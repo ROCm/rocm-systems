@@ -31,9 +31,9 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
-#include <atomic>
 #include <map>
 #include <string>
 #include <thread>
@@ -88,7 +88,7 @@ struct recorder
 {
     std::map<std::pair<uint32_t, uint32_t>, std::pair<uint64_t, uint64_t>> pairs;  // -> (start,end)
     std::vector<std::pair<uint32_t, uint32_t>>                             eops_without_start;
-    size_t                                                                 records      = 0;
+    size_t                                                                 records       = 0;
     bool                                                                   all_loss_free = true;
 
     auto on_record()
@@ -537,7 +537,7 @@ TEST(dlog_ring_size, snap_yields_a_driver_legal_size)
 
         EXPECT_GE(sz, kDlogMinRingBytes);
         EXPECT_LE(sz, kDlogMaxRingBytes);
-        EXPECT_LE(sz, 0xFFFFFFFFull);                       // uint32 buffer_size field
+        EXPECT_LE(sz, 0xFFFFFFFFull);  // uint32 buffer_size field
         if(want >= kDlogMinRingBytes)
         {
             EXPECT_LE(sz, want);  // never rounds up
@@ -695,16 +695,16 @@ TEST(dlog_drain, the_loss_verdict_travels_with_the_copied_records)
     auto         batch = std::vector<copied_record>{};
 
     // First drain syncs the cursor to the origin.
-    copy_pipes(ring.records.data(), 1, ring.rrc, ring.wptr.data(), ring.rptr.data(), cursors,
-               batch);
+    copy_pipes(
+        ring.records.data(), 1, ring.rrc, ring.wptr.data(), ring.rptr.data(), cursors, batch);
     batch.clear();
 
     ring.put(0, 0, kRecStart, 1, 4100, 10);
     ring.put(0, 1, kRecEop, 1, 4100, 20);
     ring.wptr[0] = 8;  // == region_slots: lapped
 
-    const auto copied = copy_pipes(ring.records.data(), 1, ring.rrc, ring.wptr.data(),
-                                   ring.rptr.data(), cursors, batch);
+    const auto copied = copy_pipes(
+        ring.records.data(), 1, ring.rrc, ring.wptr.data(), ring.rptr.data(), cursors, batch);
     EXPECT_GT(copied, 0u);
     EXPECT_EQ(cursors.overruns, 1u);
     for(const auto& r : batch)
@@ -727,8 +727,8 @@ TEST(dlog_drain, copier_advances_rptr_without_pairing)
     fake_ring    ring(2, 2048);
     ring_cursors cursors;
     auto         batch = std::vector<copied_record>{};
-    copy_pipes(ring.records.data(), 2, ring.rrc, ring.wptr.data(), ring.rptr.data(), cursors,
-               batch);
+    copy_pipes(
+        ring.records.data(), 2, ring.rrc, ring.wptr.data(), ring.rptr.data(), cursors, batch);
     batch.clear();
 
     ring.put(0, 0, kRecStart, 1, 4100, 10);
@@ -737,9 +737,10 @@ TEST(dlog_drain, copier_advances_rptr_without_pairing)
     ring.put(1, 0, kRecEop, 9, 4200, 30);
     ring.wptr[1] = 1;
 
-    EXPECT_EQ(copy_pipes(ring.records.data(), 2, ring.rrc, ring.wptr.data(), ring.rptr.data(),
-                         cursors, batch),
-              3u);
+    EXPECT_EQ(
+        copy_pipes(
+            ring.records.data(), 2, ring.rrc, ring.wptr.data(), ring.rptr.data(), cursors, batch),
+        3u);
     EXPECT_EQ(ring.rptr[0], 2u);  // freed before anything was paired
     EXPECT_EQ(ring.rptr[1], 1u);
     EXPECT_EQ(batch.size(), 3u);
@@ -759,9 +760,9 @@ TEST(dlog_drain, erase_slot_drops_only_that_slots_retained_starts)
 {
     drain_state st;
     // key = (doorbell_off << 32) | dispatch_id; page slot = doorbell_off & 1023.
-    const uint64_t on_slot_7    = (uint64_t{7} << 32) | 1;
-    const uint64_t also_slot_7  = (uint64_t{1024 + 7} << 32) | 2;  // aliases to slot 7
-    const uint64_t on_slot_8    = (uint64_t{8} << 32) | 3;
+    const uint64_t on_slot_7   = (uint64_t{7} << 32) | 1;
+    const uint64_t also_slot_7 = (uint64_t{1024 + 7} << 32) | 2;  // aliases to slot 7
+    const uint64_t on_slot_8   = (uint64_t{8} << 32) | 3;
 
     st.pairing.pending_starts[on_slot_7]   = pair_state::pending_start{100, 1000};
     st.pairing.pending_starts[also_slot_7] = pair_state::pending_start{200, 1000};
@@ -791,8 +792,8 @@ TEST(record_pipe, preserves_batch_order_and_contents)
         slot->now_ns = 1000 + b;
         for(uint32_t i = 0; i < 4; ++i)
         {
-            auto r              = copied_record{};
-            r.rec.dispatch_id   = b * 10 + i;
+            auto r            = copied_record{};
+            r.rec.dispatch_id = b * 10 + i;
             slot->records.emplace_back(r);
         }
         pipe.publish();
@@ -901,8 +902,8 @@ TEST(record_pipe, spsc_threads_lose_and_duplicate_nothing)
         {
             ++dropped;
         }
-        slot->now_ns = produced.load(std::memory_order_relaxed);
-        auto r       = copied_record{};
+        slot->now_ns      = produced.load(std::memory_order_relaxed);
+        auto r            = copied_record{};
         r.rec.dispatch_id = 0;
         slot->records.emplace_back(r);
         slot->records[0].rec.dispatch_id = static_cast<uint32_t>(slot->records.size() - 1);
@@ -933,9 +934,9 @@ TEST(dlog_drain, pairing_census_counts_starts_eops_and_overwrites)
     ring.put(0, 1, kRecEop, 1, db, 20);
     ring.put(0, 2, kRecStart, 2, db, 30);
     ring.put(0, 3, kRecEop, 2, db, 40);
-    ring.put(0, 4, kRecEop, 9, db, 50);      // orphan: no START ever
-    ring.put(0, 5, kRecStart, 7, db, 60);    // retained
-    ring.put(0, 6, kRecStart, 7, db, 70);    // overwrites the live key
+    ring.put(0, 4, kRecEop, 9, db, 50);    // orphan: no START ever
+    ring.put(0, 5, kRecStart, 7, db, 60);  // retained
+    ring.put(0, 6, kRecStart, 7, db, 70);  // overwrites the live key
     ring.wptr[0] = 7;
 
     recorder rec;
@@ -965,8 +966,8 @@ TEST(dlog_drain, copied_records_carry_their_region)
     fake_ring    ring(2, 2048);
     ring_cursors cursors;
     auto         batch = std::vector<copied_record>{};
-    copy_pipes(ring.records.data(), 2, ring.rrc, ring.wptr.data(), ring.rptr.data(), cursors,
-               batch);
+    copy_pipes(
+        ring.records.data(), 2, ring.rrc, ring.wptr.data(), ring.rptr.data(), cursors, batch);
     batch.clear();
 
     ring.put(0, 0, kRecStart, 1, 4100, 10);
@@ -974,9 +975,10 @@ TEST(dlog_drain, copied_records_carry_their_region)
     ring.put(1, 0, kRecEop, 1, 4100, 20);
     ring.wptr[1] = 1;
 
-    ASSERT_EQ(copy_pipes(ring.records.data(), 2, ring.rrc, ring.wptr.data(), ring.rptr.data(),
-                         cursors, batch),
-              2u);
+    ASSERT_EQ(
+        copy_pipes(
+            ring.records.data(), 2, ring.rrc, ring.wptr.data(), ring.rptr.data(), cursors, batch),
+        2u);
     ASSERT_EQ(batch.size(), 2u);
     EXPECT_EQ(batch[0].region, 0u);
     EXPECT_EQ(batch[1].region, 1u);
@@ -1045,9 +1047,19 @@ TEST(dlog_drain, two_rings_pair_independently_per_gpu)
 
     auto batch_a = std::vector<copied_record>{};
     auto batch_b = std::vector<copied_record>{};
-    copy_pipes(ring_a.records.data(), 1, ring_a.rrc, ring_a.wptr.data(), ring_a.rptr.data(), cur_a,
+    copy_pipes(ring_a.records.data(),
+               1,
+               ring_a.rrc,
+               ring_a.wptr.data(),
+               ring_a.rptr.data(),
+               cur_a,
                batch_a);
-    copy_pipes(ring_b.records.data(), 1, ring_b.rrc, ring_b.wptr.data(), ring_b.rptr.data(), cur_b,
+    copy_pipes(ring_b.records.data(),
+               1,
+               ring_b.rrc,
+               ring_b.wptr.data(),
+               ring_b.rptr.data(),
+               cur_b,
                batch_b);
     batch_a.clear();
     batch_b.clear();
@@ -1061,9 +1073,19 @@ TEST(dlog_drain, two_rings_pair_independently_per_gpu)
     ring_b.put(0, 1, kRecEop, 5, db, 400);
     ring_b.wptr[0] = 2;
 
-    copy_pipes(ring_a.records.data(), 1, ring_a.rrc, ring_a.wptr.data(), ring_a.rptr.data(), cur_a,
+    copy_pipes(ring_a.records.data(),
+               1,
+               ring_a.rrc,
+               ring_a.wptr.data(),
+               ring_a.rptr.data(),
+               cur_a,
                batch_a);
-    copy_pipes(ring_b.records.data(), 1, ring_b.rrc, ring_b.wptr.data(), ring_b.rptr.data(), cur_b,
+    copy_pipes(ring_b.records.data(),
+               1,
+               ring_b.rrc,
+               ring_b.wptr.data(),
+               ring_b.rptr.data(),
+               cur_b,
                batch_b);
 
     // One pairing state PER GPU, as the processor keeps them.
@@ -1130,7 +1152,7 @@ TEST(dlog_drain, a_slot_purge_touches_only_the_owning_gpus_pairing_state)
     pair_state gpu_a;
     pair_state gpu_b;
 
-    const uint64_t on_slot_7 = (uint64_t{7} << 32) | 1;
+    const uint64_t on_slot_7        = (uint64_t{7} << 32) | 1;
     gpu_a.pending_starts[on_slot_7] = pair_state::pending_start{100, 1000};
     gpu_b.pending_starts[on_slot_7] = pair_state::pending_start{200, 1000};
 
@@ -1144,8 +1166,8 @@ TEST(dlog_drain, a_slot_purge_touches_only_the_owning_gpus_pairing_state)
     EXPECT_EQ(gpu_b.pending_starts[on_slot_7].start_ticks, 200u);
 
     // And B still pairs its own EOP afterwards.
-    auto     rec  = recorder{};
-    auto     eop  = copied_record{};
+    auto rec             = recorder{};
+    auto eop             = copied_record{};
     eop.rec.record_type  = kRecEop;
     eop.rec.doorbell_off = 7;
     eop.rec.dispatch_id  = 1;

@@ -77,17 +77,17 @@ enum class submit_result
     rejected_permanent,  // executor closing: never retry, finalize in place
 };
 
-    // Decide the outcome and produce system-domain timestamps.
+// Decide the outcome and produce system-domain timestamps.
 template <typename ConvertFn>
 finalize_outcome
 resolve_finalize(const std::optional<uint64_t>& start_ticks,
-                 uint64_t                      end_ticks,
-                 uint64_t                      enqueue_ts,
-                 uint64_t                      now_ns,
-                 ConvertFn&&                   convert,
-                 uint64_t*                     start_ns_out,
-                 uint64_t*                     end_ns_out,
-                 finalize_detail*              detail = nullptr)
+                 uint64_t                       end_ticks,
+                 uint64_t                       enqueue_ts,
+                 uint64_t                       now_ns,
+                 ConvertFn&&                    convert,
+                 uint64_t*                      start_ns_out,
+                 uint64_t*                      end_ns_out,
+                 finalize_detail*               detail = nullptr)
 {
     auto _note = [detail](finalize_reason r) {
         if(detail) detail->reason = r;
@@ -116,17 +116,17 @@ resolve_finalize(const std::optional<uint64_t>& start_ticks,
     return finalize_outcome::result_ready;
 }
 
-    // Convert, emit on success, and retire EXACTLY ONCE on every path.
+// Convert, emit on success, and retire EXACTLY ONCE on every path.
 template <typename ConvertFn, typename EmitFn, typename RetireFn>
 finalize_outcome
 run_no_signal_finalizer(const std::optional<uint64_t>& start_ticks,
-                        uint64_t                      end_ticks,
-                        uint64_t                      enqueue_ts,
-                        uint64_t                      now_ns,
-                        ConvertFn&&                   convert,
-                        EmitFn&&                      emit,
-                        RetireFn&&                    retire,
-                        finalize_detail*              detail = nullptr)
+                        uint64_t                       end_ticks,
+                        uint64_t                       enqueue_ts,
+                        uint64_t                       now_ns,
+                        ConvertFn&&                    convert,
+                        EmitFn&&                       emit,
+                        RetireFn&&                     retire,
+                        finalize_detail*               detail = nullptr)
 {
     auto _cleanup = common::scope_destructor{[&retire]() { retire(); }};
 
@@ -139,12 +139,12 @@ run_no_signal_finalizer(const std::optional<uint64_t>& start_ticks,
     return _outcome;
 }
 
-    // Bounded holder for completions the task group would not take. An EOP-proven
-    // entry can never revert to PENDING and never becomes LEAKED, so once the
-    // reader has claimed it, it MUST eventually be finalized.
-    //
-    // THREADING: the mutex protects the held vector and the closed flag only.
-    // submit and finalize callables are always invoked with NO lock held.
+// Bounded holder for completions the task group would not take. An EOP-proven
+// entry can never revert to PENDING and never becomes LEAKED, so once the
+// reader has claimed it, it MUST eventually be finalized.
+//
+// THREADING: the mutex protects the held vector and the closed flag only.
+// submit and finalize callables are always invoked with NO lock held.
 template <typename ProvenT>
 class retry_owner
 {
@@ -184,7 +184,7 @@ public:
     {
         if(m_abandoned.load(std::memory_order_acquire)) return 0;
 
-        auto _taken = std::vector<ProvenT>{};
+        auto _taken  = std::vector<ProvenT>{};
         bool _closed = false;
         {
             auto lk = std::lock_guard<std::mutex>{m_mu};
@@ -230,9 +230,9 @@ public:
 
 private:
     std::atomic<bool>    m_abandoned = {false};
-    mutable std::mutex   m_mu     = {};
-    std::vector<ProvenT> m_held   = {};
-    bool                 m_closed = false;
+    mutable std::mutex   m_mu        = {};
+    std::vector<ProvenT> m_held      = {};
+    bool                 m_closed    = false;
 };
 }  // namespace kfd
 }  // namespace rocprofiler

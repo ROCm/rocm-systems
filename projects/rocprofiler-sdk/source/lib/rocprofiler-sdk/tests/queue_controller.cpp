@@ -65,8 +65,7 @@ TEST(queue_controller, capture_doorbell_key_rejects_non_doorbell_signal)
     signal.value = 0x7f0000004010;  // aliases hardware_doorbell_ptr
     auto queue   = make_intercept_queue(&signal);
 
-    EXPECT_FALSE(
-        capture_doorbell_key(kTestGpuId, rocprofiler_queue_id_t{1}, &queue).has_value());
+    EXPECT_FALSE(capture_doorbell_key(kTestGpuId, rocprofiler_queue_id_t{1}, &queue).has_value());
 }
 
 // A doorbell-kind signal yields the page-relative slot of its hardware doorbell
@@ -94,12 +93,10 @@ TEST(queue_controller, capture_doorbell_key_accepts_doorbell_signal)
 // No intercept queue and a null doorbell signal are both "unavailable" -> no key.
 TEST(queue_controller, capture_doorbell_key_rejects_missing_doorbell)
 {
-    EXPECT_FALSE(
-        capture_doorbell_key(kTestGpuId, rocprofiler_queue_id_t{3}, nullptr).has_value());
+    EXPECT_FALSE(capture_doorbell_key(kTestGpuId, rocprofiler_queue_id_t{3}, nullptr).has_value());
 
     auto queue = make_intercept_queue(nullptr);
-    EXPECT_FALSE(
-        capture_doorbell_key(kTestGpuId, rocprofiler_queue_id_t{3}, &queue).has_value());
+    EXPECT_FALSE(capture_doorbell_key(kTestGpuId, rocprofiler_queue_id_t{3}, &queue).has_value());
 }
 // The inline path's stand-in for "_active_kernels == 0": the hardware has
 // consumed every packet we submitted. A closing queue must wait for this before

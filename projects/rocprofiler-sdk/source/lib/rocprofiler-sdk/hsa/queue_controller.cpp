@@ -396,9 +396,8 @@ QueueController::add_queue(hsa_queue_t*           id,
     // resolved registers with no slot, making every slot on its GPU non-injective.
     if(const auto* _queue = get_queue(*id))
     {
-        auto _slot = std::optional<uint32_t>{};
-        const auto _gpu_id =
-            static_cast<uint32_t>(_queue->get_agent().get_rocp_agent()->gpu_id);
+        auto       _slot   = std::optional<uint32_t>{};
+        const auto _gpu_id = static_cast<uint32_t>(_queue->get_agent().get_rocp_agent()->gpu_id);
         if(auto _db = capture_doorbell_key(_gpu_id, _queue->get_id(), _queue->intercept_queue()))
             _slot = _db->doorbell_off;
 
@@ -827,7 +826,7 @@ capture_doorbell_key(uint32_t               gpu_id,
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         const auto* sig =
             reinterpret_cast<const amd_signal_t*>(intercept_queue->doorbell_signal.handle);
-    // hardware_doorbell_ptr aliases other union members for non-doorbell kinds.
+        // hardware_doorbell_ptr aliases other union members for non-doorbell kinds.
         if(sig->kind == AMD_SIGNAL_KIND_DOORBELL || sig->kind == AMD_SIGNAL_KIND_LEGACY_DOORBELL)
             hwptr = reinterpret_cast<uint64_t>(sig->hardware_doorbell_ptr);
     }

@@ -484,15 +484,15 @@ private:
     std::atomic<bool>     m_abandoned = {false};
     std::atomic<uint64_t> m_proven    = {0};
 
-    session_mode                                              m_mode        = session_mode::running;
-    map_t                                                     m_entries     = {};
-    std::unordered_set<correlation_key, correlation_key_hash> m_tombstones  = {};
-    std::unordered_set<uint64_t>                              m_ledger      = {};
+    session_mode                                              m_mode       = session_mode::running;
+    map_t                                                     m_entries    = {};
+    std::unordered_set<correlation_key, correlation_key_hash> m_tombstones = {};
+    std::unordered_set<uint64_t>                              m_ledger     = {};
     // Keyed by (gpu_id, slot): slot numbers repeat across GPUs, so a single set
     // would let one GPU's queue destroy quarantine another GPU's live slot.
-    std::set<std::pair<uint32_t, uint32_t>>                   m_quarantined = {};
-    std::set<std::pair<uint32_t, uint32_t>>                   m_closing     = {};
-    std::unordered_map<uint64_t, size_t>                      m_outstanding = {};
+    std::set<std::pair<uint32_t, uint32_t>> m_quarantined = {};
+    std::set<std::pair<uint32_t, uint32_t>> m_closing     = {};
+    std::unordered_map<uint64_t, size_t>    m_outstanding = {};
 };
 }  // namespace kfd
 }  // namespace rocprofiler

@@ -183,7 +183,7 @@ struct reader_state
     std::atomic<uint64_t> drain_epoch = {0};
 
     // Copier is the sole producer, processor the sole consumer.
-    record_pipe<kBatchPipeDepth> pipe = {};
+    record_pipe<kBatchPipeDepth> pipe             = {};
     std::thread                  processor_thread = {};
     std::atomic<uint64_t>        batches_dropped  = {0};
 
@@ -313,12 +313,12 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s, bool* permanent = nullp
     // buffer_size below is a uint32 field; ring_bytes() is bounded to fit it.
     static_assert(kDlogMaxRingBytes <= 0xFFFFFFFFull,
                   "dlog ring size must fit the uint32 buffer_size ioctl field");
-    auto reg                       = kfd_ioctl_profiler_args{};
-    reg.op                         = KFD_IOC_PROFILER_DLOG;
-    reg.dlog.dlog_op               = KFD_IOC_PROFILER_DLOG_REGISTER_BUFFER;
-    reg.dlog.gpu_id                = gpu_id;
-    reg.dlog.reg.buffer_size       = static_cast<uint32_t>(buf_bytes);
-    reg.dlog.reg.buffer_addr       = s->buffer_va;
+    auto reg                 = kfd_ioctl_profiler_args{};
+    reg.op                   = KFD_IOC_PROFILER_DLOG;
+    reg.dlog.dlog_op         = KFD_IOC_PROFILER_DLOG_REGISTER_BUFFER;
+    reg.dlog.gpu_id          = gpu_id;
+    reg.dlog.reg.buffer_size = static_cast<uint32_t>(buf_bytes);
+    reg.dlog.reg.buffer_addr = s->buffer_va;
     if(ioctl(kfd, AMDKFD_IOC_PROFILER, &reg) != 0)
     {
         ROCP_WARNING << fmt::format("KFD dispatch-log: REGISTER_BUFFER failed (errno={})", errno);
@@ -424,10 +424,10 @@ teardown_session(int kfd, dlog_session* s)
     }
     if(s->buffer_va != 0)
     {
-        auto unreg           = kfd_ioctl_profiler_args{};
-        unreg.op             = KFD_IOC_PROFILER_DLOG;
-        unreg.dlog.dlog_op   = KFD_IOC_PROFILER_DLOG_UNREGISTER_BUFFER;
-        unreg.dlog.gpu_id    = s->gpu_id;
+        auto unreg         = kfd_ioctl_profiler_args{};
+        unreg.op           = KFD_IOC_PROFILER_DLOG;
+        unreg.dlog.dlog_op = KFD_IOC_PROFILER_DLOG_UNREGISTER_BUFFER;
+        unreg.dlog.gpu_id  = s->gpu_id;
         ioctl(kfd, AMDKFD_IOC_PROFILER, &unreg);
 
         auto unmap                 = kfd_ioctl_unmap_memory_from_gpu_args{};
@@ -451,8 +451,8 @@ teardown_session(int kfd, dlog_session* s)
 uint64_t
 copy_records(reader_state& st)
 {
-    uint64_t _total = 0;
-    const size_t _n = st.session_count.load(std::memory_order_acquire);
+    uint64_t     _total = 0;
+    const size_t _n     = st.session_count.load(std::memory_order_acquire);
 
     // The rings are independent, so one GPU lapping cannot stall another.
     for(size_t i = 0; i < _n; ++i)
@@ -468,17 +468,21 @@ copy_records(reader_state& st)
         auto* _batch = st.pipe.acquire();
         if(!_batch)
         {
-        // Do NOT read the ring: leaving the records for the next pass loses less
-        // than copying them somewhere we cannot publish.
+            // Do NOT read the ring: leaving the records for the next pass loses less
+            // than copying them somewhere we cannot publish.
             st.batches_dropped.fetch_add(1, std::memory_order_relaxed);
             continue;
         }
 
-        _batch->now_ns = common::timestamp_ns();
-        _batch->gpu_id = _s.gpu_id;
-        const auto _copied =
-            copy_pipes(recs, _s.info.num_regions, _s.info.region_record_count, wptr_arr, rptr_arr,
-                       _s.cursors, _batch->records);
+        _batch->now_ns     = common::timestamp_ns();
+        _batch->gpu_id     = _s.gpu_id;
+        const auto _copied = copy_pipes(recs,
+                                        _s.info.num_regions,
+                                        _s.info.region_record_count,
+                                        wptr_arr,
+                                        rptr_arr,
+                                        _s.cursors,
+                                        _batch->records);
 
         // Release-store inside publish() orders the copy above before the
         // processor can observe the batch.
@@ -504,9 +508,9 @@ trace_raw_records(const record_batch& batch)
     for(const auto& _r : batch.records)
     {
         if(_logged.fetch_add(1, std::memory_order_relaxed) >= 40) return;
-        const char* _type = _r.rec.record_type == kRecStart  ? "START"
-                            : _r.rec.record_type == kRecEop  ? "EOP  "
-                                                             : "PAD  ";
+        const char* _type = _r.rec.record_type == kRecStart ? "START"
+                            : _r.rec.record_type == kRecEop ? "EOP  "
+                                                            : "PAD  ";
         ROCP_WARNING << fmt::format(
             "KFD raw record: {} region={} doorbell_off={} (page_slot={}) dispatch_id={} ts={} "
             "loss_free={}",
@@ -525,7 +529,7 @@ process_batch(processor_state& proc, const record_batch& batch)
 {
     trace_raw_records(batch);
 
-    const uint32_t _gpu = batch.gpu_id;
+    const uint32_t _gpu     = batch.gpu_id;
     auto&          _pairing = proc.for_gpu(_gpu);
 
     return pair_records(
@@ -534,7 +538,7 @@ process_batch(processor_state& proc, const record_batch& batch)
         _pairing,
         batch.now_ns,
         [&_pairing, _gpu](const drained_record& rec) {
-        // An orphaned EOP: report whether STARTs were retained for the same slot.
+            // An orphaned EOP: report whether STARTs were retained for the same slot.
             if(!rec.start_known)
             {
                 static const bool _trace =
@@ -573,8 +577,7 @@ process_batch(processor_state& proc, const record_batch& batch)
             // START carries no interval, so there is nothing to deposit for it.
             if(!rec.start_known) return;
             results_map().deposit(
-                key,
-                kfd_timing_result{rec.start_ticks, rec.end_ticks, common::timestamp_ns()});
+                key, kfd_timing_result{rec.start_ticks, rec.end_ticks, common::timestamp_ns()});
         });
 }
 
@@ -784,8 +787,8 @@ processor_loop()
             _p.starts_overwritten,
             _p.pending_starts.size());
 
-                    // The pairing key is (doorbell_off, dispatch_idx), so a START and EOP
-                    // disagreeing on doorbell_off can never pair.
+        // The pairing key is (doorbell_off, dispatch_idx), so a START and EOP
+        // disagreeing on doorbell_off can never pair.
         for(const auto& itr : _p.per_doorbell)
         {
             ROCP_WARNING << fmt::format(
@@ -812,8 +815,8 @@ reader_loop()
 
     while(!st.stop.load(std::memory_order_acquire))
     {
-            // 1 ms while a session is live; records must be drained faster than the
-            // firmware can lap the ring.
+        // 1 ms while a session is live; records must be drained faster than the
+        // firmware can lap the ring.
         const int _timeout_ms = st.any_session_ready.load(std::memory_order_acquire) ? 1 : 100;
         int       rc          = ::poll(&wake, 1, _timeout_ms);
         if(rc < 0 && errno != EINTR)
@@ -963,8 +966,8 @@ start_kfd_reader()
         return false;
     }
 
-// Registered before the thread exists: a fork in between would inherit a reader
-// thread with no handler to abandon it.
+    // Registered before the thread exists: a fork in between would inherit a reader
+    // thread with no handler to abandon it.
     if(pthread_atfork(nullptr, nullptr, disable_reader_in_child) != 0)
     {
         ROCP_WARNING << "KFD dispatch-log reader: pthread_atfork failed, reader not started";
@@ -980,8 +983,7 @@ start_kfd_reader()
         // publish, otherwise the first batches are dropped for no reason.
         st.processor_thread = std::thread{processor_loop};
         st.thread           = std::thread{reader_loop};
-    }
-    catch(const std::system_error& e)
+    } catch(const std::system_error& e)
     {
         // init_kfd_profiler() promises never to throw: the scope guard drops the fds
         // and leaves the dispatch-log unavailable, so dispatches use HSA timestamps.
@@ -1097,7 +1099,7 @@ establish_session(uint32_t gpu_id, bool latch_retryable)
         return false;
     }
 
-    auto& _s = st.sessions[_slot];
+    auto& _s         = st.sessions[_slot];
     bool  _permanent = false;
     if(!setup_session(st.kfd_fd, gpu_id, &_s, &_permanent))
     {
@@ -1149,7 +1151,7 @@ ensure_reader_session(uint32_t gpu_id)
 bool
 arm_reader_session_early(uint32_t gpu_id)
 {
-// Arm before any kernel can dispatch, so the ring is live under the first one.
+    // Arm before any kernel can dispatch, so the ring is live under the first one.
     return establish_session(gpu_id, /*latch_retryable=*/false);
 }
 }  // namespace kfd

@@ -124,13 +124,13 @@ enum class signal_less_counter
 
 struct signal_less_counters
 {
-    uint64_t batch_eligible      = 0;
-    uint64_t entry_registered    = 0;
-    uint64_t register_refused    = 0;
-    uint64_t eop_proven          = 0;
-    uint64_t eop_unmatched       = 0;
-    uint64_t handoff_submitted   = 0;
-    uint64_t handoff_retried     = 0;
+    uint64_t batch_eligible           = 0;
+    uint64_t entry_registered         = 0;
+    uint64_t register_refused         = 0;
+    uint64_t eop_proven               = 0;
+    uint64_t eop_unmatched            = 0;
+    uint64_t handoff_submitted        = 0;
+    uint64_t handoff_retried          = 0;
     uint64_t finalizer_emitted        = 0;
     uint64_t finalizer_no_timing      = 0;
     uint64_t no_timing_start_unknown  = 0;
@@ -164,8 +164,8 @@ signal_less_child_stale();
 // strand dispatches whose kernels are simply still running. Injected to keep
 // this free of the HSA layer. Returns how many were still pending at give-up.
 size_t
-drain_close_signal_less_queue(uint64_t                                  queue_token,
-                              const std::function<bool(uint64_t)>&      wait_hw_drained);
+drain_close_signal_less_queue(uint64_t                             queue_token,
+                              const std::function<bool(uint64_t)>& wait_hw_drained);
 
 // Whether to enable HW profiling lazily (on a queue's first SIGNAL-path batch)
 // instead of at queue creation. Tied to the feature being fully active: with

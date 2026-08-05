@@ -417,8 +417,8 @@ async_signal_handler(hsa_signal_t                            completion_signal,
         }
         if(registration::get_fini_status() != 0)
         {
-        // Tearing down, but the kernel is still live: wait a bounded grace period
-        // rather than tear the interval.
+            // Tearing down, but the kernel is still live: wait a bounded grace period
+            // rather than tear the interval.
             constexpr auto fini_grace = std::chrono::seconds{1};
             const auto     _now       = std::chrono::steady_clock::now();
             if(fini_deadline == std::chrono::steady_clock::time_point{})
@@ -451,12 +451,12 @@ async_signal_handler(hsa_signal_t                            completion_signal,
         std::this_thread::sleep_for(std::chrono::microseconds{delay_us});
     }
 
-        // Finalization can end the wait above while the kernel is still live, and
-        // everything below assumes it finished: the profiling interval would be
-        // half-written, a released pooled signal could still be decremented by the
-        // GPU, and subtracting an app signal would let the app observe completion
-        // early. So abandon the batch -- emit nothing, touch no signal. Process
-        // teardown owns the signals and correlation-id references at this point.
+    // Finalization can end the wait above while the kernel is still live, and
+    // everything below assumes it finished: the profiling interval would be
+    // half-written, a released pooled signal could still be decremented by the
+    // GPU, and subtracting an app signal would let the app observe completion
+    // early. So abandon the batch -- emit nothing, touch no signal. Process
+    // teardown owns the signals and correlation-id references at this point.
     if(!completed)
     {
         ROCP_WARNING << fmt::format(
@@ -467,7 +467,7 @@ async_signal_handler(hsa_signal_t                            completion_signal,
         return;
     }
 
-        // ONE absolute deadline for the whole batch's firmware rendezvous.
+    // ONE absolute deadline for the whole batch's firmware rendezvous.
     constexpr uint64_t kKfdRendezvousNs = 5'000'000;  // 5 ms
     session->kfd_deadline_ns            = kfd::steady_now_ns() + kKfdRendezvousNs;
 
@@ -537,8 +537,8 @@ no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
         if(!_hsa_agent) return false;
         const auto* _ext = get_amd_ext_table();
         if(!_ext || !_ext->hsa_amd_profiling_convert_tick_to_system_domain_fn) return false;
-        return _ext->hsa_amd_profiling_convert_tick_to_system_domain_fn(
-                   *_hsa_agent, ticks, out) == HSA_STATUS_SUCCESS;
+        return _ext->hsa_amd_profiling_convert_tick_to_system_domain_fn(*_hsa_agent, ticks, out) ==
+               HSA_STATUS_SUCCESS;
     };
 
     auto _emit = [&_payload](uint64_t start_ns, uint64_t end_ns) {
@@ -564,7 +564,7 @@ no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
 
     const uint64_t _now = common::timestamp_ns();
 
-    auto _detail = kfd::finalize_detail{};
+    auto       _detail  = kfd::finalize_detail{};
     const auto _outcome = kfd::run_no_signal_finalizer(proven.start_ticks,
                                                        proven.end_ticks,
                                                        _payload.enqueue_ts,
@@ -604,7 +604,7 @@ no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
     // Capped on REJECTIONS, not finalizations: the first few rejections are the
     // diagnostic, and a steady stream of them must not flood the log.
     {
-        static const bool _trace = common::get_env("ROCPROFILER_KFD_DISPATCH_LOG_TRACE", false);
+        static const bool _trace  = common::get_env("ROCPROFILER_KFD_DISPATCH_LOG_TRACE", false);
         static auto       _traced = std::atomic<int>{0};
         if(_trace && _traced.fetch_add(1, std::memory_order_relaxed) < 10)
         {
@@ -639,8 +639,7 @@ no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
                 _detail.end_ns,
                 _payload.enqueue_ts,
                 _now,
-                static_cast<int64_t>(_detail.start_ns) -
-                    static_cast<int64_t>(_payload.enqueue_ts),
+                static_cast<int64_t>(_detail.start_ns) - static_cast<int64_t>(_payload.enqueue_ts),
                 static_cast<int64_t>(_now) - static_cast<int64_t>(_detail.end_ns),
                 _detail.start_ns < _detail.end_ns,
                 _detail.start_ns >= _payload.enqueue_ts,
@@ -724,18 +723,18 @@ signal_less_batch_eligible(Queue*                                            que
         return false;
     }
 
-    auto _inputs                  = kfd::eligibility_inputs{};
-    _inputs.feature_enabled       = true;
-    _inputs.fully_wired           = kfd::signal_less_fully_wired();
-    _inputs.session_live_for_gpu  = true;
-    _inputs.reader_alive          = kfd::signal_less_hub().mode() == kfd::session_mode::running;
+    auto _inputs                 = kfd::eligibility_inputs{};
+    _inputs.feature_enabled      = true;
+    _inputs.fully_wired          = kfd::signal_less_fully_wired();
+    _inputs.session_live_for_gpu = true;
+    _inputs.reader_alive         = kfd::signal_less_hub().mode() == kfd::session_mode::running;
     _inputs.doorbells_injective =
         kfd::owner_registry().is_injective(static_cast<uint32_t>(_gpu_id), _db->doorbell_off);
     // is_closing() is an eligibility-only gate: a batch already past this point
     // may still register, which is what the destroy path fences before it strands.
-    _inputs.hub_accepts_batch = kfd::signal_less_hub().can_register_batch(_flat) &&
-                                !kfd::signal_less_hub().is_closing(static_cast<uint32_t>(_gpu_id),
-                                                                   _db->doorbell_off);
+    _inputs.hub_accepts_batch =
+        kfd::signal_less_hub().can_register_batch(_flat) &&
+        !kfd::signal_less_hub().is_closing(static_cast<uint32_t>(_gpu_id), _db->doorbell_off);
     // The payload is value-only (see kfd::pending_payload), so construction cannot
     // fail once the key resolved.
     _inputs.payload_constructible = true;
@@ -876,7 +875,7 @@ write_interceptor(Queue*                                queue,
                                                   .packet_data    = packet_data_array_t{}};
 
         // Decided once for the whole batch, before any packet is modified.
-        auto       _signal_less_keys = std::vector<std::optional<kfd::correlation_key>>{};
+        auto       _signal_less_keys  = std::vector<std::optional<kfd::correlation_key>>{};
         const bool _signal_less_batch = signal_less_batch_eligible(
             queue, _packets, _num_packets, _base_pkt_index, &_signal_less_keys);
         auto _signal_less_regs = std::vector<kfd::signal_less_hub_t::registration>{};
@@ -1072,7 +1071,6 @@ write_interceptor(Queue*                                queue,
                 }
             }
 
-
             {
                 auto tracer_data = _packet_data.callback_record;
                 tracing::execute_phase_enter_callbacks(
@@ -1093,12 +1091,12 @@ write_interceptor(Queue*                                queue,
                 thr_id,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
 
-                // Signal-less: stage this dispatch's owned pending entry. The payload
-                // holds value data and stable ids only -- no Queue&, no signal handle.
-                //
-                // Staged HERE, after the enqueue callbacks and after external correlation
-                // ids are mapped: an earlier snapshot carries ids never mapped for this
-                // dispatch, and the record built from it would be wrong.
+            // Signal-less: stage this dispatch's owned pending entry. The payload
+            // holds value data and stable ids only -- no Queue&, no signal handle.
+            //
+            // Staged HERE, after the enqueue callbacks and after external correlation
+            // ids are mapped: an earlier snapshot carries ids never mapped for this
+            // dispatch, and the record built from it would be wrong.
             if(_signal_less_batch && _signal_less_keys[i].has_value())
             {
                 auto _reg           = kfd::signal_less_hub_t::registration{};
@@ -1160,15 +1158,14 @@ write_interceptor(Queue*                                queue,
            !kfd::signal_less_hub().register_batch(std::move(_signal_less_regs)))
         {
             kfd::note_signal_less(kfd::signal_less_counter::register_refused);
-        // Unreachable by the argument above; the packets have already skipped their
-        // signals, so there is no way back to the signal path.
+            // Unreachable by the argument above; the packets have already skipped their
+            // signals, so there is no way back to the signal path.
             ROCP_WARNING << "KFD dispatch-log: signal-less batch registration was refused after "
                             "eligibility accepted it; these dispatches will not complete";
         }
         else if(_signal_less_batch)
         {
-            kfd::note_signal_less(kfd::signal_less_counter::entry_registered,
-                                  _signal_less_count);
+            kfd::note_signal_less(kfd::signal_less_counter::entry_registered, _signal_less_count);
         }
 
         // A signal-less batch has no completion signal to wait on.
@@ -1674,9 +1671,9 @@ interposition_init(CoreApiTable* core_table, bool enabled)
 
     // Before any queue -- and therefore any eligible batch -- can exist.
     {
-        auto _ops                = kfd::signal_less_ops{};
-        _ops.submit              = submit_no_signal_finalize;
-        _ops.finalize_in_place   = [](kfd::signal_less_hub_t::proven&& p) {
+        auto _ops              = kfd::signal_less_ops{};
+        _ops.submit            = submit_no_signal_finalize;
+        _ops.finalize_in_place = [](kfd::signal_less_hub_t::proven&& p) {
             no_signal_finalize(std::move(p));
         };
         _ops.quiesce_interceptor = []() { fence_all_queue_gates(); };

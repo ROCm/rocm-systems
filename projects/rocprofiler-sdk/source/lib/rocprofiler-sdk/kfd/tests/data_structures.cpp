@@ -98,7 +98,7 @@ TEST(kfd_time_is_sane, accepts_a_converted_end_slightly_past_now)
 
 TEST(kfd_time_is_sane, rejects_records_outside_the_dispatch_window)
 {
-    EXPECT_FALSE(kfd_time_is_sane(99, 250, 100, 300));   // starts before enqueue
+    EXPECT_FALSE(kfd_time_is_sane(99, 250, 100, 300));  // starts before enqueue
     // Ends beyond now + the conversion slack (a few hundred ns past now is now
     // tolerated on purpose; see accepts_a_converted_end_slightly_past_now).
     EXPECT_FALSE(kfd_time_is_sane(150, 301 + kKfdFutureSlackNs, 100, 300));
@@ -204,7 +204,7 @@ TEST(DoorbellMap, bind_and_resolve_rebinds_on_doorbell_reuse)
     auto m = DoorbellMap{};
 
     m.bind_and_resolve(0, qid(1), 4u);  // gen 0
-    m.on_queue_destroyed(qid(1));    // doorbell 4 -> gen bumped to 1
+    m.on_queue_destroyed(qid(1));       // doorbell 4 -> gen bumped to 1
 
     // New queue reuses doorbell 4: the FIRST resolve rebinds via the slow
     // (write-lock) path because qid(2) is absent from by_queue -- hand back the

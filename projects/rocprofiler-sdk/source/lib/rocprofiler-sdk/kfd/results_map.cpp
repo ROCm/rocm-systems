@@ -51,8 +51,8 @@ ResultsMap::deposit(const correlation_key& key, const kfd_timing_result& result)
 {
     {
         auto lk = std::lock_guard<std::mutex>{m_mutex};
-    // First-writer-wins: a correlation key is unique per in-flight dispatch, so a
-    // second deposit is a stale duplicate.
+        // First-writer-wins: a correlation key is unique per in-flight dispatch, so a
+        // second deposit is a stale duplicate.
         m_data.emplace(key, result);
     }
     // Notified outside the lock. One deposit wakes every waiter, which is correct
@@ -116,8 +116,8 @@ ResultsMap::stats() const
 size_t
 ResultsMap::erase_slot(uint32_t gpu_id, uint32_t doorbell_off)
 {
-    auto   lk      = std::lock_guard<std::mutex>{m_mutex};
-    size_t erased  = 0;
+    auto   lk     = std::lock_guard<std::mutex>{m_mutex};
+    size_t erased = 0;
     for(auto it = m_data.begin(); it != m_data.end();)
     {
         if(it->first.gpu_id == gpu_id && it->first.doorbell_off == doorbell_off)

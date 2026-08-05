@@ -105,29 +105,29 @@ struct kfd_ioctl_get_process_apertures_new_args
  */
 struct kfd_ioctl_dlog_args
 {
-    __u32 dlog_op;  /* IN: enum kfd_profiler_dlog_op */
-    __u32 gpu_id;   /* IN: KFD user gpu_id */
+    __u32 dlog_op; /* IN: enum kfd_profiler_dlog_op */
+    __u32 gpu_id;  /* IN: KFD user gpu_id */
     union
     {
         /* REGISTER_BUFFER: register a GPUVM-mapped buffer as backing store */
         struct
         {
-            __u32 buffer_size;  /* IN */
-            __u32 pad;          /* IN: must be 0 */
-            __u64 buffer_addr;  /* IN: mapped GPU VA */
+            __u32 buffer_size; /* IN */
+            __u32 pad;         /* IN: must be 0 */
+            __u64 buffer_addr; /* IN: mapped GPU VA */
         } reg;
         /* UNREGISTER_BUFFER */
         struct
         {
-            __u32 pad;  /* IN: must be 0 */
+            __u32 pad; /* IN: must be 0 */
         } unreg;
         /* OPEN_STREAM: open a stream fd against a target process */
         struct
         {
-            __u32 target_pid;  /* IN: target tgid */
-            __u32 pad;         /* IN: must be 0 */
-            __u32 flags;       /* IN: exactly one KFD_DLOG_OPEN_F_* */
-            __s32 stream_fd;   /* OUT: anon_inode stream fd */
+            __u32 target_pid; /* IN: target tgid */
+            __u32 pad;        /* IN: must be 0 */
+            __u32 flags;      /* IN: exactly one KFD_DLOG_OPEN_F_* */
+            __s32 stream_fd;  /* OUT: anon_inode stream fd */
         } open;
     };
 };
@@ -140,13 +140,13 @@ struct kfd_ioctl_dlog_args
  */
 struct kfd_ioctl_profiler_args
 {
-    __u32 op;   /* enum kfd_profiler_ops */
-    __u32 pad;  /* IN: must be 0 (reserved) */
+    __u32 op;  /* enum kfd_profiler_ops */
+    __u32 pad; /* IN: must be 0 (reserved) */
     union
     {
-        __u32                     version;  /* KFD_IOC_PROFILER_VERSION_NUM */
+        __u32                      version; /* KFD_IOC_PROFILER_VERSION_NUM */
         struct kfd_ioctl_dlog_args dlog;
-        __u32                     reserved[8];
+        __u32                      reserved[8];
     };
 };
 
@@ -208,12 +208,12 @@ enum kfd_dlog_stream_op
 
 struct kfd_dlog_stream_args
 {
-    __u32 op;   /* IN: enum kfd_dlog_stream_op */
-    __u32 pad;  /* IN: must be 0 */
+    __u32 op;  /* IN: enum kfd_dlog_stream_op */
+    __u32 pad; /* IN: must be 0 */
     union
     {
-        struct kfd_dlog_stream_info   info;    /* OUT for OP_INFO */
-        struct kfd_dlog_stream_status status;  /* OUT for OP_STATUS */
+        struct kfd_dlog_stream_info   info;   /* OUT for OP_INFO */
+        struct kfd_dlog_stream_status status; /* OUT for OP_STATUS */
     };
 };
 

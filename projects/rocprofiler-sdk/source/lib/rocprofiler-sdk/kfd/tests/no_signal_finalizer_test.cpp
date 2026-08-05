@@ -130,13 +130,8 @@ TEST(no_signal_finalizer, missing_start_is_completed_no_timing)
     auto obs  = observer{};
     auto conv = converter{};
 
-    auto outcome = run_no_signal_finalizer(std::optional<uint64_t>{},
-                                           900,
-                                           0,
-                                           10'000'000,
-                                           conv.fn(),
-                                           obs.emit_fn(),
-                                           obs.retire_fn());
+    auto outcome = run_no_signal_finalizer(
+        std::optional<uint64_t>{}, 900, 0, 10'000'000, conv.fn(), obs.emit_fn(), obs.retire_fn());
 
     EXPECT_EQ(outcome, finalize_outcome::completed_no_timing);
     EXPECT_EQ(obs.emits, 0);
@@ -174,15 +169,15 @@ TEST(no_signal_finalizer, sanity_failure_is_completed_no_timing)
     // past now is expected and accepted (see accepts_a_converted_end_slightly_
     // past_now); this is far enough out to be a record from somewhere else.
     {
-        auto obs        = observer{};
-        auto passthru   = converter{true, /*epoch=*/0};
-        auto outcome    = run_no_signal_finalizer(std::optional<uint64_t>{1},
-                                                  /*end_ticks=*/1000 + kKfdFutureSlackNs + 1,
-                                                  /*enqueue_ts=*/0,
-                                                  /*now_ns=*/1000,
-                                                  passthru.fn(),
-                                                  obs.emit_fn(),
-                                                  obs.retire_fn());
+        auto obs      = observer{};
+        auto passthru = converter{true, /*epoch=*/0};
+        auto outcome  = run_no_signal_finalizer(std::optional<uint64_t>{1},
+                                               /*end_ticks=*/1000 + kKfdFutureSlackNs + 1,
+                                               /*enqueue_ts=*/0,
+                                               /*now_ns=*/1000,
+                                               passthru.fn(),
+                                               obs.emit_fn(),
+                                               obs.retire_fn());
         EXPECT_EQ(outcome, finalize_outcome::completed_no_timing);
         EXPECT_EQ(obs.emits, 0);
         EXPECT_EQ(obs.retires, 1);
@@ -225,11 +220,11 @@ TEST(no_signal_finalizer, sanity_failure_is_completed_no_timing)
 // record -- rejecting it discarded every dispatch on gfx1201.
 TEST(no_signal_finalizer, accepts_a_converted_end_slightly_past_now)
 {
-    constexpr uint64_t now   = 1'000'000'000;
-    constexpr uint64_t skew  = 2'700'000;  // measured 2.0-2.7 ms
-    auto               obs   = observer{};
+    constexpr uint64_t now  = 1'000'000'000;
+    constexpr uint64_t skew = 2'700'000;  // measured 2.0-2.7 ms
+    auto               obs  = observer{};
     // Converts ticks straight through, so end lands at now + skew.
-    auto               conv  = converter{true, /*epoch=*/0};
+    auto conv = converter{true, /*epoch=*/0};
 
     auto outcome = run_no_signal_finalizer(std::optional<uint64_t>{now - 5'000'000},
                                            now + skew,
@@ -435,12 +430,12 @@ TEST(signal_less_teardown, ordering_guarantees_hold_at_each_step)
 {
     struct checking_steps
     {
-        bool producers_stopped = false;
+        bool producers_stopped  = false;
         bool interceptor_fenced = false;
-        bool reader_joined     = false;
-        bool retry_flushed     = false;
-        bool pending_leaked    = false;
-        bool group_joined      = false;
+        bool reader_joined      = false;
+        bool retry_flushed      = false;
+        bool pending_leaked     = false;
+        bool group_joined       = false;
 
         void stop_new_reservations()
         {
@@ -518,11 +513,12 @@ TEST(signal_less_teardown, flush_with_nothing_held_finalizes_nothing)
     auto finalized = 0;
     auto submitted = 0;
 
-    auto n = owner.flush([&submitted](fake_proven&) {
-                             ++submitted;
-                             return submit_result::accepted;
-                         },
-                         [&finalized](fake_proven&&) { ++finalized; });
+    auto n = owner.flush(
+        [&submitted](fake_proven&) {
+            ++submitted;
+            return submit_result::accepted;
+        },
+        [&finalized](fake_proven&&) { ++finalized; });
 
     EXPECT_EQ(n, 0u);
     EXPECT_EQ(submitted, 0);
@@ -544,12 +540,17 @@ TEST(no_signal_finalizer, reports_the_exact_rejection_cause)
                    uint64_t                end_ticks,
                    uint64_t                enqueue_ts,
                    bool                    convert_ok) {
-        auto obs    = observer{};
-        auto conv   = converter{convert_ok, /*epoch=*/0};
-        auto detail = finalize_detail{};
-        auto outcome =
-            run_no_signal_finalizer(start_ticks, end_ticks, enqueue_ts, now, conv.fn(),
-                                    obs.emit_fn(), obs.retire_fn(), &detail);
+        auto obs     = observer{};
+        auto conv    = converter{convert_ok, /*epoch=*/0};
+        auto detail  = finalize_detail{};
+        auto outcome = run_no_signal_finalizer(start_ticks,
+                                               end_ticks,
+                                               enqueue_ts,
+                                               now,
+                                               conv.fn(),
+                                               obs.emit_fn(),
+                                               obs.retire_fn(),
+                                               &detail);
         // Whatever the cause, the correlation id retires exactly once.
         EXPECT_EQ(obs.retires, 1);
         return std::make_pair(outcome, detail.reason);

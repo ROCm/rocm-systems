@@ -144,6 +144,5 @@ flush_retry_owner_now();
 size_t
 retry_owner_size();
 
-
 }  // namespace kfd
 }  // namespace rocprofiler

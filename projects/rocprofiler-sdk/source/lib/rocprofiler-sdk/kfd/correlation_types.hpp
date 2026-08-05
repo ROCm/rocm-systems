@@ -69,8 +69,7 @@ inline bool
 kfd_time_is_sane(uint64_t start_ns, uint64_t end_ns, uint64_t enqueue_ts, uint64_t now_ns)
 {
     // now_ns is a boot-relative nanosecond count, so the addition cannot overflow.
-    return start_ns < end_ns && start_ns >= enqueue_ts &&
-           end_ns <= now_ns + kKfdFutureSlackNs;
+    return start_ns < end_ns && start_ns >= enqueue_ts && end_ns <= now_ns + kKfdFutureSlackNs;
 }
 
 struct correlation_key_hash

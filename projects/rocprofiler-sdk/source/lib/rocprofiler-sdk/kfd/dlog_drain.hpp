@@ -57,8 +57,8 @@ constexpr uint32_t kMaxRegions = 8;
 // so it needs no advance knowledge. k is capped at 23, making 640 MiB the
 // largest accepted size. Requests are snapped DOWN onto this lattice so a
 // reasonable-looking value can never become an EINVAL that disables the feature.
-constexpr uint64_t kDlogMinRingBytes = 80ull << 10;  // 80 KiB; also the default
-constexpr uint64_t kDlogMaxRingBytes = 80ull << 23;  // 640 MiB
+constexpr uint64_t kDlogMinRingBytes = 80ull << 10;           // 80 KiB; also the default
+constexpr uint64_t kDlogMaxRingBytes = 80ull << 23;           // 640 MiB
 constexpr uint64_t kDlogMaxRingKb    = 0xFFFFFFFFull / 1024;  // parse domain (uint32 field)
 
 // Snap `want` down onto the 80 * 2^k lattice, clamped to
@@ -121,7 +121,7 @@ struct drained_record
     bool     loss_free    = true;
 };
 
-    // Carries the copier's loss verdict, since pairing happens on another thread.
+// Carries the copier's loss verdict, since pairing happens on another thread.
 struct copied_record
 {
     fw_record rec       = {};
@@ -169,8 +169,8 @@ struct pair_state
 
     // Pairing census: starts_seen far below eops_seen means the firmware is not
     // emitting STARTs, which is a different bug from a pairing mismatch.
-    uint64_t starts_seen       = 0;
-    uint64_t eops_seen         = 0;
+    uint64_t starts_seen        = 0;
+    uint64_t eops_seen          = 0;
     uint64_t starts_overwritten = 0;  // a START replaced a retained START on the same key
 
     // The pairing key is (doorbell_off, dispatch_id), so a START and EOP that
@@ -191,8 +191,7 @@ struct pair_state
         size_t removed = 0;
         for(auto it = pending_starts.begin(); it != pending_starts.end();)
         {
-            const auto _slot =
-                static_cast<uint32_t>(it->first >> 32) & (slots_per_page - 1);
+            const auto _slot = static_cast<uint32_t>(it->first >> 32) & (slots_per_page - 1);
             if(_slot == page_slot)
             {
                 it = pending_starts.erase(it);
@@ -281,8 +280,8 @@ copy_pipes(const uint8_t*           records_base,
         uint64_t       scan = cursors.rptr[p];
         if(w <= scan) continue;
 
-    // The producer lapped us: slots it already overwrote are gone, and those it
-    // is writing now may be torn.
+        // The producer lapped us: slots it already overwrote are gone, and those it
+        // is writing now may be torn.
         const bool lossy = cursors.note_overrun(w - scan, region_slots);
         if(w - scan > region_slots) scan = w - region_slots + 1;
 
@@ -331,7 +330,7 @@ pair_records(const copied_record* records,
         {
             ++state.starts_seen;
             ++state.per_doorbell[rec.doorbell_off].starts;
-        // dispatch_id is only low-32, so a key can recur.
+            // dispatch_id is only low-32, so a key can recur.
             if(state.pending_starts.count(key) != 0) ++state.starts_overwritten;
             state.pending_starts[key] = pair_state::pending_start{ts, now_ns};
             continue;

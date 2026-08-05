@@ -92,10 +92,10 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
             // dispatch's own CPU window [enqueue, now]. A record pulled for the wrong
             // dispatch would land outside these bounds, so reject it and fall back to
             // HSA. This checks correlation, not the conversion (which is HSA's own).
-            const uint64_t _now      = common::timestamp_ns();
-            const bool     _kfd_sane = _s1 == HSA_STATUS_SUCCESS && _s2 == HSA_STATUS_SUCCESS &&
-                                   kfd::kfd_time_is_sane(
-                                       kfd_start_sys, kfd_end_sys, session.enqueue_ts, _now);
+            const uint64_t _now = common::timestamp_ns();
+            const bool     _kfd_sane =
+                _s1 == HSA_STATUS_SUCCESS && _s2 == HSA_STATUS_SUCCESS &&
+                kfd::kfd_time_is_sane(kfd_start_sys, kfd_end_sys, session.enqueue_ts, _now);
 
             // Already system-domain; adjust_profiling_time() would re-scale them
             // under ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS and widen the HW interval.

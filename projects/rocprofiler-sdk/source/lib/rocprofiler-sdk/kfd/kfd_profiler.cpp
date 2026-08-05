@@ -54,7 +54,7 @@ namespace kfd
 {
 namespace
 {
-    // The reader issues the unified-profiler ioctls, which need this ABI.
+// The reader issues the unified-profiler ioctls, which need this ABI.
 constexpr uint32_t kMinProfilerAbiVersion = KFD_IOC_PROFILER_VERSION_NUM;
 
 // Translation-unit-owned state. Not exposed as bare globals; only the accessor

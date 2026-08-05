@@ -56,8 +56,8 @@ struct tracked_payload
 {
     static std::atomic<int> live;
 
-    uint64_t id      = 0;
-    bool     armed   = false;  // true while this instance owns the resource
+    uint64_t id    = 0;
+    bool     armed = false;  // true while this instance owns the resource
 
     tracked_payload() = default;
     explicit tracked_payload(uint64_t v)
@@ -577,8 +577,7 @@ TEST(signal_less_flag, only_explicit_enable_turns_it_on)
 // the feature is off and every dispatch keeps the signal path.
 TEST(signal_less_flag, machinery_is_present_but_activation_is_opt_in)
 {
-    static_assert(signal_less_fully_wired(),
-                  "the signal-less machinery is complete in this build");
+    static_assert(signal_less_fully_wired(), "the signal-less machinery is complete in this build");
 
     // Default: env unset -> not enabled -> no batch can be eligible.
     auto in                  = eligibility_inputs{};
@@ -727,8 +726,8 @@ TEST(DispatchHub, loss_ledger_selects_exactly_the_leaked_ids)
     EXPECT_TRUE(hub.is_ledgered(22));   // leaked -> finalize must skip it
 
     // Simulate the correlation_id_finalize() force-retire loop.
-    auto  dangling = std::vector<uint64_t>{11, 22, 33};
-    auto  retired  = std::vector<uint64_t>{};
+    auto dangling = std::vector<uint64_t>{11, 22, 33};
+    auto retired  = std::vector<uint64_t>{};
     for(auto id : dangling)
     {
         if(hub.is_ledgered(id)) continue;
@@ -799,8 +798,8 @@ TEST(OwnerRegistry, quarantine_persists_after_the_collision_clears)
     hub.quarantine_slot(0, 40);
 
     reg.remove_queue(2);
-    EXPECT_TRUE(reg.is_injective(0, 40));  // ownership looks clean again...
-    EXPECT_TRUE(hub.is_quarantined(0, 40));   // ...but the slot stays unusable
+    EXPECT_TRUE(reg.is_injective(0, 40));    // ownership looks clean again...
+    EXPECT_TRUE(hub.is_quarantined(0, 40));  // ...but the slot stays unusable
     EXPECT_FALSE(hub.can_register_batch({key_of(40, 9)}));
 }
 
@@ -834,7 +833,7 @@ TEST(OwnerRegistry, unresolved_queue_disables_the_whole_gpu)
 
     EXPECT_FALSE(reg.is_injective(0, 40));  // this GPU is out
     EXPECT_FALSE(reg.is_injective(0, 99));
-    EXPECT_TRUE(reg.is_injective(1, 50));   // the other GPU is unaffected
+    EXPECT_TRUE(reg.is_injective(1, 50));  // the other GPU is unaffected
 
     reg.remove_queue(3);
     EXPECT_EQ(reg.unresolved_queues(0), 0u);
@@ -1093,11 +1092,11 @@ all_entry_points_short_circuit()
     // A completion arriving in a child is dropped, never finalized: the task group
     // that would run the finalizer did not survive the fork.
     bool finalized = false;
-    ok = ok && !forked_retry().hold(7, [&finalized](int&&) { finalized = true; });
-    ok = ok && !finalized;
-    ok = ok && forked_retry().flush([](int&) { return submit_result::accepted; },
+    ok             = ok && !forked_retry().hold(7, [&finalized](int&&) { finalized = true; });
+    ok             = ok && !finalized;
+    ok             = ok && forked_retry().flush([](int&) { return submit_result::accepted; },
                                     [&finalized](int&&) { finalized = true; }) == 0;
-    ok = ok && !finalized;
+    ok             = ok && !finalized;
 
     return ok;
 }
@@ -1167,9 +1166,9 @@ TEST(fork_safety, forked_child_short_circuits_and_survives_normal_exit)
 // would deadlock here and the test would time out.
 TEST(fork_safety, child_survives_a_fork_taken_under_contention)
 {
-    auto  hub  = hub_t{};
-    auto  stop = std::atomic<bool>{false};
-    auto  busy = std::thread{[&hub, &stop]() {
+    auto hub  = hub_t{};
+    auto stop = std::atomic<bool>{false};
+    auto busy = std::thread{[&hub, &stop]() {
         for(uint32_t i = 0; !stop.load(); ++i)
         {
             register_one(hub, key_of(1, i % 512));
@@ -1228,8 +1227,8 @@ enum class model_state
 // the hub's own bookkeeping so the two can be compared.
 struct reference_model
 {
-    std::map<std::pair<uint32_t, uint32_t>, model_state> state;      // (slot,id) -> state
-    std::map<std::pair<uint32_t, uint32_t>, uint64_t>    corr_of;    // -> correlation id
+    std::map<std::pair<uint32_t, uint32_t>, model_state> state;    // (slot,id) -> state
+    std::map<std::pair<uint32_t, uint32_t>, uint64_t>    corr_of;  // -> correlation id
     std::set<std::pair<uint32_t, uint32_t>>              tombstoned;
     std::set<uint32_t>                                   quarantined;
     std::set<uint64_t>                                   ledger;
@@ -1276,17 +1275,15 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
     // Proven completions waiting to be finalized, mirroring the task group.
     auto in_flight = std::vector<hub_t::proven>{};
 
-    auto random_key = [&rng]() {
-        return reference_model::key_t{rng() % kSlots, rng() % kPerSlot};
-    };
+    auto random_key = [&rng]() { return reference_model::key_t{rng() % kSlots, rng() % kPerSlot}; };
 
     // Finalize one proven completion exactly as production does, and record what
     // the plan requires: retire exactly once, emit only when timing was usable.
     auto finalize = [&model](hub_t::proven&& p, bool convert_ok) {
-        auto     mk      = reference_model::key_t{p.key.doorbell_off, p.key.dispatch_idx_low32};
-        int      emits   = 0;
-        int      retires = 0;
-        auto     outcome = run_no_signal_finalizer(
+        auto mk      = reference_model::key_t{p.key.doorbell_off, p.key.dispatch_idx_low32};
+        int  emits   = 0;
+        int  retires = 0;
+        auto outcome = run_no_signal_finalizer(
             p.start_ticks,
             p.end_ticks,
             /*enqueue_ts=*/0,
@@ -1351,11 +1348,10 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
             case 2:
             case 3:  // EOP (sometimes under a lossy drain)
             {
-                auto       k         = random_key();
-                const bool loss_free = (rng() % 4) != 0;
-                const bool expect_proven =
-                    loss_free && !model.poisoned && !model.stopping &&
-                    model.at(k) == model_state::pending;
+                auto       k             = random_key();
+                const bool loss_free     = (rng() % 4) != 0;
+                const bool expect_proven = loss_free && !model.poisoned && !model.stopping &&
+                                           model.at(k) == model_state::pending;
 
                 auto got = hub.prove_eop(to_key(k), 900, loss_free);
                 EXPECT_EQ(got.has_value(), expect_proven) << "prove_eop disagreed with the model";
@@ -1385,9 +1381,8 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
                 else
                 {
                     // Temporary rejection: the retry owner takes ownership.
-                    owner.hold(std::move(p), [&finalize](hub_t::proven&& q) {
-                        finalize(std::move(q), true);
-                    });
+                    owner.hold(std::move(p),
+                               [&finalize](hub_t::proven&& q) { finalize(std::move(q), true); });
                 }
                 break;
             }

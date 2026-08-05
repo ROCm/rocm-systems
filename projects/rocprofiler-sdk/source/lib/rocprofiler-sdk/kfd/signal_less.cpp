@@ -32,8 +32,8 @@
 
 #include <algorithm>
 #include <atomic>
-#include <functional>
 #include <chrono>
+#include <functional>
 #include <thread>
 #include <utility>
 
@@ -118,8 +118,7 @@ profiling_storage()
 retry_owner<signal_less_hub_t::proven>&
 retry()
 {
-    static auto*& _v =
-        common::static_object<retry_owner<signal_less_hub_t::proven>>::construct();
+    static auto*& _v = common::static_object<retry_owner<signal_less_hub_t::proven>>::construct();
     return *_v;
 }
 }  // namespace
@@ -139,14 +138,14 @@ signal_less_stats()
     auto _at = [](signal_less_counter c) {
         return g_counters[static_cast<size_t>(c)].load(std::memory_order_relaxed);
     };
-    auto _s                = signal_less_counters{};
-    _s.batch_eligible      = _at(signal_less_counter::batch_eligible);
-    _s.entry_registered    = _at(signal_less_counter::entry_registered);
-    _s.register_refused    = _at(signal_less_counter::register_refused);
-    _s.eop_proven          = _at(signal_less_counter::eop_proven);
-    _s.eop_unmatched       = _at(signal_less_counter::eop_unmatched);
-    _s.handoff_submitted   = _at(signal_less_counter::handoff_submitted);
-    _s.handoff_retried     = _at(signal_less_counter::handoff_retried);
+    auto _s                     = signal_less_counters{};
+    _s.batch_eligible           = _at(signal_less_counter::batch_eligible);
+    _s.entry_registered         = _at(signal_less_counter::entry_registered);
+    _s.register_refused         = _at(signal_less_counter::register_refused);
+    _s.eop_proven               = _at(signal_less_counter::eop_proven);
+    _s.eop_unmatched            = _at(signal_less_counter::eop_unmatched);
+    _s.handoff_submitted        = _at(signal_less_counter::handoff_submitted);
+    _s.handoff_retried          = _at(signal_less_counter::handoff_retried);
     _s.finalizer_emitted        = _at(signal_less_counter::finalizer_emitted);
     _s.finalizer_no_timing      = _at(signal_less_counter::finalizer_no_timing);
     _s.no_timing_start_unknown  = _at(signal_less_counter::no_timing_start_unknown);
@@ -348,9 +347,8 @@ drain_close_signal_less_queue(uint64_t                             queue_token,
     // Saturating: never wrap the shared budget below zero.
     auto& _pool = close_drain_remaining_ns();
     auto  _have = _pool.load(std::memory_order_relaxed);
-    while(!_pool.compare_exchange_weak(_have,
-                                       _spent >= _have ? 0 : _have - _spent,
-                                       std::memory_order_relaxed))
+    while(!_pool.compare_exchange_weak(
+        _have, _spent >= _have ? 0 : _have - _spent, std::memory_order_relaxed))
     {}
 
     ROCP_INFO << fmt::format(

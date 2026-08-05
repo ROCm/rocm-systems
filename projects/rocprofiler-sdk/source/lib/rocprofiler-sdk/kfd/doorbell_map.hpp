@@ -116,7 +116,7 @@ public:
 private:
     struct map_data
     {
-        std::unordered_map<uint64_t /*queue handle*/, queue_doorbell_entry>    by_queue;
+        std::unordered_map<uint64_t /*queue handle*/, queue_doorbell_entry> by_queue;
         // Keyed by (gpu_id, doorbell_off): slot numbers repeat across GPUs.
         std::map<std::pair<uint32_t, uint32_t>, uint32_t /*generation*/> generations;
     };

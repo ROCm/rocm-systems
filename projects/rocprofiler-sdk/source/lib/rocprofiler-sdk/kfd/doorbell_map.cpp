@@ -46,8 +46,9 @@ DoorbellMap::bind_locked(map_data&              data,
 }
 
 queue_doorbell_entry
-DoorbellMap::bind_and_resolve(uint32_t gpu_id, rocprofiler_queue_id_t queue_id,
-                              uint32_t doorbell_off)
+DoorbellMap::bind_and_resolve(uint32_t               gpu_id,
+                              rocprofiler_queue_id_t queue_id,
+                              uint32_t               doorbell_off)
 {
     // Fast path: this queue is already bound to this exact doorbell_off. Steady
     // state for every dispatch after the first -- a single read lock, no mutation.

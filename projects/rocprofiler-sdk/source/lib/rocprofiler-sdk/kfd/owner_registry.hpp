@@ -22,10 +22,10 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <map>
-#include <atomic>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
@@ -185,11 +185,11 @@ private:
         return (it == m_unresolved.end()) ? 0 : it->second;
     }
 
-    std::atomic<bool>                                 m_abandoned  = {false};
-    mutable std::mutex                                m_mu         = {};
-    std::unordered_map<uint64_t, queue_entry>         m_by_queue   = {};
-    std::map<std::pair<uint32_t, uint32_t>, size_t>   m_owners     = {};
-    std::unordered_map<uint32_t, size_t>              m_unresolved = {};
+    std::atomic<bool>                               m_abandoned  = {false};
+    mutable std::mutex                              m_mu         = {};
+    std::unordered_map<uint64_t, queue_entry>       m_by_queue   = {};
+    std::map<std::pair<uint32_t, uint32_t>, size_t> m_owners     = {};
+    std::unordered_map<uint32_t, size_t>            m_unresolved = {};
 };
 
 // Which queues have already had HW profiling enabled, so the lazy path enables it
@@ -230,9 +230,9 @@ public:
     void abandon_in_child() { m_abandoned.store(true, std::memory_order_release); }
 
 private:
-    std::atomic<bool>              m_abandoned = {false};
-    mutable std::mutex             m_mu      = {};
-    std::unordered_set<uint64_t>   m_enabled = {};
+    std::atomic<bool>            m_abandoned = {false};
+    mutable std::mutex           m_mu        = {};
+    std::unordered_set<uint64_t> m_enabled   = {};
 };
 }  // namespace kfd
 }  // namespace rocprofiler
