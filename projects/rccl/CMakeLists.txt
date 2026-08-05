@@ -90,6 +90,7 @@ option(ENABLE_CODE_COVERAGE                    "Enable code coverage"           
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
+option(DISABLE_KERNARG_PRELOAD                 "Disable amdgpu-kernarg-preload-count compile/link flag" OFF)
 option(BUILD_NCCL4PY                           "Build the nccl4py Python bindings wheel"       OFF)
 # Move .hip_fatbin to the end of librccl.so so that small-code-model host
 # relocations (PC32/PLT32/GOTPCRELX/32S) between .text and the read-only /
@@ -541,8 +542,10 @@ endif()
 
 # Check for --amdgpu-kernarg-preload-count
 check_cxx_compiler_flag("-mllvm --amdgpu-kernarg-preload-count=16" HAVE_KERNARG_PRELOAD)
-if (HAVE_KERNARG_PRELOAD)
+if (HAVE_KERNARG_PRELOAD AND NOT DISABLE_KERNARG_PRELOAD)
   message(STATUS "Kernarg preloading to SGPR enabled")
+elseif (HAVE_KERNARG_PRELOAD AND DISABLE_KERNARG_PRELOAD)
+  message(STATUS "Kernarg preloading to SGPR disabled by DISABLE_KERNARG_PRELOAD=ON")
 endif()
 
 check_cxx_compiler_flag("-parallel-jobs=12" HAVE_PARALLEL_JOBS)
