@@ -434,6 +434,27 @@ TEST(DispatchHub, close_queue_leaks_its_outstanding_work)
 
 // U18: teardown
 
+// The final teardown drain runs with the session already stopping. An EOP that
+// lands then still proves its kernel finished, so it must COMPLETE (with its
+// start interval) rather than be leaked.
+TEST(DispatchHub, stopping_session_still_completes_an_in_flight_eop)
+{
+    auto hub = hub_t{};
+    auto key = key_of(4, 77);
+    ASSERT_TRUE(register_one(hub, key, /*corr_id=*/99));
+
+    hub.set_mode(session_mode::stopping);
+
+    EXPECT_TRUE(hub.note_start(key, 1000));
+    auto p = hub.prove_eop(key, 2000, /*drain_loss_free=*/true);
+    ASSERT_TRUE(p.has_value());
+    ASSERT_TRUE(p->start_ticks.has_value());
+    EXPECT_EQ(*p->start_ticks, 1000u);
+    EXPECT_EQ(p->end_ticks, 2000u);
+    // Completed, not leaked: the id must NOT be on the loss ledger.
+    EXPECT_FALSE(hub.is_ledgered(99));
+}
+
 TEST(DispatchHub, teardown_leaks_still_pending_entries)
 {
     auto hub = hub_t{};

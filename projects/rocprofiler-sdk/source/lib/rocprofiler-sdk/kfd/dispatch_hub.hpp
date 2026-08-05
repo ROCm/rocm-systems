@@ -190,19 +190,24 @@ public:
 
     // --- reader side ------------------------------------------------------
 
-    // Cleared only by the entry leaving PENDING.
+    // Cleared only by the entry leaving PENDING. No session-mode gate, for the
+    // same reason as prove_eop: a START seen during the teardown drain is what
+    // gives that drain's EOP an interval instead of a no-timing completion.
     bool note_start(const correlation_key& key, uint64_t start_ticks)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
 
         auto lk = std::lock_guard<std::mutex>{m_mu};
-        if(m_mode != session_mode::running) return false;
         auto it = m_entries.find(key);
         if(it == m_entries.end() || it->second.state != entry_state::pending) return false;
         it->second.start_ticks = start_ticks;
         return true;
     }
 
+    // NO session-mode gate: the final teardown drain runs after the mode is
+    // already stopping, and an EOP that arrives then still proves its kernel
+    // finished, so completing it is strictly better than leaking it.
+    //
     // A firmware EOP proves the kernel completed. Takes ownership exactly once;
     // the loser of a race against a loss transition gets nullopt.
     // `drain_loss_free` is the reader's wptr verdict: an EOP observed under an
@@ -217,7 +222,6 @@ public:
         if(!drain_loss_free) return std::nullopt;
 
         auto lk = std::lock_guard<std::mutex>{m_mu};
-        if(m_mode != session_mode::running) return std::nullopt;
 
         auto it = m_entries.find(key);
         if(it == m_entries.end() || it->second.state != entry_state::pending) return std::nullopt;
