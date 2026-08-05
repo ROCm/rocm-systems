@@ -221,36 +221,33 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
         tuning.maxChannels = nMaxChannels;
         tuning.timeUs = generalTable[tuning.algo][tuning.proto];
       }
-      NCCLCHECKGOTO(ncclTuningSelectBestTuning(&tunings, &bestTuning), ret, exit);
-    } else {
-      int collNetSupport = input->collNetSupport;
-      int nvlsSupport = input->nvlsSupport;
-      NCCLCHECKGOTO(ncclTuningSelectBestTuning(&tunings, &bestTuning), ret, exit);
-      // NCCL_CTA_POLICY_EFFICIENCY requires user (non-symmetric) buffer registration (currently unsupported with MNNVL).
-      // The NVLS-bit guard keeps this bias inside the candidate set: a per-call algSelection may have
-      // narrowed tuningMask, so EFFICIENCY must not resurrect NVLS when the selection excluded it.
-      if ((input->CTAPolicy & NCCL_CTA_POLICY_EFFICIENCY) && ncclGetEnv("NCCL_ALGO") == NULL &&
-          ncclGetEnv("NCCL_PROTO") == NULL && !input->comm->MNNVL &&
-          (input->tuningMask & (1ull << (NCCL_ALGO_NVLS * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE)))) {
-        // make algorithm selection based on buffer registration
-        // there can be other specialized policies for algorithms and protocols pickup in the future
-        if (input->regBuff && (input->func == ncclFuncAllGather || input->func == ncclFuncReduceScatter)) {
-          if ((input->comm->nNodes > 1 && collNetSupport && nvlsSupport) || (input->comm->nNodes == 1 && nvlsSupport)) {
-            int recChannels;
-            NCCLCHECKGOTO(ncclNvlsRegResourcesQuery(input->comm, input->func, &recChannels), ret, exit);
-            if (recChannels <= bestTuning.nChannels) {
-              bestTuning.algo = NCCL_ALGO_NVLS;
-              bestTuning.proto = NCCL_PROTO_SIMPLE;
-              bestTuning.nChannels = recChannels;
-              bestTuning.nWarps = input->comm->tuningContext.maxThreads[bestTuning.algo][bestTuning.proto] / WARP_SIZE;
-            }
-          }
-        }
-      }
     }
+    NCCLCHECKGOTO(ncclTuningSelectBestTuning(&tunings, &bestTuning), ret, exit);
   }
   if (bestTuning.algo != NCCL_ALGO_UNDEF && bestTuning.proto != NCCL_PROTO_UNDEF) {
     NCCLCHECKGOTO(ncclTuningGetChannels(input, &bestTuning), ret, exit);
+  }
+  // NCCL_CTA_POLICY_EFFICIENCY requires user (non-symmetric) buffer registration (currently unsupported with MNNVL).
+  // Run after GetChannels so bestTuning.nChannels is valid. Skip when a tuner plugin owns selection
+  // (same as pre-rearch). The NVLS-bit guard keeps this bias inside the candidate set: a per-call
+  // algSelection may have narrowed tuningMask, so EFFICIENCY must not resurrect NVLS when excluded.
+  if (input->comm->tuner == NULL && (input->CTAPolicy & NCCL_CTA_POLICY_EFFICIENCY) &&
+      ncclGetEnv("NCCL_ALGO") == NULL && ncclGetEnv("NCCL_PROTO") == NULL && !input->comm->MNNVL &&
+      (input->tuningMask & (1ull << (NCCL_ALGO_NVLS * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE)))) {
+    if (input->regBuff && (input->func == ncclFuncAllGather || input->func == ncclFuncReduceScatter)) {
+      if ((input->comm->nNodes > 1 && input->collNetSupport && input->nvlsSupport) ||
+          (input->comm->nNodes == 1 && input->nvlsSupport)) {
+        int recChannels;
+        NCCLCHECKGOTO(ncclNvlsRegResourcesQuery(input->comm, input->func, &recChannels), ret, exit);
+        if (recChannels <= bestTuning.nChannels) {
+          bestTuning.algo = NCCL_ALGO_NVLS;
+          bestTuning.proto = NCCL_PROTO_SIMPLE;
+          bestTuning.nChannels = recChannels;
+          bestTuning.maxChannels = recChannels;
+          bestTuning.nWarps = input->comm->tuningContext.maxThreads[bestTuning.algo][bestTuning.proto] / WARP_SIZE;
+        }
+      }
+    }
   }
   if ((bestTuning.symKernelId != ncclSymkKernelId_Count ||
        (input->tuningMask & NCCL_TUNING_MASK_SYM_KERNELS && bestTuning.symKernelId == ncclSymkKernelId_Count)) &&
