@@ -59,6 +59,8 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <shared_mutex>
 #include <unordered_map>
 #include <utility>
 
@@ -103,21 +105,27 @@ struct replay_pass_state_t
     hsa_signal_t              pass_done         = {.handle = 0};
 };
 
-// Per-agent replay serialization. Concurrent replays on the same agent must not interleave their
-// device-memory snapshot/restore (they would clobber each other's captured regions), so the whole
-// drain->snap->passes->restore window is guarded by this per-agent mutex. Different agents use
-// different mutexes and run concurrently; combined with agent-scoped snapshots this keeps multi-GPU
-// replay isolated.
-std::mutex&
+// Per-agent replay serialization (reader/writer). A replay's snapshot->restore window must exclude
+// any concurrent GPU work on the agent that could mutate tracked device memory, but ordinary
+// dispatches do not conflict with one another. So this is a shared_mutex:
+//   * a replay window takes the UNIQUE (writer) lock for the whole drain->snap->passes->restore
+//     sequence, excluding all other replays and every non-replay dispatch on the agent;
+//   * a non-replay dispatch takes the SHARED (reader) lock across its submit, so many normal
+//     dispatches still run concurrently while a pending replay writer waits for in-flight submits
+//     to finish and blocks new ones from entering the window.
+// Different agents use different mutexes and run concurrently; combined with agent-scoped snapshots
+// this keeps multi-GPU replay isolated. The reader lock only bounds *submission*; the async GPU
+// tail is drained by the replay window before it snapshots.
+std::shared_mutex&
 agent_replay_mutex(rocprofiler_agent_id_t agent_id)
 {
-    using lock_map_t    = std::unordered_map<uint64_t, std::unique_ptr<std::mutex>>;
+    using lock_map_t    = std::unordered_map<uint64_t, std::unique_ptr<std::shared_mutex>>;
     static auto*& locks = common::static_object<common::Synchronized<lock_map_t>>::construct();
 
-    std::mutex* mtx = nullptr;
+    std::shared_mutex* mtx = nullptr;
     locks->wlock([&](lock_map_t& _map) {
         auto& slot = _map[agent_id.handle];
-        if(!slot) slot = std::make_unique<std::mutex>();
+        if(!slot) slot = std::make_unique<std::shared_mutex>();
         mtx = slot.get();
     });
     return *mtx;
@@ -826,14 +834,16 @@ WriteInterceptor(const void* packets,
 
         if(replay_plan.replay_requested)
         {
-            // Runs synchronously on the calling (WriteInterceptor) thread. Concurrent replays are
-            // isolated by (a) a per-agent lock that serializes this whole drain->snap->passes->
-            // restore window so same-agent replays never interleave, and (b) agent-scoped snapshots
-            // so a replay only saves/restores its own agent's device memory (other GPUs untouched).
-            // Different agents hold different locks and run concurrently.
+            // Runs synchronously on the calling (WriteInterceptor) thread. Concurrent work is
+            // isolated by (a) the per-agent WRITER lock taken below, which serializes this whole
+            // drain->snap->passes->restore window against other replays *and* against non-replay
+            // dispatches on this agent (they hold the reader lock across their submit), and
+            // (b) agent-scoped snapshots so a replay only saves/restores its own agent's device
+            // memory (other GPUs untouched). Different agents hold different locks and run
+            // concurrently.
             const auto& core         = queue.core_api();
             hsa_agent_t replay_agent = queue.get_agent().get_hsa_agent();
-            const auto  replay_guard = std::lock_guard<std::mutex>{
+            const auto  replay_guard = std::unique_lock<std::shared_mutex>{
                 agent_replay_mutex(queue.get_agent().get_rocp_agent()->id)};
 
             // The app's original completion signal (completion_signal is at the same offset for
@@ -946,6 +956,17 @@ WriteInterceptor(const void* packets,
             return;
         }
     }
+
+    // Kernel-replay reader side: while a replay service is active, a non-replay dispatch on this
+    // agent must not submit into a replay's snapshot->restore window -- restore() would revert this
+    // dispatch's device writes. Hold the per-agent SHARED lock across the submit below so a replay
+    // writer waits for in-flight submits to finish and cannot open its window until we return,
+    // while ordinary dispatches still run concurrently with each other. Gated on has_kernel_replay
+    // so non-replay runs take no lock at all. (The async GPU tail is handled by the replay window's
+    // agent-wide drain, not by this lock.)
+    std::optional<std::shared_lock<std::shared_mutex>> replay_reader_guard{};
+    if(has_kernel_replay)
+        replay_reader_guard.emplace(agent_replay_mutex(queue.get_agent().get_rocp_agent()->id));
 
     bool should_batch_packets = true;
     queue.signal_callback([&should_batch_packets](const auto& map) {
