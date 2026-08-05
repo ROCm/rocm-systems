@@ -3,24 +3,14 @@
 # SPDX-License-Identifier: MIT
 
 # Dump AMDGPU code-object metadata from a HIP fat binary into a text file.
-# cmake -DHIP_COMPILER=<hipcc> -DCODE_OBJECT=<x.code> -DOUTPUT=<x.metadata> -P <this>
+# The tools are resolved by the caller at configure time.
+# cmake -DOFFLOAD_BUNDLER=<clang-offload-bundler> -DLLVM_READELF=<llvm-readelf>
+#       -DCODE_OBJECT=<x.code> -DOUTPUT=<x.metadata> -P <this>
 
-if(NOT HIP_COMPILER OR NOT CODE_OBJECT OR NOT OUTPUT)
+if(NOT OFFLOAD_BUNDLER OR NOT LLVM_READELF OR NOT CODE_OBJECT OR NOT OUTPUT)
   message(FATAL_ERROR
-    "DumpCodeObjectMetadata: HIP_COMPILER, CODE_OBJECT and OUTPUT are required")
-endif()
-
-get_filename_component(_bindir "${HIP_COMPILER}" DIRECTORY)
-find_program(OFFLOAD_BUNDLER clang-offload-bundler
-  HINTS "${_bindir}" "${_bindir}/../llvm/bin" "${_bindir}/../lib/llvm/bin")
-# Some LLVM installs ship only the llvm-readobj binary and alias llvm-readelf to
-# it via a symlink that is not always materialized.
-find_program(LLVM_READELF NAMES llvm-readelf llvm-readobj
-  HINTS "${_bindir}" "${_bindir}/../llvm/bin" "${_bindir}/../lib/llvm/bin")
-if(NOT OFFLOAD_BUNDLER OR NOT LLVM_READELF)
-  message(FATAL_ERROR
-    "DumpCodeObjectMetadata: could not locate clang-offload-bundler / "
-    "llvm-readelf (or llvm-readobj) near ${_bindir}")
+    "DumpCodeObjectMetadata: OFFLOAD_BUNDLER, LLVM_READELF, CODE_OBJECT and "
+    "OUTPUT are required")
 endif()
 
 execute_process(

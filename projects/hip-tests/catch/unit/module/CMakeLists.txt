@@ -191,10 +191,32 @@ if(HIP_PLATFORM MATCHES "amd")
                   COMMENT "Compiling copyKernel.code")
   add_custom_target(copyKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code)
 
+  # Resolved here so a toolchain without these tools fails at configure time,
+  # and llvm-readelf is taken from the bundler's own directory so the dump
+  # cannot mix binaries from two different LLVM installs.
+  get_filename_component(HIP_COMPILER_BIN_DIR "${CMAKE_HIP_COMPILER}" REALPATH)
+  get_filename_component(HIP_COMPILER_BIN_DIR "${HIP_COMPILER_BIN_DIR}" DIRECTORY)
+  find_program(OFFLOAD_BUNDLER_EXEC NAMES clang-offload-bundler clang-offload-bundler.exe
+                 HINTS ${HIP_COMPILER_BIN_DIR}
+                       ${HIP_COMPILER_BIN_DIR}/../llvm/bin
+                       ${HIP_COMPILER_BIN_DIR}/../lib/llvm/bin
+                       ${ROCM_PATH}/llvm/bin ${ROCM_PATH}/lib/llvm/bin
+                       ${HIP_PATH}/llvm/bin
+                 REQUIRED)
+  get_filename_component(LLVM_BIN_DIR ${OFFLOAD_BUNDLER_EXEC} DIRECTORY)
+  # Some LLVM installs ship only llvm-readobj and alias llvm-readelf to it via a
+  # symlink that is not always materialized.
+  find_program(LLVM_READELF_EXEC NAMES llvm-readelf llvm-readelf.exe
+                                       llvm-readobj llvm-readobj.exe
+                 HINTS ${LLVM_BIN_DIR}
+                 NO_DEFAULT_PATH
+                 REQUIRED)
+
   # Dump HSA metadata from the real device code object (LTO-independent).
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.metadata
                   COMMAND ${CMAKE_COMMAND}
-                    -DHIP_COMPILER=${CMAKE_HIP_COMPILER}
+                    -DOFFLOAD_BUNDLER=${OFFLOAD_BUNDLER_EXEC}
+                    -DLLVM_READELF=${LLVM_READELF_EXEC}
                     -DCODE_OBJECT=${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
                     -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/copyKernel.metadata
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/DumpCodeObjectMetadata.cmake
