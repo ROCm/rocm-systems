@@ -37,14 +37,6 @@ __attribute__((destructor)) void on_unload() { trace("unload"); }
 
 } // namespace
 
-extern "C" ROCJITSU_PLUGIN_EXPORT const char *rocjitsu_plugin_build_identity() {
-#ifdef PLUGIN_FIXTURE_STALE_IDENTITY
-  return "stale-build-identity";
-#else
-  return rocjitsu::kPluginBuildIdentity;
-#endif
-}
-
 extern "C" ROCJITSU_PLUGIN_EXPORT const rocjitsu::PluginMetadata *rocjitsu_plugin_metadata() {
   trace("metadata");
   static const rocjitsu::PluginMetadata metadata{PLUGIN_FIXTURE_NAME, "rocjitsu-tests", "1", "{}"};

@@ -55,22 +55,6 @@ TEST_F(PluginLoaderTest, RejectsMissingRequiredExport) {
   EXPECT_EQ(trace().find("missing:create\n"), std::string::npos);
 }
 
-TEST_F(PluginLoaderTest, RejectsLegacyMetadataBeforeDereference) {
-  rocjitsu::ExecutionPluginGroup group(rocjitsu::PluginSinkConfig{});
-  EXPECT_EQ(load("legacy_v2", group), 0);
-  EXPECT_TRUE(group.empty());
-  EXPECT_EQ(trace().find("legacy_v2:metadata\n"), std::string::npos);
-  EXPECT_EQ(trace().find("legacy_v2:create\n"), std::string::npos);
-}
-
-TEST_F(PluginLoaderTest, RejectsMismatchedBuildIdentityBeforeMetadata) {
-  rocjitsu::ExecutionPluginGroup group(rocjitsu::PluginSinkConfig{});
-  EXPECT_EQ(load("stale_identity", group), 0);
-  EXPECT_TRUE(group.empty());
-  EXPECT_EQ(trace().find("stale_identity:metadata\n"), std::string::npos);
-  EXPECT_EQ(trace().find("stale_identity:create\n"), std::string::npos);
-}
-
 TEST_F(PluginLoaderTest, DestroysRejectedDuplicateBeforeUnload) {
   rocjitsu::ExecutionPluginGroup group(rocjitsu::PluginSinkConfig{});
   ASSERT_EQ(load("good", group), 1);

@@ -72,10 +72,8 @@ configured through a profile or an explicit `--config <file>`.
 
 ### Plugin loader contract
 
-Each same-build plugin `.so` exports four `extern "C"` functions:
+Each in-tree plugin `.so` exports three `extern "C"` functions:
 
-- `const char *rocjitsu_plugin_build_identity()` — returns the generated
-  fingerprint of the plugin-facing headers and toolchain.
 - `const PluginMetadata *rocjitsu_plugin_metadata()` — returns a pointer
   to static metadata: `name`, `contact`, `version`, and a `config_schema`
   JSON string.
@@ -88,11 +86,9 @@ Each same-build plugin `.so` exports four `extern "C"` functions:
 Allocation and deallocation stay on the plugin side of the boundary: the
 host destroys each instance through the plugin's own
 `rocjitsu_plugin_destroy` export. Use the `ROCJITSU_DEFINE_PLUGIN` macro
-from `plugin_abi.h` to emit all four functions. The host validates the required
-exports and compares the build identity before dereferencing metadata. The
-identity safely rejects stale builds; it is not ABI versioning or a
-backward-compatibility guarantee. Rocjitsu and its tightly coupled plugins must
-be built together from matching headers and toolchains.
+from `plugin_abi.h` to emit all three functions. The host validates the required
+exports. Rocjitsu and its tightly coupled plugins must be built together
+in-tree from matching headers and toolchains; other builds are unsupported.
 
 ### Config schema
 

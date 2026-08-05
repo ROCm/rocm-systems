@@ -16,7 +16,6 @@
 #include <filesystem>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #if defined(__linux__)
@@ -87,20 +86,11 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
     return false;
   }
 
-  auto build_identity_fn =
-      util::lookup_symbol<PluginBuildIdentityFn>(handle, kPluginBuildIdentitySymbol);
   auto meta_fn = util::lookup_symbol<PluginMetadataFn>(handle, kPluginMetadataSymbol);
   auto create_fn = util::lookup_symbol<PluginCreateFn>(handle, kPluginCreateSymbol);
   auto destroy_fn = util::lookup_symbol<PluginDestroyFn>(handle, kPluginDestroySymbol);
-  if (!build_identity_fn || !meta_fn || !create_fn || !destroy_fn) {
+  if (!meta_fn || !create_fn || !destroy_fn) {
     util::Logger::warn("plugin '", name, "': ", soname, " is missing required exports");
-    util::close_library(handle);
-    return false;
-  }
-
-  const char *build_identity = build_identity_fn();
-  if (!build_identity || std::string_view(build_identity) != kPluginBuildIdentity) {
-    util::Logger::warn("plugin '", name, "': stale or incompatible build, skipping");
     util::close_library(handle);
     return false;
   }

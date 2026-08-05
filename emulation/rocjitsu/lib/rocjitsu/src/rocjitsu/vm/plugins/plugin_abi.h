@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file plugin_abi.h
-/// @brief Same-build loader contract for runtime-loadable execution plugins.
+/// @brief In-tree loader contract for runtime-loadable execution plugins.
 ///
 /// This is a toolchain contract, not a stable ABI: it only supports plugins
 /// built in-tree, from the same source tree and toolchain as the host (see
@@ -14,26 +14,22 @@
 /// `librocjitsu_plugin_<name>.so` and discovered through the standard
 /// dynamic-linker search path (RUNPATH, LD_LIBRARY_PATH, ld.so.cache).
 ///
-/// Each plugin shared object must export exactly four `extern "C"` symbols.
+/// Each plugin shared object must export exactly three `extern "C"` symbols.
 /// They form a C-shaped boundary: no C++ library types (`std::unique_ptr`,
 /// `std::string`, ...) cross the boundary, and the plugin owns allocation and
 /// destruction of its instance via its own allocator.
 ///
-///   1. `rocjitsu_plugin_build_identity` — returns a deterministic fingerprint
-///      of the plugin-facing headers and toolchain. The host verifies it before
-///      calling any layout-dependent export.
-///
-///   2. `rocjitsu_plugin_metadata` — returns a pointer to a static
+///   1. `rocjitsu_plugin_metadata` — returns a pointer to a static
 ///      ::rocjitsu::PluginMetadata describing the plugin (name, contact,
 ///      version, and a JSON config schema).
 ///
-///   3. `rocjitsu_plugin_create` — constructs a plugin instance from a JSON
+///   2. `rocjitsu_plugin_create` — constructs a plugin instance from a JSON
 ///      configuration string and returns it as an opaque
 ///      ::rocjitsu::PluginHandle. The host resolves the plugin's config object
 ///      (applying schema defaults) and passes it as a JSON string; the plugin
 ///      parses it however it likes.
 ///
-///   4. `rocjitsu_plugin_destroy` — destroys an instance previously returned by
+///   3. `rocjitsu_plugin_destroy` — destroys an instance previously returned by
 ///      `rocjitsu_plugin_create`, using the plugin's own allocator.
 ///
 /// ## Toolchain contract
@@ -41,16 +37,13 @@
 /// The opaque handle is an ::rocjitsu::ExecutionPlugin subclass instance; the
 /// host calls its virtual hooks directly. Plugins must therefore be built
 /// in-tree with the same toolchain and standard library as the host, against a
-/// matching ::rocjitsu::ExecutionPlugin layout. A generated same-build identity
-/// rejects stale modules before their metadata is dereferenced. It is not ABI
-/// versioning or a compatibility promise: the host and all plugins must still
-/// be rebuilt together whenever this interface changes.
+/// matching ::rocjitsu::ExecutionPlugin layout. Other builds are unsupported;
+/// the loader does not provide compatibility detection or versioning.
 ///
-/// Use the ROCJITSU_DEFINE_PLUGIN() helper to emit all four exports.
+/// Use the ROCJITSU_DEFINE_PLUGIN() helper to emit all three exports.
 
 #pragma once
 
-#include "plugin_build_identity.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 
 #include "util/log.h"
@@ -66,9 +59,6 @@ namespace rocjitsu {
 /// ExecutionPlugin base (see PluginLoader); only the plugin's own
 /// `rocjitsu_plugin_destroy` may free it.
 using PluginHandle = void *;
-
-/// @brief Signature of the generated same-build identity accessor.
-using PluginBuildIdentityFn = const char *(*)();
 
 /// @brief Static description of a plugin, returned by the metadata export.
 ///
@@ -108,8 +98,6 @@ using PluginDestroyFn = void (*)(PluginHandle handle);
 
 /// @brief Exported symbol name of the metadata accessor.
 inline constexpr const char *kPluginMetadataSymbol = "rocjitsu_plugin_metadata";
-/// @brief Exported symbol name of the same-build identity accessor.
-inline constexpr const char *kPluginBuildIdentitySymbol = "rocjitsu_plugin_build_identity";
 /// @brief Exported symbol name of the plugin factory.
 inline constexpr const char *kPluginCreateSymbol = "rocjitsu_plugin_create";
 /// @brief Exported symbol name of the plugin destructor.
@@ -135,9 +123,6 @@ inline constexpr const char *kPluginDestroySymbol = "rocjitsu_plugin_destroy";
 ///   ROCJITSU_DEFINE_PLUGIN(MyPlugin, "myplugin", "team@amd.com", "1.0", "{}")
 /// @endcode
 #define ROCJITSU_DEFINE_PLUGIN(PluginClass, NAME, CONTACT, VERSION, CONFIG_SCHEMA)                 \
-  extern "C" ROCJITSU_PLUGIN_EXPORT const char *rocjitsu_plugin_build_identity() {                 \
-    return ::rocjitsu::kPluginBuildIdentity;                                                       \
-  }                                                                                                \
   extern "C" ROCJITSU_PLUGIN_EXPORT const ::rocjitsu::PluginMetadata *rocjitsu_plugin_metadata() { \
     static const ::rocjitsu::PluginMetadata kMetadata{NAME, CONTACT, VERSION, CONFIG_SCHEMA};      \
     return &kMetadata;                                                                             \

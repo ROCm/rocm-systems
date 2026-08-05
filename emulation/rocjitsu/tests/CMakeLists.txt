@@ -335,7 +335,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 ${ROCJITSU_INCLUDE_DIR}
                 ${ROCJITSU_SRC_DIR}
                 ${HSA_INCLUDE_DIR}
-                ${GENERATED_DIR}
                 $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
                 $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
         )
@@ -357,31 +356,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_add_plugin_loader_fixture(good)
     rj_add_plugin_loader_fixture(missing PLUGIN_FIXTURE_MISSING_DESTROY=1)
     rj_add_plugin_loader_fixture(duplicate)
-    rj_add_plugin_loader_fixture(stale_identity PLUGIN_FIXTURE_STALE_IDENTITY=1)
-
-    add_library(
-        plugin_loader_fixture_legacy_v2
-        MODULE
-        plugin_loader_v2_fixture.cpp
-    )
-    target_include_directories(
-        plugin_loader_fixture_legacy_v2
-        PRIVATE
-            ${ROCJITSU_INCLUDE_DIR}
-            ${ROCJITSU_SRC_DIR}
-            ${HSA_INCLUDE_DIR}
-            $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
-            $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
-    )
-    set_target_properties(
-        plugin_loader_fixture_legacy_v2
-        PROPERTIES
-            OUTPUT_NAME rocjitsu_plugin_legacy_v2
-            LIBRARY_OUTPUT_DIRECTORY ${PLUGIN_LOADER_FIXTURE_DIR}
-            CXX_VISIBILITY_PRESET hidden
-            VISIBILITY_INLINES_HIDDEN ON
-    )
-    rj_configure_target(plugin_loader_fixture_legacy_v2 TEST)
 endif()
 
 add_executable(
@@ -543,8 +517,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         plugin_loader_fixture_good
         plugin_loader_fixture_missing
         plugin_loader_fixture_duplicate
-        plugin_loader_fixture_stale_identity
-        plugin_loader_fixture_legacy_v2
     )
 endif()
 # Benchmarks are timing tools, not correctness tests; keep them out of the
