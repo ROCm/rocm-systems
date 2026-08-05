@@ -110,6 +110,9 @@ jobs:
           echo "changed_projects: ${{ steps.configure.outputs.changed_projects }}"
           echo "run_all_tests: ${{ steps.configure.outputs.run_all_tests }}"
           echo "skip_tests: ${{ steps.configure.outputs.skip_tests }}"
+          echo "reusable_stages: ${{ steps.configure.outputs.reusable_stages }}"
+          echo "rebuild_stages: ${{ steps.configure.outputs.rebuild_stages }}"
+          echo "baseline_run_id: ${{ steps.configure.outputs.baseline_run_id }}"
 
   setup:
     needs: configure
@@ -122,13 +125,12 @@ jobs:
       # TEST: Only run rocprofiler tests
       linux_test_labels: ${{ inputs.linux_test_labels || 'test:rocprofiler' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
-      # Manual override for prebuilt stages
-      prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
-      baseline_run_id: ${{ inputs.baseline_run_id || '' }}
-      # Enable automatic stage reuse
-      # NOTE: For rocm-systems, stages will likely require rebuild since changes
-      # affect compiler-runtime which cascades to all stages
-      stage_reuse_mode: reuse-stage
+      # Use dynamically determined reusable stages, or manual override if provided
+      prebuilt_stages: ${{ inputs.prebuilt_stages || needs.configure.outputs.reusable_stages }}
+      # Use dynamically found baseline run ID, or manual override if provided
+      baseline_run_id: ${{ inputs.baseline_run_id || needs.configure.outputs.baseline_run_id }}
+      # Disable automatic stage reuse since we're passing prebuilt_stages directly
+      stage_reuse_mode: dry-run
       repository: ROCm/TheRock
       ref: users/geomin12/dynamic-determination-stage
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
