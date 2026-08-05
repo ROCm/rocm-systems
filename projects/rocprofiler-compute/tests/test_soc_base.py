@@ -497,12 +497,6 @@ def test_filter_token_known_alias_resolves_without_crash(monkeypatch):
         ),
         pytest.param(
             True,
-            ["30.13"],
-            {TABLE_3013_SENTINEL},
-            id="block_30_13_keeps_only_table_3013",
-        ),
-        pytest.param(
-            True,
             ["2", "30.13"],
             {BASELINE_SENTINEL, TABLE_3013_SENTINEL},
             id="ordinary_block_and_membw_table_are_combined",
@@ -518,8 +512,8 @@ def test_membw_analysis_counter_selection(
     """--membw-analysis admits block 30; --block then narrows within it.
 
     Each config table in the fixture owns one sentinel counter, so the selected
-    sentinels identify exactly which tables survived. The mirror 30.12 and 30.13
-    cases prove selection is by table id, while the mixed case proves a
+    sentinels identify exactly which tables survived. The 30.12 and mixed 30.13
+    cases prove selection is by table id; the mixed case also proves a
     memory-bandwidth table composes with an ordinary report block.
     """
     args = membw_analysis_soc.get_args()

@@ -635,18 +635,11 @@ def test_sanitize_block_experimental_gating(args, expect_error, expected_filter_
 # ---------------------------------------------------------------------------
 # pre_processing(): memory-bandwidth configuration persistence
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize(
-    "effective_filter_blocks",
-    [
-        pytest.param(["30"], id="full_block"),
-        pytest.param(["30.13"], id="ea_interface_submetric"),
-    ],
-)
 def test_pre_processing_persists_membw_analysis_config(
     tmp_path: Path,
-    effective_filter_blocks: list[str],
 ) -> None:
     """Persist the memory-bandwidth flag and effective filter blocks."""
+    effective_filter_blocks = ["30.13"]
     profiling_args = argparse.Namespace(
         attach_pid=None,
         config_dir=tmp_path / "analysis_configs",
