@@ -130,13 +130,16 @@ jobs:
       # Picks one concrete TheRock SHA for the whole run. See the header comment
       # and .github/scripts/resolve_therock_ref.py for the policy. Uses the REST
       # API only, so no deep clone of this repository is required.
+      #
+      # TEST: Override to use the test branch for development
       - name: Resolve TheRock ref
         id: resolve
         env:
           GITHUB_TOKEN: ${{ github.token }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          THEROCK_REF_OVERRIDE: ${{ inputs.therock_ref_override || '' }}
+          # TEST: Force use of test branch for testing
+          THEROCK_REF_OVERRIDE: ${{ inputs.therock_ref_override || 'users/geomin12/dynamic-determination-stage' }}
         run: python .github/scripts/resolve_therock_ref.py
 
   setup:
