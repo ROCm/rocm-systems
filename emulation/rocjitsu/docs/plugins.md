@@ -70,14 +70,16 @@ Each `--plugin` enables the plugin with its schema defaults. Plugins that
 take required arguments, or runs that need custom sink settings, are
 configured through a profile or an explicit `--config <file>`.
 
-### Plugin ABI
+### Plugin loader boundary
 
-The plugin boundary is a C-shaped ABI. Each plugin `.so` exports three
-`extern "C"` functions:
+Plugins are repository-owned components built and shipped with rocJitsu. The
+loader boundary does not provide compatibility or versioning for independently
+built plugins; the host and plugins must always be rebuilt together.
+
+Each plugin `.so` exports the following `extern "C"` loader functions:
 
 - `const PluginMetadata *rocjitsu_plugin_metadata()` — returns a pointer
-  to static metadata: `abi` version, `name`, `contact`, `version`, and a
-  `config_schema` JSON string.
+  to static metadata: `name` and a `config_schema` JSON string.
 - `PluginHandle rocjitsu_plugin_create(const char *config_json)` —
   constructs the plugin from its resolved JSON configuration string and
   returns an opaque handle.
@@ -87,8 +89,7 @@ The plugin boundary is a C-shaped ABI. Each plugin `.so` exports three
 Allocation and deallocation stay on the plugin side of the boundary: the
 host destroys each instance through the plugin's own
 `rocjitsu_plugin_destroy` export. Use the `ROCJITSU_DEFINE_PLUGIN` macro
-from `plugin_abi.h` to emit all three functions. The host validates the
-reported `abi` against the loader's expected version before use.
+from `plugin_exports.h` to emit the loader functions.
 
 ### Config schema
 
@@ -109,8 +110,8 @@ and passes the resolved JSON object to `rocjitsu_plugin_create`.
 
 ## Plugin output
 
-Plugins write diagnostic output (race reports, profiling data, kernel
-logs) through a configurable sink system rather than directly to stderr.
+Plugins write diagnostic output (race reports and kernel logs) through a
+configurable sink system rather than directly to stderr.
 This makes output testable and redirectable.
 
 ### Sink configuration
@@ -127,18 +128,6 @@ sink-related environment variables.
 When `file` is in `types`, each plugin writes to
 `<dir>/<plugin_name>.log`. Plugin names are fixed:
 `race` for `RaceDetectorPlugin`, `logging` for `KernelLoggingPlugin`.
-
-### Profiled execution
-
-Set the top-level `"profiled": true` key to wrap the plugins in a
-profiled execution group, which emits per-hook timing data
-(`HOOK_PROFILE` lines) to the configured sinks. With the default sink, timing
-data goes to stderr; stdout sends it to stdout, and file sinks write it to
-`<dir>/profile.log`.
-
-Profiled execution requires the simulation engine to use `"num_threads": 1`.
-Multithreaded configurations are rejected because the profiling counters are
-not synchronized.
 
 ### Examples
 
@@ -226,7 +215,7 @@ Synchronization retires the corresponding outstanding operations.
 1. Implement `ExecutionPlugin` in a new subdirectory. The plugin class
    must be constructible from `const char *config_json`.
 2. Add a `plugin_export.cpp` that calls
-   `ROCJITSU_DEFINE_PLUGIN(MyPlugin, "myname", contact, version, schema)`.
+   `ROCJITSU_DEFINE_PLUGIN(MyPlugin, "myname", schema)`.
 3. In `CMakeLists.txt`, add the object library and a
    `rj_add_plugin_so(myname <object_lib> <export_src>)` call so it builds
    `librocjitsu_plugin_myname.so`.

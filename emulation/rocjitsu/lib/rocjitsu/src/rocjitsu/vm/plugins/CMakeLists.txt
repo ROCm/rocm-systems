@@ -3,9 +3,8 @@
 
 # Plugin logic as object libraries. These are linked both into the runtime
 # plugin shared objects (below) and into the unit-test binary, so they must
-# NOT contain the ABI export symbols (rocjitsu_plugin_metadata /
-# rocjitsu_plugin_create / rocjitsu_plugin_destroy) — those live in the
-# separate plugin_export.cpp sources compiled only into the shared objects.
+# NOT contain the loader export symbols — those live in separate
+# plugin_export.cpp sources compiled only into the shared objects.
 rj_add_object_library(
     rocjitsu_plugin_logging
     logging/plugin.cpp
@@ -38,7 +37,7 @@ target_link_libraries(
 
 # Runtime plugin shared objects are only meaningful on Linux (the interposer
 # platform). Each plugin is a `librocjitsu_plugin_<name>.so` that carries only
-# its own plugin logic plus the three ABI entry points, which a linker version
+# its own plugin logic plus the required loader entry points, which a linker version
 # script restricts to be the only exported symbols. It is fully self-contained
 # (any simulator code it references is statically bundled) and needs nothing
 # from librocjitsu.so (it is not linked against the interposer/simulator image).
@@ -74,7 +73,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # nothing from the simulator at load time.
         target_link_libraries(${target} PRIVATE ${object_lib})
         add_dependencies(${target} flatbuffers_schemas)
-        # Hide everything except the ABI exports (which carry an explicit
+        # Hide everything except the loader exports (which carry an explicit
         # default-visibility attribute via ROCJITSU_DEFINE_PLUGIN). This keeps
         # the plugin's own C++ symbols private to the plugin .so.
         set_target_properties(
@@ -86,7 +85,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 C_VISIBILITY_PRESET hidden
                 VISIBILITY_INLINES_HIDDEN ON
         )
-        # Restrict the dynamic symbol table to the three ABI entry points. The
+        # Restrict the dynamic symbol table to the loader entry points. The
         # plugin's own default-visibility C API/flatbuffers symbols that the
         # visibility preset cannot hide are made local by the version script.
         target_link_options(

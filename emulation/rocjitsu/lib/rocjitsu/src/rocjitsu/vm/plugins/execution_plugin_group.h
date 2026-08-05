@@ -33,8 +33,8 @@ namespace rocjitsu {
 /// @brief Deleter for owned plugin instances.
 ///
 /// Every plugin instance is freed through a destroy function, so allocation and
-/// deallocation always stay on the same side of the plugin ABI boundary. For
-/// plugins loaded across the C ABI, @c destroyFn is the plugin library's
+/// deallocation always stay on the same side of the plugin library boundary. For
+/// dynamically loaded plugins, @c destroyFn is the plugin library's
 /// `rocjitsu_plugin_destroy` export. For in-tree plugins created with `new`, it
 /// is a small host trampoline that `delete`s the instance (see
 /// delete_execution_plugin()). The pointer is only ever handed back to the
@@ -75,12 +75,12 @@ private:
   std::string file_directory_;
 };
 
-class ExecutionPluginGroup {
+class ExecutionPluginGroup final {
 public:
   explicit ExecutionPluginGroup(PluginSinkConfig config)
       : configured_sinks_(std::move(config.sinks_)), sink_dir_(std::move(config.file_directory_)) {}
 
-  virtual ~ExecutionPluginGroup() = default;
+  ~ExecutionPluginGroup() = default;
 
   /// Add a plugin owned with a boundary-aware deleter (see OwnedPlugin).
   bool add(OwnedPlugin p) {
@@ -102,96 +102,92 @@ public:
     return add(OwnedPlugin(p.release(), PluginDeleter{&delete_execution_plugin}));
   }
 
-  uint32_t num_plugins() const { return static_cast<uint32_t>(plugins_.size()); }
-  bool empty() const { return plugins_.empty(); }
-
   // -- Lifecycle --
-  virtual void onInit() {
+  void onInit() {
     for (auto &entry : plugins_)
       entry.plugin->onInit();
   }
 
-  virtual void onShutdown() {
+  void onShutdown() {
     for (auto &entry : plugins_)
       entry.plugin->onShutdown();
   }
 
-  // -- AMDGPU (virtual) --
-  virtual void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                                amdgpu::Wavefront &wf) {
+  // -- AMDGPU --
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                        amdgpu::Wavefront &wf) {
     for (auto &entry : plugins_)
       entry.plugin->onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
   }
 
-  virtual void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                               amdgpu::Wavefront &wf) {
+  void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                       amdgpu::Wavefront &wf) {
     for (auto &entry : plugins_)
       entry.plugin->onAmdgpuAfterExecuteInstruction(pc, inst, wf);
   }
 
-  virtual void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) {
+  void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) {
     for (auto &entry : plugins_)
       entry.plugin->onAmdgpuRouteMemoryInstruction(inst, wf);
   }
 
-  virtual void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
+  void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
     for (auto &entry : plugins_)
       entry.plugin->onAmdgpuDispatchPacketProcessed(info);
   }
 
-  virtual void onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
+  void onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
     for (auto &entry : plugins_)
       entry.plugin->onAmdgpuDispatchExecutionBegin(dispatch_id);
   }
 
-  virtual void onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
+  void onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
     for (auto &entry : plugins_)
       entry.plugin->onAmdgpuDispatchExecutionEnd(dispatch_id);
   }
 
-  virtual void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
-                                           uint32_t physical_vgpr_count, uint32_t sgpr_count,
-                                           std::span<amdgpu::Wavefront *> wavefronts) {
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
+                                   uint32_t physical_vgpr_count, uint32_t sgpr_count,
+                                   std::span<amdgpu::Wavefront *> wavefronts) {
     for (auto &entry : plugins_)
       entry.plugin->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, physical_vgpr_count, sgpr_count,
                                                 wavefronts);
   }
 
-  virtual void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
+  void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
     for (auto &entry : plugins_)
       entry.plugin->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
   }
 
-  virtual void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
+  void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
     for (auto &entry : plugins_)
       entry.plugin->onAmdgpuWavefrontDispatched(wf);
   }
 
-  virtual void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
     for (auto &entry : plugins_)
       entry.plugin->onAmdgpuWavefrontHalted(wf);
   }
 
-  virtual void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
-                                     uint64_t lane_mask,
-                                     uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
+  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
+                             uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
     for (auto &entry : plugins_)
       entry.plugin->onAmdgpuReadVgprLanes(wf, physical_reg, lane_mask, byte_mask);
   }
 
-  virtual void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
-                                      uint64_t lane_mask,
-                                      uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
+  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
+                              uint64_t lane_mask,
+                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
     for (auto &entry : plugins_)
       entry.plugin->onAmdgpuWriteVgprLanes(wf, physical_reg, lane_mask, byte_mask);
   }
 
-  virtual void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) {
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) {
     for (auto &entry : plugins_)
       entry.plugin->onAmdgpuReadSgpr(wf, physical_reg);
   }
 
-  virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) {
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) {
     for (auto &entry : plugins_)
       entry.plugin->onAmdgpuBarrierResolved(wavefronts);
   }
@@ -233,13 +229,11 @@ private:
     std::vector<PluginSink *> children_;
   };
 
-protected:
+private:
   /// Owns one fanout sink and any per-fanout child sinks. Member order ensures
   /// the fanout is destroyed before the children it references.
   class SinkBundle {
   public:
-    SinkBundle() = default;
-
     [[nodiscard]] PluginSink *get() const { return fanout_.get(); }
 
   private:

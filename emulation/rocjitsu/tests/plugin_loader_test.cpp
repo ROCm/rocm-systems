@@ -10,7 +10,6 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
-#include <stdexcept>
 #include <string>
 
 #ifndef PLUGIN_LOADER_FIXTURE_DIR
@@ -40,24 +39,15 @@ protected:
   rocjitsu::test::ScopedTempFile trace_{"rocjitsu-plugin-loader-"};
 };
 
-TEST_F(PluginLoaderTest, LoadsMatchingAbi) {
+TEST_F(PluginLoaderTest, LoadsPlugin) {
   rocjitsu::ExecutionPluginGroup group(rocjitsu::PluginSinkConfig{});
   EXPECT_EQ(load("good", group), 1);
-  EXPECT_EQ(group.num_plugins(), 1u);
   EXPECT_NE(trace().find("good:create\n"), std::string::npos);
-}
-
-TEST_F(PluginLoaderTest, RejectsAbiMismatchBeforeCreate) {
-  rocjitsu::ExecutionPluginGroup group(rocjitsu::PluginSinkConfig{});
-  EXPECT_EQ(load("badabi", group), 0);
-  EXPECT_TRUE(group.empty());
-  EXPECT_EQ(trace().find("badabi:create\n"), std::string::npos);
 }
 
 TEST_F(PluginLoaderTest, RejectsMissingRequiredExport) {
   rocjitsu::ExecutionPluginGroup group(rocjitsu::PluginSinkConfig{});
   EXPECT_EQ(load("missing", group), 0);
-  EXPECT_TRUE(group.empty());
   EXPECT_EQ(trace().find("missing:create\n"), std::string::npos);
 }
 
@@ -75,26 +65,6 @@ TEST_F(PluginLoaderTest, DestroysRejectedDuplicateBeforeUnload) {
   ASSERT_NE(unloaded, std::string::npos) << events;
   EXPECT_LT(created, destroyed) << events;
   EXPECT_LT(destroyed, unloaded) << events;
-  EXPECT_EQ(group.num_plugins(), 1u);
-}
-
-TEST_F(PluginLoaderTest, RejectsProfiledGroupWithMultipleThreads) {
-  const simdojo::SimulationEngine::Config engine_config{.num_threads = 2};
-  EXPECT_THROW(
-      rocjitsu::PluginLoader::configure_plugin_group(R"({"profiled":true})", "", engine_config),
-      std::invalid_argument);
-}
-
-TEST_F(PluginLoaderTest, ProfileFileSinkFailureFallsBackToStderr) {
-  testing::internal::CaptureStderr();
-  auto group = rocjitsu::PluginLoader::configure_plugin_group(
-      R"({"profiled":true,"sinks":{"types":["file"],"dir":"/dev/null"}})");
-  group->onInit();
-  group->onShutdown();
-  const std::string error = testing::internal::GetCapturedStderr();
-
-  EXPECT_NE(error.find("cannot open plugin sink '/dev/null/profile.log'"), std::string::npos);
-  EXPECT_NE(error.find("total emulation time"), std::string::npos);
 }
 
 TEST_F(PluginLoaderTest, PluginFileSinkFailureFallsBackToStderr) {
@@ -102,7 +72,6 @@ TEST_F(PluginLoaderTest, PluginFileSinkFailureFallsBackToStderr) {
   auto group = rocjitsu::PluginLoader::configure_plugin_group(
       R"({"plugins":{"good":{}},"sinks":{"types":["file"],"dir":"/dev/null"}})",
       PLUGIN_LOADER_FIXTURE_DIR);
-  ASSERT_EQ(group->num_plugins(), 1u);
   group->onInit();
   const std::string error = testing::internal::GetCapturedStderr();
 
@@ -113,27 +82,26 @@ TEST_F(PluginLoaderTest, PluginFileSinkFailureFallsBackToStderr) {
 TEST_F(PluginLoaderTest, FileSinkFailureDoesNotDuplicateConfiguredStderr) {
   testing::internal::CaptureStderr();
   auto group = rocjitsu::PluginLoader::configure_plugin_group(
-      R"({"profiled":true,"sinks":{"types":["stderr","file"],"dir":"/dev/null"}})");
+      R"({"plugins":{"good":{}},"sinks":{"types":["stderr","file"],"dir":"/dev/null"}})",
+      PLUGIN_LOADER_FIXTURE_DIR);
   group->onInit();
-  group->onShutdown();
   const std::string error = testing::internal::GetCapturedStderr();
 
-  EXPECT_NE(error.find("cannot open plugin sink '/dev/null/profile.log'"), std::string::npos);
-  const size_t output = error.find("total emulation time");
+  EXPECT_NE(error.find("cannot open plugin sink '/dev/null/boundary.log'"), std::string::npos);
+  const size_t output = error.find("boundary:init");
   ASSERT_NE(output, std::string::npos);
-  EXPECT_EQ(error.find("total emulation time", output + 1), std::string::npos);
+  EXPECT_EQ(error.find("boundary:init", output + 1), std::string::npos);
 }
 
 TEST_F(PluginLoaderTest, FileSinkWithoutDirectoryUsesDefaultStderrSink) {
   testing::internal::CaptureStderr();
   auto group = rocjitsu::PluginLoader::configure_plugin_group(
-      R"({"profiled":true,"sinks":{"types":["file"]}})");
+      R"({"plugins":{"good":{}},"sinks":{"types":["file"]}})", PLUGIN_LOADER_FIXTURE_DIR);
   group->onInit();
-  group->onShutdown();
   const std::string error = testing::internal::GetCapturedStderr();
 
   EXPECT_NE(error.find("sink type 'file' requested but no 'dir' set"), std::string::npos);
-  EXPECT_NE(error.find("total emulation time"), std::string::npos);
+  EXPECT_NE(error.find("boundary:init"), std::string::npos);
 }
 
 } // namespace
