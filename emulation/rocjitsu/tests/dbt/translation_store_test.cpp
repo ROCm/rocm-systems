@@ -17,13 +17,17 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <span>
 #include <string_view>
 #include <vector>
 
 #include <dlfcn.h>
+#include <sched.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace {
 
@@ -371,6 +375,50 @@ TEST_F(TranslationStoreTest, AManifestWithNoObjectIsReclaimed) {
     orphans += std::filesystem::exists(object) ? 0 : 1;
   }
   EXPECT_EQ(orphans, 0u) << "an orphan manifest must be reclaimed";
+}
+
+TEST_F(TranslationStoreTest, SeparateProcessesCannotEachSpendTheWholeCap) {
+  // The in-process mutex covers one handle, which is the wrong scope for a
+  // capacity decision: every process scans the same pre-write usage, each
+  // concludes there is room, and each writes. Distinct keys are essential --
+  // writers colliding on one key overwrite each other and stay inside the cap by
+  // accident, which is why a same-key test cannot see this.
+  constexpr uint64_t kCap = 65536;
+  constexpr int kWriters = 24;
+  const std::vector<uint8_t> payload(3800, 0x5a);
+
+  // A file every child waits on, so they contend rather than run in sequence.
+  const std::filesystem::path gate = std::filesystem::path(root_) / "gate";
+
+  std::vector<pid_t> children;
+  for (int i = 0; i < kWriters; ++i) {
+    const pid_t pid = fork();
+    ASSERT_NE(pid, -1);
+    if (pid == 0) {
+      while (!std::filesystem::exists(gate))
+        sched_yield();
+      auto store = open("pair-a");
+      store->set_capacity_for_test(kCap);
+      const std::vector<uint8_t> source{static_cast<uint8_t>(i), static_cast<uint8_t>(i >> 8), 'k'};
+      store->store(store->key_for(source, kIdentity), payload, kIdentity);
+      _exit(0);
+    }
+    children.push_back(pid);
+  }
+  { std::ofstream open_the_gate(gate); }
+  for (pid_t pid : children) {
+    int status = 0;
+    ASSERT_EQ(waitpid(pid, &status, 0), pid);
+  }
+
+  uint64_t on_disk = 0;
+  const std::filesystem::path entries = std::filesystem::path(root_) / "pair-a" / "v1";
+  for (const auto &item : std::filesystem::recursive_directory_iterator(entries))
+    if (std::filesystem::is_regular_file(item))
+      on_disk += std::filesystem::file_size(item);
+
+  EXPECT_LE(on_disk, kCap) << kWriters << " concurrent processes overshot the cap";
+  EXPECT_GT(on_disk, 0u) << "the writers must not have all failed";
 }
 
 TEST_F(TranslationStoreTest, AGroupWritableStoreRootIsStillUsable) {

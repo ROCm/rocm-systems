@@ -23,6 +23,7 @@
 #include <elf.h>
 #include <fcntl.h>
 #include <link.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/types.h>
@@ -472,6 +473,47 @@ enum class DirectoryTrust {
   }
   return parent;
 }
+
+/// @brief Holds the domain directory's lock for a write.
+///
+/// @details The in-process mutex covers one handle, which is the wrong scope for
+/// a capacity decision: separate processes each scan the same pre-write usage,
+/// each concludes there is room, and each writes. Forty-eight writers with
+/// distinct keys left 194592 bytes under a 65536-byte cap, and no same-key test
+/// can expose it because the collision is in the arithmetic rather than the
+/// bytes.
+///
+/// The scan, the eviction it drives and the publication that consumes the result
+/// therefore happen under one lock on the directory itself. Readers do not take
+/// it: publication is already atomic through rename, so a lookup either sees a
+/// complete entry or misses, and making hits wait behind a writer would trade a
+/// real cost for no benefit.
+///
+/// An advisory lock is enough because every writer is this code. It is released
+/// by the kernel if the holder dies, which matters more here than in a
+/// longer-lived design: a killed pre-translation run must not wedge the store
+/// for everyone after it.
+class DirectoryWriteLock {
+public:
+  explicit DirectoryWriteLock(int dir_fd) : dir_fd_(dir_fd) {
+    held_ = dir_fd_ >= 0 && flock(dir_fd_, LOCK_EX) == 0;
+  }
+  ~DirectoryWriteLock() {
+    if (held_)
+      (void)flock(dir_fd_, LOCK_UN);
+  }
+  DirectoryWriteLock(const DirectoryWriteLock &) = delete;
+  DirectoryWriteLock &operator=(const DirectoryWriteLock &) = delete;
+
+  /// @details A store that could not take the lock declines the write rather
+  /// than proceeding unsynchronised, which is the same best-effort outcome as
+  /// any other refusal.
+  [[nodiscard]] bool held() const { return held_; }
+
+private:
+  int dir_fd_;
+  bool held_ = false;
+};
 
 struct Entry {
   /// Key without the .obj/.man suffix, so one entry covers the pair.
@@ -977,6 +1019,13 @@ void TranslationStore::Impl::store(const std::string &key, std::span<const uint8
     return;
   ensure_open_locked();
   if (dir_fd_ < 0 || object.empty())
+    return;
+
+  // Everything from here to publication is one critical section across
+  // processes, because the reservation below is only meaningful if nobody else
+  // writes between the scan and the rename that consumes its result.
+  const DirectoryWriteLock directory_lock(dir_fd_);
+  if (!directory_lock.held())
     return;
 
   const std::string manifest = build_manifest(key, object, identity, build_id_);
