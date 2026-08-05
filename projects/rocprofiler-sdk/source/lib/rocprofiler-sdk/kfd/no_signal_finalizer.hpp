@@ -28,10 +28,8 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <mutex>
 #include <optional>
 #include <utility>
-#include <vector>
 
 // The no-signal finalizer core and the bounded retry owner, free of the HSA and
 // tracing headers so every branch is unit-testable with injected callables.
@@ -68,13 +66,6 @@ struct finalize_detail
     uint64_t        start_ns  = 0;
     uint64_t        end_ns    = 0;
     bool            converted = false;
-};
-
-enum class submit_result
-{
-    accepted,
-    rejected_temporary,  // executor busy: hold and retry
-    rejected_permanent,  // executor closing: never retry, finalize in place
 };
 
 // Decide the outcome and produce system-domain timestamps.
@@ -139,100 +130,5 @@ run_no_signal_finalizer(const std::optional<uint64_t>& start_ticks,
     return _outcome;
 }
 
-// Bounded holder for completions the task group would not take. An EOP-proven
-// entry can never revert to PENDING and never becomes LEAKED, so once the
-// reader has claimed it, it MUST eventually be finalized.
-//
-// THREADING: the mutex protects the held vector and the closed flag only.
-// submit and finalize callables are always invoked with NO lock held.
-template <typename ProvenT>
-class retry_owner
-{
-public:
-    // Deliberately generous: the realistic rejection window is a closing executor
-    // during teardown, which holds a handful of entries.
-    static constexpr size_t kMaxHeld = 1024;
-
-    // `finalize_in_place(ProvenT&&)` is used ONLY at capacity, which requires
-    // kMaxHeld consecutive rejections -- the one path where a callback can run on
-    // the caller's thread, so the caller logs it.
-    template <typename FinalizeFn>
-    bool hold(ProvenT&& p, FinalizeFn&& finalize_in_place)
-    {
-        // A forked child drops the completion on the floor rather than touching the
-        // inherited mutex or running a finalizer whose task group no longer exists.
-        if(m_abandoned.load(std::memory_order_acquire)) return false;
-
-        auto _overflow = std::optional<ProvenT>{};
-        {
-            auto lk = std::lock_guard<std::mutex>{m_mu};
-            if(m_held.size() < kMaxHeld)
-            {
-                m_held.emplace_back(std::move(p));
-                return true;
-            }
-            _overflow = std::move(p);
-        }
-        finalize_in_place(std::move(*_overflow));
-        return false;
-    }
-
-    // Drain on the CALLING thread: re-submit what the executor will now take,
-    // finalize the rest in place.
-    template <typename SubmitFn, typename FinalizeFn>
-    size_t flush(SubmitFn&& submit, FinalizeFn&& finalize_in_place)
-    {
-        if(m_abandoned.load(std::memory_order_acquire)) return 0;
-
-        auto _taken  = std::vector<ProvenT>{};
-        bool _closed = false;
-        {
-            auto lk = std::lock_guard<std::mutex>{m_mu};
-            _taken.swap(m_held);
-            _closed = m_closed;
-        }
-
-        for(auto& _p : _taken)
-        {
-            if(!_closed && submit(_p) == submit_result::accepted) continue;
-            finalize_in_place(std::move(_p));
-        }
-        return _taken.size();
-    }
-
-    // No further submissions will ever be accepted; everything held must be
-    // finalized in place by the next flush.
-    void close()
-    {
-        if(m_abandoned.load(std::memory_order_acquire)) return;
-        auto lk  = std::lock_guard<std::mutex>{m_mu};
-        m_closed = true;
-    }
-
-    bool closed() const
-    {
-        if(m_abandoned.load(std::memory_order_acquire)) return true;
-        auto lk = std::lock_guard<std::mutex>{m_mu};
-        return m_closed;
-    }
-
-    size_t size() const
-    {
-        if(m_abandoned.load(std::memory_order_acquire)) return 0;
-        auto lk = std::lock_guard<std::mutex>{m_mu};
-        return m_held.size();
-    }
-
-    // pthread_atfork child handler. One atomic store, checked before the mutex.
-    void abandon_in_child() { m_abandoned.store(true, std::memory_order_release); }
-
-    bool abandoned() const { return m_abandoned.load(std::memory_order_acquire); }
-
-private:
-    std::atomic<bool>    m_abandoned = {false};
-    mutable std::mutex   m_mu        = {};
-    std::vector<ProvenT> m_held      = {};
-    bool                 m_closed    = false;
-};
 }  // namespace kfd
 }  // namespace rocprofiler

@@ -827,13 +827,6 @@ forked_registry()
     return _v;
 }
 
-retry_owner<int>&
-forked_retry()
-{
-    static auto _v = retry_owner<int>{};
-    return _v;
-}
-
 // Everything a child must be able to call without touching an inherited mutex.
 // Returns true when every entry point reported "disabled/empty".
 bool
@@ -856,35 +849,9 @@ all_entry_points_short_circuit()
     ok = ok && forked_registry().owners_of(0, 40) == 0;
     ok = ok && forked_registry().unresolved_queues(0) == 0;
 
-    ok = ok && forked_retry().size() == 0;
-    ok = ok && forked_retry().closed();
-    // A completion arriving in a child is dropped, never finalized: the task group
-    // that would run the finalizer did not survive the fork.
-    bool finalized = false;
-    ok             = ok && !forked_retry().hold(7, [&finalized](int&&) { finalized = true; });
-    ok             = ok && !finalized;
-    ok             = ok && forked_retry().flush([](int&) { return submit_result::accepted; },
-                                    [&finalized](int&&) { finalized = true; }) == 0;
-    ok             = ok && !finalized;
-
     return ok;
 }
 }  // namespace
-
-// Every entry point on every Phase-2 shared object short-circuits once abandoned,
-// so a child never reaches the lock behind it.
-TEST(fork_safety, abandoned_objects_short_circuit_every_entry_point)
-{
-    forked_registry().add_queue(1, 0, uint32_t{40});
-    register_one(forked_hub(), key_of(40, 1), /*corr_id=*/500);
-    forked_retry().hold(1, [](int&&) {});
-
-    forked_hub().abandon_in_child();
-    forked_registry().abandon_in_child();
-    forked_retry().abandon_in_child();
-
-    EXPECT_TRUE(all_entry_points_short_circuit());
-}
 
 // U19: a REAL fork. The child abandons its inherited state exactly as the atfork
 // handler does, exercises the entry points, and leaves through a normal exit() so
@@ -904,7 +871,6 @@ TEST(fork_safety, forked_child_short_circuits_and_survives_normal_exit)
         // CHILD. Exactly the atfork handler's work: atomic stores only.
         forked_hub().abandon_in_child();
         forked_registry().abandon_in_child();
-        forked_retry().abandon_in_child();
 
         const bool ok = all_entry_points_short_circuit();
 
@@ -1036,12 +1002,13 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
     const int payloads_before = tracked_payload::live.load();
 
     auto hub   = hub_t{};
-    auto owner = retry_owner<hub_t::proven>{};
     auto model = reference_model{};
     auto rng   = std::mt19937{20260803};
 
     // Proven completions waiting to be finalized, mirroring the task group.
     auto in_flight = std::vector<hub_t::proven>{};
+    // Completions the task group refused, awaiting the teardown-thread drain.
+    auto deferred = std::vector<hub_t::proven>{};
 
     auto random_key = [&rng]() { return reference_model::key_t{rng() % kSlots, rng() % kPerSlot}; };
 
@@ -1158,16 +1125,17 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
                 }
                 else
                 {
-                    // Temporary rejection: the retry owner takes ownership.
-                    owner.hold(std::move(p),
-                               [&finalize](hub_t::proven&& q) { finalize(std::move(q), true); });
+                    // The task group is gone: the completion is deferred for the
+                    // teardown thread, never finalized on this one.
+                    deferred.emplace_back(std::move(p));
                 }
                 break;
             }
-            case 5:  // flush the retry owner
+            case 5:  // teardown thread drains the deferred completions
             {
-                owner.flush([](hub_t::proven&) { return submit_result::rejected_permanent; },
-                            [&finalize](hub_t::proven&& q) { finalize(std::move(q), true); });
+                for(auto& q : deferred)
+                    finalize(std::move(q), true);
+                deferred.clear();
                 break;
             }
             case 6:  // Collision -> quarantine a slot
@@ -1248,8 +1216,9 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
     }
 
     // Teardown: everything still pending leaks, nothing proven is lost.
-    owner.flush([](hub_t::proven&) { return submit_result::rejected_permanent; },
-                [&finalize](hub_t::proven&& q) { finalize(std::move(q), true); });
+    for(auto& q : deferred)
+        finalize(std::move(q), true);
+    deferred.clear();
     for(auto& p : in_flight)
         finalize(std::move(p), true);
     in_flight.clear();

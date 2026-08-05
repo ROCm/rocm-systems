@@ -33,7 +33,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <optional>
 
 // The owned payload the hub carries for each pending dispatch, plus the
@@ -101,46 +100,38 @@ begin_close_signal_less_queue(uint64_t queue_token);
 void
 finish_close_signal_less_queue(uint64_t queue_token);
 
-// How the reader reaches the completion machinery without depending on the HSA
-// interposition layer (which depends on the hub). Installed once at init,
-// before any queue -- and therefore any eligible batch -- can exist.
-struct signal_less_ops
-{
-    // Must move out of `p` ONLY when returning `accepted`; on rejection the
-    // entry is left intact for the retry owner.
-    std::function<submit_result(signal_less_hub_t::proven&)> submit = {};
+// Bridge to the HSA interposition layer, defined in queue_interposition.cpp.
+// Everything in this file is linked into the same object library, so these are
+// direct calls rather than installed function pointers.
 
-    // Runs on the CALLING thread. Used only by the retry-owner flush, which is
-    // the teardown thread -- never the reader.
-    std::function<void(signal_less_hub_t::proven&&)> finalize_in_place = {};
+// Hand a proven completion to the async task group. Moves out of `p` ONLY on
+// true; false means the task group is gone, which only happens once
+// finalization has begun.
+bool
+submit_no_signal_finalize(signal_less_hub_t::proven& p);
 
-    // Takes and releases every live queue's gate_lock. Must be called holding no
-    // other lock.
-    std::function<void()> quiesce_interceptor = {};
-
-    // Wait for every already-submitted completion to finish executing.
-    std::function<void()> join_task_group = {};
-};
-
+// Run the finalizer on the CALLING thread. Only the deferred flush uses this,
+// and only from the teardown thread -- never the reader or processor.
 void
-install_signal_less_ops(signal_less_ops ops);
+finalize_no_signal_in_place(signal_less_hub_t::proven&& p);
 
-// Reader-side handoff for a proven completion. Submits to the task group and,
-// if the executor refuses, parks the entry in the bounded retry owner. It never
-// runs a client callback on the caller's thread (invariant 11) except in the
-// documented retry-owner overflow case.
+// Take and release every live queue's gate_lock. Caller holds no other lock.
+void
+quiesce_signal_less_interceptor();
+
+// Wait for every already-submitted completion to finish executing.
+void
+join_signal_less_tasks();
+
+// Processor-side handoff for a proven completion. Submits to the task group;
+// if it is gone, defers the entry for the teardown thread. Never runs a client
+// callback on the caller's thread.
 void
 hand_off_proven(signal_less_hub_t::proven&& p);
 
-// Drain the retry owner on the CALLING thread: re-submit what the executor still
-// takes, finalize the rest in place. Teardown step 4 calls this; it is defined
-// here so no EOP-proven completion can be dropped in the meantime.
+// Finalize every deferred completion on the CALLING thread. Returns how many.
 size_t
-flush_retry_owner_now();
-
-// Diagnostics / tests.
-size_t
-retry_owner_size();
+flush_deferred_completions();
 
 }  // namespace kfd
 }  // namespace rocprofiler

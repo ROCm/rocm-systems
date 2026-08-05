@@ -34,8 +34,10 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <mutex>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -75,21 +77,20 @@ std::atomic<bool> g_child_stale{false};
 
 namespace
 {
-// Installed once at interposition init, before any queue exists, and published
-// with a release store that the acquire load below pairs with -- so the reader
-// thread either sees no ops at all or sees fully-constructed ones.
-signal_less_ops&
-ops_storage()
+// Completions the task group would not take. Only reachable once finalization
+// has begun, so this is drained once, by the teardown thread, after the reader
+// and processor are joined -- which is what keeps a client callback off them.
+struct deferred_completions
 {
-    static auto*& _v = common::static_object<signal_less_ops>::construct();
-    return *_v;
-}
+    std::mutex                             mu   = {};
+    std::vector<signal_less_hub_t::proven> held = {};
+};
 
-std::atomic<bool>&
-ops_ready()
+deferred_completions&
+deferred()
 {
-    static auto _v = std::atomic<bool>{false};
-    return _v;
+    static auto*& _v = common::static_object<deferred_completions>::construct();
+    return *_v;
 }
 
 // Guards the loss-ledger lookup so the correlation-id finalize path costs one
@@ -115,12 +116,6 @@ profiling_storage()
     return *_v;
 }
 
-retry_owner<signal_less_hub_t::proven>&
-retry()
-{
-    static auto*& _v = common::static_object<retry_owner<signal_less_hub_t::proven>>::construct();
-    return *_v;
-}
 }  // namespace
 
 void
@@ -179,55 +174,42 @@ signal_less_abandon_in_child()
     if(auto* _reg = common::static_object<OwnerRegistry>::get()) _reg->abandon_in_child();
     if(auto* _prof = common::static_object<ProfilingEnableTracker>::get())
         _prof->abandon_in_child();
-    if(auto* _retry = common::static_object<retry_owner<signal_less_hub_t::proven>>::get())
-        _retry->abandon_in_child();
-}
-
-void
-install_signal_less_ops(signal_less_ops ops)
-{
-    ops_storage() = std::move(ops);
-    ops_ready().store(true, std::memory_order_release);
 }
 
 void
 hand_off_proven(signal_less_hub_t::proven&& p)
 {
     if(g_child_stale.load(std::memory_order_acquire)) return;
-    if(!ops_ready().load(std::memory_order_acquire)) return;
-    auto& _ops = ops_storage();
 
-    auto _result = _ops.submit(p);
-    if(_result == submit_result::accepted)
+    if(submit_no_signal_finalize(p))
     {
         note_signal_less(signal_less_counter::handoff_submitted);
         return;
     }
     note_signal_less(signal_less_counter::handoff_retried);
 
-    // The executor is closing: stop trying, the flush will finalize what is held.
-    if(_result == submit_result::rejected_permanent) retry().close();
-
-    // Deliberately NOT finalized here: this is the reader thread, which must
+    // Deliberately NOT finalized here: this is the processor thread, which must
     // never run a client callback.
-    if(!retry().hold(std::move(p), _ops.finalize_in_place))
-        ROCP_WARNING << "KFD dispatch-log: signal-less retry owner is full; a completion was "
-                        "finalized on the calling thread";
+    auto& _d = deferred();
+    auto  lk = std::lock_guard<std::mutex>{_d.mu};
+    _d.held.emplace_back(std::move(p));
 }
 
 size_t
-flush_retry_owner_now()
+flush_deferred_completions()
 {
     if(g_child_stale.load(std::memory_order_acquire)) return 0;
-    if(!ops_ready().load(std::memory_order_acquire)) return 0;
-    auto& _ops = ops_storage();
-    return retry().flush(_ops.submit, _ops.finalize_in_place);
-}
 
-size_t
-retry_owner_size()
-{
-    return retry().size();
+    auto _taken = std::vector<signal_less_hub_t::proven>{};
+    {
+        auto& _d = deferred();
+        auto  lk = std::lock_guard<std::mutex>{_d.mu};
+        _taken.swap(_d.held);
+    }
+    // Outside the lock: the finalizer runs client callbacks.
+    for(auto& _p : _taken)
+        finalize_no_signal_in_place(std::move(_p));
+    return _taken.size();
 }
 
 OwnerRegistry&
@@ -441,10 +423,9 @@ signal_less_teardown()
     //   5. leak      -> whatever never got an EOP is ledgered, so finalize skips it
     //   6. join tasks-> safe only now: no producer can submit another task
     signal_less_hub().set_mode(session_mode::stopping);
-    if(ops_ready().load(std::memory_order_acquire) && ops_storage().quiesce_interceptor)
-        ops_storage().quiesce_interceptor();
+    quiesce_signal_less_interceptor();
     stop_kfd_reader();
-    const size_t _flushed = flush_retry_owner_now();
+    const size_t _flushed = flush_deferred_completions();
 
     auto         _loss   = signal_less_hub().drain_for_teardown();
     const size_t _leaked = _loss.second.dispatches;
@@ -459,8 +440,7 @@ signal_less_teardown()
             _loss.second.correlation_ids);
     }
 
-    if(ops_ready().load(std::memory_order_acquire) && ops_storage().join_task_group)
-        ops_storage().join_task_group();
+    join_signal_less_tasks();
 
     const auto _c = signal_less_stats();
     ROCP_WARNING << fmt::format(
@@ -491,18 +471,15 @@ signal_less_quiesce()
 {
     if(g_child_stale.load(std::memory_order_acquire)) return;
     if(!signal_less_feature_enabled()) return;
-    if(!ops_ready().load(std::memory_order_acquire)) return;
-    auto& _ops = ops_storage();
-
     // (a) no registration/publication is mid-flight...
-    if(_ops.quiesce_interceptor) _ops.quiesce_interceptor();
+    quiesce_signal_less_interceptor();
     // (b) ...the reader has completed a full drain, so every record it already had
     // has been turned into a handoff...
     wait_for_reader_drain_barrier();
-    // (c) ...nothing is parked waiting to be submitted...
-    flush_retry_owner_now();
+    // (c) ...nothing is deferred waiting to be finalized...
+    flush_deferred_completions();
     // (d) ...and every submitted completion has finished executing.
-    if(_ops.join_task_group) _ops.join_task_group();
+    join_signal_less_tasks();
 }
 }  // namespace kfd
 }  // namespace rocprofiler

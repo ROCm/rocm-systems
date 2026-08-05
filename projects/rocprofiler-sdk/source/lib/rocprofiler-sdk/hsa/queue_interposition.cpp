@@ -643,17 +643,17 @@ no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
     }
 }
 
-kfd::submit_result
-submit_no_signal_finalize(kfd::signal_less_hub_t::proven& proven)
+bool
+submit_to_task_group(kfd::signal_less_hub_t::proven& proven)
 {
     auto* _tg = get_async_signal_handler();
-    if(!_tg || registration::get_fini_status() != 0) return kfd::submit_result::rejected_permanent;
+    if(!_tg || registration::get_fini_status() != 0) return false;
 
     // task_group_t::async takes a std::function, which must be copy-constructible;
     // the payload is move-only, so it travels in a shared_ptr.
     auto _held = std::make_shared<kfd::signal_less_hub_t::proven>(std::move(proven));
     _tg->async([_held]() { no_signal_finalize(std::move(*_held)); });
-    return kfd::submit_result::accepted;
+    return true;
 }
 
 bool
@@ -1653,18 +1653,6 @@ interposition_init(CoreApiTable* core_table, bool enabled)
     // TODO(rocprofiler-sdk): root-cause the attachment-mode deadlock so it can be enabled there.
     s_intercept_dynamic.store(!registration::supports_attachment(), std::memory_order_release);
 
-    // Before any queue -- and therefore any eligible batch -- can exist.
-    {
-        auto _ops              = kfd::signal_less_ops{};
-        _ops.submit            = submit_no_signal_finalize;
-        _ops.finalize_in_place = [](kfd::signal_less_hub_t::proven&& p) {
-            no_signal_finalize(std::move(p));
-        };
-        _ops.quiesce_interceptor = []() { fence_all_queue_gates(); };
-        _ops.join_task_group     = []() { interposition_sync(); };
-        kfd::install_signal_less_ops(std::move(_ops));
-    }
-
     // mark that intercept has been installed
     s_intercept_installed.store(true, std::memory_order_release);
 
@@ -1716,4 +1704,34 @@ interposition_fini()
 }
 }  // namespace queue_interposition
 }  // namespace hsa
+
+// Bridge for the KFD layer (declared in kfd/signal_less.hpp). Defined here so
+// kfd never needs the HSA interposition headers, and called directly -- both
+// sides are in the same object library.
+namespace kfd
+{
+bool
+submit_no_signal_finalize(signal_less_hub_t::proven& p)
+{
+    return hsa::queue_interposition::submit_to_task_group(p);
+}
+
+void
+finalize_no_signal_in_place(signal_less_hub_t::proven&& p)
+{
+    hsa::queue_interposition::no_signal_finalize(std::move(p));
+}
+
+void
+quiesce_signal_less_interceptor()
+{
+    hsa::queue_interposition::fence_all_queue_gates();
+}
+
+void
+join_signal_less_tasks()
+{
+    hsa::queue_interposition::interposition_sync();
+}
+}  // namespace kfd
 }  // namespace rocprofiler
