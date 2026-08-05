@@ -397,9 +397,35 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   __host__ void ipcHostStop();
 
+  // Hard-coded (not runtime-configurable): dispatching copy_bulk's Unroll
+  // across multiple runtime-selected instantiations was measured to cause
+  // instruction bloat that hurt performance, so the hybrid LD/ST portion
+  // always uses this single fixed, lower unroll factor to reduce register
+  // pressure now that LD/ST only carries part of the transfer.
+  static constexpr int kHybridUnroll = 8;
+
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe) {
-    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
+    if (sdmaImpl_.sdmaEnabled && sdmaImpl_.hybridEnabled &&
+        size >= sdmaImpl_.sdmaThreshold && size < sdmaImpl_.sdmaExclusiveThreshold) {
+      size_t sdma_bytes = sdmaImpl_.computeHybridSplitBytes(size);
+      size_t ldst_bytes = size - sdma_bytes;
+      if (sdma_bytes > 0) {
+        uint64_t completion_index = 0;
+        auto* handle = sdmaImpl_.sdmaCopyHybrid<Kind>(dst, src, sdma_bytes, local_pe,
+                                                       &completion_index);
+        assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
+        if (ldst_bytes > 0) {
+          memcpy_lane<Kind, kHybridUnroll>(static_cast<uint8_t*>(dst) + sdma_bytes,
+                                           static_cast<uint8_t*>(src) + sdma_bytes,
+                                           ldst_bytes);
+        }
+        if constexpr (is_blocking(Kind)) handle->flushTo(completion_index);
+        return;
+      }
+    }
+    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold &&
+        (!sdmaImpl_.hybridEnabled || size >= sdmaImpl_.sdmaExclusiveThreshold)) {
       auto* handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
       assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
       if constexpr (is_blocking(Kind)) handle->quietAll();
@@ -410,7 +436,35 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe) {
-    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
+    if (sdmaImpl_.sdmaEnabled && sdmaImpl_.hybridEnabled &&
+        size >= sdmaImpl_.sdmaThreshold && size < sdmaImpl_.sdmaExclusiveThreshold) {
+      size_t sdma_bytes = sdmaImpl_.computeHybridSplitBytes(size);
+      size_t ldst_bytes = size - sdma_bytes;
+      if (sdma_bytes > 0) {
+        // Thread 0 issues the SDMA sub-op, then every thread (including
+        // thread 0) collectively copies the LD/ST sub-range while the SDMA
+        // hardware executes concurrently — this overlap is the point of the
+        // hybrid split. completion_index/handle are only read by thread 0.
+        uint64_t completion_index = 0;
+        sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
+        if (is_thread_zero_in_block()) {
+          handle = sdmaImpl_.sdmaCopyHybrid<Kind>(dst, src, sdma_bytes, local_pe,
+                                                   &completion_index);
+          assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
+        }
+        if (ldst_bytes > 0) {
+          memcpy_wg<Kind, kHybridUnroll>(static_cast<uint8_t*>(dst) + sdma_bytes,
+                                         static_cast<uint8_t*>(src) + sdma_bytes,
+                                         ldst_bytes);
+        }
+        if (is_thread_zero_in_block()) {
+          if constexpr (is_blocking(Kind)) handle->flushTo(completion_index);
+        }
+        return;
+      }
+    }
+    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold &&
+        (!sdmaImpl_.hybridEnabled || size >= sdmaImpl_.sdmaExclusiveThreshold)) {
       sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_block()) {
         handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
@@ -424,7 +478,31 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe) {
-    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
+    if (sdmaImpl_.sdmaEnabled && sdmaImpl_.hybridEnabled &&
+        size >= sdmaImpl_.sdmaThreshold && size < sdmaImpl_.sdmaExclusiveThreshold) {
+      size_t sdma_bytes = sdmaImpl_.computeHybridSplitBytes(size);
+      size_t ldst_bytes = size - sdma_bytes;
+      if (sdma_bytes > 0) {
+        uint64_t completion_index = 0;
+        sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
+        if (is_thread_zero_in_wave()) {
+          handle = sdmaImpl_.sdmaCopyHybrid<Kind>(dst, src, sdma_bytes, local_pe,
+                                                   &completion_index);
+          assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
+        }
+        if (ldst_bytes > 0) {
+          memcpy_wave<Kind, kHybridUnroll>(static_cast<uint8_t*>(dst) + sdma_bytes,
+                                           static_cast<uint8_t*>(src) + sdma_bytes,
+                                           ldst_bytes);
+        }
+        if (is_thread_zero_in_wave()) {
+          if constexpr (is_blocking(Kind)) handle->flushTo(completion_index);
+        }
+        return;
+      }
+    }
+    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold &&
+        (!sdmaImpl_.hybridEnabled || size >= sdmaImpl_.sdmaExclusiveThreshold)) {
       sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_wave()) {
         handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);

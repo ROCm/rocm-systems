@@ -49,6 +49,21 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank) {
     LOG_ERROR_ABORT("ROCSHMEM_SDMA_NUM_CHANNELS=%d is out of range [1, 8]", numChannels);
   }
 
+  hybridEnabled = static_cast<bool>(envvar::sdma::hybrid_enabled);
+  sdmaExclusiveThreshold = static_cast<size_t>(envvar::sdma::exclusive_threshold);
+  hybridSplitPercent = static_cast<int>(envvar::sdma::hybrid_split_percent);
+  if (hybridEnabled) {
+    if (sdmaExclusiveThreshold < sdmaThreshold) {
+      LOG_ERROR_ABORT(
+          "ROCSHMEM_SDMA_EXCLUSIVE_THRESHOLD=%zu must be >= ROCSHMEM_SDMA_THRESHOLD=%zu",
+          sdmaExclusiveThreshold, sdmaThreshold);
+    }
+    if (hybridSplitPercent < 0 || hybridSplitPercent > 100) {
+      LOG_ERROR_ABORT("ROCSHMEM_SDMA_HYBRID_SPLIT_PERCENT=%d is out of range [0, 100]",
+                       hybridSplitPercent);
+    }
+  }
+
   if (!sdmaEnabled) {
     LOG_INFO("SDMA disabled at runtime (ROCSHMEM_SDMA_ENABLED=0)");
     return;

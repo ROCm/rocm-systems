@@ -578,6 +578,9 @@ namespace envvar {
     extern const var<size_t> threshold;
     extern const var<int32_t> num_channels;
     extern const var<bool> spread_channels;
+    extern const var<bool> hybrid_enabled;
+    extern const var<size_t> exclusive_threshold;
+    extern const var<int32_t> hybrid_split_percent;
   }  // namespace sdma
 
   /**

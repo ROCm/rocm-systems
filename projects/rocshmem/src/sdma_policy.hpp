@@ -50,6 +50,16 @@ class SdmaImpl {
   int sdmaChannel{0};       // Per-context base channel (= ctx_id % numChannels)
   int sdmaChannelStride{0}; // 0 = use sdmaChannel as-is; 1 = add wf_id offset
 
+  // Hybrid LD/ST + SDMA configuration. When enabled, transfers in
+  // [sdmaThreshold, sdmaExclusiveThreshold) are split by byte range: the
+  // first hybridSplitPercent% of bytes go via SDMA, the remainder via LD/ST,
+  // concurrently. Below sdmaThreshold: pure LD/ST. At/above
+  // sdmaExclusiveThreshold: pure SDMA (SDMA alone already saturates the link
+  // at that size, so concurrent LD/ST no longer helps).
+  bool hybridEnabled{false};
+  size_t sdmaExclusiveThreshold{65536};
+  int hybridSplitPercent{50};
+
   // Device resources - 2D array: [shm_size * numChannels]
   // Index as: deviceHandles_d[local_pe * numChannels + sdmaChannel]
   sdma_anvil::SdmaQueueDeviceHandle** deviceHandles_d{nullptr};
@@ -91,6 +101,52 @@ class SdmaImpl {
       // Mark (local_pe, effective_channel) dirty so sdmaQuiet drains the right
       // channel.  Blocking copies drain inline via quietAll, so the dirty bit
       // is unnecessary and would only cause a redundant poll in a later fence.
+      if constexpr (!is_blocking(Kind)) {
+        uint64_t bit = 1ULL << (local_pe * numChannels + effective_channel);
+        __hip_atomic_fetch_or(&sdmaDirty, bit, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      }
+    }
+    return handle;
+  }
+
+  // Number of bytes of a hybrid-tier transfer routed to SDMA (the remainder
+  // goes via concurrent LD/ST). Rounded down to a 16-byte chunk boundary so
+  // the LD/ST portion's copy_bulk/copy_remainder chunking is unaffected by
+  // the split point.
+  __device__ __forceinline__ size_t computeHybridSplitBytes(size_t size) {
+    size_t sdma_bytes = (size * static_cast<size_t>(hybridSplitPercent)) / 100;
+    return sdma_bytes & ~static_cast<size_t>(15);
+  }
+
+  // Cheap availability probe every thread in a WG/wave can evaluate
+  // identically (channel 0 only) to decide, without divergence, whether to
+  // attempt the hybrid split at all. deviceHandles_d entries are populated
+  // uniformly across all (pe, channel) pairs at init time (sdmaHostInit
+  // connects every channel for every local PE), so this is representative
+  // of handle availability for local_pe regardless of which channel a given
+  // thread would ultimately use.
+  __device__ __forceinline__ bool hybridSdmaAvailable(int local_pe) {
+    return deviceHandles_d[local_pe * numChannels] != nullptr;
+  }
+
+  // Same as sdmaCopy, but also reports the ring offset this op was submitted
+  // at via completion_index, so the caller can wait for just this op via
+  // handle->flushTo(*completion_index) instead of the full-ring quietAll()
+  // (which would also wait on unrelated traffic sharing the channel). Used
+  // for the blocking hybrid LD/ST+SDMA split, where the caller wants to
+  // overlap this op's SDMA latency with its own concurrent LD/ST work rather
+  // than draining the whole channel.
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ sdma_anvil::SdmaQueueDeviceHandle* sdmaCopyHybrid(void* dst, void* src,
+                                                    size_t size, int local_pe,
+                                                    uint64_t* completion_index) {
+    int effective_channel = (sdmaChannel +
+        sdmaChannelStride * (get_flat_block_id() / WF_SIZE)) % numChannels;
+    int idx = local_pe * numChannels + effective_channel;
+    sdma_anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
+    if (handle != nullptr) {
+      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+      sdma_anvil::put(*handle, dst, src, size, completion_index);
       if constexpr (!is_blocking(Kind)) {
         uint64_t bit = 1ULL << (local_pe * numChannels + effective_channel);
         __hip_atomic_fetch_or(&sdmaDirty, bit, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);

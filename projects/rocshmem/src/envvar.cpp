@@ -233,6 +233,16 @@ namespace envvar {
     const var<bool> spread_channels("SPREAD_CHANNELS",
         "Apply wf_id round-robin channel offset for all contexts (default: only for default ctx)",
         false);
+    const var<bool> hybrid_enabled("HYBRID_ENABLED",
+        "Enable concurrent LD/ST + SDMA hybrid split for transfers between "
+        "ROCSHMEM_SDMA_THRESHOLD and ROCSHMEM_SDMA_EXCLUSIVE_THRESHOLD", false);
+    const var<size_t> exclusive_threshold("EXCLUSIVE_THRESHOLD",
+        "Transfer size in bytes at/above which SDMA is used exclusively again "
+        "(the hybrid-to-pure-SDMA boundary). Must be >= ROCSHMEM_SDMA_THRESHOLD. "
+        "Only relevant when ROCSHMEM_SDMA_HYBRID_ENABLED=1", 65536);
+    const var<int32_t> hybrid_split_percent("HYBRID_SPLIT_PERCENT",
+        "Percent of transfer bytes routed to SDMA within the hybrid tier "
+        "(remainder via LD/ST) [0, 100]", 50);
   }  // namespace sdma
 
   namespace _detail {

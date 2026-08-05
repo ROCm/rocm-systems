@@ -481,13 +481,12 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
 // ==============================================================================
 
 // Blocking variants additionally drain all in-flight VMEM ops before returning.
-template <MemcpyKind Kind = MemcpyKind::Put>
+template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src,
                                                              size_t size) {
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 8;
   // Compile-time bypass policy: cache-bypass in the direction of the remote side.
   constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard    : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
@@ -527,13 +526,12 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   }
 }
 
-template <MemcpyKind Kind = MemcpyKind::Put>
+template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src,
                                                              size_t size) {
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 8;
 
   constexpr CachePolicy LP =
       is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
@@ -557,13 +555,12 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   }
 }
 
-template <MemcpyKind Kind = MemcpyKind::Put>
+template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src,
                                                            size_t size) {
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 8;
 
   constexpr CachePolicy LP =
       is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;

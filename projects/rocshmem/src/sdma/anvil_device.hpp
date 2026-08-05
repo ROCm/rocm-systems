@@ -520,6 +520,21 @@ __device__ __forceinline__ void put(SdmaQueueSingleProducerDeviceHandle& handle,
   put_signal_counter_impl<true, false, false>(handle, dst, src, size, nullptr, nullptr);
 }
 
+// Same as put(), but also reports the ring offset this copy was submitted at
+// via completion_index, for use with handle.flushTo(*completion_index) to
+// wait for just this op instead of the full-ring handle.quietAll().
+__device__ __forceinline__ void put(SdmaQueueDeviceHandle& handle, void* dst, void* src,
+                                    size_t size, uint64_t* completion_index) {
+  put_signal_counter_impl<true, false, false>(handle, dst, src, size, nullptr, nullptr,
+                                              completion_index);
+}
+
+__device__ __forceinline__ void put(SdmaQueueSingleProducerDeviceHandle& handle, void* dst,
+                                    void* src, size_t size, uint64_t* completion_index) {
+  put_signal_counter_impl<true, false, false>(handle, dst, src, size, nullptr, nullptr,
+                                              completion_index);
+}
+
 __device__ __forceinline__ void putSignal(SdmaQueueDeviceHandle& handle, void* dst, void* src,
                                           size_t size, uint64_t* signal) {
   put_signal_counter_impl<true, true, false>(handle, dst, src, size, signal, nullptr);
