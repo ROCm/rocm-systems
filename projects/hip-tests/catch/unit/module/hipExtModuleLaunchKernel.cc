@@ -82,7 +82,7 @@ static bool searchRegExpr(const std::regex& expr, const char* filename) {
  *    - HIP_VERSION >= 5.7
  */
 HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr) {
-  const std::regex regexp("uniform_work_group_size\\s*:\\s*[0-1]");
+  const std::regex regexp("\\.uniform_work_group_size:\\s*[0-1]");
   REQUIRE(true == searchRegExpr(regexp, "copyKernel.metadata"));
 }
 
@@ -102,11 +102,10 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr) {
  *    - HIP_VERSION >= 5.7
  */
 HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup) {
-  // first check if uniform_work_group_size = 1.
-  const std::regex regexp("uniform_work_group_size\\s*:\\s*1");
-  if (false == searchRegExpr(regexp, "copyKernel.metadata")) {
-    HIP_SKIP_TEST("test requires uniform work group size 1.");
-  }
+  // copyKernel.code is built without any flag that relaxes uniform work groups,
+  // so a missing attribute means the metadata dump is wrong rather than the
+  // test being inapplicable. Skipping here would hide a broken dump.
+  const std::regex regexp("\\.uniform_work_group_size:\\s*1");
   REQUIRE(true == searchRegExpr(regexp, "copyKernel.metadata"));
   auto isEven = GENERATE(0, 1);
   // Calculate size

@@ -13,15 +13,16 @@ endif()
 get_filename_component(_bindir "${HIP_COMPILER}" DIRECTORY)
 find_program(OFFLOAD_BUNDLER clang-offload-bundler
   HINTS "${_bindir}" "${_bindir}/../llvm/bin" "${_bindir}/../lib/llvm/bin")
-find_program(LLVM_READELF NAMES llvm-readelf
+# Some LLVM installs ship only the llvm-readobj binary and alias llvm-readelf to
+# it via a symlink that is not always materialized.
+find_program(LLVM_READELF NAMES llvm-readelf llvm-readobj
   HINTS "${_bindir}" "${_bindir}/../llvm/bin" "${_bindir}/../lib/llvm/bin")
 if(NOT OFFLOAD_BUNDLER OR NOT LLVM_READELF)
   message(FATAL_ERROR
     "DumpCodeObjectMetadata: could not locate clang-offload-bundler / "
-    "llvm-readelf near ${_bindir}")
+    "llvm-readelf (or llvm-readobj) near ${_bindir}")
 endif()
 
-# List bundle targets; unbundle each amdgcn one and dump its ELF notes.
 execute_process(
   COMMAND "${OFFLOAD_BUNDLER}" --type=o "--input=${CODE_OBJECT}" --list
   OUTPUT_VARIABLE _targets
@@ -30,23 +31,48 @@ execute_process(
 if(NOT _rc EQUAL 0)
   message(FATAL_ERROR "DumpCodeObjectMetadata: failed to list ${CODE_OBJECT}")
 endif()
-string(REPLACE "\n" ";" _targets "${_targets}")
+# --list on Windows terminates entries with CRLF, and a carriage return carried
+# into --targets makes the unbundle step reject the target name.
+string(REGEX REPLACE "\r?\n" ";" _targets "${_targets}")
 
-file(WRITE "${OUTPUT}" "")
+# Build the dump under a temporary name so an aborted run cannot leave a
+# truncated file that is newer than CODE_OBJECT and therefore looks up to date.
+set(_tmp "${OUTPUT}.tmp")
+file(WRITE "${_tmp}" "")
+set(_dumped 0)
 foreach(_t IN LISTS _targets)
   if(NOT _t MATCHES "amdgcn")
     continue()
   endif()
   string(MAKE_C_IDENTIFIER "${_t}" _safe)
-  set(_elf "${OUTPUT}.${_safe}.elf")
+  set(_elf "${_tmp}.${_safe}.elf")
   execute_process(
     COMMAND "${OFFLOAD_BUNDLER}" --type=o "--targets=${_t}"
             "--input=${CODE_OBJECT}" "--output=${_elf}" --unbundle
     RESULT_VARIABLE _urc)
-  if(_urc EQUAL 0)
-    execute_process(COMMAND "${LLVM_READELF}" --notes "${_elf}"
-                    OUTPUT_VARIABLE _notes)
-    file(APPEND "${OUTPUT}" "; ===== ${_t} =====\n${_notes}")
-    file(REMOVE "${_elf}")
+  if(NOT _urc EQUAL 0)
+    file(REMOVE "${_elf}" "${_tmp}")
+    message(FATAL_ERROR
+      "DumpCodeObjectMetadata: failed to unbundle ${_t} from ${CODE_OBJECT}")
   endif()
+  execute_process(COMMAND "${LLVM_READELF}" --notes "${_elf}"
+                  OUTPUT_VARIABLE _notes
+                  RESULT_VARIABLE _rrc)
+  file(REMOVE "${_elf}")
+  if(NOT _rrc EQUAL 0 OR NOT _notes MATCHES "AMDGPU Metadata")
+    file(REMOVE "${_tmp}")
+    message(FATAL_ERROR
+      "DumpCodeObjectMetadata: no AMDGPU metadata note in ${_t}")
+  endif()
+  file(APPEND "${_tmp}" "# ===== ${_t} =====\n${_notes}")
+  math(EXPR _dumped "${_dumped} + 1")
 endforeach()
+
+# --list reports success with no output when CODE_OBJECT is not a bundle, so an
+# empty dump has to be caught here rather than left for the test to trip over.
+if(_dumped EQUAL 0)
+  file(REMOVE "${_tmp}")
+  message(FATAL_ERROR
+    "DumpCodeObjectMetadata: ${CODE_OBJECT} has no amdgcn bundle entries")
+endif()
+file(RENAME "${_tmp}" "${OUTPUT}")
