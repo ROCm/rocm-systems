@@ -469,26 +469,17 @@ public:
                     {
                         const uint32_t sqtt_reg_size =
                             Primitives::sqtt_buffer_size_value(sqtt_size, baddr_hi);
+                        // Program base address of buffer to use for thread trace
+                        WriteConfigPacket(
+                            cmd_buffer, Primitives::SQ_THREAD_TRACE_BASE_ADDR, baddr_lo);
+                        // Program size of buffer to use for thread trace. gfx10 and gfx11 pack
+                        // BASE_HI in here, so this write is what commits the complete address.
+                        WriteConfigPacket(
+                            cmd_buffer, Primitives::SQ_THREAD_TRACE_SIZE_ADDR, sqtt_reg_size);
+
+                        // Mirror gfx12 and start BUF0 with a reset write pointer.
                         if(Primitives::GFXIP_LEVEL == 11)
-                        {
-                            // gfx11 packs BASE_HI into SIZE. Write BASE first and SIZE last to
-                            // commit the complete address, matching the gfx12 BASE_HI-last order.
-                            WriteConfigPacket(
-                                cmd_buffer, Primitives::SQ_THREAD_TRACE_BASE_ADDR, baddr_lo);
-                            WriteConfigPacket(
-                                cmd_buffer, Primitives::SQ_THREAD_TRACE_SIZE_ADDR, sqtt_reg_size);
-                            // Mirror gfx12 and start BUF0 with a reset write pointer.
                             WriteConfigPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_WPTR_ADDR, 0);
-                        }
-                        else
-                        {
-                            // Program size of buffer to use for thread trace
-                            WriteConfigPacket(
-                                cmd_buffer, Primitives::SQ_THREAD_TRACE_SIZE_ADDR, sqtt_reg_size);
-                            // Program base address of buffer to use for thread trace
-                            WriteConfigPacket(
-                                cmd_buffer, Primitives::SQ_THREAD_TRACE_BASE_ADDR, baddr_lo);
-                        }
                     }
 
                     // Program the thread trace mask
