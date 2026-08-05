@@ -241,8 +241,6 @@ Examples:
             print(f"Skip tests:        {args.skip_tests}")
             print(f"Coverage report:   {args.coverage_report}")
             print(f"Build dir:         {args.build_dir if args.build_dir else 'default'}")
-            print(f"RCCL build type:   {args.rccl_build_type if args.rccl_build_type else 'from config'}")
-            print(f"Allow debug perf:  {args.allow_debug_perf}")
             print(f"Report suffix:     {args.report_suffix}")
             print(f"Rerun failed:      {args.rerun_failed}")
             print(f"Skip MPI check:    {args.skip_mpi_check}")

@@ -329,12 +329,9 @@ class TestExecutor:
         # Determine build directory (priority: --build-dir > env var > default)
         custom_rccl_path = os.environ.get('RCCL_LIB_PATH') or os.environ.get('RCCL_BUILD_DIR')
 
-        # A prebuilt tree can't honor a build-type selection; say so rather than
-        # ignoring the flag silently.
         if getattr(self.args, "rccl_build_type", None) and (self.args.build_dir or custom_rccl_path):
-            print(f"NOTE: --rccl-build-type {self.args.rccl_build_type} ignored for the build "
-                  "directory; a custom RCCL library path takes precedence "
-                  "(--build-dir / RCCL_LIB_PATH / RCCL_BUILD_DIR)")
+            print(f"NOTE: --rccl-build-type {self.args.rccl_build_type} ignored; "
+                  "a custom RCCL library path takes precedence")
 
         if self.args.build_dir:
             # Use custom build directory from command line
@@ -367,7 +364,6 @@ class TestExecutor:
             print(f"Work directory:   {workdir}")
             print(f"Workspace directory: {self.workspace_dir}")
             print(f"Build directory:  {self.build_dir}")
-            print(f"RCCL build type:  {self.rccl_build_type}")
             if self.using_custom_lib:
                 print(f"  (Custom path via {'--build-dir' if self.args.build_dir else 'RCCL_LIB_PATH/RCCL_BUILD_DIR'})")
             print(f"Log directory:    {self.log_dir}")
@@ -625,28 +621,18 @@ class TestExecutor:
         if self.using_custom_lib:
             return True
 
-        banner = "!" * 80
         if self.runs_gtest or self.args.allow_debug_perf:
-            print(f"\n{banner}")
-            print("WARNING: rccl-tests perf binaries will run against a DEBUG build of RCCL")
-            print(f"         Build directory: {self.build_dir}")
-            if self.runs_gtest:
-                print("         This config also runs gtest suites that require a Debug build,")
-                print("         so the build type is left as-is.")
-            print("         Perf numbers from this run are NOT representative -- do not")
-            print("         publish or compare them against Release results.")
-            print(f"{banner}\n")
+            reason = "config also runs gtest suites" if self.runs_gtest else "--allow-debug-perf"
+            print(f"WARNING: rccl-tests perf will use a DEBUG build ({reason}); "
+                  f"numbers are not representative: {self.build_dir}")
             return True
 
-        print(f"\n{banner}")
-        print("ERROR: refusing to run rccl-tests perf binaries against a DEBUG build of RCCL")
+        print("=" * 80)
+        print("ERROR: refusing to benchmark rccl-tests against a DEBUG build of RCCL")
         print(f"       Build directory: {self.build_dir}")
-        print("       Every enabled suite in this config runs rccl-tests, so Debug was")
-        print("       selected explicitly via build_configuration.build_type or")
-        print("       --rccl-build-type. Perf numbers from a Debug build are meaningless.")
-        print("       Use --rccl-build-type release, or pass --allow-debug-perf if you")
-        print("       really do want to benchmark a Debug build.")
-        print(f"{banner}\n")
+        print("       Every enabled suite runs rccl-tests, so Debug was selected explicitly.")
+        print("       Re-run with --rccl-build-type release, or --allow-debug-perf to override.")
+        print("=" * 80)
         return False
 
     def _install_flags_for_build_type(self, install_flags):
@@ -669,11 +655,10 @@ class TestExecutor:
             dropped = [f for f in flags if f in DEBUG_ONLY_INSTALL_FLAGS]
             if dropped:
                 flags = [f for f in flags if f not in DEBUG_ONLY_INSTALL_FLAGS]
-                print(f"NOTE: Release build requested; dropped debug-only install.sh "
-                      f"flag(s): {' '.join(dropped)}")
+                print(f"NOTE: Release build; dropped debug-only flag(s): {' '.join(dropped)}")
         elif not any(f in ("--debug", "--debug-fast") for f in flags):
             flags.insert(0, "--debug")
-            print("NOTE: Debug build requested; added --debug to install.sh flags")
+            print("NOTE: Debug build; added --debug")
 
         return flags
 
@@ -873,15 +858,13 @@ class TestExecutor:
         # RCCL to link against: explicit rccl_home, else the RCCL build_dir we built.
         rccl_home = _expand(cfg.get("rccl_home", self.build_dir))
 
-        # Configs predating build_type hardcode the other flavor's directory here,
-        # which would silently link a stale librccl.so. Only that exact sibling
-        # path is redirected, so genuinely custom rccl_home values still apply.
+        # Configs predating build_type hardcode the other flavor here, which would
+        # silently link a stale librccl.so. Only that exact sibling path is redirected.
         other_flavor = "debug" if self.rccl_build_type == "release" else "release"
         sibling_build_dir = os.path.join(workdir, "build", other_flavor)
         if not self.using_custom_lib and os.path.normpath(rccl_home) == os.path.normpath(sibling_build_dir):
-            print(f"NOTE: rccl_tests_build_configuration.rccl_home points at the {other_flavor} "
-                  f"build ({rccl_home}); linking against the {self.rccl_build_type} build at "
-                  f"{self.build_dir} instead")
+            print(f"NOTE: rccl_home pointed at the {other_flavor} build; "
+                  f"using {self.build_dir}")
             rccl_home = self.build_dir
 
         # Expand env vars / ~ in each flag so values like
