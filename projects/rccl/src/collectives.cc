@@ -299,8 +299,8 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   // Step 3: Shuffle tempBuffer (local-rank-major) -> recvbuff (node-major).
   size_t totalAGBytes = (size_t)nNodes * localRanks * rankOffset;
   int numBlocks = hierarchicalShuffleNumBlocks(totalAGBytes);
-  hierarchicalShuffle<<<numBlocks, 256, 0, stream>>>((const char*)tempBuffer, (char*)recvbuff, rankOffset, nNodes,
-                                                     localRanks);
+  hierarchicalShuffle<<<numBlocks, HIERARCHICAL_SHUFFLE_THREADS, 0, stream>>>((const char*)tempBuffer, (char*)recvbuff,
+                                                                              rankOffset, nNodes, localRanks);
   CUDACHECK(hipGetLastError());
 
   return ncclSuccess;
@@ -737,8 +737,8 @@ static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, voi
   // Step 1: Pre-shuffle sendbuff (node-major) -> tempBuf (local-rank-major).
   size_t totalBytes = (size_t)nNodes * localRanks * rankOffset;
   int numBlocks = hierarchicalShuffleNumBlocks(totalBytes);
-  hierarchicalShuffle<<<numBlocks, 256, 0, stream>>>((const char*)sendbuff, (char*)tempBuf, rankOffset, localRanks,
-                                                     nNodes);
+  hierarchicalShuffle<<<numBlocks, HIERARCHICAL_SHUFFLE_THREADS, 0, stream>>>((const char*)sendbuff, (char*)tempBuf,
+                                                                              rankOffset, localRanks, nNodes);
   CUDACHECK(hipGetLastError());
 
   // Step 2: Intra-node ReduceScatter, in-place inside tempBuf.
@@ -760,7 +760,6 @@ static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, voi
 
   // Step 3: Inter-node ReduceScatter  intraOut -> recvbuff.
   size_t interMsgSize = recvcount * typeSize * (size_t)nNodes;
-  interComm->enableDirectReduceScatter = 0;
   if (rcclUseReduceScatterDirect(interComm, interMsgSize)) {
     NCCLCHECK(rcclDirectReduceScatter(intraOut, recvbuff, recvcount, datatype, op, interComm, stream,
                                       REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS));
@@ -790,8 +789,9 @@ enum rcclReduceScatterAlgo {
   RCCL_RS_HIERARCHICAL
 };
 
-static rcclReduceScatterAlgo rcclSelectReduceScatterAlgo(struct ncclComm* comm, size_t msgSize) {
-  if (ncclGroupDepth == 0 && rcclUseHierarchicalReduceScatter(comm, msgSize)) {
+static rcclReduceScatterAlgo rcclSelectReduceScatterAlgo(struct ncclComm* comm, size_t msgSize, ncclRedOp_t op) {
+  // User-defined op is not supported for hierarchical reduce scatter
+  if (ncclGroupDepth == 0 && (int(op) < int(ncclNumOps)) && rcclUseHierarchicalReduceScatter(comm, msgSize)) {
     return RCCL_RS_HIERARCHICAL;
   }
   if (ncclGroupDepth == 0 && rcclUseReduceScatterDirect(comm, msgSize)) {
@@ -858,7 +858,7 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
     }
   }
 
-  rcclReduceScatterAlgo algo = symEligible ? RCCL_RS_RING : rcclSelectReduceScatterAlgo(comm, msgSize);
+  rcclReduceScatterAlgo algo = symEligible ? RCCL_RS_RING : rcclSelectReduceScatterAlgo(comm, msgSize, op);
   switch (algo) {
   case RCCL_RS_HIERARCHICAL:
     return ncclHierarchicalReduceScatter_Impl(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);

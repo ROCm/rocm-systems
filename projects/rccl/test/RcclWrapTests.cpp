@@ -1563,23 +1563,25 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
 
     std::vector<HierRSCase> testCases = {
         // nNodes < 8 --> disabled
-        {"LessThan8Nodes",            4,  true,  1ULL << 20, false, {}},
+        {"LessThan8Nodes",            4,  true,  1ULL << 20, false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // sub-comms not initialized --> disabled
-        {"CommsNotInitialized",       16, false, 1ULL << 20, false, {}},
+        {"CommsNotInitialized",       16, false, 1ULL << 20, false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 8 node size > 64MB --> disabled
-        {"Disabled_8Nodes_AboveHalf", 8,  true,  HALF + 1,   false, {}},
+        {"Disabled_8Nodes_AboveHalf", 8,  true,  HALF + 1,   false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 16 node size > 128MB --> disabled
-        {"Disabled_16N_AboveFull",    16, true,  FULL + 1,   false, {}},
+        {"Disabled_16N_AboveFull",    16, true,  FULL + 1,   false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // disabled by default
+        {"DisabledByDefault",          16, true,  1ULL << 20, false, {}},
         // env var forces off --> disabled
         {"DisabledByEnvVar",          16, true,  1ULL << 20, false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "0"}}},
         // 8 nodes, initialized, below threshold --> enabled
-        {"Enabled_8Nodes_BelowHalf",  8,  true,  1ULL << 20, true,  {}},
+        {"Enabled_8Nodes_BelowHalf",  8,  true,  1ULL << 20, true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 8 nodes, exactly at threshold --> enabled
-        {"Enabled_8Nodes_AtHalf",     8,  true,  HALF,       true,  {}},
+        {"Enabled_8Nodes_AtHalf",     8,  true,  HALF,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 16 nodes, initialized, below threshold --> enabled
-        {"Enabled_16Nodes_BelowFull", 16, true,  1ULL << 20, true,  {}},
+        {"Enabled_16Nodes_BelowFull", 16, true,  1ULL << 20, true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 16 nodes, exactly at threshold --> enabled
-        {"Enabled_16Nodes_AtFull",    16, true,  FULL,       true,  {}},
+        {"Enabled_16Nodes_AtFull",    16, true,  FULL,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
     };
 
     // Base environment shared by every case
