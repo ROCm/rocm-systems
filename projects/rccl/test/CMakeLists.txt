@@ -550,6 +550,7 @@ if(BUILD_TESTS)
       GinNcclTimeoutMPITests.cpp
       SymmetricKernelMPITests.cpp
       SymmetricWindowMPITests.cpp
+      DeviceApiMPITests.cpp
       CommNetMismatchMPITests.cpp
     )
 
