@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file dbt/translation_store.cpp
-/// @brief Session-scoped store for translated code objects.
+/// @brief On-disk store for translated code objects.
 
 #include "rocjitsu/code/dbt/translation_store.h"
 
@@ -18,6 +18,7 @@
 #include <utility>
 
 #include <dirent.h>
+#include <dlfcn.h>
 #include <elf.h>
 #include <fcntl.h>
 #include <link.h>
@@ -60,11 +61,23 @@ constexpr uint64_t kHeadroomBytes = 64ull << 20;
 /// @brief Fraction of capacity a single entry may occupy.
 constexpr uint64_t kMaxEntryDivisor = 16;
 
-/// @brief Largest object a read will materialise.
+/// @brief Largest object a session-tier read will materialise.
 /// @details Derived from the write-side per-entry limit so a reader never has to
 /// buffer something the writer would have refused. It also bounds the damage
 /// from a corrupt size field before the digest gets a chance to reject it.
 constexpr uint64_t kMaxObjectBytes = kAbsoluteCapacityBytes / kMaxEntryDivisor;
+
+/// @brief Largest object the shared tier will read or write.
+///
+/// @details Deliberately far above the session tier's limit. The two limits
+/// answer different questions: the session tier caps entries because its root is
+/// usually memory-backed and shared with the rest of the runtime directory,
+/// whereas the shared tier sits on ordinary storage and exists to hold exactly
+/// the objects too large to be worth caching in memory -- a device library of a
+/// few hundred megabytes takes minutes to translate, which is the case the tier
+/// was built for. What remains is a sanity bound, so a corrupt size never turns
+/// into an allocation of that size.
+constexpr uint64_t kSharedMaxObjectBytes = 4ull << 30;
 
 /// @brief Evict down to this share of capacity so eviction is amortised.
 constexpr uint64_t kEvictTargetPermille = 900; // 90%
@@ -270,6 +283,25 @@ struct Sha256 {
   return query.result;
 }
 
+} // namespace
+
+std::string shared_translation_root(const void *address) {
+  Dl_info info{};
+  if (dladdr(address, &info) == 0 || info.dli_fname == nullptr)
+    return {};
+  const std::string_view path(info.dli_fname);
+  const size_t file_at = path.rfind('/');
+  if (file_at == std::string_view::npos)
+    return {}; // A bare name means the loader resolved it by search; no prefix.
+  const std::string_view library_dir = path.substr(0, file_at);
+  const size_t prefix_at = library_dir.rfind('/');
+  if (prefix_at == std::string_view::npos)
+    return {};
+  return std::string(library_dir.substr(0, prefix_at)) + "/share/rocjitsu/translations";
+}
+
+namespace {
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -282,15 +314,30 @@ struct Sha256 {
   return "/tmp/rocjitsu-" + std::to_string(getuid());
 }
 
-[[nodiscard]] bool make_directory_path(const std::string &path) {
+/// @brief Create @p path and every missing parent with mode @p mode.
+///
+/// @details The mode is explicit because the two tiers need opposite things. The
+/// session tree is private to one user. The shared tree is typically written by
+/// root during an image build and read later by an unprivileged process, so a
+/// private mode would produce a tree nobody can use.
+///
+/// mkdir applies the umask, so a component this call creates has its mode set
+/// again afterwards. A component that already existed is left exactly as found:
+/// correcting one would quietly repair the very thing the directory checks below
+/// exist to notice, and repairing it is precisely what someone who planted it
+/// would want.
+[[nodiscard]] bool make_directory_path(const std::string &path, mode_t mode) {
   std::string partial;
   partial.reserve(path.size());
   for (size_t i = 1; i <= path.size(); ++i) {
     if (i != path.size() && path[i] != '/')
       continue;
     partial.assign(path, 0, i);
-    if (mkdir(partial.c_str(), 0700) != 0 && errno != EEXIST)
+    if (mkdir(partial.c_str(), mode) == 0) {
+      (void)chmod(partial.c_str(), mode);
+    } else if (errno != EEXIST) {
       return false;
+    }
   }
   return true;
 }
@@ -309,6 +356,35 @@ struct Sha256 {
   struct stat info {};
   if (fstat(fd, &info) != 0 || !S_ISDIR(info.st_mode) || info.st_uid != geteuid() ||
       (info.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
+    close(fd);
+    return -1;
+  }
+  return fd;
+}
+
+/// @brief Open @p path and confirm it is a trusted system directory.
+///
+/// @details A separate policy from the session tier's, not a relaxation of it.
+/// The session tier requires sole ownership because it is writable by the
+/// process that checks it, and exclusivity is what makes its own writes safe to
+/// trust. The shared tier is read at run time and written only by an installer,
+/// so the question is different: could anyone outside the trust boundary have
+/// placed an entry here? Owner root or the caller, with neither group nor other
+/// able to write, is the answer -- the standard test for a system directory. The
+/// verified descriptor is then held, so nothing that happens to the path
+/// afterwards changes which directory is read.
+///
+/// Symlinks are permitted on the final component, unlike the session tier, since
+/// nothing here is rooted in a world-writable directory and packagers do
+/// legitimately link install trees around. The ownership test is applied to
+/// whatever the link resolves to.
+[[nodiscard]] int open_trusted_directory(const std::string &path) {
+  const int fd = open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (fd < 0)
+    return -1;
+  struct stat info {};
+  if (fstat(fd, &info) != 0 || !S_ISDIR(info.st_mode) ||
+      (info.st_uid != 0 && info.st_uid != geteuid()) || (info.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
     close(fd);
     return -1;
   }
@@ -335,8 +411,10 @@ struct Entry {
 } // namespace
 
 struct TranslationStore::Impl {
-  Impl(std::string_view domain, const void *translator)
-      : domain_(domain), translator_(translator) {}
+  Impl(std::string_view domain, const void *translator, bool shared, std::string_view shared_root,
+       Access access)
+      : domain_(domain), translator_(translator), shared_(shared), shared_root_(shared_root),
+        access_(access) {}
 
   ~Impl() {
     if (dir_fd_ >= 0)
@@ -394,6 +472,18 @@ struct TranslationStore::Impl {
   }
 #endif
 
+  /// @brief True when this instance manages the shared tier.
+  /// @details Recorded from which constructor ran rather than inferred from the
+  /// root being set, so a shared store handed an empty root disables itself
+  /// instead of quietly becoming a session store somewhere else entirely.
+  [[nodiscard]] bool shared() const { return shared_; }
+
+  [[nodiscard]] bool writable() const { return access_ == Access::kReadWrite; }
+
+  [[nodiscard]] uint64_t max_object_bytes() const {
+    return shared() ? kSharedMaxObjectBytes : kMaxObjectBytes;
+  }
+
   void ensure_open_locked() {
     if (opened_)
       return;
@@ -406,17 +496,30 @@ struct TranslationStore::Impl {
 
     std::string base;
 #if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)
-    base = root_override_.empty() ? runtime_dir() : root_override_;
-#else
-    base = runtime_dir();
+    base = root_override_;
 #endif
+    if (base.empty()) {
+      if (shared()) {
+        if (shared_root_.empty())
+          return;
+        base = shared_root_;
+      } else {
+        base = runtime_dir();
+      }
+    }
     const std::string path = base + "/" + domain_ + "/" + std::string(kSchemaDir);
-    if (!make_directory_path(path))
+    // A read-only store never creates its tree. An absent shared tier means
+    // nobody pre-translated, which is a miss and not something to repair -- and
+    // a directory this process created could not be trusted by the next one
+    // anyway, since it would fail its own ownership test under a different user.
+    if (writable() && !make_directory_path(path, shared() ? 0755 : 0700))
       return;
-    dir_fd_ = open_verified_directory(path);
-    // Once per process, and the only moment at which a temporary left by a
-    // process that died mid-write is unambiguously abandoned.
-    sweep_abandoned_locked();
+    dir_fd_ = shared() ? open_trusted_directory(path) : open_verified_directory(path);
+    if (writable()) {
+      // Once per process, and the only moment at which a temporary left by a
+      // process that died mid-write is unambiguously abandoned.
+      sweep_abandoned_locked();
+    }
   }
 
   [[nodiscard]] std::vector<Entry> scan_locked() const;
@@ -437,6 +540,10 @@ struct TranslationStore::Impl {
   // build id becomes part of every key, so the entries name what produced them
   // rather than whichever binary happened to be running.
   const void *const translator_;
+  const bool shared_;
+  // Root of the shared tree; unused by the session tier, which derives its own.
+  const std::string shared_root_;
+  const Access access_;
   std::mutex mutex_;
   bool opened_ = false;
   int dir_fd_ = -1;
@@ -519,6 +626,18 @@ uint64_t TranslationStore::Impl::capacity_locked() const {
 }
 
 bool TranslationStore::Impl::reserve_space_locked(uint64_t needed) {
+  // The shared tier is curated rather than cached: someone decided which objects
+  // belong in it, so evicting one to fit another would silently undo that
+  // decision and leave a pre-translation pass with unpredictable output. It gets
+  // a per-entry ceiling and the free-space floor, and nothing else.
+  if (shared()) {
+    struct statvfs vfs {};
+    if (dir_fd_ < 0 || fstatvfs(dir_fd_, &vfs) != 0)
+      return false;
+    const uint64_t free_now = static_cast<uint64_t>(vfs.f_bavail) * vfs.f_frsize;
+    return needed <= kSharedMaxObjectBytes && free_now >= needed + headroom_locked();
+  }
+
   const uint64_t cap = capacity_locked();
   if (cap == 0 || needed > cap / kMaxEntryDivisor)
     return false;
@@ -609,15 +728,23 @@ namespace {
 }
 
 [[nodiscard]] bool write_atomically(int dir_fd, const std::string &name, const void *data,
-                                    size_t size) {
+                                    size_t size, mode_t mode) {
   static std::atomic<uint64_t> counter{0};
   const std::string temp = name + ".tmp." +
                            std::to_string(counter.fetch_add(1, std::memory_order_relaxed)) + "." +
                            std::to_string(getpid());
   const int fd =
-      openat(dir_fd, temp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+      openat(dir_fd, temp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode);
   if (fd < 0)
     return false;
+  // open() applies the umask, which for a shared entry written during an image
+  // build would leave a file the eventual reader cannot open. Set the mode on the
+  // descriptor instead, before the rename makes the name visible.
+  if (fchmod(fd, mode) != 0) {
+    close(fd);
+    unlinkat(dir_fd, temp.c_str(), 0);
+    return false;
+  }
   const auto *cursor = static_cast<const uint8_t *>(data);
   size_t left = size;
   while (left > 0) {
@@ -680,7 +807,7 @@ std::vector<uint8_t> TranslationStore::Impl::lookup(const std::string &key,
       return {};
   }
 
-  const std::optional<std::string> object = read_whole(dir_fd_, object_name, kMaxObjectBytes);
+  const std::optional<std::string> object = read_whole(dir_fd_, object_name, max_object_bytes());
   if (!object || std::to_string(object->size()) != *recorded_size)
     return {};
 
@@ -689,9 +816,12 @@ std::vector<uint8_t> TranslationStore::Impl::lookup(const std::string &key,
   if (to_hex(hash.finish()) != *recorded_sha)
     return {};
 
-  // Refresh for the eviction order. Failure only costs ordering accuracy.
-  const timespec now[2] = {{0, UTIME_NOW}, {0, UTIME_NOW}};
-  (void)utimensat(dir_fd_, object_name.c_str(), now, AT_SYMLINK_NOFOLLOW);
+  // Refresh for the eviction order. Failure only costs ordering accuracy, and
+  // the shared tier never evicts, so it has no order to keep.
+  if (writable()) {
+    const timespec now[2] = {{0, UTIME_NOW}, {0, UTIME_NOW}};
+    (void)utimensat(dir_fd_, object_name.c_str(), now, AT_SYMLINK_NOFOLLOW);
+  }
 
 #if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)
   ++hits_;
@@ -702,6 +832,8 @@ std::vector<uint8_t> TranslationStore::Impl::lookup(const std::string &key,
 void TranslationStore::Impl::store(const std::string &key, std::span<const uint8_t> object,
                                    const TranslationIdentity &identity) {
   std::lock_guard lock(mutex_);
+  if (!writable())
+    return;
   ensure_open_locked();
   if (dir_fd_ < 0 || object.empty())
     return;
@@ -710,16 +842,26 @@ void TranslationStore::Impl::store(const std::string &key, std::span<const uint8
   if (!reserve_space_locked(object.size() + manifest.size()))
     return;
 
+  // Entries in the shared tree must be readable by whoever eventually runs; the
+  // directory's ownership, not the file's mode, is what keeps them trustworthy.
+  const mode_t mode = shared() ? 0644 : 0600;
   // Manifest first: a visible object must always have something to verify
   // against. A manifest with no object simply reads as a miss.
-  if (!write_atomically(dir_fd_, key + ".man", manifest.data(), manifest.size()))
+  if (!write_atomically(dir_fd_, key + ".man", manifest.data(), manifest.size(), mode))
     return;
-  if (!write_atomically(dir_fd_, key + ".obj", object.data(), object.size()))
+  if (!write_atomically(dir_fd_, key + ".obj", object.data(), object.size(), mode))
     unlinkat(dir_fd_, (key + ".man").c_str(), 0);
 }
 
 TranslationStore::TranslationStore(std::string_view domain, const void *translator)
-    : impl_(std::make_unique<Impl>(domain, translator)) {}
+    : impl_(std::make_unique<Impl>(domain, translator, /*shared=*/false, std::string_view{},
+                                   Access::kReadWrite)) {}
+
+TranslationStore::TranslationStore(std::string_view domain, const void *translator,
+                                   std::string_view root, Access access)
+    : impl_(std::make_unique<Impl>(domain, translator, /*shared=*/true, root, access)) {}
+
+bool TranslationStore::available() { return impl_->available(); }
 
 TranslationStore::~TranslationStore() = default;
 

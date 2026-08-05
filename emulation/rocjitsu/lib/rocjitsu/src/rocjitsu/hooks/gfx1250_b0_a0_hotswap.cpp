@@ -15,6 +15,7 @@
 #include "hsa/hsa_api_trace_minimal.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/code_object_identity.h"
+#include "rocjitsu/code/dbt/gfx1250_b0_a0_cache.h"
 #include "rocjitsu/code/dbt/translation_store.h"
 #include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
 
@@ -53,31 +54,37 @@ using rocjitsu::TranslationIdentity;
 using rocjitsu::TranslationStore;
 
 /// @brief The single configuration this hook translates under.
-///
-/// @details The translation entry point takes no options, so every request from
-/// this hook shares one identity. It is still recorded and re-checked so a
-/// stored object can never satisfy a request from a hook built around a
-/// different profile.
-constexpr TranslationIdentity kTranslationIdentity{
-    .profile_id = 1,
-    .input_revision = 1,
-    .output_revision = 0,
-    .target_isa = "gfx1250",
-};
+/// @details Shared with the ahead-of-time tool, which must derive the same keys.
+constexpr TranslationIdentity kTranslationIdentity = rocjitsu::kGfx1250B0A0Identity;
 
-/// @brief This hook's entries, kept apart from any other consumer's.
+/// @brief Entries this process may write, kept apart from any other consumer's.
 ///
 /// @details Constructed on first use and never destroyed, matching the rest of
 /// this hook's state: the store may be consulted from a load that arrives after
 /// static destructors would otherwise have run.
-///
-/// The store is told which translator produced its entries by being handed an
-/// address inside it. Naming the translator rather than this library is what lets
-/// a translation performed by another program -- one done ahead of time, before
-/// this process existed -- be found here.
 TranslationStore &translation_store() {
   static TranslationStore &store = *new TranslationStore(
-      "gfx1250-b0-a0", reinterpret_cast<const void *>(&rj_gfx1250_b0_to_a0_translate_with_info));
+      rocjitsu::kGfx1250B0A0Domain, rocjitsu::gfx1250_b0_a0_translator_anchor());
+  return store;
+}
+
+/// @brief Entries produced ahead of time, which this process only reads.
+///
+/// @details The session tier cannot hold the objects that most need caching: its
+/// root is the per-user runtime directory, which is memory-backed, so it caps
+/// entry size well below the few hundred megabytes a large device library
+/// occupies -- caching one there would cost more than retranslating it, and it
+/// would not survive the process exiting anyway. This tier is what a container
+/// image or a post-install step populates, on ordinary storage, once.
+///
+/// Read-only is a property of the tier and not a precaution: a runtime that
+/// wrote here would be writing outside its own trust boundary, and the entry it
+/// left would be refused by the next reader for exactly that reason.
+TranslationStore &pretranslation_store() {
+  static TranslationStore &store = *new TranslationStore(
+      rocjitsu::kGfx1250B0A0Domain, rocjitsu::gfx1250_b0_a0_translator_anchor(),
+      rocjitsu::shared_translation_root(rocjitsu::gfx1250_b0_a0_translator_anchor()),
+      TranslationStore::Access::kReadOnly);
   return store;
 }
 
@@ -1236,13 +1243,37 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
       return reused_status;
     }
 
-    // Only a load this process has not already answered reaches the store, which
-    // is what keeps its cost off the repeat path: a digest over the whole source
+    // Only a load this process has not already answered reaches the tiers, which
+    // is what keeps their cost off the repeat path: a digest over the whole source
     // and a file read, once per distinct object rather than once per load.
-    const CacheKey cache_key = translation_store().key_for(*source, kTranslationIdentity);
+    //
+    // One key serves both tiers. It names the translator, the configuration and
+    // the source -- never where the entry lives -- so the tiers agree on it by
+    // construction, which is the whole reason a translation performed ahead of
+    // time can be found at all. Deriving it per tier would digest a source that
+    // can reach hundreds of megabytes twice over.
+    //
+    // It is derived from whichever tier can use it, because key_for() declines
+    // when its own store is unusable. Asking the session tier unconditionally
+    // would tie the pre-translated tier's fate to it: a container with a
+    // read-only /tmp -- precisely the case pre-translation is for -- would lose
+    // both.
+    TranslationStore &key_source =
+        pretranslation_store().available() ? pretranslation_store() : translation_store();
+    const CacheKey cache_key = key_source.key_for(*source, kTranslationIdentity);
+
+    // Pre-translated entries first. They are the ones worth having: the objects
+    // large enough to dominate start-up are precisely the ones the session tier
+    // refuses. A hit here also means the session tier is never consulted, so a
+    // fully pre-translated install does no per-user cache work at all.
+    const char *tier = "aot";
+    std::vector<uint8_t> cached = pretranslation_store().lookup(cache_key, kTranslationIdentity);
+    if (cached.empty()) {
+      tier = "session";
+      cached = translation_store().lookup(cache_key, kTranslationIdentity);
+    }
     // Adopting the store's buffer rather than copying it again keeps a hit to one
     // allocation; the bytes have already been read once.
-    std::vector<uint8_t> cached = translation_store().lookup(cache_key, kTranslationIdentity);
     const size_t cached_size = cached.size();
     if (Blob reused = adopt_bytes(std::move(cached)); reused != nullptr) {
       // Remember what the store gave us. Without this, every later load of these
@@ -1258,8 +1289,8 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
 
       const hsa_status_t reused_status =
           load_owned_bytes(executable, agent, reused, options, loaded, *api, original_load);
-      log("reused input_bytes=%zu output_bytes=%zu status=%d", source->size(), cached_size,
-          static_cast<int>(reused_status));
+      log("reused tier=%s input_bytes=%zu output_bytes=%zu status=%d", tier, source->size(),
+          cached_size, static_cast<int>(reused_status));
       return reused_status;
     }
 
@@ -1528,6 +1559,18 @@ extern "C" RJ_HOOK_EXPORT uint64_t rj_test_cache_size() {
 
 extern "C" RJ_HOOK_EXPORT uint64_t rj_test_cache_hits() {
   return translation_store().hits_for_test();
+}
+
+// Test-only seam onto the pre-translated tier. Its production root is derived
+// from the translator's install prefix, so a test can only reach it by naming
+// one -- and only by counting its hits separately from the session tier's can a
+// test show that a pre-translated entry is what served a load.
+extern "C" RJ_HOOK_EXPORT void rj_test_set_pretranslation_root(const char *root) {
+  pretranslation_store().set_root_for_test(root);
+}
+
+extern "C" RJ_HOOK_EXPORT uint64_t rj_test_pretranslation_hits() {
+  return pretranslation_store().hits_for_test();
 }
 
 extern "C" RJ_HOOK_EXPORT void rj_test_set_cache_capacity(uint64_t bytes) {

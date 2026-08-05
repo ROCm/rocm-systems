@@ -1185,6 +1185,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             hsa_hotswap_rocjitsu_unit_test
             probe_relocation_function_table_dispatch_gfx1250
         )
+        # The pre-translated tier is filled by a separate program and read by the
+        # hook. Running the real tool is the only way to test that the two agree
+        # on a key; writing entries through a test seam would exercise the hook's
+        # own derivation twice and prove nothing about the pair.
+        target_compile_definitions(
+            hsa_hotswap_rocjitsu_unit_test
+            PRIVATE RJ_PRETRANSLATE_TOOL="$<TARGET_FILE:rj_pretranslate>"
+        )
+        add_dependencies(hsa_hotswap_rocjitsu_unit_test rj_pretranslate)
     endif()
     rj_configure_target(hsa_hotswap_rocjitsu_unit_test TEST)
     gtest_discover_tests(hsa_hotswap_rocjitsu_unit_test)

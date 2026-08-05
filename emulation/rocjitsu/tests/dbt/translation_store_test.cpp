@@ -21,6 +21,8 @@
 #include <string_view>
 #include <vector>
 
+#include <sys/stat.h>
+
 namespace {
 
 using rocjitsu::TranslationIdentity;
@@ -48,13 +50,23 @@ protected:
   }
   void TearDown() override { std::filesystem::remove_all(root_); }
 
-  /// @brief A store rooted in this test's private directory.
+  /// @brief A session-tier store rooted in this test's private directory.
   [[nodiscard]] std::unique_ptr<TranslationStore> open(std::string_view domain) {
     // Any address inside the translator would do in production; a test that is
     // not translating anything only needs the two stores it compares to agree.
     auto store = std::make_unique<TranslationStore>(
         domain, reinterpret_cast<const void *>(&translator_identity_anchor));
     store->set_root_for_test(root_);
+    return store;
+  }
+
+  /// @brief A shared-tier store over @p path, or over this test's directory.
+  [[nodiscard]] std::unique_ptr<TranslationStore> open_shared(std::string_view domain,
+                                                              TranslationStore::Access access,
+                                                              const char *path = nullptr) {
+    auto store = std::make_unique<TranslationStore>(
+        domain, reinterpret_cast<const void *>(&translator_identity_anchor),
+        path == nullptr ? root_ : path, access);
     return store;
   }
 
@@ -118,6 +130,113 @@ TEST_F(TranslationStoreTest, TwoHandlesOnOneDomainSeeEachOther) {
   // path a second process would take.
   auto reader = open("pair-a");
   EXPECT_EQ(get(*reader), kObject);
+}
+
+TEST_F(TranslationStoreTest, WhatAToolWritesToTheSharedTierARuntimeReads) {
+  auto tool = open_shared("pair-a", TranslationStore::Access::kReadWrite);
+  put(*tool, kObject);
+
+  auto runtime = open_shared("pair-a", TranslationStore::Access::kReadOnly);
+  EXPECT_EQ(get(*runtime), kObject);
+}
+
+TEST_F(TranslationStoreTest, TheSharedTierIsReadableByWhoeverEventuallyRuns) {
+  // A shared tree is usually written by root during an image build and read by
+  // an unprivileged process afterwards. Modes only the writer can open would
+  // make every one of those reads a miss, and nothing would report it.
+  //
+  // The umask is what makes this a real risk, and the reason the store sets
+  // modes explicitly instead of trusting the ones it passes to open(). A build
+  // running under a restrictive umask is exactly where this goes wrong, so the
+  // test creates that condition rather than waiting to meet it.
+  const mode_t previous = umask(077);
+  auto tool = open_shared("pair-a", TranslationStore::Access::kReadWrite);
+  put(*tool, kObject);
+  umask(previous);
+
+  size_t files = 0;
+  for (const auto &item : std::filesystem::recursive_directory_iterator(root_)) {
+    const auto mode = std::filesystem::status(item).permissions();
+    EXPECT_NE(mode & std::filesystem::perms::others_read, std::filesystem::perms::none)
+        << item.path();
+    EXPECT_EQ(mode & (std::filesystem::perms::group_write | std::filesystem::perms::others_write),
+              std::filesystem::perms::none)
+        << item.path();
+    files += std::filesystem::is_regular_file(item) ? 1 : 0;
+  }
+  EXPECT_EQ(files, 2u) << "expected one object and one manifest";
+}
+
+TEST_F(TranslationStoreTest, AReadOnlySharedStoreDoesNotWriteAnExistingTree) {
+  // The tree has to already exist, or this would only be re-proving that a store
+  // with nowhere to write does not write.
+  auto tool = open_shared("pair-a", TranslationStore::Access::kReadWrite);
+  put(*tool, kObject);
+  const uint64_t before = tool->size_for_test();
+  ASSERT_GT(before, 0u);
+
+  const std::vector<uint8_t> replacement{'w', 'r', 'o', 'n', 'g'};
+  auto runtime = open_shared("pair-a", TranslationStore::Access::kReadOnly);
+  ASSERT_TRUE(runtime->available());
+  put(*runtime, replacement);
+
+  EXPECT_EQ(get(*runtime), kObject);
+  EXPECT_EQ(tool->size_for_test(), before);
+}
+
+TEST_F(TranslationStoreTest, AReadOnlySharedStoreCreatesNoTree) {
+  // An absent shared tier means nobody pre-translated. That is a miss, not
+  // something to repair: a directory this process created could not be trusted
+  // by the next one anyway, since it would fail its own ownership test under a
+  // different user.
+  auto runtime = open_shared("pair-a", TranslationStore::Access::kReadOnly);
+  put(*runtime, kObject);
+  EXPECT_TRUE(get(*runtime).empty());
+  EXPECT_TRUE(std::filesystem::is_empty(root_));
+}
+
+TEST_F(TranslationStoreTest, ASharedTreeAnyoneCanWriteIsRefused) {
+  // Distinct from the session tier's rule, which demands sole ownership. Here
+  // the question is whether someone outside the trust boundary could have
+  // placed an entry, and a directory writable by group or other says yes.
+  //
+  // The tree is planted rather than created and then loosened, because that is
+  // the shape of the real thing: an attacker who can write the parent makes the
+  // directory before the tool does. The tool must refuse it as found, not
+  // silently correct the mode and carry on.
+  int domain_index = 0;
+  for (const auto extra :
+       {std::filesystem::perms::group_write, std::filesystem::perms::others_write}) {
+    const std::string domain = "pair-" + std::to_string(domain_index++);
+    const std::filesystem::path leaf = std::filesystem::path(root_) / domain / "v1";
+    std::filesystem::create_directories(leaf);
+    std::filesystem::permissions(leaf, std::filesystem::perms::owner_all | extra);
+
+    auto tool = open_shared(domain, TranslationStore::Access::kReadWrite);
+    EXPECT_FALSE(tool->available()) << domain;
+    put(*tool, kObject);
+    EXPECT_TRUE(get(*tool).empty()) << domain;
+
+    auto runtime = open_shared(domain, TranslationStore::Access::kReadOnly);
+    EXPECT_FALSE(runtime->available()) << domain;
+  }
+}
+
+TEST_F(TranslationStoreTest, TheSharedTierHoldsWhatTheSessionTierRefuses) {
+  // The reason the shared tier exists. The session tier is rooted in the
+  // per-user runtime directory, which is memory-backed, so it caps entry size
+  // well below the few hundred megabytes a large device library occupies --
+  // exactly the objects whose translation dominates start-up. An object over
+  // that cap has to land somewhere or pre-translating it accomplishes nothing.
+  const std::vector<uint8_t> oversized(17u << 20, 0xab);
+
+  auto session = open("pair-a");
+  put(*session, oversized);
+  EXPECT_TRUE(get(*session).empty());
+
+  auto tool = open_shared("pair-b", TranslationStore::Access::kReadWrite);
+  put(*tool, oversized);
+  EXPECT_EQ(get(*tool), oversized);
 }
 
 } // namespace

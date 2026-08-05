@@ -56,6 +56,8 @@ extern "C" size_t rj_test_cache_lookup(uint32_t profile, uint32_t input_revision
                                        uint32_t output_revision, const char *isa,
                                        const void *source, size_t source_size, void *out,
                                        size_t out_capacity);
+extern "C" void rj_test_set_pretranslation_root(const char *root);
+extern "C" uint64_t rj_test_pretranslation_hits();
 
 namespace {
 
@@ -266,11 +268,17 @@ std::vector<uint8_t> read_translation_fixture() {
 }
 #endif
 
-/// @brief Redirect the translation store into a private directory.
+/// @brief Redirect both translation tiers into private directories.
 ///
 /// @details Without this every test would share the real per-user store, so one
 /// test's output could satisfy another's load and results would depend on run
 /// order and on whatever a previous run left behind.
+///
+/// The pre-translated tier is redirected for the opposite reason: its real root
+/// is derived from the install prefix, so a machine that happens to have a
+/// populated one would serve these loads from it and quietly stop testing the
+/// paths below. Pointing it at an empty directory disables it, and the one test
+/// that wants it populated fills this in.
 class ScopedCacheRoot {
 public:
   ScopedCacheRoot() {
@@ -278,21 +286,37 @@ public:
     if (mkdtemp(path_) == nullptr)
       path_[0] = '\0';
     rj_test_set_cache_root(path_[0] == '\0' ? nullptr : path_);
+
+    std::strcpy(pretranslation_path_, "/tmp/rj-hotswap-aot-XXXXXX");
+    if (mkdtemp(pretranslation_path_) == nullptr)
+      pretranslation_path_[0] = '\0';
+    rj_test_set_pretranslation_root(pretranslation_path_[0] == '\0' ? nullptr
+                                                                    : pretranslation_path_);
   }
   ~ScopedCacheRoot() {
     rj_test_set_cache_root(nullptr);
+    rj_test_set_pretranslation_root(nullptr);
     rj_test_set_cache_capacity(0);
     rj_test_set_cache_headroom(0);
     if (path_[0] != '\0')
       std::filesystem::remove_all(path_);
+    if (pretranslation_path_[0] != '\0')
+      std::filesystem::remove_all(pretranslation_path_);
   }
   ScopedCacheRoot(const ScopedCacheRoot &) = delete;
   ScopedCacheRoot &operator=(const ScopedCacheRoot &) = delete;
 
   [[nodiscard]] const char *path() const { return path_; }
+  [[nodiscard]] const char *pretranslation_path() const { return pretranslation_path_; }
+
+  /// @brief Re-run the pre-translated tier's checks after filling its directory.
+  /// @details It opens once and holds the descriptor, so a tier populated after
+  /// the first lookup would stay closed.
+  void reopen_pretranslation() const { rj_test_set_pretranslation_root(pretranslation_path_); }
 
 private:
   char path_[64] = {};
+  char pretranslation_path_[64] = {};
 };
 
 struct FakeApi {
@@ -520,6 +544,103 @@ protected:
   std::vector<uint8_t> source;
 };
 
+#if defined(RJ_PRETRANSLATE_TOOL)
+// The pre-translated tier is only worth anything if a DIFFERENT program can fill
+// it. Both sides key entries on the translator's build id and locate the tree
+// relative to that same shared object, so they agree by construction -- but
+// nothing reports a disagreement. A tool writing keys the hook never computes
+// would produce no error, no warning, and no reuse whatsoever.
+//
+// So this runs the real tool as a separate process rather than writing entries
+// through a test seam. A seam would exercise the hook's own key derivation twice
+// and prove nothing about the pair.
+TEST_F(HsaHotswapCacheTest, WhatTheToolWritesAheadOfTimeServesALoad) {
+  const std::filesystem::path input =
+      std::filesystem::path(cache_root.pretranslation_path()) / "source.co";
+  {
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(source.data()),
+              static_cast<std::streamsize>(source.size()));
+    ASSERT_TRUE(out.good());
+  }
+
+  const std::string command = std::string(RJ_PRETRANSLATE_TOOL) + " --store-root '" +
+                              cache_root.pretranslation_path() + "' '" + input.string() +
+                              "' > /dev/null 2>&1";
+  ASSERT_EQ(std::system(command.c_str()), 0) << command;
+  std::filesystem::remove(input);
+  cache_root.reopen_pretranslation();
+
+  const std::vector<uint8_t> loaded = load(source);
+  ASSERT_FALSE(loaded.empty());
+  EXPECT_EQ(rj_test_pretranslation_hits(), 1u);
+
+  // The session tier is not consulted after a pre-translated hit, and the
+  // runtime never writes back what it was handed. An install that pre-translated
+  // everything therefore does no per-user cache work at all.
+  EXPECT_EQ(rj_test_cache_hits(), 0u);
+  EXPECT_EQ(rj_test_cache_size(), 0u);
+
+  // Nothing was added to the tier either -- it is read-only to this process.
+  size_t objects = 0;
+  for (const auto &item :
+       std::filesystem::recursive_directory_iterator(cache_root.pretranslation_path()))
+    objects += item.path().extension() == ".obj" ? 1 : 0;
+  EXPECT_EQ(objects, 1u);
+}
+
+TEST_F(HsaHotswapCacheTest, APreTranslatedObjectIsWhatTranslatingWouldHaveProduced) {
+  // Reuse is only correct if it is indistinguishable from doing the work. The
+  // tool and the hook run the same translator, so this should hold trivially --
+  // which is exactly why it is worth an assertion rather than an assumption.
+  const std::vector<uint8_t> translated = load(source);
+  ASSERT_FALSE(translated.empty());
+  rj_test_clear_retained_storage();
+
+  const std::filesystem::path input =
+      std::filesystem::path(cache_root.pretranslation_path()) / "source.co";
+  {
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(source.data()),
+              static_cast<std::streamsize>(source.size()));
+  }
+  const std::string command = std::string(RJ_PRETRANSLATE_TOOL) + " --store-root '" +
+                              cache_root.pretranslation_path() + "' '" + input.string() +
+                              "' > /dev/null 2>&1";
+  ASSERT_EQ(std::system(command.c_str()), 0) << command;
+  std::filesystem::remove(input);
+  cache_root.reopen_pretranslation();
+
+  EXPECT_EQ(load(source), translated);
+  EXPECT_EQ(rj_test_pretranslation_hits(), 1u);
+}
+
+TEST_F(HsaHotswapCacheTest, PreTranslatedEntriesSurviveAnUnusableSessionTier) {
+  // A container with a read-only /tmp is exactly what pre-translation is for, and
+  // it is also where the per-user tier cannot open. One derived key serves both
+  // tiers, so it would be easy to make the pre-translated tier depend on the
+  // session tier opening -- and the symptom would be full translation cost on
+  // precisely the deployments that pre-translated most carefully.
+  const std::filesystem::path input =
+      std::filesystem::path(cache_root.pretranslation_path()) / "source.co";
+  {
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(source.data()),
+              static_cast<std::streamsize>(source.size()));
+  }
+  const std::string command = std::string(RJ_PRETRANSLATE_TOOL) + " --store-root '" +
+                              cache_root.pretranslation_path() + "' '" + input.string() +
+                              "' > /dev/null 2>&1";
+  ASSERT_EQ(std::system(command.c_str()), 0) << command;
+  std::filesystem::remove(input);
+  cache_root.reopen_pretranslation();
+
+  rj_test_set_cache_root("/dev/null/no-session-store-here");
+  ASSERT_FALSE(load(source).empty());
+  EXPECT_EQ(rj_test_pretranslation_hits(), 1u);
+}
+#endif // RJ_PRETRANSLATE_TOOL
+
 TEST_F(HsaHotswapCacheTest, ALoadThisProcessHasNotSeenIsServedFromTheStore) {
   const std::vector<uint8_t> first = load(source);
   ASSERT_FALSE(first.empty());
@@ -671,8 +792,9 @@ protected:
     std::vector<uint8_t> out(object.size());
     const size_t size = rj_test_cache_lookup(profile, in_rev, out_rev, isa, source.data(),
                                              source.size(), out.data(), out.size());
-    if (size == object.size())
+    if (size == object.size()) {
       EXPECT_EQ(out, object);
+    }
     return size;
   }
 

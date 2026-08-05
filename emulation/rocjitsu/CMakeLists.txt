@@ -437,7 +437,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    # rj_pretranslate ships because the tier it fills is only worth having if an
+    # image build or a post-install step can fill it.
+    install(
+        TARGETS rocjitsu_bin rj_pretranslate
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
 endif()
 
 # Config files and schemas: share/rocjitsu/
