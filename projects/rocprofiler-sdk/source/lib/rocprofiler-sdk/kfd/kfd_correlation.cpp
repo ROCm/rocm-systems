@@ -39,12 +39,5 @@ doorbell_map()
     static auto*& _v = common::static_object<DoorbellMap>::construct();
     return *_v;
 }
-
-ResultsMap&
-results_map()
-{
-    static auto*& _v = common::static_object<ResultsMap>::construct();
-    return *_v;
-}
 }  // namespace kfd
 }  // namespace rocprofiler

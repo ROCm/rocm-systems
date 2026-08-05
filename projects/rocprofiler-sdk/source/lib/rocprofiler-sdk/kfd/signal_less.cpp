@@ -537,13 +537,5 @@ signal_less_quiesce()
     // (d) ...and every submitted completion has finished executing.
     if(_ops.join_task_group) _ops.join_task_group();
 }
-
-bool
-kfd_selection_enabled()
-{
-    // Emitting a KFD timestamp requires the whole signal-less path.
-    if(g_child_stale.load(std::memory_order_acquire)) return false;
-    return signal_less_feature_enabled() && signal_less_fully_wired();
-}
 }  // namespace kfd
 }  // namespace rocprofiler

@@ -80,7 +80,6 @@ constexpr size_t kMaxSessions = 8;
 constexpr uint64_t kEvictIntervalNs          = 1'000'000'000ull;  // 1 s
 constexpr uint64_t kProcessorEvictIntervalNs = 1'000'000'000ull;  // 1 s
 constexpr uint64_t kStartMaxAgeNs            = 5'000'000'000ull;  // 5 s
-constexpr uint64_t kResultMaxAgeNs           = 5'000'000'000ull;  // 5 s
 
 // Owned exclusively by the processor thread, so none of it needs a lock.
 struct processor_state
@@ -572,12 +571,6 @@ process_batch(processor_state& proc, const record_batch& batch)
                 return;
             }
             note_signal_less(signal_less_counter::eop_unmatched);
-
-            // Signal-backed dispatch: unchanged rendezvous deposit. An EOP with no
-            // START carries no interval, so there is nothing to deposit for it.
-            if(!rec.start_known) return;
-            results_map().deposit(
-                key, kfd_timing_result{rec.start_ticks, rec.end_ticks, common::timestamp_ns()});
         });
 }
 
@@ -827,9 +820,6 @@ reader_loop()
             // still retires doorbell-map entries.
             st.any_session_ready.store(false, std::memory_order_release);
             st.reader_unavailable.store(true, std::memory_order_release);
-            // No record can be deposited again: release anyone waiting on one
-            // rather than make them burn their rendezvous deadline.
-            results_map().abandon_waiters();
             ROCP_WARNING << fmt::format(
                 "KFD dispatch-log reader: poll failed (errno={}), reader exiting; dispatch-log is "
                 "now disabled for this process, all dispatches use HSA timestamps",
@@ -859,7 +849,6 @@ reader_loop()
 
             if(now_ns - last_evict_ns >= kEvictIntervalNs)
             {
-                results_map().evict_stale(now_ns, kResultMaxAgeNs);
                 for(size_t i = 0, _n = st.session_count.load(std::memory_order_acquire); i < _n;
                     ++i)
                     log_stream_status(st.sessions[i]);
@@ -881,17 +870,8 @@ reader_loop()
         }
     }
 
-    // The reader is done: nothing else will be deposited.
-    results_map().abandon_waiters();
-
-    const auto _stats = results_map().stats();
-    ROCP_INFO << fmt::format(
-        "KFD dispatch-log reader: loop exited, total pairs seen = {}, completion-path "
-        "lookups: {} hit / {} miss, {} HSA fallback(s)",
-        total_seen,
-        _stats.hits,
-        _stats.misses,
-        _stats.fallbacks);
+    ROCP_INFO << fmt::format("KFD dispatch-log reader: loop exited, total pairs seen = {}",
+                             total_seen);
 
     // Signal-less chain, reported from the reader too so the break point is
     // visible even if teardown does not run. Silent unless the feature is active.
@@ -1046,10 +1026,6 @@ nudge_reader()
 void
 request_reader_slot_purge(uint32_t gpu_id, uint32_t doorbell_slot)
 {
-    // Results are behind their own lock, so they can go now; retained starts are
-    // the processor's, so they are queued for it.
-    results_map().erase_slot(gpu_id, doorbell_slot);
-
     auto lk = std::lock_guard<std::mutex>{purge_mutex()};
     purge_requests().emplace_back(gpu_id, doorbell_slot);
 }

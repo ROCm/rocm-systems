@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -34,6 +35,15 @@ namespace rocprofiler
 {
 namespace kfd
 {
+// Absolute monotonic nanoseconds; all deadlines in the KFD path are values of this.
+inline uint64_t
+steady_now_ns()
+{
+    using namespace std::chrono;
+    return static_cast<uint64_t>(
+        duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count());
+}
+
 // Every field is snapshotted at enqueue time so completion-time lookup cannot
 // race with queue destroy/recreate.
 struct correlation_key

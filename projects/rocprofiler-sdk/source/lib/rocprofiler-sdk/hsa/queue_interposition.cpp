@@ -46,7 +46,6 @@
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
-#include "lib/rocprofiler-sdk/kfd/results_map.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -466,10 +465,6 @@ async_signal_handler(hsa_signal_t                            completion_signal,
             completion_signal.handle);
         return;
     }
-
-    // ONE absolute deadline for the whole batch's firmware rendezvous.
-    constexpr uint64_t kKfdRendezvousNs = 5'000'000;  // 5 ms
-    session->kfd_deadline_ns            = kfd::steady_now_ns() + kKfdRendezvousNs;
 
     for(auto& packet : session->packet_data)
     {

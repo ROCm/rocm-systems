@@ -23,7 +23,6 @@
 #pragma once
 
 #include "lib/rocprofiler-sdk/kfd/doorbell_map.hpp"
-#include "lib/rocprofiler-sdk/kfd/results_map.hpp"
 
 namespace rocprofiler
 {
@@ -32,15 +31,5 @@ namespace kfd
 // One instance per process: the enqueue paths and the reader thread share it.
 DoorbellMap&
 doorbell_map();
-
-// Deposited by the reader thread, taken in get_dispatch_time().
-ResultsMap&
-results_map();
-
-// The single gate for emitting KFD timestamps: selecting a firmware record is
-// only sound once it is provably from the current, uniquely-owning queue
-// generation. False keeps every dispatch on HSA timestamps, signals retained.
-bool
-kfd_selection_enabled();
 }  // namespace kfd
 }  // namespace rocprofiler
