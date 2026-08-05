@@ -136,8 +136,9 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm*, int* gdrSupport) {
 ncclResult_t rocmLibraryInit(void) { return ncclSuccess; }
 uint64_t ncclOsGetPid() { return 4321; }
 // DMA-BUF export function pointer (dmaBufSupported gate): NULL -> unsupported.
-// Global-scope name is unmangled, so an untyped definition satisfies the ref.
-void* pfn_hsa_amd_portable_export_dmabuf = nullptr;
+// The typedef is visible via the transitively-included rocmwrap.h, so define it
+// with the real type.
+PFN_hsa_amd_portable_export_dmabuf pfn_hsa_amd_portable_export_dmabuf = nullptr;
 
 // The NCCL_API dispatch symbol ncclCommGetAsyncError is emitted outside init.cc
 // (the api-trace layer, not linked here); ncclCommEnsureReady calls it. Route it
