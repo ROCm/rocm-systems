@@ -1,0 +1,332 @@
+                 U CommCheck(ncclComm*, char const*, char const*)
+                 U GcnArchNameFormat(char*, char*)
+                 U IsArchMatch(char const*, char const*)
+                 U PtrCheck(void const*, char const*, char const*)
+                 U ResetInitFakes()
+                 U _Unwind_Resume
+                 U __assert_fail
+                 U __cxa_allocate_exception
+                 U __cxa_atexit
+                 U __cxa_bad_cast
+                 U __cxa_begin_catch
+                 U __cxa_end_catch
+                 U __cxa_free_exception
+                 U __cxa_guard_acquire
+                 U __cxa_guard_release
+                 U __cxa_rethrow
+                 U __cxa_throw
+                 U __dso_handle
+                 U __dynamic_cast
+                 U __errno_location
+                 U __gxx_personality_v0
+                 U __once_proxy
+                 U __udivti3
+                 U amd_smi_getDeviceIndexByPciBusId(char const*, unsigned int*)
+                 U amd_smi_getFabricDeviceInfo(unsigned int, amdsmiFabricDeviceInfo*)
+                 U amd_smi_init()
+                 U atexit
+                 U bcastGrowHandle(ncclBootstrapHandle*, ncclComm*, bool)
+                 U bcmp
+                 U bootstrapAllGather(void*, void*, int)
+                 U bootstrapClose(void*)
+                 U bootstrapCreateRoot(ncclBootstrapHandle*, bool)
+                 U bootstrapGetUniqueId(ncclBootstrapHandle*, ncclComm*)
+                 U bootstrapInit(int, void*, ncclComm*, ncclComm*)
+                 U bootstrapIntraNodeBarrier(void*, int*, int, int, int)
+                 U bootstrapNetInit()
+                 U bootstrapSplit(unsigned long, ncclComm*, ncclComm*, int, int, int*)
+                 U commSetUnrollFactor(ncclComm*)
+                 U dladdr
+                 U dlclose
+                 U dlopen
+                 U dlsym
+                 U fclose
+                 U ferror
+                 U fopen
+                 U fprintf
+                 U fread
+                 U free
+                 U freeChannel(ncclChannel*, int, int, int, ncclComm*)
+                 U g_loadParam
+                 U getBusId(int, long*)
+                 U getFirmwareVersion()
+                 U getHostHash()
+                 U getHostName(char*, int, char)
+                 U getPidHash()
+                 U getROCmVersion
+                 U getenv
+                 U gethostname
+                 U hashCombine(unsigned long, unsigned long)
+                 U hipDeviceCanAccessPeer
+                 U hipDeviceGet
+                 U hipDeviceGetAttribute
+                 U hipDeviceSetLimit
+                 U hipEventCreateWithFlags
+                 U hipEventDestroy
+                 U hipEventQuery
+                 U hipEventSynchronize
+                 U hipExtMallocWithFlags
+                 U hipFree
+                 U hipGetDevice
+                 U hipGetDeviceCount
+                 U hipGetDevicePropertiesR0600
+                 U hipGetErrorString
+                 U hipGetLastError
+                 U hipHostFree
+                 U hipHostMalloc
+                 U hipMemAddressFree
+                 U hipMemAddressReserve
+                 U hipMemCreate
+                 U hipMemGetAddressRange
+                 U hipMemGetAllocationGranularity
+                 U hipMemMap
+                 U hipMemPoolCreate
+                 U hipMemPoolDestroy
+                 U hipMemPoolSetAttribute
+                 U hipMemRelease
+                 U hipMemRetainAllocationHandle
+                 U hipMemSetAccess
+                 U hipMemUnmap
+                 U hipMemcpyAsync
+                 U hipMemsetAsync
+                 U hipRuntimeGetVersion
+                 U hipSetDevice
+                 U hipStreamCreateWithFlags
+                 U hipStreamDestroy
+                 U hipStreamSynchronize
+                 U hipThreadExchangeStreamCaptureMode
+                 U initChannel(ncclComm*, int)
+                 U initEnv()
+                 U initNvtxRegisteredEnums()
+                 U int64ToBusId(long, char*)
+                 U latency_profiler::collTraceDestroy(ncclComm*)
+                 U latency_profiler::collTraceInit(ncclComm*)
+                 U malloc
+                 U memchr
+                 U memcpy
+                 U memmove
+                 U memset
+                 U micro_getenv(char const*)
+                 U ncclAsyncLaunch(ncclAsyncJob*, ncclResult_t (*)(ncclAsyncJob*), void (*)(ncclAsyncJob*), void (*)(void*), ncclComm*)
+                 U ncclCeFinalize(ncclComm*)
+                 U ncclCheckMultiRank(ncclComm*)
+                 U ncclCollNetChainBufferSetup(ncclComm*)
+                 U ncclCollNetDirectBufferSetup(ncclComm*)
+                 U ncclCollNetSetup(ncclComm*, ncclComm*, ncclTopoGraph**)
+                 U ncclCommDestroy
+                 U ncclCommGetAsyncError
+                 U ncclCommInitRank
+                 U ncclCommSplit
+                 U ncclCuMemEnable()
+                 U ncclCuMemHandleType
+                 U ncclCudaCompCap()
+                 U ncclCudaContextDrop(ncclCudaContext*)
+                 U ncclCudaContextTrack(ncclCudaContext**)
+                 U ncclDdaFabricCommFini(ncclComm*)
+                 U ncclDdaFabricCommInit(ncclComm*)
+                 U ncclDdaIpcCommFini(ncclComm*)
+                 U ncclDdaIpcCommInit(ncclComm*)
+                 U ncclDdaUseFabricPath(ncclComm*)
+                 U ncclDebugLevel
+                 U ncclDebugLog(ncclDebugLogLevel, unsigned long, char const*, int, char const*, ...)
+                 U ncclDebugMask
+                 U ncclDebugNoWarn
+                 U ncclDevrFinalize(ncclComm*)
+                 U ncclDevrIsOneLsaTeam(ncclComm*)
+                 U ncclEnvPluginInit()
+                 U ncclGetEnv(char const*)
+                 U ncclGetUniqueId
+                 U ncclGetUserP2pLevel(int*)
+                 U ncclGinFinalize(ncclComm*)
+                 U ncclGinHostFinalize(ncclComm*)
+                 U ncclGinInit(ncclComm*)
+                 U ncclGinInitFromParent(ncclComm*, ncclComm*)
+                 U ncclGinQueryLastError(ncclGinState*, bool*)
+                 U ncclGpuGdrSupport(ncclComm*, int*)
+                 U ncclGroupDepth
+                 U ncclGroupEndInternal(ncclSimInfo_v22200*)
+                 U ncclGroupError
+                 U ncclGroupJobAbort(ncclGroupJob*)
+                 U ncclGroupJobComplete(ncclGroupJob*)
+                 U ncclGroupStartInternal()
+                 U ncclInitKernelsForDevice(int, int, unsigned long*)
+                 U ncclIommuPassthroughOk(char const*)
+                 U ncclLastError
+                 U ncclMemManagerDestroy
+                 U ncclMemManagerInit
+                 U ncclMemTrack
+                 U ncclMemUntrack
+                 U ncclMemoryStack::allocateSpilled(ncclMemoryStack*, unsigned long, unsigned long)
+                 U ncclMemoryStackDestruct(ncclMemoryStack*)
+                 U ncclMnnvlCheck(ncclComm*)
+                 U ncclNetFinalize(ncclComm*)
+                 U ncclNetInit(ncclComm*)
+                 U ncclNetInitFromParent(ncclComm*, ncclComm*)
+                 U ncclNvlsBufferSetup(ncclComm*)
+                 U ncclNvlsInit(ncclComm*)
+                 U ncclNvlsSetup(ncclComm*, ncclComm*)
+                 U ncclNvlsTreeConnect(ncclComm*)
+                 U ncclNvlsTuning(ncclComm*)
+                 U ncclOsCpuCount(cpu_set_t const&)
+                 U ncclOsGetAffinity(cpu_set_t*)
+                 U ncclOsGetPageSize()
+                 U ncclOsInitialize()
+                 U ncclOsSetAffinity(cpu_set_t const&)
+                 U ncclParamLaunchOrderImplicit()
+                 U ncclParamNvlsEnable()
+                 U ncclParamNvtxDisable()
+                 U ncclParamPatEnable()
+                 U ncclParamSingleProcMemRegEnable()
+                 U ncclProfilerPluginFinalize(ncclComm*)
+                 U ncclProfilerPluginInit(ncclComm*)
+                 U ncclProfilerProxyTraceDumpIfAny(void*)
+                 U ncclProxyCallBlocking(ncclComm*, ncclProxyConnector*, int, void*, int, void*, int)
+                 U ncclProxyConnect(ncclComm*, int, int, int, ncclProxyConnector*)
+                 U ncclProxyCreate(ncclComm*)
+                 U ncclProxyDestroy(ncclComm*)
+                 U ncclProxyShmUnlink(ncclComm*)
+                 U ncclProxyStop(ncclComm*)
+                 U ncclPxnDisable(ncclComm*)
+                 U ncclRasCommFini(ncclComm const*)
+                 U ncclRegCleanup(ncclComm*)
+                 U ncclRmaProxyFinalize(ncclComm*)
+                 U ncclStrongStreamAcquire(ncclCudaGraph, ncclStrongStream*, bool, ihipStream_t**)
+                 U ncclStrongStreamConstruct(ncclStrongStream*)
+                 U ncclStrongStreamDestruct(ncclStrongStream*)
+                 U ncclStrongStreamRelease(ncclCudaGraph, ncclStrongStream*, bool)
+                 U ncclStrongStreamSynchronize(ncclStrongStream*)
+                 U ncclSymkFinalize(ncclComm*)
+                 U ncclThreadSignalLocalInstance
+                 U ncclTopoCheckCrossNicSupport(bool*)
+                 U ncclTopoCheckNicFused(ncclComm*, bool*)
+                 U ncclTopoCompute(ncclTopoSystem*, ncclTopoGraph*)
+                 U ncclTopoComputeCommCPU(ncclComm*)
+                 U ncclTopoComputeP2pChannels(ncclComm*)
+                 U ncclTopoComputeP2pChannelsPerPeer(ncclComm*)
+                 U ncclTopoComputePaths(ncclTopoSystem*, ncclComm*)
+                 U ncclTopoDumpGraphs(ncclTopoSystem*, int, ncclTopoGraph**)
+                 U ncclTopoFree(ncclTopoSystem*)
+                 U ncclTopoGetCpuAffinity(ncclTopoSystem*, int, cpu_set_t*)
+                 U ncclTopoGetLinkType(ncclTopoSystem*, int, int, bool*, int, int, int*)
+                 U ncclTopoGetMinNetBw(ncclTopoSystem*, int, float*)
+                 U ncclTopoGetNvbGpus(ncclTopoSystem*, int, int*, int**)
+                 U ncclTopoGetPxnRanks(ncclComm*, int**, int*)
+                 U ncclTopoGetStrFromSys(char const*, char const*, char*)
+                 U ncclTopoGetSystem(ncclComm*, ncclTopoSystem**, char const*)
+                 U ncclTopoInitTunerConstants(ncclComm*)
+                 U ncclTopoPathAllDirectNVLink(ncclTopoSystem*, bool*)
+                 U ncclTopoPathAllNVLink(ncclTopoSystem*, int*)
+                 U ncclTopoPostset(ncclComm*, int*, int*, ncclTopoRanks**, int*, ncclTopoGraph**, ncclComm*, int)
+                 U ncclTopoPreset(ncclComm*, ncclTopoGraph* (&) [7], ncclTopoRanks*)
+                 U ncclTopoPrint(ncclTopoSystem*)
+                 U ncclTopoPrintGraph(ncclTopoSystem*, ncclTopoGraph*)
+                 U ncclTopoSearchInit(ncclTopoSystem*)
+                 U ncclTopoTrimSystem(ncclTopoSystem*, ncclComm*)
+                 U ncclTopoTuneModel(ncclComm*, int, int, ncclTopoGraph**)
+                 U ncclTransportCheckP2pType(ncclComm*, bool*, bool*, bool*)
+                 U ncclTransportP2pConnect(ncclComm*, int, int, int*, int, int*, int)
+                 U ncclTransportP2pSetup(ncclComm*, ncclTopoGraph*, int, bool*)
+                 U ncclTransportPatConnect(ncclComm*)
+                 U ncclTransportRingConnect(ncclComm*)
+                 U ncclTransportTreeConnect(ncclComm*)
+                 U ncclTreeBasePostset(ncclComm*, ncclTopoGraph*)
+                 U ncclTunerPluginLoad(ncclComm*)
+                 U ncclTunerPluginUnload(ncclComm*)
+                 U operator delete(void*, unsigned long)
+                 U operator delete[](void*)
+                 U operator new(unsigned long)
+                 U operator new(unsigned long, std::nothrow_t const&)
+                 U pfn_hsa_amd_portable_export_dmabuf
+                 U pthread_mutex_lock
+                 U pthread_mutex_unlock
+                 U pthread_once
+                 U qsort
+                 U rccl::Recorder::instance()
+                 U rccl::Recorder::record(char const*)
+                 U rccl::Recorder::record(ncclComm**, int, int const*)
+                 U rccl::Recorder::record(rccl::rcclCall_t, int, int, ncclUniqueId*, ncclComm*, int)
+                 U rccl::Recorder::record(rccl::rcclCall_t, int, int, ncclUniqueId*, ncclConfig_v22800*, ncclComm*)
+                 U rccl::Recorder::record(rccl::rcclCall_t, ncclComm*)
+                 U rcclCheckRomeTopoModelIdxConsensus(int, std::function<int (int)>, std::function<char const* (int)>, std::function<unsigned long (int)>)
+                 U rcclCommSetP2pShiftSize(ncclComm*)
+                 U rcclGetTuningIndexForArch(char const*)
+                 U rcclGitHash
+                 U rcclParamHierarchicalAllGather()
+                 U rcclParamPxnOptQpUsage()
+                 U rcclSetDefaultBuffSizes(ncclComm*, int*)
+                 U rcclSetP2pNetChunkSize(ncclComm*, int&)
+                 U rcclUseAinic()
+                 U rocmLibraryInit()
+                 U roctx_scoped_range_in::roctx_scoped_range_in(char const*)
+                 U roctx_scoped_range_in::roctx_scoped_range_in(nvtxPayloadSchemaEntry_v1 const*, nvtxPayloadData_v1 const*, unsigned long, char const*)
+                 U roctx_scoped_range_in::~roctx_scoped_range_in()
+                 U sched_yield
+                 U snprintf
+                 U stat
+                 U std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_append(char const*, unsigned long)
+                 U std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_assign(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)
+                 U std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_construct(unsigned long, char)
+                 U std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_create(unsigned long&, unsigned long)
+                 U std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_replace(unsigned long, unsigned long, char const*, unsigned long)
+                 U std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_replace_aux(unsigned long, unsigned long, unsigned long, char)
+                 U std::__cxx11::numpunct<char> const& std::use_facet<std::__cxx11::numpunct<char> >(std::locale const&)
+                 U std::__detail::_Prime_rehash_policy::_M_need_rehash(unsigned long, unsigned long, unsigned long) const
+                 U std::__once_call
+                 U std::__once_callable
+                 U std::__throw_bad_alloc()
+                 U std::__throw_bad_array_new_length()
+                 U std::__throw_bad_cast()
+                 U std::__throw_bad_function_call()
+                 U std::__throw_length_error(char const*)
+                 U std::__throw_logic_error(char const*)
+                 U std::__throw_system_error(int)
+                 U std::basic_ios<char, std::char_traits<char> >::clear(std::_Ios_Iostate)
+                 U std::basic_ostream<char, std::char_traits<char> >& std::__ostream_insert<char, std::char_traits<char> >(std::basic_ostream<char, std::char_traits<char> >&, char const*, long)
+                 U std::cerr
+                 U std::chrono::_V2::steady_clock::now()
+                 U std::condition_variable::wait(std::unique_lock<std::mutex>&)
+                 U std::ios_base::Init::Init()
+                 U std::ios_base::Init::~Init()
+                 U std::locale::facet::~facet()
+                 U std::locale::id::_M_id() const
+                 U std::locale::locale()
+                 U std::locale::locale(std::locale const&)
+                 U std::locale::~locale()
+                 U std::nothrow
+                 U std::ostream::operator<<(int)
+                 U std::runtime_error::runtime_error(char const*)
+                 U std::runtime_error::what() const
+                 U std::runtime_error::~runtime_error()
+                 U std::terminate()
+                 U std::thread::join()
+                 U stderr
+                 U strcasecmp
+                 U strdup
+                 U strerror
+                 U strlen
+                 U strstr
+                 U strtok
+                 U strtok_r
+                 U strtol
+                 U testing::Message::Message()
+                 U testing::Test::SetUp()
+                 U testing::Test::Test()
+                 U testing::Test::~Test()
+                 U testing::internal::AssertHelper::AssertHelper(testing::TestPartResult::Type, char const*, int, char const*)
+                 U testing::internal::AssertHelper::operator=(testing::Message const&) const
+                 U testing::internal::AssertHelper::~AssertHelper()
+                 U testing::internal::GTestLog::GTestLog(testing::internal::GTestLogSeverity, char const*, int)
+                 U testing::internal::GTestLog::~GTestLog()
+                 U testing::internal::IsTrue(bool)
+                 U testing::internal::MakeAndRegisterTestInfo(char const*, char const*, char const*, char const*, testing::internal::CodeLocation, void const*, void (*)(), void (*)(), testing::internal::TestFactoryBase*)
+                 U typeinfo for std::exception
+                 U typeinfo for std::locale::facet
+                 U typeinfo for std::runtime_error
+                 U typeinfo for testing::Test
+                 U validHsaScratchEnvSetting(char const*, int, int, char const*)
+                 U vtable for __cxxabiv1::__class_type_info
+                 U vtable for __cxxabiv1::__si_class_type_info
+                 w TLS init function for ncclDebugNoWarn
+                 w TLS init function for ncclGroupDepth
+                 w TLS init function for ncclGroupError
+                 w TLS init function for ncclThreadSignalLocalInstance

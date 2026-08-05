@@ -73,8 +73,17 @@ rocm_install(TARGETS rccl-UnitTestsMicro COMPONENT tests)
 set(TEST_MICRO_INIT_SOURCE_FILES
   init-test.cc
   fakes/init_fakes.cc                  # init-only seams (micro_getenv, ResetInitFakes)
+  fakes/init_stubs.cc                  # fail-loud stubs (Tier-E) + data symbols
   fakes/nccl_fakes.cc                  # reusable nccl* stubs (g_loadParam, ...)
   fakes/hip_fakes.cc                   # HIP runtime seams
+  # Real host-only oracle TUs (D3): compiled from the hipified snapshot so the
+  # REAL PtrCheck/CommCheck (argcheck), IsArchMatch/GcnArchNameFormat (archinfo),
+  # and busId/hash helpers (utils) are exercised, not reimplemented. --gc-sections
+  # (below) drops every other function these TUs define so their deep deps don't
+  # pull in the world.
+  ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc
+  ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc
+  ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc
   ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
   ../common/ProcessIsolatedTestRunner.cpp
 )
@@ -101,7 +110,10 @@ target_compile_options(rccl-UnitTestsMicroInit PRIVATE
   -Xarch_device -fno-profile-instr-generate
   -Xarch_device -fno-coverage-mapping)
 target_link_options(rccl-UnitTestsMicroInit PRIVATE
-  -fprofile-instr-generate -fcoverage-mapping)
+  -fprofile-instr-generate -fcoverage-mapping
+  # GC unreferenced functions (paired with -ffunction-sections) so the real
+  # oracle TUs contribute only the handful of symbols init-test actually uses.
+  -Wl,--gc-sections)
 
 if(BUILD_ADDRESS_SANITIZER)
   target_compile_options(rccl-UnitTestsMicroInit PRIVATE -fsanitize=address)
