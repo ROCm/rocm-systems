@@ -686,53 +686,73 @@ __device__ __forceinline__ void *direct_ctx_shmem_ptr(rocshmem_ctx_t ctx,
   ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET_PTR(ctx, shmem_ptr(dest, pe));
 }
 
-__device__ __forceinline__ void direct_ctx_barrier_all(rocshmem_ctx_t ctx) {
+/*
+ * The barrier-family and sync-family helpers below are deliberately
+ * __noinline__, unlike the other direct_ctx_* helpers in this file. Each one
+ * expands (under all_backends) to a 3-way GDA/RO/IPC switch over a full
+ * collective synchronization implementation (internal_sync/
+ * internal_direct_barrier/internal_atomic_barrier, plus a quiet() call) --
+ * inlining that into shared test kernels that call multiple of the
+ * regular/wave/wg variants from one kernel body (e.g. TeamBarrierTest,
+ * SyncAllTest, BarrierAllTest) grows register/scratch usage enough to drop
+ * occupancy by a full wave (5->4 waves/SIMD, confirmed via gfx950
+ * all_backends resource-usage comparison). This happened even without
+ * __forceinline__: because these helpers now live in the same translation
+ * unit as their callers (unlike the Context::barrier* /sync* methods they
+ * replace, which lived in a separate TU and only merged in at the more
+ * conservative cross-TU LTO inlining stage), the ordinary per-TU inliner
+ * still folded them in. Unlike putmem/getmem (hot-loop, per-call overhead
+ * dominates), barrier/sync calls are infrequent and network-round-trip-
+ * dominated, so the call overhead __noinline__ costs here is not worth an
+ * occupancy regression.
+ */
+__device__ __noinline__ void direct_ctx_barrier_all(rocshmem_ctx_t ctx) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_BARRIER_ALL);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, barrier_all());
 }
 
-__device__ __forceinline__ void direct_ctx_barrier_all_wave(
+__device__ __noinline__ void direct_ctx_barrier_all_wave(
     rocshmem_ctx_t ctx) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_BARRIER_ALL_WAVE);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, barrier_all_wave());
 }
 
-__device__ __forceinline__ void direct_ctx_barrier_all_wg(
+__device__ __noinline__ void direct_ctx_barrier_all_wg(
     rocshmem_ctx_t ctx) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_BARRIER_ALL_WG);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, barrier_all_wg());
 }
 
-__device__ __forceinline__ void direct_ctx_barrier(rocshmem_ctx_t ctx,
-                                                    rocshmem_team_t team) {
+__device__ __noinline__ void direct_ctx_barrier(rocshmem_ctx_t ctx,
+                                                 rocshmem_team_t team) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_BARRIER);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, barrier(team));
 }
 
-__device__ __forceinline__ void direct_ctx_barrier_wave(
+__device__ __noinline__ void direct_ctx_barrier_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_BARRIER_WAVE);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, barrier_wave(team));
 }
 
-__device__ __forceinline__ void direct_ctx_barrier_wg(
+__device__ __noinline__ void direct_ctx_barrier_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_BARRIER_WG);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, barrier_wg(team));
 }
 
-__device__ __forceinline__ void direct_ctx_sync_all(rocshmem_ctx_t ctx) {
+__device__ __noinline__ void direct_ctx_sync_all(rocshmem_ctx_t ctx) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_SYNC_ALL);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, sync_all());
 }
 
-__device__ __forceinline__ void direct_ctx_sync_all_wave(
+__device__ __noinline__ void direct_ctx_sync_all_wave(
     rocshmem_ctx_t ctx) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_SYNC_ALL_WAVE);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, sync_all_wave());
 }
 
-__device__ __forceinline__ void direct_ctx_sync_all_wg(rocshmem_ctx_t ctx) {
+__device__ __noinline__ void direct_ctx_sync_all_wg(rocshmem_ctx_t ctx) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_SYNC_ALL_WG);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, sync_all_wg());
 }
@@ -741,8 +761,8 @@ __device__ __forceinline__ void direct_ctx_sync_all_wg(rocshmem_ctx_t ctx) {
  * NOTE: rocshmem_ctx_sync/_wave/_wg all three call sync_wg (pre-existing
  * quirk in rocshmem_gpu.cpp being replicated exactly, not fixed).
  */
-__device__ __forceinline__ void direct_ctx_sync_wg(rocshmem_ctx_t ctx,
-                                                    rocshmem_team_t team) {
+__device__ __noinline__ void direct_ctx_sync_wg(rocshmem_ctx_t ctx,
+                                                 rocshmem_team_t team) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_SYNC_WG);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, sync_wg(team));
 }
