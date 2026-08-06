@@ -36,7 +36,13 @@ RE_MAF = re.compile(
 RE_MEM_FAULT_ERR = re.compile(
     r"Memory Fault Error \[[^\]]*?faulting addr: (0x[0-9a-fA-F]+), kernel: ([^\]]+)\]"
 )
-RE_HANG = re.compile(r"HSA_STATUS_ERROR_(MEMORY_FAULT|ABORTED|EXCEPTION)")
+RE_HSA_STATUS = re.compile(r"HSA_STATUS_ERROR_(MEMORY_FAULT|ABORTED|EXCEPTION)")
+# A queue abort carries its own bracket, with the kernel but no faulting
+# address, so the memory-fault regex above cannot see it. Observed on an
+# out-of-bounds ATen gather, where this was the only line naming the culprit.
+RE_QUEUE_ABORT_KERNEL = re.compile(
+    r"aborting with error[^\[\n]*\[[^\]]*?kernel: ([^\]]+)\]"
+)
 RE_PASS = re.compile(r"\[HRR\] PASS\b")
 RE_FAIL = re.compile(r"\[HRR\] FAIL\b")
 RE_ARCHIVE_RECOVERED = re.compile(
@@ -156,8 +162,19 @@ def _classify(text: str, finding: Finding) -> str:
         if "out of memory" in text.lower():
             return "replay_oom"
         return "replay_fatal_api"
-    if RE_HANG.search(text) and not RE_PASS.search(text):
-        return "hang"
+    # An HSA queue abort is not a hang. MEMORY_FAULT says so in as many words,
+    # and EXCEPTION is a hardware exception, which an out-of-bounds access
+    # raises. Reporting either as a hang sends the reader after stalled work
+    # that never existed and drops the kernel the abort just named. A real hang
+    # shows up as no progress against the clock, which needs a replay timeout
+    # this skill does not have yet.
+    hsa = RE_HSA_STATUS.search(text)
+    if hsa and not RE_PASS.search(text):
+        return (
+            "illegal_memory_access"
+            if hsa.group(1) == "MEMORY_FAULT"
+            else "replay_aborted"
+        )
     if RE_FAIL.search(text) or (finding.d2h_fail and finding.d2h_fail > 0):
         return "nan_inf_divergence"
     if "Replay aborted" in text or "aborting replay" in text:
@@ -177,7 +194,10 @@ def _kernel_family(name: str | None) -> str | None:
         if sk:
             parts.append("streamk" if "SK3" in sk else "streamk_variant")
         return "/".join(parts)
-    if name.startswith("_ZN"):
+    # Mangled and demangled forms of the same ATen symbols both occur: the
+    # memory-fault line prints the mangled name, the queue-abort line prints
+    # the demangled signature.
+    if name.startswith("_ZN") or "at::native::" in name:
         return "pytorch_kernel"
     return "other"
 
@@ -220,6 +240,12 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         if name.endswith("...") or name in finding.archive_kernel_names:
             continue
         finding.archive_kernel_names.append(name)
+
+    m = RE_HSA_STATUS.search(text)
+    if m and not RE_PASS.search(text):
+        note = f"the queue aborted with HSA_STATUS_ERROR_{m.group(1)}"
+        if note not in finding.notes:
+            finding.notes.append(note)
 
     m = RE_VERSION_MISMATCH.search(text)
     if m:
@@ -270,6 +296,11 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         finding.kernel_name = m.group(2).strip()
 
     if not finding.kernel_name:
+        m = RE_QUEUE_ABORT_KERNEL.search(text)
+        if m:
+            finding.kernel_name = m.group(1).strip()
+
+    if not finding.kernel_name:
         cijk = RE_CIJK.search(text)
         if cijk:
             finding.kernel_name = cijk.group(1)
@@ -299,6 +330,14 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         new_outcome = "MAF"
     elif RE_FAIL.search(text):
         new_outcome = "FAIL"
+    elif RE_HSA_STATUS.search(text):
+        # A queue abort is a GPU-side stop, so it is never UNKNOWN. Its own
+        # status says which: MEMORY_FAULT is a fault, the rest are aborts.
+        new_outcome = (
+            "MAF"
+            if RE_HSA_STATUS.search(text).group(1) == "MEMORY_FAULT"
+            else "ABORT"
+        )
     elif (
         "aborting replay" in text
         or RE_FATAL_EVENT.search(text)
@@ -365,6 +404,7 @@ def finalize(finding: Finding) -> Finding:
     if finding.fault_class in (
         "illegal_memory_access",
         "read_only_page_fault",
+        "replay_aborted",
     ) and RE_ATEN_CHEVRON.search(finding.kernel_name or ""):
         finding.notes.append(
             "the faulting kernel is an ATen kernel launched through <<<>>> "
