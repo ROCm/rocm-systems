@@ -6,6 +6,19 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 
+### Added
+
+- `--detach-after <seconds>` flag on `rocprof-sys-attach` for non-interactive use; the
+  binary sleeps for the given duration after attach instead of waiting for `ENTER` on
+  stdin.
+
+### Changed
+
+- PAPI is no longer disabled at `perf_event_paranoid > 2` when the process holds
+  `CAP_PERFMON`. Previously only `CAP_SYS_ADMIN` lifted the restriction, which was
+  stricter than the kernel's own `perfmon_capable()` check and forced callers to grant
+  a near-root capability to use hardware counters.
+
 ### Removed
 
 - Removed the `ROCPROFSYS_BUILD_SQLITE3` CMake option and the in-tree SQLite3/rocpd

@@ -247,8 +247,42 @@ If you receive a permission error when attaching, ensure the following:
       # Check current setting
       $ cat /proc/sys/kernel/yama/ptrace_scope
 
-      # Temporarily allow attachment (requires root)
-      $ sudo sysctl kernel.yama.ptrace_scope=0
+A missing ``ptrace_scope`` file means the yama security module is not active
+and ``ptrace`` is unrestricted. Otherwise the value determines what is allowed:
+``0`` permits attaching to any process of the same user, ``1`` restricts
+attaching to descendants of the calling process, ``2`` requires
+``CAP_SYS_PTRACE``, and ``3`` denies attaching entirely.
+
+At scope ``1`` or ``2``, choose whichever of the following fits your environment:
+
+* Grant ``CAP_SYS_PTRACE`` to the process running ``rocprof-sys``. This is the
+  only option inside an unprivileged container, where the value is a global node
+  setting that cannot be modified. For Docker, add ``--cap-add=SYS_PTRACE`` to
+  ``docker run``:
+
+  .. code-block:: shell
+
+     $ docker run --cap-add=SYS_PTRACE ...
+
+  Note that running as root is not sufficient on its own; container root does
+  not hold ``CAP_SYS_PTRACE`` unless it is explicitly granted.
+
+* Have the target process opt in with ``PR_SET_PTRACER``. This works at scope
+  ``1`` without any elevated privileges, and only affects the process that calls
+  it:
+
+  .. code-block:: c
+
+     #include <sys/prctl.h>
+
+     prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0);
+
+* Relax the scope system-wide. This requires root and changes the setting for
+  every process on the node, so prefer one of the alternatives above:
+
+  .. code-block:: shell
+
+     $ sudo sysctl kernel.yama.ptrace_scope=0
 
 Process not found
 ----------------------------------------

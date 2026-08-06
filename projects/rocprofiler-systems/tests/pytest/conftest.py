@@ -337,6 +337,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "rank_filter",
         "pytest_impl",
         "conditions",
+        "rocattach",
     ]
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
@@ -1595,6 +1596,7 @@ def _build_rocprofsys_config_header() -> list[str]:
         _row("Avail:", rocprof_config.rocprofsys_avail),
         _row("Causal:", rocprof_config.rocprofsys_causal),
         _row("Python:", rocprof_config.rocprofsys_python),
+        _row("Attach:", rocprof_config.rocprofsys_attach),
         "-" * 70,
         "Executables:",
         _row("MPI:", cap.mpiexec_exec),
