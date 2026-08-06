@@ -33,6 +33,8 @@ THE SOFTWARE.
 #include "info.h"
 #include "ce_coll.h"
 #include "dda_all_reduce.h"
+#include "dda_all_gather.h"
+#include "group.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
 #include "strongstream.h"
@@ -455,6 +457,15 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
     return ncclSuccess;
   }
 
+  if (coll == ncclFuncAllGather) {
+    struct rcclCollDecision decision;
+    NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, (size_t)count, dataType, /*query=*/true, &decision));
+    *algo = decision.algo;
+    *protocol = decision.protocol;
+    *maxChannels = decision.nMaxChannels;
+    return ncclSuccess;
+  }
+
   // Other collectives: fall back to the size/algo query until they are migrated
   // onto rcclSelectXxx().
   return rcclGetAlgoInfo(comm, coll, count, dataType, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*numPipeOps=*/1, algo,
@@ -833,6 +844,124 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     task.count = count;
     task.datatype = datatype;
     NCCLCHECK(getAlgoInfo(comm, &task, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*numPipeOps=*/1, /*simInfo=*/nullptr));
+    decision->protocol = task.protocol;
+#ifdef ENABLE_WARP_SPEED
+    // WarpSpeed reports as RING* with channels scaled by nWarps, matching rcclGetAlgoInfo.
+    decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : task.nMaxChannels;
+    decision->algo = task.useWarpSpeed ? rcclAddonAlgos_t::RCCL_WARP_SPEED : task.algorithm;
+#else
+    decision->nMaxChannels = task.nMaxChannels;
+    decision->algo = task.algorithm;
+#endif
+  }
+  return ncclSuccess;
+}
+
+// See the header comment on rcclSelectAllGather(). Faithful consolidation of
+// ncclAllGather_impl() (DDA) and rcclSelectAllGatherAlgo() (hierarchical / direct
+// / ring); the outcome for any given operands is identical.
+ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
+                                 ncclDataType_t datatype, bool query, struct rcclCollDecision* decision) {
+  memset(decision, 0, sizeof(*decision));
+  decision->algo = NCCL_ALGO_RING;
+  decision->protocol = NCCL_PROTO_SIMPLE;
+  decision->nMaxChannels = 0;
+
+  const size_t typeSize = ncclTypeSize(datatype);
+  const size_t totalBytes = (size_t)comm->nRanks * sendcount * typeSize;
+  size_t msgSize = totalBytes;
+
+  // (1) DDA fast paths. Symmetric-registered buffers defer to the symmetric
+  // kernel (extracted downstream), so DDA is gated on !symEligible, as before.
+  const bool symEligible =
+    isSymmetricKernelRequested(comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount, sendbuff, recvbuff);
+  if (!symEligible && rcclDdaEnabled(comm, totalBytes, 8388608)) {
+    if (IsArchMatch(comm->archName, "gfx1250")) {
+      if (rcclParamDdaLL() && msgSize <= (size_t)rcclParamDdaLLThreshold() &&
+          ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+        decision->algo = RCCL_DDA_FABRIC_LL;
+        decision->protocol = NCCL_PROTO_LL;
+        return ncclSuccess;
+      }
+      if (rcclParamDdaLL128() && msgSize <= (size_t)rcclParamDdaLL128Threshold() &&
+          ncclAllGatherDdaFabricLL128Eligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+        decision->algo = RCCL_DDA_FABRIC_LL128;
+        decision->protocol = NCCL_PROTO_LL128;
+        return ncclSuccess;
+      }
+      if (ncclAllGatherDdaFabricEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+        decision->algo = RCCL_DDA_FABRIC_VMM;
+        return ncclSuccess;
+      }
+    } else if (ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+      decision->algo = RCCL_DDA_IPC;
+      return ncclSuccess;
+    }
+  }
+
+  // (2) Hierarchical AllGather. Live dispatch requires being outside a group
+  // (rcclSelectAllGatherAlgo); the reporting query always runs outside a group, so
+  // the same gate reproduces rcclGetAlgoInfo's group-agnostic reporting.
+  if (ncclGroupDepth == 0 && rcclUseHierarchicalAllGather(comm, msgSize)) {
+    decision->algo = RCCL_HIERARCHICAL_ALLGATHER;
+    if (query) {
+      // -A reports the inter-comm proto/channels; intra values are logged only.
+      ncclComm* interComm = comm->hierarchicalInterComm;
+      ncclComm* intraComm = comm->hierarchicalIntraComm;
+      int nNodes = interComm->nRanks;
+      size_t interMsgSize = sendcount * typeSize * nNodes;
+      if (nNodes <= 16 && rcclUseAllGatherDirect(interComm, interMsgSize)) {
+        decision->protocol = NCCL_PROTO_SIMPLE;
+        decision->nMaxChannels = interComm->p2pnChannels;
+      } else {
+        struct ncclTaskColl task;
+        task.func = ncclFuncAllGather;
+        task.count = sendcount;
+        task.datatype = datatype;
+        NCCLCHECK(getAlgoInfo(interComm, &task, 0, 0, 1));
+        decision->protocol = task.protocol;
+        decision->nMaxChannels = task.nMaxChannels;
+      }
+      int intraProto, intraChan;
+      size_t intraCount = sendcount * nNodes;
+      size_t intraMsgSize = intraCount * typeSize * intraComm->nRanks;
+      if (rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
+        intraProto = NCCL_PROTO_SIMPLE;
+        intraChan = intraComm->p2pnChannels;
+      } else {
+        struct ncclTaskColl task;
+        task.func = ncclFuncAllGather;
+        task.count = intraCount;
+        task.datatype = datatype;
+        NCCLCHECK(getAlgoInfo(intraComm, &task, 0, 0, 1));
+        intraProto = task.protocol;
+        intraChan = task.nMaxChannels;
+      }
+      INFO(NCCL_COLL, "Hierarchical AG inter: proto=%d channels=%d, intra: proto=%d channels=%d", decision->protocol,
+           decision->nMaxChannels, intraProto, intraChan);
+    }
+    return ncclSuccess;
+  }
+
+  // (3) Direct AllGather (per-peer Send/Recv).
+  if (rcclUseAllGatherDirect(comm, msgSize)) {
+    decision->algo = RCCL_DIRECT_ALLGATHER;
+    decision->protocol = NCCL_PROTO_SIMPLE;
+    decision->nMaxChannels = comm->p2pnChannels;
+    return ncclSuccess;
+  }
+
+  // (4) Standard ring kernel. Fill algo/protocol/channels for reporting; the live
+  // path recomputes these in taskAppend(), so only the query needs them.
+  decision->algo = NCCL_ALGO_RING;
+  decision->protocol = NCCL_PROTO_SIMPLE;
+  if (query) {
+    struct ncclTaskColl task;
+    memset(&task, 0, sizeof(task));
+    task.func = ncclFuncAllGather;
+    task.count = sendcount;
+    task.datatype = datatype;
+    NCCLCHECK(getAlgoInfo(comm, &task, 0, 0, 1));
     decision->protocol = task.protocol;
 #ifdef ENABLE_WARP_SPEED
     // WarpSpeed reports as RING* with channels scaled by nWarps, matching rcclGetAlgoInfo.

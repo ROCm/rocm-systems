@@ -162,6 +162,14 @@ NCCL_API(ncclResult_t, rcclGetCollImplInfo, struct ncclComm* comm, ncclFunc_t co
 ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream, bool query,
                                  bool graphCapturingHint, struct rcclCollDecision* decision);
+// Single source of truth for AllGather implementation selection. Runs the exact
+// priority chain (DDA LL/LL128/VMM/IPC -> hierarchical -> direct -> ring) and
+// returns the decision. AllGather has no CE / graph-capture-sensitive backend, so
+// (unlike rcclSelectAllReduce) it needs no stream probe or graph hint.
+//   query=false : live dispatch path (ncclAllGather_impl).
+//   query=true  : side-effect-free reporting; also fills protocol/nMaxChannels.
+ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
+                                 ncclDataType_t datatype, bool query, struct rcclCollDecision* decision);
 // Selection helpers shared between collectives.cc and the wrapped decision logic.
 bool rcclDdaEnabled(const struct ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default = 0);
 bool isSymmetricKernelRequested(struct ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
