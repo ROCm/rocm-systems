@@ -163,6 +163,93 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_EDGE_PATH="${ROCPD_DB_V3_EDGE_PATH}"
 )
 
+# Synthetic v3 kernel_dispatch_pmc fixture, generated at build time from committed
+# SQL against the canonical v3 schema (same mechanism as the edge fixture above).
+# Encodes two PMC types across three kernel_dispatch rows so both track discovery
+# and get_interval_track() can be asserted on real values. The db has no
+# rocpd_timestamp table, so the reader selects the v3 backend.
+set(_v3p_uuid "0000000000000000000000000b030003")
+set(_v3p_schema_src
+    ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
+)
+set(_v3p_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_kd_pmc_data.sql)
+set(_v3p_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v3_kd_pmc_gen.sql)
+file(READ ${_v3p_schema_src} _v3p_schema)
+file(READ ${_v3p_data_src} _v3p_data)
+string(
+    REGEX REPLACE
+    "INSERT INTO[^;]*rocpd_metadata[^;]*;"
+    ""
+    _v3p_schema
+    "${_v3p_schema}"
+)
+string(REPLACE "{{uuid}}" "_${_v3p_uuid}" _v3p_schema "${_v3p_schema}")
+string(REPLACE "{{guid}}" "${_v3p_uuid}" _v3p_schema "${_v3p_schema}")
+string(REPLACE "{{uuid}}" "_${_v3p_uuid}" _v3p_data "${_v3p_data}")
+string(REPLACE "{{guid}}" "${_v3p_uuid}" _v3p_data "${_v3p_data}")
+file(WRITE ${_v3p_gen_sql} "${_v3p_schema}\n${_v3p_data}\n")
+
+set(ROCPD_DB_V3_KD_PMC_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v3_kd_pmc.db)
+add_custom_command(
+    OUTPUT ${ROCPD_DB_V3_KD_PMC_PATH}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V3_KD_PMC_PATH}
+    COMMAND
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_KD_PMC_PATH} ".read ${_v3p_gen_sql}"
+    DEPENDS ${_v3p_gen_sql} ${_v3p_schema_src} ${_v3p_data_src}
+    COMMENT "Generating synthetic v3 kernel_dispatch_pmc test fixture"
+    VERBATIM
+)
+add_custom_target(
+    profiler-hub_v3_kd_pmc_fixture
+    DEPENDS ${ROCPD_DB_V3_KD_PMC_PATH}
+)
+add_dependencies(profiler-hub_unit_tests profiler-hub_v3_kd_pmc_fixture)
+
+target_compile_definitions(
+    profiler-hub_unit_tests
+    PRIVATE ROCPD_DB_V3_KD_PMC_PATH="${ROCPD_DB_V3_KD_PMC_PATH}"
+)
+
+# Synthetic v4.0 kernel_dispatch_pmc fixture, generated at build time from committed
+# SQL against the bundled v4.0 schema (no canonical v4.0 DDL lives in-tree, so the
+# schema copy ships in fixtures/). Mirrors the v3 fixture data shape; the presence
+# of rocpd_timestamp makes the reader select the v4 backend.
+set(_v4p_uuid "0000000000000000000000000b040004")
+set(_v4p_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4_kd_pmc_data.sql)
+set(_v4p_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v4_kd_pmc_gen.sql)
+file(READ ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql _v4p_schema)
+file(READ ${_v4p_data_src} _v4p_data)
+string(REPLACE "{{uuid}}" "_${_v4p_uuid}" _v4p_schema "${_v4p_schema}")
+string(REPLACE "{{guid}}" "${_v4p_uuid}" _v4p_schema "${_v4p_schema}")
+string(REPLACE "{{uuid}}" "_${_v4p_uuid}" _v4p_data "${_v4p_data}")
+string(REPLACE "{{guid}}" "${_v4p_uuid}" _v4p_data "${_v4p_data}")
+file(WRITE ${_v4p_gen_sql} "${_v4p_schema}\n${_v4p_data}\n")
+
+set(ROCPD_DB_V4_KD_PMC_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v4_kd_pmc.db)
+add_custom_command(
+    OUTPUT ${ROCPD_DB_V4_KD_PMC_PATH}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V4_KD_PMC_PATH}
+    COMMAND
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_KD_PMC_PATH} ".read ${_v4p_gen_sql}"
+    DEPENDS ${_v4p_gen_sql}
+            ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql
+            ${_v4p_data_src}
+    COMMENT "Generating synthetic v4.0 kernel_dispatch_pmc test fixture"
+    VERBATIM
+)
+add_custom_target(
+    profiler-hub_v4_kd_pmc_fixture
+    DEPENDS ${ROCPD_DB_V4_KD_PMC_PATH}
+)
+add_dependencies(profiler-hub_unit_tests profiler-hub_v4_kd_pmc_fixture)
+
+target_compile_definitions(
+    profiler-hub_unit_tests
+    PRIVATE ROCPD_DB_V4_KD_PMC_PATH="${ROCPD_DB_V4_KD_PMC_PATH}"
+)
+
 gtest_discover_tests(
     profiler-hub_unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}

@@ -2060,4 +2060,368 @@ TEST_F(reader_v3_edge_sql_test, get_event_info_folds_args_for_memory_allocate)
     EXPECT_EQ(std::get<std::string>(*alloc_bytes), "4096");
 }
 
+// ============================================================================
+// kernel_dispatch_pmc track type — v3 synthetic fixture (rocpd_v3_kd_pmc.db)
+// Data: 1 agent, 2 PMC types (SQ_WAVES pmc_id=1, GRBM_COUNT pmc_id=2),
+// 3 dispatches: kd 1+2 on SQ_WAVES (start 1000,2000), kd 3 on GRBM_COUNT
+// (start 3000). Tracks: (nid=1,agent_id=1,pmc_id=1,pid=100) has 2 events;
+// (nid=1,agent_id=1,pmc_id=2,pid=100) has 1 event.
+// ============================================================================
+
+class reader_v3_kd_pmc_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        m_storage = std::make_unique<profiler_hub::storage_t>(m_database_path, "");
+        m_reader  = std::make_shared<profiler_hub::reader_t>(std::move(m_storage));
+    }
+
+    void TearDown() override
+    {
+        m_reader.reset();
+        m_storage.reset();
+    }
+
+    std::string                              m_database_path{ ROCPD_DB_V3_KD_PMC_PATH };
+    std::unique_ptr<profiler_hub::storage_t> m_storage;
+    std::shared_ptr<profiler_hub::reader_t>  m_reader;
+};
+
+TEST_F(reader_v3_kd_pmc_test, v3_discovers_two_kd_pmc_tracks)
+{
+    // Two distinct (nid, agent_id, pmc_id, pid) -> 2 kernel_dispatch_pmc tracks.
+    auto tracks =
+        find_tracks(m_reader->get_tracks(),
+                    profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
+    ASSERT_EQ(tracks.size(), 2U);
+
+    // Every kd_pmc track must carry agent_info (from agent_id=1).
+    for(const auto& t : tracks)
+    {
+        ASSERT_NE(t->agent_info, nullptr);
+        ASSERT_EQ(t->agent_info->id, 1U);
+        ASSERT_NE(t->process_info, nullptr);
+        ASSERT_EQ(t->process_info->pid, 100U);
+        ASSERT_NE(t->node_info, nullptr);
+    }
+}
+
+TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_pmc_info_populated)
+{
+    // pmc_info must be resolved from pmc_id for both tracks.
+    auto tracks =
+        find_tracks(m_reader->get_tracks(),
+                    profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
+    ASSERT_EQ(tracks.size(), 2U);
+
+    std::set<std::string> pmc_names;
+    for(const auto& t : tracks)
+    {
+        ASSERT_NE(t->pmc_info, nullptr);
+        pmc_names.insert(t->pmc_info->name);
+    }
+    ASSERT_TRUE(pmc_names.count("SQ_WAVES") == 1);
+    ASSERT_TRUE(pmc_names.count("GRBM_COUNT") == 1);
+}
+
+TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_interval_track_count_and_order)
+{
+    // The SQ_WAVES track (pmc_id=1) covers kd 1 (start=1000) and kd 2 (start=2000).
+    // Rows are inserted out of start order (kd 2 first), so this proves ORDER BY start.
+    auto tracks =
+        find_tracks(m_reader->get_tracks(),
+                    profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
+    ASSERT_EQ(tracks.size(), 2U);
+
+    profiler_hub::reader_types::track_info_ptr_t sq_waves_track;
+    profiler_hub::reader_types::track_info_ptr_t grbm_track;
+    for(const auto& t : tracks)
+    {
+        ASSERT_NE(t->pmc_info, nullptr);
+        if(t->pmc_info->name == "SQ_WAVES")
+            sq_waves_track = t;
+        else if(t->pmc_info->name == "GRBM_COUNT")
+            grbm_track = t;
+    }
+    ASSERT_NE(sq_waves_track, nullptr);
+    ASSERT_NE(grbm_track, nullptr);
+
+    // SQ_WAVES track: 2 events in ascending start order.
+    auto sq_intervals = m_reader->get_interval_track(sq_waves_track->id);
+    ASSERT_EQ(sq_intervals.size(), 2U);
+    ASSERT_TRUE(is_start_sorted(sq_intervals));
+    ASSERT_EQ(sq_intervals[0].start, 1000U);
+    ASSERT_EQ(sq_intervals[0].end, 1200U);
+    ASSERT_EQ(sq_intervals[1].start, 2000U);
+    ASSERT_EQ(sq_intervals[1].end, 2300U);
+
+    // GRBM_COUNT track: 1 event.
+    auto grbm_intervals = m_reader->get_interval_track(grbm_track->id);
+    ASSERT_EQ(grbm_intervals.size(), 1U);
+    ASSERT_EQ(grbm_intervals[0].start, 3000U);
+    ASSERT_EQ(grbm_intervals[0].end, 3100U);
+}
+
+TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_interval_resolves_as_kernel_dispatch)
+{
+    // Task 035: a kd_pmc interval event's row id is a rocpd_kernel_dispatch.id, so its
+    // handle must be typed kernel_dispatch and resolve through the KD detail path -- NOT
+    // the point pmc_event path (WHERE rocpd_pmc_event.id = ?), which keys a different
+    // table. Guard bites: revert interval_event_type_for(kernel_dispatch_pmc) to
+    // pmc_event and this test fails (handle mis-types + KD detail unreachable; the
+    // kd_pmc fixture has no rocpd_sample, so the point path resolves to nullopt).
+    auto tracks =
+        find_tracks(m_reader->get_tracks(),
+                    profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
+    profiler_hub::reader_types::track_info_ptr_t sq_waves_track;
+    for(const auto& t : tracks)
+    {
+        ASSERT_NE(t->pmc_info, nullptr);
+        if(t->pmc_info->name == "SQ_WAVES") sq_waves_track = t;
+    }
+    ASSERT_NE(sq_waves_track, nullptr);
+
+    auto intervals = m_reader->get_interval_track(sq_waves_track->id);
+    ASSERT_FALSE(intervals.empty());
+    const auto& first = intervals.front();  // start=1000 -> kd row id 1
+
+    // The minted handle is typed kernel_dispatch, not pmc_event.
+    EXPECT_EQ(type_of(first.id),
+              profiler_hub::reader_types::event_type_t::kernel_dispatch);
+
+    auto detail = m_reader->get_event_info(first.id);
+    ASSERT_TRUE(detail.has_value());
+    // Interval extent is present (kd_pmc is an interval track); a point pmc_event would
+    // leave te == nullopt.
+    EXPECT_EQ(detail->ts, 1000U);
+    ASSERT_TRUE(detail->te.has_value());
+    EXPECT_EQ(detail->te.value(), 1200U);
+
+    // kernel_dispatch properties are populated -> the KD detail path ran.
+    auto* dispatch_id = find_prop(*detail, "dispatch_id");
+    ASSERT_NE(dispatch_id, nullptr);
+    EXPECT_EQ(std::get<uint64_t>(*dispatch_id), 1U);
+    auto* wg_x = find_prop(*detail, "workgroup_size_x");
+    ASSERT_NE(wg_x, nullptr);
+    EXPECT_EQ(std::get<uint64_t>(*wg_x), 64U);
+    auto* grid_x = find_prop(*detail, "grid_size_x");
+    ASSERT_NE(grid_x, nullptr);
+    EXPECT_EQ(std::get<uint64_t>(*grid_x), 512U);
+    EXPECT_NE(find_prop(*detail, "kernel_symbol_id"), nullptr);
+}
+
+TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_track_stats_matches_interval_slice)
+{
+    auto tracks =
+        find_tracks(m_reader->get_tracks(),
+                    profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
+    for(const auto& t : tracks)
+    {
+        auto intervals = m_reader->get_interval_track(t->id);
+        auto stats     = m_reader->get_track_stats(t->id);
+        expect_stats_match_intervals(stats, intervals);
+    }
+}
+
+TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_display_name_from_kernel_symbol)
+{
+    // Interval display_name must be resolved from kernel_symbol (vecAdd(float*, int)).
+    auto tracks =
+        find_tracks(m_reader->get_tracks(),
+                    profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
+    ASSERT_GE(tracks.size(), 1U);
+    auto intervals = m_reader->get_interval_track(tracks.front()->id);
+    ASSERT_FALSE(intervals.empty());
+    for(const auto& ev : intervals)
+    {
+        ASSERT_EQ(ev.display_name, "vecAdd(float*, int)");
+    }
+}
+
+TEST_F(reader_v3_kd_pmc_test, v3_get_scalar_track_returns_empty_for_kd_pmc)
+{
+    // kernel_dispatch_pmc is an interval track; scalar read must return empty (Q7 guard).
+    auto tracks =
+        find_tracks(m_reader->get_tracks(),
+                    profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
+    ASSERT_GE(tracks.size(), 1U);
+    ASSERT_TRUE(m_reader->get_scalar_track(tracks.front()->id).empty());
+}
+
+// ============================================================================
+// kernel_dispatch_pmc track type — v4 synthetic fixture (rocpd_v4_kd_pmc.db)
+// Mirrors the v3 fixture data shape; the presence of rocpd_timestamp triggers
+// the v4 backend. Verifies the 4-arg timestamp-spine SQL path.
+// ============================================================================
+
+class reader_v4_kd_pmc_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        m_storage = std::make_unique<profiler_hub::storage_t>(m_database_path, "");
+        m_reader  = std::make_shared<profiler_hub::reader_t>(std::move(m_storage));
+    }
+
+    void TearDown() override
+    {
+        m_reader.reset();
+        m_storage.reset();
+    }
+
+    std::string                              m_database_path{ ROCPD_DB_V4_KD_PMC_PATH };
+    std::unique_ptr<profiler_hub::storage_t> m_storage;
+    std::shared_ptr<profiler_hub::reader_t>  m_reader;
+};
+
+TEST_F(reader_v4_kd_pmc_test, v4_discovers_two_kd_pmc_tracks)
+{
+    auto tracks =
+        find_tracks(m_reader->get_tracks(),
+                    profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
+    ASSERT_EQ(tracks.size(), 2U);
+
+    for(const auto& t : tracks)
+    {
+        ASSERT_NE(t->agent_info, nullptr);
+        ASSERT_EQ(t->agent_info->id, 1U);
+        ASSERT_NE(t->process_info, nullptr);
+        ASSERT_EQ(t->process_info->pid, 100U);
+        ASSERT_NE(t->node_info, nullptr);
+    }
+}
+
+TEST_F(reader_v4_kd_pmc_test, v4_kd_pmc_pmc_info_populated)
+{
+    auto tracks =
+        find_tracks(m_reader->get_tracks(),
+                    profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
+    ASSERT_EQ(tracks.size(), 2U);
+
+    std::set<std::string> pmc_names;
+    for(const auto& t : tracks)
+    {
+        ASSERT_NE(t->pmc_info, nullptr);
+        pmc_names.insert(t->pmc_info->name);
+    }
+    ASSERT_TRUE(pmc_names.count("SQ_WAVES") == 1);
+    ASSERT_TRUE(pmc_names.count("GRBM_COUNT") == 1);
+}
+
+TEST_F(reader_v4_kd_pmc_test, v4_kd_pmc_interval_track_count_and_order)
+{
+    // Timestamps inserted out of value order (kd 2 timestamps ids 1,2 with values
+    // 2000/2300 before kd 1 timestamps ids 3,4 with values 1000/1200). ORDER BY
+    // ts_s.value must return kd 1 before kd 2 on the SQ_WAVES track.
+    auto tracks =
+        find_tracks(m_reader->get_tracks(),
+                    profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
+    ASSERT_EQ(tracks.size(), 2U);
+
+    profiler_hub::reader_types::track_info_ptr_t sq_waves_track;
+    profiler_hub::reader_types::track_info_ptr_t grbm_track;
+    for(const auto& t : tracks)
+    {
+        ASSERT_NE(t->pmc_info, nullptr);
+        if(t->pmc_info->name == "SQ_WAVES")
+            sq_waves_track = t;
+        else if(t->pmc_info->name == "GRBM_COUNT")
+            grbm_track = t;
+    }
+    ASSERT_NE(sq_waves_track, nullptr);
+    ASSERT_NE(grbm_track, nullptr);
+
+    auto sq_intervals = m_reader->get_interval_track(sq_waves_track->id);
+    ASSERT_EQ(sq_intervals.size(), 2U);
+    ASSERT_TRUE(is_start_sorted(sq_intervals));
+    ASSERT_EQ(sq_intervals[0].start, 1000U);
+    ASSERT_EQ(sq_intervals[0].end, 1200U);
+    ASSERT_EQ(sq_intervals[1].start, 2000U);
+    ASSERT_EQ(sq_intervals[1].end, 2300U);
+
+    auto grbm_intervals = m_reader->get_interval_track(grbm_track->id);
+    ASSERT_EQ(grbm_intervals.size(), 1U);
+    ASSERT_EQ(grbm_intervals[0].start, 3000U);
+    ASSERT_EQ(grbm_intervals[0].end, 3100U);
+}
+
+TEST_F(reader_v4_kd_pmc_test, v4_kd_pmc_interval_resolves_as_kernel_dispatch)
+{
+    // Task 035 (v4 backend): same contract as the v3 test. The v4 kd_pmc interval SQL
+    // also SELECTs K.id (rocpd_kernel_dispatch.id), so the single-site fix in
+    // interval_event_type_for is backend-agnostic and routes this handle through the KD
+    // detail path with the interval extent (te) present.
+    auto tracks =
+        find_tracks(m_reader->get_tracks(),
+                    profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
+    profiler_hub::reader_types::track_info_ptr_t sq_waves_track;
+    for(const auto& t : tracks)
+    {
+        ASSERT_NE(t->pmc_info, nullptr);
+        if(t->pmc_info->name == "SQ_WAVES") sq_waves_track = t;
+    }
+    ASSERT_NE(sq_waves_track, nullptr);
+
+    auto intervals = m_reader->get_interval_track(sq_waves_track->id);
+    ASSERT_FALSE(intervals.empty());
+    const auto& first = intervals.front();  // start=1000 -> kd row id 1
+
+    EXPECT_EQ(type_of(first.id),
+              profiler_hub::reader_types::event_type_t::kernel_dispatch);
+
+    auto detail = m_reader->get_event_info(first.id);
+    ASSERT_TRUE(detail.has_value());
+    EXPECT_EQ(detail->ts, 1000U);
+    ASSERT_TRUE(detail->te.has_value());
+    EXPECT_EQ(detail->te.value(), 1200U);
+
+    auto* dispatch_id = find_prop(*detail, "dispatch_id");
+    ASSERT_NE(dispatch_id, nullptr);
+    EXPECT_EQ(std::get<uint64_t>(*dispatch_id), 1U);
+    auto* wg_x = find_prop(*detail, "workgroup_size_x");
+    ASSERT_NE(wg_x, nullptr);
+    EXPECT_EQ(std::get<uint64_t>(*wg_x), 64U);
+    auto* grid_x = find_prop(*detail, "grid_size_x");
+    ASSERT_NE(grid_x, nullptr);
+    EXPECT_EQ(std::get<uint64_t>(*grid_x), 512U);
+    EXPECT_NE(find_prop(*detail, "kernel_symbol_id"), nullptr);
+}
+
+TEST_F(reader_v4_kd_pmc_test, v4_kd_pmc_track_stats_matches_interval_slice)
+{
+    auto tracks =
+        find_tracks(m_reader->get_tracks(),
+                    profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
+    for(const auto& t : tracks)
+    {
+        auto intervals = m_reader->get_interval_track(t->id);
+        auto stats     = m_reader->get_track_stats(t->id);
+        expect_stats_match_intervals(stats, intervals);
+    }
+}
+
+TEST_F(reader_v4_kd_pmc_test, v4_kd_pmc_display_name_from_kernel_symbol)
+{
+    auto tracks =
+        find_tracks(m_reader->get_tracks(),
+                    profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
+    ASSERT_GE(tracks.size(), 1U);
+    auto intervals = m_reader->get_interval_track(tracks.front()->id);
+    ASSERT_FALSE(intervals.empty());
+    for(const auto& ev : intervals)
+    {
+        ASSERT_EQ(ev.display_name, "vecAdd(float*, int)");
+    }
+}
+
+TEST_F(reader_v4_kd_pmc_test, v4_get_scalar_track_returns_empty_for_kd_pmc)
+{
+    auto tracks =
+        find_tracks(m_reader->get_tracks(),
+                    profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
+    ASSERT_GE(tracks.size(), 1U);
+    ASSERT_TRUE(m_reader->get_scalar_track(tracks.front()->id).empty());
+}
+
 }  // namespace
