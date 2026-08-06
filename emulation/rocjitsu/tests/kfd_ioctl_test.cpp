@@ -2718,8 +2718,21 @@ TEST(RemoteDriverDbgNotifierTest, EnableWithClosedNotifierFdPreservesEbadf) {
   // A positive fd number that is already closed: a valid-looking dbg_fd the
   // SCM_RIGHTS send must reject. Allocated after the driver so its fd number is
   // not reused by the driver's internal eventfd before the send.
+  //
+  // Park it far above the lowest-free-fd range first. open() hands out the
+  // lowest free descriptor, so a plain close() leaves this number first in line:
+  // anything else in the process that opens a descriptor between here and the
+  // send below takes it, the send then succeeds, and the test stops testing
+  // what it is named for -- it reports whatever the daemon path answers instead,
+  // and can block waiting for a reply that no one is serving.
   int dead_fd = ::eventfd(0, EFD_CLOEXEC);
   ASSERT_GE(dead_fd, 0);
+  constexpr int kParkedFdBase = 4096;
+  const int parked_fd = ::fcntl(dead_fd, F_DUPFD_CLOEXEC, kParkedFdBase);
+  if (parked_fd >= 0) {
+    ASSERT_EQ(::close(dead_fd), 0);
+    dead_fd = parked_fd;
+  }
   ASSERT_EQ(::close(dead_fd), 0);
 
   kfd_ioctl_dbg_trap_args en{};
