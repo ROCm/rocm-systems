@@ -334,6 +334,8 @@ install( PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/kfdtest ${CMAKE_CURRENT_BINARY_DIR
 	DESTINATION bin )
 install( FILES ${CMAKE_CURRENT_BINARY_DIR}/kfdtest.exclude
 	DESTINATION share/kfdtest )
+install( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.kfdtest
+	DESTINATION share/doc/kfdtest )
 # Remove dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON not given to cmake
 if(NOT ROCM_DEP_ROCMCORE)
     string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
