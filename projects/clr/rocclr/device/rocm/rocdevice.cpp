@@ -81,8 +81,8 @@ extern const char* HipExtraSourceCodeNoGWS;
 namespace amd::roc {
 bool roc::Device::isHsaInitialized_ = false;
 bool roc::Device::hostVmemSupported_ = false;
-std::vector<hsa_agent_t> roc::Device::gpu_agents_;
-std::vector<AgentInfo> roc::Device::cpu_agents_;
+std::vector<hsa_agent_t> roc::Device::gpu_agents_ ROCCLR_INIT_PRIORITY(101);
+std::vector<AgentInfo> roc::Device::cpu_agents_ ROCCLR_INIT_PRIORITY(101);
 
 address Device::mg_sync_ = nullptr;
 
