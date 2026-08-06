@@ -4,14 +4,12 @@
 """Unit tests for utils/metrics/noise_clamper.py."""
 
 import pandas as pd
-import pytest
 
 # =============================================================================
 # TESTS FOR NOISE_CLAMP: Multi-Pass Profiling Variance Handling
 # =============================================================================
 
 
-@pytest.mark.noise_clamp
 def test_noise_clamp_clamping_behavior():
     """Core behavior: positives unchanged, negatives clamped to 0."""
     import numpy as np
@@ -36,7 +34,6 @@ def test_noise_clamp_clamping_behavior():
     np.testing.assert_array_equal(result_np, np.array([100.0, 0.0]))
 
 
-@pytest.mark.noise_clamp
 def test_noise_clamp_zero_reference():
     """Edge case: zero reference should not cause division by zero."""
     from utils.metrics.noise_clamper import to_noise_clamp
@@ -46,7 +43,6 @@ def test_noise_clamp_zero_reference():
     assert result.iloc[0] == 0.0
 
 
-@pytest.mark.noise_clamp
 def test_noise_clamp_warning_above_threshold():
     """Warning recorded when relative error >= 1%."""
     from utils.metrics.noise_clamper import (
@@ -65,7 +61,6 @@ def test_noise_clamp_warning_above_threshold():
     assert stats["max_rel"] >= 0.01
 
 
-@pytest.mark.noise_clamp
 def test_noise_clamp_no_warning_below_threshold():
     """No warning when relative error < 1%."""
     from utils.metrics.noise_clamper import (
@@ -82,7 +77,6 @@ def test_noise_clamp_no_warning_below_threshold():
     assert get_noise_clamp_warnings()["count"] == 0
 
 
-@pytest.mark.noise_clamp
 def test_noise_clamp_empty_input():
     """Empty inputs should return empty without error."""
     from utils.metrics.noise_clamper import to_noise_clamp
@@ -91,7 +85,6 @@ def test_noise_clamp_empty_input():
     assert len(result) == 0
 
 
-@pytest.mark.noise_clamp
 def test_noise_clamp_threshold_boundary():
     """Exactly 1% error should trigger warning (>= not >)."""
     from utils.metrics.noise_clamper import (
@@ -107,7 +100,6 @@ def test_noise_clamp_threshold_boundary():
     assert get_noise_clamp_warnings()["count"] == 1
 
 
-@pytest.mark.noise_clamp
 def test_noise_clamper_instance_isolation():
     """Separate NoiseClamper instances should have independent state."""
     import numpy as np
