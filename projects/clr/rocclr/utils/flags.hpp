@@ -279,6 +279,8 @@ release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                                 \
         "1 = Disable Image support for ROC path")                             \
 release(bool, DEBUG_CLR_ENABLE_PREFETCH_METADATA, true,                       \
         "Enable metadata prefetch for some Aql packets")                      \
+release(bool, HIP_DISABLE_DYN_PREFETCH, false,                                \
+        "Disable dynamic data prefetch by setting mode=0 in launch descriptor") \
 release(cstring, HIP_HRR_CAPTURE_OUTPUT, "",                                  \
         "Set to a directory path to enable HRR capture; archive written there") \
 release(bool, HIP_HRR_DEBUG_ARGS, false,                                      \

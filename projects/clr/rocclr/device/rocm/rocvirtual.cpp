@@ -5318,7 +5318,7 @@ static void convertDynDataPrefetchToHsa(const amd::DynDataPrefetchRegion* region
     hw[i].cooperative = 1;
     hw[i].temporal = hints & 0x3u;
     hw[i].scope = 2; // DEVICE
-    hw[i].mode = 1; // ABSOLUTE_VA
+    hw[i].mode = HIP_DISABLE_DYN_PREFETCH ? 0 : 1; // 0=disabled, 1=ABSOLUTE_VA
   }
 }
 
