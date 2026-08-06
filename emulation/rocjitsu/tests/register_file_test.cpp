@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 #if defined(__linux__)
 #include <algorithm>
@@ -23,6 +24,12 @@ namespace {
 
 using simdojo::RegisterFile;
 using simdojo::RegisterFileStorage;
+
+using DemandPagedUint32Storage = simdojo::detail::DemandPagedRegisterStorage<uint32_t>;
+static_assert(!std::is_copy_constructible_v<DemandPagedUint32Storage>);
+static_assert(!std::is_copy_assignable_v<DemandPagedUint32Storage>);
+static_assert(!std::is_move_constructible_v<DemandPagedUint32Storage>);
+static_assert(!std::is_move_assignable_v<DemandPagedUint32Storage>);
 
 #if defined(__linux__)
 size_t resident_page_count(const void *data, size_t bytes) {
@@ -67,6 +74,10 @@ TEST(RegisterFileTest, DemandPagedStorageIsContiguousAndInitiallyZero) {
   ASSERT_NE(file.data(), nullptr);
 #if defined(__linux__)
   EXPECT_EQ(resident_page_count(file.data(), file.total_regs() * sizeof(uint32_t)), 0u);
+  const long page_size_result = sysconf(_SC_PAGESIZE);
+  ASSERT_GT(page_size_result, 0);
+  const size_t page_size = static_cast<size_t>(page_size_result);
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(file.data()) % page_size, alignof(std::max_align_t));
 #endif
   ASSERT_EQ(file.allocate(1), 0);
   ASSERT_EQ(file.allocate(1), 1000);
