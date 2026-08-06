@@ -22,9 +22,12 @@
 
 #if defined(__HIPCC__) || defined(__HIP_PLATFORM_AMD__)
 #define NCCL_HIP_PLATFORM 1
-#define NCCL_DEVICE_COMPILE 1
 #elif defined(__CUDACC__)
 #define NCCL_CUDA_PLATFORM 1
+#endif
+// Key device-compile on the actual device TU (__HIPCC__/__CUDACC__), not the HIP
+// platform macro, so host-only builds don't pull in device template bodies.
+#if defined(__HIPCC__) || defined(__CUDACC__)
 #define NCCL_DEVICE_COMPILE 1
 #else
 #define NCCL_DEVICE_COMPILE 0
