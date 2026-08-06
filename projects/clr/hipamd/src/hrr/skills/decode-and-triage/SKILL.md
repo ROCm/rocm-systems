@@ -178,7 +178,32 @@ native. Use `--no-replay` for metadata-only (no GPU).
 When outcome is `UNKNOWN` or fault class is `unknown`, say so explicitly in the
 summary — do not invent a fault type.
 
+### A faulting ATen kernel needs the original failure signature
+
+PyTorch and vLLM reach the GPU through `<<<>>>` (`hipLaunchByPtr`), and those
+kernels pass device pointers inside by-value structs: `vectorized_elementwise_kernel`
+takes a `std::array<char*,N>`, `reduce_kernel` a config struct with pointers at
+arbitrary offsets. Capture records those offsets and replay translates them, with
+a defensive rescan for any the capture-time heuristic missed, so on a current
+build these kernels replay faithfully and a fault on one is a real finding.
+
+Two things still make such a fault ambiguous: the detector is a value-based
+heuristic, and an archive recorded before that support landed carries no offsets
+at all, in which case replay launches with a capture-time address and faults on a
+workload that is fine. Both look identical to a workload defect.
+
+So the fault class stays what the evidence says (`illegal_memory_access`), the
+finding carries a note, and you **ask the user for their original failure
+signature** before calling it their bug. If their run never faulted here, suspect
+the recording. Faults on `hipModuleLaunchKernel`-launched kernels (hipBLASLt
+GEMMs, custom HIP kernels) do not carry this ambiguity.
+
 ### Kernel attribution
+
+Replay runs with `--sync-after-launch`, which `triage_archive.sh` adds for you.
+Without it the GPU is serialized only once at the end, so a fault is reported but
+not attributed and the finding has no failing event and no kernel. Pass
+`--no-sync` only when throughput matters more than attribution.
 
 A clean replay implicates no kernel, so the finding reports none even though the
 archive lists the kernels it ran. Never present a kernel next to a `PASS`.

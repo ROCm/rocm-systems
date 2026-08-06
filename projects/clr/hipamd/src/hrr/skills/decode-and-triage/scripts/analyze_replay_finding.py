@@ -29,9 +29,12 @@ RE_MAF = re.compile(
     r"Memory access fault by GPU node-(\d+).*on address (0x[0-9a-fA-F]+)\.\s*"
     r"Reason:\s*([^.\n]+)"
 )
+# The leading fields of this bracket vary by ROCm build -- some emit `host:`,
+# some start at `GPU index:` -- so anchor on the two fields actually consumed
+# rather than on the whole prefix. Requiring `host:` dropped the kernel name on
+# every build that omits it, which is the one field the report exists to give.
 RE_MEM_FAULT_ERR = re.compile(
-    r"Memory Fault Error \[host: [^,]+, GPU index: \d+, faulting addr: (0x[0-9a-fA-F]+), "
-    r"kernel: ([^\]]+)\]"
+    r"Memory Fault Error \[[^\]]*?faulting addr: (0x[0-9a-fA-F]+), kernel: ([^\]]+)\]"
 )
 RE_HANG = re.compile(r"HSA_STATUS_ERROR_(MEMORY_FAULT|ABORTED|EXCEPTION)")
 RE_PASS = re.compile(r"\[HRR\] PASS\b")
@@ -48,12 +51,35 @@ RE_ARCHIVE_COMPLETE = re.compile(r"Complete:\s+(yes|no)\b", re.IGNORECASE)
 RE_INFO_EVENTS = re.compile(r"^Events:\s+(\d+)\s*$", re.MULTILINE)
 RE_INFO_KERNELS = re.compile(r"^Kernels:\s+(\d+)\s*$", re.MULTILINE)
 RE_INFO_RECOVERED = re.compile(r"^Recovered:\s+(\d+)\s+events\s*$", re.MULTILINE)
-# Rows of the `--info` kernel summary table: id, name, grid, block. A memory
-# fault can kill the replay before any per-launch attribution reaches the log,
-# and then this table is the only record of what the archive ran.
+# Short archives print no `Kernels:` total and report launches only in the API
+# call-count block. Without this the total stays unknown and the single-kernel
+# inference in finalize() can never fire.
+RE_INFO_LAUNCH_COUNT = re.compile(r"\bhip\w*LaunchKernel\s+(\d+)\b")
+# Rows of the `--info` kernel summary table: name, grid, block, with an optional
+# leading id, since some builds omit the id column. A memory fault can kill the
+# replay before any per-launch attribution reaches the log, and then this table
+# is the only record of what the archive ran. The name must start with a letter
+# or underscore, which is what keeps a bare id from being read as a symbol now
+# that the id is optional.
 RE_INFO_KERNEL_ROW = re.compile(
-    r"^\s*\d+\s+(\S+)\s+\[[\d,\s]+\]\s+\[[\d,\s]+\]", re.MULTILINE
+    r"^[ \t]*(?:\d+[ \t]+)?([A-Za-z_][^\s\[]*)[ \t]+\[[\d,\s]+\][ \t]+\[[\d,\s]+\]",
+    re.MULTILINE,
 )
+# `--sync-after-launch` and `--sync-after-event` print one line per replayed
+# event. A GPU fault tears the process down before HRR writes its own Fatal
+# line, so the last of these is often the only record of the failing dispatch.
+RE_EVENT_PROGRESS = re.compile(
+    r"^[ \t]*(?:\[HRR\][ \t]*)?Event (\d+):[ \t]*(\w+)"
+    r"(?:[^\n]*?->[ \t]*Kernel '([^']+)')?",
+    re.MULTILINE,
+)
+# PyTorch/ATen kernels reach the GPU through `<<<>>>` (hipLaunchByPtr) and pass
+# device pointers inside by-value structs. Capture records those and replay
+# translates them, so these kernels do replay faithfully on a current build. The
+# detector is still a value-based heuristic, and an archive recorded before it
+# landed carries no such offsets at all, so a fault on one of these symbols
+# earns a caveat in the finding, not a different verdict.
+RE_ATEN_CHEVRON = re.compile(r"_ZN2at6native|at::native::")
 RE_CAPTURE_MAF = RE_MAF
 RE_D2H_SUMMARY = re.compile(r"D2H checks\s+: (\d+) pass.*?, (\d+) fail, (\d+) skipped")
 RE_KERNARG = re.compile(r"kernarg_address=(0x[0-9a-fA-F]+)")
@@ -80,6 +106,7 @@ class Finding:
     workgroup: str | None = None
     gpu_node: str | None = None
     last_progress_kernel: str | None = None
+    last_event_kernel: str | None = None
     kernels_launched: int | None = None
     d2h_pass: int | None = None
     d2h_fail: int | None = None
@@ -182,6 +209,11 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         if m:
             setattr(finding, attr, int(m.group(1)))
 
+    if finding.archive_kernels is None:
+        m = RE_INFO_LAUNCH_COUNT.search(text)
+        if m:
+            finding.archive_kernels = int(m.group(1))
+
     for name in RE_INFO_KERNEL_ROW.findall(text):
         # The table truncates long names to its column width, and a truncated
         # symbol is worse than none: it cannot be looked up or handed over.
@@ -214,6 +246,17 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
             finding.failing_call_index = int(hit.group(2))
             finding.failing_api = hit.group(3)
             break
+
+    last_event = None
+    for m in RE_EVENT_PROGRESS.finditer(text):
+        last_event = m
+    if last_event is not None:
+        # An HRR Fatal line names the failing event exactly; this is only the
+        # last event that started, so it never overrides one.
+        if finding.failing_call_index is None:
+            finding.failing_call_index = int(last_event.group(1))
+            finding.failing_api = last_event.group(2)
+        finding.last_event_kernel = last_event.group(3)
 
     m = RE_MAF.search(text)
     if m:
@@ -282,7 +325,19 @@ def finalize(finding: Finding) -> Finding:
     if finding.fault_class == "replay_pass":
         finding.kernel_name = None
         finding.kernel_family = None
+        finding.last_event_kernel = None
         return finding
+
+    # Under --sync-after-launch the last launch to start is the one that
+    # faulted, so it stands in when the runtime's fault line carried no kernel.
+    if not finding.kernel_name and finding.last_event_kernel:
+        finding.kernel_name = finding.last_event_kernel
+        finding.notes.append(
+            f"kernel name taken from the last launch to start before the fault "
+            f"({finding.last_event_kernel}); the runtime fault line named no "
+            f"kernel. Valid only because the replay ran with "
+            f"--sync-after-launch."
+        )
 
     # A memory fault can tear the process down before the failing dispatch is
     # attributed, leaving a log with no kernel at all. When the archive holds
@@ -299,6 +354,26 @@ def finalize(finding: Finding) -> Finding:
             f"kernel ({finding.kernel_name}); the replay log carried no "
             f"per-launch attribution. Re-run with --sync-after-launch to "
             f"confirm the faulting dispatch directly."
+        )
+
+    # A `<<<>>>`-launched ATen kernel passes device pointers inside by-value
+    # structs. Current capture records those offsets and replay translates them,
+    # so this is not automatically a recording artefact, but the detector is a
+    # heuristic and an archive taken before it landed carries no offsets at all.
+    # Both failure modes look exactly like a workload fault, so flag the
+    # ambiguity rather than resolving it either way.
+    if finding.fault_class in (
+        "illegal_memory_access",
+        "read_only_page_fault",
+    ) and RE_ATEN_CHEVRON.search(finding.kernel_name or ""):
+        finding.notes.append(
+            "the faulting kernel is an ATen kernel launched through <<<>>> "
+            "(hipLaunchByPtr), which passes device pointers inside by-value "
+            "structs. Replay translates those via a value-based heuristic, and "
+            "an archive recorded before that support landed has none recorded "
+            "at all, so an untranslated pointer here would fault exactly like a "
+            "workload defect. Confirm against the user's original failure "
+            "signature before reporting this as their bug."
         )
 
     finding.kernel_family = _kernel_family(finding.kernel_name)
@@ -346,6 +421,7 @@ def render_markdown(f: Finding) -> str:
         f"- **Kernels launched**: {f.kernels_launched or 'n/a'}",
         f"- **D2H**: pass={f.d2h_pass or 0} fail={f.d2h_fail or 0} attempted={f.d2h_attempted or 0}",
         f"- **Last progress kernel**: `{f.last_progress_kernel or 'n/a'}`",
+        f"- **Last launch before fault**: `{f.last_event_kernel or 'n/a'}`",
         "",
         "## Archive / capture",
         f"- **Events**: {f.archive_events or 'n/a'}",
