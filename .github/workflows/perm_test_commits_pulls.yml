@@ -12,6 +12,9 @@ on:
   pull_request:
     paths:
       - .github/workflows/perm_test_commits_pulls.yml
+  push:
+    branches:
+      - users/jechrist/gha-perm-test
 
 permissions: {}
 
