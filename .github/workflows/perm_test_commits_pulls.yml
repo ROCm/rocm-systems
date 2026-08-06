@@ -99,3 +99,26 @@ jobs:
           else
             echo "verdict=OTHER_FAIL"
           fi
+
+  no-permissions:
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: gh api commits/pulls with no GITHUB_TOKEN scopes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -x
+          set +e
+          resp=$(gh api -i "repos/${{ github.repository }}/commits/${{ env.TEST_COMMIT_SHA }}/pulls" 2>&1)
+          rc=$?
+          echo "--- summary ---"
+          echo "exit_code=${rc}"
+          echo "$resp" | rg "HTTP/|403|Resource not accessible|X-Accepted-Github-Permissions" || true
+          if echo "$resp" | rg -q "403|Resource not accessible"; then
+            echo "verdict=FAIL_403"
+          elif [ "$rc" -eq 0 ]; then
+            echo "verdict=OK_UNEXPECTED"
+          else
+            echo "verdict=OTHER_FAIL"
+          fi
