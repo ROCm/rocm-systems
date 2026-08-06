@@ -2756,9 +2756,9 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         if (rcclParamHierarchicalReduceScatter() == 1) {
           tempBufSize = (comm->nNodes >= 16) ? HIERARCHICAL_TEMP_BUFFER_SIZE : HIERARCHICAL_TEMP_BUFFER_SIZE / 2;
         } else {
-          tempBufSize = (comm->nNodes >= 32) ? HIERARCHICAL_TEMP_BUFFER_SIZE
-                        : (comm->nNodes >= 16) ? HIERARCHICAL_TEMP_BUFFER_SIZE / 2
-                                              : HIERARCHICAL_TEMP_BUFFER_SIZE / 4;
+          tempBufSize = (comm->nNodes >= 32) ? HIERARCHICAL_TEMP_BUFFER_SIZE :
+                        (comm->nNodes >= 16) ? HIERARCHICAL_TEMP_BUFFER_SIZE / 2 :
+                                               HIERARCHICAL_TEMP_BUFFER_SIZE / 4;
         }  
         NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), tempBufSize, comm->memManager), res, fail);
         comm->hierarchicalCommsInitialized = true;
