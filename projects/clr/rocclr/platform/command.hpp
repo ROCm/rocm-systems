@@ -375,7 +375,9 @@ class Command : public Event {
   }
   bool getPktCapturingState() const { return packetCapturing_; }
 
-  //! Sets AQL capture state, aql packet to capture and where to copy kernArgs
+  //! Sets AQL capture state, aql packet to capture and where to copy kernArgs.
+  //! |metadataPacket|, when non-null, also enables capturing the metadata-prefetch
+  //! packet that parallels each captured AQL packet.
   void setPktCapturingState(bool state, std::vector<uint8_t*>* packet,
                             amd::GraphKernelArgManager* graphKernArgMgr,
                             const std::string** capturedKernelName,
@@ -1681,7 +1683,12 @@ class AccumulateCommand : public Command {
   std::vector<const char*> kernelNames_;
   //! GPU timestamps — one entry per kernel dispatch slot, parallel to
   //! kernelNames_, populated at signal completion time.
-  std::vector<std::pair<uint64_t, uint64_t>> timestamps_;
+  struct KernelTimestamp {
+    uint64_t start;
+    uint64_t end;
+    uint32_t queue_index;  //!< vGPU index of the stream that ran this kernel
+  };
+  std::vector<KernelTimestamp> timestamps_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
   //! When false, the destructor does not destroy hw_events_ (an external owner,
@@ -1724,15 +1731,15 @@ class AccumulateCommand : public Command {
   void addKernelName(const char* name) { kernelNames_.push_back(name); }
 
   //! Add GPU timestamps for one dispatch slot (called at signal completion).
-  void addTimestamps(uint64_t startTs, uint64_t endTs) {
-    timestamps_.push_back({startTs, endTs});
+  void addTimestamps(uint64_t startTs, uint64_t endTs, uint32_t queue_index = UINT32_MAX) {
+    timestamps_.push_back({startTs, endTs, queue_index});
   }
 
   //! Return kernel name pointers (one per dispatch slot)
   const std::vector<const char*>& getKernelNames() const { return kernelNames_; }
 
   //! Return GPU timestamps (one per dispatch slot, populated at signal completion)
-  const std::vector<std::pair<uint64_t, uint64_t>>& getTimestamps() const { return timestamps_; }
+  const std::vector<KernelTimestamp>& getTimestamps() const { return timestamps_; }
 
   //! The command implementation
   virtual void submit(device::VirtualDevice& device) { device.submitAccumulate(*this); }
@@ -2165,9 +2172,10 @@ class CopyMemoryP2PCommand : public CopyMemoryCommand {
  public:
   CopyMemoryP2PCommand(HostQueue& queue, cl_command_type cmdType,
                        const EventWaitList& eventWaitList, Memory& srcMemory, Memory& dstMemory,
-                       Coord3D srcOrigin, Coord3D dstOrigin, Coord3D size)
+                       Coord3D srcOrigin, Coord3D dstOrigin, Coord3D size,
+                       amd::CopyMetadata copyMetadata = amd::CopyMetadata())
       : CopyMemoryCommand(queue, cmdType, eventWaitList, srcMemory, dstMemory, srcOrigin, dstOrigin,
-                          size) {}
+                          size, copyMetadata) {}
 
   CopyMemoryP2PCommand(HostQueue& queue, cl_command_type cmdType,
                        const EventWaitList& eventWaitList, Memory& srcMemory, Memory& dstMemory,
@@ -2175,7 +2183,7 @@ class CopyMemoryP2PCommand : public CopyMemoryCommand {
                        const BufferRect& srcRect, const BufferRect& dstRect,
                        amd::CopyMetadata copyMetadata = amd::CopyMetadata())
       : CopyMemoryCommand(queue, cmdType, eventWaitList, srcMemory, dstMemory, srcOrigin, dstOrigin,
-                          size, srcRect, dstRect) {}
+                          size, srcRect, dstRect, copyMetadata) {}
 
   virtual void submit(device::VirtualDevice& device) { device.submitCopyMemoryP2P(*this); }
 

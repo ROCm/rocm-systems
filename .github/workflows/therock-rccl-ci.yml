@@ -17,6 +17,10 @@ on:
         description: 'Email address to send test summary report'
         type: string
         default: 'collectives-ci@amd.com'
+      notify_webhook:
+        description: 'Teams webhook URL for test summary notifications'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -49,6 +53,9 @@ jobs:
           echo "Changed files:"
           git diff --name-only HEAD^
 
+          # Scheduled and manual runs always execute the full CI pipeline.
+          # PR/push runs only trigger CI when files under projects/rccl/
+          # have changed, to avoid burning GPU runner time on unrelated commits.
           if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "run_linux_ci=true" >> "$GITHUB_OUTPUT"
             echo "Scheduled/manual run — always run CI"
@@ -81,6 +88,7 @@ jobs:
       artifact_run_id: ${{ inputs.artifact_run_id }}
       test_scope: ${{ inputs.test_scope || 'smoke' }}
       notify_email: ${{ inputs.notify_email || 'collectives-ci@amd.com' }}
+      notify_webhook: ${{ inputs.notify_webhook }}
       cmake_options: >
         -DTHEROCK_ENABLE_ALL=OFF
         -DTHEROCK_BUILD_TESTING=ON

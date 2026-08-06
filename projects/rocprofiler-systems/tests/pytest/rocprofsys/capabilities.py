@@ -4,13 +4,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from functools import cached_property
 from pathlib import Path
 from typing import Optional
+import functools
 import os
 import shutil
 import subprocess
 import re
+
+from .cache import persistent_cache, persistent_cached_property
 
 
 def _get_amdsmi_version_output(rocm_path: Optional[Path] = None) -> Optional[str]:
@@ -110,7 +112,7 @@ class SystemCapabilities:
             is_installed=config.is_installed,
         )
 
-    @cached_property
+    @persistent_cached_property
     def mpi_implementation(self) -> str:
         """Get the name of the MPI implementation."""
         mpicc = shutil.which("mpicc")
@@ -142,7 +144,7 @@ class SystemCapabilities:
 
         return "unknown"
 
-    @cached_property
+    @persistent_cached_property
     def default_nic(self) -> Optional[str]:
         """Get the name of the default NIC
 
@@ -164,7 +166,7 @@ class SystemCapabilities:
         except (subprocess.SubprocessError, OSError):
             return None
 
-    @cached_property
+    @persistent_cached_property
     def ai_nic_devices(self) -> list[str]:
         """Get the unique AI NIC device names reported by AMD SMI.
 
@@ -200,7 +202,7 @@ class SystemCapabilities:
         except (subprocess.SubprocessError, OSError, subprocess.TimeoutExpired):
             return []
 
-    @cached_property
+    @persistent_cached_property
     def papi_nic_events(self) -> Optional[str]:
         """Get the list of all events that we want PAPI to record.
 
@@ -224,7 +226,7 @@ class SystemCapabilities:
         except (subprocess.SubprocessError, OSError):
             return None
 
-    @cached_property
+    @persistent_cached_property
     def ucx_availability(self) -> bool:
         mpiexec_exec = self.mpiexec_exec
         if mpiexec_exec is None:
@@ -272,7 +274,7 @@ class SystemCapabilities:
 
         return True
 
-    @cached_property
+    @persistent_cached_property
     def num_procs(self) -> int:
         """Number of processors available to this process.
 
@@ -287,7 +289,7 @@ class SystemCapabilities:
 
         return count if count > 0 else 2
 
-    @cached_property
+    @persistent_cached_property
     def ptrace_scope(self) -> int:
         """Get the value of the ptrace_scope kernel parameter."""
         if not Path("/proc/sys/kernel/yama/ptrace_scope").exists():
@@ -297,7 +299,7 @@ class SystemCapabilities:
         except (OSError, ValueError):
             return 3
 
-    @cached_property
+    @persistent_cached_property
     def perf_event_paranoid(self) -> int:
         """Get the value of the perf_event_paranoid kernel parameter."""
         if not Path("/proc/sys/kernel/perf_event_paranoid").exists():
@@ -307,7 +309,7 @@ class SystemCapabilities:
         except (OSError, ValueError):
             return 4
 
-    @cached_property
+    @persistent_cached_property
     def cap_sys_admin(self) -> bool:
         """Get the value of the CAP_SYS_ADMIN capability."""
         capchk = self.rocprofsys_tests_dir / "rocprof-sys-capchk"
@@ -326,7 +328,7 @@ class SystemCapabilities:
         except (subprocess.SubprocessError, OSError):
             return False
 
-    @cached_property
+    @persistent_cached_property
     def cap_perfmon(self) -> bool:
         """Get the value of the CAP_PERFMON capability."""
         capchk = self.rocprofsys_tests_dir / "rocprof-sys-capchk"
@@ -346,7 +348,7 @@ class SystemCapabilities:
         except (subprocess.SubprocessError, OSError):
             return False
 
-    @cached_property
+    @persistent_cached_property
     def perf_events_usable(self) -> bool:
         """Whether perf_event_open-based features can actually be used.
 
@@ -359,7 +361,7 @@ class SystemCapabilities:
         """
         return self.perf_event_paranoid <= 2 or self.cap_sys_admin
 
-    @cached_property
+    @persistent_cached_property
     def papi_availability(self) -> bool:
         """Check if PAPI is built into rocprofiler-systems.
 
@@ -388,24 +390,27 @@ class SystemCapabilities:
         except (subprocess.SubprocessError, OSError, subprocess.TimeoutExpired):
             return False
 
-    @cached_property
+    # ---------------------------------------------------------------------------
+    # Do NOT make this a persistent_cached_property: the result depends on the
+    # per-process --python-versions / --python-root-dirs hints, so it must not be
+    # shared across processes
+    @functools.cached_property
     def _supported_python_versions_and_executables(
         self,
     ) -> tuple[Optional[list[str]], Optional[list[Path]]]:
         """Return the list of supported python versions and executables"""
-        versions, executables = _get_supported_python_versions_and_executables(
+        return _get_supported_python_versions_and_executables(
             self.rocprofsys_site_packages,
             self._python_versions_hint,
             self._python_root_dirs_hint,
         )
-        return versions, executables
 
-    @cached_property
+    @property
     def supported_python_versions(self) -> Optional[list[str]]:
         """Return the list of supported python versions"""
         return self._supported_python_versions_and_executables[0]
 
-    @cached_property
+    @property
     def supported_python_executables(self) -> Optional[list[Path]]:
         """Return the list of supported python executables"""
         return self._supported_python_versions_and_executables[1]
@@ -426,7 +431,9 @@ class SystemCapabilities:
                 f"Python version '{version}' not found. Available: {', '.join(self.supported_python_versions)}"
             )
 
-    @cached_property
+    # ---------------------------------------------------------------------------
+
+    @persistent_cached_property
     def is_inside_docker(self) -> bool:
         """Check if the system is running inside a Docker container."""
         if os.path.exists("/.dockerenv"):
@@ -440,13 +447,13 @@ class SystemCapabilities:
             pass
         return False
 
-    @cached_property
+    @persistent_cached_property
     def oshrun_exec(self) -> Optional[Path]:
         """Get the path to the oshrun executable."""
         result = shutil.which("oshrun")
         return Path(result) if result else None
 
-    @cached_property
+    @persistent_cached_property
     def oshrun_version(self) -> Optional[tuple[int, ...]]:
         """Get the parsed version of oshrun as a tuple (major, minor)"""
         if not self.oshrun_exec:
@@ -468,7 +475,7 @@ class SystemCapabilities:
         except (subprocess.SubprocessError, OSError):
             return None
 
-    @cached_property
+    @persistent_cached_property
     def oshrun_strips_double_dash(self) -> bool:
         """Return True if this oshrun strips the first '--' from application argv.
 
@@ -504,7 +511,7 @@ class SystemCapabilities:
         finally:
             os.unlink(probe_path)
 
-    @cached_property
+    @persistent_cached_property
     def rocprofiler_sdk_version(self) -> Optional[tuple[int, int, int]]:
         """Return rocprofiler-sdk (major, minor, patch) from ``version.h`` under ROCm.
 
@@ -525,13 +532,13 @@ class SystemCapabilities:
             root / "include" / "rocprofiler-sdk" / "version.h"
         )
 
-    @cached_property
+    @persistent_cached_property
     def julia_exec(self) -> Optional[Path]:
         """Get the path to the Julia executable."""
         path = shutil.which("julia")
         return Path(path) if path else None
 
-    @cached_property
+    @persistent_cached_property
     def mpiexec_exec(self) -> Optional[Path]:
         """Find MPI launcher executable."""
         for candidate in ["mpiexec", "mpirun"]:
@@ -540,10 +547,16 @@ class SystemCapabilities:
                 return Path(path)
         return None
 
+    @persistent_cache("cap.target_support_mpi", method=True)
     def target_support_mpi(self, target_path: Path) -> bool:
-        """Check if the target supports MPI by checking if the target is linked to MPI."""
+        """Check if the target supports MPI by checking if the target is linked to MPI.
+
+        Cached per ``target_path`` (``method=True`` keeps ``self`` out of the
+        key); a binary's MPI linkage is constant within a CTest session.
+        """
         if not target_path.exists():
             return False
+
         ldd_exec = shutil.which("ldd")
         if not ldd_exec:
             return False
@@ -560,12 +573,12 @@ class SystemCapabilities:
         except (subprocess.SubprocessError, OSError):
             return False
 
-    @cached_property
+    @persistent_cached_property
     def amdsmi_version(self) -> Optional[tuple[int, int]]:
         """Get (major, minor) version of amd-smi, or None if not available."""
         return get_amdsmi_version(self.rocm_path)
 
-    @cached_property
+    @persistent_cached_property
     def amdgpu_version(self) -> Optional[tuple[int, int, int]]:
         """Get (major, minor, patch) of the amdgpu driver, or None if not available."""
         return get_amdgpu_version(self.rocm_path)

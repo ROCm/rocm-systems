@@ -25,16 +25,27 @@
 /// If a plugin is used without a group (unusual), it falls back to a
 /// static StderrSink so output is never silently lost.
 ///
-/// ## Environment variables (production path)
+/// ## Configuration (production path)
 ///
-///   RJ_SINKS=stderr,file   Comma-separated sink types: stderr, stdout, file
-///                          (default: stderr).
-///   RJ_SINK_DIR=/tmp/out   Directory for file sinks. Each plugin writes
-///                          to <dir>/<plugin_name>.log.
+/// Sinks are configured from the top-level `sinks` object in the rocjitsu
+/// config (parsed by PluginLoader::configure_plugin_group):
+///
+/// @code{.json}
+///   "sinks": { "types": ["stderr", "file"], "dir": "/tmp/out" }
+/// @endcode
+///
+///   types   Array of sink types: "stderr", "stdout", "file"
+///           (default: ["stderr"]).
+///   dir     Directory for file sinks. Each plugin writes to
+///           <dir>/<plugin_name>.log.
 
 #pragma once
 
+#include "util/log.h"
+
+#include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -73,7 +84,10 @@ public:
 /// @brief Writes to a file. Owns the FILE* handle; flushes after each write.
 class FileSink : public PluginSink {
 public:
-  explicit FileSink(const std::string &path) : file_(std::fopen(path.c_str(), "w")) {}
+  explicit FileSink(const std::string &path) : file_(std::fopen(path.c_str(), "w")) {
+    if (!file_)
+      util::Logger::warn("cannot open plugin sink '", path, "': ", std::strerror(errno));
+  }
 
   ~FileSink() override {
     if (file_)
@@ -82,6 +96,8 @@ public:
 
   FileSink(const FileSink &) = delete;
   FileSink &operator=(const FileSink &) = delete;
+
+  bool is_open() const { return file_ != nullptr; }
 
   void write(std::string_view msg) override {
     if (file_) {

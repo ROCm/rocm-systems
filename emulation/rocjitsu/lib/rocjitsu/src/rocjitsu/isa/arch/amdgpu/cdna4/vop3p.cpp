@@ -462,7 +462,9 @@ void VPkMinimum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     float rlo = ieee_min(ieee_min(a_lo, b_lo), c_lo);
     float rhi = ieee_min(ieee_min(a_hi, b_hi), c_hi);
     amdgpu::RegisterAccess(wf).write_lane(
-        vdst, lane, util::f32_to_f16(rlo) | (static_cast<uint32_t>(util::f32_to_f16(rhi)) << 16));
+        vdst, lane,
+        util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) |
+            (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));
   }
 }
 
@@ -529,7 +531,9 @@ void VPkMaximum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     float rlo = ieee_max(ieee_max(a_lo, b_lo), c_lo);
     float rhi = ieee_max(ieee_max(a_hi, b_hi), c_hi);
     amdgpu::RegisterAccess(wf).write_lane(
-        vdst, lane, util::f32_to_f16(rlo) | (static_cast<uint32_t>(util::f32_to_f16(rhi)) << 16));
+        vdst, lane,
+        util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) |
+            (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));
   }
 }
 

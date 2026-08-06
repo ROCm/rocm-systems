@@ -108,6 +108,7 @@ in the following table.
         | ``PROFILE``: Prints logs related to the profiling/timing info.
         | ``RAS``: Prints logs related to RAS.
         | ``VERBS``: Prints logs related to IB/Verbs.
+        | ``DESTROY``: Prints logs related to communicator/plugin teardown (destroy, abort, revoke, plugin unload).
         | ``ALL``: Activates all logging subsystems.
 
     * - | ``NCCL_WARN_ENABLE_DEBUG_INFO``
@@ -192,6 +193,24 @@ in the following table.
       - | ``AF_INET``: Force IPv4
         | ``AF_INET6``: Force IPv6
         | Unset: Use first available
+
+    * - | ``NCCL_IGNORE_NET_MISMATCH``
+        | Controls what happens when ranks report a different number of local
+          network (NET) devices during communicator initialization. RCCL gathers
+          each rank's local NET device count and compares the minimum and maximum
+          across the communicator. A mismatch usually means the job was launched
+          with an inconsistent NIC selection (for example, an uneven
+          ``NCCL_SOCKET_IFNAME``/``NCCL_IB_HCA`` per rank, or nodes with different
+          NIC counts), which otherwise surfaces later as obscure transport
+          failures. See :ref:`heterogeneous-nic-counts`.
+      - | ``1``: Detect and continue, logging the mismatch at ``INFO`` level (default).
+        | ``0``: Fail initialization with ``ncclSystemError`` and a warning on the mismatch.
+
+    * - | ``NCCL_IGNORE_COLLNET_MISMATCH``
+        | Same as ``NCCL_IGNORE_NET_MISMATCH`` but for the number of local CollNet
+          devices reported by each rank.
+      - | ``0``: Fail initialization with ``ncclSystemError`` and a warning on the mismatch (default).
+        | ``1``: Detect and continue, logging the mismatch at ``INFO`` level.
 
     * - | ``NCCL_NET_MERGE_LEVEL``
         | Controls network device merging behavior.

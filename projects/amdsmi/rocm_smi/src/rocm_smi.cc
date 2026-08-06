@@ -3798,45 +3798,6 @@ rsmi_status_t rsmi_dev_gpu_reset(uint32_t dv_ind) {
   CATCH
 }
 
-rsmi_status_t rsmi_dev_amdgpu_driver_reload(void) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-  // TODO(amdsmi_team): technically, we should block for all devices
-  // As this is a global operation, we can use a mutex to ensure
-  // that only one thread is trying to restart the driver at a time.
-  uint32_t dv_ind = 0;  // Default to first device
-  DEVICE_MUTEX
-  GET_DEV_FROM_INDX
-
-  rsmi_status_t restartRet = dev->restartAMDGpuDriver();
-
-  // Attempting to speed up processing time
-  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
-  if (restartRet != RSMI_STATUS_SUCCESS) {
-    if (is_logger_enabled) {
-      ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-         << " | Fail - restart AMD GPU detected"
-         << " | Device #: " << dv_ind << " | Type: AMDGPU Driver Reload"
-         << " | Cause: AMDGPU Driver Reload failed "
-         << " | Returning = " << getRSMIStatusString(restartRet, false);
-      LOG_ERROR(ss);
-    }
-    return restartRet;
-  }
-
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-       << " | Success - if restart completed successfully"
-       << " | Device #: " << dv_ind << " | Type: AMDGPU Driver Reload"
-       << " | Returning = " << getRSMIStatusString(restartRet, false);
-    LOG_INFO(ss);
-  }
-  return restartRet;
-
-  CATCH
-}
-
 rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind, uint32_t* num_regions,
                                                  rsmi_freq_volt_region_t* buffer) {
   TRY std::ostringstream ss;

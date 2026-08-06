@@ -20,8 +20,9 @@ namespace {
 TEST(SemanticSpillFrame, SeparatesPersistentAndTransientRanges) {
   TranslationContext context(/*vgprs=*/8, /*agprs=*/0, /*accum_base=*/0,
                              /*sgprs=*/8, /*private_bytes=*/20);
-  const uint32_t persistent = context.reserve_persistent_semantic_spill_dwords(2);
-  ASSERT_EQ(persistent, 32u);
+  const auto persistent = context.reserve_persistent_semantic_spill_dwords(2);
+  ASSERT_TRUE(persistent);
+  ASSERT_EQ(*persistent, 32u);
 
   SemanticSpillFrame frame(context);
   const auto first = frame.allocate_dwords(3, /*byte_alignment=*/4);
@@ -34,6 +35,23 @@ TEST(SemanticSpillFrame, SeparatesPersistentAndTransientRanges) {
   EXPECT_EQ(first->byte_offset, 48u);
   EXPECT_EQ(second->byte_offset, 64u);
   EXPECT_EQ(context.required_private_segment_fixed_size, 72u);
+}
+
+TEST(SemanticSpillFrame, PersistentReservationRejects32BitOverflow) {
+  // A guest kernel can advertise a private size near UINT32_MAX. Aligning that up
+  // and extending it for a spill must fail closed rather than wrap to a low
+  // offset that would corrupt guest scratch.
+  TranslationContext context(/*vgprs=*/8, /*agprs=*/0, /*accum_base=*/0,
+                             /*sgprs=*/8, /*private_bytes=*/0xfffffff8u);
+  const auto persistent = context.reserve_persistent_semantic_spill_dwords(2);
+  EXPECT_FALSE(persistent);
+}
+
+TEST(SemanticSpillFrame, TransientReservationRejects32BitOverflow) {
+  TranslationContext context(/*vgprs=*/8, /*agprs=*/0, /*accum_base=*/0,
+                             /*sgprs=*/8, /*private_bytes=*/0xfffffff8u);
+  const auto transient = context.reserve_semantic_spill_dwords(2);
+  EXPECT_FALSE(transient);
 }
 
 TEST(SemanticSpillFrame, NewInstructionsReuseTransientFrameBase) {

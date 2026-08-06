@@ -4464,26 +4464,6 @@ amdsmi_status_t amdsmi_reset_gpu(amdsmi_processor_handle processor_handle) {
   return ret;
 }
 
-amdsmi_status_t amdsmi_gpu_driver_reload(void) {
-  std::ostringstream ss;
-  AMDSMI_CHECK_INIT();
-
-  // Attempting to speed up processing time
-  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | ======= start =======";
-    LOG_INFO(ss);
-  }
-  rsmi_status_t ret = rsmi_dev_amdgpu_driver_reload();
-  amdsmi_status_t amdsmi_status = amd::smi::rsmi_to_amdsmi_status(ret);
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__
-       << " | Returning: " << smi_amdgpu_get_status_string(amdsmi_status, false);
-    LOG_INFO(ss);
-  }
-  return amdsmi_status;
-}
-
 amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_handle,
                                             uint32_t* gpu_busy_percent) {
   auto status = rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
@@ -4494,6 +4474,19 @@ amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_ha
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
   return status;
+}
+
+amdsmi_status_t amdsmi_get_vcn_busy_percent(amdsmi_processor_handle processor_handle,
+                                            uint32_t* vcn_busy_percent) {
+  if (!vcn_busy_percent) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  amd::smi::AMDSmiGPUDevice* gpudevice = nullptr;
+  amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpudevice);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+  return smi_amdgpu_get_vcn_busy_percent(gpudevice, vcn_busy_percent);
 }
 
 amdsmi_status_t amdsmi_get_utilization_count(amdsmi_processor_handle processor_handle,
@@ -5669,23 +5662,8 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
   info->pcie_metric.pcie_replay_count = metric_info.pcie_replay_count_acc;
   info->pcie_metric.pcie_l0_to_recovery_count = metric_info.pcie_l0_to_recov_count_acc;
   info->pcie_metric.pcie_replay_roll_over_count = metric_info.pcie_replay_rover_count_acc;
-  /**
-   * pcie_metric.pcie_nak_received_count: (uint64_t)
-   * metric_info.pcie_nak_rcvd_count_acc: (uint32_t)
-   */
-  info->pcie_metric.pcie_nak_received_count =
-      translate_umax_or_assign_value<decltype(info->pcie_metric.pcie_nak_received_count)>(
-          metric_info.pcie_nak_rcvd_count_acc, (metric_info.pcie_nak_rcvd_count_acc));
-  /**
-   * pcie_metric.pcie_nak_sent_count:     (uint64_t)
-   * metric_info.pcie_nak_sent_count_acc: (uint32_t)
-   */
-  info->pcie_metric.pcie_nak_sent_count =
-      translate_umax_or_assign_value<decltype(info->pcie_metric.pcie_nak_sent_count)>(
-          metric_info.pcie_nak_sent_count_acc, (metric_info.pcie_nak_sent_count_acc));
-  /**
-   * pcie_metric.pcie_lc_perf_other_end_recovery: (uint32_t)
-   */
+  info->pcie_metric.pcie_nak_received_count = metric_info.pcie_nak_rcvd_count_acc;
+  info->pcie_metric.pcie_nak_sent_count = metric_info.pcie_nak_sent_count_acc;
   info->pcie_metric.pcie_lc_perf_other_end_recovery_count = translate_umax_or_assign_value<
       decltype(info->pcie_metric.pcie_lc_perf_other_end_recovery_count)>(
       metric_info.pcie_lc_perf_other_end_recovery, (metric_info.pcie_lc_perf_other_end_recovery));

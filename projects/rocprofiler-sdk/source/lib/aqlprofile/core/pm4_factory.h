@@ -62,6 +62,9 @@ GetAgentInfo(aqlprofile_agent_handle_t agent_id);
 aqlprofile_agent_handle_t
 RegisterAgent(const aqlprofile_agent_info_v1_t* agent_info);
 
+aqlprofile_agent_handle_t
+RegisterAgent(const aqlprofile_agent_info_v2_t* agent_info);
+
 // GPU enumeration
 enum gpu_id_t
 {
@@ -167,6 +170,7 @@ public:
     virtual bool IsGFX10() const { return false; }
     virtual bool IsGFX11() const { return false; }
     virtual bool IsGFX12() const { return false; }
+    virtual bool IsGFX1250() const { return false; }
     // Return number of XCC on the GPU
     uint32_t GetXccNumber() const { return agent_info_->xcc_num; }
     // Return number of XCC per AID
@@ -241,6 +245,15 @@ public:
 
     virtual int GetAccumLowID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
     virtual int GetAccumHiID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
+    virtual int GetSQGAccumID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
+
+    // Return GPU id for a given gfxip string. Pure mapping function; the
+    // instance-side GetGpuId() above returns the cached value resolved by
+    // this lookup at factory-construction time. Exposed for callers that
+    // need chip-family dispatch before a Pm4Factory exists -- e.g.
+    // populate_cu_bitmap_from_drm() gating the GFX11+ DRM bitmap fetch in
+    // pm4_factory.cpp without re-implementing the gfxip -> gpu_id_t table.
+    static gpu_id_t GetGpuId(std::string_view);
 
 protected:
     explicit Pm4Factory(const BlockInfoMap& map)
@@ -310,8 +323,6 @@ private:
     static Pm4Factory* Mi350Create(const AgentInfo* agent_info);
     // Create MI450 factory
     static Pm4Factory* Mi450Create(const AgentInfo* agent_info);
-    // Return GPU id for a given agent
-    static gpu_id_t GetGpuId(std::string_view);
 
     static bool CheckConcurrent(const profile_t* profile);
 

@@ -146,6 +146,7 @@ from .amdsmi_interface import amdsmi_get_gpu_vram_usage
 from .amdsmi_interface import amdsmi_get_power_info
 from .amdsmi_interface import amdsmi_get_clock_info
 from .amdsmi_interface import amdsmi_get_gpu_busy_percent
+from .amdsmi_interface import amdsmi_get_vcn_busy_percent
 
 from .amdsmi_interface import amdsmi_get_pcie_info
 from .amdsmi_interface import amdsmi_get_gpu_bad_page_info
@@ -187,7 +188,6 @@ from .amdsmi_interface import amdsmi_set_gpu_od_volt_info
 from .amdsmi_interface import amdsmi_set_gpu_perf_level
 from .amdsmi_interface import amdsmi_get_gpu_power_profile_presets
 from .amdsmi_interface import amdsmi_reset_gpu
-from .amdsmi_interface import amdsmi_gpu_driver_reload
 from .amdsmi_interface import amdsmi_set_gpu_perf_determinism_mode
 from .amdsmi_interface import amdsmi_set_gpu_fan_speed
 from .amdsmi_interface import amdsmi_reset_gpu_fan

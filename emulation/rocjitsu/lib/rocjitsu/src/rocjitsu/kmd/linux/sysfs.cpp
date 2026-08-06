@@ -241,11 +241,13 @@ void Sysfs::make_dir(const std::string &path) { fs::create_directories(path); }
 
 void Sysfs::cleanup() {
   if (!topology_dir_.empty()) {
-    fs::remove_all(topology_dir_);
+    std::error_code ec;
+    fs::remove_all(topology_dir_, ec);
     topology_dir_.clear();
   }
   if (!drm_dir_.empty()) {
-    fs::remove_all(drm_dir_);
+    std::error_code ec;
+    fs::remove_all(drm_dir_, ec);
     drm_dir_.clear();
   }
 }

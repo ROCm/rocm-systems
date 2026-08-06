@@ -175,7 +175,7 @@ struct EmulatorEntry {
     supported: bool,
     /// Human-readable explanation of the support decision.
     support_reason: String,
-    available_plugins: Vec<&'static str>,
+    available_plugins: Vec<String>,
 }
 
 async fn list_emulators() -> Json<Vec<EmulatorEntry>> {
@@ -191,12 +191,7 @@ async fn list_emulators() -> Json<Vec<EmulatorEntry>> {
                 is_default,
                 supported: spec.support.supported,
                 support_reason: spec.support.reason,
-                // Plugin discovery requires constructing a live backend
-                // instance; the registry doesn't expose a static plugin
-                // list yet, so we return an empty set here. Future work:
-                // surface declared plugin slots on the emulator
-                // description.
-                available_plugins: Vec::new(),
+                available_plugins: spec.plugins,
             }
         })
         .collect();

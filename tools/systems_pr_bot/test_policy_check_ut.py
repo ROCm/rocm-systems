@@ -3,7 +3,7 @@ Unit + integration tests for policy_check.py.
 
 These let us iterate on policies WITHOUT pushing branches or running workflows:
   • Unit tests   — exercise individual validators / regex patterns.
-  • Integration  — feed blobs of [branch, title, description, files] through
+  • Integration  — feed blobs of [title, description, files] through
                    the higher-level ensure_* functions.
 """
 
@@ -48,13 +48,6 @@ def make_policy(**overrides: Any) -> pc.Policy:
     if the shipped config changes.
     """
     defaults: Dict[str, Any] = dict(
-        branch_patterns=[
-            re.compile(r"^users\/[A-Za-z0-9][A-Za-z0-9\-]*\/.+"),
-            re.compile(r"^shared\/.+"),
-            re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-_]*$"),
-            re.compile(r"^dependabot\/.+"),
-            re.compile(r"^revert-[0-9]+-.+"),
-        ],
         title_min_length=10,
         title_max_length=80,
         description_min_length=30,
@@ -62,9 +55,6 @@ def make_policy(**overrides: Any) -> pc.Policy:
         description_checklist_patterns=[re.compile(p) for p in _CHECKLIST_PATTERNS],
         block_draft=True,
         forbidden_title_patterns=[re.compile(r"(?i)\bWIP\b")],
-        max_files_changed=50,
-        max_total_changes=2000,
-        max_single_file_changes=700,
         forbidden_paths=["**/*.pem", "**/.env", "**/id_rsa"],
         unit_test_code_extensions=[".py", ".cpp"],
         unit_test_patterns=[
@@ -97,58 +87,6 @@ def make_file(
         "deletions": deletions,
         "changes": changes if changes is not None else additions + deletions,
     }
-
-
-# ----------------------------- branch name -----------------------------------
-
-
-class BranchNameTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.policy = make_policy()
-
-    def _errs(self, branch: str) -> List[str]:
-        e: List[str] = []
-        pc.ensure_branch_name(self.policy, branch, e)
-        return e
-
-    def test_valid_branches(self) -> None:
-        for branch in [
-            "users/chi/ucicd_setup_visible_devices",
-            # Nested namespace/feature after the username is allowed.
-            "users/dgaliffi/fix/remove-build-boost-option",
-            # Uppercase letters are allowed (acronyms / module names).
-            "users/frepaul/ROCm-end-user-project-workflow",
-            "users/agunashe/hipModuleGetLoadingMode_test",
-            "compiler-ww-24-SMP-2",
-            "ZIP-packaging-RFC",
-            "shared/add-runner-health",
-            "shared/team/feature",
-            "bump-rocm-libraries-936a6c7",
-            "dependabot/github_actions/github-actions-3dfd2199fc",
-            "revert-5217-users/derobins/add_hipfile_support",
-        ]:
-            with self.subTest(branch=branch):
-                self.assertEqual(self._errs(branch), [])
-
-    def test_invalid_branches(self) -> None:
-        # "Feature/Bad" -> unknown prefix; "users//missing"/"users/" -> empty
-        # segments; "bad branch name" -> spaces are not allowed.
-        for branch in ["Feature/Bad", "users//missing", "bad branch name", "users/"]:
-            with self.subTest(branch=branch):
-                self.assertTrue(self._errs(branch))
-
-    def test_fork_pr_branch_name_is_enforced(self) -> None:
-        # All policies — including branch name — are enforced for fork PRs too.
-        # The validator always runs; there is no fork-based skip.
-        policy = make_policy()
-        e: List[str] = []
-        pc.ensure_branch_name(policy, "BadBranch", e)
-        self.assertTrue(e, "Branch name must be validated for fork PRs too")
-
-        # A valid branch name passes for both same-repo and fork PRs.
-        e = []
-        pc.ensure_branch_name(policy, "users/sam/my-feature", e)
-        self.assertEqual(e, [])
 
 
 # ----------------------------- PR title --------------------------------------
@@ -195,6 +133,28 @@ class DescriptionTests(unittest.TestCase):
         e: List[str] = []
         pc.ensure_pr_description(policy, "A long enough description with no ref.", e)
         self.assertTrue(any("must reference a JIRA ID" in x for x in e))
+
+    def test_issue_reference_in_comment_does_not_pass(self) -> None:
+        # Isolate reference detection (skip min-length and checklist).
+        policy = make_policy(
+            description_min_length=0, description_checklist_patterns=[]
+        )
+        multiline_comment = """<!--
+Fixes #1234
+-->"""
+        multiple_comments = """This description has no visible issue reference.
+<!-- Related to #1234 -->
+Some visible text between the comments.
+<!-- https://github.com/ROCm/TheRock/issues/5678 -->"""
+        for body in [
+            "<!-- GitHub issue: https://github.com/ROCm/TheRock/issues/1234 -->",
+            multiline_comment,
+            multiple_comments,
+        ]:
+            with self.subTest(body=body):
+                e: List[str] = []
+                pc.ensure_pr_description(policy, body, e)
+                self.assertTrue(any("must reference a JIRA ID" in x for x in e))
 
     def test_issue_reference_variants_pass(self) -> None:
         # Isolate reference detection (skip min-length and checklist).
@@ -389,21 +349,17 @@ class DraftAndBumpTests(unittest.TestCase):
 
 
 class IntegrationBlobTests(unittest.TestCase):
-    """Feed full [branch, title, description, files] blobs through validators."""
+    """Feed full [title, description, files] blobs through validators."""
 
     def setUp(self) -> None:
         self.policy = make_policy()
 
     def _evaluate(
-        self, *, branch: str, title: str, body: str, files: List[Dict[str, Any]]
+        self, *, title: str, body: str, files: List[Dict[str, Any]]
     ) -> Dict[str, List[str]]:
         out: Dict[str, List[str]] = {}
 
         e: List[str] = []
-        pc.ensure_branch_name(self.policy, branch, e)
-        out["branch"] = e
-
-        e = []
         pc.ensure_pr_title(self.policy, title, e)
         pc.ensure_pr_description(self.policy, body, e)
         out["title_desc"] = e
@@ -419,7 +375,6 @@ class IntegrationBlobTests(unittest.TestCase):
 
     def test_fully_compliant_pr(self) -> None:
         result = self._evaluate(
-            branch="users/sam/add-feature",
             title="feat(ci): add policy unit tests",
             body=(
                 "Adds unit tests for the policy checker.\n"
@@ -434,19 +389,16 @@ class IntegrationBlobTests(unittest.TestCase):
 
     def test_fully_noncompliant_pr(self) -> None:
         result = self._evaluate(
-            branch="BadBranch",
             title="wip",
             body="too short",
             files=[make_file("secret.pem"), make_file("src/module.py")],
         )
-        self.assertTrue(result["branch"])
         self.assertTrue(result["title_desc"])
         self.assertTrue(result["forbidden"])
         self.assertTrue(result["unit"])
 
     def test_docs_only_pr_is_compliant(self) -> None:
         result = self._evaluate(
-            branch="shared/update-docs",
             title="docs: clarify contributing guide",
             body=(
                 "Improves the contributing docs.\n"
@@ -471,7 +423,6 @@ class LoadPolicyTests(unittest.TestCase):
         if not policy_path.exists():
             self.skipTest("policy.yml not present next to tests")
         policy = pc.load_policy(policy_path)
-        self.assertGreater(len(policy.branch_patterns), 0)
         self.assertIn("pre-commit", policy.required_checks)
         self.assertGreaterEqual(policy.title_max_length, policy.title_min_length)
 

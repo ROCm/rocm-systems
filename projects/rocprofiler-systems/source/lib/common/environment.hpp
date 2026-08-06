@@ -5,6 +5,7 @@
 
 #include "common/defines.h"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "logger/debug.hpp"
 #include <spdlog/fmt/fmt.h>
 
@@ -16,7 +17,6 @@
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
-#include <exception>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -417,6 +417,20 @@ remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
     }
 }
 
+/// @brief Build the default colon-delimited library search-path list.
+///
+/// Concatenates the process's @c ROCPROFSYS_PATH, @c LD_LIBRARY_PATH, @c LIBRARY_PATH and
+/// @c PWD environment variables (in that order), followed by the current
+/// directory @c "." , into a single @c ':' -delimited string.
+/// @return Colon-delimited search paths; never empty (always ends with @c "." ).
+[[nodiscard]] inline std::string
+get_default_lib_search_paths()
+{
+    return fmt::format("{}:{}:{}:{}:.", get_env(env_vars::PATH, ""),
+                       get_env("LD_LIBRARY_PATH", ""), get_env("LIBRARY_PATH", ""),
+                       get_env("PWD", ""));
+}
+
 /// @brief Locate the ROCm LLVM library directory that contains libomptarget.so.
 ///
 /// Probes candidates derived from @c ROCM_PATH and @c ROCmVersion_DIR plus the
@@ -588,7 +602,7 @@ discover_torch_libpath(const std::string& python_binary)
 
     std::string torch_libdir = result + "/lib";
 
-    if(!::tim::filepath::direxists(torch_libdir))
+    if(!path::is_directory(torch_libdir))
     {
         LOG_WARNING("torch lib directory does not exist: {}", torch_libdir);
         return {};

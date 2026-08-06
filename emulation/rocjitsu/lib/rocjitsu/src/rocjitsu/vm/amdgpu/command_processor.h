@@ -181,6 +181,17 @@ public:
   std::vector<ClusterLdsTarget> cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id,
                                                     uint32_t mcast_mask);
 
+  /// @brief Test-only view of the doorbell monitor lifecycle flag.
+  ///
+  /// @details Exposes doorbell_running_ so a regression test can observe the
+  /// monitor retiring after the last host-accessible queue is destroyed and
+  /// restarting when a new one registers. Read under doorbell_thread_mutex_ so it
+  /// never races the loop's self-exit or ensure_doorbell_monitor().
+  [[nodiscard]] bool doorbell_monitor_running_for_test() {
+    std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
+    return doorbell_running_;
+  }
+
 private:
   /// @brief Initialize a wavefront's registers per the AMDHSA ABI.
   void init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf, const DispatchEntry &entry,
@@ -215,17 +226,15 @@ private:
   ///
   /// @warning Drops dirty L2 lines without writeback. Only use after a direct
   /// backing write whose destination is the only stale region; otherwise use
-  /// flush_gpu_caches() so K$-writeback dirty lines are published, not lost.
+  /// flush_gpu_caches() so dirty L2 lines are published, not lost.
   void invalidate_gpu_caches();
 
   /// @brief Coarse writeback+invalidate of the GPU data caches (L1 K$/V$ + L2).
   /// @details Like invalidate_gpu_caches(), but publishes dirty data instead of
-  /// dropping it. Ordering is load-bearing: dirty scalar L1 (K$) lines are
-  /// written back into L2 first, then L2 is flushed to backing, so a dirty K$ or
-  /// L2 line overlapping an SDMA destination reaches backing before the direct
-  /// SDMA write (which runs after this returns) rather than being written out
-  /// over it by a later K$/L2 flush. Each line is written back under its own
-  /// owning vmid. Vector L1 (V$) is write-through, so it only needs invalidation.
+  /// dropping it. Scalar and vector L1 are write-through and only need
+  /// invalidation. Dirty L2 data is flushed to backing before the direct SDMA
+  /// write (which runs after this returns), so a later L2 flush cannot overwrite
+  /// the direct result. Each L2 line is written back under its owning VMID.
   void flush_gpu_caches();
 
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and create a DispatchEntry.
@@ -341,6 +350,13 @@ private:
   void write_gpu_block(uint64_t va, const void *src, size_t size, uint32_t vmid);
 
   void stop_doorbell_monitor();
+  /// @brief Start the doorbell monitor if one is not already running, reaping a
+  /// previously self-exited thread first. Serialized by doorbell_thread_mutex_.
+  /// @details Caller MUST NOT hold hw_queue_mutex_: this may join a monitor that
+  /// self-exited, and that monitor's final self-exit check takes hw_queue_mutex_,
+  /// so joining under it would deadlock. This also fixes the lock order to
+  /// doorbell_thread_mutex_ -> hw_queue_mutex_ (never the reverse).
+  void ensure_doorbell_monitor();
   bool scan_doorbells();
 
   InterruptCallback interrupt_cb_;
@@ -362,6 +378,20 @@ private:
   std::atomic<bool> stall_pending_{false};
 
   void doorbell_poll_loop(std::stop_token stop);
+
+  // The doorbell monitor's lifecycle is serialized by its OWN mutex, deliberately
+  // distinct from hw_queue_mutex_. An empty monitor exits itself when it observes
+  // the last host-accessible queue gone (so unregister_queue never has to join a
+  // thread that may be mid-iteration inside engine/event code — that join could
+  // deadlock, which is why queue destruction only removes queue state). A later
+  // register_queue reaps the already-exited jthread and starts a fresh one. Taking
+  // doorbell_thread_mutex_ (never nested under hw_queue_mutex_) keeps concurrent
+  // register/unregister from racing on doorbell_thread_ and doorbell_running_.
+  std::mutex doorbell_thread_mutex_;
+  // True while a monitor is running or about to run. The monitor clears it under
+  // doorbell_thread_mutex_ just before returning, so ensure_doorbell_monitor() can
+  // tell a live monitor from a self-exited one that still needs joining.
+  bool doorbell_running_ = false;
   std::jthread doorbell_thread_;
 };
 

@@ -33,6 +33,18 @@ DbtExecutionBackend execution_backend_from_fb(fb::DbtExecutionBackend backend) {
   throw std::runtime_error("dbt_guest.execution_backend is invalid");
 }
 
+DbtSiliconRevision silicon_revision_from_fb(fb::DbtSiliconRevision revision) {
+  switch (revision) {
+  case fb::DbtSiliconRevision_unspecified:
+    return DbtSiliconRevision::Unspecified;
+  case fb::DbtSiliconRevision_gfx1250_a0:
+    return DbtSiliconRevision::Gfx1250A0;
+  case fb::DbtSiliconRevision_gfx1250_b0:
+    return DbtSiliconRevision::Gfx1250B0;
+  }
+  throw std::runtime_error("dbt_guest silicon revision is invalid");
+}
+
 void validate_guest_device_geometry(const KfdDeviceConfig &device) {
   if (!device.present || device.simd_count == 0)
     return;
@@ -97,6 +109,8 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
   config.log_level = guest->log_level();
   config.signal_backtrace = guest->signal_backtrace();
   config.guest_device = kfd_device_from_fb(guest->guest_device());
+  config.guest_revision = silicon_revision_from_fb(guest->guest_revision());
+  config.host_revision = silicon_revision_from_fb(guest->host_revision());
   validate_guest_device_geometry(config.guest_device);
   if (config.enabled && config.host.backend == DbtExecutionBackend::Hardware &&
       !config.host.simulator_config_path.empty())

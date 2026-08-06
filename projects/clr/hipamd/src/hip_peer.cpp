@@ -7,23 +7,10 @@
 #include <hip/hip_runtime.h>
 
 #include "hip_internal.hpp"
-#include "hip_platform.hpp"
 #include "hip_conversions.hpp"
 
 
 namespace hip {
-
-namespace {
-
-hipError_t InitManagedVarDevicePtrForPeerDevices(int srcDevice, int dstDevice) {
-  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(dstDevice);
-  if (srcDevice != dstDevice) {
-    IHIP_INIT_MANAGED_VAR_DEVICE_PTR(srcDevice);
-  }
-  return hipSuccess;
-}
-
-}  // namespace
 
 hipError_t canAccessPeer(int* canAccessPeer, int deviceId, int peerDeviceId) {
   amd::Device* device = nullptr;
@@ -195,8 +182,6 @@ hipError_t hipMemcpyPeer(void* dst, int dstDevice, const void* src, int srcDevic
     HIP_RETURN(hipErrorInvalidDevice);
   }
 
-  HIP_RETURN_ONFAIL(InitManagedVarDevicePtrForPeerDevices(srcDevice, dstDevice));
-
   HIP_RETURN(
       ihipMemcpy(dst, src, sizeBytes, hipMemcpyDeviceToDevice, *hip::getNullStream(), true, false));
 }
@@ -214,9 +199,6 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int src
   if (hip_stream == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-
-  HIP_RETURN_ONFAIL(InitManagedVarDevicePtrForPeerDevices(srcDevice, dstDevice));
-
   HIP_RETURN(ihipMemcpy(dst, src, sizeBytes, hipMemcpyDeviceToDevice, *hip_stream, true, true));
 }
 
@@ -229,9 +211,6 @@ hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p) {
       p->dstDevice >= static_cast<int>(g_devices.size()) || p->srcDevice < 0 || p->dstDevice < 0) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
-
-  HIP_RETURN_ONFAIL(InitManagedVarDevicePtrForPeerDevices(p->srcDevice, p->dstDevice));
-
   hipMemcpy3DParms copyParms = getMemcpy3DParms(*p);
   HIP_RETURN(ihipMemcpy3D(&copyParms, nullptr));
 }
@@ -251,8 +230,6 @@ hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream) {
   if (hip_stream == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-
-  HIP_RETURN_ONFAIL(InitManagedVarDevicePtrForPeerDevices(p->srcDevice, p->dstDevice));
 
   hipMemcpy3DParms copyParms = getMemcpy3DParms(*p);
   HIP_RETURN(ihipMemcpy3D(&copyParms, stream, true));

@@ -7,9 +7,10 @@ rj_add_object_library(rocjitsu_kmd
     libc_passthrough.cpp
     linux_kfd.cpp
     remote_driver.cpp
+    rj_daemon.cpp
     simulated_kfd.cpp
     sysfs.cpp
     transport.cpp
 )
 target_include_directories(rocjitsu_kmd PRIVATE ${GENERATED_DIR})
-target_link_libraries(rocjitsu_kmd PUBLIC ${CMAKE_DL_LIBS})
+target_link_libraries(rocjitsu_kmd PUBLIC ${CMAKE_DL_LIBS} PRIVATE util_headers)

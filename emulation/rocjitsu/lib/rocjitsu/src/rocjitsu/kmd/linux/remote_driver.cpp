@@ -424,21 +424,21 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     switch (request) {
     case AMDKFD_IOC_WAIT_EVENTS: {
       auto *wait_args = reinterpret_cast<kfd_ioctl_wait_events_args *>(args_base);
-      size_t inline_size = wait_args->num_events * sizeof(kfd_event_data);
+      const auto *events = reinterpret_cast<const void *>(wait_args->events_ptr);
+      const size_t inline_size = wait_args->num_events * sizeof(kfd_event_data);
       size_t inline_offset = buf.size();
       buf.resize(inline_offset + inline_size);
-      std::memcpy(buf.data() + inline_offset, reinterpret_cast<const void *>(wait_args->events_ptr),
-                  inline_size);
+      std::memcpy(buf.data() + inline_offset, events, inline_size);
       break;
     }
     case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
     case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU: {
       auto *map_args = reinterpret_cast<kfd_ioctl_map_memory_to_gpu_args *>(args_base);
-      size_t inline_size = map_args->n_devices * sizeof(uint32_t);
+      const auto *device_ids = reinterpret_cast<const void *>(map_args->device_ids_array_ptr);
+      const size_t inline_size = map_args->n_devices * sizeof(uint32_t);
       size_t inline_offset = buf.size();
       buf.resize(inline_offset + inline_size);
-      std::memcpy(buf.data() + inline_offset,
-                  reinterpret_cast<const void *>(map_args->device_ids_array_ptr), inline_size);
+      std::memcpy(buf.data() + inline_offset, device_ids, inline_size);
       break;
     }
     case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW: {

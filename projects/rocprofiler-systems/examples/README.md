@@ -53,6 +53,7 @@ This directory contains example applications demonstrating various profiling sce
 | --------- | ------------- | -------------- |
 | [jpegdecode](jpegdecode/) | Batch JPEG decoding performance benchmark using rocJPEG | HIP, rocJPEG |
 | [videodecode](videodecode/) | Batch video decoding benchmark using ROCDecode with VCN hardware | HIP, ROCDecode, FFmpeg |
+| [hipfile](hipfile/) | hipFILE (GPU-direct storage) API tracing demo | HIP, hipFILE, ROCProfiler-SDK 1.3.5+ |
 
 ### HPC
 

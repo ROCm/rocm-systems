@@ -126,6 +126,7 @@ class LoweringContext:
     arch_name: str = ''
     vector_sgpr_once: bool = False
     clear_false_lane_mask_writes: bool = True
+    mode_sensitive_f16_dst: bool = True
 
 
 _INFIX_OPS: dict[SemaNodeKind, str] = {
@@ -985,9 +986,16 @@ def _lower_dst_write(
 
     needs_bitcast = _rhs_is_float_expr(rhs_node)
     lhs_ty = _get_operand_dtype(lhs_node)
+    binding = ctx.operand_map.dst(idx) if ctx.operand_map else None
     if lhs_ty and lhs_ty.base == 'F' and lhs_ty.size == 16:
-        rhs = f'util::f32_to_f16({rhs})'
+        if ctx.mode_sensitive_f16_dst:
+            rhs = f'util::f32_to_f16_mode({rhs}, wf.fp16_ovfl())'
+        else:
+            rhs = f'util::f32_to_f16({rhs})'
     elif lhs_ty and lhs_ty.base == 'BF' and lhs_ty.size == 16:
+        # Explicit data-conversion generators use the mode-aware BF16 helpers.
+        # Generic BF16 semantic writes cover arithmetic forms where current ISA
+        # prose does not define FP16_OVFL clamping.
         rhs = f'util::f32_to_bf16({rhs})'
     elif lhs_ty and lhs_ty.size == 16 and lhs_ty.base in ('I', 'U'):
         cpp = lhs_ty.cpp_type
@@ -1000,10 +1008,6 @@ def _lower_dst_write(
         rhs = f'std::bit_cast<uint32_t>({rhs})'
     elif needs_bitcast == 64:
         rhs = f'std::bit_cast<uint64_t>({rhs})'
-
-    binding = None
-    if ctx.operand_map:
-        binding = ctx.operand_map.dst(idx)
 
     if binding:
         name = binding.name
@@ -1226,13 +1230,15 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' if (std::isnan(s) || s < 0.0f) return 0u;'
     ' if (s >= 4294967296.0f) return UINT32_MAX;'
     ' return static_cast<uint32_t>(s); }}()',
-    'cvt_f16_f32': 'util::f32_to_f16(std::bit_cast<float>(static_cast<uint32_t>({0})))',
+    # Explicit F32->F16 conversion consumes MODE.FP16_OVFL even on scalar paths;
+    # generic generated scalar F16 arithmetic is gated out in CodeGenerator.
+    'cvt_f16_f32': 'util::f32_to_f16_mode(std::bit_cast<float>(static_cast<uint32_t>({0})), wf.fp16_ovfl())',
     'cvt_f32_f16': 'std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>({0})))',
     'cvt_f32_bf16': 'std::bit_cast<uint32_t>(util::bf16_to_f32(static_cast<uint16_t>({0})))',
     'cvt_f32_fp8': 'std::bit_cast<uint32_t>(util::fp8_e4m3_to_f32(static_cast<uint8_t>({0})))',
     'cvt_f32_bf8': 'std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0})))',
-    'cvt_f16_fp8': 'static_cast<uint32_t>(util::f32_to_f16(util::fp8_e4m3_to_f32(static_cast<uint8_t>({0}))))',
-    'cvt_f16_bf8': 'static_cast<uint32_t>(util::f32_to_f16(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0}))))',
+    'cvt_f16_fp8': 'static_cast<uint32_t>(util::f32_to_f16_mode(util::fp8_e4m3_to_f32(static_cast<uint8_t>({0})), wf.fp16_ovfl()))',
+    'cvt_f16_bf8': 'static_cast<uint32_t>(util::f32_to_f16_mode(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0})), wf.fp16_ovfl()))',
     'cvt_f64_i32': 'std::bit_cast<uint64_t>(static_cast<double>(static_cast<int32_t>({0})))',
     'cvt_f64_u32': 'std::bit_cast<uint64_t>(static_cast<double>({0}))',
     'cvt_i32_f64': '[&]() -> uint32_t {{ double s = std::bit_cast<double>(static_cast<uint64_t>({0}));'
@@ -1246,8 +1252,8 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' return static_cast<uint32_t>(s); }}()',
     'cvt_f64_f32': 'std::bit_cast<uint64_t>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>({0}))))',
     'cvt_f32_f64': 'std::bit_cast<uint32_t>(static_cast<float>(std::bit_cast<double>(static_cast<uint64_t>({0}))))',
-    'cvt_f16_u16': 'util::f32_to_f16(static_cast<float>(static_cast<uint16_t>({0})))',
-    'cvt_f16_i16': 'util::f32_to_f16(static_cast<float>(static_cast<int16_t>({0} & 0xFFFF)))',
+    'cvt_f16_u16': 'util::f32_to_f16_mode(static_cast<float>(static_cast<uint16_t>({0})), wf.fp16_ovfl())',
+    'cvt_f16_i16': 'util::f32_to_f16_mode(static_cast<float>(static_cast<int16_t>({0} & 0xFFFF)), wf.fp16_ovfl())',
     'cvt_u16_f16': '[&]() -> uint32_t {{ float s = util::f16_to_f32(static_cast<uint16_t>({0}));'
     ' if (std::isnan(s) || s < 0.0f) return 0u;'
     ' if (s >= 65536.0f) return static_cast<uint32_t>(UINT16_MAX);'
@@ -1716,9 +1722,9 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
             )
         if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f16_fp8':
             return (
-                f'static_cast<uint32_t>(util::f32_to_f16(({ctx.fp8_decode_e5m3_select}) ? '
+                f'static_cast<uint32_t>(util::f32_to_f16_mode(({ctx.fp8_decode_e5m3_select}) ? '
                 f'util::fp8_e5m3_to_f32(static_cast<uint8_t>({arg})) : '
-                f'{fp8_decode_fn}(static_cast<uint8_t>({arg}))))'
+                f'{fp8_decode_fn}(static_cast<uint8_t>({arg})), wf.fp16_ovfl()))'
             )
         if callee == 'cvt_f32_fp8':
             return (
@@ -1729,8 +1735,8 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
                 f'std::bit_cast<uint32_t>({bf8_decode_fn}(static_cast<uint8_t>({arg})))'
             )
         if callee == 'cvt_f16_fp8':
-            return f'static_cast<uint32_t>(util::f32_to_f16({fp8_decode_fn}(static_cast<uint8_t>({arg}))))'
-        return f'static_cast<uint32_t>(util::f32_to_f16({bf8_decode_fn}(static_cast<uint8_t>({arg}))))'
+            return f'static_cast<uint32_t>(util::f32_to_f16_mode({fp8_decode_fn}(static_cast<uint8_t>({arg})), wf.fp16_ovfl()))'
+        return f'static_cast<uint32_t>(util::f32_to_f16_mode({bf8_decode_fn}(static_cast<uint8_t>({arg})), wf.fp16_ovfl()))'
 
     if len(args) == 1 and callee in _INLINE_UNARY_OPS:
         return _INLINE_UNARY_OPS[callee].format(args[0])

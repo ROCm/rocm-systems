@@ -560,6 +560,47 @@ TEST(UtilSimd, F32ToF16_VectorMatchesScalar_Sweep) {
   }
 }
 
+TEST(UtilSimd, F32ToF16Rtz_VectorMatchesScalar_Sweep) {
+  SKIP_IF_NO_SIMD();
+  using V = util::native<float>;
+  constexpr std::size_t W = util::native_width_v<float>;
+  for (uint64_t u = 0; u < 0x100000000ULL; u += 997ULL * W) {
+    alignas(V) float in[W];
+    for (std::size_t i = 0; i < W; ++i)
+      in[i] = std::bit_cast<float>(static_cast<uint32_t>(u + 997ULL * i));
+    V v(in, util::stdx::element_aligned);
+    util::native<uint32_t> rv = util::f32_to_f16_rtz_simd(v);
+    alignas(util::native<uint32_t>) uint32_t out[W];
+    rv.copy_to(out, util::stdx::element_aligned);
+    for (std::size_t i = 0; i < W; ++i) {
+      const uint32_t s = util::f32_to_f16_rtz(in[i]);
+      ASSERT_EQ(s, out[i]) << "f32=0x" << std::hex << std::bit_cast<uint32_t>(in[i]);
+    }
+  }
+}
+
+TEST(UtilSimd, F32ToF16Mode_VectorMatchesScalar_Sweep) {
+  SKIP_IF_NO_SIMD();
+  using V = util::native<float>;
+  constexpr std::size_t W = util::native_width_v<float>;
+  for (bool fp16_ovfl : {false, true}) {
+    for (uint64_t u = 0; u < 0x100000000ULL; u += 997ULL * W) {
+      alignas(V) float in[W];
+      for (std::size_t i = 0; i < W; ++i)
+        in[i] = std::bit_cast<float>(static_cast<uint32_t>(u + 997ULL * i));
+      V v(in, util::stdx::element_aligned);
+      util::native<uint32_t> rv = util::f32_to_f16_mode_simd(v, fp16_ovfl);
+      alignas(util::native<uint32_t>) uint32_t out[W];
+      rv.copy_to(out, util::stdx::element_aligned);
+      for (std::size_t i = 0; i < W; ++i) {
+        const uint32_t s = util::f32_to_f16_mode(in[i], fp16_ovfl);
+        ASSERT_EQ(s, out[i]) << "fp16_ovfl=" << fp16_ovfl << " f32=0x" << std::hex
+                             << std::bit_cast<uint32_t>(in[i]);
+      }
+    }
+  }
+}
+
 // Guard for util::flush_denorm_f32_simd: denormals flush to sign-preserving
 // zero (FTZ); every other class (±0, normal, ±Inf, NaN payloads) passes through
 // bit-for-bit. The f32 rcp/rsq/exp/log SIMD ports funnel through this helper.

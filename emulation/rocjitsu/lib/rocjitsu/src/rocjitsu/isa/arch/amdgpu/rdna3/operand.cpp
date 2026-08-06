@@ -564,6 +564,16 @@ std::string Operand::name() const {
 std::optional<RegisterRef> Operand::to_register_ref() const {
   if (size_bits_ == 0)
     return std::nullopt;
+  // A fieldless operand (no MR ISA encoding field: a hardwired
+  // register/side effect like VCC/EXEC/SCC, or the fieldless image
+  // address) never denotes a def-use-tracked register: its
+  // encoding value is a fixed placeholder, not a decoded index, so
+  // mapping it to a RegisterRef would fabricate a spurious def/use.
+  // Making this explicit keeps every fieldless operand inert by
+  // design (not by per-type coincidence) if it is placed in the
+  // operand arrays.
+  if (fieldless_)
+    return std::nullopt;
   // Liveness tracks operands as contiguous 32-bit register lanes.
   const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);
   if (auto packed =
@@ -1035,6 +1045,12 @@ void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32
 uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
   if (delegate())
     return amdgpu::RegisterAccess(wf).read_scalar(*delegate());
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!reads_value())
+    return 0u;
   if (has_literal64_)
     return static_cast<uint32_t>(literal64_value_);
   if (is_immediate_type(opr_type_))
@@ -1045,11 +1061,20 @@ uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
 uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
   if (delegate())
     return amdgpu::RegisterAccess(wf).read_lane(*delegate(), lane);
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!reads_value())
+    return 0u;
   int ev = encoding_value_;
   if (auto packed = packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, ev)) {
     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, false) : off;
-    uint32_t raw = amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane);
+    uint8_t byte_mask = packed->shift ? rocjitsu::ExecutionPlugin::kHighHalfByteMask
+                                      : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
+    uint32_t raw =
+        amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane, byte_mask);
     return (raw >> packed->shift) & 0xffffu;
   }
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
@@ -1064,19 +1089,33 @@ uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
 }
 
 void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!is_writable())
+    return;
   resolve_dst_write(wf, encoding_value_, val);
 }
 
 void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!is_writable())
+    return;
   if (auto packed =
           packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, true) : off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
-    uint32_t old = amdgpu::RegisterAccess(wf.cu()).read_vgpr(idx, lane);
+    uint8_t write_byte_mask = packed->shift ? rocjitsu::ExecutionPlugin::kHighHalfByteMask
+                                            : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
+    uint32_t old = amdgpu::RegisterAccess(wf.cu()).read_vgpr_storage(idx, lane);
     uint32_t keep_mask = packed->shift ? 0x0000ffffu : 0xffff0000u;
     uint32_t merged = (old & keep_mask) | ((val & 0xffffu) << packed->shift);
-    amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, merged);
+    amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, merged, write_byte_mask);
     return;
   }
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, encoding_value_)) {
@@ -1090,6 +1129,12 @@ void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) con
 uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {
   if (delegate())
     return amdgpu::RegisterAccess(wf).read_lane64(*delegate(), lane);
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!reads_value())
+    return 0;
   int ev = encoding_value_;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
@@ -1104,6 +1149,12 @@ uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const 
 }
 
 void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!is_writable())
+    return;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, encoding_value_)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
@@ -1114,6 +1165,12 @@ void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) c
 }
 
 uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!reads_value())
+    return 0;
   if (has_literal64_)
     return literal64_value_;
   if (is_immediate_type(opr_type_))
@@ -1122,6 +1179,12 @@ uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
 }
 
 void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!is_writable())
+    return;
   resolve_dst_write64(wf, encoding_value_, val);
 }
 

@@ -17,13 +17,14 @@
 namespace rocjitsu {
 
 class Instruction;
+class Gfx1250VgprMsbAnalysis;
 
 /// @brief Registers read and written by one decoded instruction.
 class InstDefUse {
 public:
   /// @brief Extract explicit operand register refs.
   /// @param inst Decoded instruction whose operands have stable lifetimes.
-  InstDefUse(const Instruction &inst);
+  InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vgpr_msb = nullptr);
 
   RegisterSet defs;                        ///< Registers overwritten by the instruction.
   RegisterSet uses;                        ///< Registers read before the instruction writes defs.

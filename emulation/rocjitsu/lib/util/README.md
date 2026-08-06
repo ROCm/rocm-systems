@@ -34,6 +34,7 @@ compiled sources.
 | `arena_alloc.h` | Fixed-size block pool allocator with free-list. `ArenaAlloc<BlockSize, NumBlocks, BlockAlign>` provides O(1) alloc/dealloc with global-allocator fallback. |
 | `spinlock.h` | TTAS spinlock optimized for sub-microsecond critical sections. Uses C++20 `atomic::wait()` with ThreadSanitizer annotations. |
 | `intrusive_list.h` | Bidirectional intrusive linked list with optional parent-pointer tracking. `IntrusiveList<T>` and `IListNode<T>` with O(1) insert/erase. |
+| `unique_handle.h` | Move-only RAII ownership for POSIX file descriptors, Win32 handles, and custom handle traits. |
 
 ### Diagnostics
 
@@ -58,5 +59,6 @@ All headers are under `lib/util/include/util/` and can be included as:
 #include "util/bit.h"
 ```
 
-The library links as `util` in CMake. Both `rocjitsu` and `simdojo`
-depend on it.
+Header-only consumers link `util_headers` in CMake. The `util` target links
+`util_headers` publicly and adds the small compiled SIMD implementation used by
+rocjitsu and simdojo.

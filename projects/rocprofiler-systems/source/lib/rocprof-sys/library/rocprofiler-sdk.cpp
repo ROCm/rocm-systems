@@ -1420,6 +1420,22 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 break;
             }
 #endif
+#if(ROCPROFILER_VERSION >= 10304)
+            case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+            {
+                tool_tracing_callback_start(category::rocm_rocshmem_api{}, record,
+                                            user_data, ts);
+                break;
+            }
+#endif
+#if(ROCPROFILER_VERSION >= 10305)
+            case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
+            {
+                tool_tracing_callback_start(category::rocm_hipfile_api{}, record,
+                                            user_data, ts);
+                break;
+            }
+#endif
             case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
             {
                 tool_tracing_callback_start(category::rocm_rccl_api{}, record, user_data,
@@ -1503,6 +1519,22 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
             {
                 tool_tracing_callback_stop(category::rocm_rocjpeg_api{}, record,
+                                           user_data, ts, _bt_data);
+                break;
+            }
+#endif
+#if(ROCPROFILER_VERSION >= 10304)
+            case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+            {
+                tool_tracing_callback_stop(category::rocm_rocshmem_api{}, record,
+                                           user_data, ts, _bt_data);
+                break;
+            }
+#endif
+#if(ROCPROFILER_VERSION >= 10305)
+            case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
+            {
+                tool_tracing_callback_stop(category::rocm_hipfile_api{}, record,
                                            user_data, ts, _bt_data);
                 break;
             }
@@ -2243,10 +2275,15 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
                 ::std::abort();
             }
 
-            auto _dev_id = static_cast<std::uint32_t>(_agent->device_id);
+            auto        _dev_id = static_cast<std::uint32_t>(_agent->device_id);
+            const auto& _agent_mgr_entry =
+                get_agent_manager_instance().get_agent_by_handle(_agent_id.handle);
+            auto _dev_type_index =
+                static_cast<std::uint32_t>(_agent_mgr_entry.device_type_index);
 
             _agent_counter_storage->at(_agent_id).emplace(
-                itr.first, counter_storage{ tool_data, _dev_id, 0, _info->name });
+                itr.first,
+                counter_storage{ tool_data, _dev_id, _dev_type_index, 0, _info->name });
         }
 
         auto _event = counter_event{ counter_dispatch_record{
@@ -2482,6 +2519,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 #endif
 #if(ROCPROFILER_VERSION >= 700)
             ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
+#endif
+#if(ROCPROFILER_VERSION >= 10304)
+            ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,
+#endif
+#if(ROCPROFILER_VERSION >= 10305)
+            ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,
 #endif
         })
     {

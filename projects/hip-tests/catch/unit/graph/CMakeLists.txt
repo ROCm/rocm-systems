@@ -64,6 +64,7 @@ set(TEST_SRC
   hipGraphExecBatchMemOpNodeSetParams.cc
   hipGraphAddBatchMemOpNode.cc
   hipGraphBatchMemOpNodeSetParams.cc
+  hipGraphBatchMemOpNodeCapture.cc
   hipDrvGraphExecMemcpyNodeSetParams.cc
   hipDrvGraphAddMemFreeNode.cc
   hipGraphAddNodeConcurrent.cc)

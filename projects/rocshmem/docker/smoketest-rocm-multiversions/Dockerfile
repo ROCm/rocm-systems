@@ -80,7 +80,7 @@ RUN wget -qO- https://repo.amd.com/rocm/packages/gpg/rocm.gpg \
 ###############################################################################
 # UCX (shared across all ROCm versions, built against the newest)
 ###############################################################################
-ARG UCX_COMMIT=18770fdc1c3b5de202d14a088a14b734d2c4bbf3
+ARG UCX_COMMIT=b6a9d47fccce849c28111f05a7fa8f1c930ff17d
 ARG UCX_INSTALL=/opt/ucx
 RUN git clone https://github.com/ROCm/ucx.git /tmp/ucx \
  && cd /tmp/ucx && git checkout ${UCX_COMMIT} \

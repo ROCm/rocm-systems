@@ -53,6 +53,7 @@
 #include <mutex>
 #include <new>
 #include <optional>
+#include <set>
 #include <shared_mutex>
 #include <signal.h>
 #include <span>
@@ -108,6 +109,7 @@ using rocjitsu::make_kernarg_extension_layout;
 using rocjitsu::parse_kernarg_extension_metadata;
 using rocjitsu::parse_virtual_lds_metadata;
 using rocjitsu::plan_virtual_lds_dispatch;
+using rocjitsu::ProcessorRevision;
 using rocjitsu::SHN_UNDEF;
 using rocjitsu::SHT_NULL;
 using rocjitsu::SHT_STRTAB;
@@ -204,6 +206,11 @@ struct HookConfig {
   uint32_t host_gpu_id = 0;
   int log_level = kLogDisabled;
   bool signal_backtrace = false;
+  /// @brief Guest and host revisions from the DBT guest config. gfx1250 A0 and
+  /// B0 share an ELF machine ID, so these select the same-target translation
+  /// profile.
+  ProcessorRevision guest_revision = ProcessorRevision::Unspecified;
+  ProcessorRevision host_revision = ProcessorRevision::Unspecified;
 };
 
 /// @brief Parse a config ISA name or architecture alias into a DBT target.
@@ -221,6 +228,20 @@ struct HookConfig {
       return target;
   }
   return std::nullopt;
+}
+
+/// @brief Map a config silicon revision to the DBT translator revision.
+[[nodiscard]] ProcessorRevision
+processor_revision_from_config(rocjitsu::config::DbtSiliconRevision revision) {
+  switch (revision) {
+  case rocjitsu::config::DbtSiliconRevision::Unspecified:
+    return ProcessorRevision::Unspecified;
+  case rocjitsu::config::DbtSiliconRevision::Gfx1250A0:
+    return ProcessorRevision::Gfx1250A0;
+  case rocjitsu::config::DbtSiliconRevision::Gfx1250B0:
+    return ProcessorRevision::Gfx1250B0;
+  }
+  return ProcessorRevision::Unspecified;
 }
 
 /// @brief Clamp a user-provided hook log level to the supported range.
@@ -353,6 +374,8 @@ void restore_signal_backtrace_handlers() {
   config.host_gpu_id = dbt_guest->host.gpu_id;
   config.log_level = clamp_log_level(dbt_guest->log_level);
   config.signal_backtrace = dbt_guest->signal_backtrace;
+  config.guest_revision = processor_revision_from_config(dbt_guest->guest_revision);
+  config.host_revision = processor_revision_from_config(dbt_guest->host_revision);
   return config;
 }
 
@@ -520,6 +543,10 @@ void trace_virtual_lds_kernarg(uint64_t packet_id, const void *kernarg, size_t s
     return "expand-missing";
   case DiagnosticKind::ExpandFailed:
     return "expand-failed";
+  case DiagnosticKind::DataOnly:
+    return "data-only";
+  case DiagnosticKind::NothingToTranslate:
+    return "nothing-to-translate";
   case DiagnosticKind::ResourceLimit:
     return "resource-limit";
   case DiagnosticKind::KernelSkipped:
@@ -2286,17 +2313,36 @@ public:
       return;
 
     const uint64_t packet_id = static_cast<uint64_t>(value);
-    if (state.queue->type == HSA_QUEUE_TYPE_SINGLE && packet_id >= state.next_packet_id &&
-        packet_id - state.next_packet_id < state.queue->size) {
+    // A producer (single- OR multi-producer) can reserve and publish several
+    // consecutive packets and then ring once with the final packet ID. Rewriting
+    // only the doorbell-named packet would let an earlier still-unrewritten
+    // predecessor (e.g. a virtual-LDS dispatch at next_packet_id) reach the CP
+    // unrevised, and advancing next_packet_id past it would make the scanner skip
+    // it too. So rewrite the whole newly-published range [next_packet_id,
+    // packet_id]. note_packet_ready advances the contiguous frontier and remembers
+    // ready-but-non-contiguous successors, so an out-of-order producer that leaves
+    // an unready hole does not advance the cursor past it -- but once the hole
+    // closes the cursor catches up across every already-ready successor instead of
+    // stranding below the ready suffix. The range must fit the ring to bound the
+    // scan.
+    if (packet_id >= state.next_packet_id && packet_id - state.next_packet_id < state.queue->size) {
       rewrite_packet_range(state, state.next_packet_id, packet_id + 1, true);
       return;
     }
 
-    // Multi queues may ring arbitrary packet IDs. Also handle unusual single
-    // queue jumps by at least rewriting the packet named by the doorbell value.
+    // Doorbell ID below the frontier (a lagging out-of-order ring) or a jump
+    // larger than the ring: rewrite at least the named packet. The background
+    // scanner covers any packets between the frontier and this one.
     const bool ready = rewrite_packet(state, packet_id);
-    if (ready && packet_id >= state.next_packet_id)
+    if (ready && packet_id >= state.next_packet_id) {
+      // A jump larger than the ring means the intervening packets have wrapped
+      // (their slots reused), so step the cursor past this packet directly and
+      // discard any now-stale ready_ahead entries below the new frontier rather
+      // than trying to make the cursor contiguous across the wrapped gap.
       state.next_packet_id = packet_id + 1;
+      state.ready_ahead.erase(state.ready_ahead.begin(),
+                              state.ready_ahead.lower_bound(state.next_packet_id));
+    }
   }
 
   /// @brief Release all tracked queues during HSA tool unload.
@@ -2400,6 +2446,13 @@ private:
     hsa_agent_t host_agent{};
     uint64_t doorbell_signal = 0;
     uint64_t next_packet_id = 0;
+    // Packet IDs observed ready at or beyond next_packet_id but not yet contiguous
+    // with the cursor (an out-of-order producer rang a later packet while an
+    // earlier hole was still INVALID). When the hole closes, note_packet_ready
+    // drains the contiguous run from here so the cursor catches up across every
+    // already-ready successor instead of stranding below the ready suffix. Bounded
+    // by the ring size: an id leaves the set as soon as the cursor passes it.
+    std::set<uint64_t> ready_ahead;
     uint32_t host_lds_bytes = 0;
     bool uses_packet_interceptor = false;
     // True only for the queue running guest work on the guest's execution host
@@ -2541,8 +2594,29 @@ private:
   }
 
   static void note_packet_ready(QueueState &state, uint64_t packet_id, bool ready) {
-    if (ready && packet_id == state.next_packet_id)
+    // Only packets at or beyond the contiguous cursor can advance it; a ready
+    // packet below it was already accounted for.
+    if (!ready || packet_id < state.next_packet_id)
+      return;
+
+    // Remember this packet as ready even if it is not the one the cursor is
+    // waiting for. An out-of-order producer can ring a later packet while an
+    // earlier hole is still INVALID, so the cursor must be able to catch up across
+    // this successor once the hole closes -- otherwise it strands below the
+    // already-ready suffix and a later doorbell range can skip a packet.
+    if (packet_id != state.next_packet_id) {
+      state.ready_ahead.insert(packet_id);
+      return;
+    }
+
+    // The cursor's packet is ready: advance across it and every contiguous
+    // successor already observed ready in a prior doorbell.
+    ++state.next_packet_id;
+    auto it = state.ready_ahead.begin();
+    while (it != state.ready_ahead.end() && *it == state.next_packet_id) {
       ++state.next_packet_id;
+      it = state.ready_ahead.erase(it);
+    }
   }
 
   [[nodiscard]] static VirtualLdsDispatchState
@@ -3787,7 +3861,23 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return HSA_STATUS_ERROR;
   }
 
-  if (source_target.arch == config->target.arch && source_target.mach == config->target.mach) {
+  // gfx1250 A0 and B0 share an ELF machine ID, so a same-arch/same-mach match
+  // does not identify the revision. When both revisions are configured, use the
+  // selected same-ISA translation profile. Otherwise fail closed.
+  const bool gfx1250_same_target = source_target.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                   config->target.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                   source_target.mach == config->target.mach;
+  const bool have_gfx1250_revisions = config->guest_revision != ProcessorRevision::Unspecified &&
+                                      config->host_revision != ProcessorRevision::Unspecified;
+  if (gfx1250_same_target && !have_gfx1250_revisions) {
+    std::fprintf(stderr,
+                 "[rocjitsu-hooks] gfx1250 same-target load requires guest and host silicon "
+                 "revisions in the DBT guest config; failing load\n");
+    return HSA_STATUS_ERROR;
+  }
+
+  if (!gfx1250_same_target && source_target.arch == config->target.arch &&
+      source_target.mach == config->target.mach) {
     log_message(kLogInfo,
                 "source target %s arch %s already matches requested target; passing through",
                 elf_mach_name(source_target.mach), arch_name(source_target.arch));
@@ -3811,7 +3901,7 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
         original_load(executable, load_agent, code_object_reader, options, loaded_code_object);
     log_message(kLogVerbose, "load_agent_code_object already-target status=%d",
                 static_cast<int>(status));
-    if (status == HSA_STATUS_SUCCESS && guest_load)
+    if (status == HSA_STATUS_SUCCESS)
       ExecutableAgentRegistry::instance().record(executable, agent, load_agent);
     if (status == HSA_STATUS_SUCCESS) {
       const hsa_loaded_code_object_t loaded =
@@ -3828,6 +3918,10 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   // an independent kernel fails translation; the skipped-kernel diagnostic names
   // the symbol that is redirected to a target no-op stub.
   translator_options.skip_failed_kernels = true;
+  // gfx1250 A0 and B0 share a machine ID. Select the same-ISA translation
+  // profile from the configured revisions.
+  translator_options.input_revision = config->guest_revision;
+  translator_options.output_revision = config->host_revision;
 
   std::vector<uint8_t> translated_elf;
   log_message(kLogInfo, "translating reader=%llu %s/%s -> %s/%s mach=0x%x",
@@ -3841,9 +3935,19 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return HSA_STATUS_ERROR;
   }
 
-  BinaryTranslator translator(source_target.arch, config->target.arch, config->target.mach,
-                              translator_options);
-  rocjitsu::TranslatedCodeObject translated = translator.translate(source_object);
+  rocjitsu::TranslatedCodeObject translated;
+  try {
+    BinaryTranslator translator(source_target.arch, config->target.arch, config->target.mach,
+                                translator_options);
+    translated = translator.translate(source_object);
+  } catch (const std::exception &error) {
+    std::fprintf(stderr, "[rocjitsu-hooks] code-object translation threw an exception: %s\n",
+                 error.what());
+    return HSA_STATUS_ERROR;
+  } catch (...) {
+    std::fprintf(stderr, "[rocjitsu-hooks] code-object translation threw an unknown exception\n");
+    return HSA_STATUS_ERROR;
+  }
 
   print_diagnostics(stderr, translated.diagnostics, config->log_level > kLogDisabled);
   if (translated.elf_bytes.empty() || has_error_diagnostic(translated.diagnostics)) {
@@ -3851,10 +3955,9 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return HSA_STATUS_ERROR;
   }
 
-  // A skipped kernel is redirected to an s_trap; s_endpgm stub. Because a
-  // no-handler s_trap falls through (it is not a program terminator), dispatching
-  // that stub would run the s_endpgm and COMPLETE NORMALLY — the application would
-  // observe success with stale/garbage output instead of a failure. There is no
+  // A skipped kernel is redirected to an s_endpgm stub. Dispatching that stub
+  // would COMPLETE NORMALLY without producing the kernel's outputs, so the application
+  // would observe success with stale/garbage output instead of a failure. There is no
   // safe way to let such a kernel be dispatched, so fail the whole code-object
   // load rather than hand back an executable that can silently produce wrong
   // results. (This trades the "keep the module loadable when an unused kernel
@@ -3902,7 +4005,7 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   if (status != HSA_STATUS_SUCCESS) {
     std::fprintf(stderr, "[rocjitsu-hooks] translated code-object load failed: %d\n",
                  static_cast<int>(status));
-  } else if (guest_load) {
+  } else {
     ExecutableAgentRegistry::instance().record(executable, agent, load_agent);
   }
   if (status == HSA_STATUS_SUCCESS) {
