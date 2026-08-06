@@ -231,7 +231,7 @@ struct ROCPROFSYS_INTERNAL_API indirect
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
                     path::filename(_dllib).c_str(), m_dllib.c_str());
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
-                    path::filename(_causal_lib.c_str()), m_causal_api_lib.c_str());
+                    path::filename(_causal_lib).c_str(), m_causal_api_lib.c_str());
             ROCPROFSYS_COMMON_LIBRARY_LOG_END
         }
 
