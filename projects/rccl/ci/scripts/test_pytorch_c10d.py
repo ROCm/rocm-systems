@@ -212,6 +212,89 @@ def patch_missing_torch_modules() -> None:
         )
 
 
+def dump_device_code_object_symbols(rccl_lib: Path) -> None:
+    """Dump Generic kernel symbols from the RCCL library's device code object.
+
+    Uses roc-obj-ls to list embedded code objects, then roc-obj-extract +
+    readelf to show kernel symbols.  This diagnostic is critical for debugging
+    host↔device symbol mismatches (e.g., <4096> vs <5120> mangled names).
+    """
+    import shutil
+
+    rccl_path = rccl_lib.resolve()
+    log.info("=== Device code object diagnostic for %s ===", rccl_path)
+
+    # Host symbols (from nm)
+    nm = shutil.which("nm")
+    if nm:
+        result = subprocess.run(
+            [nm, "-D", str(rccl_path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        host_syms = [
+            l.strip() for l in result.stdout.splitlines()
+            if "ncclDevKernel_Generic" in l
+        ]
+        log.info("Host-side Generic kernel symbols (%d):", len(host_syms))
+        for s in host_syms:
+            log.info("  %s", s)
+    else:
+        log.warning("nm not found — skipping host symbol dump")
+
+    # Device code objects
+    roc_obj_ls = shutil.which("roc-obj-ls")
+    roc_obj_extract = shutil.which("roc-obj-extract")
+    readelf = shutil.which("readelf")
+
+    if roc_obj_ls:
+        result = subprocess.run(
+            [roc_obj_ls, str(rccl_path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        log.info("Embedded code objects:\n%s", result.stdout.strip())
+    else:
+        log.warning("roc-obj-ls not found — skipping code object listing")
+
+    if roc_obj_extract and readelf:
+        with tempfile.TemporaryDirectory(prefix="rccl-diag-") as tmpdir:
+            result = subprocess.run(
+                [roc_obj_extract, "-o", tmpdir, str(rccl_path)],
+                capture_output=True, text=True, timeout=60,
+            )
+            extracted = list(Path(tmpdir).rglob("*.co")) + list(Path(tmpdir).rglob("*.elf"))
+            if not extracted:
+                extracted = [f for f in Path(tmpdir).iterdir() if f.is_file()]
+            for co in extracted:
+                result = subprocess.run(
+                    [readelf, "-sW", str(co)],
+                    capture_output=True, text=True, timeout=30,
+                )
+                dev_syms = [
+                    l.strip() for l in result.stdout.splitlines()
+                    if "ncclDevKernel_Generic" in l
+                ]
+                log.info("Device symbols in %s (%d):", co.name, len(dev_syms))
+                for s in dev_syms:
+                    log.info("  %s", s)
+    elif readelf:
+        # Fallback: try readelf directly on the library (shows host symbols,
+        # but may also show embedded ELF sections)
+        log.info("roc-obj-extract not found — trying readelf on library directly")
+        result = subprocess.run(
+            [readelf, "-sW", str(rccl_path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        dev_syms = [
+            l.strip() for l in result.stdout.splitlines()
+            if "ncclDevKernel_Generic" in l
+        ]
+        log.info("All Generic kernel symbols from readelf (%d):", len(dev_syms))
+        for s in dev_syms:
+            log.info("  %s", s)
+
+    log.info("=== End device code object diagnostic ===")
+
+
 def print_environment_info() -> None:
     """Print GPU and environment details for CI logs."""
     import torch
@@ -449,6 +532,10 @@ def main() -> None:
     # so the HIP runtime matches the compiler that built RCCL's device
     # code objects (prevents findSymbol → guarantee → abort)
     override_bundled_hip_runtime(rccl_lib_dir)
+
+    # Step 4c: Dump device code object symbols for debugging host↔device
+    # kernel name mismatches (e.g., <4096> vs <5120> in mangled names)
+    dump_device_code_object_symbols(rccl_lib)
 
     setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
 
