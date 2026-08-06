@@ -5,6 +5,9 @@ name: RCCL host unit tests
 # hardware is required: the binary is compiled with `hipcc --offload-host-only` and
 # links no HIP/ROCm runtime. The workflow's own path is in the trigger so it
 # self-runs on the PR that introduces it. JIRA ID: AICOMRCCL-1711
+#
+# TODO(AICOMRCCL-1711): fold this into TheRock's packaged CI once the host-test
+# gate stabilizes
 
 on:
   pull_request:
