@@ -207,6 +207,7 @@ public:
   /// @brief Try to allocate a contiguous block of registers.
   /// @param count Number of registers needed (must be <= regs_per_block).
   /// @returns Base register index, or -1 if no free block.
+  /// @post On success, every register in the returned allocation block is zero.
   int32_t allocate(uint32_t count) {
     if (count == 0 || regs_per_block_ == 0)
       return -1;
