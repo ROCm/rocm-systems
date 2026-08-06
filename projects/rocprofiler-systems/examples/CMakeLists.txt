@@ -93,6 +93,7 @@ set(ROCPROFSYS_EXAMPLE_DIRS
     fork
     videodecode
     jpegdecode
+    hipfile
     roctx
     thread-limit
     transferBench

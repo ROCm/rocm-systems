@@ -78,9 +78,9 @@ static int parse_pmmetric_table(uint8_t* buf, struct metric_field* table, int32_
         *kv = reinterpret_cast<rsmi_name_value_t*>(realloc(*kv, kvsize * (sizeof **kv)));
       }
       if (table[x].field_arr_size == 1) {
-        sprintf((*kv)[*kvnum].name, "%s", table[x].field_name);
+        snprintf((*kv)[*kvnum].name, sizeof((*kv)[*kvnum].name), "%s", table[x].field_name);
       } else {
-        sprintf((*kv)[*kvnum].name, "%s[%d]", table[x].field_name, y);
+        snprintf((*kv)[*kvnum].name, sizeof((*kv)[*kvnum].name), "%s[%d]", table[x].field_name, y);
       }
       (*kv)[*kvnum].value = v1;
 
@@ -197,15 +197,19 @@ top:
         kvsize += 64;
         *kv = reinterpret_cast<rsmi_name_value_t*>(realloc(*kv, kvsize * (sizeof **kv)));
       }
-      sprintf((*kv)[*kvnum].name, "%s", table[x].field_name);
+      snprintf((*kv)[*kvnum].name, sizeof((*kv)[*kvnum].name), "%s", table[x].field_name);
       if (table[x].field_arr_size > 1) {
-        sprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name), "[%" PRId64 "]", y);
+        snprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name),
+                 sizeof((*kv)[*kvnum].name) - strlen((*kv)[*kvnum].name), "[%" PRIu64 "]", y);
       }
       if (x >= instance_start)
-        sprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name), ".instance[%" PRId64 "]",
-                cur_instance);
+        snprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name),
+                 sizeof((*kv)[*kvnum].name) - strlen((*kv)[*kvnum].name), ".instance[%" PRIu64 "]",
+                 cur_instance);
       if (x >= smn_start)
-        sprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name), ".smn[%" PRId64 "]", cur_smn);
+        snprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name),
+                 sizeof((*kv)[*kvnum].name) - strlen((*kv)[*kvnum].name), ".smn[%" PRIu64 "]",
+                 cur_smn);
       (*kv)[*kvnum].value = v;
       ++(*kvnum);
     }

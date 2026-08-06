@@ -241,22 +241,22 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         ' return util::f32_to_f16_simd('
         'util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b))); }',
     ),
-    # v_cvt_pkrtz_f16_f32 (both spellings): pack two f32 -> two f16 (round toward
-    # zero is what f32_to_f16/f32_to_f16_simd implement; proven bit-identical).
+    # v_cvt_pkrtz_f16_f32 (both spellings): pack two f32 -> two f16 with
+    # round-toward-zero narrowing; proven bit-identical to the scalar helper.
     # Inputs arrive as raw u32 lanes, bit_cast to f32. The VOP3 twins carry no
     # modifiers (verified) so they auto-route to VOP3_BINARY_INT with this functor.
     'v_cvt_pkrtz_f16_f32_vop2': (
         'uint32_t',
         '[](auto a, auto b) {'
-        ' auto lo = util::f32_to_f16_simd(std::bit_cast<util::native<float>>(a));'
-        ' auto hi = util::f32_to_f16_simd(std::bit_cast<util::native<float>>(b));'
+        ' auto lo = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a));'
+        ' auto hi = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b));'
         ' return lo | (hi << 16); }',
     ),
     'v_cvt_pk_rtz_f16_f32_vop2': (
         'uint32_t',
         '[](auto a, auto b) {'
-        ' auto lo = util::f32_to_f16_simd(std::bit_cast<util::native<float>>(a));'
-        ' auto hi = util::f32_to_f16_simd(std::bit_cast<util::native<float>>(b));'
+        ' auto lo = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a));'
+        ' auto hi = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b));'
         ' return lo | (hi << 16); }',
     ),
     # --- f16 binary (low 16 bits f16, result zero-extended). Same f32
@@ -2577,6 +2577,24 @@ SIMD_VOP3_CARRY_CIN.update(
 )
 
 
+def _indent_probe(probe: str) -> str:
+    return '\n'.join(('  ' + line) if line else line for line in probe.splitlines())
+
+
+def _mode_aware_f16_result_simd_probe(default_probe: str, ovfl_probe: str) -> str:
+    default_body = _indent_probe(default_probe)
+    ovfl_body = _indent_probe(ovfl_probe)
+    return f'  if (wf.fp16_ovfl()) {{\n{ovfl_body}\n  }} else {{\n{default_body}\n  }}'
+
+
+def _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op: str) -> bool:
+    return 'f32_to_f16_simd' in cpp_op
+
+
+def _fp16_ovfl_cpp_op(cpp_op: str) -> str:
+    return cpp_op.replace('f32_to_f16_simd', 'f32_to_f16_ovfl_simd')
+
+
 def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | None:
     """Return the SIMD fast-path probe block for a kernel, or None."""
     if template_name in SIMD_VOP3_TRUE16_UNSAFE:
@@ -2592,11 +2610,19 @@ def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | N
     spec2 = SIMD_VOP2_BINARY.get(template_name)
     if spec2 is not None:
         cpp_t, cpp_op = spec2
-        return f'  ROCJITSU_TRY_SIMD_VOP2_BINARY({cpp_t}, {cpp_op});'
+        probe = f'  ROCJITSU_TRY_SIMD_VOP2_BINARY({cpp_t}, {cpp_op});'
+        if _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op):
+            ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP2_BINARY({cpp_t}, {_fp16_ovfl_cpp_op(cpp_op)});'
+            return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
+        return probe
     spec1 = SIMD_VOP1_UNARY.get(template_name)
     if spec1 is not None:
         cpp_tin, cpp_tout, cpp_op = spec1
-        return f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
+        probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
+        if _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op):
+            ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {_fp16_ovfl_cpp_op(cpp_op)});'
+            return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
+        return probe
     specc = SIMD_VOP2_CARRY.get(template_name)
     if specc is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP2_CARRY({specc});'
@@ -2608,7 +2634,11 @@ def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | N
             if template_name in SIMD_VOP2_TERNARY_ACCUMULATE
             else 'ROCJITSU_TRY_SIMD_VOP2_TERNARY'
         )
-        return f'  {macro}({cpp_t}, {k_expr}, {cpp_op});'
+        probe = f'  {macro}({cpp_t}, {k_expr}, {cpp_op});'
+        if _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op):
+            ovfl_probe = f'  {macro}({cpp_t}, {k_expr}, {_fp16_ovfl_cpp_op(cpp_op)});'
+            return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
+        return probe
     specf64 = SIMD_VOP2_FMA_F64.get(template_name)
     if specf64 is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP2_FMA_F64({specf64});'
@@ -2895,10 +2925,18 @@ def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | N
                     if true16_vop3
                     else 'ROCJITSU_TRY_SIMD_VOP3_BINARY_F16'
                 )
-                return f'  {macro}({cpp_t}, {cpp_op});'
+                probe = f'  {macro}({cpp_t}, {cpp_op});'
+                if _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op):
+                    ovfl_probe = f'  {macro}({cpp_t}, {_fp16_ovfl_cpp_op(cpp_op)});'
+                    return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
+                return probe
             if true16_vop3:
                 return None
-            return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
+            probe = f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
+            if _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op):
+                ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {_fp16_ovfl_cpp_op(cpp_op)});'
+                return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
+            return probe
         # VOP3-encoded twins of the SIMD VOP1 unary ops. The plain int/cvt forms
         # apply no modifiers and read the same src0/vdst operands as VOP1, so they
         # reuse the VOP1 unary path verbatim. The f32 forms (and the float-domain
@@ -2921,7 +2959,11 @@ def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | N
                 return None
             if base in _VOP3_UNARY_FP_F32:
                 return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, {cpp_op});'
-            return f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
+            probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
+            if _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op):
+                ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {_fp16_ovfl_cpp_op(cpp_op)});'
+                return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
+            return probe
         # VOP3 twins of the mixed-width f64<->b32 cvt ops. Their generated VOP3
         # bodies drop the abs/neg/omod/clamp modifier reads (verified per-op),
         # so routing through the existing cvt glue is bit-exact. (A symmetric
