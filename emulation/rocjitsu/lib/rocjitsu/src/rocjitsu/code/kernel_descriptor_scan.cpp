@@ -4,6 +4,7 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/isa/isa_traits.h"
 
 #include <cstring>
 #include <limits>
@@ -160,6 +161,54 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
     }
   }
   return out;
+}
+
+uint8_t kernel_wavefront_size(rj_code_arch_t arch, const KD &desc) {
+  // CDNA kernels are Wave64 in the code objects currently handled here.
+  if (arch_is_cdna(arch))
+    return 64;
+
+  // gfx1250 is Wave32-only. Do not interpret a missing legacy descriptor bit
+  // as Wave64: older producers may omit the bit even though the hardware has
+  // no Wave64 launch mode.
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return 32;
+
+  // RDNA descriptors opt into Wave32 with ENABLE_WAVEFRONT_SIZE32. If the bit is
+  // clear, launch hardware interprets the descriptor as Wave64.
+  if (arch_is_rdna(arch)) {
+    const bool wave32 =
+        AMDHSA_BITS_GET(desc.kernel_code_properties,
+                        rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
+    return wave32 ? 32 : 64;
+  }
+
+  return 64;
+}
+
+uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefront_size) {
+  // This is the AMDHSA kernel-descriptor encoding granularity for
+  // COMPUTE_PGM_RSRC1.GRANULATED_WORKITEM_VGPR_COUNT, not the physical VGPR
+  // allocation block from the ISA manuals. For example, RDNA3/RDNA4 manuals
+  // describe Wave64 physical allocation in blocks of 8 VGPRs (or 12 on
+  // 1536-VGPR/SIMD parts), while the AMDHSA descriptor table encodes
+  // GFX10-GFX12 Wave64 as max(0, ceil(vgprs_used / 4) - 1).
+  //
+  // If/when occupancy modeling needs the physical allocation block size, add a
+  // separate helper for that policy. Reusing this descriptor helper for
+  // occupancy would mix two different hardware contracts.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA1)
+    return 4;
+  if (arch_is_cdna(arch))
+    return 8;
+  // gfx1250 exposes four 256-VGPR banks selected by WAVE_MODE.VGPR_MSB. Its
+  // AMDHSA descriptor allocates that combined Wave32 namespace in blocks of
+  // 16 VGPRs, unlike the 8-VGPR Wave32 granule used by generic RDNA targets.
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return 16;
+  if (arch_is_rdna(arch))
+    return wavefront_size == 32 ? 8 : 4;
+  return 1;
 }
 
 } // namespace rocjitsu

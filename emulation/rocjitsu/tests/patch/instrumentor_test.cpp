@@ -2117,31 +2117,35 @@ protected:
     return c.cave;
   }
 
-  // The in-flight-load drain sits at the top of the spill prologue, immediately
-  // before `first_spill_op` (the first store on the VGPR path, the first writelane
-  // on the SGPR path), so a register whose producing load is still pending is
-  // stored final-valued, not stale.
+  // The architecture-complete load drain opens the probe-call envelope, ahead of the
+  // special-state saves and `first_spill_op` (the first store on the VGPR path, the
+  // first writelane on the SGPR path), so a register whose producing load is still
+  // pending is stored final-valued, not stale.
   void expect_drain_before_store(const std::vector<uint32_t> &cave,
                                  const std::vector<uint32_t> &first_spill_op) {
     const auto drain = build_wait_all_loads_complete(a_.arch);
-    auto it = std::search(cave.begin(), cave.end(), first_spill_op.begin(), first_spill_op.end());
-    ASSERT_NE(it, cave.end());
-    ASSERT_GE(it - cave.begin(), static_cast<std::ptrdiff_t>(drain.size()));
-    EXPECT_TRUE(std::equal(drain.begin(), drain.end(), it - drain.size()));
+    auto op = std::search(cave.begin(), cave.end(), first_spill_op.begin(), first_spill_op.end());
+    ASSERT_NE(op, cave.end());
+    EXPECT_NE(std::search(cave.begin(), op, drain.begin(), drain.end()), op)
+        << "no load drain before the first spill op";
   }
 
-  // A second in-flight-load drain sits immediately before the first spill fill
-  // (`first_fill_load`, the first epilogue scratch load), so a probe's own still-in-
-  // flight load cannot retire onto a just-restored register -- on RDNA4 the per-fill
-  // s_wait_loadcnt misses a scalar s_load (KMCNT). Fills exist only after the call,
-  // so this also places the drain after s_swappc_b64.
-  void expect_drain_before_fill(const std::vector<uint32_t> &cave,
-                                const std::vector<uint32_t> &first_fill_load) {
+  // The matching drain is emitted immediately after the probe call returns, ahead of
+  // any restoration, so a probe's own still-in-flight load cannot retire onto a just-
+  // restored register -- on RDNA4 the per-fill s_wait_loadcnt misses a scalar s_load
+  // (KMCNT). It sits after the prologue op (`first_spill_op`, before the call) and
+  // before `first_fill_load` (the first epilogue scratch load), i.e. after the
+  // s_swappc_b64 return.
+  void expect_drain_after_return(const std::vector<uint32_t> &cave,
+                                 const std::vector<uint32_t> &first_spill_op,
+                                 const std::vector<uint32_t> &first_fill_load) {
     const auto drain = build_wait_all_loads_complete(a_.arch);
-    auto it = std::search(cave.begin(), cave.end(), first_fill_load.begin(), first_fill_load.end());
-    ASSERT_NE(it, cave.end());
-    ASSERT_GE(it - cave.begin(), static_cast<std::ptrdiff_t>(drain.size()));
-    EXPECT_TRUE(std::equal(drain.begin(), drain.end(), it - drain.size()));
+    auto op = std::search(cave.begin(), cave.end(), first_spill_op.begin(), first_spill_op.end());
+    ASSERT_NE(op, cave.end());
+    auto fill = std::search(op, cave.end(), first_fill_load.begin(), first_fill_load.end());
+    ASSERT_NE(fill, cave.end());
+    EXPECT_NE(std::search(op, fill, drain.begin(), drain.end()), fill)
+        << "no load drain after the call return, before the first spill fill";
   }
 
   // Assert v`vgpr`'s spill words are in `cave`: a scratch store (prologue) and load
@@ -2176,27 +2180,31 @@ protected:
   }
 
   // Assert the standard single-VGPR spill in `caved`: v2 stored/reloaded at slot 64,
-  // the reload guarded by a load wait, the prologue drain immediately before the store,
-  // and the descriptor grown by one slot (64 -> 68).
+  // the reload guarded by a load wait, the boundary drain before the store and after
+  // the call return, and the descriptor grown by one slot (64 -> 68).
   void expect_vgpr_spill(const Caved &caved) {
     const std::vector<uint32_t> &cave = caved.cave;
     expect_vgpr_spill_present(cave, /*vgpr=*/2, /*off=*/64);
     EXPECT_NE(std::find(cave.begin(), cave.end(), build_wait_loads_complete(a_.arch)), cave.end());
-    expect_drain_before_store(cave, build_scratch_store_dword(/*vgpr=*/2, /*off=*/64, a_.arch));
-    expect_drain_before_fill(cave, build_scratch_load_dword(/*vgpr=*/2, /*off=*/64, a_.arch));
+    const auto store = build_scratch_store_dword(/*vgpr=*/2, /*off=*/64, a_.arch);
+    expect_drain_before_store(cave, store);
+    expect_drain_after_return(cave, store, build_scratch_load_dword(/*vgpr=*/2, /*off=*/64, a_.arch));
     EXPECT_EQ(caved.scratch, 68u);
   }
 
   // Assert the standard single-SGPR spill in `caved`: s8 bridged through v0, stored/reloaded
-  // at slot 64, the reload guarded by a load wait, the prologue drain immediately before the
-  // first spill op (the writelane), and the descriptor grown by one slot (64 -> 68).
+  // at slot 64, the reload guarded by a load wait, the boundary drain before the first spill
+  // op (the writelane) and after the call return, and the descriptor grown by one slot
+  // (64 -> 68).
   void expect_sgpr_spill(const Caved &caved) {
     const std::vector<uint32_t> &cave = caved.cave;
     expect_sgpr_spill_present(cave, /*sgpr=*/8, /*off=*/64);
     EXPECT_NE(std::find(cave.begin(), cave.end(), build_wait_loads_complete(a_.arch)), cave.end());
     const auto writelane = build_v_writelane_b32(/*bridge=*/0, /*sgpr=*/8, /*lane=*/0, a_.arch);
-    expect_drain_before_store(cave, {writelane.begin(), writelane.end()});
-    expect_drain_before_fill(cave, build_scratch_load_dword(/*bridge=*/0, /*off=*/64, a_.arch));
+    const std::vector<uint32_t> writelane_words{writelane.begin(), writelane.end()};
+    expect_drain_before_store(cave, writelane_words);
+    expect_drain_after_return(cave, writelane_words,
+                              build_scratch_load_dword(/*bridge=*/0, /*off=*/64, a_.arch));
     EXPECT_EQ(caved.scratch, 68u);
   }
 
@@ -2255,6 +2263,22 @@ protected:
     ASSERT_FALSE(cave.empty());
     expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_exec_lo(arch()));
     expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_vcc_lo(arch()));
+  }
+
+  // Every probe-call envelope -- including a no-spill site -- opens with a load drain
+  // and emits a matching drain right after the call returns, so a pre-anchor or
+  // probe-issued asynchronous load cannot retire onto the saved/restored special
+  // state. The probe body is a bare s_nop (no spill; special state still preserved).
+  void expect_boundary_drains_at_no_spill_site() {
+    const std::vector<uint32_t> cave = patch_probe_clobbering(build_s_nop(0, arch()));
+    ASSERT_FALSE(cave.empty());
+    const auto drain = build_wait_all_loads_complete(arch());
+    size_t count = 0;
+    for (auto it = std::search(cave.begin(), cave.end(), drain.begin(), drain.end());
+         it != cave.end(); it = std::search(it + drain.size(), cave.end(), drain.begin(),
+                                            drain.end()))
+      ++count;
+    EXPECT_GE(count, 2u) << "a no-spill probe envelope must still be bracketed by boundary drains";
   }
 
   // FLAT_SCRATCH stays rejected (the spill store/load depend on it), failing closed.
@@ -2353,6 +2377,10 @@ TEST_F(Cdna4ProbeSpill, PreservesExecAndVccUnconditionally) {
 TEST_F(Rdna4ProbeSpill, PreservesExecAndVccUnconditionally) {
   expect_preserves_exec_and_vcc_unconditionally();
 }
+
+TEST_F(Cdna3ProbeSpill, BoundaryDrainsAtNoSpillSite) { expect_boundary_drains_at_no_spill_site(); }
+TEST_F(Cdna4ProbeSpill, BoundaryDrainsAtNoSpillSite) { expect_boundary_drains_at_no_spill_site(); }
+TEST_F(Rdna4ProbeSpill, BoundaryDrainsAtNoSpillSite) { expect_boundary_drains_at_no_spill_site(); }
 
 // Compare-based coverage: v_cmp writes VCC and v_cmpx writes EXEC. The always-on
 // preservation brackets the call regardless of the summary, so VCC/EXEC round-trip
