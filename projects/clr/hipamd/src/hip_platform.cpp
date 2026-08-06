@@ -8,6 +8,7 @@
 #include <hip/texture_types.h>
 #include "hip_platform.hpp"
 #include "hip_internal.hpp"
+#include "hip_graph_helper.hpp"
 #include "platform/command.hpp"
 #include "platform/program.hpp"
 #include "platform/runtime.hpp"
@@ -121,8 +122,9 @@ struct __CudaFatBinaryWrapper {
 
 // Forward declarations
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
-hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_params,
-                                  hipStream_t hStream, void** kernelParams, void** extra,
+hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::NDRangeContainer& ndrange,
+                                  uint32_t sharedMemBytes, hipStream_t hStream,
+                                  void** kernelParams, void** extra,
                                   hipEvent_t startEvent, hipEvent_t stopEvent,
                                   uint32_t flags = 0, uint32_t params = 0,
                                   uint32_t gridId = 0, uint32_t numGrids = 0,
@@ -386,16 +388,17 @@ hipError_t hipLaunchByPtr(const void* hostFunction) {
                  exec.sharedMem_, extra);
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
-  amd::HIPLaunchParams launch_params(exec.gridDim_.x, exec.gridDim_.y, exec.gridDim_.z,
-                                           exec.blockDim_.x, exec.blockDim_.y, exec.blockDim_.z,
-                                           exec.sharedMem_, *device, 0, 0, 0, 1, 1, 1);
-  if (!launch_params.IsValidConfig() ||
-      launch_params.local_.product() > device->info().maxWorkGroupSize_) {
+  amd::LaunchConfigStatus cfgStatus;
+  amd::NDRangeContainer ndrange = hip::makeHipLaunchNDRange(exec.gridDim_.x, exec.gridDim_.y,
+      exec.gridDim_.z, exec.blockDim_.x, exec.blockDim_.y, exec.blockDim_.z, 0, 0, 0, 1, 1, 1,
+      cfgStatus);
+  if (cfgStatus != amd::LaunchConfigStatus::kOk ||
+      ndrange.local().product() > device->info().maxWorkGroupSize_) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  HIP_RETURN(ihipModuleLaunchKernel(
-      func, launch_params, exec.hStream_, nullptr, extra, nullptr, nullptr));
+  HIP_RETURN(ihipModuleLaunchKernel(func, ndrange, static_cast<uint32_t>(exec.sharedMem_),
+                                    exec.hStream_, nullptr, extra, nullptr, nullptr));
 }
 
 // ================================================================================================
@@ -728,15 +731,17 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
     return hipErrorInvalidConfiguration;
   }
 
-  amd::HIPLaunchParams launch_params(gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y,
-                                     blockDim.z, sharedMemBytes, *device, 0, 0, 0,
-                                     clusterDim.x, clusterDim.y, clusterDim.z);
-  if (!launch_params.IsValidConfig()) {
+  amd::LaunchConfigStatus cfgStatus;
+  amd::NDRangeContainer ndrange = hip::makeHipLaunchNDRange(gridDim.x, gridDim.y, gridDim.z,
+      blockDim.x, blockDim.y, blockDim.z, 0, 0, 0, clusterDim.x, clusterDim.y, clusterDim.z,
+      cfgStatus);
+  if (cfgStatus != amd::LaunchConfigStatus::kOk) {
     return hipErrorInvalidConfiguration;
   }
 
-  return ihipModuleLaunchKernel(func, launch_params, stream, args, nullptr, startEvent, stopEvent,
-                                flags, 0, 0, 0, 0, 0, 0, dynDataPrefetchConfig);
+  return ihipModuleLaunchKernel(func, ndrange, static_cast<uint32_t>(sharedMemBytes), stream,
+                                args, nullptr, startEvent, stopEvent, flags, 0, 0, 0, 0, 0, 0,
+                                dynDataPrefetchConfig);
 }
 
 // ================================================================================================
