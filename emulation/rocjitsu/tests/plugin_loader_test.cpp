@@ -48,6 +48,18 @@ TEST_F(PluginLoaderTest, LoadsPluginAndDispatchesLifecycle) {
   EXPECT_NE(trace().find("good:init\n"), std::string::npos);
 }
 
+TEST_F(PluginLoaderTest, WarnsAndLoadsWhenRemovedProfiledConfigIsPresent) {
+  testing::internal::CaptureStderr();
+  auto group = rocjitsu::PluginLoader::configure_plugin_group(
+      R"({"profiled":false,"plugins":{"good":{}}})", PLUGIN_LOADER_FIXTURE_DIR);
+  const std::string error = testing::internal::GetCapturedStderr();
+
+  ASSERT_EQ(group->num_plugins(), 1u);
+  EXPECT_NE(trace().find("good:create\n"), std::string::npos);
+  EXPECT_NE(error.find("hook profiling was removed; ignoring top-level 'profiled' config"),
+            std::string::npos);
+}
+
 TEST_F(PluginLoaderTest, RejectsMissingRequiredExport) {
   rocjitsu::ExecutionPluginGroup group(rocjitsu::PluginSinkConfig{});
   EXPECT_EQ(load("missing", group), 0);

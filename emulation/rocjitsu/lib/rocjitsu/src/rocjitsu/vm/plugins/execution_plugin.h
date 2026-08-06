@@ -54,23 +54,24 @@ public:
   PluginSink &sink() { return *sink_; }
 
   /// Whether high-frequency instruction, memory-routing, and register callbacks
-  /// must be serialized for this plugin. They run concurrently by default
-  /// because each callback is scoped to one wavefront. Override after identifying
-  /// shared mutable state that cannot be protected within the plugin. Infrequent
-  /// lifecycle and topology callbacks are always serialized by the group. The
-  /// group samples this policy once when the plugin is added, so implementations
-  /// must return a stable value from construction onward.
+  /// must acquire the group's callback lock. By default, infrequent callbacks
+  /// exclude only other infrequent callbacks; high-frequency callbacks may
+  /// overlap both one another and an infrequent callback. Returning true makes
+  /// all callbacks share the same lock. Override after identifying shared mutable
+  /// state that cannot be protected within the plugin. The group samples this
+  /// policy once when the plugin is added, so implementations must return a stable
+  /// value from construction onward.
   virtual bool requires_serial_hot_hooks() const { return false; }
 
   // -- Lifecycle hooks ------------------------------------------------------
 
   /// Called when the emulated driver opens (simulation is ready to accept work).
-  /// Serialized by ExecutionPluginGroup.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onInit() {}
 
   /// Called when the emulated driver closes (simulation is shutting down).
   /// All simulation state is still valid during this callback.
-  /// Serialized by ExecutionPluginGroup.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onShutdown() {}
 
   // -- AMDGPU hooks --------------------------------------------------------
@@ -98,36 +99,36 @@ public:
   /// Called when the command processor has parsed an AQL kernel dispatch packet
   /// and created a DispatchEntry. Fires during packet fetching, before any
   /// workgroups are placed. Multiple packets may be parsed in a single fetch.
-  /// Serialized by ExecutionPluginGroup.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo & /*info*/) {}
 
   /// Called when the command processor begins executing a dispatch — barriers
   /// are satisfied and workgroup placement is about to start.
-  /// Serialized by ExecutionPluginGroup.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuDispatchExecutionBegin(uint32_t /*dispatch_id*/) {}
 
   /// Called when all workgroups of a dispatch have completed execution.
-  /// Serialized by ExecutionPluginGroup.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuDispatchExecutionEnd(uint32_t /*dispatch_id*/) {}
 
   /// Called after a workgroup's wavefronts have been dispatched to a CU.
   /// @param physical_vgpr_count Physical VGPR allocation block size per wavefront.
-  /// Serialized by ExecutionPluginGroup.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWorkgroupDispatched(uint32_t /*dispatch_id*/, uint32_t /*wg_id*/,
                                            uint32_t /*physical_vgpr_count*/,
                                            uint32_t /*sgpr_count*/,
                                            std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
 
   /// Called when the last wavefront of a workgroup has halted.
-  /// Serialized by ExecutionPluginGroup.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWorkgroupCompleted(uint32_t /*dispatch_id*/, uint32_t /*wg_id*/) {}
 
   /// Called after a wavefront is initialized and before its first instruction.
-  /// Serialized by ExecutionPluginGroup.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontDispatched(amdgpu::Wavefront & /*wf*/) {}
 
   /// Called when a wavefront halts, before its resources are freed.
-  /// Serialized by ExecutionPluginGroup.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontHalted(amdgpu::Wavefront & /*wf*/) {}
 
   /// Called when a VGPR is read during instruction execution.
@@ -165,7 +166,7 @@ public:
   virtual void onAmdgpuReadSgpr(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/) {}
 
   /// Called when all waves in a workgroup have reached s_barrier.
-  /// Serialized by ExecutionPluginGroup.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
 
 private:

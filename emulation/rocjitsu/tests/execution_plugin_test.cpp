@@ -432,15 +432,34 @@ private:
   OverlapProbe cold_probe_;
 };
 
+class CrossHookConcurrencyProbePlugin final : public ExecutionPlugin {
+public:
+  explicit CrossHookConcurrencyProbePlugin(bool serialize_hot_hooks)
+      : ExecutionPlugin("cross_hook_concurrency_probe"), serialize_hot_hooks_(serialize_hot_hooks) {
+  }
+
+  bool requires_serial_hot_hooks() const override { return serialize_hot_hooks_; }
+
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { probe_.observe(); }
+
+  void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { probe_.observe(); }
+
+  OverlapProbe &probe() { return probe_; }
+
+private:
+  bool serialize_hot_hooks_;
+  OverlapProbe probe_;
+};
+
 struct OverlapResult {
   bool first_entered;
   bool overlap_observed;
 };
 
-template <typename Callback>
-OverlapResult run_staged_threads(OverlapProbe &probe, std::chrono::milliseconds overlap_timeout,
-                                 Callback callback) {
-  std::thread first(callback);
+template <typename FirstCallback, typename SecondCallback>
+OverlapResult run_staged_callbacks(OverlapProbe &probe, std::chrono::milliseconds overlap_timeout,
+                                   FirstCallback first_callback, SecondCallback second_callback) {
+  std::thread first(first_callback);
   const bool first_entered = probe.wait_for_first(std::chrono::seconds(5));
   if (!first_entered) {
     probe.release_first();
@@ -448,12 +467,18 @@ OverlapResult run_staged_threads(OverlapProbe &probe, std::chrono::milliseconds 
     return {false, false};
   }
 
-  std::thread second(callback);
+  std::thread second(second_callback);
   const bool overlap_observed = probe.wait_for_overlap(overlap_timeout);
   probe.release_first();
   first.join();
   second.join();
   return {true, overlap_observed};
+}
+
+template <typename Callback>
+OverlapResult run_staged_threads(OverlapProbe &probe, std::chrono::milliseconds overlap_timeout,
+                                 Callback callback) {
+  return run_staged_callbacks(probe, overlap_timeout, callback, callback);
 }
 
 template <typename Callback> void run_two_threads(Callback callback) {
@@ -901,6 +926,40 @@ TEST(ExecutionPluginTest, HighFrequencyHooksHonorSerialOptIn) {
   EXPECT_TRUE(result.first_entered);
   EXPECT_FALSE(result.overlap_observed);
   EXPECT_EQ(probe_ptr->hot_probe().max_active(), 1);
+}
+
+TEST(ExecutionPluginTest, InfrequentAndHighFrequencyHooksMayOverlapByDefault) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto probe = std::make_unique<CrossHookConcurrencyProbePlugin>(false);
+  auto *probe_ptr = probe.get();
+  ASSERT_TRUE(group.add(std::move(probe)));
+  ASSERT_FALSE(group.requires_serial_hot_hooks());
+
+  const auto result = run_staged_callbacks(
+      probe_ptr->probe(), std::chrono::seconds(5),
+      [&]() { group.onAmdgpuWorkgroupCompleted(0, 0); },
+      [&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+
+  EXPECT_TRUE(result.first_entered);
+  EXPECT_TRUE(result.overlap_observed);
+  EXPECT_EQ(probe_ptr->probe().max_active(), 2);
+}
+
+TEST(ExecutionPluginTest, SerialHotHookOptInPreventsInfrequentAndHighFrequencyOverlap) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto probe = std::make_unique<CrossHookConcurrencyProbePlugin>(true);
+  auto *probe_ptr = probe.get();
+  ASSERT_TRUE(group.add(std::move(probe)));
+  ASSERT_TRUE(group.requires_serial_hot_hooks());
+
+  const auto result = run_staged_callbacks(
+      probe_ptr->probe(), std::chrono::milliseconds(20),
+      [&]() { group.onAmdgpuWorkgroupCompleted(0, 0); },
+      [&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+
+  EXPECT_TRUE(result.first_entered);
+  EXPECT_FALSE(result.overlap_observed);
+  EXPECT_EQ(probe_ptr->probe().max_active(), 1);
 }
 
 TEST(ExecutionPluginTest, EmptyGroupDispatchIsSafeAcrossThreads) {

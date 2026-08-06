@@ -216,12 +216,14 @@ group divides hooks by frequency and synchronization cost:
 
 - Lifecycle, dispatch, workgroup, wavefront, and barrier callbacks are
   infrequent. The group takes one recursive mutex before iterating its plugins,
-  so these callbacks cannot overlap across simulation partitions or with each
-  other. Recursive acquisition lets a callback synchronously read registers and
-  fire register-observation hooks without deadlocking.
+  so two infrequent callbacks cannot overlap across simulation partitions. With
+  the default hot-hook policy, an infrequent callback can still overlap a
+  high-frequency callback. Recursive acquisition lets a callback synchronously
+  read registers and fire register-observation hooks without deadlocking.
 - Instruction before/after, memory-routing, and register-access callbacks are
-  high-frequency and run concurrently by default. Each callback is scoped to a
-  wavefront below the simulation's shader-engine partition granularity.
+  high-frequency and run concurrently with both other high-frequency callbacks
+  and infrequent callbacks by default. Each callback is scoped to a wavefront
+  below the simulation's shader-engine partition granularity.
 
 A plugin whose high-frequency callbacks reach shared mutable state may override
 `requires_serial_hot_hooks()` to return `true`. The group samples that stable
@@ -245,5 +247,9 @@ concurrently.
    `rj_add_plugin_so(myname <object_lib> <export_src>)` call so it builds
    `librocjitsu_plugin_myname.so`.
 4. Use `sink().write()` for all output — never write to stderr directly.
-5. Enable it by adding `"myname": { ... }` to the `plugins` section of
+5. Audit shared mutable state reached by high-frequency hooks against both
+   high-frequency and infrequent callbacks. Override
+   `requires_serial_hot_hooks()` when that state cannot be protected within the
+   plugin.
+6. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.

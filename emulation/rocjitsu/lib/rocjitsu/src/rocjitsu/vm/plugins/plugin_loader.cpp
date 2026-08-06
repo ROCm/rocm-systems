@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #if defined(__linux__)
@@ -34,6 +35,16 @@ using plugin_detail::resolve_config;
 std::vector<util::LibraryHandle> &open_handles() {
   static std::vector<util::LibraryHandle> handles;
   return handles;
+}
+
+bool map_has_key(const flexbuffers::Reference &root, std::string_view key) {
+  if (!root.IsMap())
+    return false;
+  auto keys = root.AsMap().Keys();
+  for (size_t i = 0; i < keys.size(); ++i)
+    if (std::string_view(keys[i].AsKey()) == key)
+      return true;
+  return false;
 }
 
 std::string resolve_plugin_path(const std::string &soname, const std::string &plugin_dir) {
@@ -223,6 +234,9 @@ PluginLoader::configure_plugin_group(const std::string &config_json,
   flexbuffers::Builder root_fbb;
   bool parsed = flexbuffer_from_json(config_json, root_fbb);
   auto root = parsed ? flexbuffers::GetRoot(root_fbb.GetBuffer()) : flexbuffers::Reference();
+
+  if (map_has_key(root, "profiled"))
+    util::Logger::warn("hook profiling was removed; ignoring top-level 'profiled' config");
 
   auto group = std::make_shared<ExecutionPluginGroup>(parse_sink_config(root));
   load_from_config(config_json, *group, plugin_dir);
