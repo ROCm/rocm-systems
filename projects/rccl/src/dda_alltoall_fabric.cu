@@ -54,9 +54,8 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   INFO(NCCL_COLL, "DDA fabric AllToAll: launching kernel: nRanks=%d count=%zu grid=%u block=%u%s", nRanks, count,
        grid.x, block.x, (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
-  // Note: the copy of sendbuff into this rank's scratch buffer is performed
-  // inside the kernel (copyFromSrcToDest) rather than via a host-side
-  // hipMemcpyAsync, which is expensive to launch on ROCm.
+  CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
+
   switch (nRanks) {
   case 4:
     meta::comms::ddaAllToAllFabric<T, 4><<<grid, block, 0, stream>>>(
