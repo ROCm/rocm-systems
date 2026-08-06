@@ -153,6 +153,61 @@ TEST(WaveDebugTest, TrapHandlerRestoresInterruptedExecBeforeReporting) {
   EXPECT_EQ(wf->exec(), kInterruptedExec);
 }
 
+// Restoring the interrupted EXEC belongs to returning from the handler, not to
+// stopping for a debugger. A handler that returns without stopping the wave
+// used to leave its own mask installed, and nothing later put the
+// application's back: the kernel ran on with every lane active, silently
+// un-diverging a branch. gdb.rocm/lane-info.exp catches it as lanes that had
+// converged out of a branch being reported active again.
+TEST(WaveDebugTest, TrapHandlerRestoresInterruptedExecWhenReturningWithoutStopping) {
+  WaveDebugFixture fx;
+  fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
+  fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
+
+  // Same shape as the handler above with the halt removed, so the wave runs on
+  // after s_rfe instead of stopping.
+  const uint32_t handler[] = {
+      0x806C846Cu,              // s_add_u32 ttmp0, ttmp0, 4
+      0x826D806Du,              // s_addc_u32 ttmp1, ttmp1, 0
+      0xBEFE00FFu, 0x80000000u, // s_mov_b32 exec_lo, 0x80000000
+      0xBF90000Au,              // s_sendmsg sendmsg(MSG_GET_DOORBELL)
+      0xBE801F6Cu,              // s_rfe_b64 ttmp[0:1]
+  };
+  for (uint32_t i = 0; i < std::size(handler); ++i)
+    fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+
+  fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
+  });
+  fx.cu->set_sendmsg_handler([](amdgpu::Wavefront &wave, uint32_t message) {
+    if (message == 10)
+      wave.set_exec((wave.exec() & 0xFFFFFFFF00000000ULL) | 7u);
+    return message == 1 || message == 10;
+  });
+
+  // Lanes 0, 2 and 4 of a five-lane wave, the shape lane-info.exp produces.
+  constexpr uint64_t kInterruptedExec = 0x15ULL;
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(kInterruptedExec);
+
+  for (int i = 0; i < 6 && wf->pc == kKernelAddr; ++i)
+    fx.cu->step();
+  for (int i = 0; i < 6 && wf->in_trap_handler(); ++i)
+    fx.cu->step();
+
+  ASSERT_FALSE(wf->in_trap_handler());
+  EXPECT_FALSE(wf->debug_halted());
+  EXPECT_EQ(wf->exec(), kInterruptedExec);
+
+  // Run the wave off the end. Leaving one resident past the fixture is not
+  // inert: the CU pool-allocates decoded instructions and frees the pool with
+  // the decoder.
+  for (int i = 0; i < 4 && !wf->is_halted(); ++i)
+    fx.cu->step();
+  EXPECT_TRUE(wf->is_halted());
+}
+
 TEST(WaveDebugTest, UnmappedInstructionFetchReportsMemoryViolationAtBranchTarget) {
   WaveDebugFixture fx;
   constexpr uint32_t kProcessId = 7;

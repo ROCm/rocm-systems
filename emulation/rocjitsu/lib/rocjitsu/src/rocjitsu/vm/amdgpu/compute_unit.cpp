@@ -599,10 +599,9 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   // s_rfe follows the same target-minus-size convention as other control-flow
   // instructions. Publish the handler-driven stop only after the common PC
   // increment has produced the architectural return PC for CWSR serialization.
-  if (trap_return && active->debug_halted() && active->trap_interrupt_sent()) {
-    active->set_exec(active->trap_saved_exec());
+  // EXEC is put back by s_rfe itself, for every return and not just this one.
+  if (trap_return && active->debug_halted() && active->trap_interrupt_sent())
     notify_trap_complete(*active);
-  }
 
   // Debugger per-access checks, after the access completed and the PC advanced
   // (so the serialized wave resumes at the next instruction). A memory fault is
