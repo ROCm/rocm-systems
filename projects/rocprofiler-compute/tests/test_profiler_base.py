@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 import common
 import pytest
+import yaml
 
 from pc_sampling.pc_sampling_profile import PCSamplingLimits
 from rocprof_compute_base import RocProfCompute
@@ -629,6 +630,45 @@ def test_sanitize_block_experimental_gating(args, expect_error, expected_filter_
     else:
         instance.sanitize()
         assert args.filter_blocks == expected_filter_blocks
+
+
+# ---------------------------------------------------------------------------
+# pre_processing(): memory-bandwidth configuration persistence
+# ---------------------------------------------------------------------------
+def test_pre_processing_persists_membw_analysis_config(
+    tmp_path: Path,
+) -> None:
+    """Persist the memory-bandwidth flag and effective filter blocks."""
+    effective_filter_blocks = ["30.13"]
+    profiling_args = argparse.Namespace(
+        attach_pid=None,
+        config_dir=tmp_path / "analysis_configs",
+        experimental=True,
+        filter_blocks=[],
+        membw_analysis=True,
+        no_roof=True,
+        output_directory=str(tmp_path),
+        remaining="./app",
+    )
+    mock_soc = Mock()
+    mock_soc._mspec = SimpleNamespace()
+    mock_soc.profiling_setup.return_value = effective_filter_blocks
+    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
+    profiler = rocprof_v3_profiler(
+        profiling_args,
+        profiler_mode="rocprofv3",
+        soc=mock_soc,
+    )
+
+    with patch("rocprof_compute_profile.profiler_base.gen_sysinfo"):
+        profiler.pre_processing()
+
+    mock_soc.profiling_setup.assert_called_once_with()
+    profiling_config = yaml.safe_load(
+        (tmp_path / "profiling_config.yaml").read_text(encoding="utf-8")
+    )
+    assert profiling_config["membw_analysis"] is True
+    assert profiling_config["filter_blocks"] == effective_filter_blocks
 
 
 # ---------------------------------------------------------------------------
