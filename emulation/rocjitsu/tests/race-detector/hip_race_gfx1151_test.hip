@@ -28,6 +28,13 @@ struct RaceRecord {
   std::string message;
 };
 
+struct RaceExpectation {
+  const char *type = nullptr;
+  const char *access = nullptr;
+  const char *producer = nullptr;
+  const char *consumer = nullptr;
+};
+
 std::vector<RaceRecord> parse_race_log() {
   const char *dir = std::getenv("RJ_SINK_DIR");
   if (!dir)
@@ -92,10 +99,18 @@ protected:
     EXPECT_TRUE(records.empty()) << "Expected no races, got " << records.size();
   }
 
-  std::vector<RaceRecord> ExpectRace() {
+  void ExpectRace(const RaceExpectation &expected) {
     auto records = parse_race_log();
-    EXPECT_FALSE(records.empty()) << "Expected at least one race, got none";
-    return records;
+    ASSERT_FALSE(records.empty()) << "Expected at least one race, got none";
+    const auto &record = records.front();
+    if (expected.type != nullptr)
+      EXPECT_EQ(record.type, expected.type);
+    if (expected.access != nullptr)
+      EXPECT_EQ(record.access, expected.access);
+    if (expected.producer != nullptr)
+      EXPECT_NE(record.message.find(expected.producer), std::string::npos);
+    if (expected.consumer != nullptr)
+      EXPECT_NE(record.message.find(expected.consumer), std::string::npos);
   }
 };
 
@@ -108,6 +123,10 @@ __global__ void vgpr_no_race_kernel(const float *src, float *dst) {
                : "v"(&src[tid]));
   dst[tid] = val;
 }
+
+static constexpr RaceExpectation kVgprWaitcntRaceExpectation{
+    .type = "VGPR",
+};
 
 __global__ void vgpr_race_kernel(const float *src, float *dst) {
   int tid = threadIdx.x;
@@ -152,6 +171,11 @@ __global__ void d16_global_load_hi_merge_kernel(const uint8_t *src, uint32_t *ds
 // omits s_waitcnt before storing the VGPR. The store consumes the load
 // destination while the low-half load is still outstanding, so the race detector
 // should report a real VGPR race after the memory-completion self-race is fixed.
+static constexpr RaceExpectation kD16GlobalLoadMissingWaitcntRaceExpectation{
+    .type = "VGPR",
+    .producer = "global_load_d16_u8",
+};
+
 __global__ void d16_global_load_missing_waitcnt_kernel(const uint8_t *src, uint32_t *dst) {
   int tid = threadIdx.x;
   uint32_t val = 0xABCD0000u;
@@ -162,6 +186,13 @@ __global__ void d16_global_load_missing_waitcnt_kernel(const uint8_t *src, uint3
                : "memory");
   dst[tid] = val;
 }
+
+static constexpr RaceExpectation kWawGlobalLoadThenWmmaExpectation{
+    .type = "VGPR",
+    .access = "write",
+    .producer = "global_load",
+    .consumer = "v_wmma",
+};
 
 __global__ void waw_global_load_then_wmma_kernel(const int *src, int *out) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -186,6 +217,10 @@ lds_wave32_cross_wave_safe_kernel(int *out) {
   out[tid] = lds[(tid + 32) & 63];
 }
 
+static constexpr RaceExpectation kLdsWave32CrossWaveRaceExpectation{
+    .type = "LDS",
+};
+
 __attribute__((amdgpu_flat_work_group_size(64, 64))) __global__ void
 lds_wave32_cross_wave_race_kernel(int *out) {
   __shared__ int lds[64];
@@ -208,9 +243,7 @@ TEST_F(Gfx1151RaceTest, vgpr_waitcnt_race) {
   auto *dst = alloc<float>(32);
   vgpr_race_kernel<<<1, 32>>>(src, dst);
   sync();
-  auto records = ExpectRace();
-  ASSERT_FALSE(records.empty());
-  EXPECT_EQ(records[0].type, "VGPR");
+  ExpectRace(kVgprWaitcntRaceExpectation);
 }
 
 TEST_F(Gfx1151RaceTest, d16_global_load_merge_no_race) {
@@ -245,10 +278,7 @@ TEST_F(Gfx1151RaceTest, d16_global_load_missing_waitcnt_race) {
   d16_global_load_missing_waitcnt_kernel<<<1, 32>>>(src, dst);
   sync();
 
-  auto records = ExpectRace();
-  ASSERT_FALSE(records.empty());
-  EXPECT_EQ(records[0].type, "VGPR");
-  EXPECT_NE(records[0].message.find("global_load_d16_u8"), std::string::npos);
+  ExpectRace(kD16GlobalLoadMissingWaitcntRaceExpectation);
 }
 
 TEST_F(Gfx1151RaceTest, lds_wave32_cross_wave) {
@@ -260,9 +290,7 @@ TEST_F(Gfx1151RaceTest, lds_wave32_cross_wave) {
 TEST_F(Gfx1151RaceTest, lds_wave32_cross_wave_race) {
   lds_wave32_cross_wave_race_kernel<<<1, 64>>>(alloc<int>(64));
   sync();
-  auto records = ExpectRace();
-  ASSERT_FALSE(records.empty());
-  EXPECT_EQ(records[0].type, "LDS");
+  ExpectRace(kLdsWave32CrossWaveRaceExpectation);
 }
 
 TEST_F(Gfx1151RaceTest, waw_global_load_then_wmma) {
@@ -270,12 +298,7 @@ TEST_F(Gfx1151RaceTest, waw_global_load_then_wmma) {
   auto *out = alloc<int>(32);
   waw_global_load_then_wmma_kernel<<<1, 32>>>(src, out);
   sync();
-  auto records = ExpectRace();
-  ASSERT_FALSE(records.empty());
-  EXPECT_EQ(records[0].type, "VGPR");
-  EXPECT_EQ(records[0].access, "write");
-  EXPECT_NE(records[0].message.find("global_load"), std::string::npos);
-  EXPECT_NE(records[0].message.find("v_wmma"), std::string::npos);
+  ExpectRace(kWawGlobalLoadThenWmmaExpectation);
 }
 
 } // namespace
