@@ -88,6 +88,19 @@ extern std::function<hipError_t(int* /*dev*/)> g_hipGetDevice;
 extern std::function<hipError_t(int /*dev*/)> g_hipSetDevice;
 extern std::function<hipError_t(int* /*count*/)> g_hipGetDeviceCount;
 
+// Deep-path (commAlloc/devCommSetup, Tier-E) result seams. These default to
+// hipErrorInvalidValue so any call a test hasn't opted into still surfaces as an
+// unexpected call (preserving the p2p tests). Set to hipSuccess to enable the
+// commAlloc happy path (InstallCommAllocSuccess does this), or leave one at the
+// error value to exercise a specific CUDACHECK early-return arm.
+// g_hipWarpSize is written by hipDeviceGetAttribute(hipDeviceAttributeWarpSize).
+extern hipError_t g_hipDeviceGetAttributeResult;
+extern hipError_t g_hipDeviceGetPCIBusIdResult;
+extern hipError_t g_hipEventCreateResult;
+extern hipError_t g_hipMemPoolResult;
+extern hipError_t g_hipStreamCreateResult;
+extern int g_hipWarpSize;
+
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
 void ResetHipFakes();

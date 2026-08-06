@@ -51,6 +51,27 @@ extern int g_gdrSupportCalls;
 // success is injectable so a (process-isolated) test can drive ncclInit failure.
 extern bool g_bootstrapNetInitFail;
 
+// -------------------------------------------------------------------------
+// Tier-E: commAlloc() deep seams. These were fail-loud stubs; they are now
+// controllable so commAlloc() runs host-only. Each returns its g_*Result
+// (default ncclSuccess) so a test can inject a failure at exactly one check to
+// cover that early-return arm. ncclNetInit installs a fake comm->ncclNet
+// (name "microfake") on success. (ncclCreateSideStream is a static-inline in
+// alloc.h and ncclCudaCompCap comes from the real utils.cc oracle -- both real,
+// driven via the HIP device model, not faked here.)
+// -------------------------------------------------------------------------
+extern ncclResult_t g_ncclNetInitResult;
+extern ncclResult_t g_ncclGinInitResult;
+extern ncclResult_t g_ncclStrongStreamResult;
+extern ncclResult_t g_ncclMemManagerInitResult;
+extern ncclResult_t g_amdSmiInitResult;
+
+// Enable the full commAlloc() happy path in one call: flips the HIP deep-path
+// seams (attribute/PCIBusId/event/mempool/stream) to success and resets the
+// nccl seams above to their success defaults. Call at the top of a commAlloc
+// test, then inject a single failure to exercise a specific arm.
+void InstallCommAllocSuccess();
+
 // Reset every init-layer fake to defaults. Cascades to ResetHipFakes() and
 // ResetNcclFakes(). Called from the fixture TearDown().
 void ResetInitFakes();

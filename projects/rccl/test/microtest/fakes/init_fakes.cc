@@ -189,6 +189,40 @@ ncclResult_t ncclTopoGetStrFromSys(const char* /*path*/, const char* fileName, c
   return ncclSuccess;
 }
 
+// -------------------------------------------------------------------------
+// Tier-E: commAlloc() deep seams (controllable). Defaults succeed so real
+// commAlloc() runs host-only; a test injects one failure to cover a specific
+// early-return arm. ncclNetInit/ncclNetInitFromParent live in init-test.cc --
+// they set comm->ncclNet, which needs the full ncclComm/ncclNet_t layout that
+// only the UUT TU has. ncclCudaCompCap and the static-inline ncclCreateSideStream
+// are the real code (utils.cc oracle / alloc.h), driven via the HIP device model.
+// -------------------------------------------------------------------------
+ncclResult_t g_ncclNetInitResult        = ncclSuccess;
+ncclResult_t g_ncclGinInitResult        = ncclSuccess;
+ncclResult_t g_ncclStrongStreamResult   = ncclSuccess;
+ncclResult_t g_ncclMemManagerInitResult = ncclSuccess;
+ncclResult_t g_amdSmiInitResult         = ncclSuccess;
+
+ncclResult_t ncclGinInit(struct ncclComm*) { return g_ncclGinInitResult; }
+ncclResult_t ncclGinInitFromParent(struct ncclComm*, struct ncclComm*) { return g_ncclGinInitResult; }
+ncclResult_t ncclStrongStreamConstruct(struct ncclStrongStream*) { return g_ncclStrongStreamResult; }
+ncclResult_t amd_smi_init() { return g_amdSmiInitResult; }
+size_t ncclOsGetPageSize() { return 4096; }
+extern "C" ncclResult_t ncclMemManagerInit(struct ncclComm*) { return g_ncclMemManagerInitResult; }
+
+void InstallCommAllocSuccess() {
+  g_ncclNetInitResult = ncclSuccess;
+  g_ncclGinInitResult = ncclSuccess;
+  g_ncclStrongStreamResult = ncclSuccess;
+  g_ncclMemManagerInitResult = ncclSuccess;
+  g_amdSmiInitResult = ncclSuccess;
+  g_hipDeviceGetAttributeResult = hipSuccess;
+  g_hipDeviceGetPCIBusIdResult  = hipSuccess;
+  g_hipEventCreateResult        = hipSuccess;
+  g_hipMemPoolResult            = hipSuccess;
+  g_hipStreamCreateResult       = hipSuccess;
+}
+
 void ResetInitFakes() {
   ResetHipFakes();
   ResetNcclFakes();
@@ -200,4 +234,9 @@ void ResetInitFakes() {
   g_gdrSupportValue = 0;
   g_gdrSupportCalls = 0;
   pfn_hsa_amd_portable_export_dmabuf = nullptr;
+  g_ncclNetInitResult = ncclSuccess;
+  g_ncclGinInitResult = ncclSuccess;
+  g_ncclStrongStreamResult = ncclSuccess;
+  g_ncclMemManagerInitResult = ncclSuccess;
+  g_amdSmiInitResult = ncclSuccess;
 }

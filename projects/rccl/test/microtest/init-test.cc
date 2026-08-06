@@ -93,6 +93,29 @@
 
 #undef getenv
 
+// -------------------------------------------------------------------------
+// Tier-E: ncclNetInit()/ncclNetInitFromParent() fakes. Defined HERE (not in
+// init_fakes.cc) because they set comm->ncclNet, which needs the full
+// ncclComm/ncclNet_t layout that only this UUT TU sees. commAlloc() reads
+// comm->ncclNet again in dmaBufSupported(), so a non-null net is required on
+// the success path. g_ncclNetInitResult (init_fakes.h) makes the result
+// injectable; on failure comm->ncclNet is left null and commAlloc returns early.
+// -------------------------------------------------------------------------
+static ncclNet_t g_microFakeNet = [] {
+  ncclNet_t n{};
+  n.name = "microfake";
+  return n;
+}();
+ncclResult_t ncclNetInit(struct ncclComm* comm) {
+  if (g_ncclNetInitResult == ncclSuccess && comm) comm->ncclNet = &g_microFakeNet;
+  return g_ncclNetInitResult;
+}
+ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* parent) {
+  if (g_ncclNetInitResult == ncclSuccess && comm)
+    comm->ncclNet = parent ? parent->ncclNet : &g_microFakeNet;
+  return g_ncclNetInitResult;
+}
+
 // ===========================================================================
 // Fixture: resets all init-layer fakes between tests (TearDown). Tests that
 // exercise ncclInit()/call_once outcomes run process-isolated (see plan F4).
@@ -666,3 +689,87 @@ TEST_F(InitMicrotest, CheckHostUncacheMemSetting_Cached_Gfx942_ReturnsSuccess) {
   EXPECT_EQ(ncclSuccess, checkHostUncacheMemSetting(t.get()));
 }
 #endif
+
+// ===========================================================================
+// Tier-E: commAlloc() -- the deep allocation entry point. Runs host-only via
+// the controllable deep seams (InstallCommAllocSuccess). The two arg-check arms
+// need no seams; the happy path needs all seams; each failure arm injects ONE
+// failure so the corresponding early-return is covered in isolation.
+// ===========================================================================
+namespace {
+std::unique_ptr<ncclComm> FreshComm() { return std::unique_ptr<ncclComm>(new ncclComm{}); }
+}  // namespace
+
+TEST_F(InitMicrotest, CommAlloc_NdevZero_ReturnsInvalidArgument) {
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclInvalidArgument, commAlloc(comm.get(), /*parent=*/nullptr, /*ndev=*/0, /*rank=*/0));
+}
+
+TEST_F(InitMicrotest, CommAlloc_RankOutOfRange_ReturnsInvalidArgument) {
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclInvalidArgument, commAlloc(comm.get(), nullptr, /*ndev=*/4, /*rank=*/4));
+}
+
+TEST_F(InitMicrotest, CommAlloc_RankNegative_ReturnsInvalidArgument) {
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclInvalidArgument, commAlloc(comm.get(), nullptr, /*ndev=*/4, /*rank=*/-1));
+}
+
+TEST_F(InitMicrotest, CommAlloc_HappyPath_ReturnsSuccessAndSetsIdentity) {
+  InstallCommAllocSuccess();
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/3));
+  EXPECT_EQ(8, comm->nRanks);
+  EXPECT_EQ(3, comm->rank);
+  EXPECT_NE(nullptr, comm->ncclNet);            // ncclNetInit installed the fake net
+  EXPECT_NE(nullptr, comm->sharedRes);          // parent==NULL -> owns sharedRes
+}
+
+TEST_F(InitMicrotest, CommAlloc_NetInitFails_ReturnsError) {
+  InstallCommAllocSuccess();
+  g_ncclNetInitResult = ncclSystemError;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSystemError, commAlloc(comm.get(), nullptr, 8, 0));
+}
+
+TEST_F(InitMicrotest, CommAlloc_GinInitFails_ReturnsError) {
+  InstallCommAllocSuccess();
+  g_ncclGinInitResult = ncclInternalError;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclInternalError, commAlloc(comm.get(), nullptr, 8, 0));
+}
+
+TEST_F(InitMicrotest, CommAlloc_MemManagerInitFails_ReturnsError) {
+  InstallCommAllocSuccess();
+  g_ncclMemManagerInitResult = ncclInternalError;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclInternalError, commAlloc(comm.get(), nullptr, 8, 0));
+}
+
+TEST_F(InitMicrotest, CommAlloc_GetDeviceFails_ReturnsError) {
+  InstallCommAllocSuccess();
+  g_hipGetDevice = [](int*) { return hipErrorInvalidValue; };  // first CUDACHECK
+  auto comm = FreshComm();
+  EXPECT_NE(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
+}
+
+TEST_F(InitMicrotest, CommAlloc_EventCreateFails_ReturnsError) {
+  InstallCommAllocSuccess();
+  g_hipEventCreateResult = hipErrorInvalidValue;  // cudaEventCreateWithFlags arm
+  auto comm = FreshComm();
+  EXPECT_NE(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
+}
+
+TEST_F(InitMicrotest, CommAlloc_WarpSizeAttrFails_ReturnsError) {
+  InstallCommAllocSuccess();
+  g_hipDeviceGetAttributeResult = hipErrorInvalidValue;  // WarpSize CUDACHECK
+  auto comm = FreshComm();
+  EXPECT_NE(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
+}
+
+TEST_F(InitMicrotest, CommAlloc_MemPoolCreateFails_ReturnsError) {
+  InstallCommAllocSuccess();
+  g_hipMemPoolResult = hipErrorInvalidValue;  // cudaMemPoolCreate arm
+  auto comm = FreshComm();
+  EXPECT_NE(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
+}

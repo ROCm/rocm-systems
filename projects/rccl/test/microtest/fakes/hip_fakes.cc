@@ -34,6 +34,8 @@
 #include <cstdlib>
 #include <functional>
 
+#include <cstdio>        // std::snprintf
+
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
@@ -148,9 +150,24 @@ std::function<hipError_t(int*)> g_hipGetDevice = DefaultHipGetDevice;
 std::function<hipError_t(int)> g_hipSetDevice = DefaultHipSetDevice;
 std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
 
+// Deep-path (commAlloc/devCommSetup) result seams. Default to failure so the
+// p2p tests keep surfacing unexpected calls; commAlloc tests opt into success.
+hipError_t g_hipDeviceGetAttributeResult = hipErrorInvalidValue;
+hipError_t g_hipDeviceGetPCIBusIdResult  = hipErrorInvalidValue;
+hipError_t g_hipEventCreateResult        = hipErrorInvalidValue;
+hipError_t g_hipMemPoolResult            = hipErrorInvalidValue;
+hipError_t g_hipStreamCreateResult       = hipErrorInvalidValue;
+int        g_hipWarpSize                 = 64;
+
 // Restore every HIP hook to its default. Called from ResetP2pFakes().
 void ResetHipFakes()
 {
+    g_hipDeviceGetAttributeResult   = hipErrorInvalidValue;
+    g_hipDeviceGetPCIBusIdResult    = hipErrorInvalidValue;
+    g_hipEventCreateResult          = hipErrorInvalidValue;
+    g_hipMemPoolResult              = hipErrorInvalidValue;
+    g_hipStreamCreateResult         = hipErrorInvalidValue;
+    g_hipWarpSize                   = 64;
     g_hipMemGetAddressRange         = DefaultHipMemGetAddressRange;
     g_hipIpcGetMemHandle            = DefaultHipIpcGetMemHandle;
     g_hipMemRetainAllocationHandle  = DefaultHipMemRetainAllocationHandle;
@@ -220,16 +237,21 @@ hipError_t hipDeviceGet(hipDevice_t* device, int)
     return hipErrorInvalidValue;
 }
 
-hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t, int)
+hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int)
 {
-    if (pi) *pi = 0;
-    return hipErrorInvalidValue;
+    if (pi) *pi = (attr == hipDeviceAttributeWarpSize) ? g_hipWarpSize : 0;
+    return g_hipDeviceGetAttributeResult;
 }
 
 hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int)
 {
-    if (pciBusId && len > 0) pciBusId[0] = '\0';
-    return hipErrorInvalidValue;
+    if (pciBusId && len > 0) {
+        if (g_hipDeviceGetPCIBusIdResult == hipSuccess)
+            std::snprintf(pciBusId, len, "0000:00:00.0");
+        else
+            pciBusId[0] = '\0';
+    }
+    return g_hipDeviceGetPCIBusIdResult;
 }
 
 hipError_t hipEventCreate(hipEvent_t* event)
@@ -256,11 +278,17 @@ hipError_t hipGetDeviceCount(int* count) { return g_hipGetDeviceCount(count); }
 
 // Deep-path HIP stubs (commAlloc/devCommSetup); not exercised by Tier A-D tests.
 hipError_t hipDeviceSetLimit(hipLimit_t, size_t) { return hipErrorInvalidValue; }
-hipError_t hipEventCreateWithFlags(hipEvent_t*, unsigned int) { return hipErrorInvalidValue; }
+hipError_t hipEventCreateWithFlags(hipEvent_t* e, unsigned int) {
+    if (e) *e = (g_hipEventCreateResult == hipSuccess) ? reinterpret_cast<hipEvent_t>(0x1) : nullptr;
+    return g_hipEventCreateResult;
+}
 hipError_t hipEventSynchronize(hipEvent_t) { return hipErrorInvalidValue; }
-hipError_t hipMemPoolCreate(hipMemPool_t*, const hipMemPoolProps*) { return hipErrorInvalidValue; }
+hipError_t hipMemPoolCreate(hipMemPool_t* p, const hipMemPoolProps*) {
+    if (p) *p = (g_hipMemPoolResult == hipSuccess) ? reinterpret_cast<hipMemPool_t>(0x1) : nullptr;
+    return g_hipMemPoolResult;
+}
 hipError_t hipMemPoolDestroy(hipMemPool_t) { return hipErrorInvalidValue; }
-hipError_t hipMemPoolSetAttribute(hipMemPool_t, hipMemPoolAttr, void*) { return hipErrorInvalidValue; }
+hipError_t hipMemPoolSetAttribute(hipMemPool_t, hipMemPoolAttr, void*) { return g_hipMemPoolResult; }
 hipError_t hipPointerGetAttributes(hipPointerAttribute_t*, const void*) { return hipErrorInvalidValue; }
 
 // Device-model symbols routed through the controllable hooks above. After
@@ -360,8 +388,9 @@ hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute,
 
 hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int)
 {
-    if (stream) *stream = nullptr;
-    return hipErrorInvalidValue;
+    if (stream) *stream = (g_hipStreamCreateResult == hipSuccess)
+                              ? reinterpret_cast<hipStream_t>(0x1) : nullptr;
+    return g_hipStreamCreateResult;
 }
 
 hipError_t hipStreamDestroy(hipStream_t)     { return hipErrorInvalidValue; }
