@@ -120,6 +120,7 @@ set(SRC_FILES
   include/mem_manager.h
   include/allocator.h
   include/algorithms/CollCommon.h
+  include/algorithms/CollCommonTdm.h
   include/algorithms/CollCommon_ll128.h
   include/algorithms/all_reduce/all_reduce_dda.h
   include/algorithms/all_reduce/all_reduce_dda_ll.h
@@ -743,7 +744,11 @@ if(ENABLE_DEVICE_LINKER)
   # it is compiled with full HIP by the device linker step (ce_reduce.o) so the
   # fat binary is properly embedded. ce_coll.cc (no __global__ call sites)
   # stays in the main target and is compiled --offload-host-only as usual.
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "device/ce_reduce\\.cc$")
+  # When ENABLE_CE_REDUCE_KERNEL is OFF there is no device linker step for it, so
+  # it stays in the main target and compiles to just the host-side stub launcher.
+  if(ENABLE_CE_REDUCE_KERNEL)
+    list(FILTER HIP_SOURCES EXCLUDE REGEX "device/ce_reduce\\.cc$")
+  endif()
   message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, device/ce_reduce.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_all_reduce_fabric_ll.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_all_gather_fabric_ll.cu.cpp, dda_alltoall_fabric.cu.cpp)")
 endif()
 
@@ -796,6 +801,29 @@ if(DEMANGLE_DIR)
 endif()
 if(ROCTX_ENABLE)
   target_include_directories(rccl PRIVATE ${ROCTRACER_INCLUDE_DIR})
+endif()
+
+# The DDA Simple fabric kernels use the tensor data mover via tdm/tdmCopy.h,
+# which detects toolchain support with
+# __has_include(<hip/amd_detail/amd_gfx1250_TDM.h>). Some ROCm SDKs do not ship
+# that descriptor header; without it TDM_SUPPORTED is 0 and the TDM kernels
+# silently compile down to their vector fallback. The repo vendors an equivalent
+# descriptor at src/device/tdm/tdm.h, so stage a copy at the canonical include
+# path when the SDK lacks one. This must run before DeviceLinker.cmake is
+# included below, since rccl_device_defs snapshots this target's include
+# directories and the dda_*_fabric.cu kernels are built by the device linker.
+# test/CMakeLists.txt does the same for the unit-test fixtures.
+find_path(RCCL_GFX1250_TDM_HEADER
+  NAMES hip/amd_detail/amd_gfx1250_TDM.h
+  PATHS ${HIP_INCLUDE_DIRS} "${ROCM_PATH}/include")
+if(NOT RCCL_GFX1250_TDM_HEADER)
+  set(_rccl_tdm_fallback_dir "${PROJECT_BINARY_DIR}/tdm_fallback")
+  configure_file(
+    "${PROJECT_SOURCE_DIR}/src/device/tdm/tdm.h"
+    "${_rccl_tdm_fallback_dir}/hip/amd_detail/amd_gfx1250_TDM.h"
+    COPYONLY)
+  target_include_directories(rccl PRIVATE "${_rccl_tdm_fallback_dir}")
+  message(STATUS "rccl: SDK lacks amd_gfx1250_TDM.h; using vendored fallback from src/device/tdm/tdm.h")
 endif()
 
 ## Set RCCL compile definitions
@@ -949,6 +977,10 @@ endif()
 if(CE_ENABLED)
   target_compile_definitions(rccl PRIVATE CE_BATCH_ASYNC_SUPPORTED)
   message(STATUS "CE_BATCH_ASYNC_SUPPORTED compile definition enabled")
+endif()
+if(NOT ENABLE_CE_REDUCE_KERNEL)
+  target_compile_definitions(rccl PRIVATE RCCL_DISABLE_CE_REDUCE_KERNEL)
+  message(STATUS "ENABLE_CE_REDUCE_KERNEL=OFF: CE AllReduce local-reduction kernel replaced by a failing stub")
 endif()
 if(CUMEM_DMABUF_EXPORT_ENABLED)
   target_compile_definitions(rccl PRIVATE RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)

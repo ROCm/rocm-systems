@@ -19,6 +19,7 @@
 #pragma once
 
 #include "algorithms/CollCommon.h"
+#include "algorithms/CollCommonTdm.h"
 #include "fabric_gpu_barrier.h"
 
 namespace meta::comms {
@@ -77,6 +78,69 @@ __launch_bounds__(512)
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   allGather<T, NRANKS_CT>(ipcbuffs, recvbuff, selfRank, nRanks, idxStart, idxEnd, idxStride, true);
+
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+}
+
+// ---------------------------------------------------------------------------
+// Tensor-data-mover variants
+//
+// Same phases and the same barrier placement as the two kernels above; only the
+// bulk movement differs, so the two families are interchangeable at launch. The
+// grid shape differs (see getTdmGridAndBlockDims), which is fine because every
+// rank picks the same one.
+// ---------------------------------------------------------------------------
+
+template <typename T, int NRANKS_CT, bool hasAcc>
+__launch_bounds__(kTdmThreadsPerBlock) __global__
+  void ddaAllReduceFlatFabricTdm(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
+                                 const T* __restrict__ sendbuff, int selfRank, int nRanks, FabricGpuBarrier barrier,
+                                 const T* __restrict__ acc) {
+  __shared__ __align__(kTdmRowBytes) uint8_t lds[kTdmLdsBytes];
+  const TdmWarpTile tile = tdmWarpTile();
+  uint8_t* window0 = tdmWindow(lds, 0);
+  uint8_t* window1 = tdmWindow(lds, 1);
+
+  uint8_t* const* peers = reinterpret_cast<uint8_t* const*>(ipcbuffs);
+  const size_t nbytes = count * sizeof(T);
+
+  tdmCopyRange(reinterpret_cast<const uint8_t*>(sendbuff), peers[selfRank], nbytes, window0, window1, tile);
+
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+
+  tdmReduceRange<T, NRANKS_CT, hasAcc>(peers, reinterpret_cast<uint8_t*>(recvbuff),
+                                       reinterpret_cast<const uint8_t*>(acc), nRanks, /*srcOff=*/0, /*dstOff=*/0,
+                                       nbytes, window0, window1, tile);
+
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+}
+
+template <typename T, int NRANKS_CT, bool hasAcc>
+__launch_bounds__(kTdmThreadsPerBlock) __global__
+  void ddaAllReduceTreeFabricTdm(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
+                                 const T* __restrict__ sendbuff, int selfRank, int nRanks, FabricGpuBarrier barrier,
+                                 const T* __restrict__ acc) {
+  __shared__ __align__(kTdmRowBytes) uint8_t lds[kTdmLdsBytes];
+  const TdmWarpTile tile = tdmWarpTile();
+  uint8_t* window0 = tdmWindow(lds, 0);
+  uint8_t* window1 = tdmWindow(lds, 1);
+
+  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+
+  uint8_t* const* peers = reinterpret_cast<uint8_t* const*>(ipcbuffs);
+  const int nRanksEff = (NRANKS_CT > 0) ? NRANKS_CT : nRanks;
+  const size_t shardBytes = (count / nRanksEff) * sizeof(T);
+  const size_t shardOff = (size_t)selfRank * shardBytes;
+
+  // Two-shot: reduce this rank's shard across all peers into its own scratch
+  // slot, then gather every rank's reduced shard.
+  tdmReduceRange<T, NRANKS_CT, hasAcc>(peers, peers[selfRank], reinterpret_cast<const uint8_t*>(acc), nRanks, shardOff,
+                                       shardOff, shardBytes, window0, window1, tile);
+
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+
+  tdmAllGather<NRANKS_CT>(peers, reinterpret_cast<uint8_t*>(recvbuff), selfRank, nRanks, shardBytes,
+                          /*enableOffset=*/true, window0, window1, tile);
 
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
 }

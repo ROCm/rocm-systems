@@ -6,6 +6,7 @@
 
 #include "fabric_init.h"
 
+#include "algorithms/CollCommonTdm.h"
 #include "alloc.h"
 #include "archinfo.h"
 #include "checks.h"
@@ -25,6 +26,20 @@ using nccl_dda_detail::ddaFabricMaxNBlocksForScratch;
 using nccl_dda_detail::ddaLLEpochCount;
 using nccl_dda_detail::DdaFabricBarrierState;
 using nccl_dda_detail::kDdaFabricLLArMaxBlocks;
+
+// Whether the Simple-protocol fabric kernels should drive their bulk movement
+// with the tensor data mover. On by default wherever the device supports it;
+// RCCL_DDA_TDM=0 forces the vector kernels so the two can be compared. Resolved
+// once per comm here rather than per collective: the support check queries
+// device properties.
+static bool ddaTdmEnabledForDevice(int cudaDev) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char* s = getenv("RCCL_DDA_TDM");
+    enabled = (s != nullptr) ? (atoi(s) != 0) : 1;
+  }
+  return enabled != 0 && meta::comms::tdmSimpleSupported(cudaDev);
+}
 
 bool ncclDdaUseFabricPath(ncclComm* comm) {
   if (comm == nullptr) {
@@ -144,11 +159,13 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   comm->ddaPeerPtrsHost = peerHost;
   comm->ddaFabricBarrierState = barrierState;
   comm->ddaFabricMaxBlocks = nBlocksMax;
+  comm->ddaUseTdm = ddaTdmEnabledForDevice(comm->cudaDev);
   comm->ddaLLEpochDev = epochDev;
   comm->ddaLLEpochLen = (int)epochLen;
   INFO(NCCL_INIT,
-       "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm), FabricGpuBarrier nBlocks=%d, peer table on device",
-       nRanks, bytes, nBlocksMax);
+       "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm), FabricGpuBarrier nBlocks=%d, peer table on device, "
+       "Simple protocol uses %s",
+       nRanks, bytes, nBlocksMax, comm->ddaUseTdm ? "TDM" : "vector loads");
   return ncclSuccess;
 
 fail:

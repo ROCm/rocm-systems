@@ -919,27 +919,38 @@ add_custom_command(
 # Compiled with full HIP here so the fat binary is embedded in ce_reduce.o.
 # ce_coll.cc (main target, --offload-host-only) has no __global__ call sites
 # and therefore produces no undefined __hip_fatbin_<hash> reference.
+#
+# The 10 datatypes x 4 reduction ops instantiation matrix makes this the single
+# slowest TU in the device build, so ENABLE_CE_REDUCE_KERNEL=OFF skips it for
+# development builds that do not exercise CE AllReduce. CE_REDUCE_FAT_OBJ is
+# then left unset, which drops it from the device_linker_build dependencies and
+# from DEVICE_LINKER_OBJECTS by empty-list expansion.
 # ===========================================================================
-set(CE_REDUCE_FAT_OBJ "${DEVICE_BUILD_DIR}/ce_reduce.o")
+if(ENABLE_CE_REDUCE_KERNEL)
+  set(CE_REDUCE_FAT_OBJ "${DEVICE_BUILD_DIR}/ce_reduce.o")
 
-add_custom_command(
-  OUTPUT  ${CE_REDUCE_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    -std=c++17
-    -fPIC
-    -w
-    -c -o ${CE_REDUCE_FAT_OBJ}
-    ${HIPIFY_DIR}/src/device/ce_reduce.cc
-  DEPENDS ${HIPIFY_DIR}/src/device/ce_reduce.cc
-  COMMENT "DL compile: device/ce_reduce.cc (CE AllReduce reduce kernel)"
-  VERBATIM
-)
+  add_custom_command(
+    OUTPUT  ${CE_REDUCE_FAT_OBJ}
+    COMMAND ${DL_CLANG}
+      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+      ${DL_HIP_COMPILER_FLAGS}
+      -DRCCL_DEVICE_LINKER
+      ${_link_def_flags}
+      ${_host_inc_flags}
+      ${DL_OPT_FLAGS}
+      -std=c++17
+      -fPIC
+      -w
+      -c -o ${CE_REDUCE_FAT_OBJ}
+      ${HIPIFY_DIR}/src/device/ce_reduce.cc
+    DEPENDS ${HIPIFY_DIR}/src/device/ce_reduce.cc
+    COMMENT "DL compile: device/ce_reduce.cc (CE AllReduce reduce kernel)"
+    VERBATIM
+  )
+else()
+  set(CE_REDUCE_FAT_OBJ "")
+  message(STATUS "Device Linker: skipping device/ce_reduce.cc (ENABLE_CE_REDUCE_KERNEL=OFF)")
+endif()
 
 # ===========================================================================
 # Symmetric kernels: per-instantiation device TUs from gensrc/symmetric/.

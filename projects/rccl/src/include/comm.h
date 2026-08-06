@@ -638,6 +638,10 @@ struct ncclComm {
   nccl_dda_detail::DdaIpcBarrierState* ddaIpcBarrierState; /* IPC path only */
   nccl_dda_detail::DdaFabricBarrierState* ddaFabricBarrierState; /* fabric path only */
   int ddaFabricMaxBlocks;
+  // Whether the Simple-protocol fabric kernels drive their bulk movement with
+  // the tensor data mover. Resolved once at init (arch support + RCCL_DDA_TDM)
+  // because the check queries device properties.
+  bool ddaUseTdm;
   // True when ddaScratch is VMM (cuMem) backed (fabric path); selects the
   // matching deallocator at teardown.
   bool ddaScratchIsVmm;

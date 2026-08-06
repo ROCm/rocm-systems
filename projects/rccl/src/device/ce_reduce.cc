@@ -25,9 +25,12 @@ THE SOFTWARE.
 #include <hip/hip_fp16.h>
 #include <hip/hip_bfloat16.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <algorithm>
 
 #include "nccl.h"
+
+#ifndef RCCL_DISABLE_CE_REDUCE_KERNEL
 
 // *********************************************************************************
 // VecTrait<T>
@@ -326,3 +329,18 @@ ncclResult_t ncclCeLaunchLocalReduce(const void* tmpBuf, void* output, int nRank
 
   return ncclSuccess;
 }
+
+#else // RCCL_DISABLE_CE_REDUCE_KERNEL
+
+// Built with -DENABLE_CE_REDUCE_KERNEL=OFF: the 40-instantiation reduce kernel
+// was not compiled, so CE AllReduce cannot run. ce_coll.cc still references the
+// launcher, hence this stub. Callers must treat the failure as fatal rather than
+// falling through to an unreduced result.
+ncclResult_t ncclCeLaunchLocalReduce(const void* tmpBuf, void* output, int nRanks, size_t chunkElems,
+                                     ncclDataType_t datatype, ncclRedOp_t op, hipStream_t stream) {
+  if (chunkElems == 0) return ncclSuccess;
+  printf("[CE reduce] librccl was built with ENABLE_CE_REDUCE_KERNEL=OFF; CE AllReduce is unavailable\n");
+  return ncclInvalidUsage;
+}
+
+#endif // RCCL_DISABLE_CE_REDUCE_KERNEL
