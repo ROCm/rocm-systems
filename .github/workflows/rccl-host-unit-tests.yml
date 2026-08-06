@@ -55,11 +55,20 @@ jobs:
 
       - name: Run host tests
         working-directory: projects/rccl/test/host
-        run: ./build/rccl-HostUnitTests --gtest_output=xml:host_tests.xml
+        shell: bash
+        run: |
+          # tee the full stdout+stderr (incl. WARN/debug output) to a log while
+          # keeping the binary's exit code (pipefail) so a failure still fails the job.
+          set -o pipefail
+          ./build/rccl-HostUnitTests \
+            --gtest_output=xml:host_tests.xml \
+            --gtest_color=no 2>&1 | tee host_tests.log
 
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: host-unit-test-results
-          path: projects/rccl/test/host/host_tests.xml
+          path: |
+            projects/rccl/test/host/host_tests.log
+            projects/rccl/test/host/host_tests.xml
