@@ -22,6 +22,8 @@ THE SOFTWARE.
 
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <vector>
 #include <string>
 #include <map>
@@ -137,12 +139,12 @@ private:
      * @brief Fallback parameters (if no level specified) - mirror level_2.
      */
     // 64, 256, 1K, 4K, 16K, 64K, 256K, 1M, 10M, 50M, 100M, 500M, 1G, 2G
-    const std::vector<size_t> defaultMemorySizes = {64,        256,       1024,       4096,
-                                                    16384,     65536,     262144,     1048576,
-                                                    10485760,  52428800,  104857600,  524288000,
-                                                    1073741824, 2147483648};
-    const std::vector<int> defaultBlockSizes = {32, 64, 96, 128, 192, 256, 384, 512, 768, 1024};
-    const int defaultIterations = 5;
-    const int defaultWarmups = 5;
-    const size_t defaultMaxMemory = 8589934592; // 8G
+    static constexpr std::array<size_t, 14> defaultMemorySizes = {64,        256,       1024,       4096,
+                                                                  16384,     65536,     262144,     1048576,
+                                                                  10485760,  52428800,  104857600,  524288000,
+                                                                  1073741824, 2147483648};
+    static constexpr std::array<int, 10> defaultBlockSizes = {32, 64, 96, 128, 192, 256, 384, 512, 768, 1024};
+    static constexpr int defaultIterations = 5;
+    static constexpr int defaultWarmups = 5;
+    static constexpr size_t defaultMaxMemory = 8589934592; // 8G
 };
