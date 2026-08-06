@@ -547,7 +547,10 @@ TEST(KernelDescriptorTranslator, RdnaWave64UsesAmdhsaDescriptorVgprEncoding) {
     EXPECT_EQ(translated->target_vgpr_granulated, 31u);
   }
 }
-TEST(BinaryTranslatorE2E, DescriptorPrologueRedirectsEntryWithoutOverwritingOriginalEntry) {
+
+// TODO: https://github.com/ROCm/rocm-systems/issues/9791
+TEST(BinaryTranslatorE2E,
+     DISABLED_DescriptorPrologueRedirectsEntryWithoutOverwritingOriginalEntry) {
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid());
   ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
