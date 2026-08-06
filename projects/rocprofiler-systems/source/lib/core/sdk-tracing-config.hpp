@@ -782,15 +782,14 @@ sdk_tracing_config<SdkApi, Externals>::get_buffered_domains()
     // headers declare the KFD enums; the loaded runtime library must be checked
     // separately since it can be older than the headers this binary was built
     // against.
-    version_info kfd_version{};
+    version_info runtime_version{ get_version() };
     bool         kfd_supported_by_runtime = false;
     if constexpr(compile_time_sdk_version >=
                  version_info{ .major = 1, .minor = 0, .patch = 0 })
     {
         constexpr auto kfd_min_version =
             version_info{ .major = 1, .minor = 2, .patch = 2 };
-        kfd_version              = get_version();
-        kfd_supported_by_runtime = (kfd_version >= kfd_min_version);
+        kfd_supported_by_runtime = (runtime_version >= kfd_min_version);
     }
 
     auto data    = std::unordered_set<kind_t>{};
@@ -863,7 +862,8 @@ sdk_tracing_config<SdkApi, Externals>::get_buffered_domains()
                             "KFD tracing domain '{}' disabled: rocprofiler-sdk "
                             "{}.{}.{} has a bug with undefined KFD node IDs (fixed in "
                             ">= 1.2.2)",
-                            itr, kfd_version.major, kfd_version.minor, kfd_version.patch);
+                            itr, runtime_version.major, runtime_version.minor,
+                            runtime_version.patch);
                         warned = true;
                     }
                     continue;
@@ -941,7 +941,8 @@ sdk_tracing_config<SdkApi, Externals>::get_buffered_domains()
                 LOG_WARNING("ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON requested KFD "
                             "page_fault/page_migrate tracing, but rocprofiler-sdk "
                             "{}.{}.{} is too old (requires >= 1.2.2)",
-                            kfd_version.major, kfd_version.minor, kfd_version.patch);
+                            runtime_version.major, runtime_version.minor,
+                            runtime_version.patch);
             }
         }
     }

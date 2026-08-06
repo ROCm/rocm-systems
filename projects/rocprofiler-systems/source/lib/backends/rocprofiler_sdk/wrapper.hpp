@@ -405,6 +405,16 @@ struct wrapper
         ROCPROFILER_CALLBACK_TRACING_HIP_STREAM;
 #endif
 
+#if ROCPROFILER_VERSION >= 10304
+    static constexpr callback_tracing_kind CALLBACK_TRACING_ROCSHMEM_API =
+        ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API;
+#endif
+
+#if ROCPROFILER_VERSION >= 10305
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HIPFILE_API =
+        ROCPROFILER_CALLBACK_TRACING_HIPFILE_API;
+#endif
+
     // ─── Buffer tracing kind constants ───────────────────────────────────────────
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_CORE_API =
         ROCPROFILER_BUFFER_TRACING_HSA_CORE_API;
