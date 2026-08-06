@@ -15,6 +15,9 @@ add_library(
     ${rocprofiler_sdk_components_unit_tests_sources}
 )
 
+# Unit tests intentionally compile only the SPM request/config validation path here.
+# The SDK runtime helpers stay behind ROCPROFSYS_COMPILE_SPM_RUNTIME and are
+# compile-checked by the normal SPM-enabled rocprofiler-systems-object-library target.
 set_source_files_properties(
     ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/rocprofiler-sdk/spm.cpp
     PROPERTIES COMPILE_DEFINITIONS ROCPROFSYS_DISABLE_SPM_RUNTIME=1

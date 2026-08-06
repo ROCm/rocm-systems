@@ -1402,7 +1402,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
 void
 perfetto_processor_t::handle([[maybe_unused]] const spm_sample& _spm)
 {
-#if ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM
+#if ROCPROFSYS_USE_SPM
     using counter_collection_track =
         core::perfetto::counter_track<category::rocm_counter_collection>;
 

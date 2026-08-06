@@ -102,7 +102,7 @@ using counter_id_vec_t = std::vector<rocprofiler_counter_id_t>;
 using agent_counter_id_map_t =
     std::unordered_map<rocprofiler_agent_id_t, counter_id_vec_t>;
 
-#if ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM
+#if ROCPROFSYS_USE_SPM
 using agent_spm_counter_config_map_t =
     std::unordered_map<rocprofiler_agent_id_t, rocprofiler_counter_config_id_t>;
 #endif
@@ -148,7 +148,7 @@ struct client_data
     agent_counter_id_map_t             agent_events              = {};
     agent_counter_info_map_t           agent_counter_info        = {};
     agent_counter_profile_map_t        agent_counter_profiles    = {};
-#if ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM
+#if ROCPROFSYS_USE_SPM
     common::synchronized<agent_spm_counter_config_map_t> agent_spm_counter_configs = {};
     std::atomic<std::uint64_t>                           spm_data_loss_reports{ 0 };
 #endif

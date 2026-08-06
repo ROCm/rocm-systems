@@ -17,8 +17,8 @@
 
 namespace
 {
-using rocprofsys::rocprofiler_sdk::spm::beta_opt_in_satisfied;
 using rocprofsys::rocprofiler_sdk::spm::is_config_valid;
+using rocprofsys::rocprofiler_sdk::spm::is_spm_enabled_for_sdk;
 using rocprofsys::rocprofiler_sdk::spm::request;
 
 constexpr auto sdk_spm_beta_env = "ROCPROFILER_SPM_BETA_ENABLED";
@@ -44,12 +44,6 @@ struct fake_env
 };
 
 using fake_environment = rocprofsys::common::environment<fake_env>;
-
-bool
-read_fake_env_bool(const char* name, bool fallback)
-{
-    return fake_environment::get_env(name, fallback);
-}
 
 void
 ensure_spm_settings_registered()
@@ -181,13 +175,13 @@ TEST(spm_config_validation, accepts_valid_requested_spm_request)
 
 TEST_F(beta_opt_in_test, accepts_when_spm_is_not_requested)
 {
-    EXPECT_TRUE(beta_opt_in_satisfied(request{}, read_fake_env_bool));
+    EXPECT_TRUE(is_spm_enabled_for_sdk<fake_environment>(request{}));
 }
 
 TEST_F(beta_opt_in_test, rejects_requested_spm_without_sdk_beta_env)
 {
     EXPECT_FALSE(
-        beta_opt_in_satisfied(make_valid_requested_spm_request(), read_fake_env_bool));
+        is_spm_enabled_for_sdk<fake_environment>(make_valid_requested_spm_request()));
 }
 
 TEST_F(beta_opt_in_test, accepts_requested_spm_with_sdk_beta_env)
@@ -195,5 +189,5 @@ TEST_F(beta_opt_in_test, accepts_requested_spm_with_sdk_beta_env)
     fake_env::setenv(sdk_spm_beta_env, "ON", 1);
 
     EXPECT_TRUE(
-        beta_opt_in_satisfied(make_valid_requested_spm_request(), read_fake_env_bool));
+        is_spm_enabled_for_sdk<fake_environment>(make_valid_requested_spm_request()));
 }

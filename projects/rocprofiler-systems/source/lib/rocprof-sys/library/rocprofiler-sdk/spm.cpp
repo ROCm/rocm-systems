@@ -5,7 +5,6 @@
 // no-SDK runtime fallbacks here.
 
 #include "library/rocprofiler-sdk/spm.hpp"
-#include "common/environment.hpp"
 
 #include "logger/debug.hpp"
 
@@ -14,10 +13,25 @@
 #include <cstdint>
 #include <string_view>
 
+// SPM runtime compilation is controlled by two inputs:
+//
+//   ROCPROFSYS_USE_SPM
+//     Set to 0/1 by cmake/Packages.cmake after probing for
+//     <rocprofiler-sdk/experimental/spm.h>. Also used by fwd.hpp and
+//     perfetto_processor.cpp for SPM-dependent data members/output.
+//
+//   ROCPROFSYS_DISABLE_SPM_RUNTIME
+//     Defined only by the unit-test target so the SPM request/validation helpers
+//     can be compiled and tested without pulling in SDK SPM runtime dependencies.
+//
+// ROCPROFSYS_COMPILE_SPM_RUNTIME resolves those inputs into the single local
+// condition this file branches on. Keeping this derived gate avoids repeating the
+// compound condition at each #if site. The __has_include check protects against
+// CMake reporting SPM support when the compiler cannot include the experimental
+// header.
 #if defined(ROCPROFSYS_DISABLE_SPM_RUNTIME)
 #    define ROCPROFSYS_COMPILE_SPM_RUNTIME 0
-#elif ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM &&                                              \
-    __has_include(<rocprofiler-sdk/experimental/spm.h>)
+#elif ROCPROFSYS_USE_SPM && __has_include(<rocprofiler-sdk/experimental/spm.h>)
 #    define ROCPROFSYS_COMPILE_SPM_RUNTIME 1
 #else
 #    define ROCPROFSYS_COMPILE_SPM_RUNTIME 0
@@ -59,19 +73,11 @@ namespace spm
 {
 namespace
 {
-constexpr auto beta_env_name = "ROCPROFILER_SPM_BETA_ENABLED";
-
 bool
 has_configured_event_string(std::string_view events)
 {
     return std::any_of(events.begin(), events.end(),
                        [](unsigned char itr) { return std::isspace(itr) == 0; });
-}
-
-bool
-read_posix_env_bool(const char* name, bool fallback)
-{
-    return ::rocprofsys::common::get_env(name, fallback);
 }
 }  // namespace
 
@@ -93,8 +99,8 @@ is_config_valid(const request&                  req,
 
     if(!dispatch_counter_events.empty())
     {
-        LOG_WARNING("SPM counter collection is mutually exclusive with "
-                    "ROCPROFSYS_ROCM_EVENTS");
+        LOG_ERROR("Invalid SPM configuration: SPM counter collection is mutually "
+                  "exclusive with ROCPROFSYS_ROCM_EVENTS");
         return false;
     }
 
@@ -102,45 +108,22 @@ is_config_valid(const request&                  req,
     // any non-whitespace value as a requested device-counting collection.
     if(has_configured_event_string(gpu_perf_counter_events))
     {
-        LOG_WARNING("SPM counter collection is mutually exclusive with "
-                    "ROCPROFSYS_GPU_PERF_COUNTERS");
+        LOG_ERROR("Invalid SPM configuration: SPM counter collection is mutually "
+                  "exclusive with ROCPROFSYS_GPU_PERF_COUNTERS");
         return false;
     }
 
     if(req.sample_interval == 0)
     {
-        LOG_WARNING("SPM counter collection requires a positive sample interval. Set "
-                    "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL or pass --spm-sample-interval "
-                    "(for example, 8192). Supported intervals are hardware-limited and "
-                    "can be queried with 'rocprofv3-avail info --spm-config'.");
+        LOG_ERROR("Invalid SPM configuration: SPM counter collection requires a "
+                  "positive sample interval. Set ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL or "
+                  "pass --spm-sample-interval (for example, 8192). Supported intervals "
+                  "are hardware-limited and can be queried with 'rocprofv3-avail info "
+                  "--spm-config'.");
         return false;
     }
 
     return true;
-}
-
-bool
-beta_opt_in_satisfied(const request& req, env_bool_reader_t read_env)
-{
-    if(!req.requested()) return true;
-
-    if(read_env(beta_env_name, false))
-    {
-        LOG_WARNING("ROCm SPM counter collection is enabled as a beta feature");
-        return true;
-    }
-
-    LOG_WARNING("ROCm SPM counter collection was requested, but SDK beta SPM is "
-                "not explicitly enabled. SPM samples will be skipped for this "
-                "run. Set ROCPROFILER_SPM_BETA_ENABLED=ON to acknowledge the "
-                "beta risk and enable SPM collection.");
-    return false;
-}
-
-bool
-beta_opt_in_satisfied(const request& req)
-{
-    return beta_opt_in_satisfied(req, read_posix_env_bool);
 }
 
 #if ROCPROFSYS_COMPILE_SPM_RUNTIME
