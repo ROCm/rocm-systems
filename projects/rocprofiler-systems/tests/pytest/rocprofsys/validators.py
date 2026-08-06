@@ -71,6 +71,7 @@ ROCPROFSYS_ABORT_FAIL_REGEX = [
     r"terminate called after throwing an instance",
     r"calling abort\.\. in ",
     r"Exit code: [1-9]",
+    r"Failed to open Symtab for",
 ]
 
 from rocprofsys.runners import TestResult

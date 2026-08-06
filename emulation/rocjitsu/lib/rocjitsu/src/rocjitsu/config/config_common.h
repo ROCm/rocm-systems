@@ -36,12 +36,15 @@ inline std::string read_config_file(const std::string &path) {
 /// @details FlatBuffers returns pointers into `Parser::builder_`. Keeping the
 /// parser local to this helper makes the lifetime explicit: callers must copy
 /// any values they need inside @p callback rather than retaining raw pointers.
+/// @param skip_unexpected_fields Preserve the general simulation config's
+/// forward-compatible unknown-field behavior when true; use false for strict
+/// sub-configs whose misspelled keys could change execution behavior.
 template <typename Callback>
-decltype(auto) with_parsed_simulation_config_json(const std::string &json,
-                                                  const std::string &schema_text,
-                                                  Callback &&callback) {
+decltype(auto)
+with_parsed_simulation_config_json(const std::string &json, const std::string &schema_text,
+                                   Callback &&callback, bool skip_unexpected_fields = true) {
   flatbuffers::Parser parser;
-  parser.opts.skip_unexpected_fields_in_json = true;
+  parser.opts.skip_unexpected_fields_in_json = skip_unexpected_fields;
   if (!parser.Parse(schema_text.c_str()))
     throw std::runtime_error("Failed to parse schema: " + std::string(parser.error_));
   if (!parser.Parse(json.c_str()))

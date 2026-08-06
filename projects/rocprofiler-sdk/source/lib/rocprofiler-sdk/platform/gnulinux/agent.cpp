@@ -33,7 +33,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
-#include <fmt/core.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <libdrm/amdgpu.h>
@@ -588,7 +587,7 @@ enumerate()
         if(agent_info.type == ROCPROFILER_AGENT_TYPE_GPU)
         {
             constexpr auto workgrp_max = 1024;
-            constexpr auto grid_max    = std::numeric_limits<uint32_t>::max();
+            constexpr auto grid_max    = std::numeric_limits<int32_t>::max();
             constexpr auto grid_max_x  = std::numeric_limits<int32_t>::max();
             constexpr auto grid_max_y  = std::numeric_limits<uint16_t>::max();
             constexpr auto grid_max_z  = std::numeric_limits<uint16_t>::max();

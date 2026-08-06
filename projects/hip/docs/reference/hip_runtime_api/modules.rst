@@ -29,6 +29,7 @@ The API is organized into modules based on functionality.
   * :ref:`surface_object_reference`
 
 * :ref:`peer_to_peer_device_memory_access_reference`
+* :ref:`execution_context_management_reference`
 * :ref:`context_management_reference`
 * :ref:`module_management_reference`
 * :ref:`occupancy_reference`

@@ -297,6 +297,8 @@ struct kernel_dispatch
     uint64_t                dispatch_id         = 0;
     uint64_t                stream_id           = 0;
     uint64_t                queue_id            = 0;
+    uint64_t                graph_exec_id       = 0;
+    uint64_t                graph_node_id       = 0;
     std::string             queue               = {};
     std::string             stream              = {};
     rocprofiler_timestamp_t start               = 0;
@@ -355,6 +357,8 @@ struct memory_copies
     std::string             category             = {};
     uint64_t                stream_id            = 0;
     uint64_t                queue_id             = 0;
+    uint64_t                graph_exec_id        = 0;
+    uint64_t                graph_node_id        = 0;
     std::string             stream_name          = {};
     std::string             queue_name           = {};
     uint64_t                size                 = 0;
@@ -373,6 +377,21 @@ struct memory_copies
     uint64_t                stack_id             = 0;
     uint64_t                parent_stack_id      = 0;
     uint64_t                corr_id              = 0;
+};
+
+struct graph_launch
+{
+    uint64_t                id                    = 0;
+    guid_t                  guid                  = {};
+    pid_t                   pid                   = 0;
+    pid_t                   tid                   = 0;
+    rocprofiler_timestamp_t start                 = 0;
+    rocprofiler_timestamp_t end                   = 0;
+    uint64_t                graph_exec_id         = 0;
+    uint64_t                kernel_dispatch_count = 0;
+    uint64_t                stack_id              = 0;
+    uint64_t                parent_stack_id       = 0;
+    uint64_t                corr_id               = 0;
 };
 
 struct scratch_memory
@@ -766,6 +785,8 @@ load(ArchiveT& ar, rocpd::types::kernel_dispatch& data)
     LOAD_DATA_FIELD(dispatch_id);
     LOAD_DATA_FIELD(queue_id);
     LOAD_DATA_FIELD(stream_id);
+    LOAD_DATA_FIELD(graph_exec_id);
+    LOAD_DATA_FIELD(graph_node_id);
     LOAD_DATA_FIELD(queue);
     LOAD_DATA_FIELD(stream);
     LOAD_DATA_FIELD(start);
@@ -827,6 +848,8 @@ load(ArchiveT& ar, rocpd::types::memory_copies& data)
     LOAD_DATA_FIELD(region_name);
     LOAD_DATA_FIELD(stream_id);
     LOAD_DATA_FIELD(queue_id);
+    LOAD_DATA_FIELD(graph_exec_id);
+    LOAD_DATA_FIELD(graph_node_id);
     LOAD_DATA_FIELD(stream_name);
     LOAD_DATA_FIELD(queue_name);
     LOAD_DATA_FIELD(size);
@@ -843,6 +866,23 @@ load(ArchiveT& ar, rocpd::types::memory_copies& data)
     LOAD_DATA_FIELD(src_agent_type);
     LOAD_DATA_FIELD(src_address);
     LOAD_DATA_FIELD(category);
+    LOAD_DATA_FIELD(stack_id);
+    LOAD_DATA_FIELD(parent_stack_id);
+    LOAD_DATA_FIELD(corr_id);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, rocpd::types::graph_launch& data)
+{
+    LOAD_DATA_FIELD(id);
+    LOAD_DATA_FIELD(guid);
+    LOAD_DATA_FIELD(pid);
+    LOAD_DATA_FIELD(tid);
+    LOAD_DATA_FIELD(start);
+    LOAD_DATA_FIELD(end);
+    LOAD_DATA_FIELD(graph_exec_id);
+    LOAD_DATA_FIELD(kernel_dispatch_count);
     LOAD_DATA_FIELD(stack_id);
     LOAD_DATA_FIELD(parent_stack_id);
     LOAD_DATA_FIELD(corr_id);

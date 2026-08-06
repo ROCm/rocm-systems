@@ -16,6 +16,7 @@
 /projects/rccl-tests/                                                 @ROCm/rccl-reviewers
 /projects/rdc/                                                        @ROCm/rdc-reviewers
 /projects/rocm-core/                                                  @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru
+/projects/rocm-core/rdhc/                                             @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru @solaiys
 /projects/rocm-smi-lib/                                               @ROCm/smi-reviewers
 /projects/rocminfo/                                                   @dayatsin-amd @shwetagkhatri
 /projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer
@@ -41,7 +42,7 @@
 /projects/rocr-runtime/libhsakmt                                      @kentrussell @dayatsin-amd @cfreeamd
 /projects/rocr-runtime/libhsakmt/tests/kfdtest                        @kentrussell @xiaogang-chen-amd
 /projects/rocr-runtime/libhsakmt/include/impl                         @dayatsin-amd @cfreeamd @gandryey @chrispaquot
-/projects/rocr-runtime/libhsakmt/src/dxg                              @dayatsin-amd @cfreeamd @gandryey @chrispaquot
+/projects/rocr-runtime/libhsakmt/src/dxg                              @dayatsin-amd @cfreeamd @gandryey @chrispaquot @fcui-amd
 /projects/rocr-runtime/rocrtst                                        @shwetagkhatri @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/core/runtime/trap_handler/*.s	@lancesix @dayatsin-amd @cfreeamd @shwetagkhatri
 /projects/rocr-runtime/runtime/hsa-runtime/core/driver/xdna           @atgutier @ypapadop-amd @dayatsin-amd @cfreeamd
@@ -123,5 +124,8 @@
 /projects/rocjpeg/**/*.rst                                            @ROCm/rocjpeg-docs-reviewers
 /projects/rocjpeg/**/.readthedocs.yaml                                @ROCm/rocjpeg-docs-reviewers
 
+/projects/hipfile/**/*.md                                             @ROCm/hipfile-docs-reviewers
+/projects/hipfile/**/*.rst                                            @ROCm/hipfile-docs-reviewers
+/projects/hipfile/**/.readthedocs.yaml                                @ROCm/hipfile-docs-reviewers
 
 /projects/rocprof-trace-decoder/**/*.md                               @ROCm/rocm-devtools-team @ROCm/rocm-documentation

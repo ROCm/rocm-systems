@@ -88,6 +88,7 @@ class VCvtF16F32Vop3 : public Vop3 {
 public:
   VCvtF16F32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -230,6 +231,7 @@ class VMovB16Vop3 : public Vop3 {
 public:
   VMovB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -448,6 +450,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
 };
 
 class VMovrelsB32Vop3 : public Vop3 {
@@ -456,6 +459,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
 };
 
 class VMovrelsdB32Vop3 : public Vop3 {
@@ -464,6 +468,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
 };
 
 class VMovrelsd2B32Vop3 : public Vop3 {
@@ -472,12 +477,14 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
 };
 
 class VCvtF16U16Vop3 : public Vop3 {
 public:
   VCvtF16U16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -486,6 +493,7 @@ class VCvtF16I16Vop3 : public Vop3 {
 public:
   VCvtF16I16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -494,6 +502,7 @@ class VCvtU16F16Vop3 : public Vop3 {
 public:
   VCvtU16F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -502,6 +511,7 @@ class VCvtI16F16Vop3 : public Vop3 {
 public:
   VCvtI16F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -510,6 +520,7 @@ class VRcpF16Vop3 : public Vop3 {
 public:
   VRcpF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -518,6 +529,7 @@ class VSqrtF16Vop3 : public Vop3 {
 public:
   VSqrtF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -526,6 +538,7 @@ class VRsqF16Vop3 : public Vop3 {
 public:
   VRsqF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -534,6 +547,7 @@ class VLogF16Vop3 : public Vop3 {
 public:
   VLogF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -542,6 +556,7 @@ class VExpF16Vop3 : public Vop3 {
 public:
   VExpF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -550,6 +565,7 @@ class VFrexpMantF16Vop3 : public Vop3 {
 public:
   VFrexpMantF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -558,6 +574,7 @@ class VFrexpExpI16F16Vop3 : public Vop3 {
 public:
   VFrexpExpI16F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -566,6 +583,7 @@ class VFloorF16Vop3 : public Vop3 {
 public:
   VFloorF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -574,6 +592,7 @@ class VCeilF16Vop3 : public Vop3 {
 public:
   VCeilF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -582,6 +601,7 @@ class VTruncF16Vop3 : public Vop3 {
 public:
   VTruncF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -590,6 +610,7 @@ class VRndneF16Vop3 : public Vop3 {
 public:
   VRndneF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -598,6 +619,7 @@ class VFractF16Vop3 : public Vop3 {
 public:
   VFractF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -606,6 +628,7 @@ class VSinF16Vop3 : public Vop3 {
 public:
   VSinF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -614,6 +637,7 @@ class VCosF16Vop3 : public Vop3 {
 public:
   VCosF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -622,6 +646,7 @@ class VSatPkU8I16Vop3 : public Vop3 {
 public:
   VSatPkU8I16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -630,6 +655,7 @@ class VCvtNormI16F16Vop3 : public Vop3 {
 public:
   VCvtNormI16F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -638,6 +664,7 @@ class VCvtNormU16F16Vop3 : public Vop3 {
 public:
   VCvtNormU16F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -646,6 +673,7 @@ class VNotB16Vop3 : public Vop3 {
 public:
   VNotB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 };
@@ -932,6 +960,7 @@ class VAddF16Vop3 : public Vop3 {
 public:
   VAddF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -941,6 +970,7 @@ class VSubF16Vop3 : public Vop3 {
 public:
   VSubF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -950,6 +980,7 @@ class VSubrevF16Vop3 : public Vop3 {
 public:
   VSubrevF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -959,6 +990,7 @@ class VMulF16Vop3 : public Vop3 {
 public:
   VMulF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -968,6 +1000,7 @@ class VFmacF16Vop3 : public Vop3 {
 public:
   VFmacF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -977,6 +1010,7 @@ class VMaxF16Vop3 : public Vop3 {
 public:
   VMaxF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -986,6 +1020,7 @@ class VMinF16Vop3 : public Vop3 {
 public:
   VMinF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -995,6 +1030,7 @@ class VLdexpF16Vop3 : public Vop3 {
 public:
   VLdexpF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1328,6 +1364,7 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+  Operand vcc;
 };
 
 class VDivFmasF64Vop3 : public Vop3 {
@@ -1338,6 +1375,7 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+  Operand vcc;
 };
 
 class VMsadU8Vop3 : public Vop3 {
@@ -1394,6 +1432,7 @@ class VMadU16Vop3 : public Vop3 {
 public:
   VMadU16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1444,6 +1483,7 @@ class VFmaF16Vop3 : public Vop3 {
 public:
   VFmaF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1454,6 +1494,7 @@ class VMin3F16Vop3 : public Vop3 {
 public:
   VMin3F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1464,6 +1505,7 @@ class VMin3I16Vop3 : public Vop3 {
 public:
   VMin3I16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1474,6 +1516,7 @@ class VMin3U16Vop3 : public Vop3 {
 public:
   VMin3U16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1484,6 +1527,7 @@ class VMax3F16Vop3 : public Vop3 {
 public:
   VMax3F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1494,6 +1538,7 @@ class VMax3I16Vop3 : public Vop3 {
 public:
   VMax3I16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1504,6 +1549,7 @@ class VMax3U16Vop3 : public Vop3 {
 public:
   VMax3U16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1514,6 +1560,7 @@ class VMed3F16Vop3 : public Vop3 {
 public:
   VMed3F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1524,6 +1571,7 @@ class VMed3I16Vop3 : public Vop3 {
 public:
   VMed3I16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1534,6 +1582,7 @@ class VMed3U16Vop3 : public Vop3 {
 public:
   VMed3U16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1544,6 +1593,7 @@ class VMadI16Vop3 : public Vop3 {
 public:
   VMadI16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1554,6 +1604,7 @@ class VDivFixupF16Vop3 : public Vop3 {
 public:
   VDivFixupF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1644,6 +1695,7 @@ class VCndmaskB16Vop3 : public Vop3 {
 public:
   VCndmaskB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1674,6 +1726,7 @@ class VMaxminF16Vop3 : public Vop3 {
 public:
   VMaxminF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1684,6 +1737,7 @@ class VMinmaxF16Vop3 : public Vop3 {
 public:
   VMinmaxF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1734,6 +1788,7 @@ class VDot2F16F16Vop3 : public Vop3 {
 public:
   VDot2F16F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1744,6 +1799,7 @@ class VDot2Bf16Bf16Vop3 : public Vop3 {
 public:
   VDot2Bf16Bf16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1754,6 +1810,7 @@ class VAddNcU16Vop3 : public Vop3 {
 public:
   VAddNcU16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1763,6 +1820,7 @@ class VSubNcU16Vop3 : public Vop3 {
 public:
   VSubNcU16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1772,6 +1830,7 @@ class VMulLoU16Vop3 : public Vop3 {
 public:
   VMulLoU16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1799,6 +1858,7 @@ class VMaxU16Vop3 : public Vop3 {
 public:
   VMaxU16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1808,6 +1868,7 @@ class VMaxI16Vop3 : public Vop3 {
 public:
   VMaxI16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1817,6 +1878,7 @@ class VMinU16Vop3 : public Vop3 {
 public:
   VMinU16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1826,6 +1888,7 @@ class VMinI16Vop3 : public Vop3 {
 public:
   VMinI16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1835,6 +1898,7 @@ class VAddNcI16Vop3 : public Vop3 {
 public:
   VAddNcI16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1844,6 +1908,7 @@ class VSubNcI16Vop3 : public Vop3 {
 public:
   VSubNcI16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2060,6 +2125,7 @@ class VLshlrevB16Vop3 : public Vop3 {
 public:
   VLshlrevB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2069,6 +2135,7 @@ class VLshrrevB16Vop3 : public Vop3 {
 public:
   VLshrrevB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2078,6 +2145,7 @@ class VAshrrevI16Vop3 : public Vop3 {
 public:
   VAshrrevI16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2132,6 +2200,7 @@ class VAndB16Vop3 : public Vop3 {
 public:
   VAndB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2141,6 +2210,7 @@ class VOrB16Vop3 : public Vop3 {
 public:
   VOrB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2150,6 +2220,7 @@ class VXorB16Vop3 : public Vop3 {
 public:
   VXorB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3017,6 +3088,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtF16Vop3 : public Vop3 {
@@ -3026,6 +3098,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqF16Vop3 : public Vop3 {
@@ -3035,6 +3108,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeF16Vop3 : public Vop3 {
@@ -3044,6 +3118,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtF16Vop3 : public Vop3 {
@@ -3053,6 +3128,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLgF16Vop3 : public Vop3 {
@@ -3062,6 +3138,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeF16Vop3 : public Vop3 {
@@ -3071,6 +3148,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxOF16Vop3 : public Vop3 {
@@ -3080,6 +3158,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxUF16Vop3 : public Vop3 {
@@ -3089,6 +3168,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgeF16Vop3 : public Vop3 {
@@ -3098,6 +3178,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNlgF16Vop3 : public Vop3 {
@@ -3107,6 +3188,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgtF16Vop3 : public Vop3 {
@@ -3116,6 +3198,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNleF16Vop3 : public Vop3 {
@@ -3125,6 +3208,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeqF16Vop3 : public Vop3 {
@@ -3134,6 +3218,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNltF16Vop3 : public Vop3 {
@@ -3143,6 +3228,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxTF16Vop3 : public Vop3 {
@@ -3152,6 +3238,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxFF32Vop3 : public Vop3 {
@@ -3161,6 +3248,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtF32Vop3 : public Vop3 {
@@ -3170,6 +3258,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqF32Vop3 : public Vop3 {
@@ -3179,6 +3268,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeF32Vop3 : public Vop3 {
@@ -3188,6 +3278,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtF32Vop3 : public Vop3 {
@@ -3197,6 +3288,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLgF32Vop3 : public Vop3 {
@@ -3206,6 +3298,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeF32Vop3 : public Vop3 {
@@ -3215,6 +3308,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxOF32Vop3 : public Vop3 {
@@ -3224,6 +3318,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxUF32Vop3 : public Vop3 {
@@ -3233,6 +3328,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgeF32Vop3 : public Vop3 {
@@ -3242,6 +3338,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNlgF32Vop3 : public Vop3 {
@@ -3251,6 +3348,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgtF32Vop3 : public Vop3 {
@@ -3260,6 +3358,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNleF32Vop3 : public Vop3 {
@@ -3269,6 +3368,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeqF32Vop3 : public Vop3 {
@@ -3278,6 +3378,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNltF32Vop3 : public Vop3 {
@@ -3287,6 +3388,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxTF32Vop3 : public Vop3 {
@@ -3296,6 +3398,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxFF64Vop3 : public Vop3 {
@@ -3305,6 +3408,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtF64Vop3 : public Vop3 {
@@ -3314,6 +3418,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqF64Vop3 : public Vop3 {
@@ -3323,6 +3428,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeF64Vop3 : public Vop3 {
@@ -3332,6 +3438,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtF64Vop3 : public Vop3 {
@@ -3341,6 +3448,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLgF64Vop3 : public Vop3 {
@@ -3350,6 +3458,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeF64Vop3 : public Vop3 {
@@ -3359,6 +3468,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxOF64Vop3 : public Vop3 {
@@ -3368,6 +3478,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxUF64Vop3 : public Vop3 {
@@ -3377,6 +3488,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgeF64Vop3 : public Vop3 {
@@ -3386,6 +3498,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNlgF64Vop3 : public Vop3 {
@@ -3395,6 +3508,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgtF64Vop3 : public Vop3 {
@@ -3404,6 +3518,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNleF64Vop3 : public Vop3 {
@@ -3413,6 +3528,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeqF64Vop3 : public Vop3 {
@@ -3422,6 +3538,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNltF64Vop3 : public Vop3 {
@@ -3431,6 +3548,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxTF64Vop3 : public Vop3 {
@@ -3440,6 +3558,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtI16Vop3 : public Vop3 {
@@ -3449,6 +3568,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqI16Vop3 : public Vop3 {
@@ -3458,6 +3578,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeI16Vop3 : public Vop3 {
@@ -3467,6 +3588,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtI16Vop3 : public Vop3 {
@@ -3476,6 +3598,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeI16Vop3 : public Vop3 {
@@ -3485,6 +3608,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeI16Vop3 : public Vop3 {
@@ -3494,6 +3618,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtU16Vop3 : public Vop3 {
@@ -3503,6 +3628,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqU16Vop3 : public Vop3 {
@@ -3512,6 +3638,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeU16Vop3 : public Vop3 {
@@ -3521,6 +3648,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtU16Vop3 : public Vop3 {
@@ -3530,6 +3658,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeU16Vop3 : public Vop3 {
@@ -3539,6 +3668,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeU16Vop3 : public Vop3 {
@@ -3548,6 +3678,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxFI32Vop3 : public Vop3 {
@@ -3557,6 +3688,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtI32Vop3 : public Vop3 {
@@ -3566,6 +3698,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqI32Vop3 : public Vop3 {
@@ -3575,6 +3708,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeI32Vop3 : public Vop3 {
@@ -3584,6 +3718,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtI32Vop3 : public Vop3 {
@@ -3593,6 +3728,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeI32Vop3 : public Vop3 {
@@ -3602,6 +3738,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeI32Vop3 : public Vop3 {
@@ -3611,6 +3748,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxTI32Vop3 : public Vop3 {
@@ -3620,6 +3758,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxFU32Vop3 : public Vop3 {
@@ -3629,6 +3768,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtU32Vop3 : public Vop3 {
@@ -3638,6 +3778,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqU32Vop3 : public Vop3 {
@@ -3647,6 +3788,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeU32Vop3 : public Vop3 {
@@ -3656,6 +3798,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtU32Vop3 : public Vop3 {
@@ -3665,6 +3808,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeU32Vop3 : public Vop3 {
@@ -3674,6 +3818,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeU32Vop3 : public Vop3 {
@@ -3683,6 +3828,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxTU32Vop3 : public Vop3 {
@@ -3692,6 +3838,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxFI64Vop3 : public Vop3 {
@@ -3701,6 +3848,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtI64Vop3 : public Vop3 {
@@ -3710,6 +3858,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqI64Vop3 : public Vop3 {
@@ -3719,6 +3868,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeI64Vop3 : public Vop3 {
@@ -3728,6 +3878,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtI64Vop3 : public Vop3 {
@@ -3737,6 +3888,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeI64Vop3 : public Vop3 {
@@ -3746,6 +3898,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeI64Vop3 : public Vop3 {
@@ -3755,6 +3908,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxTI64Vop3 : public Vop3 {
@@ -3764,6 +3918,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxFU64Vop3 : public Vop3 {
@@ -3773,6 +3928,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtU64Vop3 : public Vop3 {
@@ -3782,6 +3938,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqU64Vop3 : public Vop3 {
@@ -3791,6 +3948,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeU64Vop3 : public Vop3 {
@@ -3800,6 +3958,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtU64Vop3 : public Vop3 {
@@ -3809,6 +3968,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeU64Vop3 : public Vop3 {
@@ -3818,6 +3978,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeU64Vop3 : public Vop3 {
@@ -3827,6 +3988,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxTU64Vop3 : public Vop3 {
@@ -3836,6 +3998,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxClassF16Vop3 : public Vop3 {
@@ -3845,6 +4008,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxClassF32Vop3 : public Vop3 {
@@ -3854,6 +4018,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxClassF64Vop3 : public Vop3 {
@@ -3863,6 +4028,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VAddCoCiU32Vop3SdstEnc : public Vop3SdstEnc {

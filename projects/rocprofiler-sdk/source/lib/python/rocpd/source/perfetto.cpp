@@ -85,8 +85,13 @@ PerfettoSession::PerfettoSession(const tool::output_config& output_cfg, sqlite3*
     auto shmem_size_hint = config.perfetto_shmem_size_hint;
     auto buffer_size_kb  = config.perfetto_buffer_size;
 
+    // The rocpd path sets perfetto_buffer_size directly through the pybind binding
+    // and never runs output_config::parse_env(), so validate here before narrowing
+    // to Perfetto's uint32_t size_kb.
+    tool::defaults::validate_perfetto_buffer_size(buffer_size_kb);
+
     auto* buffer_config = cfg.add_buffers();
-    buffer_config->set_size_kb(buffer_size_kb);
+    buffer_config->set_size_kb(static_cast<uint32_t>(buffer_size_kb));
 
     args.supports_multiple_data_source_instances = true;
     // track_event_cfg.clear_disabled_categories();
@@ -180,6 +185,7 @@ write_perfetto(
     const tool::generator<types::sample>&            sample_gen,
     const tool::generator<types::kernel_dispatch>&   kernel_dispatch_gen,
     const tool::generator<types::memory_copies>&     memory_copy_gen,
+    const tool::generator<types::graph_launch>&      graph_launch_gen,
     const tool::generator<types::scratch_memory>&    scratch_memory_gen,
     const tool::generator<types::memory_allocation>& memory_allocation_gen,
     const tool::generator<types::counter>&           counter_collection_gen)
@@ -608,9 +614,55 @@ write_perfetto(
                                   "tid",
                                   itr.tid,
                                   "stream_id",
-                                  itr.stream_id);
+                                  itr.stream_id,
+                                  [&](::perfetto::EventContext ctx) {
+                                      if(itr.graph_exec_id != 0)
+                                      {
+                                          rocprofiler::sdk::add_perfetto_annotation(
+                                              ctx, "graph_exec_id", itr.graph_exec_id);
+                                          rocprofiler::sdk::add_perfetto_annotation(
+                                              ctx, "graph_node_id", itr.graph_node_id);
+                                      }
+                                  });
                 TRACE_EVENT_END(
                     sdk::perfetto_category<sdk::category::memory_copy>::name, *_track, itr.end);
+            }
+            tracing_session->FlushBlocking();
+        }
+
+        for(auto ditr : graph_launch_gen)
+        {
+            for(auto itr : graph_launch_gen.get(ditr))
+            {
+                auto& track = thread_tracks.at(itr.tid);
+                // use "[...]" syntax for name to convey this is a metadata region
+                TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::hip_api>::name,
+                                  ::perfetto::StaticString{"[Graph Execution]"},
+                                  track,
+                                  itr.start,
+                                  ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
+                                  "begin_ns",
+                                  itr.start,
+                                  "end_ns",
+                                  itr.end,
+                                  "delta_ns",
+                                  (itr.end - itr.start),
+                                  "tid",
+                                  itr.tid,
+                                  "kind",
+                                  "HIP_GRAPH",
+                                  "operation",
+                                  "hipGraphLaunch",
+                                  "corr_id",
+                                  itr.stack_id,
+                                  "ancestor_id",
+                                  itr.parent_stack_id,
+                                  "graph_exec_id",
+                                  itr.graph_exec_id,
+                                  "kernel_dispatch_count",
+                                  itr.kernel_dispatch_count);
+                TRACE_EVENT_END(
+                    sdk::perfetto_category<sdk::category::hip_api>::name, track, itr.end);
             }
             tracing_session->FlushBlocking();
         }
@@ -806,6 +858,14 @@ write_perfetto(
                                   "stream_id",
                                   current.stream_id,
                                   [&](::perfetto::EventContext ctx) {
+                                      if(current.graph_exec_id != 0)
+                                      {
+                                          rocprofiler::sdk::add_perfetto_annotation(
+                                              ctx, "graph_exec_id", current.graph_exec_id);
+                                          rocprofiler::sdk::add_perfetto_annotation(
+                                              ctx, "graph_node_id", current.graph_node_id);
+                                      }
+
                                       for(auto& [counter_id, counter_value] : counter_id_value)
                                       {
                                           rocprofiler::sdk::add_perfetto_annotation(

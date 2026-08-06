@@ -13,6 +13,10 @@ To build the Docker image and run the container, follow these steps.
 
 #. Build the Docker image
 
+   The ``Dockerfile.ubuntu`` file is located in the ``docker`` directory of the
+   RCCL project. Run the following commands from the ``projects/rccl`` directory
+   of the rocm-systems repository.
+
    By default, the Dockerfile uses ``docker.io/rocm/dev-ubuntu-22.04:latest`` as the base Docker image.
    It then installs RCCL and rccl-tests (in both cases, it uses the version from the ``develop`` branch).
 
@@ -20,15 +24,15 @@ To build the Docker image and run the container, follow these steps.
 
    .. code-block:: shell
 
-      docker build -t rccl-tests -f Dockerfile.ubuntu --pull .
+      docker build -t rccl-tests -f docker/Dockerfile.ubuntu --pull .
 
    The base Docker image, rccl repository, rccl-tests repository, and GPU targets can be modified
-   by using ``--build-args`` in the ``docker build`` command above. For example, to use a different base Docker image for the MI250 GPU,
+   by using ``--build-arg`` in the ``docker build`` command above. For example, to use a different base Docker image and target a specific GPU architecture,
    use this command:
 
    .. code-block:: shell
 
-      docker build -t rccl-tests -f Dockerfile.ubuntu --build-arg="ROCM_IMAGE_NAME=rocm/dev-ubuntu-20.04" --build-arg="ROCM_IMAGE_TAG=6.2" --build-arg="GPU_TARGETS=gfx90a" --pull .
+      docker build -t rccl-tests -f docker/Dockerfile.ubuntu --build-arg="ROCM_IMAGE_NAME=rocm/dev-ubuntu-24.04" --build-arg="ROCM_IMAGE_TAG=6.4.2" --build-arg="GPU_TARGETS=gfx942" --pull .
 
 #. Launch an interactive Docker container on a system with AMD GPUs:
 
