@@ -66,6 +66,18 @@
 #define NVTX3_RANGE_ADD_PAYLOAD(...)
 #undef NVTX3_FUNC_WITH_PARAMS
 #define NVTX3_FUNC_WITH_PARAMS(...)
+#else
+// NVTX already disabled by the build (ROCm 7.2+ defines NVTX_NO_IMPL/NVTX_DISABLE).
+// On those configs core.h pulls src/include/nvtx_stub.h, which defines `struct
+// nccl_domain` -- but init.cc ALSO does a direct `#include "nvtx.h"`, which defines
+// `nccl_domain` again under a DIFFERENT include guard (NCCL_NVTX_H_), so the TU sees
+// two definitions and fails to compile. Pre-set that guard so init.cc's direct
+// nvtx.h include is a no-op (nvtx_stub.h stays the sole definer), and supply the one
+// range macro nvtx.h would have provided that nvtx_stub.h does not.
+#define NCCL_NVTX_H_
+#ifndef NCCL_NVTX3_FUNC_RANGE
+#define NCCL_NVTX3_FUNC_RANGE
+#endif
 #endif
 
 // getenv seam (plan F2): active ONLY around the UUT include. init.cc's direct
