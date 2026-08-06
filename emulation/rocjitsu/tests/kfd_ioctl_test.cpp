@@ -750,12 +750,14 @@ TEST_F(KfdIoctlTest, MapMemoryToGpuMapsLocalUserVaAllocation) {
     }
   } allocation{driver_, alloc.handle};
   ASSERT_NE(alloc.handle, 0u);
+  EXPECT_FALSE(soc_->memory()->is_mapped(kGpuVa, driver_->local_process_id()));
 
   kfd_ioctl_map_memory_to_gpu_args map{};
   map.handle = alloc.handle;
   map.n_devices = 1;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
   EXPECT_EQ(map.n_success, 1u);
+  EXPECT_TRUE(soc_->memory()->is_mapped(kGpuVa, driver_->local_process_id()));
 
   uint8_t *page = soc_->memory()->resolve_host_ptr(kGpuVa, driver_->local_process_id());
   ASSERT_EQ(page, reinterpret_cast<uint8_t *>(kGpuVa));
@@ -767,7 +769,29 @@ TEST_F(KfdIoctlTest, MapMemoryToGpuMapsLocalUserVaAllocation) {
   free_args.handle = alloc.handle;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
   allocation.handle = 0;
-  EXPECT_FALSE(soc_->memory()->has_page_table_mapping(kGpuVa, driver_->local_process_id()));
+  EXPECT_FALSE(soc_->memory()->is_mapped(kGpuVa, driver_->local_process_id()));
+}
+
+TEST_F(KfdIoctlTest, AllocMemoryRejectsInvalidUserVaRanges) {
+  constexpr uint64_t kGpuVa = rocjitsu::KfdProcess::kGpuVmBase + 0x3220000;
+  constexpr uint64_t kSize = rocjitsu::KfdProcess::kPageSize;
+  constexpr uint32_t kFlags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+
+  auto expect_invalid = [&](uint64_t va, uint64_t size, uint32_t flags) {
+    kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+    alloc.va_addr = va;
+    alloc.size = size;
+    alloc.gpu_id = kGpuId;
+    alloc.flags = flags;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), -EINVAL);
+    EXPECT_EQ(alloc.handle, 0u);
+  };
+
+  expect_invalid(kGpuVa + 1, kSize, kFlags);
+  expect_invalid(kGpuVa, kSize - 1, kFlags);
+  expect_invalid(kGpuVa, 0, kFlags);
+  expect_invalid(kGpuVa + 1, kSize,
+                 KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE);
 }
 
 TEST_F(KfdIoctlTest, SvmSetAndGetAttributes) {

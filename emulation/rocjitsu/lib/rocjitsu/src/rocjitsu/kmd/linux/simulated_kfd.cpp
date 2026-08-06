@@ -1886,6 +1886,12 @@ int SimulatedKfd::unmap_memory_ioctl(void *arg) {
 int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
 
+  if (args->size == 0)
+    return -EINVAL;
+  if (args->va_addr != 0 && ((args->va_addr & (KfdProcess::kPageSize - 1)) != 0 ||
+                             (args->size & (KfdProcess::kPageSize - 1)) != 0))
+    return -EINVAL;
+
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
 
   bool user_provided_va = (args->va_addr != 0);

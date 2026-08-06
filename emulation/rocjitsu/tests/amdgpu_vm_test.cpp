@@ -109,7 +109,7 @@ TEST(GpuMemoryPassthroughTest, PageTableMappingQueryIgnoresHostPassthrough) {
   KfdProcess proc(kVmid);
   mem.register_process(kVmid, &proc.page_table_, &proc.page_table_mutex_);
 
-  EXPECT_FALSE(mem.has_page_table_mapping(kGpuVa, kVmid));
+  EXPECT_FALSE(mem.is_mapped(kGpuVa, kVmid));
   EXPECT_EQ(mem.resolve_host_ptr(kGpuVa, kVmid), reinterpret_cast<uint8_t *>(kGpuVa));
 
   mem.unregister_process(kVmid);
@@ -128,7 +128,7 @@ TEST(GpuMemoryPassthroughTest, MappedGpuVmApertureStillUsesProcessPageTable) {
   proc.map_pages(kGpuVa, backing.data(), backing.size());
   mem.register_process(kVmid, &proc.page_table_, &proc.page_table_mutex_);
 
-  EXPECT_TRUE(mem.has_page_table_mapping(kGpuVa, kVmid));
+  EXPECT_TRUE(mem.is_mapped(kGpuVa, kVmid));
   ASSERT_EQ(mem.resolve_host_ptr(kGpuVa, kVmid), backing.data());
   mem.write32(kGpuVa, kValue, kVmid);
   uint32_t observed = 0;
@@ -405,7 +405,8 @@ TEST(CommandProcessorScratchBackingTest, ExplicitPteControlsAllocatorWithPassthr
   constexpr uint32_t kVmid = 44;
   constexpr uint64_t kScratchPool = 0x1'0000'0000ULL;
   constexpr uint32_t kPrivateSegmentSize = 4;
-  constexpr size_t kExpectedScratchSize = kPrivateSegmentSize * 64;
+  constexpr size_t kRawScratchSize = kPrivateSegmentSize * 64;
+  constexpr size_t kExpectedScratchSize = ((kRawScratchSize + 1023) / 1024) * 1024;
 
   KfdProcess proc(kVmid);
   alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> scratch_backing{};

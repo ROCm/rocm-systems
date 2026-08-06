@@ -301,11 +301,6 @@ public:
     }
   };
 
-  // GPUVM uses the simulator's fixed 4 KiB translation granule. This models
-  // the GPU page table and is intentionally independent of the host page size.
-  static constexpr uint64_t kPageShift = 12;
-  static constexpr uint64_t kPageSize = 1ULL << kPageShift;
-
   /// @brief One host-backed interval within a GPU page.
   struct HostExtent {
     uint8_t *host_ptr = nullptr;

@@ -521,12 +521,11 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
       cu->write_sgpr(sbase + 33, 0);
     }
     util::Logger::cp([&](auto &os) {
-      os << std::format(
-          "SCRATCH wf{} pool={:#x} wave_scratch={:#x} per_wave={} priv_size={} "
-          "backing_addr={:#x} mapped={}",
-          wf->wf_id(), scratch_pool, wave_scratch, per_wave_size, pkt.private_segment_fixed_size,
-          pkt.scratch_backing_addr,
-          memory_ ? (memory_->resolve_host_ptr(wave_scratch, pkt.process_id) != nullptr) : false);
+      os << std::format("SCRATCH wf{} pool={:#x} wave_scratch={:#x} per_wave={} priv_size={} "
+                        "backing_addr={:#x} mapped={}",
+                        wf->wf_id(), scratch_pool, wave_scratch, per_wave_size,
+                        pkt.private_segment_fixed_size, pkt.scratch_backing_addr,
+                        memory_ ? memory_->is_mapped(wave_scratch, pkt.process_id) : false);
     });
 
     if (flat_scratch_init_sgpr >= 0) {
