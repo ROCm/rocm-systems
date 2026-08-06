@@ -8,7 +8,6 @@
 
 #include "platform/commandqueue.hpp"
 #include "rocdefs.hpp"
-#include "rocringpublish.hpp"
 #include "rocdevice.hpp"
 #include "utils/flags.hpp"
 #include "utils/nontemporal.hpp"
@@ -29,6 +28,7 @@ namespace amd::roc {
 class Device;
 class Memory;
 struct ProfilingSignal;
+struct RingPublishState;
 class Timestamp;
 
 //! True while the calling thread is inside HsaAmdSignalHandler (async-events thread).
