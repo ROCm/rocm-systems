@@ -17,7 +17,8 @@
 // explicitly opt into surfaces the unexpected call as
 // ncclUnhandledCudaError via CUCHECKGOTO.
 
-#pragma once
+#ifndef RCCL_MICROTEST_HIP_FAKES_H_
+#define RCCL_MICROTEST_HIP_FAKES_H_
 
 #include <cstddef>
 #include <functional>
@@ -90,3 +91,5 @@ extern std::function<hipError_t(int* /*count*/)> g_hipGetDeviceCount;
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
 void ResetHipFakes();
+
+#endif  // RCCL_MICROTEST_HIP_FAKES_H_

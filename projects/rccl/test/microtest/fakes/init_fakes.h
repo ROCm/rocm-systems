@@ -15,7 +15,8 @@
 // the GPU decision inventory + per-test matrix are completed (see
 // init_coverage_plan.md).
 
-#pragma once
+#ifndef RCCL_MICROTEST_INIT_FAKES_H_
+#define RCCL_MICROTEST_INIT_FAKES_H_
 
 #include "hip_fakes.h"
 #include "nccl_fakes.h"
@@ -53,3 +54,5 @@ extern bool g_bootstrapNetInitFail;
 // Reset every init-layer fake to defaults. Cascades to ResetHipFakes() and
 // ResetNcclFakes(). Called from the fixture TearDown().
 void ResetInitFakes();
+
+#endif  // RCCL_MICROTEST_INIT_FAKES_H_
