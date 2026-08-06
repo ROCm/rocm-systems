@@ -36,7 +36,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y cmake git python3 build-essential rocm-cmake \
-            libgtest-dev libgmock-dev libfmt-dev
+            moreutils libgtest-dev libgmock-dev libfmt-dev
 
       - name: Put ROCm on PATH
         run: echo "/opt/rocm/bin" >> "$GITHUB_PATH"
@@ -57,12 +57,16 @@ jobs:
         working-directory: projects/rccl/test/host
         shell: bash
         run: |
-          # tee the full stdout+stderr (incl. WARN/debug output) to a log while
-          # keeping the binary's exit code (pipefail) so a failure still fails the job.
+          # Prepend a real-UTC timestamp to each line via `ts` (moreutils), tee the
+          # full stdout+stderr (incl. WARN/debug output) to a log, and keep the
+          # binary's exit code (pipefail) so a failure still fails the job.
+          # For a relative "start = 0" timeline instead, use: ts -s '%.s'
           set -o pipefail
           ./build/rccl-HostUnitTests \
             --gtest_output=xml:host_tests.xml \
-            --gtest_color=no 2>&1 | tee host_tests.log
+            --gtest_color=no 2>&1 \
+            | TZ=UTC ts '%Y-%m-%dT%H:%M:%.SZ' \
+            | tee host_tests.log
 
       - name: Upload results
         if: always()
