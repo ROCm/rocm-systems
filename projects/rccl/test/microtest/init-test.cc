@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "fakes/init_fakes.h"
+#include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
 
 // Pull in alloc.h / param.h now so their macros are visible to be #undef'd
 // before init.cc's transitive includes see them (same rationale as p2p-test.cc).
@@ -613,6 +614,30 @@ TEST_F(InitMicrotest, CommInitRankDev_PostInit_MyrankGeNranks_ReturnsInvalidArgu
   ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
   EXPECT_EQ(ncclInvalidArgument,
             ncclCommInitRankDev(&nc, /*nranks=*/1, /*nId=*/1, &id, /*myrank=*/1, 0, &cfg, "t"));
+}
+
+// --- D5 (process-isolated): ncclInit() FAILURE arm. ncclInit uses call_once, so
+// once any in-process test runs it (success), it can't be made to fail. The
+// ProcessIsolatedTestRunner re-execs a fresh binary image (pristine call_once)
+// per registered test, so bootstrapNetInit failure genuinely fails ncclInit. --
+namespace {
+const bool kRegisteredIsolatedInitTests = [] {
+  using RcclUnitTesting::ProcessIsolatedTestRunner;
+  ProcessIsolatedTestRunner::registerTest(
+      "Init_NcclInit_BootstrapNetInitFailure_ReturnsSystemError", [] {
+        g_bootstrapNetInitFail = true;  // fresh process: first ncclInit() run hits this
+        ncclComm_t nc = nullptr;
+        ncclUniqueId id{};
+        ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+        ncclResult_t r = ncclCommInitRankDev(&nc, 1, 1, &id, 0, 0, &cfg, "t");
+        EXPECT_EQ(ncclSystemError, r);  // ncclInit -> initOnceFunc -> bootstrapNetInit fails
+      });
+  return true;
+}();
+}  // namespace
+
+TEST(InitMicrotestIsolated, NcclInitFailureArms) {
+  EXPECT_TRUE(RcclUnitTesting::ProcessIsolatedTestRunner::executeAllTests());
 }
 
 #if defined(HIP_HOST_UNCACHED_MEMORY)
