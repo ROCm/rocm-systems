@@ -8,7 +8,6 @@
 #include "core/control/trigger.hpp"
 #include "core/state.hpp"
 
-#include <atomic>
 #include <chrono>
 #include <mutex>
 #include <string_view>

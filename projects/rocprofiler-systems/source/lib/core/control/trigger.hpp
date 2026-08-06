@@ -40,7 +40,11 @@ protected:
         m_set_action = std::move(setter);
     }
 
-    void publish_action(action act) const { m_set_action(act); }
+    void publish_action(action act) const
+    {
+        assert(m_set_action);
+        m_set_action(act);
+    }
 
 private:
     action_setter m_set_action;
