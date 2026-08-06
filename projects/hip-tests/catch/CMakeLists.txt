@@ -379,6 +379,22 @@ endif()
 set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script)
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hip-tests.cmake
      DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
+
+# Patch CatchAddTests.cmake in-place so that catch_discover_tests_impl writes
+# an empty _tests.cmake when zero tests match the filter, instead of returning
+# early without creating the file.  The generated _include.cmake hardcodes the
+# path to CatchAddTests.cmake from Catch2's source tree, so we must patch it
+# there (not a copy) for the fix to take effect at ctest startup.
+# Without this, catch_discover_tests("[disabled]") on a binary with no
+# [disabled] tests leaves a dangling _include.cmake whose include() fails:
+#   "include could not find requested file: ..._tests.cmake"
+file(READ "${CATCH_ADD_TESTS_SCRIPT}" _catch_content)
+string(REPLACE
+  "  if(num_tests STREQUAL \"0\")\n    return()\n  endif()"
+  "  if(num_tests STREQUAL \"0\")\n    file(WRITE \"\${_CTEST_FILE}\" \"# no tests discovered for this spec\\n\")\n    return()\n  endif()"
+  _catch_content "${_catch_content}")
+file(WRITE "${CATCH_ADD_TESTS_SCRIPT}" "${_catch_content}")
+
 file(COPY ${CATCH_ADD_TESTS_SCRIPT}
          DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_SCRIPT_TARGETS ${CATCH_ADD_TESTS_SCRIPT})
