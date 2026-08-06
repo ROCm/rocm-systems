@@ -177,6 +177,12 @@ struct PcValue {
   uint64_t source_getpc_offset = 0;
   uint64_t source_recovery_begin_offset = 0;
   uint64_t source_recovery_end_offset = 0;
+  /// @brief False once a non-chain instruction was observed inside the recovery
+  /// range. patch_recovered_builder_fixups NOPs the whole
+  /// [begin, end) interval as one contiguous run, so a gap instruction between
+  /// two builder steps would be erased. A value that stops being contiguous can
+  /// never regain the property, so any later delta step keeps it false.
+  bool contiguous = true;
 
   friend bool operator==(const PcValue &, const PcValue &) = default;
 };
@@ -250,11 +256,20 @@ struct InstructionFacts {
   bool written_sgprs_computed = false;
 };
 
+[[nodiscard]] bool is_lane_fixup_consumer(const InstructionFacts &facts) {
+  return facts.swappc_ssrc.has_value();
+}
+
 struct AnalysisContext {
   std::span<const Instruction *const> insts;
   std::span<const uint8_t> text;
   rj_code_arch_t arch;
   std::vector<InstructionFacts> facts;
+
+  // Whole-text superset of every SGPR pair that a deferred cross-block
+  // consumer can name. Every PendingConsumer producer must originate from one
+  // of the setpc/swappc operands recorded here.
+  std::bitset<REGISTER_SET_MAX_SGPRS> consumer_pairs;
 };
 
 /// @brief Per-pair summary for one analysis block.
@@ -275,6 +290,74 @@ struct PairTransfer {
   Kind kind = Kind::Pass;
   PcValue value;
 };
+
+/// @brief One PC-relative address producer while a discovery round is running.
+///
+/// @details `poisoned` is sticky. Once a producer is observed in a way that no
+/// single delta rewrite can repair, no later observation may resurrect it.
+struct PcAddressBuilderEntry {
+  PcAddressBuilder record;
+  bool poisoned = false;
+};
+
+/// @brief Accumulator for every PC-relative address producer seen in one round.
+///
+/// @details Keyed by the producer's `s_getpc_b64` source offset so a getpc that
+/// is observed several times (at its consumer, at a call that clobbers it, and
+/// again at block exit) collapses to one record. Two observations that disagree
+/// cannot both be satisfied by one delta rewrite, so a disagreement poisons the
+/// record instead of picking one.
+using PcAddressBuilderMap = std::unordered_map<uint64_t, PcAddressBuilderEntry>;
+
+void seed_pc_builder(PcAddressBuilderMap &builders, uint64_t getpc_offset, uint16_t pair_lo) {
+  // Every s_getpc_b64 is recorded even when nothing can be proven about it. A
+  // whole-scope "no stale PC values" claim must account for the producers the
+  // pass failed to follow, not silently omit them.
+  builders.try_emplace(getpc_offset,
+                       PcAddressBuilderEntry{.record = {.source_getpc_offset = getpc_offset,
+                                                        .source_sreg = pair_lo,
+                                                        .resolved = false}});
+}
+
+void poison_pc_builder(PcAddressBuilderMap &builders, uint64_t getpc_offset) {
+  auto it = builders.find(getpc_offset);
+  if (it == builders.end())
+    return;
+  it->second.poisoned = true;
+  it->second.record.resolved = false;
+}
+
+/// @brief Record the value a builder leaves in its pair at a stable program point.
+///
+/// @details A stable point is one where the pair stops being tracked: the block
+/// exit, a call that clobbers it, or the consumer that reads it. The recorded
+/// value is exactly what the original builder range produces there, which is the
+/// precondition for rewriting that range to produce the relocated address.
+void note_pc_builder(PcAddressBuilderMap &builders, uint16_t pair_lo, const PcValue &value) {
+  const PcAddressBuilder record{
+      .source_getpc_offset = value.source_getpc_offset,
+      .source_recovery_begin_offset = value.source_recovery_begin_offset,
+      .source_recovery_end_offset = value.source_recovery_end_offset,
+      .source_target_offset = value.offset,
+      .source_sreg = pair_lo,
+      .resolved = true,
+      .contiguous = value.contiguous,
+  };
+
+  auto it = builders.find(value.source_getpc_offset);
+  if (it == builders.end()) {
+    builders.emplace(value.source_getpc_offset, PcAddressBuilderEntry{.record = record});
+    return;
+  }
+  if (it->second.poisoned)
+    return;
+  if (it->second.record.resolved && it->second.record != record) {
+    it->second.poisoned = true;
+    it->second.record.resolved = false;
+    return;
+  }
+  it->second.record = record;
+}
 
 struct AnalysisBlock {
   /// Byte offset of the first instruction in this temporary analysis block.
@@ -397,6 +480,21 @@ public:
     return false;
   }
 
+  /// @brief Visit dirty SGPR halves in ascending register order.
+  template <typename F> void for_each_dirty(F &&f) const {
+    uint64_t bits = dirty_lo_;
+    while (bits != 0) {
+      f(static_cast<uint16_t>(std::countr_zero(bits)));
+      bits &= bits - 1;
+    }
+
+    bits = dirty_hi_;
+    while (bits != 0) {
+      f(static_cast<uint16_t>(64 + std::countr_zero(bits)));
+      bits &= bits - 1;
+    }
+  }
+
   /// @brief Invalidate every builder overlapping @p sgpr.
   ///
   /// @details A write to sN can corrupt the pair s[N:N+1] when sN is the low
@@ -435,6 +533,7 @@ private:
 
   std::array<std::optional<PcValue>, REGISTER_SET_MAX_SGPRS> builders_;
   std::vector<uint16_t> active_pairs_;
+  static_assert(REGISTER_SET_MAX_SGPRS <= 128, "dirty set uses two 64-bit words");
   uint64_t dirty_lo_ = 0;
   uint64_t dirty_hi_ = 0;
 };
@@ -1100,6 +1199,10 @@ void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
     facts.getpc_sdst = scalar_pc_sreg(arch, inst, facts.word, ScalarPcOp::GetPc64);
     facts.setpc_ssrc = scalar_pc_sreg(arch, inst, facts.word, ScalarPcOp::SetPc64);
     facts.swappc_ssrc = scalar_pc_sreg(arch, inst, facts.word, ScalarPcOp::SwapPc64);
+    if (facts.setpc_ssrc && *facts.setpc_ssrc < kMaxTrackedSgprPair)
+      ctx.consumer_pairs.set(*facts.setpc_ssrc);
+    if (facts.swappc_ssrc && *facts.swappc_ssrc < kMaxTrackedSgprPair)
+      ctx.consumer_pairs.set(*facts.swappc_ssrc);
     if (facts.swappc_ssrc)
       facts.swappc_sdst = static_cast<uint16_t>((facts.word >> 16) & 0x7fu);
     facts.call_sdst = s_call_sdst(inst, facts.word);
@@ -1176,15 +1279,32 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
 
 [[nodiscard]] std::vector<uint8_t>
 explicit_external_entries(const std::vector<AnalysisBlock> &blocks,
-                          std::span<const uint64_t> extra_leaders) {
+                          std::span<const uint64_t> sorted_extra_leaders) {
   std::vector<uint8_t> entries(blocks.size(), 0);
   if (!entries.empty())
     entries[0] = 1;
+
+  // Analysis blocks are built from the ordered instruction stream. Both input
+  // sequences are therefore ascending and can be matched in one merge pass.
+  assert(std::ranges::is_sorted(blocks, {}, &AnalysisBlock::offset));
+  assert(std::ranges::is_sorted(sorted_extra_leaders));
+  auto leader = sorted_extra_leaders.begin();
   for (size_t block_index = 1; block_index < blocks.size(); ++block_index) {
-    if (std::ranges::find(extra_leaders, blocks[block_index].offset) != extra_leaders.end())
+    while (leader != sorted_extra_leaders.end() && *leader < blocks[block_index].offset)
+      ++leader;
+    if (leader != sorted_extra_leaders.end() && *leader == blocks[block_index].offset)
       entries[block_index] = 1;
   }
   return entries;
+}
+
+[[nodiscard]] bool is_analysis_root(size_t block_index, std::span<const uint8_t> external_entries,
+                                    const std::vector<std::vector<size_t>> &predecessors,
+                                    ExternalEntryPolicy entry_policy) {
+  if (external_entries[block_index] != 0)
+    return true;
+  return entry_policy == ExternalEntryPolicy::InferPredecessorless &&
+         predecessors[block_index].empty();
 }
 
 void set_kill_transfer(AnalysisBlock &block, uint16_t pair_lo) {
@@ -1197,15 +1317,18 @@ void set_kill_transfer(AnalysisBlock &block, uint16_t pair_lo) {
     transfer.kind = PairTransfer::Kind::Kill;
 }
 
-void finalize_block_transfers(AnalysisBlock &block, const BlockState &state) {
+void finalize_block_transfers(AnalysisBlock &block, const BlockState &state,
+                              const std::bitset<REGISTER_SET_MAX_SGPRS> &consumer_pairs) {
   // Phase 2 block-exit summary:
   //
-  // 1. Every still-live builder becomes SET. This overrides incoming facts for
-  //    the same pair in Phase 3.
-  // 2. Every dirty half that is not covered by a SET kills both possible pair
-  //    interpretations: s[N:N+1] and, when N > 0, s[N-1:N].
+  // 1. Every still-live builder for a consumer pair becomes SET. This
+  //    overrides incoming facts for the same pair in Phase 3.
+  // 2. Every dirty half overlapping a consumer pair that is not covered by a
+  //    SET kills that interpretation: s[N:N+1] or, when N > 0, s[N-1:N].
   // 3. Pairs never mentioned in transfers are implicit PASS.
   for (uint16_t pair_lo : state.active_pairs()) {
+    if (!consumer_pairs[pair_lo])
+      continue;
     const PcValue *value = state.builder(pair_lo);
     if (value == nullptr)
       continue;
@@ -1214,18 +1337,19 @@ void finalize_block_transfers(AnalysisBlock &block, const BlockState &state) {
     transfer.value = *value;
   }
 
-  for (uint16_t half = 0; half < REGISTER_SET_MAX_SGPRS; ++half) {
-    if (!state.dirty(half))
-      continue;
-    if (!block.transfers.contains(half) || block.transfers[half].kind != PairTransfer::Kind::Set)
+  const auto has_set_transfer = [&](uint16_t pair_lo) {
+    const auto transfer = block.transfers.find(pair_lo);
+    return transfer != block.transfers.end() && transfer->second.kind == PairTransfer::Kind::Set;
+  };
+  state.for_each_dirty([&](uint16_t half) {
+    if (consumer_pairs[half] && !has_set_transfer(half))
       set_kill_transfer(block, half);
     if (half > 0) {
       const uint16_t previous_pair = static_cast<uint16_t>(half - 1);
-      if (!block.transfers.contains(previous_pair) ||
-          block.transfers[previous_pair].kind != PairTransfer::Kind::Set)
+      if (consumer_pairs[previous_pair] && !has_set_transfer(previous_pair))
         set_kill_transfer(block, previous_pair);
     }
-  }
+  });
 }
 
 std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const AnalysisBlock &block,
@@ -1240,10 +1364,16 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     const PcValue *value = state.builder(pair_lo);
     if (value == nullptr)
       continue;
+    // The matched idiom's first instruction must start where the recorded range
+    // ends, or an unmodeled instruction sits inside the range that the patcher
+    // would NOP-erase along with the builder. Mark the value non-contiguous so
+    // the whole-scope proof declines to rewrite that range.
+    const bool adjacent = ctx.insts[index]->src_loc() == value->source_recovery_end_offset;
     if (auto pattern = match_temp_add_pattern(ctx, index, block.last_index, pair_lo)) {
       PcValue updated = *value;
       updated.offset += pattern->delta;
       updated.source_recovery_end_offset = pattern->end_offset;
+      updated.contiguous = updated.contiguous && adjacent;
 
       for (size_t i = 0; i < pattern->instruction_count; ++i)
         invalidate_written_sgprs(ctx, index + i, state, pair_lo);
@@ -1254,6 +1384,7 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
       PcValue updated = *value;
       updated.offset += pattern->delta;
       updated.source_recovery_end_offset = pattern->end_offset;
+      updated.contiguous = updated.contiguous && adjacent;
 
       for (size_t i = 0; i < pattern->instruction_count; ++i)
         invalidate_written_sgprs(ctx, index + i, state, pair_lo);
@@ -1402,10 +1533,17 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
     PcValue updated = *value;
     const Instruction &inst = *ctx.insts[index];
     const uint32_t word = ctx.facts[index].word;
+    // A builder step must start exactly where the recorded range ends. If the
+    // pair survived an instruction between the previous step and this one, that
+    // instruction sits inside [begin, end) and would be NOP-erased by
+    // patch_recovered_builder_fixups. Mark the value non-contiguous so the
+    // whole-scope proof declines to rewrite the range.
+    const bool adjacent = inst.src_loc() == updated.source_recovery_end_offset;
     if (!apply_gfx1250_add_nc_u64_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
         !apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
         !apply_high_carry_update(inst, word, ctx.text, ctx.arch, pair_lo, updated))
       continue;
+    updated.contiguous = updated.contiguous && adjacent;
 
     invalidate_written_sgprs(ctx, index, state, pair_lo);
     state.set_builder(pair_lo, updated);
@@ -1433,7 +1571,7 @@ void emit_fixups_for_values(const AnalysisContext &ctx, size_t inst_index, uint1
 
 void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBlock> &blocks,
                 std::vector<PendingConsumer> &pending_consumers,
-                std::vector<IndirectCallFixup> &recovered) {
+                std::vector<IndirectCallFixup> &recovered, PcAddressBuilderMap &pc_builders) {
   // Phase 2: run local transfer semantics for one straight-line block.
   //
   // This scan has no incoming lattice facts by design. A pair either becomes
@@ -1444,6 +1582,16 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
   AnalysisBlock &block = blocks[block_index];
   BlockState state;
 
+  // Publish every still-live builder's current value. Called only where the
+  // tracked pairs are about to stop being tracked, so the published value is
+  // the one the original builder range really produces at that point.
+  const auto note_live_pc_builders = [&] {
+    for (uint16_t pair_lo : state.active_pairs()) {
+      if (const PcValue *value = state.builder(pair_lo))
+        note_pc_builder(pc_builders, pair_lo, *value);
+    }
+  };
+
   for (size_t index = block.first_index; index <= block.last_index; ++index) {
     const Instruction &inst = *ctx.insts[index];
     const InstructionFacts &facts = ctx.facts[index];
@@ -1453,16 +1601,32 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
       // s_getpc_b64 writes the address of the following instruction. The
       // low/high add sequence edits this base to the eventual branch target.
       const uint16_t pair_lo = *facts.getpc_sdst;
+      // A second builder overwriting the same pair abandons the first one at an
+      // unknown point in its chain. No single delta rewrite is provably correct
+      // for an abandoned chain, so poison it rather than publish a partial value.
+      if (const PcValue *replaced = state.builder(pair_lo))
+        poison_pc_builder(pc_builders, replaced->source_getpc_offset);
+      seed_pc_builder(pc_builders, inst.src_loc(), pair_lo);
       state.set_builder(pair_lo, PcValue{.offset = static_cast<int64_t>(next_offset),
                                          .source_getpc_offset = inst.src_loc(),
                                          .source_recovery_begin_offset = next_offset,
                                          .source_recovery_end_offset = next_offset});
       continue;
     }
+    // A getpc the pass declines to track still produces a PC-derived value.
+    // Record it as an unresolvable producer so it cannot be silently omitted
+    // from a whole-scope claim.
+    if (facts.getpc_sdst) {
+      seed_pc_builder(pc_builders, inst.src_loc(), *facts.getpc_sdst);
+      poison_pc_builder(pc_builders, inst.src_loc());
+    }
 
     const std::optional<uint16_t> consumer_pair =
         facts.setpc_ssrc ? facts.setpc_ssrc : facts.swappc_ssrc;
     if (consumer_pair) {
+      // The consumer terminates this block, and its destination pair write can
+      // clobber a tracked builder. Publish the pre-consumer values first.
+      note_live_pc_builders();
       // A consumer resolved from local state is the strongest case: the builder
       // and the branch/call through that builder are in the same straight-line
       // block. Emit now so BasicBlock can split at the consumer and target.
@@ -1478,6 +1642,8 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
         // predecessor blocks. Defer classification until the block-entry
         // lattice is available. Out-of-range selectors cannot name a tracked
         // SGPR pair and deliberately remain unresolved.
+        assert(ctx.consumer_pairs[*consumer_pair] &&
+               "deferred consumer pair must be in the whole-text consumer set");
         pending_consumers.push_back(PendingConsumer{
             .block_index = block_index,
             .inst_index = index,
@@ -1498,6 +1664,9 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
       // context-sensitive return edge, so allowing existing builders to PASS
       // through this block would incorrectly preserve values that the callee may
       // clobber. Fail closed by killing every carried builder at the call site.
+      // The values are still exactly what the builder ranges produced up to
+      // here, so publish them before dropping them.
+      note_live_pc_builders();
       const std::vector<uint16_t> active_pairs = state.active_pairs();
       for (uint16_t pair_lo : active_pairs)
         state.invalidate_pair(pair_lo);
@@ -1524,27 +1693,29 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
     invalidate_written_sgprs(ctx, index, state);
   }
 
-  finalize_block_transfers(block, state);
+  note_live_pc_builders();
+  finalize_block_transfers(block, state, ctx.consumer_pairs);
 }
 
-[[nodiscard]] std::vector<LatticeFacts>
-run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
-                   std::span<const PendingConsumer> pending_consumers,
-                   std::span<const uint64_t> extra_leaders) {
+[[nodiscard]] std::vector<LatticeFacts> run_block_dataflow(
+    const std::vector<AnalysisBlock> &blocks, std::span<const PendingConsumer> pending_consumers,
+    std::span<const uint64_t> sorted_extra_leaders, ExternalEntryPolicy entry_policy) {
   // Phase 3: compute block-entry facts to a fixed point.
   //
   // entry[B] = JOIN(exit[P]) for every predecessor P of B.
   //
-  // Blocks with no predecessors keep an empty entry map. Empty does not mean
-  // "known empty set"; it means every pair is at unconstrained kernel-entry
-  // state unless a predecessor later mentions that pair. Consumers interpret a
-  // missing fact as unresolved.
+  // Explicit external entries begin with an empty map. Empty does not mean
+  // "known empty set"; at those entries every pair has an unconstrained
+  // hardware-supplied value unless a predecessor later mentions it. Under the
+  // ExplicitOnly policy, a predecessorless non-entry is instead unreachable
+  // (BOTTOM), so its empty map must not participate in a successor join.
   std::vector<std::vector<size_t>> predecessors(blocks.size());
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
     for (size_t successor : blocks[block_index].successors)
       predecessors[successor].push_back(block_index);
   }
-  const std::vector<uint8_t> external_entries = explicit_external_entries(blocks, extra_leaders);
+  const std::vector<uint8_t> external_entries =
+      explicit_external_entries(blocks, sorted_extra_leaders);
 
   // Dataflow results are consumed only by pending cross-block branches. A pair
   // that is built or killed somewhere but never reaches such a consumer cannot
@@ -1566,8 +1737,17 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
   // Treating that backedge as unconstrained permanently poisons an otherwise
   // dominated PC builder (the RCCL call-loop shape). Section entry and every
   // caller-provided kernel entry are nevertheless external roots even when
-  // they have structural predecessors. Blocks with no predecessors remain
-  // conservative analysis roots because they may also be externally entered.
+  // they have structural predecessors.
+  //
+  // With ExplicitOnly, do not infer an external entry merely because a block
+  // has no predecessor. BinaryTranslator supplies every descriptor- or
+  // firmware-visible kernel entry, then walks each entry's reachable CFG and
+  // emits shared blocks separately in every kernel-local scope. A callable
+  // helper is either an explicit leader itself or has a direct or recovered
+  // predecessor edge; a predecessorless block after a non-returning instruction
+  // such as s_trap 2 cannot acquire a hidden incoming edge from another kernel
+  // scope. Generic callers without a complete entry list use
+  // InferPredecessorless to preserve conservative multi-function recovery.
   std::vector<bool> reachable(blocks.size(), false);
   // Keep key presence separate from the sparse fact vectors. The dataflow
   // join needs the union of predecessor keys on every worklist visit; caching
@@ -1589,7 +1769,7 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
     LatticeFacts new_entry;
     std::bitset<REGISTER_SET_MAX_SGPRS> mentioned_pairs;
     const bool new_reachable =
-        external_entries[block_index] != 0 || predecessors[block_index].empty() ||
+        is_analysis_root(block_index, external_entries, predecessors, entry_policy) ||
         std::ranges::any_of(predecessors[block_index],
                             [&](size_t predecessor) { return reachable[predecessor]; });
     if (new_reachable && !predecessors[block_index].empty()) {
@@ -1789,9 +1969,28 @@ struct VectorLaneFlowState {
   return ref;
 }
 
-void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
+// Whether a physical VGPR is callee-saved under the AMDGPU device calling
+// convention (CSR_AMDGPU_VGPRs). The callee-saved VGPRs are interleaved with
+// scratch registers in stripes of eight at a stride of sixteen starting at
+// v40: v40-47, v56-63, v72-79, ... A conforming callee must preserve these
+// across a call, so a PC stashed in one survives an intervening call even
+// though the analysis does not descend into the callee body.
+//
+// TODO: Replace this calling-convention assumption with analysis that proves
+// every reachable callee preserves the stashed physical VGPR before allowing
+// the stash to survive a call. A compiler-generated callee violating the ABI is
+// highly unlikely, but hand-written or otherwise non-conforming code may still
+// do so. See the LLVM AMDGPU User Guide and AMDGPUCallingConv.td.
+//
+// @p phys_vgpr is the resolved physical index, which for gfx1250 VGPR_MSB
+// banking may exceed 255 (bank*256 + selector). The ABI table only defines the
+// convention for v0-255, so a banked register above that range is NOT proven
+// callee-saved and must fail closed rather than be masked down to its selector.
+
+void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<AnalysisBlock> &blocks,
                                      std::vector<IndirectCallFixup> &recovered,
-                                     std::span<const uint64_t> extra_leaders) {
+                                     std::span<const uint64_t> sorted_extra_leaders,
+                                     ExternalEntryPolicy entry_policy) {
   // gfx1250 device functions sometimes keep a small static call set in one
   // VGPR: getpc-built low/high halves are written to fixed lanes, then read
   // back into an SGPR pair before swappc. Track only fixed-lane
@@ -1808,19 +2007,19 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
   // conflicting definition, unknown bank, or overlapping VGPR write therefore
   // still fails closed.
   //
-  // The gfx1250 A0 trap-recovery workaround requires S_SET_VGPR_MSB SIMM16[15:8]
-  // to carry the previous bank state. The architectural bank update remains
-  // SIMM16[7:0], so analysis intentionally ignores the workaround metadata byte.
+  // The gfx1250 A0 profile uses S_SET_VGPR_MSB SIMM16[15:8] for the previous
+  // bank state. The bank update remains SIMM16[7:0], so analysis ignores the
+  // profile metadata byte.
   // This pass only observes MODE; it never inserts or reorders
   // S_SETREG/S_SET_VGPR_MSB and therefore cannot violate the required co-issue
   // spacing.
   if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
     return;
 
-  const std::vector<AnalysisBlock> blocks = build_analysis_blocks(ctx, extra_leaders);
   if (blocks.empty())
     return;
-  const std::vector<uint8_t> external_entries = explicit_external_entries(blocks, extra_leaders);
+  const std::vector<uint8_t> external_entries =
+      explicit_external_entries(blocks, sorted_extra_leaders);
 
   const auto changes_vgpr_msb_bank = [](std::string_view mnemonic) {
     return mnemonic == "s_set_vgpr_msb" || mnemonic == "s_setreg_b32" ||
@@ -1869,10 +2068,12 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
 
       if (facts.call_sdst) {
         // A direct call can clobber any caller-saved VGPR before its
-        // fallthrough continuation executes. The temporary CFG has no
-        // context-sensitive return edge, so no pre-call lane stash is proven
-        // to survive into either successor.
-        state.slots.clear();
+        // fallthrough continuation executes, and the temporary CFG has no
+        // context-sensitive return edge. Drop every stash in a caller-saved
+        // VGPR; a conforming callee must preserve a callee-saved VGPR, so a
+        // stash there survives (see is_callee_saved_vgpr).
+        std::erase_if(state.slots,
+                      [](const auto &item) { return !is_callee_saved_vgpr(item.first.vgpr); });
       }
 
       if (mnemonic == "v_writelane_b32") {
@@ -1922,7 +2123,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
         continue;
       }
 
-      if (emit_fixups && facts.swappc_ssrc &&
+      if (emit_fixups && is_lane_fixup_consumer(facts) &&
           static_cast<size_t>(*facts.swappc_ssrc + 1) < read_halves.size()) {
         const uint16_t pair_lo = *facts.swappc_ssrc;
         const auto &lo = read_halves[pair_lo];
@@ -1935,29 +2136,36 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
       if (facts.swappc_sdst) {
         // A returning indirect call may execute arbitrary callee code before
         // the fallthrough continuation. Resolve this call from the pre-call
-        // state above, then discard every lane stash before publishing the
-        // block exit so a callee-clobbered value cannot reach the continuation.
-        state.slots.clear();
+        // state above, then drop every stash in a caller-saved VGPR before
+        // publishing the block exit so a callee-clobbered value cannot reach
+        // the continuation. A callee-saved VGPR is preserved by a conforming
+        // callee, so a stash there survives (see is_callee_saved_vgpr).
+        std::erase_if(state.slots,
+                      [](const auto &item) { return !is_callee_saved_vgpr(item.first.vgpr); });
       }
 
-      RegisterSet vgpr_defs;
-      for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
-        const Operand *op = inst.dst_operand(dst_index);
-        if (op == nullptr)
-          continue;
-        if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::VGPR)
-          vgpr_defs.expand(*ref);
-      }
-      inst.implicit_defs(vgpr_defs);
-      vgpr_defs.for_each([&](RegisterRef ref) {
-        if (ref.cls != RegClass::VGPR)
-          return;
-        // Operand metadata does not expose a role for every implicit/wide def.
-        // Conservatively invalidate every physical bank sharing this selector.
-        std::erase_if(state.slots, [&](const auto &item) {
-          return (item.first.vgpr & 0xffu) == (ref.index & 0xffu);
+      // VGPR defs are decoded only to invalidate tracked slots; no slots makes
+      // this entire region a no-op.
+      if (!state.slots.empty()) {
+        RegisterSet vgpr_defs;
+        for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
+          const Operand *op = inst.dst_operand(dst_index);
+          if (op == nullptr)
+            continue;
+          if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::VGPR)
+            vgpr_defs.expand(*ref);
+        }
+        inst.implicit_defs(vgpr_defs);
+        vgpr_defs.for_each([&](RegisterRef ref) {
+          if (ref.cls != RegClass::VGPR)
+            return;
+          // Operand metadata does not expose a role for every implicit/wide def.
+          // Conservatively invalidate every physical bank sharing this selector.
+          std::erase_if(state.slots, [&](const auto &item) {
+            return (item.first.vgpr & 0xffu) == (ref.index & 0xffu);
+          });
         });
-      });
+      }
 
       if (!builders.active_pairs().empty())
         invalidate_written_sgprs(ctx, index, builders);
@@ -2021,13 +2229,13 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
         new_entry.vgpr_msb_imm = std::nullopt;
     }
 
-    // A block with no direct predecessors is a possible device-function entry.
-    // Section entry and every caller-provided kernel entry are explicit
-    // external entries even when they have structural predecessors. Meet the
-    // corresponding external state with any reachable predecessor: it
-    // contributes no lane stash, and explicit kernel entries begin in bank
-    // zero according to the entry contract.
-    if (predecessors[block_index].empty() || external_entries[block_index] != 0) {
+    // Generic callers conservatively infer predecessorless device-function
+    // entries; callers with a complete entry list leave unlisted blocks at
+    // BOTTOM. Explicit entries remain roots even with structural predecessors.
+    // Meet a root's external state with any reachable predecessor: it
+    // contributes no lane stash, and explicit entries begin in bank zero
+    // according to the entry contract.
+    if (is_analysis_root(block_index, external_entries, predecessors, entry_policy)) {
       new_reachable = true;
       VectorLaneFlowState external_entry;
       if (external_entries[block_index] != 0)
@@ -2060,8 +2268,18 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
   }
 
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
-    if (reachable[block_index])
-      (void)scan_block(blocks[block_index], entry_states[block_index], true);
+    if (!reachable[block_index])
+      continue;
+    const AnalysisBlock &block = blocks[block_index];
+    bool has_consumer = false;
+    for (size_t index = block.first_index; index <= block.last_index; ++index) {
+      if (is_lane_fixup_consumer(ctx.facts[index])) {
+        has_consumer = true;
+        break;
+      }
+    }
+    if (has_consumer)
+      (void)scan_block(block, entry_states[block_index], true);
   }
 }
 
@@ -2171,15 +2389,19 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
   return static_cast<uint16_t>((word >> 16) & 0x7fu);
 }
 
-[[nodiscard]] std::vector<IndirectCallFixup>
-discover_indirect_branch_edges_unfiltered(std::span<const Instruction *const> insts,
-                                          std::span<const uint8_t> text, rj_code_arch_t arch,
-                                          std::span<const uint64_t> extra_leaders) {
+[[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges_unfiltered(
+    std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
+    std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
+    std::vector<PcAddressBuilder> *pc_builders) {
   std::vector<IndirectCallFixup> recovered;
   AnalysisContext ctx = build_context(insts, text, arch);
-  recover_vector_lane_stashed_pcs(ctx, recovered, extra_leaders);
-  std::vector<uint64_t> leaders(extra_leaders.begin(), extra_leaders.end());
+  std::vector<uint64_t> sorted_extra_leaders(extra_leaders.begin(), extra_leaders.end());
+  std::ranges::sort(sorted_extra_leaders);
+  sorted_extra_leaders.erase(std::ranges::unique(sorted_extra_leaders).begin(),
+                             sorted_extra_leaders.end());
+  std::vector<uint64_t> leaders(sorted_extra_leaders);
 
+  PcAddressBuilderMap round_builders;
   for (size_t iteration = 0; iteration < kMaxIndirectDiscoveryIterations; ++iteration) {
     add_recovered_leaders(leaders, recovered);
 
@@ -2188,22 +2410,46 @@ discover_indirect_branch_edges_unfiltered(std::span<const Instruction *const> in
 
     std::vector<PendingConsumer> pending_consumers;
     std::vector<IndirectCallFixup> iteration_recovered;
+    // Lane-stash recovery consumes the same graph as scalar recovery, including
+    // edges proven in earlier rounds. Keep the sorted explicit entries separate
+    // from leaders: recovered targets become reachable through those edges, not
+    // by being promoted to external roots.
+    recover_vector_lane_stashed_pcs(ctx, blocks, iteration_recovered, sorted_extra_leaders,
+                                    entry_policy);
+    // Recovered leaders can split a block between rounds, which changes where a
+    // builder's block-exit value is observed. Keep only the final round's view
+    // so the published records are internally consistent with one CFG.
+    round_builders.clear();
     for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
-      scan_block(ctx, block_index, blocks, pending_consumers, iteration_recovered);
+      scan_block(ctx, block_index, blocks, pending_consumers, iteration_recovered, round_builders);
     recover_signed_delta_templates(ctx, blocks, iteration_recovered);
 
-    size_t unresolved_consumers = 0;
     if (!pending_consumers.empty()) {
-      const auto entry_facts = run_block_dataflow(blocks, pending_consumers, extra_leaders);
-      unresolved_consumers = classify_pending_consumers(ctx, blocks, entry_facts, pending_consumers,
-                                                        iteration_recovered);
+      const auto entry_facts =
+          run_block_dataflow(blocks, pending_consumers, sorted_extra_leaders, entry_policy);
+      (void)classify_pending_consumers(ctx, blocks, entry_facts, pending_consumers,
+                                       iteration_recovered);
     }
 
     bool changed = false;
     for (const IndirectCallFixup &fixup : iteration_recovered)
       changed |= append_unique(recovered, fixup);
-    if (!changed || unresolved_consumers == 0)
+    if (!changed)
       break;
+  }
+
+  if (pc_builders != nullptr) {
+    pc_builders->clear();
+    pc_builders->reserve(round_builders.size());
+    for (const auto &[getpc_offset, entry] : round_builders) {
+      // Publish the disagreement flag on the copy that leaves this pass. It is kept off the stored
+      // record so the equality test above, which decides whether a second observation conflicts,
+      // keeps comparing only the observed value.
+      PcAddressBuilder published = entry.record;
+      published.poisoned = entry.poisoned;
+      pc_builders->push_back(published);
+    }
+    std::ranges::sort(*pc_builders, {}, &PcAddressBuilder::source_getpc_offset);
   }
 
   std::ranges::sort(recovered, {}, &IndirectCallFixup::source_call_offset);
@@ -2212,30 +2458,40 @@ discover_indirect_branch_edges_unfiltered(std::span<const Instruction *const> in
 
 } // namespace
 
-std::vector<IndirectCallFixup>
-discover_indirect_branch_edges(std::span<const Instruction *const> insts,
-                               std::span<const uint8_t> text, rj_code_arch_t arch,
-                               std::span<const uint64_t> extra_leaders) {
+bool is_callee_saved_vgpr(uint16_t phys_vgpr) {
+  return phys_vgpr >= 40 && phys_vgpr <= 255 && ((phys_vgpr - 40) % 16) < 8;
+}
+
+std::vector<IndirectCallFixup> discover_indirect_branch_edges(
+    std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
+    std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
+    std::vector<PcAddressBuilder> *pc_builders) {
+  if (pc_builders != nullptr)
+    pc_builders->clear();
   if (insts.empty())
     return {};
 
   // Every recoverable edge ends at an indirect branch/call consumer. Most
   // generated kernels have none, so avoid building the auxiliary CFG and
-  // running its dataflow passes when no fixup can possibly be produced.
+  // running its dataflow passes when no fixup can possibly be produced. A
+  // section with no dynamic transfer also has no consumer whose target could be
+  // a stale PC, so leaving pc_builders empty here withholds a claim rather than
+  // making a false one.
   const bool has_indirect_consumer = std::ranges::any_of(
       insts, [](const Instruction *inst) { return is_recoverable_indirect_consumer(*inst); });
   if (!has_indirect_consumer) {
 #ifndef NDEBUG
     // Keep the cheap predicate coupled to every fixup producer. A future
     // recovery path for another consumer kind must extend the predicate above.
-    const auto unfiltered =
-        discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders);
+    const auto unfiltered = discover_indirect_branch_edges_unfiltered(
+        insts, text, arch, extra_leaders, entry_policy, nullptr);
     assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
 #endif
     return {};
   }
 
-  return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders);
+  return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders, entry_policy,
+                                                   pc_builders);
 }
 
 } // namespace rocjitsu

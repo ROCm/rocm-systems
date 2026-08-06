@@ -800,6 +800,17 @@ class BlockingContext {
     HIP_SKIP_TEST("warp match functions are not supported on this device.");                       \
   }
 
+// Call at the start of tests that require cooperative kernel launch support to indicate
+// whether it is supported on the current device.
+#define CHECK_COOPERATIVE_LAUNCH_SUPPORT                                                           \
+  int current_device_ = 0;                                                                         \
+  hipDeviceProp_t device_properties_;                                                              \
+  HIP_CHECK(hipGetDevice(&current_device_));                                                       \
+  HIP_CHECK(hipGetDeviceProperties(&device_properties_, current_device_));                         \
+  if (!device_properties_.cooperativeLaunch) {                                                     \
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);                             \
+  }
+
 // Call GENERATE_CAPTURE macro at the start of the test, before using BEGIN/END_CAPTURE.
 // Use BEGIN/END_CAPTURE macros to execute APIs in both stream capturing and non-capturing modes.
 // Place BEGIN_CAPTURE before the API call and END_CAPTURE after the call.

@@ -74,10 +74,9 @@ struct DriverMemoryHandle {
   /// - allocation address / thunk buffer handle for @ref KfdDriver
   /// - XDNA BO handle for @ref XdnaDriver
   uint64_t handle{};
-  /// Virtual address of this allocation, or nullptr if the allocation has no
-  /// host-visible VA. Always the allocation's real VA; whether FreeMemory unmaps it
-  /// is a driver-internal decision (e.g. the XDNA driver leaves shared device-heap
-  /// VAs mapped), not something callers track.
+  /// Virtual address of this allocation, or nullptr if the driver exposes none.
+  /// Whether FreeMemory unmaps it is driver-defined: an allocation may borrow a
+  /// mapping owned by something else, in which case FreeMemory leaves it intact.
   void* vaddr{};
   int dmabuf_fd{-1};
   uint64_t mmap_offset{0};
@@ -462,7 +461,7 @@ public:
   /// @param[in] nodes nodes to be used can be null
   /// @return HSA_STATUS_SUCCESS if the driver successfully makes the memory
   virtual hsa_status_t MakeMemoryResident(const void* mem, size_t size, uint64_t* alternate_va,
-                                          const HsaMemMapFlags* mem_flags = nullptr,
+                                          const HsaMemFlags* mem_flags = nullptr,
                                           uint32_t num_nodes = 0,
                                           const uint32_t* nodes = nullptr) const = 0;
 

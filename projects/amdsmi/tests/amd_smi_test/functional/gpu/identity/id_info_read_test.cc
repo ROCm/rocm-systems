@@ -125,19 +125,6 @@ void TestIdInfoRead::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(err)
 
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_vram_vendor", "gpu=" + std::to_string(i), VERB(STANDARD));
-    err = amdsmi_get_gpu_vram_vendor(processor_handles_[i], buffer, kBufferLen);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
-    if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-      DISPLAY_AMDSMI_API("amdsmi_get_gpu_vram_vendor", "gpu=" + std::to_string(i), VERB(STANDARD));
-      err = amdsmi_get_gpu_vram_vendor(processor_handles_[i], nullptr, kBufferLen);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-      ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
-    } else {
-      CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) { std::cout << "\t**Device Vram Vendor name: " << buffer << std::endl; }
-    }
-
     amdsmi_vram_info_t vram_info;
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_vram_info", "gpu=" + std::to_string(i), VERB(STANDARD));
     err = amdsmi_get_gpu_vram_info(processor_handles_[i], &vram_info);

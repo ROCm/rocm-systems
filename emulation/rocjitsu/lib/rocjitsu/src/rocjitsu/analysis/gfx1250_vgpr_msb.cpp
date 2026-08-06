@@ -153,8 +153,8 @@ void apply_mode_write(VgprMsbState &state, uint16_t hwreg, std::optional<uint32_
 ///
 /// S_SETREG_IMM32_B32 targeting MODE updates MODE[19:12] from the same literal
 /// bits even when those fields are outside the instruction's requested bit
-/// slice. Compiler workarounds therefore carry the intended banks in literal
-/// bits [19:12]. Model the hardware result rather than the architectural mask.
+/// slice. The intended banks are carried in literal bits [19:12]. Model that
+/// result rather than the architectural mask.
 void apply_immediate_mode_vgpr_msb_side_effect(VgprMsbState &state, uint16_t hwreg,
                                                uint32_t literal) {
   if (decode_hwreg(hwreg).id != kModeHwreg)

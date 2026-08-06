@@ -983,6 +983,8 @@ void DsStorexchgRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStorexchg2addrRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
@@ -992,23 +994,42 @@ void DsStorexchg2addrRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base =
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->wf_size = wf.wf_size();
+  d->ds2_active = true;
+  d->ds2_dst_reg_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst) +
+      1;
+  d->store_data.resize(wf.wf_size() * 4);
+  d->ds2_store_data.resize(wf.wf_size() * 4);
+  uint32_t addr_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, addr.opr_type_, addr.encoding_value_, addr.vgpr_msb_role());
+  uint32_t data0_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
-  d->store_data.resize(wf.wf_size() * 4);
+  uint32_t data1_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data1, amdgpu::VgprMsbRole::Src2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U + wf.lds_base();
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U + wf.lds_base();
+    uint32_t val0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0_0, 4);
+    uint32_t val1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
+    std::memcpy(&d->ds2_store_data[lane * 4 + 0], &val1_0, 4);
   }
   set_data(std::move(d));
 }
 
 void DsStorexchg2addrStride64RtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
@@ -1018,18 +1039,35 @@ void DsStorexchg2addrStride64RtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base =
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->wf_size = wf.wf_size();
+  d->ds2_active = true;
+  d->ds2_dst_reg_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst) +
+      1;
+  d->store_data.resize(wf.wf_size() * 4);
+  d->ds2_store_data.resize(wf.wf_size() * 4);
+  uint32_t addr_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, addr.opr_type_, addr.encoding_value_, addr.vgpr_msb_role());
+  uint32_t data0_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
-  d->store_data.resize(wf.wf_size() * 4);
+  uint32_t data1_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data1, amdgpu::VgprMsbRole::Src2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U + wf.lds_base();
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U + wf.lds_base();
+    uint32_t val0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0_0, 4);
+    uint32_t val1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
+    std::memcpy(&d->ds2_store_data[lane * 4 + 0], &val1_0, 4);
   }
   set_data(std::move(d));
 }
@@ -2302,6 +2340,8 @@ void DsStorexchgRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStorexchg2addrRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
@@ -2311,25 +2351,46 @@ void DsStorexchg2addrRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base =
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->wf_size = wf.wf_size();
+  d->ds2_active = true;
+  d->ds2_dst_reg_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst) +
+      2;
+  d->store_data.resize(wf.wf_size() * 8);
+  d->ds2_store_data.resize(wf.wf_size() * 8);
+  uint32_t addr_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, addr.opr_type_, addr.encoding_value_, addr.vgpr_msb_role());
+  uint32_t data0_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
-  d->store_data.resize(wf.wf_size() * 8);
+  uint32_t data1_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data1, amdgpu::VgprMsbRole::Src2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
+    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 8U + wf.lds_base();
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 8U + wf.lds_base();
+    uint32_t val0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0_0, 4);
+    uint32_t val1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
+    std::memcpy(&d->ds2_store_data[lane * 8 + 0], &val1_0, 4);
+    uint32_t val0_1 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val0_1, 4);
+    uint32_t val1_1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 1, lane);
+    std::memcpy(&d->ds2_store_data[lane * 8 + 4], &val1_1, 4);
   }
   set_data(std::move(d));
 }
 
 void DsStorexchg2addrStride64RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
@@ -2339,20 +2400,39 @@ void DsStorexchg2addrStride64RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base =
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->wf_size = wf.wf_size();
+  d->ds2_active = true;
+  d->ds2_dst_reg_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst) +
+      2;
+  d->store_data.resize(wf.wf_size() * 8);
+  d->ds2_store_data.resize(wf.wf_size() * 8);
+  uint32_t addr_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, addr.opr_type_, addr.encoding_value_, addr.vgpr_msb_role());
+  uint32_t data0_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
-  d->store_data.resize(wf.wf_size() * 8);
+  uint32_t data1_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data1, amdgpu::VgprMsbRole::Src2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
+    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 512U + wf.lds_base();
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 512U + wf.lds_base();
+    uint32_t val0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0_0, 4);
+    uint32_t val1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
+    std::memcpy(&d->ds2_store_data[lane * 8 + 0], &val1_0, 4);
+    uint32_t val0_1 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val0_1, 4);
+    uint32_t val1_1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 1, lane);
+    std::memcpy(&d->ds2_store_data[lane * 8 + 4], &val1_1, 4);
   }
   set_data(std::move(d));
 }
@@ -2986,7 +3066,22 @@ void DsStoreAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
+  {
+    uint64_t exec = wf.exec();
+    d->lane_mask = exec;
+    d->exec_mask = exec;
+    d->wg_id = wf.wg_id();
+    d->wf_id = wf.wf_id();
+    d->cu_path = wf.cu().full_path();
+    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;
+    uint32_t m0 = wf.m0();
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint32_t lane_offset = (m0 + lane * 4U) & 0xFFFFFU;
+      d->per_lane_addr[lane] = lane_offset + offset + wf.lds_base();
+    }
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base =
@@ -2996,8 +3091,8 @@ void DsStoreAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
+    std::memcpy(&d->store_data[lane * 4], &val0, 4);
   }
   set_data(std::move(d));
 }
@@ -3020,11 +3115,11 @@ void DsLoadAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {
     d->cu_path = wf.cu().full_path();
     uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;
     uint32_t m0 = wf.m0();
-    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();
+      uint32_t lane_offset = (m0 + lane * 4U) & 0xFFFFFU;
+      d->per_lane_addr[lane] = lane_offset + offset + wf.lds_base();
     }
   }
   set_data(std::move(d));

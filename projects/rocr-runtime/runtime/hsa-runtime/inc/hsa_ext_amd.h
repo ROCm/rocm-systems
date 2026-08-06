@@ -984,6 +984,9 @@ typedef enum hsa_amd_agent_info_s {
    * For CPU agents: indicates host memory can be allocated and exported.
    * For GPU agents: indicates the GPU can access such host-allocated memory.
    * The type of this attribute is bool.
+   *
+   * @note This query will be deprecated in the future.
+   * Use HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED instead.
    */
   HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
 } hsa_amd_agent_info_t;
@@ -2393,7 +2396,8 @@ typedef struct hsa_amd_memory_copy_op_s {
  * Each operation is self-describing via its @c type field. A BROADCAST operation
  * is a single op that copies one source to multiple destinations via @c dst_list
  * and @c num_entries. A SWAP operation exchanges two buffers using @c src_size and
- * @c dst_size.
+ * @c dst_size. SWAP operations require addresses to be 64-byte aligned for gfx94x/gfx95x
+ * and 32-byte aligned for gfx1250.
  *
  * @param[in] copy_ops Array of copy operation descriptors.
  *

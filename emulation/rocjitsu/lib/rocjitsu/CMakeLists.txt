@@ -29,49 +29,39 @@ set_target_properties(
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    # Fixed-profile shared library for the load-time gfx1250 B0-to-A0
-    # consumer. Its default registry contains only the gfx1250 model provider,
-    # excluding the full simulator aggregate and execution objects. Keep this
-    # Linux-only until equivalent export control is provided for other
-    # shared-library formats.
+    # Private fixed-profile archive for the gfx1250 B0-to-A0 hotswap hook. Its
+    # default registry contains only the gfx1250 model provider, excluding the
+    # full simulator aggregate and execution objects.
     add_library(
         rocjitsu_gfx1250_b0_to_a0
-        SHARED
+        STATIC
         src/rocjitsu/code/dbt/gfx1250_b0_to_a0_library.cpp
     )
+    foreach(_object_lib IN LISTS ROCJITSU_DBT_BASE_OBJECT_LIBS)
+        target_sources(
+            rocjitsu_gfx1250_b0_to_a0
+            PRIVATE $<TARGET_OBJECTS:${_object_lib}>
+        )
+    endforeach()
     set_target_properties(
         rocjitsu_gfx1250_b0_to_a0
         PROPERTIES
             OUTPUT_NAME rocjitsu_gfx1250_b0_to_a0
-            VERSION ${PROJECT_VERSION}
-            SOVERSION ${PROJECT_VERSION_MAJOR}
+            POSITION_INDEPENDENT_CODE ON
     )
     target_link_libraries(
         rocjitsu_gfx1250_b0_to_a0
         PRIVATE
-            rocjitsu_dbt_internal
             rocjitsu_gfx1250_model_registry
             simdojo_headers
+            util
+            Threads::Threads
     )
     rj_configure_target(
         rocjitsu_gfx1250_b0_to_a0
         PRIVATE_INCLUDES
         WARNINGS
         HIDDEN
-    )
-    set(_gfx1250_b0_to_a0_exports
-        ${ROCJITSU_SRC_DIR}/rocjitsu/code/dbt/gfx1250_b0_to_a0.exports
-    )
-    set_property(
-        TARGET rocjitsu_gfx1250_b0_to_a0
-        APPEND
-        PROPERTY LINK_DEPENDS ${_gfx1250_b0_to_a0_exports}
-    )
-    target_link_options(
-        rocjitsu_gfx1250_b0_to_a0
-        PRIVATE
-            "LINKER:--exclude-libs,ALL"
-            "LINKER:--version-script=${_gfx1250_b0_to_a0_exports}"
     )
 endif()
 
