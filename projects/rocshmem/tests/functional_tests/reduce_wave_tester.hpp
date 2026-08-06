@@ -71,7 +71,6 @@ class ReduceWaveTester : public Tester {
    */
   int num_teams = 39;
   rocshmem_team_t *team_reduce_wave_world_dup;
-  int *error_flag;
 };
 
 #include "reduce_wave_tester.cpp"

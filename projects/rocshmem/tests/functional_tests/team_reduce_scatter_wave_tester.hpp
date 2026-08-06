@@ -66,7 +66,6 @@ class TeamReduceScatterWaveTester : public Tester {
    */
   int num_teams = 39;
   rocshmem_team_t *team_reduce_scatter_wave_world_dup;
-  int *error_flag;
 
   std::function<void(T1 &, T1 &)> init_buf;
   std::function<std::pair<bool, std::string>(const T1 &, const T1 &)>

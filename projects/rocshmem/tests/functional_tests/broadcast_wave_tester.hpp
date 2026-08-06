@@ -65,7 +65,6 @@ class BroadcastWaveTester : public Tester {
    */
   int num_teams = 39;
   rocshmem_team_t *bcast_wave_world_dup;
-  int *error_flag;
 };
 
 #include "broadcast_wave_tester.cpp"

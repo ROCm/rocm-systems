@@ -133,7 +133,6 @@ AlltoallWaveTester<T1>::AlltoallWaveTester(TesterArguments args)
 
   CHECK_HIP(hipMalloc(&alltoall_wave_world_dup,
                       sizeof(rocshmem_team_t) * total_waves));
-  CHECK_HIP(hipMalloc(&error_flag, sizeof(int)));
 }
 
 template <typename T1>
@@ -141,7 +140,6 @@ AlltoallWaveTester<T1>::~AlltoallWaveTester() {
   free_test_buffer(source_buf, args.local_buf_type);
   free_test_buffer(dest_buf);
   CHECK_HIP(hipFree(alltoall_wave_world_dup));
-  CHECK_HIP(hipFree(error_flag));
 }
 
 template <typename T1>
@@ -156,9 +154,6 @@ void AlltoallWaveTester<T1>::preLaunchKernel() {
       abort();
     }
   }
-
-  int zero = 0;
-  CHECK_HIP(hipMemcpy(error_flag, &zero, sizeof(int), hipMemcpyHostToDevice));
 }
 
 template <typename T1>

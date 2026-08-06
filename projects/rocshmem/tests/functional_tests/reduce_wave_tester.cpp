@@ -151,7 +151,6 @@ ReduceWaveTester<T1, T2>::ReduceWaveTester(
 
   CHECK_HIP(hipMalloc(&team_reduce_wave_world_dup,
                       sizeof(rocshmem_team_t) * total_waves));
-  CHECK_HIP(hipMalloc(&error_flag, sizeof(int)));
 }
 
 template <typename T1, ROCSHMEM_OP T2>
@@ -159,7 +158,6 @@ ReduceWaveTester<T1, T2>::~ReduceWaveTester() {
   free_test_buffer(s_buf, args.local_buf_type);
   free_test_buffer(r_buf);
   CHECK_HIP(hipFree(team_reduce_wave_world_dup));
-  CHECK_HIP(hipFree(error_flag));
 }
 
 template <typename T1, ROCSHMEM_OP T2>
@@ -176,9 +174,6 @@ void ReduceWaveTester<T1, T2>::preLaunchKernel() {
       abort();
     }
   }
-
-  int zero = 0;
-  CHECK_HIP(hipMemcpy(error_flag, &zero, sizeof(int), hipMemcpyHostToDevice));
 }
 
 template <typename T1, ROCSHMEM_OP T2>

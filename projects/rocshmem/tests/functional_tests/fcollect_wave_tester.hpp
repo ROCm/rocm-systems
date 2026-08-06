@@ -65,7 +65,6 @@ class FcollectWaveTester : public Tester {
    */
   int num_teams = 39;
   rocshmem_team_t *team_fcollect_wave_world_dup;
-  int *error_flag;
 };
 
 #include "fcollect_wave_tester.cpp"
