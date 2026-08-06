@@ -1,0 +1,45 @@
+# Intentionally-uncovered public HIP APIs (contract-test allowlist)
+#
+# This file is the single source of truth for HIP runtime APIs that are declared
+# in projects/hip/include/hip/hip_runtime_api.h but intentionally have NO contract
+# test, with the reason each one cannot be covered by the device-only contract
+# harness. tools/check_contract_coverage.py treats every entry here as a justified
+# gap (non-blocking) and will FAIL a PR for any declared-but-uncovered API that is
+# NOT listed here.
+#
+# Format: one `APIName  # reason` per line. Blank lines and lines starting with `#`
+# are ignored. Keep the reason specific enough that a reviewer can judge whether it
+# still holds on a newer runtime.
+#
+# Before adding an entry: confirm the gap is real (probe the actual runtime, do not
+# assume a return value) and prefer writing a test. See AUTHORING.md. When a test is
+# later added for an API here, remove its line — the checker flags redundant entries.
+
+# --- External-semaphore graph nodes (8) ---
+# The add path faults (SIGSEGV) without a real external semaphore, which can only be
+# produced by an external graphics/compute producer (Vulkan vkGetSemaphoreFdKHR,
+# DMA-buf, D3D/NvSci). Confirmed cross-arch: identical SIGSEGV on gfx1101 and
+# MI100/gfx908 even with valid non-null synthetic params, never launched. The
+# in-tree Vulkan unit suite (catch/unit/vulkan_interop) already covers these with a
+# real producer; the device-only contract layer deliberately does not pull in Vulkan.
+hipGraphAddExternalSemaphoresSignalNode        # ext-sem: add faults without a real Vulkan semaphore (cross-arch SIGSEGV)
+hipGraphAddExternalSemaphoresWaitNode          # ext-sem: add faults without a real Vulkan semaphore (cross-arch SIGSEGV)
+hipGraphExternalSemaphoresSignalNodeGetParams  # ext-sem: requires a signal node that cannot be constructed device-only
+hipGraphExternalSemaphoresSignalNodeSetParams  # ext-sem: requires a signal node that cannot be constructed device-only
+hipGraphExternalSemaphoresWaitNodeGetParams    # ext-sem: requires a wait node that cannot be constructed device-only
+hipGraphExternalSemaphoresWaitNodeSetParams    # ext-sem: requires a wait node that cannot be constructed device-only
+hipGraphExecExternalSemaphoresSignalNodeSetParams  # ext-sem: requires an instantiated signal node (see above)
+hipGraphExecExternalSemaphoresWaitNodeSetParams    # ext-sem: requires an instantiated wait node (see above)
+
+# --- Texture-reference border color (2) ---
+# The AMD runtime implements both with an unconditional assert(false) after the
+# image-support check (clr/hipamd/src/hip_texture.cpp), so calling them aborts the
+# test binary in assert-enabled builds. There is no defined contract to assert until
+# the runtime stores border-color state on the reference.
+hipTexRefSetBorderColor  # runtime assert(false) aborts the binary; no stored state to round-trip
+hipTexRefGetBorderColor  # runtime assert(false) aborts the binary; no stored state to round-trip
+
+# --- Windows-only positive path (1) ---
+# The AMD Linux runtime rejects a device-side bind with hipErrorInvalidTexture; the
+# positive path is Windows-only (the in-tree unit test guards behind #if defined(_WIN32)).
+hipBindTextureToMipmappedArray  # Windows-only positive path; Linux device-side bind rejects

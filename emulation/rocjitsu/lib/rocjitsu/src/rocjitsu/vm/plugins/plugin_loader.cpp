@@ -144,19 +144,20 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
   return true;
 }
 
-/// Configure output sinks on @p group from the optional top-level `sinks`
-/// object. Defaults to a single stderr sink when absent.
+/// Parse owned output sinks from the optional top-level `sinks` object.
+/// Defaults to a single stderr sink when absent.
 ///
 /// @code{.json}
 ///   "sinks": { "types": ["stderr", "file"], "dir": "/tmp/out" }
 /// @endcode
-void configure_sinks(const flexbuffers::Reference &root, ExecutionPluginGroup &group) {
+PluginSinkConfig parse_sink_config(const flexbuffers::Reference &root) {
+  PluginSinkConfig config;
   flexbuffers::Reference sinks = root.IsMap() ? root.AsMap()["sinks"] : flexbuffers::Reference();
 
   // Default: stderr only.
   if (!sinks.IsMap()) {
-    group.add_sink(&StderrSink::instance());
-    return;
+    config.emplace<StderrSink>();
+    return config;
   }
 
   auto sinks_map = sinks.AsMap();
@@ -164,8 +165,8 @@ void configure_sinks(const flexbuffers::Reference &root, ExecutionPluginGroup &g
   std::string dir = sinks_map["dir"].IsString() ? sinks_map["dir"].AsString().c_str() : "";
 
   if (!types.IsVector()) {
-    group.add_sink(&StderrSink::instance());
-    return;
+    config.emplace<StderrSink>();
+    return config;
   }
 
   auto vec = types.AsVector();
@@ -173,21 +174,22 @@ void configure_sinks(const flexbuffers::Reference &root, ExecutionPluginGroup &g
   for (size_t i = 0; i < vec.size(); ++i) {
     std::string token = vec[i].IsString() ? vec[i].AsString().c_str() : "";
     if (token == "stderr") {
-      group.add_sink(&StderrSink::instance());
+      config.emplace<StderrSink>();
       configured = true;
     } else if (token == "stdout") {
-      group.add_sink(&StdoutSink::instance());
+      config.emplace<StdoutSink>();
       configured = true;
     } else if (token == "file") {
       if (!dir.empty()) {
-        group.set_sink_dir(dir);
+        config.set_file_directory(dir);
         configured = true;
       } else
         util::Logger::warn("sink type 'file' requested but no 'dir' set");
     }
   }
   if (!configured)
-    group.add_sink(&StderrSink::instance());
+    config.emplace<StderrSink>();
+  return config;
 }
 
 } // namespace
@@ -233,11 +235,13 @@ PluginLoader::configure_plugin_group(const std::string &config_json, const std::
     throw std::invalid_argument("profiled plugin execution requires num_threads=1");
   }
 
-  std::shared_ptr<ExecutionPluginGroup> group =
-      profiled ? std::make_shared<ProfiledExecutionPluginGroup>()
-               : std::make_shared<ExecutionPluginGroup>();
+  PluginSinkConfig sink_config = parse_sink_config(root);
+  std::shared_ptr<ExecutionPluginGroup> group;
+  if (profiled)
+    group = std::make_shared<ProfiledExecutionPluginGroup>(std::move(sink_config));
+  else
+    group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
 
-  configure_sinks(root, *group);
   load_from_config(config_json, *group, plugin_dir);
   return group;
 }
