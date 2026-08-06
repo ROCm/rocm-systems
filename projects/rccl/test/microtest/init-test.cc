@@ -115,6 +115,8 @@ ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* paren
     comm->ncclNet = parent ? parent->ncclNet : &g_microFakeNet;
   return g_ncclNetInitResult;
 }
+// Note: ncclGdrCopy is defined by init.cc itself (= NULL by default), so
+// devCommSetup()'s `ncclGdrCopy != NULL` check takes the host-workFifo arm.
 
 // ===========================================================================
 // Fixture: resets all init-layer fakes between tests (TearDown). Tests that
@@ -772,4 +774,41 @@ TEST_F(InitMicrotest, CommAlloc_MemPoolCreateFails_ReturnsError) {
   g_hipMemPoolResult = hipErrorInvalidValue;  // cudaMemPoolCreate arm
   auto comm = FreshComm();
   EXPECT_NE(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
+}
+
+// ===========================================================================
+// Tier-E: devCommSetup() -- builds the device-side comm/channels image. Runs on
+// a comm produced by commAlloc()'s happy path; the device work goes through the
+// controllable HIP async-op seams (InstallDevCommSetupSuccess). cuMem stays off
+// (default) so the alloc templates take the hipExtMallocWithFlags host arm.
+// ===========================================================================
+namespace {
+// A comm brought through commAlloc()'s happy path, ready for devCommSetup().
+std::unique_ptr<ncclComm> AllocedComm(int ndev = 8, int rank = 0) {
+  auto comm = std::unique_ptr<ncclComm>(new ncclComm{});
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), /*parent=*/nullptr, ndev, rank));
+  return comm;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, DevCommSetup_HappyPath_ReturnsSuccessAndSetsDevComm) {
+  InstallDevCommSetupSuccess();
+  auto comm = AllocedComm();
+  EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
+  EXPECT_NE(nullptr, comm->devComm);            // devCommAndChans allocated
+  EXPECT_NE(nullptr, comm->workFifoBuf);         // host workFifo arm taken
+}
+
+TEST_F(InitMicrotest, DevCommSetup_AsyncOpFails_ReturnsError) {
+  InstallDevCommSetupSuccess();
+  auto comm = AllocedComm();
+  g_hipAsyncOpsResult = hipErrorInvalidValue;    // first calloc-async capture-mode fails
+  EXPECT_NE(ncclSuccess, devCommSetup(comm.get()));
+}
+
+TEST_F(InitMicrotest, DevCommSetup_DevCommAllocFails_ReturnsError) {
+  InstallDevCommSetupSuccess();
+  auto comm = AllocedComm();
+  g_hipExtMallocWithFlags = [](void**, std::size_t, unsigned) { return hipErrorMemoryAllocation; };
+  EXPECT_NE(ncclSuccess, devCommSetup(comm.get()));
 }

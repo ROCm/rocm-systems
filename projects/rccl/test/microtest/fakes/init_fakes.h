@@ -72,6 +72,11 @@ extern ncclResult_t g_amdSmiInitResult;
 // test, then inject a single failure to exercise a specific arm.
 void InstallCommAllocSuccess();
 
+// Enable the full devCommSetup() happy path: InstallCommAllocSuccess() plus the
+// HIP async stream ops (thread-exchange / memsetAsync / memcpyAsync) that its
+// alloc/copy templates drive. Call after building a comm via commAlloc().
+void InstallDevCommSetupSuccess();
+
 // Reset every init-layer fake to defaults. Cascades to ResetHipFakes() and
 // ResetNcclFakes(). Called from the fixture TearDown().
 void ResetInitFakes();

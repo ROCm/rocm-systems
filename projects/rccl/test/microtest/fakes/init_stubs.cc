@@ -72,7 +72,6 @@ ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclRegCleanup(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) { ::abort(); }
-ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream* ss) { ::abort(); }
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTopoCheckNicFused(struct ncclComm* comm, bool* fused) { ::abort(); }
 ncclResult_t ncclTopoCompute(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) { ::abort(); }

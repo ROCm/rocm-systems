@@ -210,6 +210,11 @@ ncclResult_t amd_smi_init() { return g_amdSmiInitResult; }
 size_t ncclOsGetPageSize() { return 4096; }
 extern "C" ncclResult_t ncclMemManagerInit(struct ncclComm*) { return g_ncclMemManagerInitResult; }
 
+// devCommSetup() deep seam: the strong-stream sync on the exit path succeeds.
+// (ncclCommPushCuda*Free are defined by init.cc itself -- real host code that
+// pushes destructors onto comm->destructorHead, so they are not faked here.)
+ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream*) { return g_ncclStrongStreamResult; }
+
 void InstallCommAllocSuccess() {
   g_ncclNetInitResult = ncclSuccess;
   g_ncclGinInitResult = ncclSuccess;
@@ -221,6 +226,11 @@ void InstallCommAllocSuccess() {
   g_hipEventCreateResult        = hipSuccess;
   g_hipMemPoolResult            = hipSuccess;
   g_hipStreamCreateResult       = hipSuccess;
+}
+
+void InstallDevCommSetupSuccess() {
+  InstallCommAllocSuccess();
+  g_hipAsyncOpsResult = hipSuccess;
 }
 
 void ResetInitFakes() {

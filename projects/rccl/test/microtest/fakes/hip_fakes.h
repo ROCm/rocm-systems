@@ -99,6 +99,10 @@ extern hipError_t g_hipDeviceGetPCIBusIdResult;
 extern hipError_t g_hipEventCreateResult;
 extern hipError_t g_hipMemPoolResult;
 extern hipError_t g_hipStreamCreateResult;
+// Async stream ops reached by devCommSetup's alloc/copy templates
+// (hipThreadExchangeStreamCaptureMode / hipMemsetAsync / hipMemcpyAsync).
+// Default failure keeps the p2p tests surfacing unexpected calls.
+extern hipError_t g_hipAsyncOpsResult;
 extern int g_hipWarpSize;
 
 // Restore the HIP controllable seams above to their defaults. Called by

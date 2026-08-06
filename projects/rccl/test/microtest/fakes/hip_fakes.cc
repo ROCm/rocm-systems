@@ -157,6 +157,7 @@ hipError_t g_hipDeviceGetPCIBusIdResult  = hipErrorInvalidValue;
 hipError_t g_hipEventCreateResult        = hipErrorInvalidValue;
 hipError_t g_hipMemPoolResult            = hipErrorInvalidValue;
 hipError_t g_hipStreamCreateResult       = hipErrorInvalidValue;
+hipError_t g_hipAsyncOpsResult           = hipErrorInvalidValue;
 int        g_hipWarpSize                 = 64;
 
 // Restore every HIP hook to its default. Called from ResetP2pFakes().
@@ -167,6 +168,7 @@ void ResetHipFakes()
     g_hipEventCreateResult          = hipErrorInvalidValue;
     g_hipMemPoolResult              = hipErrorInvalidValue;
     g_hipStreamCreateResult         = hipErrorInvalidValue;
+    g_hipAsyncOpsResult             = hipErrorInvalidValue;
     g_hipWarpSize                   = 64;
     g_hipMemGetAddressRange         = DefaultHipMemGetAddressRange;
     g_hipIpcGetMemHandle            = DefaultHipIpcGetMemHandle;
@@ -239,7 +241,14 @@ hipError_t hipDeviceGet(hipDevice_t* device, int)
 
 hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int)
 {
-    if (pi) *pi = (attr == hipDeviceAttributeWarpSize) ? g_hipWarpSize : 0;
+    if (pi) {
+        if (attr == hipDeviceAttributeWarpSize)
+            *pi = g_hipWarpSize;
+        else if (attr == hipDeviceAttributeDirectManagedMemAccessFromHost)
+            *pi = 1;   // report managed -> ncclCudaHostCalloc takes the extMalloc arm
+        else
+            *pi = 0;
+    }
     return g_hipDeviceGetAttributeResult;
 }
 
@@ -372,12 +381,12 @@ hipError_t hipMemUnmap(void*, size_t) { return hipErrorInvalidValue; }
 hipError_t hipMemcpyAsync(void*, const void*, size_t, hipMemcpyKind,
                           hipStream_t)
 {
-    return hipErrorInvalidValue;
+    return g_hipAsyncOpsResult;
 }
 
 hipError_t hipMemsetAsync(void*, int, size_t, hipStream_t)
 {
-    return hipErrorInvalidValue;
+    return g_hipAsyncOpsResult;
 }
 
 hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute,
@@ -398,5 +407,5 @@ hipError_t hipStreamSynchronize(hipStream_t) { return hipErrorInvalidValue; }
 
 hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode*)
 {
-    return hipErrorInvalidValue;
+    return g_hipAsyncOpsResult;
 }
