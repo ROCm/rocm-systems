@@ -97,6 +97,72 @@ if(
     target_link_options(profiler-hub_unit_tests PRIVATE -static-libsan)
 endif()
 
+# Synthetic v3 edge-matrix fixture, generated at build time from committed SQL.
+# The v3 schema is canonical at source/data_storage/schema/rocpd_tables.sql, so we
+# reference it directly to avoid a drifting duplicate. The {{uuid}}/{{guid}}
+# placeholders are substituted exactly as get_schema_query() does, then fed
+# through the sqlite3 CLI. The db has no rocpd_timestamp table, so the reader
+# selects the v3 backend. It seeds the two degenerate (bare non-pmc sample track)
+# and the six writer-id-blocked (rocpd_arg on kd/mc/ma; counter/track identity)
+# edge tests that cannot be expressed through the current writer API. Regenerate:
+#   uuid=00000000000000000000000000e30003
+#   sed -e "s/{{uuid}}/_$uuid/g" -e "s/{{guid}}/$uuid/g" \
+#       ../../source/data_storage/schema/rocpd_tables.sql \
+#       fixtures/rocpd_v3_edge_data.sql | sqlite3 rocpd_v3_edge.db
+find_program(SQLITE3_EXECUTABLE sqlite3)
+if(NOT SQLITE3_EXECUTABLE)
+    message(
+        FATAL_ERROR
+        "sqlite3 CLI not found; it is required to build the synthetic v3 edge "
+        "test fixture (tests/unit/fixtures/rocpd_v3_edge_data.sql)."
+    )
+endif()
+
+set(_v3e_uuid "00000000000000000000000000e30003")
+set(_v3e_schema_src
+    ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
+)
+set(_v3e_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_edge_data.sql)
+set(_v3e_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v3_edge_gen.sql)
+file(READ ${_v3e_schema_src} _v3e_schema)
+file(READ ${_v3e_data_src} _v3e_data)
+# The canonical schema ends with an INSERT INTO rocpd_metadata that uses
+# double-quoted string literals. The modern sqlite3 CLI rejects double-quoted
+# strings in DML (only DDL keeps the legacy behavior), and the reader never reads
+# metadata anyway (v3 is detected by the ABSENCE of rocpd_timestamp). Strip that
+# single trailing DML statement so the CLI is fed pure DDL. [^;] spans newlines.
+string(
+    REGEX REPLACE
+    "INSERT INTO[^;]*rocpd_metadata[^;]*;"
+    ""
+    _v3e_schema
+    "${_v3e_schema}"
+)
+string(REPLACE "{{uuid}}" "_${_v3e_uuid}" _v3e_schema "${_v3e_schema}")
+string(REPLACE "{{guid}}" "${_v3e_uuid}" _v3e_schema "${_v3e_schema}")
+string(REPLACE "{{uuid}}" "_${_v3e_uuid}" _v3e_data "${_v3e_data}")
+string(REPLACE "{{guid}}" "${_v3e_uuid}" _v3e_data "${_v3e_data}")
+file(WRITE ${_v3e_gen_sql} "${_v3e_schema}\n${_v3e_data}\n")
+
+set(ROCPD_DB_V3_EDGE_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v3_edge.db)
+add_custom_command(
+    OUTPUT ${ROCPD_DB_V3_EDGE_PATH}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V3_EDGE_PATH}
+    COMMAND
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_EDGE_PATH} ".read ${_v3e_gen_sql}"
+    DEPENDS ${_v3e_gen_sql} ${_v3e_schema_src} ${_v3e_data_src}
+    COMMENT "Generating synthetic v3 edge-matrix test fixture"
+    VERBATIM
+)
+add_custom_target(profiler-hub_v3_edge_fixture DEPENDS ${ROCPD_DB_V3_EDGE_PATH})
+add_dependencies(profiler-hub_unit_tests profiler-hub_v3_edge_fixture)
+
+target_compile_definitions(
+    profiler-hub_unit_tests
+    PRIVATE ROCPD_DB_V3_EDGE_PATH="${ROCPD_DB_V3_EDGE_PATH}"
+)
+
 gtest_discover_tests(
     profiler-hub_unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}

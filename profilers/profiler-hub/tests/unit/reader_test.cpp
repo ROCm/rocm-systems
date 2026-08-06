@@ -398,6 +398,113 @@ find_first_track(const reader_types::track_info_list_t& tracks,
     return nullptr;
 }
 
+// Peek the per-type-table row id an opaque handle encodes. Test-only: the public
+// API treats event_id_t as opaque (equality / ordering / hashing only).
+size_t
+row_id_of(const reader_types::event_id_t& id)
+{
+    return reader_types::detail::event_id_access::row_id(id);
+}
+
+// Look up a property in a unified event_info_t bag by key (nullptr if absent).
+const reader_types::arg_value_t*
+find_prop(const reader_types::event_info_t& d, const std::string& key)
+{
+    for(const auto& p : d.properties)
+    {
+        if(p.key == key) return &p.value;
+    }
+    return nullptr;
+}
+
+// All tracks of a given type.
+reader_types::track_info_list_t
+find_tracks(const reader_types::track_info_list_t& tracks, reader_types::track_type_t type)
+{
+    reader_types::track_info_list_t out;
+    for(const auto& t : tracks)
+    {
+        if(t->type == type) out.push_back(t);
+    }
+    return out;
+}
+
+// True if interval events are non-decreasing by start timestamp (the documented
+// ordering contract of get_interval_track).
+bool
+is_start_sorted(const reader_types::interval_entry_list_t& v)
+{
+    for(size_t i = 1; i < v.size(); ++i)
+    {
+        if(v[i].start < v[i - 1].start) return false;
+    }
+    return true;
+}
+
+// True if scalar events are non-decreasing by timestamp (the documented
+// ordering contract of get_scalar_track).
+bool
+is_timestamp_sorted(const reader_types::scalar_sample_list_t& v)
+{
+    for(size_t i = 1; i < v.size(); ++i)
+    {
+        if(v[i].timestamp < v[i - 1].timestamp) return false;
+    }
+    return true;
+}
+
+// Assert get_track_stats agrees with a full get_interval_track slice: count ==
+// #rows, min_ts == MIN(start), max_ts == MAX(end).
+void
+expect_stats_match_intervals(const reader_types::track_stats_t&         stats,
+                             const reader_types::interval_entry_list_t& intervals)
+{
+    ASSERT_EQ(stats.count, intervals.size());
+    if(intervals.empty())
+    {
+        ASSERT_FALSE(stats.min_ts.has_value());
+        ASSERT_FALSE(stats.max_ts.has_value());
+        return;
+    }
+    auto min_start = intervals.front().start;
+    auto max_end   = intervals.front().end;
+    for(const auto& iv : intervals)
+    {
+        if(iv.start < min_start) min_start = iv.start;
+        if(iv.end > max_end) max_end = iv.end;
+    }
+    ASSERT_TRUE(stats.min_ts.has_value());
+    ASSERT_TRUE(stats.max_ts.has_value());
+    ASSERT_EQ(stats.min_ts.value(), min_start);
+    ASSERT_EQ(stats.max_ts.value(), max_end);
+}
+
+// Assert get_track_stats agrees with a full get_scalar_track slice: count ==
+// #samples, min_ts == MIN(timestamp), max_ts == MAX(timestamp).
+void
+expect_stats_match_scalars(const reader_types::track_stats_t&        stats,
+                           const reader_types::scalar_sample_list_t& samples)
+{
+    ASSERT_EQ(stats.count, samples.size());
+    if(samples.empty())
+    {
+        ASSERT_FALSE(stats.min_ts.has_value());
+        ASSERT_FALSE(stats.max_ts.has_value());
+        return;
+    }
+    auto min_ts = samples.front().timestamp;
+    auto max_ts = samples.front().timestamp;
+    for(const auto& s : samples)
+    {
+        if(s.timestamp < min_ts) min_ts = s.timestamp;
+        if(s.timestamp > max_ts) max_ts = s.timestamp;
+    }
+    ASSERT_TRUE(stats.min_ts.has_value());
+    ASSERT_TRUE(stats.max_ts.has_value());
+    ASSERT_EQ(stats.min_ts.value(), min_ts);
+    ASSERT_EQ(stats.max_ts.value(), max_ts);
+}
+
 // --- shared writer-seed helpers ---
 // Per-type-table row ids come from the writer's per-type autoincrementer (0-based,
 // source/autoincrementer.hpp), incremented once per insert, so seeding each type in
@@ -1101,6 +1208,856 @@ TEST_F(reader_v3_edge_flow_test, get_flows_excludes_zero_and_null_stack_id)
         ASSERT_TRUE(f.kind == fk::launch_to_dispatch ||
                     f.kind == fk::copy_submit_to_exec);
     }
+}
+
+// ===========================================================================
+// Edge-matrix NON-flow tests (ported from pre-rebase cac3369ac5). Chunk 2 of
+// the mixed-policy port wave (task 070). The pre-rebase reader_v3_edge_test
+// loaded a single SQL fixture (rocpd_v3_edge.db) for all 17 non-flow tests; the
+// DL-015 3-way split re-homes them by seed mechanism:
+//   * (c) 9 writer-portable behaviors -> reader_v3_edge_test below, reproduced
+//     through writer_t::insert_*_data + insert_pmc_event_data (counters).
+//   * (a) 2 degenerate + (b) 6 writer-id-blocked -> reader_v3_edge_sql_test,
+//     which still loads the SQL fixture (bare non-pmc sample track a correct
+//     writer must never emit; rocpd_arg on kd/mc/ma; counter/track identity via
+//     register_track_info) — see that fixture's header.
+// Assertions are preserved verbatim; only the seeding mechanism moved.
+// ===========================================================================
+
+// Writer-seeded reproduction of the edge oracle's non-counter matrix + its two
+// discoverable counters. The one off-by-one vs. the 1-based SQL fixture is agent
+// id: agent primary keys are 0-based (source/autoincrementer.hpp), but the
+// memory-track test asserts agent_info->id == 1, so a throwaway agent is
+// registered first, landing the real {GPU,0} agent (used by kd + alloc) at id 1.
+class reader_v3_edge_test : public reader_test
+{
+protected:
+    void SetUp() override
+    {
+        reader_test::SetUp();
+        auto writer = make_writer();
+        seed_edge_identity(*writer);
+
+        // 4 regions -> one cpu_thread track. Insertion order deliberately differs
+        // from start order so the reader's ORDER BY start is exercised; RegionAlpha
+        // is inserted 3rd so it carries region row-id 2 (0-based) while being the
+        // start-order front.
+        seed_named_region(*writer, "RegionGamma", 0, 3000, 3500);   // region id 0
+        seed_named_region(*writer, "RegionBeta", 200, 2000, 2500);  // region id 1
+        seed_named_region(*writer, "RegionAlpha", 100, 1000, 5000); // region id 2
+        seed_named_region(*writer, "RegionDelta", 400, 6000, 6500); // region id 3
+
+        // 3 kernel dispatches: Queue-A (1) = kd@1200 + kd@1600, Queue-B (2) = kd@1400.
+        // All on stream 1.
+        seed_kd(*writer, /*queue*/ 1, /*stream*/ 1, 1200, 1300);
+        seed_kd(*writer, /*queue*/ 2, /*stream*/ 1, 1400, 1500);
+        seed_kd(*writer, /*queue*/ 1, /*stream*/ 1, 1600, 1700);
+
+        // 3 memory copies: all dst_agent NULL -> ONE dma track [2100,2200,2400].
+        // stream 1 gets 2100 + 2200, stream 2 gets 2400.
+        seed_mc(*writer, /*stream*/ 1, 2100, 2150);
+        seed_mc(*writer, /*stream*/ 1, 2200, 2250);
+        seed_mc(*writer, /*stream*/ 2, 2400, 2450);
+
+        // 1 memory allocate on agent {GPU,0} (id 1), queue NULL, stream 1 -> one
+        // memory track + one memory_activity track; also the 6th stream-1 event.
+        seed_ma(*writer, /*stream*/ 1, 6100, 6200);
+
+        // 2 discoverable counters. Samples inserted out of timestamp order so the
+        // reader's ORDER BY timestamp is exercised.
+        seed_counter(*writer, "GRBM_COUNT", "grbm_track",
+                     { { 3000, 30.5 }, { 1000, 10.5 }, { 2000, 20.5 } });
+        seed_counter(*writer, "SQ_WAVES", "sq_waves_track",
+                     { { 500, 5.0 }, { 1500, 15.0 } });
+
+        writer->flush_in_memory_data_to_disk();
+        writer.reset();
+        m_reader = make_reader();
+    }
+
+    void seed_edge_identity(writer_t& writer) const
+    {
+        const writer_types::node_info_t node_info{ 1, 42, "synthetic-machine" };
+        writer.register_node_info(node_info);
+
+        writer_types::process_info_t process_info;
+        process_info.pid     = 1;
+        process_info.node_id = 1;
+        writer.register_process_info(process_info);
+
+        writer_types::thread_info_t thread_info;
+        thread_info.thread_id  = 1;
+        thread_info.node_id    = 1;
+        thread_info.process_id = 1;
+        writer.register_thread_info(thread_info);
+
+        // Throwaway agent registered first so its 0-based primary key is 0, leaving
+        // the real GPU agent below at id 1 (what the memory-track test asserts).
+        writer_types::agent_info_t dummy_agent;
+        dummy_agent.unique_id.agent_type = "CPU";
+        dummy_agent.unique_id.type_index = 0;
+        dummy_agent.node_id              = 1;
+        dummy_agent.process_id           = 1;
+        writer.register_agent_info(dummy_agent);
+
+        writer_types::agent_info_t agent_info;
+        agent_info.unique_id.agent_type = "GPU";
+        agent_info.unique_id.type_index = 0;
+        agent_info.node_id              = 1;
+        agent_info.process_id           = 1;
+        writer.register_agent_info(agent_info);
+
+        for(size_t queue_id : { 1U, 2U })
+        {
+            writer_types::queue_info_t queue_info;
+            queue_info.queue_id   = queue_id;
+            queue_info.node_id    = 1;
+            queue_info.process_id = 1;
+            writer.register_queue_info(queue_info);
+        }
+
+        // Throwaway stream registered first so its 0-based primary key is 0, leaving
+        // the two real streams at primary keys 1 and 2 (the reader keys stream_info by
+        // primary key, and the ported tests expect the 6-event stream at stream_id 1).
+        // It carries no events, so it never surfaces as a synthesized stream track.
+        {
+            writer_types::stream_info_t dummy_stream;
+            dummy_stream.stream_id  = 99;
+            dummy_stream.node_id    = 1;
+            dummy_stream.process_id = 1;
+            writer.register_stream_info(dummy_stream);
+        }
+
+        for(size_t stream_id : { 1U, 2U })
+        {
+            writer_types::stream_info_t stream_info;
+            stream_info.stream_id  = stream_id;
+            stream_info.node_id    = 1;
+            stream_info.process_id = 1;
+            writer.register_stream_info(stream_info);
+        }
+
+        writer_types::code_object_info_t code_object_info;
+        code_object_info.id         = 1;
+        code_object_info.node_id    = 1;
+        code_object_info.process_id = 1;
+        writer.register_code_object_info(code_object_info);
+
+        writer_types::kernel_symbol_info_t kernel_symbol_info;
+        kernel_symbol_info.id          = 1;
+        kernel_symbol_info.node_id     = 1;
+        kernel_symbol_info.process_id  = 1;
+        kernel_symbol_info.code_obj_id = 1;
+        writer.register_kernel_symbol_info(kernel_symbol_info);
+    }
+
+    void seed_named_region(writer_t&                 writer,
+                           std::string_view          name,
+                           size_t                    stack_id,
+                           reader_types::timestamp_t start,
+                           reader_types::timestamp_t end) const
+    {
+        writer_types::trace_environment_t trace_environment;
+        trace_environment.node_id    = 1;
+        trace_environment.process_id = 1;
+        trace_environment.thread_id  = 1;
+
+        writer_types::event_data_t event_data;
+        event_data.stack_id = stack_id;
+
+        writer_types::region_data_t region_data;
+        region_data.name            = name;
+        region_data.start_timestamp = start;
+        region_data.end_timestamp   = end;
+        region_data.event           = event_data;
+        writer.insert_region_data(region_data, trace_environment);
+    }
+
+    void seed_kd(writer_t&                 writer,
+                 size_t                    queue_id,
+                 size_t                    stream_id,
+                 reader_types::timestamp_t start,
+                 reader_types::timestamp_t end) const
+    {
+        writer_types::trace_environment_t trace_environment;
+        trace_environment.node_id    = 1;
+        trace_environment.process_id = 1;
+        trace_environment.thread_id  = 1;
+        trace_environment.agent_id   = writer_types::agent_unique_id_t{ "GPU", 0 };
+        trace_environment.queue_id   = queue_id;
+        trace_environment.stream_id  = stream_id;
+
+        writer_types::kernel_dispatch_data_t kernel_dispatch_data;
+        kernel_dispatch_data.kernel_symbol_id = 1;
+        kernel_dispatch_data.code_object_id   = 1;
+        kernel_dispatch_data.start_timestamp  = start;
+        kernel_dispatch_data.end_timestamp    = end;
+        kernel_dispatch_data.event            = writer_types::event_data_t{};
+        writer.insert_kernel_dispatch_data(kernel_dispatch_data, trace_environment);
+    }
+
+    void seed_mc(writer_t&                 writer,
+                 size_t                    stream_id,
+                 reader_types::timestamp_t start,
+                 reader_types::timestamp_t end) const
+    {
+        writer_types::trace_environment_t trace_environment;
+        trace_environment.node_id    = 1;
+        trace_environment.process_id = 1;
+        trace_environment.stream_id  = stream_id;
+
+        writer_types::memory_copy_data_t memory_copy_data;
+        memory_copy_data.name            = "copy";
+        memory_copy_data.region_name     = "copy";
+        memory_copy_data.start_timestamp = start;
+        memory_copy_data.end_timestamp   = end;
+        memory_copy_data.size            = 1024;
+        // dst_agent_id left unset -> all copies share the NULL destination-agent
+        // key -> exactly one dma track.
+        memory_copy_data.event = writer_types::event_data_t{};
+        writer.insert_memory_copy_data(memory_copy_data, trace_environment);
+    }
+
+    void seed_ma(writer_t&                 writer,
+                 size_t                    stream_id,
+                 reader_types::timestamp_t start,
+                 reader_types::timestamp_t end) const
+    {
+        writer_types::trace_environment_t trace_environment;
+        trace_environment.node_id    = 1;
+        trace_environment.process_id = 1;
+        trace_environment.agent_id   = writer_types::agent_unique_id_t{ "GPU", 0 };
+        trace_environment.stream_id  = stream_id;
+        // queue_id left unset -> memory track carries agent, no queue.
+
+        writer_types::memory_alloc_data_t memory_alloc_data;
+        memory_alloc_data.type            = "ALLOC";
+        memory_alloc_data.level           = "REAL";
+        memory_alloc_data.start_timestamp = start;
+        memory_alloc_data.end_timestamp   = end;
+        memory_alloc_data.size            = 4096;
+        memory_alloc_data.event           = writer_types::event_data_t{};
+        writer.insert_memory_alloc_data(memory_alloc_data, trace_environment);
+    }
+
+    // Register a PMC + a track, then insert one PMC-backed sample per (ts,value).
+    // insert_pmc_event_data inserts an event, a rocpd_pmc_event row (making the
+    // track discoverable as a counter), and a rocpd_sample on the shared track;
+    // the counter's display name resolves to the PMC name. pmc/track names are
+    // string_view — callers must pass string literals (static storage).
+    void seed_counter(
+        writer_t&                                                            writer,
+        std::string_view                                                     pmc_name,
+        std::string_view                                                     track_name,
+        const std::vector<std::pair<reader_types::timestamp_t, double>>&     samples) const
+    {
+        writer_types::pmc_info_t pmc_info;
+        pmc_info.unique_id.name = pmc_name;
+        pmc_info.symbol         = pmc_name;
+        pmc_info.node_id        = 1;
+        pmc_info.process_id     = 1;
+        writer.register_pmc_info(pmc_info);
+
+        writer_types::track_info_t track_info;
+        track_info.name       = writer_types::track_name_t{ track_name };
+        track_info.node_id    = 1;
+        track_info.process_id = 1;
+        writer.register_track_info(track_info);
+
+        for(const auto& [timestamp, value] : samples)
+        {
+            writer_types::pmc_event_data_t pmc_event_data;
+            pmc_event_data.event            = writer_types::event_data_t{};
+            pmc_event_data.value            = value;
+            pmc_event_data.sample.timestamp = timestamp;
+            pmc_event_data.sample.track     = track_info;
+            writer.insert_pmc_event_data(
+                pmc_event_data,
+                writer_types::pmc_info_unique_id_t{ pmc_name, std::nullopt });
+        }
+    }
+
+    std::unique_ptr<reader_t> m_reader;
+};
+
+TEST_F(reader_v3_edge_test, get_interval_track_cpu_thread_regions_ordered)
+{
+    // track 1 carries 4 regions; ORDER BY start (row-id order deliberately differs):
+    //   region 2 (start 1000) -> 3 (2000) -> 1 (3000) -> 4 (6000).
+    auto tracks = m_reader->get_tracks();
+    auto cpu = find_tracks(tracks, profiler_hub::reader_types::track_type_t::cpu_thread);
+
+    profiler_hub::reader_types::interval_entry_list_t regions;
+    for(const auto& t : cpu)
+    {
+        auto iv = m_reader->get_interval_track(t->id);
+        if(iv.size() == 4)
+        {
+            regions = std::move(iv);
+            break;
+        }
+    }
+    ASSERT_EQ(regions.size(), 4U);
+    ASSERT_TRUE(is_start_sorted(regions));
+    ASSERT_EQ(row_id_of(regions.front().id), 2U);
+    ASSERT_EQ(regions.front().start, 1000);
+    ASSERT_EQ(regions.front().end, 5000);
+
+    auto details = m_reader->get_event_info(regions.front().id);
+    ASSERT_TRUE(details.has_value());
+    ASSERT_EQ(details->name, "RegionAlpha");
+}
+
+TEST_F(reader_v3_edge_test, get_interval_track_gpu_queue_and_dma_ordered)
+{
+    auto tracks = m_reader->get_tracks();
+
+    // Two gpu_queue tracks: Queue-A has 2 dispatches (start 1200, 1600), Queue-B 1.
+    auto gpu = find_tracks(tracks, profiler_hub::reader_types::track_type_t::gpu_queue);
+    ASSERT_EQ(gpu.size(), 2U);
+    profiler_hub::reader_types::interval_entry_list_t gpu_two;
+    size_t                                            gpu_singletons = 0;
+    for(const auto& t : gpu)
+    {
+        auto iv = m_reader->get_interval_track(t->id);
+        if(iv.size() == 2)
+            gpu_two = iv;
+        else if(iv.size() == 1)
+            ++gpu_singletons;
+    }
+    ASSERT_EQ(gpu_two.size(), 2U);
+    ASSERT_EQ(gpu_singletons, 1U);
+    ASSERT_TRUE(is_start_sorted(gpu_two));
+    ASSERT_EQ(gpu_two.front().start, 1200);
+
+    // One dma track (all 3 copies share queue_id NULL + dst_agent_id NULL under the
+    // by-destination-agent key). Row-id order != start order proves ORDER BY start:
+    // copies at 2200 (mc1), 2400 (mc2), 2100 (mc3) => [2100, 2200, 2400].
+    auto dma = find_tracks(tracks, profiler_hub::reader_types::track_type_t::dma);
+    ASSERT_EQ(dma.size(), 1U);
+    auto dma_iv = m_reader->get_interval_track(dma.front()->id);
+    ASSERT_EQ(dma_iv.size(), 3U);
+    ASSERT_TRUE(is_start_sorted(dma_iv));
+    ASSERT_EQ(dma_iv.front().start, 2100);
+}
+
+TEST_F(reader_v3_edge_test, get_scalar_track_values_for_both_counters)
+{
+    auto tracks = m_reader->get_tracks();
+    auto counters =
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::counter);
+
+    for(const auto& c : counters)
+    {
+        auto samples = m_reader->get_scalar_track(c->id);
+        ASSERT_TRUE(is_timestamp_sorted(samples));
+
+        if(c->name == "GRBM_COUNT")
+        {
+            // 3 samples, ascending timestamp despite differing row-id order.
+            ASSERT_FALSE(samples.empty());
+            ASSERT_EQ(samples.size(), 3U);
+            ASSERT_EQ(samples.front().timestamp, 1000);
+            ASSERT_DOUBLE_EQ(samples.front().value, 10.5);
+
+            auto details = m_reader->get_event_info(samples.front().id);
+            ASSERT_TRUE(details.has_value());
+            ASSERT_EQ(details->ts, samples.front().timestamp);
+            ASSERT_FALSE(details->te.has_value());
+        }
+        else if(c->name == "SQ_WAVES")
+        {
+            ASSERT_FALSE(samples.empty());
+            ASSERT_EQ(samples.size(), 2U);
+            ASSERT_EQ(samples.front().timestamp, 500);
+            ASSERT_DOUBLE_EQ(samples.front().value, 5.0);
+
+            auto details = m_reader->get_event_info(samples.front().id);
+            ASSERT_TRUE(details.has_value());
+            ASSERT_EQ(details->ts, samples.front().timestamp);
+            ASSERT_FALSE(details->te.has_value());
+        }
+    }
+}
+
+TEST_F(reader_v3_edge_test, track_scoped_queries_respect_type)
+{
+    // Q7: interval query on a counter (scalar-only) track and scalar query on a
+    // cpu_thread (interval-only) track both return empty, not an error.
+    auto tracks = m_reader->get_tracks();
+    auto counter =
+        find_first_track(tracks, profiler_hub::reader_types::track_type_t::counter);
+    auto cpu =
+        find_first_track(tracks, profiler_hub::reader_types::track_type_t::cpu_thread);
+    ASSERT_NE(counter, nullptr);
+    ASSERT_NE(cpu, nullptr);
+    ASSERT_TRUE(m_reader->get_interval_track(counter->id).empty());
+    ASSERT_TRUE(m_reader->get_scalar_track(cpu->id).empty());
+}
+
+TEST_F(reader_v3_edge_test, get_track_stats_matches_slices_for_every_track_type)
+{
+    // Hand-authored oracle: the 4-region cpu_thread track spans start 1000..end 6000+.
+    // For every track, stats must equal MIN/MAX/COUNT over the exact interval/scalar
+    // slice — this covers cpu_thread, gpu_queue, dma (here the "neither" variant:
+    // queue_id NULL + dst_agent_id NULL; the queue+agent "qa" variant is covered by the
+    // dma-by-agent fixture) and counter in one pass, per synthesized track flavor.
+    auto tracks = m_reader->get_tracks();
+
+    bool checked_cpu = false;
+    for(const auto& t :
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::cpu_thread))
+    {
+        auto intervals = m_reader->get_interval_track(t->id);
+        auto stats     = m_reader->get_track_stats(t->id);
+        expect_stats_match_intervals(stats, intervals);
+        if(intervals.size() == 4)
+        {
+            ASSERT_EQ(stats.min_ts.value(), 1000U);
+            checked_cpu = true;
+        }
+    }
+    ASSERT_TRUE(checked_cpu) << "expected a 4-region cpu_thread track";
+
+    for(const auto& t :
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::gpu_queue))
+    {
+        auto intervals = m_reader->get_interval_track(t->id);
+        expect_stats_match_intervals(m_reader->get_track_stats(t->id), intervals);
+    }
+
+    for(const auto& t :
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::dma))
+    {
+        auto intervals = m_reader->get_interval_track(t->id);
+        expect_stats_match_intervals(m_reader->get_track_stats(t->id), intervals);
+    }
+
+    for(const auto& t :
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::counter))
+    {
+        auto samples = m_reader->get_scalar_track(t->id);
+        expect_stats_match_scalars(m_reader->get_track_stats(t->id), samples);
+    }
+
+    for(const auto& t :
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::stream))
+    {
+        auto intervals = m_reader->get_interval_track(t->id);
+        expect_stats_match_intervals(m_reader->get_track_stats(t->id), intervals);
+    }
+
+    for(const auto& t :
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::memory))
+    {
+        auto intervals = m_reader->get_interval_track(t->id);
+        expect_stats_match_intervals(m_reader->get_track_stats(t->id), intervals);
+    }
+
+    for(const auto& t :
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::memory_activity))
+    {
+        auto samples = m_reader->get_scalar_track(t->id);
+        expect_stats_match_scalars(m_reader->get_track_stats(t->id), samples);
+    }
+}
+
+TEST_F(reader_v3_edge_test, get_interval_track_stream_aggregates_three_op_kinds)
+{
+    // This is the only fixture exercising all THREE UNION legs of a stream track,
+    // including memory_allocate. Hand-authored oracle:
+    //   stream 1 (nid,pid,stream_id)=(1,1,1): 3 kernel_dispatch + 2 memory_copy +
+    //       1 memory_allocate = 6 events, ORDER BY start:
+    //       kd3(1200) kd2(1400) kd1(1600) mc3(2100) mc1(2200) ma1(6100)
+    //   stream 2 (1,1,2): 1 memory_copy = 1 event (mc2 start 2400)
+    // op_kind is retired: each event's opaque handle encodes its type and resolves
+    // through exactly one get_*_details() accessor, which is what we assert here.
+    auto tracks  = m_reader->get_tracks();
+    auto streams = find_tracks(tracks, profiler_hub::reader_types::track_type_t::stream);
+    ASSERT_EQ(streams.size(), 2U);
+
+    profiler_hub::reader_types::track_info_ptr_t s1, s2;
+    for(const auto& s : streams)
+    {
+        ASSERT_NE(s->stream_info, nullptr);
+        if(s->stream_info->stream_id == 1)
+            s1 = s;
+        else if(s->stream_info->stream_id == 2)
+            s2 = s;
+    }
+    ASSERT_NE(s1, nullptr);
+    ASSERT_NE(s2, nullptr);
+
+    auto iv1 = m_reader->get_interval_track(s1->id);
+    ASSERT_EQ(iv1.size(), 6U);
+    ASSERT_TRUE(is_start_sorted(iv1));
+
+    size_t kd = 0, mc = 0, ma = 0;
+    for(const auto& ev : iv1)
+    {
+        ASSERT_EQ(count_interval_resolutions(*m_reader, ev.id), 1)
+            << "handle must resolve through exactly one detail accessor";
+        if(type_of(ev.id) == profiler_hub::reader_types::event_type_t::kernel_dispatch)
+            ++kd;
+        else if(type_of(ev.id) == profiler_hub::reader_types::event_type_t::memory_copy)
+            ++mc;
+        else if(type_of(ev.id) ==
+                profiler_hub::reader_types::event_type_t::memory_allocate)
+            ++ma;
+        else
+            FAIL() << "unexpected event type on stream 1";
+    }
+    ASSERT_EQ(kd, 3U);
+    ASSERT_EQ(mc, 2U);
+    ASSERT_EQ(ma, 1U);
+    ASSERT_EQ(iv1.front().start, 1200);
+    ASSERT_EQ(type_of(iv1.front().id),
+              profiler_hub::reader_types::event_type_t::kernel_dispatch);
+    ASSERT_EQ(iv1.back().start, 6100);
+    ASSERT_EQ(type_of(iv1.back().id),
+              profiler_hub::reader_types::event_type_t::memory_allocate);
+
+    auto iv2 = m_reader->get_interval_track(s2->id);
+    ASSERT_EQ(iv2.size(), 1U);
+    ASSERT_EQ(iv2.front().start, 2400);
+    ASSERT_EQ(type_of(iv2.front().id),
+              profiler_hub::reader_types::event_type_t::memory_copy);
+
+    expect_stats_match_intervals(m_reader->get_track_stats(s1->id), iv1);
+    expect_stats_match_intervals(m_reader->get_track_stats(s2->id), iv2);
+}
+
+TEST_F(reader_v3_edge_test, get_interval_track_stream_memalloc_event_carries_category)
+{
+    // The memory_allocate UNION leg in the stream SQL carries the category LEFT JOIN
+    // (same pattern as kd/mc legs). The sole memory_allocate row (ma1) has no
+    // category set, so the resolved category must be an empty string — asserting
+    // that proves the structural LEFT JOIN is executed correctly.
+    auto tracks  = m_reader->get_tracks();
+    auto streams = find_tracks(tracks, profiler_hub::reader_types::track_type_t::stream);
+
+    profiler_hub::reader_types::track_info_ptr_t s1;
+    for(const auto& s : streams)
+    {
+        if(s->stream_info && s->stream_info->stream_id == 1) s1 = s;
+    }
+    ASSERT_NE(s1, nullptr);
+
+    auto iv = m_reader->get_interval_track(s1->id);
+    ASSERT_EQ(iv.size(), 6U);
+
+    bool found_ma = false;
+    for(const auto& ev : iv)
+    {
+        if(type_of(ev.id) == profiler_hub::reader_types::event_type_t::memory_allocate)
+        {
+            EXPECT_EQ(ev.category, "");
+            found_ma = true;
+        }
+    }
+    EXPECT_TRUE(found_ma) << "stream 1 must contain at least one memory_allocate event";
+}
+
+TEST_F(reader_v3_edge_test, get_interval_track_memory_type_interval_and_identity)
+{
+    // track_type_t::memory for rocpd_memory_allocate rows keyed by
+    // (nid, agent_id, queue_id, pid). One such row exercises the "a_only" variant
+    // (agent_id set, queue_id NULL).
+    auto tracks  = m_reader->get_tracks();
+    auto mem_trk = find_tracks(tracks, profiler_hub::reader_types::track_type_t::memory);
+    ASSERT_EQ(mem_trk.size(), 1U);
+
+    const auto& t = mem_trk.front();
+    // agent_info must be populated (agent_id=1); queue_info null (queue_id IS NULL).
+    ASSERT_NE(t->agent_info, nullptr);
+    EXPECT_EQ(t->agent_info->id, 1U);
+    EXPECT_EQ(t->queue_info, nullptr);
+
+    auto intervals = m_reader->get_interval_track(t->id);
+    ASSERT_EQ(intervals.size(), 1U);
+    EXPECT_EQ(intervals.front().start, 6100U);
+    EXPECT_EQ(intervals.front().end, 6200U);
+
+    // the handle must resolve through get_event_info() as a memory_allocate event.
+    ASSERT_EQ(type_of(intervals.front().id),
+              profiler_hub::reader_types::event_type_t::memory_allocate);
+    auto details = m_reader->get_event_info(intervals.front().id);
+    ASSERT_TRUE(details.has_value());
+    EXPECT_EQ(details->ts, 6100U);
+    ASSERT_TRUE(details->te.has_value());
+    EXPECT_EQ(details->te.value(), 6200U);
+    auto* size = find_prop(*details, "size");
+    ASSERT_NE(size, nullptr);
+    ASSERT_TRUE(std::holds_alternative<uint64_t>(*size));
+    EXPECT_EQ(std::get<uint64_t>(*size), 4096U);
+    auto* type = find_prop(*details, "type");
+    ASSERT_NE(type, nullptr);
+    ASSERT_TRUE(std::holds_alternative<std::string>(*type));
+    EXPECT_EQ(std::get<std::string>(*type), "ALLOC");
+}
+
+TEST_F(reader_v3_edge_test, get_track_stats_memory_type_matches_interval_slice)
+{
+    // get_track_stats() must return the same count/min/max as the interval slice for
+    // the memory track.
+    auto tracks  = m_reader->get_tracks();
+    auto mem_trk = find_tracks(tracks, profiler_hub::reader_types::track_type_t::memory);
+    ASSERT_EQ(mem_trk.size(), 1U);
+
+    auto intervals = m_reader->get_interval_track(mem_trk.front()->id);
+    expect_stats_match_intervals(m_reader->get_track_stats(mem_trk.front()->id),
+                                 intervals);
+}
+
+// ===========================================================================
+// SQL-seeded edge tests (DL-015 buckets (a) + (b)). These load the committed
+// SQL fixture (fixtures/rocpd_v3_edge_data.sql -> rocpd_v3_edge.db, built at
+// configure time). (a) is the permanent escape-hatch: a bare non-pmc rocpd_sample
+// track a correct writer must never emit. (b) is writer-id-blocked NOW and is
+// flagged for a future writer task: rocpd_arg rows on kernel_dispatch/memory_copy/
+// memory_allocate events (writer only carries args on regions) and counter/track
+// identity (NULL pid/tid, empty-pmc-name fallback) authored directly on
+// rocpd_track. Assertions are the pre-rebase originals, verbatim.
+// ===========================================================================
+class reader_v3_edge_sql_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        m_storage = std::make_unique<profiler_hub::storage_t>(m_database_path, "");
+        m_reader  = std::make_shared<profiler_hub::reader_t>(std::move(m_storage));
+    }
+
+    void TearDown() override
+    {
+        m_reader.reset();
+        m_storage.reset();
+    }
+
+    std::string                              m_database_path{ ROCPD_DB_V3_EDGE_PATH };
+    std::unique_ptr<profiler_hub::storage_t> m_storage;
+    std::shared_ptr<profiler_hub::reader_t>  m_reader;
+};
+
+TEST_F(reader_v3_edge_sql_test, track_matrix_counts_by_type)
+{
+    // cpu_thread/region tracks are synthesized from rocpd_region, not rocpd_track.
+    // rocpd_track contributes 4 PMC-backed sampled (counter) rows (2, 3, 6, 8);
+    // the non-counter rows (1, 4, 5) are ignored, and track 7 -- sampled but with NO
+    // rocpd_pmc_event -- is NOT a counter. Track 8 (pmc_id 99, empty PMC name) IS a
+    // counter -- discovery joins rocpd_pmc_event (present), not rocpd_info_pmc.
+    // Synthesis adds 1 cpu_thread, 2 gpu_queue, 1 dma, 2 stream, 1 memory => 11 tracks.
+    // Task 012B adds 1 memory_activity (1 alloc row, agent_id=1) => total 12.
+    auto tracks = m_reader->get_tracks();
+    ASSERT_EQ(tracks.size(), 12U);
+    ASSERT_EQ(
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::cpu_thread).size(),
+        1U);
+    ASSERT_EQ(
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::counter).size(),
+        4U);
+    ASSERT_EQ(
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::gpu_queue).size(),
+        2U);
+    ASSERT_EQ(find_tracks(tracks, profiler_hub::reader_types::track_type_t::dma).size(),
+              1U);
+    ASSERT_EQ(
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::stream).size(), 2U);
+    ASSERT_EQ(
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::memory).size(), 1U);
+    ASSERT_EQ(
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::memory_activity)
+            .size(),
+        1U);
+}
+
+TEST_F(reader_v3_edge_sql_test, counter_discovery_excludes_non_pmc_sample_track)
+{
+    // Counter discovery must classify a track as a counter only when a PMC-backed
+    // rocpd_sample references it (the sample's event_id joins rocpd_pmc_event), NOT
+    // merely when any rocpd_sample references it. Track 7 has a rocpd_sample (sample 7
+    // / event 14) but NO rocpd_pmc_event, so it must not appear as a counter -- and
+    // since it has no rocpd_region row, it must not appear as any track type at all.
+    auto tracks = m_reader->get_tracks();
+    auto counters =
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::counter);
+    // Primary signal: only the 4 PMC-backed sample tracks (2, 3, 6, 8) are counters.
+    ASSERT_EQ(counters.size(), 4U);
+    // Corroborating signal: every counter is PMC-backed, so each resolves to a
+    // non-empty scalar track. The spurious non-PMC track 7 would resolve to zero.
+    for(const auto& c : counters)
+        ASSERT_FALSE(m_reader->get_scalar_track(c->id).empty())
+            << "counter track " << c->id.value << " has no PMC-backed samples";
+}
+
+TEST_F(reader_v3_edge_sql_test, counter_identity_null_pid_and_null_tid_branches)
+{
+    // v3 counter tracks come from rocpd_track (Q10) and CAN carry NULL pid/tid:
+    //   track 2: pid set, tid NULL -> process_info set,  thread_info NULL
+    //   track 3: pid + tid set     -> process_info set,  thread_info SET
+    //   track 6: pid NULL          -> process_info NULL, thread_info NULL
+    //   track 8: pid set, tid NULL -> process_info set,  thread_info NULL (fallback)
+    auto tracks = m_reader->get_tracks();
+    auto counters =
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::counter);
+    ASSERT_EQ(counters.size(), 4U);
+
+    int with_thread = 0, with_process = 0, without_process = 0;
+    for(const auto& t : counters)
+    {
+        if(t->thread_info != nullptr) ++with_thread;
+        if(t->process_info != nullptr)
+            ++with_process;
+        else
+            ++without_process;
+    }
+    // Exactly one counter track carries a resolved thread (tid set -- track 3).
+    ASSERT_EQ(with_thread, 1);
+    // Exactly one carries no process (pid NULL -- track 6); tracks 2/3/8 do.
+    ASSERT_EQ(without_process, 1);
+    ASSERT_EQ(with_process, 3);
+}
+
+TEST_F(reader_v3_edge_sql_test, counter_thread_info_tracks_tid_agent_info_always_null)
+{
+    // The #147 contract, both branches. thread_info is driven by rocpd_track.tid
+    // and is orthogonal to counter classification; agent_info is impossible on v3
+    // (rocpd_track has no agent_id column) regardless of tid.
+    auto tracks = m_reader->get_tracks();
+    auto counters =
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::counter);
+    ASSERT_EQ(counters.size(), 4U);
+
+    profiler_hub::reader_types::track_info_ptr_t no_tid_counter;    // GRBM_COUNT
+    profiler_hub::reader_types::track_info_ptr_t with_tid_counter;  // SQ_WAVES
+    for(const auto& c : counters)
+    {
+        if(c->name == "GRBM_COUNT")
+            no_tid_counter = c;
+        else if(c->name == "SQ_WAVES")
+            with_tid_counter = c;
+    }
+    ASSERT_NE(no_tid_counter, nullptr)
+        << "counter display name should be its PMC name (Q9)";
+    ASSERT_NE(with_tid_counter, nullptr)
+        << "counter display name should be its PMC name (Q9)";
+
+    // Branch 1: counter with tid NULL -> thread_info null.
+    ASSERT_EQ(no_tid_counter->thread_info, nullptr);
+    ASSERT_EQ(no_tid_counter->agent_info, nullptr);
+
+    // Branch 2: counter WITH tid -> thread_info populated (the case rocpd.db lacks).
+    ASSERT_NE(with_tid_counter->thread_info, nullptr);
+    ASSERT_EQ(with_tid_counter->agent_info, nullptr);
+}
+
+TEST_F(reader_v3_edge_sql_test, counter_display_name_falls_back_to_track_name_on_pmc_miss)
+{
+    // F7 coverage: when the pmc_info lookup produces an empty name, the display name must
+    // fall back to rocpd_track.name rather than being empty, zero-initialized, or stale.
+    // Track 8: rocpd_track.name_id=7 -> "FallbackCounter"; pmc_id=99 exists in
+    // rocpd_info_pmc with an intentionally empty name field.
+    auto tracks = m_reader->get_tracks();
+    auto counters =
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::counter);
+
+    profiler_hub::reader_types::track_info_ptr_t fallback_counter;
+    for(const auto& c : counters)
+    {
+        if(c->name == "FallbackCounter")
+        {
+            fallback_counter = c;
+            break;
+        }
+    }
+    ASSERT_NE(fallback_counter, nullptr) << "fallback counter track not found";
+
+    // Primary assertion: display name equals rocpd_track.name (the fallback value).
+    ASSERT_EQ(fallback_counter->name, "FallbackCounter");
+    // Sanity: non-empty, not garbage.
+    ASSERT_FALSE(fallback_counter->name.empty());
+    // pmc_info: pmc_id=99 is in rocpd_info_pmc with empty name -> pmc_info IS attached
+    // but carries an empty name, which is exactly what triggers the fallback guard.
+    ASSERT_NE(fallback_counter->pmc_info, nullptr);
+    ASSERT_TRUE(fallback_counter->pmc_info->name.empty());
+    // Non-fallback path still intact: the 3 fully-resolved counters have non-empty names
+    // and their display name equals the PMC name (name != track->name only for fallback).
+    size_t with_pmc_name_match = 0;
+    for(const auto& c : counters)
+    {
+        if(c->pmc_info != nullptr && !c->pmc_info->name.empty())
+        {
+            ASSERT_EQ(c->name, c->pmc_info->name);
+            ++with_pmc_name_match;
+        }
+    }
+    ASSERT_EQ(with_pmc_name_match, 3U);
+}
+
+// Scan a track's interval handles for the get_event_info whose property bag
+// contains `arg_key`, and return that value (or nullptr if none carries it).
+static const profiler_hub::reader_types::arg_value_t*
+find_folded_arg_on_track(const profiler_hub::reader_t&                       r,
+                         const profiler_hub::reader_types::track_info_ptr_t& track,
+                         const std::string&                                  arg_key)
+{
+    static profiler_hub::reader_types::arg_value_t s_hit;
+    for(const auto& iv : r.get_interval_track(track->id))
+    {
+        auto detail = r.get_event_info(iv.id);
+        if(!detail) continue;
+        if(const auto* v = find_prop(*detail, arg_key))
+        {
+            s_hit = *v;
+            return &s_hit;
+        }
+    }
+    return nullptr;
+}
+
+TEST_F(reader_v3_edge_sql_test, get_event_info_folds_args_for_kernel_dispatch)
+{
+    auto                                           tracks = m_reader->get_tracks();
+    const profiler_hub::reader_types::arg_value_t* kernel_name = nullptr;
+    for(const auto& t :
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::gpu_queue))
+    {
+        kernel_name = find_folded_arg_on_track(*m_reader, t, "kernel_name");
+        if(kernel_name) break;
+    }
+    ASSERT_NE(kernel_name, nullptr) << "kernel_dispatch detail did not fold its args";
+    ASSERT_TRUE(std::holds_alternative<std::string>(*kernel_name));
+    EXPECT_EQ(std::get<std::string>(*kernel_name), "vecAdd");
+}
+
+TEST_F(reader_v3_edge_sql_test, get_event_info_folds_args_for_memory_copy)
+{
+    auto                                           tracks = m_reader->get_tracks();
+    const profiler_hub::reader_types::arg_value_t* bytes  = nullptr;
+    for(const auto& t :
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::dma))
+    {
+        bytes = find_folded_arg_on_track(*m_reader, t, "bytes");
+        if(bytes) break;
+    }
+    ASSERT_NE(bytes, nullptr) << "memory_copy detail did not fold its args";
+    ASSERT_TRUE(std::holds_alternative<std::string>(*bytes));
+    EXPECT_EQ(std::get<std::string>(*bytes), "1024");
+}
+
+TEST_F(reader_v3_edge_sql_test, get_event_info_folds_args_for_memory_allocate)
+{
+    auto                                           tracks = m_reader->get_tracks();
+    const profiler_hub::reader_types::arg_value_t* alloc_bytes = nullptr;
+    for(const auto& t :
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::memory))
+    {
+        alloc_bytes = find_folded_arg_on_track(*m_reader, t, "alloc_bytes");
+        if(alloc_bytes) break;
+    }
+    ASSERT_NE(alloc_bytes, nullptr) << "memory_allocate detail did not fold its args";
+    ASSERT_TRUE(std::holds_alternative<std::string>(*alloc_bytes));
+    EXPECT_EQ(std::get<std::string>(*alloc_bytes), "4096");
 }
 
 }  // namespace
