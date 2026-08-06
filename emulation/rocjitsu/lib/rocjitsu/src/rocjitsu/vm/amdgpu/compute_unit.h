@@ -755,6 +755,7 @@ template <simdojo::ExecMode Mode, GpuIsa Isa>
 class IsaExecComputeUnit : public ExecComputeUnit<Mode> {
 public:
   using Vgpr = simdojo::VectorReg<Isa::WF_SIZE, uint32_t>;
+  using VgprFile = simdojo::RegisterFile<Vgpr, simdojo::RegisterFileStorage::DEMAND_PAGED>;
 
   /// @brief Construct an ISA-parameterized compute unit.
   /// @param name Human-readable name (e.g., "cu0").
@@ -820,11 +821,11 @@ public:
 
   /// @brief Return the VGPR register file (typed, only on concrete CU).
   /// @returns Const reference to the VGPR register file.
-  const simdojo::RegisterFile<Vgpr> &vgpr_file() const { return vgpr_file_; }
+  const VgprFile &vgpr_file() const { return vgpr_file_; }
 
   /// @brief Return a mutable reference to the VGPR register file.
   /// @returns Mutable reference to the VGPR register file.
-  simdojo::RegisterFile<Vgpr> &vgpr_file() { return vgpr_file_; }
+  VgprFile &vgpr_file() { return vgpr_file_; }
 
 protected:
   /// @returns Base index of the allocated VGPR block, or -1 on failure.
@@ -848,7 +849,7 @@ protected:
   }
 
 private:
-  simdojo::RegisterFile<Vgpr> vgpr_file_{"vgpr"};
+  VgprFile vgpr_file_{"vgpr"};
   std::vector<Wavefront *> vgpr_to_wave_; ///< Physical VGPR → owning wavefront.
   uint32_t vgprs_per_block_ = 0;
 };
