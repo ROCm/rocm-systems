@@ -918,7 +918,8 @@ static void ncclHierCollFreeChunkPlan(struct ncclHierChunkPlan* plan) {
 // gate inputs are identical on all ranks (per-peer bytes by the collective API
 // contract, the threshold by the uniform-env requirement), so sender and
 // receiver always derive the same chunk->context mapping.
-static int ncclHierCollNumCtx(struct ncclRmaProxyState* rmaProxyState, size_t perPeerBytes) {
+static int ncclHierCollNumCtx(struct ncclRmaProxyState* rmaProxyState, size_t perPeerBytes, bool persistent) {
+  if (persistent) return 1;
   int numCtx = rmaProxyState->numIntCtx;
   int64_t threshold = ncclParamRmaMultiCtxThreshold();
   if (threshold < 0) threshold = HIER_COLL_MULTI_CTX_THRESHOLD_DEFAULT;
@@ -1126,7 +1127,7 @@ ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* p
   struct ncclDevrWindow* sendWin = args->sendWin;
   struct ncclDevrWindow* recvWin = args->recvWin;
   size_t perRankBytes = args->nElts * args->eltSize;
-  int numCtx = ncclHierCollNumCtx(rmaProxyState, perRankBytes);
+  int numCtx = ncclHierCollNumCtx(rmaProxyState, perRankBytes, persistent);
 
   struct ncclRmaProxyCtx* railProxyCtx = (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[railCtx];
 
@@ -1402,7 +1403,7 @@ ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* pl
   struct ncclDevrWindow* sendWin = args->sendWin;
   struct ncclDevrWindow* recvWin = args->recvWin;
   size_t perPeerBytes = args->nElts * args->eltSize;
-  int numCtx = ncclHierCollNumCtx(rmaProxyState, perPeerBytes);
+  int numCtx = ncclHierCollNumCtx(rmaProxyState, perPeerBytes, persistent);
   bool inPlace = (sendbuff == recvbuff);
 
   struct ncclRmaProxyCtx* railProxyCtx = (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[railCtx];
