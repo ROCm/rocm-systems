@@ -564,9 +564,9 @@ bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
 
   size_t threshold = 0;
   if (comm->nNodes >= 16) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE;
+    threshold = HIERARCHICAL_TEMP_BUFFER_SIZE;
   } else if (comm->nNodes >= 8) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
+    threshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 2;
   }
 
   return threshold > 0 && msgSize <= threshold;
@@ -677,9 +677,9 @@ bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize) {
 
   size_t threshold = 0;
   if (comm->nNodes >= 16) {
-    threshold = HIERARCHICAL_RS_TEMP_BUFFER_SIZE;
+    threshold = HIERARCHICAL_TEMP_BUFFER_SIZE;
   } else if (comm->nNodes >= 8) {
-    threshold = HIERARCHICAL_RS_TEMP_BUFFER_SIZE / 2;
+    threshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 2;
   }
 
   return threshold > 0 && msgSize <= threshold;

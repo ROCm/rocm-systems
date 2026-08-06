@@ -1471,8 +1471,8 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
         std::unordered_map<std::string, std::string> extraEnv;
     };
 
-    const size_t HALF = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
-    const size_t FULL = HIERARCHICAL_AG_TEMP_BUFFER_SIZE;
+    const size_t HALF = HIERARCHICAL_TEMP_BUFFER_SIZE / 2;
+    const size_t FULL = HIERARCHICAL_TEMP_BUFFER_SIZE;
 
     std::vector<HierAGCase> testCases = {
         // nNodes < 8 --> disabled
@@ -1558,8 +1558,8 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
         std::unordered_map<std::string, std::string> extraEnv;
     };
 
-    const size_t HALF = HIERARCHICAL_RS_TEMP_BUFFER_SIZE / 2; // 8-node threshold (64MB)
-    const size_t FULL = HIERARCHICAL_RS_TEMP_BUFFER_SIZE;     // 16-node threshold (128MB)
+    const size_t HALF = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 8-node threshold (64MB)
+    const size_t FULL = HIERARCHICAL_TEMP_BUFFER_SIZE;     // 16-node threshold (128MB)
 
     std::vector<HierRSCase> testCases = {
         // nNodes < 8 --> disabled

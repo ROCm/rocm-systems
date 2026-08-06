@@ -244,7 +244,7 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   int nNodes = interComm->nRanks; // Number of nodes
   size_t typeSize = ncclTypeSize(datatype);
 
-  void* tempBuffer = comm->hierarchicalAGTempBuffer;
+  void* tempBuffer = comm->hierarchicalTempBuffer;
   const void* interSendBuff = sendbuff;
   size_t rankOffset = sendcount * typeSize;
   if (sendbuff == ((char*)recvbuff) + comm->rank * rankOffset) {
@@ -730,7 +730,7 @@ static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, voi
   size_t typeSize = ncclTypeSize(datatype);
   size_t rankOffset = recvcount * typeSize;
 
-  void* tempBuf = comm->hierarchicalRSTempBuffer;
+  void* tempBuf = comm->hierarchicalTempBuffer;
   size_t intraOutCount = recvcount * nNodes; // per-rank intra-RS output
   void* intraOut = (char*)tempBuf + (size_t)intraComm->rank * intraOutCount * typeSize;
 

@@ -682,11 +682,10 @@ struct ncclComm {
   struct ncclComm* hierarchicalInterComm;
   bool hierarchicalCommsInitialized;
 
-  // Hierarchical AG temporary buffers
-  void* hierarchicalAGTempBuffer;
-
-  // Hierarchical RS temporary buffer
-  void* hierarchicalRSTempBuffer;
+  // Hierarchical temporary buffer
+  // Both hierarchical AG and RS use the same temp buffer,
+  // so running them concurrently on same communicator across two streams is unsafe
+  void* hierarchicalTempBuffer;
 
   // Force PAT algorithm for this communicator
   bool forcePatEnable;

@@ -451,13 +451,9 @@ static ncclResult_t commFree(ncclComm_t comm) {
   }
 
   // Free hierarchical AG/RS resources
-  if (comm->hierarchicalAGTempBuffer) {
-    NCCLCHECK(ncclCudaFree(comm->hierarchicalAGTempBuffer, comm->memManager));
-    comm->hierarchicalAGTempBuffer = nullptr;
-  }
-  if (comm->hierarchicalRSTempBuffer) {
-    NCCLCHECK(ncclCudaFree(comm->hierarchicalRSTempBuffer, comm->memManager));
-    comm->hierarchicalRSTempBuffer = nullptr;
+  if (comm->hierarchicalTempBuffer) {
+    NCCLCHECK(ncclCudaFree(comm->hierarchicalTempBuffer, comm->memManager));
+    comm->hierarchicalTempBuffer = nullptr;
   }
   if (comm->hierarchicalIntraComm) {
     NCCLCHECK(ncclCommDestroy(comm->hierarchicalIntraComm));
@@ -690,9 +686,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->hierarchicalIntraComm = nullptr;
   comm->hierarchicalInterComm = nullptr;
   comm->hierarchicalCommsInitialized = false;
-  comm->hierarchicalAGTempBuffer = nullptr;
-  comm->hierarchicalRSTempBuffer = nullptr;
-  // Enable PAT for interComm hierarchical AG
+  comm->hierarchicalTempBuffer = nullptr;
+  // Enable PAT for interComm hierarchical collectives
   comm->forcePatEnable = (parent != nullptr) ? parent->forcePatEnable : false;
 
   // Try to create a CUDA object right away. If there is something wrong with
@@ -2719,16 +2714,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         comm->forcePatEnable = false;
         // inherit PXN disable from parent comm
         comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
-        if (rcclParamHierarchicalAllGather() == 1) {
-          size_t agBufSize =
-            (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
-          NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalAGTempBuffer), agBufSize, comm->memManager), res, fail);
-        }
-        if (rcclParamHierarchicalReduceScatter() == 1) {
-          size_t rsBufSize =
-            (comm->nNodes >= 16) ? HIERARCHICAL_RS_TEMP_BUFFER_SIZE : HIERARCHICAL_RS_TEMP_BUFFER_SIZE / 2;
-          NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalRSTempBuffer), rsBufSize, comm->memManager), res, fail);
-        }
+        size_t bufSize = (comm->nNodes >= 16) ? HIERARCHICAL_TEMP_BUFFER_SIZE : HIERARCHICAL_TEMP_BUFFER_SIZE / 2;
+        NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), bufSize, comm->memManager), res, fail);
         comm->hierarchicalCommsInitialized = true;
         INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
              comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
