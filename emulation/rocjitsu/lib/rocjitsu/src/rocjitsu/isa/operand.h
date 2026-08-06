@@ -15,7 +15,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <utility>
 
 namespace simdojo {
 template <size_t NUM_ELEMS, typename VecElem> class VectorReg;
@@ -58,6 +57,8 @@ void amdgpu_isa_write_lane_chunk_base(const AmdgpuIsaOperand<Isa> &op, amdgpu::W
                                       uint64_t mask);
 } // namespace detail
 
+class ScopedOperandDelegate;
+
 /// @brief Base class for an instruction operand with value resolution.
 ///
 /// @details Instruction execution code treats Operand as a descriptor: it can
@@ -71,6 +72,7 @@ public:
   // operand value-access backend. Keep these hooks private so generated
   // instruction bodies cannot bypass read observation by calling them directly.
   friend class amdgpu::RegisterAccess;
+  friend class ScopedOperandDelegate;
   template <typename Isa> friend class AmdgpuIsaOperand;
 
   Operand() = default;
@@ -238,12 +240,10 @@ private:
   virtual void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const;
 
 public:
-  /// @brief Set a delegate operand that overrides read methods.
+  /// @brief Return the active read delegate, if any.
   ///
-  /// @details Supports temporary source substitution without changing the
-  /// concrete operand member type.
-  void set_delegate(Operand *d) { delegate_ = d; }
-  void clear_delegate() { delegate_ = nullptr; }
+  /// Delegate mutation is restricted to ScopedOperandDelegate so restoration
+  /// cannot be skipped on exceptions or early returns.
   Operand *delegate() const { return delegate_; }
 
   /// @brief Whether `read_lane_chunk` / `write_lane_chunk` produce correct,
@@ -261,6 +261,8 @@ public:
   }
 
 private:
+  void set_delegate(Operand *delegate) { delegate_ = delegate; }
+
   /// @brief Fill `out[0..count)` with operand values for lanes
   /// `[lane_base, lane_base + count)`.
   ///
@@ -548,6 +550,39 @@ private:
                                     uint8_t byte_mask) const override;
 };
 
+/// @brief Temporarily redirect operand reads through another operand.
+///
+/// Restores the previous delegate on scope exit, including exception and early
+/// return paths. A null delegate leaves the operand unchanged.
+class ScopedOperandDelegate {
+public:
+  ScopedOperandDelegate(Operand &operand, Operand *delegate) noexcept {
+    if (!delegate)
+      return;
+    operand_ = &operand;
+    previous_ = operand.delegate();
+    operand.set_delegate(delegate);
+  }
+
+  ~ScopedOperandDelegate() noexcept { restore(); }
+
+  ScopedOperandDelegate(const ScopedOperandDelegate &) = delete;
+  ScopedOperandDelegate &operator=(const ScopedOperandDelegate &) = delete;
+  ScopedOperandDelegate(ScopedOperandDelegate &&) = delete;
+  ScopedOperandDelegate &operator=(ScopedOperandDelegate &&) = delete;
+
+private:
+  void restore() noexcept {
+    if (!operand_)
+      return;
+    operand_->set_delegate(previous_);
+    operand_ = nullptr;
+  }
+
+  Operand *operand_ = nullptr;
+  Operand *previous_ = nullptr;
+};
+
 /// @brief Operand backed by instruction-scoped staged lane values.
 ///
 /// Holds source values prepared before semantic execution, including lane
@@ -568,7 +603,7 @@ public:
   /// @brief Construct from 64-bit staged lane values.
   StagedOperand(const Operand &base, const uint64_t *data, int lane_count);
 
-  std::string name() const override { return "dpp_src"; }
+  std::string name() const override { return "staged_src"; }
 
   bool simd_capable() const override { return true; }
 
@@ -592,7 +627,7 @@ private:
   int lane_count_ = 0;
 };
 
-// Compatibility name used by generated encoding members.
+// Compatibility name for generated output predating StagedOperand.
 using DppOperand = StagedOperand;
 
 } // namespace rocjitsu
