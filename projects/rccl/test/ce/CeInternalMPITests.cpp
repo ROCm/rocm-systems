@@ -584,15 +584,23 @@ TEST_F(CeInternalMPITest, LaunchFourOpsNullStreamSucceeds)
 // ===========================================================================
 
 // NEG-01: ncclCeImplemented returns false for collectives CE does not handle.
+//
+// NOTE: ncclFuncAllReduce was moved out of this negative list in PR #8443
+// ("Users/galaband/rccl ce ar no pipeline"), which added CE AllReduce support
+// (ce_coll.cc's ncclCeImplemented() switch now returns true for
+// ncclFuncAllReduce). That PR updated the switch statement but never updated
+// this test, leaving a stale assertion that CE_Internal_Neg has failed on
+// ever since (verified identical on rccl/gfx1250:f43c171 and PR #8945 tip).
+// AllReduce's positive expectation now lives in NEG-02 below, alongside the
+// driver-gated checks for the other CE-supported collectives.
 TEST(CeInternalNeg, CeImplementedReturnsFalseForUnsupported)
 {
-    EXPECT_FALSE(ncclCeImplemented(ncclFuncAllReduce,    ncclDevSum, ncclFloat32));
     EXPECT_FALSE(ncclCeImplemented(ncclFuncBroadcast,    ncclDevSum, ncclFloat32));
     EXPECT_FALSE(ncclCeImplemented(ncclFuncReduceScatter, ncclDevSum, ncclFloat32));
 }
 
 // NEG-02: On ROCm 7.12+ or 7.0.2.x, ncclCeImplemented returns true for
-//         the four supported CE collectives.
+//         the five supported CE collectives.
 TEST(CeInternalNeg, CeImplementedReturnsTrueOnSupportedDriver)
 {
     if(!isCeDriverSupported())
@@ -605,6 +613,7 @@ TEST(CeInternalNeg, CeImplementedReturnsTrueOnSupportedDriver)
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAlltoAll,  ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncScatter,   ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncGather,    ncclDevSum, ncclFloat32));
+    EXPECT_TRUE(ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat32));
 }
 
 // ===========================================================================

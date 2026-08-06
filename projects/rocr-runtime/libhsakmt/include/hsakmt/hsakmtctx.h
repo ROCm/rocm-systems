@@ -681,7 +681,7 @@ hsaKmtMapMemoryToGPUNodesCtx(
     void*             MemoryAddress,         //IN (page-aligned)
     HSAuint64         MemorySizeInBytes,     //IN (page-aligned)
     HSAuint64*        AlternateVAGPU,        //OUT (page-aligned)
-    HsaMemMapFlags    MemMapFlags,           //IN
+    HsaMemFlags       MemFlags,              //IN
     HSAuint64         NumberOfNodes,         //IN
     HSAuint32*        NodeArray              //IN
     );

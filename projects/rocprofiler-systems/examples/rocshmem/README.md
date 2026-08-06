@@ -27,7 +27,7 @@ all nine `rocm_rocshmem_api` spans:
 
 - CMake 3.25+
 - ROCm with HIP runtime
-- rocSHMEM ≥ 3.6.0 (included in ROCm 7.15)
+- rocSHMEM ≥ 3.6.0 (included in ROCm 10.0)
 - MPI runtime (e.g. Open MPI)
 
 ## Building

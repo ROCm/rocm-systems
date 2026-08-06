@@ -56,11 +56,10 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   dim3 grid(blocks);
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
-  // Dedicated small, high-namespace epoch array for the LL AR tier (see
-  // kDdaFabricLLArMaxBlocks / kDdaLLArEpochSeed) so the per-launch epoch reset
-  // stays cheap and cannot false-match LL128 flags on the shared scratch.
-  uint32_t* epochDev = comm->ddaLLArEpochDev;
-  const int epochLen = comm->ddaLLArEpochLen;
+  // Shared epoch counter (same as AG/RS) so bank = flag & 1 is consistent
+  // across all LL operation types and cannot alias scratch banks.
+  uint32_t* epochDev = comm->ddaLLEpochDev;
+  const int epochLen = comm->ddaLLEpochLen;
 
   INFO(NCCL_COLL, "DDA fabric AllReduce LL: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk, grid.x,
        block.x);

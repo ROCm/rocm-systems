@@ -244,20 +244,17 @@ typedef struct dim3 {
 #pragma push_macro("__DEVICE__")
 #define __DEVICE__ static __device__ __forceinline__
 
-extern "C" __device__ __attribute__((const)) size_t __ockl_get_local_id(unsigned int);
-__DEVICE__ unsigned int __hip_get_thread_idx_x() { return __ockl_get_local_id(0); }
-__DEVICE__ unsigned int __hip_get_thread_idx_y() { return __ockl_get_local_id(1); }
-__DEVICE__ unsigned int __hip_get_thread_idx_z() { return __ockl_get_local_id(2); }
+__DEVICE__ unsigned int __hip_get_thread_idx_x() { return __builtin_amdgcn_workitem_id_x(); }
+__DEVICE__ unsigned int __hip_get_thread_idx_y() { return __builtin_amdgcn_workitem_id_y(); }
+__DEVICE__ unsigned int __hip_get_thread_idx_z() { return __builtin_amdgcn_workitem_id_z(); }
 
-extern "C" __device__ __attribute__((const)) size_t __ockl_get_group_id(unsigned int);
-__DEVICE__ unsigned int __hip_get_block_idx_x() { return __ockl_get_group_id(0); }
-__DEVICE__ unsigned int __hip_get_block_idx_y() { return __ockl_get_group_id(1); }
-__DEVICE__ unsigned int __hip_get_block_idx_z() { return __ockl_get_group_id(2); }
+__DEVICE__ unsigned int __hip_get_block_idx_x() { return __builtin_amdgcn_workgroup_id_x(); }
+__DEVICE__ unsigned int __hip_get_block_idx_y() { return __builtin_amdgcn_workgroup_id_y(); }
+__DEVICE__ unsigned int __hip_get_block_idx_z() { return __builtin_amdgcn_workgroup_id_z(); }
 
-extern "C" __device__ __attribute__((const)) size_t __ockl_get_local_size(unsigned int);
-__DEVICE__ unsigned int __hip_get_block_dim_x() { return __ockl_get_local_size(0); }
-__DEVICE__ unsigned int __hip_get_block_dim_y() { return __ockl_get_local_size(1); }
-__DEVICE__ unsigned int __hip_get_block_dim_z() { return __ockl_get_local_size(2); }
+__DEVICE__ unsigned int __hip_get_block_dim_x() { return __builtin_amdgcn_workgroup_size_x(); }
+__DEVICE__ unsigned int __hip_get_block_dim_y() { return __builtin_amdgcn_workgroup_size_y(); }
+__DEVICE__ unsigned int __hip_get_block_dim_z() { return __builtin_amdgcn_workgroup_size_z(); }
 
 extern "C" __device__ __attribute__((const)) size_t __ockl_get_num_groups(unsigned int);
 __DEVICE__ unsigned int __hip_get_grid_dim_x() { return __ockl_get_num_groups(0); }
@@ -380,9 +377,30 @@ __DEFINE_HCC_FUNC(group_size, blockDim)
 __DEFINE_HCC_FUNC(num_groups, gridDim)
 #pragma pop_macro("__DEFINE_HCC_FUNC")
 
-extern "C" __device__ __attribute__((const)) size_t __ockl_get_global_id(unsigned int);
 inline __device__ __attribute__((always_inline)) unsigned int hc_get_workitem_absolute_id(int dim) {
-  return (unsigned int)__ockl_get_global_id(dim);
+  unsigned int local_id, group_id, group_size;
+
+  switch (dim) {
+    case 0:
+      local_id = __builtin_amdgcn_workitem_id_x();
+      group_id = __builtin_amdgcn_workgroup_id_x();
+      group_size = __builtin_amdgcn_workgroup_size_x();
+      break;
+    case 1:
+      local_id = __builtin_amdgcn_workitem_id_y();
+      group_id = __builtin_amdgcn_workgroup_id_y();
+      group_size = __builtin_amdgcn_workgroup_size_y();
+      break;
+    case 2:
+      local_id = __builtin_amdgcn_workitem_id_z();
+      group_id = __builtin_amdgcn_workgroup_id_z();
+      group_size = __builtin_amdgcn_workgroup_size_z();
+      break;
+    default:
+      return 0;
+  }
+
+  return group_id * group_size + local_id;
 }
 
 #endif

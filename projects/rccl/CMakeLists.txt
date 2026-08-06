@@ -91,6 +91,7 @@ option(ENABLE_IFC                              "Enable indirect function call"  
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
 option(DISABLE_KERNARG_PRELOAD                 "Disable amdgpu-kernarg-preload-count compile/link flag" OFF)
+option(BUILD_NCCL4PY                           "Build the nccl4py Python bindings wheel"       OFF)
 # Move .hip_fatbin to the end of librccl.so so that small-code-model host
 # relocations (PC32/PLT32/GOTPCRELX/32S) between .text and the read-only /
 # writable data clusters stay in range even when the bundled device fat
@@ -666,6 +667,21 @@ if(EMIT_LLVM_IR)
   add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
 endif()
 
+# nccl4py Python bindings (opt-in)
+#==================================================================================================
+# When BUILD_NCCL4PY=ON, expose the `uv`-driven wheel/dev targets defined in
+# bindings/nccl4py/CMakeLists.txt. This is opt-in (OFF by default) so a normal
+# RCCL build never requires `uv` or a managed Python toolchain. The wheel build
+# itself is CUDA/HIP-header free (see bindings/nccl4py/setup.py); librccl.so is
+# resolved at runtime via dlopen, so we only add a build-order dependency on the
+# rccl target for convenience when running the bindings against a fresh build.
+if(BUILD_NCCL4PY)
+  add_subdirectory(bindings/nccl4py)
+  if(TARGET nccl4py AND TARGET rccl)
+    add_dependencies(nccl4py rccl)
+  endif()
+endif()
+
 # Install settings
 #==================================================================================================
 ## Specify install targets
@@ -760,21 +776,6 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/profiler/proxytrace)
   endif()
   add_subdirectory(test)
-
-  if(BUILD_SHARED_LIBS)
-    # rccl is defined in src/, so avoid TARGET-signature command here.
-    # Use an output-stamp command plus a local custom target dependency.
-    set(extract_metadata_stamp "${CMAKE_BINARY_DIR}/extract_metadata.stamp")
-    add_custom_command(
-      OUTPUT "${extract_metadata_stamp}"
-      COMMENT "Extracting metadata from librccl.so"
-      COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
-      COMMAND ${CMAKE_COMMAND} -E touch "${extract_metadata_stamp}"
-      DEPENDS rccl
-      VERBATIM
-    )
-    add_custom_target(extract_rccl_metadata ALL DEPENDS "${extract_metadata_stamp}")
-  endif()
 
 endif()
 

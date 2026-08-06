@@ -26,7 +26,6 @@
 #include "ce_coll.h"
 #include "rma/rma.h"
 #include "argcheck.h"
-#include "mem_manager.h"
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
@@ -645,11 +644,6 @@ struct ncclComm {
   // Device-resident per-block epoch cells for the LL-protocol DDA collectives,
   uint32_t* ddaLLEpochDev;
   int ddaLLEpochLen;
-  // Dedicated small epoch array for the LL AllReduce tier (kDdaFabricLLArMaxBlocks
-  // cells, seeded to a disjoint high flag namespace). Keeps that latency-bound
-  // tier's per-launch epoch reset cheap without the shared 256-wide array's cost.
-  uint32_t* ddaLLArEpochDev;
-  int ddaLLArEpochLen;
 
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;

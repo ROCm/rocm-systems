@@ -54,12 +54,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def _find_py_interface() -> Path:
     """Directory holding amdsmi_wrapper.py, across source and installed layouts.
 
-    Source tree: ``py-interface/`` under ``projects/amdsmi``. Installed
-    package: the ``amdsmi`` package in site-packages -- in CI this test runs
-    from the installed tests directory, where ``py-interface/`` is absent and
-    the wrapper instead ships inside the importable ``amdsmi`` package.
+    Resolution order is deliberate: the wheel-loader tests copy this wrapper
+    expecting the committed system variant (``_AMDSMI_ALLOW_SYSTEM_FALLBACK =
+    True``), so it must NOT resolve to a coexisting pip wheel's wrapper (which
+    ships the flag flipped to ``False``).
+
+      1. ``py-interface/`` in the source checkout.
+      2. The co-installed ``share/amd_smi/amdsmi`` copy (installed alongside the
+         tests, always the system variant, and immune to a wheel shadowing
+         ``import amdsmi`` on sys.path).
+      3. Only then the imported ``amdsmi`` package, as a last resort.
     """
-    candidates = [REPO_ROOT / "py-interface"]
+    candidates = [REPO_ROOT / "py-interface", REPO_ROOT / "amdsmi"]
     try:
         import amdsmi
 
@@ -210,14 +216,24 @@ class AbiCompatTest(unittest.TestCase):
         )
 
     def test_stable_symbols_resolve_against_older_so(self):
-        # Older .so: only the stable subset is exported. Wrapper must
-        # successfully bind every stable amdsmi_* it touches at module
-        # init -- regression here means wrappers built against newer
-        # headers cannot be used against older libraries at all.
+        # Simulate a user with an OLDER/mismatched .so loaded: it exports only
+        # the stable subset, none of the newer symbols. The contract is:
+        #   * every common (stable) symbol the user requests still works, and
+        #   * a symbol the older .so does not export fails cleanly, not silently.
         with _Patch(STABLE_SYMBOLS):
             w = _import_fresh_wrapper()
+        lib = w._libraries["libamd_smi.so"]
+        self.assertIsInstance(lib, FakeCDLL)
+
+        # Common symbols resolve and are callable against the older .so.
         for sym in STABLE_SYMBOLS:
             self.assertTrue(hasattr(w, sym), "wrapper lost stable symbol %s" % sym)
+            fn = getattr(lib, sym)
+            self.assertEqual(fn(), 0, "stable symbol %s not callable against older .so" % sym)
+
+        # A newer symbol the older .so lacks must raise, not return a no-op.
+        with self.assertRaises(AttributeError):
+            lib.amdsmi_get_gpu_a_future_only_symbol()
 
     def test_unguarded_bindings_are_stable(self):
         # Contract: any amdsmi_* binding the wrapper performs WITHOUT a
@@ -345,6 +361,40 @@ class WheelLoaderContractTest(unittest.TestCase):
             mod._load_library()
         self.assertIn("refusing to fall back", str(ctx.exception))
 
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    def test_relocatable_unloadable_lib_falls_through_to_system(self):
+        # TheRock relocatable layout: wrapper at <root>/share/amd_smi/amdsmi,
+        # library at <root>/lib. A present-but-unloadable relocatable .so
+        # (missing deps -> OSError) must fall through to the system SONAME
+        # rather than shadow it.
+        import re as _re
+
+        soname = _re.search(r'_AMDSMI_LIB_SONAME = "([^"]+)"', WRAPPER_SRC.read_text()).group(1)
+        pkg = self._tmp / "share" / "amd_smi" / "amdsmi"
+        pkg.mkdir(parents=True)
+        shutil.copy(WRAPPER_SRC, pkg / "amdsmi_wrapper.py")
+        reloc = self._tmp / "lib" / soname
+        reloc.parent.mkdir()
+        reloc.write_bytes(b"")  # present, but CDLL will raise below
+        attempted = []
+        orig = ctypes.CDLL
+
+        def _cdll(path, mode=0):
+            attempted.append(str(path))
+            if str(path) == str(reloc):
+                raise OSError("simulated missing dependency")
+            return FakeCDLL(path, mode, STABLE_SYMBOLS)
+
+        ctypes.CDLL = _cdll
+        try:
+            mod = _import_wrapper_from(str(pkg), self._modname)
+        finally:
+            ctypes.CDLL = orig
+        # the relocatable path was tried, then the loader fell through to the
+        # bare system SONAME instead of returning a broken/_MissingLibrary.
+        self.assertIn(str(reloc), attempted)
+        self.assertEqual(mod._loaded_lib_path, mod._AMDSMI_LIB_SONAME)
+
 
 class DisableSystemFallbackToolTest(unittest.TestCase):
     """tools/disable_system_fallback.py flips the loader flag exactly once."""
@@ -363,7 +413,29 @@ class DisableSystemFallbackToolTest(unittest.TestCase):
             patched = wrapper.read_text()
             self.assertIn("_AMDSMI_ALLOW_SYSTEM_FALLBACK = False", patched)
             self.assertNotIn("_AMDSMI_ALLOW_SYSTEM_FALLBACK = True", patched)
-            # Anchor is gone now -> a second run must fail (count != 1).
+            # Anchor is gone now -> a second run is a no-op (idempotent), so a
+            # rebuild that reuses the already-flipped staged wrapper succeeds.
+            rc = subprocess.call([sys.executable, str(DISABLE_SYSTEM_FALLBACK_TOOL), str(wrapper)])
+            self.assertEqual(rc, 0)
+            self.assertIn("_AMDSMI_ALLOW_SYSTEM_FALLBACK = False", wrapper.read_text())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(
+        WRAPPER_SRC.is_file() and DISABLE_SYSTEM_FALLBACK_TOOL.is_file(),
+        "wrapper or disable_system_fallback.py not found (installed layout)",
+    )
+    def test_ambiguous_wrapper_fails_loud(self):
+        # Neither the True anchor nor exactly one False replacement present:
+        # the tool must refuse (non-zero exit) rather than stage a wheel with
+        # an ambiguous loader-fallback flag.
+        tmp = Path(tempfile.mkdtemp(prefix="amdsmi-disable-"))
+        try:
+            wrapper = tmp / "amdsmi_wrapper.py"
+            text = WRAPPER_SRC.read_text().replace(
+                "_AMDSMI_ALLOW_SYSTEM_FALLBACK = True", "_AMDSMI_ALLOW_SYSTEM_FALLBACK_UNSET = True"
+            )
+            wrapper.write_text(text)
             rc = subprocess.call([sys.executable, str(DISABLE_SYSTEM_FALLBACK_TOOL), str(wrapper)])
             self.assertNotEqual(rc, 0)
         finally:

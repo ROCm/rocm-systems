@@ -245,11 +245,17 @@ public:
   /// @param val New M0 value.
   void set_m0(uint32_t val) { m0_ = val; }
 
+  static constexpr uint32_t DX10_CLAMP_BIT = 1u << 8;
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
 
+  bool dx10_clamp() const { return (mode_raw_ & DX10_CLAMP_BIT) != 0; }
   bool gpr_idx_en() const { return mode_has_gpr_idx_en_ && ((mode_raw_ & GPR_IDX_EN_BIT) != 0); }
   bool fp16_ovfl() const { return (mode_raw_ & FP16_OVFL_BIT) != 0; }
+  uint32_t fp_round_mode_f32() const { return mode_raw_ & 0x3u; }
+  uint32_t fp_round_mode_f16_f64() const { return (mode_raw_ >> 2) & 0x3u; }
+  uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> 4) & 0x3u; }
+  uint32_t fp_denorm_mode_f16_f64() const { return (mode_raw_ >> 6) & 0x3u; }
   uint32_t gpr_idx_offset() const { return m0_ & 0xFF; }
   uint32_t gpr_idx_mode() const { return (m0_ >> 8) & 0xF; }
 

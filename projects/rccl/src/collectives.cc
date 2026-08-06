@@ -187,7 +187,7 @@ RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(134217728));  // 128 MiB
 // x MAXBLOCKS sweep.
 RCCL_PARAM(DdaLL, "DDA_LL", 1);
 RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));       // 32 KiB
-RCCL_PARAM(DdaLL128, "DDA_LL128", 1);
+RCCL_PARAM(DdaLL128, "DDA_LL128", 0);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
 
 // Returns true when the DDA fast path should be attempted for a collective

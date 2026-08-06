@@ -8,6 +8,7 @@
 #include "nccl.h"
 #include "debug.h"
 #include "rocmwrap.h"
+#include "archinfo.h"
 #include "kernel_config.h"
 #include "hsa/hsa.h"
 #include "param.h"
@@ -129,6 +130,16 @@ int ncclIsCuMemSupported() {
   int flag = 0;
   int supported = 1;
   ncclResult_t ret = ncclSuccess;
+  char gcnArch[256] = "unknown";
+
+  // Auto-detect (NCCL_CUMEM_ENABLE=-2) only turns cuMem on where the VMM path is
+  // required; NCCL_CUMEM_ENABLE=1 bypasses this gate.
+  CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
+  if (GetGcnArchName(cudaDev, gcnArch) != 0 || !IsArchMatch(gcnArch, "gfx1250")) {
+    INFO(NCCL_INIT, "cuMem auto-enable is limited to gfx1250 (detected %s); set NCCL_CUMEM_ENABLE=1 to override",
+         gcnArch);
+    return 0;
+  }
 
   if (ncclGetKernelVersionCode() < KERNEL_VERSION_CODE(6, 8)) {
     WARN("cuMem support requires Linux kernel >= 6.8");
@@ -143,7 +154,6 @@ int ncclIsCuMemSupported() {
       supported = 0;
     }
   }
-  CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
   if (CUPFN(cuMemCreate) == NULL) supported = 0;
   CUCHECKGOTO(cuDeviceGet(&currentDev, cudaDev), ret, error);
   // Query device to see if CUMEM VMM support is available
