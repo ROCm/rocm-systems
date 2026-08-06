@@ -30,7 +30,7 @@
 #                         Use with --skip-branch to also skip branch test runs.
 #   --variant-dir  SPEC   Additional named variant: NAME:ENV1=V1,...:PATH
 #                         NAME       - Label used in plots
-#                         ENV1=V1,…  - Comma-separated environment variables to set at runtime
+#                         ENV1=V1,…  - Comma-separated environment variables to set at runtime (values must not contain ':')
 #                         PATH       - Use PATH as pre-built variant build (skips variant build)
 #                         May be repeated for multiple variants.
 #                         Example: --variant-dir "sdma-on:ROCSHMEM_SDMA_ENABLED=1:build/sdma"
@@ -372,7 +372,15 @@ for spec in "${VARIANT_SPECS[@]}"; do
 done
 
 for dir_spec in "${VARIANT_DIR_SPECS[@]}"; do
-  IFS=':' read -r vname venv vdir <<< "$dir_spec"
+  IFS=':' read -r vname venv vdir extra <<< "$dir_spec"
+  if [[ -z "$vname" || -z "$vdir" || -n "${extra:-}" ]]; then
+    echo "ERROR: Invalid --variant-dir SPEC (expected NAME:ENV1=V1,...:PATH): $dir_spec" >&2
+    exit 1
+  fi
+  if [[ ! -d "$vdir" ]]; then
+    echo "ERROR: --variant-dir PATH is not a directory: $vdir" >&2
+    exit 1
+  fi
   env_prefix=""
   IFS=',' read -ra pairs <<< "$venv"
   for pair in "${pairs[@]}"; do
