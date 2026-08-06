@@ -172,16 +172,26 @@ build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arc
 /// load's later result). Emitted once, before any store.
 ///
 /// CDNA's monolithic s_waitcnt 0 drains vmcnt+lgkmcnt (VMEM, LDS, and scalar) in
-/// one word. RDNA4/GFX12 split the counters, so it takes s_wait_loadcnt_dscnt 0
-/// (VMEM + LDS -> VGPRs) and s_wait_kmcnt 0 (scalar -> SGPRs).
+/// one word. RDNA4/GFX12 split the counters across separate waits, and every
+/// counter whose loads can target a VGPR must be drained: s_wait_loadcnt_dscnt 0
+/// (VMEM + LDS -> VGPRs), s_wait_samplecnt 0 (image sample/gather -> VGPRs),
+/// s_wait_bvhcnt 0 (BVH ray-intersection -> VGPRs), and s_wait_kmcnt 0
+/// (scalar -> SGPRs).
 [[nodiscard]] inline std::vector<uint32_t> build_wait_all_loads_complete(rj_code_arch_t arch) {
   switch (arch) {
+  // CDNA2 has no scratch spill emitter (spilling is deferred), but a no-spill
+  // probe call still reaches emit_probe_call and needs the unconditional boundary
+  // drain. Its monolithic s_waitcnt 0 drains vmcnt+lgkmcnt, same as CDNA3/4.
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return {build_sopp_encoding(arch, cdna2::kSWaitcntSopp, 0)};
   case ROCJITSU_CODE_ARCH_CDNA3:
     return {build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0)};
   case ROCJITSU_CODE_ARCH_CDNA4:
     return {build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0)};
   case ROCJITSU_CODE_ARCH_RDNA4:
     return {build_sopp_encoding(arch, rdna4::kSWaitLoadcntDscntSopp, 0),
+            build_sopp_encoding(arch, rdna4::kSWaitSamplecntSopp, 0),
+            build_sopp_encoding(arch, rdna4::kSWaitBvhcntSopp, 0),
             build_sopp_encoding(arch, rdna4::kSWaitKmcntSopp, 0)};
   default:
     throw util::UnimplementedInst("all-loads wait for target architecture");

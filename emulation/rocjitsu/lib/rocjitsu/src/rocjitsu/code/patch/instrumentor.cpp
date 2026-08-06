@@ -126,26 +126,6 @@ uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
   }
 }
 
-// VGPR-count encoding granule for @p arch. Descriptor VGPR count =
-// (GRANULATED_WORKITEM_VGPR_COUNT + 1) * granule. Matches LLVM's
-// AMDGPUBaseInfo::getVGPREncodingGranule(). Throws for an unmodeled arch.
-uint32_t vgpr_encoding_granule(rj_code_arch_t arch) {
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    return 16;
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    return 8;
-  default:
-    throw util::UnimplementedInst("VGPR encoding granule for target architecture");
-  }
-}
-
 // Special machine state preserved across a probe call: SCC (via the trampoline
 // envelope), EXEC/VCC/M0 (saved to a dead SGPR temp; the orchestrator sets the
 // plan.preserve_* flags below), and ordinary GPRs (via the spill policy).
@@ -823,8 +803,14 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         const uint32_t granulated_vgpr_count =
             AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc1,
                             rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+        // The descriptor encoding granule is wave-size dependent on RDNA (8 for
+        // Wave32, 4 for Wave64); using the Wave32 granule for a Wave64 kernel would
+        // overcount the allocation and let the SGPR bridge scan pick an unallocated
+        // VGPR. Share the wave-aware decoder with DBT so the two cannot diverge.
         const uint32_t kernel_vgpr_count =
-            (granulated_vgpr_count + 1) * vgpr_encoding_granule(arch_);
+            (granulated_vgpr_count + 1) *
+            descriptor_vgpr_granularity_for_wavefront(
+                arch_, kernel_wavefront_size(arch_, kernel.descriptor));
         if (!sgpr_spill.none() &&
             !plan_sgpr_spills(sgpr_spill, live, plan.vgpr_spills, kernel_vgpr_count, *spills, arch_,
                               plan.sgpr_spills, plan.spill_bridge_vgpr, &err)) {

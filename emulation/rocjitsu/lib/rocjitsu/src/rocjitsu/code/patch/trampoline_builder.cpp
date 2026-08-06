@@ -101,14 +101,10 @@ struct SpillBracket {
   const bool has_vgpr = !vgpr_spills.empty();
   const bool has_sgpr = !sgpr_spills.empty();
 
-  // Drain any in-flight load that could still be writing a to-be-spilled register:
-  // a register live at the anchor may be the target of a pre-anchor load whose
-  // consumer wait sits after the anchor, so storing it now without this drain would
-  // spill a stale value. Emitted once, before any store.
-  if (has_vgpr || has_sgpr) {
-    const std::vector<uint32_t> drain = build_wait_all_loads_complete(arch);
-    bracket.prologue.insert(bracket.prologue.end(), drain.begin(), drain.end());
-  }
+  // The in-flight-load drain that protects to-be-spilled registers from a pending
+  // pre-anchor load is emitted by the caller (emit_probe_call) at the very top of
+  // the probe-call envelope, ahead of the special-state/temp writes, so it also
+  // covers no-spill sites. The bracket therefore opens straight into the stores.
 
   // VGPRs: batch stores in the prologue.
   for (const SpillSlot &slot : vgpr_spills) {
@@ -131,15 +127,10 @@ struct SpillBracket {
     bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
   }
 
-  // Drain the probe's in-flight loads before any fill: a probe body may issue an
-  // unwaited load into a register we are about to restore, and on RDNA4 the fills'
-  // s_wait_loadcnt misses a scalar s_load (KMCNT), so that load could retire after
-  // the readlane and clobber the restored value. Emitted after the call, before the
-  // first fill; mirrors the prologue drain.
-  if (has_vgpr || has_sgpr) {
-    const std::vector<uint32_t> drain = build_wait_all_loads_complete(arch);
-    bracket.epilogue.insert(bracket.epilogue.end(), drain.begin(), drain.end());
-  }
+  // The matching drain of the probe's in-flight loads is emitted by the caller
+  // (emit_probe_call) immediately after the call returns, ahead of any restoration,
+  // so it also covers no-spill sites. The bracket epilogue therefore opens straight
+  // into the fills.
 
   // Epilogue: restore SGPRs first (load/wait/readlane each, since the single bridge
   // is reused), then the VGPRs, so a reused bridge's reload lands last (see above).
@@ -366,7 +357,17 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   const SpillBracket spill =
       build_spill_bracket(plan.vgpr_spills, plan.sgpr_spills, plan.spill_bridge_vgpr, plan.arch);
 
+  // Architecture-complete load drain, emitted once at each probe-call boundary
+  // regardless of whether the site spills. Liveness does not model a pre-anchor
+  // asynchronous load still targeting an otherwise-dead register, so such a load
+  // could retire over a special-state/temp value we save below; a probe can
+  // likewise return with an outstanding load that would escape the call boundary.
+  // Emitted at the very top of the envelope (before any special-state/target/link
+  // write) and again immediately after the call returns (before any restoration).
+  const std::vector<uint32_t> boundary_drain = build_wait_all_loads_complete(plan.arch);
+
   std::vector<uint32_t> env;
+  env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
 
   // The site spills iff there is anything to spill; this drives the EXEC full-mask
   // toggles only. EXEC save/restore is decided by special_state_saves membership.
@@ -439,6 +440,12 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // materialized target. The probe returns here via s_setpc_b64 of the same pair.
   env.push_back(build_s_swappc_b64(link, target_lo, plan.arch));
 
+  // Drain the probe's in-flight loads immediately on return, before any restoration
+  // (SCC/EXEC, spill fills, special-state) or the relocated host code -- a probe may
+  // return with an unwaited load still targeting a register we are about to restore
+  // or that the host reads. Mirrors the boundary drain at the envelope top.
+  env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
+
   // SCC restore (epilogue): set SCC from the saved temp before the relocated
   // original runs.
   if (plan.preserve_scc)
@@ -461,9 +468,11 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 
   // Plan/emit drift guard: the planner committed to this many envelope words and
   // the orchestrator sized the layout around it. A mismatch means the two
-  // disagree about the envelope shape. before_word_count is the envelope; the
-  // spill bracket is accounted separately since only the orchestrator knows it.
-  if (env.size() != plan.before_word_count + spill.prologue.size() + spill.epilogue.size()) {
+  // disagree about the envelope shape. before_word_count is the arch-agnostic
+  // envelope; the spill bracket and the two boundary drains are accounted
+  // separately since their sizes are arch- and site-specific.
+  if (env.size() != plan.before_word_count + spill.prologue.size() + spill.epilogue.size() +
+                        2 * boundary_drain.size()) {
     report(error_out, "emit_probe_call: synthesized envelope word count does not match the planned "
                       "before_word_count");
     return std::nullopt;

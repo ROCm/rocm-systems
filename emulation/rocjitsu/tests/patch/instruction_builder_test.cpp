@@ -350,10 +350,12 @@ TEST(InstructionBuilder, BuildWaitAllLoadsComplete) {
             (std::vector<uint32_t>{0xBF8C0000u}));
   EXPECT_EQ(build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_CDNA4),
             (std::vector<uint32_t>{0xBF8C0000u}));
-  // RDNA4 splits the counters: s_wait_loadcnt_dscnt 0 (VMEM + LDS -> VGPRs) then
-  // s_wait_kmcnt 0 (scalar -> SGPRs).
+  // RDNA4 splits the counters and every VGPR-targeting load counter must drain:
+  // s_wait_loadcnt_dscnt 0 (VMEM + LDS -> VGPRs), s_wait_samplecnt 0 (image
+  // sample/gather -> VGPRs), s_wait_bvhcnt 0 (BVH -> VGPRs), then s_wait_kmcnt 0
+  // (scalar -> SGPRs).
   EXPECT_EQ(build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_RDNA4),
-            (std::vector<uint32_t>{0xBFC80000u, 0xBFC70000u}));
+            (std::vector<uint32_t>{0xBFC80000u, 0xBFC20000u, 0xBFC30000u, 0xBFC70000u}));
 }
 
 // VCC_LO/EXEC_LO scalar-operand codes are resolved per-arch: each case returns
