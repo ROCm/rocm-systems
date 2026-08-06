@@ -121,10 +121,17 @@ def test_coll_info_lifecycle_native():
 
 @pytest.mark.ext_inspector
 @pytest.mark.inspector_regression
-def test_comm_lifecycle_stress_allreduce(paths):
+@pytest.mark.parametrize(
+    "collective,perf_binary_name",
+    [
+        pytest.param("allreduce", "all_reduce_perf", id="allreduce"),
+        pytest.param("allgather", "all_gather_perf", id="allgather"),
+    ],
+)
+def test_comm_lifecycle_stress(paths, collective, perf_binary_name):
     """Repeated full comm lifecycles (separate mpirun per iteration) with inspector tracing."""
     dump_dir = os.path.join(
-        paths.INSPECTOR_DUMP_DIR, "lifecycle_stress", "allreduce_lifecycle"
+        paths.INSPECTOR_DUMP_DIR, "lifecycle_stress", f"{collective}_lifecycle"
     )
     os.makedirs(dump_dir, exist_ok=True)
 
@@ -132,7 +139,7 @@ def test_comm_lifecycle_stress_allreduce(paths):
         os.remove(f)
 
     env = _inspector_stress_env(paths, dump_dir)
-    perf_binary = f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf"
+    perf_binary = os.path.join(paths.RCCL_TESTS_DIR, "build", perf_binary_name)
     if not os.path.exists(perf_binary):
         pytest.skip(f"RCCL perf binary not found: {perf_binary}")
 
@@ -140,37 +147,9 @@ def test_comm_lifecycle_stress_allreduce(paths):
     os.makedirs(log_dir, exist_ok=True)
 
     for cycle in range(COMM_LIFECYCLE_ITERATIONS):
-        log_file = os.path.join(log_dir, f"allreduce_lifecycle_cycle_{cycle}.log")
+        log_file = os.path.join(log_dir, f"{collective}_lifecycle_cycle_{cycle}.log")
         result = _mpirun_perf(paths, perf_binary, log_file, env)
         assert result.returncode == 0, (
-            f"Inspector comm lifecycle stress failed on cycle {cycle}, see {log_file}"
-        )
-
-
-@pytest.mark.ext_inspector
-@pytest.mark.inspector_regression
-def test_comm_lifecycle_stress_allgather(paths):
-    """Alternate collective type to increase kernel-channel / proxy churn."""
-    dump_dir = os.path.join(
-        paths.INSPECTOR_DUMP_DIR, "lifecycle_stress", "allgather_lifecycle"
-    )
-    os.makedirs(dump_dir, exist_ok=True)
-
-    for f in glob.glob(os.path.join(dump_dir, "*.log")):
-        os.remove(f)
-
-    env = _inspector_stress_env(paths, dump_dir)
-    perf_binary = f"{paths.RCCL_TESTS_DIR}/build/all_gather_perf"
-    if not os.path.exists(perf_binary):
-        pytest.skip(f"RCCL perf binary not found: {perf_binary}")
-
-    log_dir = os.path.join(paths.LOGDIR, "inspector_lifecycle_stress_logs")
-    os.makedirs(log_dir, exist_ok=True)
-
-    for cycle in range(COMM_LIFECYCLE_ITERATIONS):
-        log_file = os.path.join(log_dir, f"allgather_lifecycle_cycle_{cycle}.log")
-        result = _mpirun_perf(paths, perf_binary, log_file, env)
-        assert result.returncode == 0, (
-            f"Inspector AllGather comm lifecycle stress failed on cycle {cycle}, "
+            f"Inspector {collective} comm lifecycle stress failed on cycle {cycle}, "
             f"see {log_file}"
         )
