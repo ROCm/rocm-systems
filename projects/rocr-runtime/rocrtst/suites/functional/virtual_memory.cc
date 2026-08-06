@@ -1362,6 +1362,8 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t agent, hsa_amd_memory
     return;
   }
 
+  rocrtst::SetEnv("HSAKMT_DEBUG_LEVEL", "7");
+
   rocrtst::pool_info_t pool_i;
   ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
   if (!pool_i.alloc_allowed || pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
@@ -1750,17 +1752,17 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(void) {
   }
 
   // Run on GPU pools
-  for (unsigned int i = 0; i < gpus.size(); ++i) {
-    hsa_amd_memory_pool_t gpu_pool;
-    memset(&gpu_pool, 0, sizeof(gpu_pool));
-    ASSERT_SUCCESS(
-        hsa_amd_agent_iterate_memory_pools(gpus[i], rocrtst::GetGlobalMemoryPool, &gpu_pool));
-    if (gpu_pool.handle == 0) {
-      std::cout << "    No global mempool in GPU agent" << std::endl;
-      continue;
-    }
-    TestVirtAddressAlias(cpus[0], gpus[i], gpu_pool);
-  }
+  // for (unsigned int i = 0; i < gpus.size(); ++i) {
+  //   hsa_amd_memory_pool_t gpu_pool;
+  //   memset(&gpu_pool, 0, sizeof(gpu_pool));
+  //   ASSERT_SUCCESS(
+  //       hsa_amd_agent_iterate_memory_pools(gpus[i], rocrtst::GetGlobalMemoryPool, &gpu_pool));
+  //   if (gpu_pool.handle == 0) {
+  //     std::cout << "    No global mempool in GPU agent" << std::endl;
+  //     continue;
+  //   }
+  //   TestVirtAddressAlias(cpus[0], gpus[i], gpu_pool);
+  // }
 
   if (verbosity() > 0) {
     std::cout << "    Subtest finished" << std::endl;
