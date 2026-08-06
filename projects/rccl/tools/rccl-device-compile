@@ -11,6 +11,22 @@ Compile mode (--compile):
     3. Assembles extracted .s to .o via amdclang++
     Side effect: writes out.resources.json alongside out.o
 
+Device-object mode (--emit-device-obj):
+    rccl-device-compile --emit-device-obj --arch=gfx942 -DFOO -Ipath -o out.o in.cu.cpp
+    Compiles the whole TU's device half straight to a real per-arch
+    relocatable ELF object via amdclang++ (--offload-device-only
+    -fhip-emit-relocatable), keeping every __global__ kernel in the file
+    (unlike --compile, no ncclDevFunc extraction, no resources.json, no
+    intermediate assembly text). -fhip-emit-relocatable makes the driver
+    stop after cc1's -emit-obj and skip its usual internal "link to a
+    self-contained device shared object" step, which is what would
+    otherwise make the output un-mergeable with other TUs' device code.
+    For mixed host+device TUs (onerank, collectives, dda_*, sym_*) whose
+    kernels are standalone entries with their own .kd, not participants in
+    the leaf-kernel dispatcher's resource-aggregation patch. The resulting
+    .o is meant to be listed alongside --compile's leaf-kernel outputs in a
+    --link invocation, so its device code lands in the same device.elf.
+
 Link mode (--link):
     rccl-device-compile --link --arch=gfx942 --dispatcher=common.cu.cpp -o device.elf obj1.o obj2.o
     1. Aggregates resource JSON files from all input objects
@@ -535,6 +551,49 @@ def do_compile(args, forwarded_flags):
 
 
 # ---------------------------------------------------------------------------
+# Device-object mode: whole mixed TU's device half -> real per-arch .o
+# ---------------------------------------------------------------------------
+
+
+def do_emit_device_obj(args, forwarded_flags):
+    """Compile a mixed host+device TU's device half to a real per-arch object.
+
+    Unlike do_compile (leaf kernels), this keeps the WHOLE translation unit's
+    device code as-is -- no ncclDevFunc extraction, no .resources.json (these
+    kernels are standalone __global__ entries with their own .kd, not
+    participants in the leaf-kernel dispatcher's resource-aggregation patch).
+
+    A single amdclang++ invocation with -fhip-emit-relocatable is enough: it
+    makes the driver stop right after cc1's own -emit-obj and skip the
+    internal "lld -shared" + offload-bundle steps it would otherwise run to
+    turn the compile into a self-contained device shared object (verified via
+    `-###`: without this flag, --offload-device-only -c chains cc1 -> an
+    internal `lld -shared` -> clang-offload-bundler, and that internal
+    lld -shared step is exactly what makes the output un-mergeable with other
+    TUs' device code -- ld.lld can fold multiple relocatable objects into one
+    device.elf, but not multiple already-linked shared objects). No bitcode,
+    no LTO, no manual assembly text step needed either.
+    """
+    clang, _ = discover_tools(args.clang)
+    arch = args.arch
+    source = args.source
+    output = args.output
+
+    compile_cmd = [
+        clang,
+        '-x', 'hip',
+        '--offload-device-only',
+        f'--offload-arch={arch}',
+        '-fhip-emit-relocatable',
+        '-gline-tables-only',
+        '-w',
+    ] + forwarded_flags + [
+        '-c', '-o', output, source,
+    ]
+    run(compile_cmd, f"compile (device-obj) {os.path.basename(source)}")
+
+
+# ---------------------------------------------------------------------------
 # Link mode: objects -> device.elf
 # ---------------------------------------------------------------------------
 
@@ -683,7 +742,7 @@ def parse_compiler_flags(argv):
     while i < len(argv):
         arg = argv[i]
         # Our flags
-        if arg in ('--compile', '--link', '--keep-temps', '--version'):
+        if arg in ('--compile', '--link', '--emit-device-obj', '--keep-temps', '--version'):
             our_args.append(arg)
         elif arg.startswith('--arch='):
             our_args.append(arg)
@@ -747,6 +806,7 @@ def main():
     parser = argparse.ArgumentParser(prog='rccl-device-compile', add_help=False)
     parser.add_argument('--compile', action='store_true')
     parser.add_argument('--link', action='store_true')
+    parser.add_argument('--emit-device-obj', action='store_true', dest='emit_device_obj')
     parser.add_argument('--arch', required=False)
     parser.add_argument('--clang', default=None)
     parser.add_argument('--dispatcher', default=None)
@@ -771,6 +831,16 @@ def main():
         args.source = positional[0]
         do_compile(args, forwarded_flags)
 
+    elif args.emit_device_obj:
+        if not positional:
+            raise SystemExit("ERROR: --emit-device-obj requires a source file")
+        if not args.arch:
+            raise SystemExit("ERROR: --emit-device-obj requires --arch=<target>")
+        if not args.output:
+            raise SystemExit("ERROR: --emit-device-obj requires -o <output>")
+        args.source = positional[0]
+        do_emit_device_obj(args, forwarded_flags)
+
     elif args.link:
         if not positional:
             raise SystemExit("ERROR: --link requires object files")
@@ -782,7 +852,7 @@ def main():
         do_link(args, forwarded_flags)
 
     else:
-        raise SystemExit("ERROR: specify --compile or --link mode")
+        raise SystemExit("ERROR: specify --compile, --emit-device-obj, or --link mode")
 
 
 if __name__ == '__main__':
