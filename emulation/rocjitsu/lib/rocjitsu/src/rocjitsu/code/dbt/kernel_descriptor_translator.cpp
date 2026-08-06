@@ -644,6 +644,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   // offset.
   static_assert(sizeof(KD) == 64, "descriptor snapshot size mismatch");
   std::memcpy(result.source_descriptor_bytes.data(), &src, sizeof(KD));
+  result.source_arch = guest_arch;
   result.kernel_name = std::move(kernel_name);
   result.entry_text_offset = entry_text_offset;
   result.target_entry_text_offset = entry_text_offset;
@@ -775,7 +776,39 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.host_vgpr_allocation_count = required_vgpr_allocation;
   result.target_vgpr_count = required_vgprs;
   result.target_vgpr_allocation_count = required_vgpr_allocation;
-  const uint32_t max_host_vgprs = arch_max_vgprs(host_arch);
+  // SHARED_VGPR_COUNT describes registers the unchanged kernel body already
+  // uses, and it is carried rather than recomputed, so it has to be reserved out
+  // of the target budget before the allocation is chosen. Shrinking the
+  // descriptor does not make the body need fewer registers, so an allocation
+  // that no longer leaves room for the shared blocks is a rejection, not
+  // something to clamp. LLVM rejects the same overcommit.
+  uint32_t shared_vgpr_reserved = 0;
+  if (rsrc3_carries_verbatim(guest_arch, host_arch) &&
+      rsrc3_layout_has_shared_vgpr_count(rsrc3_layout(host_arch))) {
+    const uint32_t source_shared =
+        AMDHSA_BITS_GET(src.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT);
+    if (source_shared != 0 && result.target_wave_size == 32) {
+      // Shared VGPR blocks exist only for wave64; LLVM requires the field to be
+      // zero otherwise. Dropping them would silently remove registers the body
+      // still reads.
+      append_descriptor_error(result,
+                              "source descriptor reserves " + std::to_string(source_shared) +
+                                  " shared VGPR blocks, which exist only for wave64; translating "
+                                  "this descriptor to wave32 is not implemented");
+    }
+    shared_vgpr_reserved =
+        result.target_wave_size == 32 ? 0 : rsrc3_shared_vgpr_reserved_registers(source_shared);
+  }
+
+  const uint32_t arch_vgpr_limit = arch_max_vgprs(host_arch);
+  const uint32_t max_host_vgprs = arch_vgpr_limit == 0 || shared_vgpr_reserved >= arch_vgpr_limit
+                                      ? arch_vgpr_limit
+                                      : arch_vgpr_limit - shared_vgpr_reserved;
+  if (arch_vgpr_limit != 0 && shared_vgpr_reserved >= arch_vgpr_limit) {
+    append_descriptor_resource_error(
+        result, "shared VGPR blocks alone exceed the target VGPR budget", required_vgprs,
+        required_vgpr_allocation, arch_vgpr_limit, options);
+  }
   if (max_host_vgprs != 0 && required_vgprs > max_host_vgprs) {
     append_descriptor_resource_error(
         result,
@@ -932,6 +965,41 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
 }
 
 } // namespace
+
+Rsrc3Layout rsrc3_layout(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return Rsrc3Layout::Gfx9Accum;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return Rsrc3Layout::Gfx10;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return Rsrc3Layout::Gfx11;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return Rsrc3Layout::Gfx120;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return Rsrc3Layout::Gfx125;
+  default:
+    return Rsrc3Layout::Incompatible;
+  }
+}
+
+bool rsrc3_carries_verbatim(rj_code_arch_t source_arch, rj_code_arch_t target_arch) {
+  // Every neighbouring pair is kept apart deliberately, because each disagrees
+  // on bits the other reserves: a GFX11 or GFX12 word on a GFX10 target would
+  // set INST_PREF_SIZE and IMAGE_OP, and a GFX125 word on a GFX120 target would
+  // set bits 21:14. LLVM requires reserved bits to be zero.
+  const Rsrc3Layout source = rsrc3_layout(source_arch);
+  return source != Rsrc3Layout::Incompatible && source == rsrc3_layout(target_arch);
+}
+
+bool rsrc3_layout_has_shared_vgpr_count(Rsrc3Layout layout) {
+  return layout == Rsrc3Layout::Gfx10 || layout == Rsrc3Layout::Gfx11;
+}
 
 KernelDescriptorTranslator::KernelDescriptorTranslator(rj_code_arch_t guest_arch,
                                                        rj_code_arch_t host_arch)
