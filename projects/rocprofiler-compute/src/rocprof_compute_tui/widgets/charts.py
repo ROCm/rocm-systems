@@ -4,9 +4,7 @@
 from __future__ import annotations
 
 import math
-import sys
 import traceback
-from io import StringIO
 from typing import Any, Optional
 
 import pandas as pd
@@ -322,23 +320,15 @@ class MemoryChart(Static):
             else:
                 plot_func = plot_mem_chart_gfx9
 
-            original_stdout = sys.stdout
-            try:
-                with StringIO() as string_buffer:
-                    sys.stdout = string_buffer
-                    result = plot_func("per_kernel", metric_dict)
-                    stdout_output = string_buffer.getvalue()
-            finally:
-                sys.stdout = original_stdout
-
-            plot_str = next(
-                (x for x in [stdout_output, str(result) if result else None] if x),
-                "No chart data generated",
+            heading = "3. Memory Chart (Normalization: per_kernel)"
+            result = plot_func(
+                metric_dict,
+                chart_title=heading,
             )
-            self.update(plot_str)
+            self.update(result if result else "No chart data generated")
 
         except Exception as e:
-            self.update(f"Memory chart error: {str(e)}")
+            self.update(f"Memory chart error: {str(e)}\n{traceback.format_exc()}")
 
 
 class SimpleBar(Static):
