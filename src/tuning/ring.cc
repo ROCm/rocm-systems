@@ -32,8 +32,9 @@ ncclResult_t ncclTuningRingModelInit(struct ncclComm* comm, int id, int* /*enabl
     comm->tuningContext.generalLatencies[c][algo][proto] = -1.0;
     comm->tuningContext.generalBandwidths[c][algo][proto] = -1.0;
     int nSteps = ncclTuningGetNsteps(c, comm->nRanks);
-    float busBw =
-      (comm->nNodes > 1 ? comm->graphs[algo].bwInter : comm->graphs[algo].bwIntra) * comm->graphs[algo].nChannels;
+    float bw = (comm->nNodes == 1 || (comm->nNodes <= 2 && comm->minCompCap < 100)) ? comm->graphs[algo].bwIntra :
+                                                                                      comm->graphs[algo].bwInter;
+    float busBw = bw * comm->graphs[algo].nChannels;
     if (proto == NCCL_PROTO_LL) {
       busBw = std::min(llMaxBw, busBw * .5);
     }

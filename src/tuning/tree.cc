@@ -25,7 +25,10 @@ ncclResult_t ncclTuningTreeModelInit(struct ncclComm* comm, int id, int enabled[
       enabled[c] = 0; // Hard disable
       continue;
     }
-    float busBw = std::min(comm->graphs[algo].bwInter, comm->graphs[algo].bwIntra) * comm->graphs[algo].nChannels;
+    float bw = (comm->minCompCap < 100) ?
+                 ((comm->nNodes <= 2) ? comm->graphs[algo].bwIntra : comm->graphs[algo].bwInter) :
+                 std::min(comm->graphs[algo].bwInter, comm->graphs[algo].bwIntra);
+    float busBw = bw * comm->graphs[algo].nChannels;
     if (c == ncclFuncAllReduce) busBw = std::min(busBw * .92, comm->graphs[algo].nChannels * perChMaxTreeBw);
     if (proto == NCCL_PROTO_LL) {
       busBw = std::min(busBw * 1.0 / 3.8, llMaxBw);
