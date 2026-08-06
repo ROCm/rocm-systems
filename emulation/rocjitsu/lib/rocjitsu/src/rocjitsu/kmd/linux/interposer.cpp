@@ -49,7 +49,7 @@ RJ_DIAGNOSTIC_POP
 #include <cerrno>
 #include <charconv>
 #include <chrono>
-#include <condition_variable>
+#include <climits>
 #include <csignal>
 #include <cstdarg>
 #include <cstdio>
@@ -59,6 +59,8 @@ RJ_DIAGNOSTIC_POP
 #include <dlfcn.h>
 #include <exception>
 #include <fcntl.h>
+#include <limits>
+#include <linux/futex.h>
 #include <linux/memfd.h>
 #include <memory>
 #include <mutex>
@@ -66,6 +68,7 @@ RJ_DIAGNOSTIC_POP
 #include <pthread.h>
 #include <signal.h>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <sys/ioctl.h>
@@ -89,6 +92,21 @@ using rocjitsu::SimulatedKfd;
 using rocjitsu::Sysfs;
 
 namespace {
+
+static_assert(std::atomic<uint32_t>::is_always_lock_free,
+              "futex-backed state requires a lock-free uint32_t atomic");
+
+/// @brief Sleep while @p word still equals @p expected, until @p deadline or a signal.
+long futex_wait_until(std::atomic<uint32_t> &word, uint32_t expected, const timespec *deadline) {
+  return syscall(SYS_futex, &word, FUTEX_WAIT_BITSET_PRIVATE, expected, deadline, nullptr,
+                 FUTEX_BITSET_MATCH_ANY);
+}
+
+/// @brief Wake every waiter sleeping on @p word.
+void futex_wake_all(std::atomic<uint32_t> &word) {
+  (void)syscall(SYS_futex, &word, FUTEX_WAKE_PRIVATE, std::numeric_limits<int>::max(), nullptr,
+                nullptr, 0);
+}
 
 /// @brief Attempt to connect @p sock to the AF_UNIX socket at @p path.
 /// @returns A connected socket fd on success; -1 with errno set on failure.
@@ -329,20 +347,9 @@ public:
     remote_open_refs_.store(0, std::memory_order_relaxed);
     new (&init_mutex_) std::mutex();
     new (&fd_mutex_) std::mutex();
+    new (&drm_fd_lifecycle_mutex_) std::mutex();
     new (&remote_mutex_) std::mutex();
     sysfs_fds_.clear();
-    // A parent thread may have been asleep on one of these wait queues when the
-    // process forked. Reconstruct each shared DRM-file queue exactly once before
-    // dropping the inherited state; destroying or notifying a condition variable
-    // that still records a vanished parent waiter has undefined behavior. The flag
-    // handles duplicated DRM fds, which deliberately share one DrmFileState.
-    for (auto &[fd, state] : drm_fds_) {
-      (void)fd;
-      if (state && !state->syncobj_cv_reset_after_fork) {
-        new (&state->syncobj_cv) std::condition_variable();
-        state->syncobj_cv_reset_after_fork = true;
-      }
-    }
     drm_fds_.clear();
     kfd_dup_fds_.clear();
     // Drop GEM bookkeeping WITHOUT munmapping cpu_ptr or unmapping PTEs: those host
@@ -863,22 +870,36 @@ public:
   struct DrmFileState {
     uint64_t id = 0;
     uint32_t render_minor = 128;
+    // Guarded by InterposerContext::fd_mutex_. Reservations and tracked fds both
+    // contribute one reference, so the state and its namespaces remain live while
+    // an ioctl or duplication operation holds a token.
     size_t open_fds = 0;
     uint32_t next_syncobj_handle = 1;
     std::unordered_map<uint32_t, std::shared_ptr<SyncobjEntry>> syncobj_entries;
     // Timeline activity on one DRM file must not wake waiters belonging to every
-    // other open DRM file in the process.
-    std::condition_variable syncobj_cv;
-    bool syncobj_cv_reset_after_fork = false;
+    // other open DRM file in the process. Waiters sleep on this generation with
+    // futex(2), which preserves EINTR instead of transparently restarting after a
+    // signal as std::condition_variable does.
+    std::atomic<uint32_t> syncobj_generation{0};
   };
 
   using DrmFileToken = std::shared_ptr<DrmFileState>;
+
+  /// @brief Serialize synthetic DRM fd-table mutations with kernel fd operations.
+  /// @details The lock may cover only metadata operations and calls through the
+  /// real-libc passthrough table. Backend teardown, RPC, GEM cleanup, and any
+  /// interposed libc entry point must run after this lock is released.
+  std::unique_lock<std::mutex> lock_drm_fd_lifecycle() {
+    return std::unique_lock(drm_fd_lifecycle_mutex_);
+  }
 
   struct DrmUntrackResult {
     bool tracked = false;
     std::optional<uint64_t> closed_file_id;
   };
 
+  /// @brief Drop one fd or reservation reference while fd_mutex_ is held.
+  /// @returns The DRM-file identity when the final reference was removed.
   std::optional<uint64_t> release_drm_file_locked(const DrmFileToken &state) {
     if (!state)
       return std::nullopt;
@@ -890,7 +911,10 @@ public:
     return state->open_fds == 0 ? std::optional(state->id) : std::nullopt;
   }
 
-  void track_drm(int fd, uint32_t render_minor = 128) {
+  /// @brief Track a newly opened synthetic DRM fd.
+  /// @returns The identity of a stale displaced DRM file whose final reference
+  /// was removed, if any. The caller reaps it after releasing the lifecycle lock.
+  [[nodiscard]] std::optional<uint64_t> track_drm(int fd, uint32_t render_minor = 128) {
     auto state = std::make_shared<DrmFileState>();
     state->render_minor = render_minor;
     state->open_fds = 1;
@@ -905,10 +929,14 @@ public:
         drm_fds_.emplace(fd, std::move(state));
       }
     }
-    if (closed_file_id)
-      reap_gem_for_drm_file(*closed_file_id);
+    return closed_file_id;
   }
 
+  /// @brief Pin the DRM file currently tracked at @p fd.
+  /// @details The fd-table lifecycle lock is required when this reservation must
+  /// stay paired with a following kernel fd operation such as dup(). An ioctl may
+  /// call this directly: fd_mutex_ makes the lookup and increment atomic with
+  /// untracking, and the returned shared state remains valid if close races later.
   DrmFileToken reserve_drm_file(int fd) {
     std::lock_guard lock(fd_mutex_);
     auto it = drm_fds_.find(fd);
@@ -918,6 +946,8 @@ public:
     return it->second;
   }
 
+  /// @brief Release a token obtained from reserve_drm_file().
+  /// @details Final GEM cleanup runs outside fd_mutex_ and any lifecycle lock.
   void release_drm_file_reservation(const DrmFileToken &state) {
     if (!state)
       return;
@@ -930,27 +960,70 @@ public:
       reap_gem_for_drm_file(*closed_file_id);
   }
 
-  void commit_drm_dup(int fd, const DrmFileToken &state) {
-    if (fd < 0 || !state)
-      return;
+  /// @brief Scoped ioctl reservation that preserves the ioctl's final errno.
+  class DrmFileReservation {
+  public:
+    DrmFileReservation(InterposerContext &context, DrmFileToken file)
+        : context_(&context), file_(std::move(file)) {}
+    DrmFileReservation(const DrmFileReservation &) = delete;
+    DrmFileReservation &operator=(const DrmFileReservation &) = delete;
+    DrmFileReservation(DrmFileReservation &&other) noexcept
+        : context_(std::exchange(other.context_, nullptr)), file_(std::move(other.file_)) {}
+    DrmFileReservation &operator=(DrmFileReservation &&) = delete;
+    ~DrmFileReservation() {
+      if (!context_)
+        return;
+      const int saved_errno = errno;
+      context_->release_drm_file_reservation(file_);
+      errno = saved_errno;
+    }
+
+    [[nodiscard]] const DrmFileToken &file() const { return file_; }
+
+  private:
+    InterposerContext *context_;
+    DrmFileToken file_;
+  };
+
+  /// @brief Capture a stable DRM-file identity for one ioctl invocation.
+  [[nodiscard]] DrmFileReservation reserve_drm_file_for_ioctl(int fd) {
+    return DrmFileReservation(*this, reserve_drm_file(fd));
+  }
+
+  /// @brief Reconcile DRM tracking after a successful descriptor duplication.
+  /// @details Replaces stale target tracking even when @p state is null, so an
+  /// ordinary duplicate cannot inherit a recycled synthetic DRM identity. A
+  /// non-null state consumes the source reservation as the new fd's reference.
+  /// @returns The identity of a displaced DRM file whose final reference was
+  /// removed, if any. The caller performs GEM cleanup after releasing the
+  /// lifecycle lock.
+  [[nodiscard]] std::optional<uint64_t> commit_drm_dup(int fd, const DrmFileToken &state) {
+    if (fd < 0)
+      return std::nullopt;
     std::optional<uint64_t> closed_file_id;
     {
       std::lock_guard lock(fd_mutex_);
       if (auto stale = drm_fds_.find(fd); stale != drm_fds_.end()) {
         auto displaced = std::move(stale->second);
-        stale->second = state;
+        if (state)
+          stale->second = state;
+        else
+          drm_fds_.erase(stale);
         closed_file_id = release_drm_file_locked(displaced);
-      } else {
+      } else if (state) {
         drm_fds_.emplace(fd, state);
       }
     }
-    if (closed_file_id)
-      reap_gem_for_drm_file(*closed_file_id);
+    return closed_file_id;
   }
 
   bool is_drm(int fd) {
     std::lock_guard lock(fd_mutex_);
     return drm_fds_.count(fd) != 0;
+  }
+
+  static uint32_t drm_render_minor(const DrmFileToken &file) {
+    return file ? file->render_minor : 128;
   }
 
   uint32_t drm_render_minor(int fd) {
@@ -959,6 +1032,7 @@ public:
     return (it != drm_fds_.end()) ? it->second->render_minor : 128;
   }
 
+  /// @brief Remove @p fd from DRM tracking while preserving outstanding tokens.
   DrmUntrackResult untrack_drm(int fd) {
     std::lock_guard lock(fd_mutex_);
     auto it = drm_fds_.find(fd);
@@ -969,39 +1043,50 @@ public:
     return {.tracked = true, .closed_file_id = release_drm_file_locked(state)};
   }
 
-  int create_syncobj(int fd, uint32_t flags, uint32_t *handle) {
+  /// @brief Allocate a syncobj handle in @p file's private namespace.
+  int create_syncobj(const DrmFileToken &file, uint32_t flags, uint32_t *handle) {
     if (!handle || (flags & ~DRM_SYNCOBJ_CREATE_SIGNALED) != 0)
       return -EINVAL;
-    std::lock_guard lock(fd_mutex_);
-    auto file = drm_fds_.find(fd);
-    if (file == drm_fds_.end())
+    if (!file)
       return -EBADF;
-    auto &state = *file->second;
+    std::lock_guard lock(fd_mutex_);
+    auto &state = *file;
+    if (state.syncobj_entries.size() == std::numeric_limits<uint32_t>::max())
+      return -ENOSPC;
     uint32_t candidate = state.next_syncobj_handle++;
     while (candidate == 0 || state.syncobj_entries.count(candidate) != 0)
       candidate = state.next_syncobj_handle++;
-    auto entry = std::make_shared<SyncobjEntry>();
-    entry->has_fence = (flags & DRM_SYNCOBJ_CREATE_SIGNALED) != 0;
-    state.syncobj_entries[candidate] = std::move(entry);
+    try {
+      auto entry = std::make_shared<SyncobjEntry>();
+      entry->has_fence = (flags & DRM_SYNCOBJ_CREATE_SIGNALED) != 0;
+      state.syncobj_entries.emplace(candidate, std::move(entry));
+    } catch (const std::bad_alloc &) {
+      return -ENOMEM;
+    } catch (const std::length_error &) {
+      return -ENOMEM;
+    }
     *handle = candidate;
     return 0;
   }
 
-  int destroy_syncobj(int fd, uint32_t handle) {
-    std::lock_guard lock(fd_mutex_);
-    auto file = drm_fds_.find(fd);
-    if (file == drm_fds_.end())
+  /// @brief Remove a syncobj handle from @p file's private namespace.
+  int destroy_syncobj(const DrmFileToken &file, uint32_t handle) {
+    if (!file)
       return -EBADF;
-    if (file->second->syncobj_entries.erase(handle) == 0)
+    std::lock_guard lock(fd_mutex_);
+    if (file->syncobj_entries.erase(handle) == 0)
       return -EINVAL;
     return 0;
   }
 
+  /// @brief Copy a caller-owned array without faulting inside the interposer.
   template <typename T>
   static int snapshot_user_array(uint64_t address, uint32_t count, std::vector<T> &snapshot) {
     try {
       snapshot.resize(count);
     } catch (const std::bad_alloc &) {
+      return -ENOMEM;
+    } catch (const std::length_error &) {
       return -ENOMEM;
     }
     const size_t bytes = static_cast<size_t>(count) * sizeof(T);
@@ -1009,19 +1094,23 @@ public:
     iovec remote{reinterpret_cast<void *>(static_cast<uintptr_t>(address)), bytes};
     long copied;
     do {
-      copied = syscall(SYS_process_vm_readv, getpid(), &local, 1, &remote, 1, 0);
+      copied = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
     } while (copied < 0 && errno == EINTR);
     return copied == static_cast<long>(bytes) ? 0 : -EFAULT;
   }
 
-  int wait_syncobj_timeline(int fd, drm_syncobj_timeline_wait *wait) {
+  /// @brief Wait for one or all requested points in a DRM-file namespace.
+  /// @details Waiters use a per-file generation futex. Producers update the
+  /// points under fd_mutex_, increment the generation with release ordering, and
+  /// wake all sleepers; waiters recheck state under the same mutex after waking.
+  int wait_syncobj_timeline(const DrmFileToken &file, drm_syncobj_timeline_wait *wait) {
     if (!wait)
       return -EINVAL;
     const drm_syncobj_timeline_wait request = *wait;
     constexpr uint32_t kSupportedFlags =
         DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT |
         DRM_SYNCOBJ_WAIT_FLAGS_WAIT_AVAILABLE | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_DEADLINE;
-    if ((request.flags & ~kSupportedFlags) != 0 || request.pad != 0)
+    if ((request.flags & ~kSupportedFlags) != 0)
       return -EINVAL;
     if (request.count_handles == 0)
       return 0;
@@ -1031,22 +1120,37 @@ public:
       return rc;
     if (int rc = snapshot_user_array(request.points, request.count_handles, points); rc != 0)
       return rc;
-    std::unique_lock lock(fd_mutex_);
-    auto file = drm_fds_.find(fd);
-    if (file == drm_fds_.end())
+    if (!file)
       return -EBADF;
-    auto file_state = file->second;
     std::vector<std::shared_ptr<SyncobjEntry>> entries;
-    entries.reserve(request.count_handles);
+    try {
+      entries.reserve(request.count_handles);
+    } catch (const std::bad_alloc &) {
+      return -ENOMEM;
+    } catch (const std::length_error &) {
+      return -ENOMEM;
+    }
+    std::unique_lock lock(fd_mutex_);
     for (uint32_t i = 0; i < request.count_handles; ++i) {
-      auto it = file->second->syncobj_entries.find(handles[i]);
-      if (it == file->second->syncobj_entries.end())
+      auto it = file->syncobj_entries.find(handles[i]);
+      if (it == file->syncobj_entries.end())
         return -ENOENT;
       entries.push_back(it->second);
     }
     const bool wait_all = (request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL) != 0;
     const bool wait_for_submit = (request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT) != 0;
     const bool wait_available = (request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_AVAILABLE) != 0;
+    // The kernel validates fence availability once when the wait begins. A later
+    // unrelated wakeup must not turn a valid pending wait into EINVAL.
+    if (!wait_for_submit && !wait_available) {
+      for (uint32_t i = 0; i < request.count_handles; ++i) {
+        const auto &entry = *entries[i];
+        const bool submitted =
+            entry.has_fence && (points[i] == 0 || entry.submitted_point >= points[i]);
+        if (!submitted)
+          return -EINVAL;
+      }
+    }
     const auto evaluate = [&]() -> std::pair<int, uint32_t> {
       bool all_ready = true;
       bool any_ready = false;
@@ -1055,8 +1159,6 @@ public:
         const auto &entry = *entries[i];
         const bool submitted =
             entry.has_fence && (points[i] == 0 || entry.submitted_point >= points[i]);
-        if (!submitted && !wait_for_submit && !wait_available)
-          return {-EINVAL, 0};
         const bool ready = wait_available ? submitted
                                           : entry.has_fence && (points[i] == 0 ||
                                                                 entry.signaled_point >= points[i]);
@@ -1074,8 +1176,7 @@ public:
       if (state < 0)
         return state;
       if (state > 0) {
-        if (!wait_all)
-          wait->first_signaled = first_ready;
+        wait->first_signaled = wait_all ? std::numeric_limits<uint32_t>::max() : first_ready;
         return 0;
       }
 
@@ -1085,19 +1186,42 @@ public:
       const int64_t now_ns = static_cast<int64_t>(now.tv_sec) * 1'000'000'000LL + now.tv_nsec;
       if (request.timeout_nsec <= now_ns)
         return -ETIME;
-      file_state->syncobj_cv.wait_for(lock,
-                                      std::chrono::nanoseconds(request.timeout_nsec - now_ns));
+      const uint32_t generation = file->syncobj_generation.load(std::memory_order_relaxed);
+      lock.unlock();
+      const timespec deadline{static_cast<time_t>(request.timeout_nsec / 1'000'000'000LL),
+                              static_cast<long>(request.timeout_nsec % 1'000'000'000LL)};
+      // This user-space model cannot recover which signal interrupted futex(2),
+      // so it cannot apply the kernel ioctl layer's SA_RESTART decision. Surface
+      // EINTR consistently and let callers retry; the focused regression pins
+      // that documented difference from the in-kernel DRM implementation.
+      const long rc = futex_wait_until(file->syncobj_generation, generation, &deadline);
+      const int wait_errno = errno;
+      lock.lock();
+      if (rc == 0 || wait_errno == EAGAIN)
+        continue;
+      if (wait_errno == ETIMEDOUT)
+        return -ETIME;
+      if (wait_errno == EINTR)
+        return -EINTR;
+      return -wait_errno;
     }
   }
 
+  /// @brief Publish a completed binary or timeline fence under fd_mutex_.
   static void signal_syncobj_locked(const std::shared_ptr<SyncobjEntry> &entry, uint64_t point) {
     if (!entry)
       return;
     entry->has_fence = true;
+    if (point == 0) {
+      entry->submitted_point = 0;
+      entry->signaled_point = 0;
+      return;
+    }
     entry->submitted_point = std::max(entry->submitted_point, point);
     entry->signaled_point = std::max(entry->signaled_point, point);
   }
 
+  /// @brief Resolve one handle while fd_mutex_ is held.
   static std::shared_ptr<SyncobjEntry> lookup_syncobj_locked(const DrmFileToken &file,
                                                              uint32_t handle) {
     if (!file || handle == 0)
@@ -1106,9 +1230,12 @@ public:
     return entry != file->syncobj_entries.end() ? entry->second : nullptr;
   }
 
+  /// @brief Advance the per-file generation and wake every futex waiter.
   static void notify_syncobj_waiters(const DrmFileToken &file) {
-    if (file)
-      file->syncobj_cv.notify_all();
+    if (!file)
+      return;
+    file->syncobj_generation.fetch_add(1, std::memory_order_release);
+    futex_wake_all(file->syncobj_generation);
   }
 
   bool create_local_vm(const std::string &config_path) {
@@ -1228,10 +1355,11 @@ public:
   /// file, and returns the handle. Handle 0 is never minted, so callers may treat 0
   /// as "no handle".
   /// @returns The stable GEM handle (>= 1).
-  uint32_t prime_import(int dmabuf_fd, int drm_fd, uint64_t size) {
+  uint32_t prime_import(int dmabuf_fd, const DrmFileToken &drm_file, uint64_t size) {
     std::lock_guard lock(fd_mutex_);
-    auto drm_file = drm_fds_.find(drm_fd);
-    if (drm_file == drm_fds_.end())
+    if (!drm_file)
+      return 0;
+    if (gem_entries_.size() == std::numeric_limits<uint32_t>::max())
       return 0;
     uint32_t alloc_flags = 0;
     if (auto it = pending_gem_flags_.find(dmabuf_fd); it != pending_gem_flags_.end()) {
@@ -1257,7 +1385,7 @@ public:
     gem = {};
     gem.dmabuf_fd = (backing_fd >= 0) ? backing_fd : dmabuf_fd;
     gem.owns_dmabuf_fd = (backing_fd >= 0);
-    gem.drm_file_id = drm_file->second->id;
+    gem.drm_file_id = drm_file->id;
     gem.size = size;
     gem.alloc_flags = alloc_flags;
     return handle;
@@ -1275,28 +1403,30 @@ public:
   /// the PTEs, and publishes the output timeline point. The lock order
   /// fd_mutex_ -> driver page-table lock matches
   /// teardown_gem_entry_locked, so there is no inversion.
-  /// @param replace When true (AMDGPU_VA_OP_REPLACE), first evict any existing range
-  ///   in the calling DRM-file namespace that OVERLAPS {va_address, map_size}, so the
-  ///   old owner's bookkeeping does not later tear down the replacement's PTEs.
-  ///   When false (AMDGPU_VA_OP_MAP), an overlapping pre-existing range is a conflict.
+  /// @param replace When true (AMDGPU_VA_OP_REPLACE), reject overlap with another
+  ///   DRM file before evicting an existing range in the calling DRM-file namespace.
+  ///   The namespaces share one simulated GPU page table, so neither operation may
+  ///   overwrite another file's PTEs. When false (AMDGPU_VA_OP_MAP), any overlapping
+  ///   pre-existing range is a conflict.
+  /// @param publish_timeline Whether this update publishes its output timeline.
+  ///   AMDGPU_VM_DELAY_UPDATE suppresses publication, matching the kernel contract.
   /// @returns Zero when the range was installed, `-ENOENT` for an unknown handle in
   ///   this DRM-file namespace, or another negative errno for invalid requests.
-  [[nodiscard]] int gem_map(int drm_fd, uint32_t handle, uint64_t va_address, uint64_t offset_in_bo,
-                            uint64_t map_size, bool replace, uint32_t timeline_handle = 0,
+  [[nodiscard]] int gem_map(const DrmFileToken &file, uint32_t handle, uint64_t va_address,
+                            uint64_t offset_in_bo, uint64_t map_size, bool replace,
+                            bool publish_timeline = true, uint32_t timeline_handle = 0,
                             uint64_t timeline_point = 0) {
     std::unique_lock lock(fd_mutex_);
-    auto file = drm_fds_.find(drm_fd);
-    if (file == drm_fds_.end())
+    if (!file)
       return -EBADF;
-    auto file_state = file->second;
-    auto timeline = lookup_syncobj_locked(file_state, timeline_handle);
+    auto timeline = lookup_syncobj_locked(file, timeline_handle);
     if (timeline_handle != 0 && !timeline)
       return -ENOENT;
     auto *drv = dynamic_cast<SimulatedKfd *>(driver());
     if (!drv)
       return -ENODEV;
     auto it = gem_entries_.find(handle);
-    if (it == gem_entries_.end() || it->second.drm_file_id != file->second->id)
+    if (it == gem_entries_.end() || it->second.drm_file_id != file->id)
       return -ENOENT;
     GemEntry &gem = it->second;
     // Bound the request within the BO without letting offset_in_bo + map_size
@@ -1307,14 +1437,25 @@ public:
         map_size > gem.size - offset_in_bo)
       return -EINVAL;
     const GemMapping range{va_address, map_size};
-    // Handle the target VA range's current occupant. REPLACE evicts any current
-    // holder (possibly a different handle) so its records cannot later unmap the new
-    // PTEs. Plain MAP treats an existing range as a conflict rather than silently
-    // double-mapping over another handle's PTEs.
+    // Handle the target VA range's current occupant. Independent DRM files have
+    // private handle namespaces but currently share one simulated GPU page table,
+    // so a foreign mapping must never be overwritten. REPLACE may evict only a
+    // current holder from this DRM file; plain MAP rejects any current holder.
+    const bool foreign_overlap = range_is_mapped_by_other_drm_file_locked(file->id, range);
+    if (foreign_overlap) {
+      // TODO: Give each independent DRM file its own simulated GPUVM. Until then,
+      // permitting this overlap would overwrite the single shared page table and
+      // let either file tear down the other's PTEs. Make the model limitation
+      // visible instead of silently accepting or rejecting the update.
+      util::Logger::warn("DRM files currently share one simulated GPUVM; rejecting overlapping "
+                         "GEM_VA range at address ",
+                         va_address);
+      return -EINVAL;
+    }
     if (replace) {
-      if (!evict_range_locked(drv, file->second->id, range, /*allow_missing=*/true))
+      if (!evict_range_locked(drv, file->id, range, /*allow_missing=*/true))
         return -EINVAL;
-    } else if (range_is_mapped_locked(file->second->id, range)) {
+    } else if (range_is_mapped_locked(range)) {
       return -EINVAL;
     }
     if (!gem.cpu_ptr) {
@@ -1344,10 +1485,11 @@ public:
     if (!drv->gem_va_map(va_address, host, map_size, gem.alloc_flags))
       return -EINVAL;
     gem.installed_vas.push_back(range);
-    signal_syncobj_locked(timeline, timeline_point);
+    if (publish_timeline)
+      signal_syncobj_locked(timeline, timeline_point);
     lock.unlock();
-    if (timeline)
-      notify_syncobj_waiters(file_state);
+    if (publish_timeline && timeline)
+      notify_syncobj_waiters(file);
     return 0;
   }
 
@@ -1359,21 +1501,20 @@ public:
   /// own and cannot report success for a no-op.
   /// @returns Zero when the range was unmapped, `-ENOENT` for an unknown handle in
   ///   this DRM-file namespace, or another negative errno for invalid requests.
-  [[nodiscard]] int gem_unmap(int drm_fd, uint32_t handle, uint64_t va_address, uint64_t map_size,
+  [[nodiscard]] int gem_unmap(const DrmFileToken &file, uint32_t handle, uint64_t va_address,
+                              uint64_t map_size, bool publish_timeline = true,
                               uint32_t timeline_handle = 0, uint64_t timeline_point = 0) {
     std::unique_lock lock(fd_mutex_);
-    auto file = drm_fds_.find(drm_fd);
-    if (file == drm_fds_.end())
+    if (!file)
       return -EBADF;
-    auto file_state = file->second;
-    auto timeline = lookup_syncobj_locked(file_state, timeline_handle);
+    auto timeline = lookup_syncobj_locked(file, timeline_handle);
     if (timeline_handle != 0 && !timeline)
       return -ENOENT;
     auto *drv = dynamic_cast<SimulatedKfd *>(driver());
     if (!drv)
       return -ENODEV;
     auto it = gem_entries_.find(handle);
-    if (it == gem_entries_.end() || it->second.drm_file_id != file->second->id)
+    if (it == gem_entries_.end() || it->second.drm_file_id != file->id)
       return -ENOENT;
     GemEntry &gem = it->second;
     const GemMapping range{va_address, map_size};
@@ -1383,10 +1524,11 @@ public:
     if (!drv->gem_va_unmap(va_address, map_size))
       return -EINVAL;
     std::erase(gem.installed_vas, range);
-    signal_syncobj_locked(timeline, timeline_point);
+    if (publish_timeline)
+      signal_syncobj_locked(timeline, timeline_point);
     lock.unlock();
-    if (timeline)
-      notify_syncobj_waiters(file_state);
+    if (publish_timeline && timeline)
+      notify_syncobj_waiters(file);
     return 0;
   }
 
@@ -1399,26 +1541,26 @@ public:
   /// phantom clear).
   /// @returns Zero when an overlapping range in the calling DRM-file namespace was
   ///   cleared, or a negative errno when no such range exists or the request fails.
-  [[nodiscard]] int gem_clear(int drm_fd, uint64_t va_address, uint64_t map_size,
-                              uint32_t timeline_handle = 0, uint64_t timeline_point = 0) {
+  [[nodiscard]] int gem_clear(const DrmFileToken &file, uint64_t va_address, uint64_t map_size,
+                              bool publish_timeline = true, uint32_t timeline_handle = 0,
+                              uint64_t timeline_point = 0) {
     std::unique_lock lock(fd_mutex_);
-    auto file = drm_fds_.find(drm_fd);
-    if (file == drm_fds_.end())
+    if (!file)
       return -EBADF;
-    auto file_state = file->second;
-    auto timeline = lookup_syncobj_locked(file_state, timeline_handle);
+    auto timeline = lookup_syncobj_locked(file, timeline_handle);
     if (timeline_handle != 0 && !timeline)
       return -ENOENT;
     auto *drv = dynamic_cast<SimulatedKfd *>(driver());
     if (!drv)
       return -ENODEV;
-    if (!evict_range_locked(drv, file->second->id, GemMapping{va_address, map_size},
+    if (!evict_range_locked(drv, file->id, GemMapping{va_address, map_size},
                             /*allow_missing=*/false))
       return -EINVAL;
-    signal_syncobj_locked(timeline, timeline_point);
+    if (publish_timeline)
+      signal_syncobj_locked(timeline, timeline_point);
     lock.unlock();
-    if (timeline)
-      notify_syncobj_waiters(file_state);
+    if (publish_timeline && timeline)
+      notify_syncobj_waiters(file);
     return 0;
   }
 
@@ -1445,13 +1587,12 @@ public:
   /// and munmaps the host mapping entirely under fd_mutex_, so no GemEntry pointer
   /// or driver pointer escapes the lock and a concurrent GEM_VA cannot race the
   /// teardown.
-  int untrack_gem(int drm_fd, uint32_t handle) {
+  int untrack_gem(const DrmFileToken &file, uint32_t handle) {
     std::lock_guard lock(fd_mutex_);
-    auto file = drm_fds_.find(drm_fd);
-    if (file == drm_fds_.end())
+    if (!file)
       return -EBADF;
     auto it = gem_entries_.find(handle);
-    if (it == gem_entries_.end() || it->second.drm_file_id != file->second->id)
+    if (it == gem_entries_.end() || it->second.drm_file_id != file->id)
       return -ENOENT;
     teardown_gem_entry_locked(it->second);
     gem_entries_.erase(it);
@@ -1630,6 +1771,14 @@ private:
 
   std::mutex init_mutex_;
   std::mutex fd_mutex_;
+  /// Serializes synthetic DRM fd-table operations with tracking updates. The
+  /// kernel makes close and duplication atomic with respect to the process fd
+  /// table; this lock extends that atomicity through the interposer's drm_fds_
+  /// bookkeeping so a recycled integer fd cannot acquire an older DRM file's
+  /// namespaces. Its scope is deliberately limited to source lookup plus the
+  /// kernel fd operation and DRM tracking update. Backend teardown, RPC, GEM
+  /// cleanup, and other interposed libc calls must run after it is released.
+  std::mutex drm_fd_lifecycle_mutex_;
   std::mutex remote_mutex_;
   std::unordered_map<int, std::string> sysfs_fds_;
   std::unordered_map<int, DrmFileToken> drm_fds_;
@@ -1723,12 +1872,27 @@ private:
     return evicted_any || allow_missing;
   }
 
-  /// @brief Whether any GEM entry owns a range OVERLAPPING @p range. Caller holds
-  /// fd_mutex_. Used by plain MAP to reject a map that would collide with (not just
-  /// exactly duplicate) an existing range's PTEs.
-  [[nodiscard]] bool range_is_mapped_locked(uint64_t drm_file_id, const GemMapping &range) const {
+  /// @brief Whether any GEM entry owns a range OVERLAPPING @p range in the shared
+  /// simulated GPU page table. Caller holds fd_mutex_. Used by plain MAP to reject
+  /// a map that would collide with an existing range's PTEs, regardless of which
+  /// DRM file owns it.
+  [[nodiscard]] bool range_is_mapped_locked(const GemMapping &range) const {
     for (const auto &[handle, gem] : gem_entries_) {
-      if (gem.drm_file_id != drm_file_id)
+      for (const auto &existing : gem.installed_vas)
+        if (existing.overlaps(range))
+          return true;
+    }
+    return false;
+  }
+
+  /// @brief Whether a GEM entry owned by a DRM file other than @p drm_file_id
+  /// overlaps @p range in the shared simulated GPU page table. Caller holds
+  /// fd_mutex_. Used by REPLACE to reject a foreign collision before evicting any
+  /// mapping owned by the caller.
+  [[nodiscard]] bool range_is_mapped_by_other_drm_file_locked(uint64_t drm_file_id,
+                                                              const GemMapping &range) const {
+    for (const auto &[handle, gem] : gem_entries_) {
+      if (gem.drm_file_id == drm_file_id)
         continue;
       for (const auto &existing : gem.installed_vas)
         if (existing.overlaps(range))
@@ -1844,7 +2008,18 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
     return {true, -1};
   }
 
-  InterposerContext::ctx.track_drm(high_fd, render_minor);
+  std::optional<uint64_t> closed_file_id;
+  try {
+    auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
+    closed_file_id = InterposerContext::ctx.track_drm(high_fd, render_minor);
+  } catch (const std::bad_alloc &) {
+    const int saved_errno = ENOMEM;
+    InterposerContext::real().close(high_fd);
+    errno = saved_errno;
+    return {true, -1};
+  }
+  if (closed_file_id)
+    InterposerContext::ctx.reap_gem_for_drm_file(*closed_file_id);
   return {true, high_fd};
 }
 
@@ -1999,11 +2174,16 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   // handler). Closing the DRM FILE itself, however, is the true backstop: reap any
   // handles still open on it (mirroring the kernel dropping a drm_file's GEM
   // objects) so a leaked/never-GEM_CLOSE'd handle cannot outlive its DRM file.
-  auto drm_close = InterposerContext::ctx.untrack_drm(fd);
+  InterposerContext::DrmUntrackResult drm_close;
+  {
+    auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
+    drm_close = InterposerContext::ctx.untrack_drm(fd);
+    if (drm_close.tracked)
+      InterposerContext::real().close(fd);
+  }
   if (drm_close.tracked) {
     if (drm_close.closed_file_id)
       InterposerContext::ctx.reap_gem_for_drm_file(*drm_close.closed_file_id);
-    InterposerContext::real().close(fd);
     return 0;
   }
   if (InterposerContext::ctx.is_kfd_dup(fd)) {
@@ -2038,7 +2218,9 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
   constexpr unsigned kDrmIoctlNrSyncobjDestroy = _IOC_NR(DRM_IOCTL_SYNCOBJ_DESTROY);
   constexpr unsigned kDrmIoctlNrSyncobjTimelineWait = _IOC_NR(DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT);
 
-  if (InterposerContext::ctx.is_drm(fd)) {
+  auto drm_file_reservation = InterposerContext::ctx.reserve_drm_file_for_ioctl(fd);
+  const auto &drm_file = drm_file_reservation.file();
+  if (drm_file) {
     unsigned nr = _IOC_NR(request);
     unsigned type = _IOC_TYPE(request);
     if (type == kDrmIoctlType && nr == kDrmIoctlNrVersion && arg) {
@@ -2092,7 +2274,7 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       // Mint a stable handle (independent of the fd number) scoped to this DRM file,
       // folding in the alloc flags captured at EXPORT_DMABUF. The caller closes the
       // export fd right after access setup; the handle — not the fd — owns the BO.
-      prime->handle = InterposerContext::ctx.prime_import(prime->fd, fd, sz);
+      prime->handle = InterposerContext::ctx.prime_import(prime->fd, drm_file, sz);
       if (prime->handle == 0) {
         errno = EBADF;
         return -1;
@@ -2102,7 +2284,7 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
     if (type == kDrmIoctlType && nr == kDrmIoctlNrSyncobjCreate && arg) {
       auto *create = static_cast<drm_syncobj_create *>(arg);
       return kfd_ioctl_ret(
-          InterposerContext::ctx.create_syncobj(fd, create->flags, &create->handle));
+          InterposerContext::ctx.create_syncobj(drm_file, create->flags, &create->handle));
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrSyncobjDestroy && arg) {
       auto *destroy = static_cast<drm_syncobj_destroy *>(arg);
@@ -2110,11 +2292,11 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         errno = EINVAL;
         return -1;
       }
-      return kfd_ioctl_ret(InterposerContext::ctx.destroy_syncobj(fd, destroy->handle));
+      return kfd_ioctl_ret(InterposerContext::ctx.destroy_syncobj(drm_file, destroy->handle));
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrSyncobjTimelineWait && arg) {
       return kfd_ioctl_ret(InterposerContext::ctx.wait_syncobj_timeline(
-          fd, static_cast<drm_syncobj_timeline_wait *>(arg)));
+          drm_file, static_cast<drm_syncobj_timeline_wait *>(arg)));
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrAmdgpuInfo && arg) {
       // Service the AMDGPU_INFO queries that real libdrm_amdgpu issues during
@@ -2125,7 +2307,7 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       //   READ_MMR_REG (gb_addr_cfg is mandatory for all families),
       //   VRAM_GTT, MEMORY. Failures (-1) abort device init.
       auto *info = static_cast<drm_amdgpu_info *>(arg);
-      auto gpu_info = interposer_gpu_info(InterposerContext::ctx.drm_render_minor(fd));
+      auto gpu_info = interposer_gpu_info(InterposerContext::ctx.drm_render_minor(drm_file));
       if (!gpu_info) {
         errno = ENODEV;
         return -1;
@@ -2220,7 +2402,7 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       // BEFORE munmapping the host pages, entirely under fd_mutex_ so no state
       // escapes the lock.
       auto *gc = static_cast<drm_gem_close *>(arg);
-      return kfd_ioctl_ret(InterposerContext::ctx.untrack_gem(fd, gc->handle));
+      return kfd_ioctl_ret(InterposerContext::ctx.untrack_gem(drm_file, gc->handle));
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrGemVa && arg) {
       // GEM_VA installs (or tears down) a GPU virtual mapping for a prime-
@@ -2229,10 +2411,11 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       // VAs. We map by GEM handle, lazily mmap the backing pages, and
       // install/remove them in the GPU page table.
       auto *va = static_cast<drm_amdgpu_gem_va *>(arg);
-      // Input fences require the VM update to remain pending until another
-      // operation signals them. This local model only supports synchronous
-      // updates, so reject that contract instead of applying the mapping early.
-      if (va->num_syncobj_handles != 0 || va->input_fence_syncobj_handles != 0) {
+      // The kernel waits synchronously for every input fence before touching the
+      // VM. This model has no input-fence lookup/wait implementation, so reject a
+      // nonzero authoritative count instead of applying the update before its
+      // dependencies. The pointer is unused and ignored when the count is zero.
+      if (va->num_syncobj_handles != 0) {
         errno = EINVAL;
         return -1;
       }
@@ -2247,6 +2430,7 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         errno = ENODEV;
         return -1;
       }
+      const bool publish_timeline = (va->flags & AMDGPU_VM_DELAY_UPDATE) == 0;
       int result = 0;
       switch (va->operation) {
       case AMDGPU_VA_OP_MAP:
@@ -2254,21 +2438,22 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         // REPLACE evicts any prior occupant of the VA range in this DRM-file
         // namespace before installing the new mapping, so closing the old handle
         // cannot later unmap the replacement. MAP rejects a range already in use.
-        result = InterposerContext::ctx.gem_map(fd, va->handle, va->va_address, va->offset_in_bo,
-                                                va->map_size,
-                                                /*replace=*/va->operation == AMDGPU_VA_OP_REPLACE,
-                                                va->vm_timeline_syncobj_out, va->vm_timeline_point);
+        result = InterposerContext::ctx.gem_map(
+            drm_file, va->handle, va->va_address, va->offset_in_bo, va->map_size,
+            /*replace=*/va->operation == AMDGPU_VA_OP_REPLACE, publish_timeline,
+            va->vm_timeline_syncobj_out, va->vm_timeline_point);
         break;
       case AMDGPU_VA_OP_UNMAP:
         // UNMAP requires the supplied handle to own the exact range.
-        result =
-            InterposerContext::ctx.gem_unmap(fd, va->handle, va->va_address, va->map_size,
-                                             va->vm_timeline_syncobj_out, va->vm_timeline_point);
+        result = InterposerContext::ctx.gem_unmap(
+            drm_file, va->handle, va->va_address, va->map_size, publish_timeline,
+            va->vm_timeline_syncobj_out, va->vm_timeline_point);
         break;
       case AMDGPU_VA_OP_CLEAR:
         // CLEAR is handle-agnostic within the calling DRM-file namespace.
-        result = InterposerContext::ctx.gem_clear(
-            fd, va->va_address, va->map_size, va->vm_timeline_syncobj_out, va->vm_timeline_point);
+        result = InterposerContext::ctx.gem_clear(drm_file, va->va_address, va->map_size,
+                                                  publish_timeline, va->vm_timeline_syncobj_out,
+                                                  va->vm_timeline_point);
         break;
       default:
         // Unknown GEM_VA operation — do not claim it succeeded.
@@ -2354,24 +2539,34 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
 
 RJ_INTERPOSER_EXPORT int dup(int oldfd) {
   assert(InterposerContext::real().ready());
-  // Reserve the source backend's open reference BEFORE the syscall so a racing
-  // last-close cannot tear the backend down between the dup and tracking the new
-  // fd (which would leave a valid KFD dup untracked / unreferenced).
-  auto reserved = InterposerContext::ctx.reserve_dup_backend(oldfd);
-  auto drm_file = InterposerContext::ctx.reserve_drm_file(oldfd);
-  int rc = InterposerContext::real().dup(oldfd);
+  std::optional<InterposerContext::DupBackend> reserved;
+  InterposerContext::DrmFileToken drm_file;
+  std::optional<uint64_t> closed_file_id;
+  int rc;
+  {
+    auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
+    // Keep the source kernel fd and its DRM identity paired until dup() and the
+    // tracking update complete. Backend and GEM cleanup run after this scope.
+    reserved = InterposerContext::ctx.reserve_dup_backend(oldfd);
+    drm_file = InterposerContext::ctx.reserve_drm_file(oldfd);
+    rc = InterposerContext::real().dup(oldfd);
+    if (rc >= 0)
+      closed_file_id = InterposerContext::ctx.commit_drm_dup(rc, drm_file);
+  }
   if (rc < 0) {
-    // Syscall failed: roll back the reservation.
+    const int saved_errno = errno;
     if (reserved)
       InterposerContext::ctx.release_backend(*reserved);
     InterposerContext::ctx.release_drm_file_reservation(drm_file);
+    errno = saved_errno;
     return rc;
   }
   if (reserved)
     InterposerContext::ctx.commit_dup(rc, *reserved);
   else
     InterposerContext::ctx.untrack_dup(rc);
-  InterposerContext::ctx.commit_drm_dup(rc, drm_file);
+  if (closed_file_id)
+    InterposerContext::ctx.reap_gem_for_drm_file(*closed_file_id);
   return rc;
 }
 
@@ -2381,7 +2576,7 @@ namespace {
 // dup2/dup3 atomically CLOSE newfd before installing the duplicate, so any
 // tracking/reference newfd previously held must be dropped before the
 // replacement is tracked:
-//   - stale sysfs/DRM tracking for newfd is removed;
+//   - stale sysfs tracking for newfd is removed;
 //   - if newfd was a tracked KFD dup, its reference is released and its stale
 //     kfd_dup_fds_ entry erased (otherwise commit_dup would see the stale entry
 //     and release the newly-reserved backend, leaving the OLD backend recorded);
@@ -2390,7 +2585,7 @@ namespace {
 //     routes to the old backend.
 // Then the replacement is recorded on the reserved source backend.
 void reconcile_dup_target(int newfd, std::optional<InterposerContext::DupBackend> reserved,
-                          const InterposerContext::DrmFileToken &drm_file) {
+                          std::optional<uint64_t> closed_drm_file_id) {
   InterposerContext::ctx.untrack_sysfs(newfd);
   // dup2/dup3 atomically close whatever newfd was, bypassing the close() hook, so
   // every per-fd cleanup close() performs must be mirrored here. Drop any transient
@@ -2399,17 +2594,11 @@ void reconcile_dup_target(int newfd, std::optional<InterposerContext::DupBackend
   // PRIME on the recycled fd number could misapply as the wrong PTE MTYPE. No-op for
   // non-dmabuf fds.
   InterposerContext::ctx.drop_pending_gem_flags(newfd);
-  // If newfd was a DRM render fd still owning live GEM handles, reap them here just as
-  // close() does (untrack_drm + reap_gem_for_drm_file) — otherwise those GemEntry
-  // objects owned by newfd's DRM file leak their PTEs, host mmap, and dup'd dmabuf
-  // fd, and a later commit_dup could re-tag the same number as a KFD dup.
-  auto drm_close = InterposerContext::ctx.untrack_drm(newfd);
-  if (drm_close.closed_file_id)
-    InterposerContext::ctx.reap_gem_for_drm_file(*drm_close.closed_file_id);
+  if (closed_drm_file_id)
+    InterposerContext::ctx.reap_gem_for_drm_file(*closed_drm_file_id);
   InterposerContext::ctx.invalidate_overwritten_kfd_fd(newfd);
   if (reserved)
     InterposerContext::ctx.commit_dup(newfd, *reserved);
-  InterposerContext::ctx.commit_drm_dup(newfd, drm_file);
 }
 } // namespace
 
@@ -2419,17 +2608,32 @@ RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
   // tracking would drop a still-open ref. Forward without touching tracking.
   if (oldfd == newfd)
     return InterposerContext::real().dup2(oldfd, newfd);
-  // Reserve the source backend before the syscall (see dup()).
-  auto reserved = InterposerContext::ctx.reserve_dup_backend(oldfd);
-  auto drm_file = InterposerContext::ctx.reserve_drm_file(oldfd);
-  int rc = InterposerContext::real().dup2(oldfd, newfd);
+  std::optional<InterposerContext::DupBackend> reserved;
+  InterposerContext::DrmFileToken drm_file;
+  std::optional<uint64_t> closed_drm_file_id;
+  int rc;
+  {
+    auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
+    reserved = InterposerContext::ctx.reserve_dup_backend(oldfd);
+    drm_file = InterposerContext::ctx.reserve_drm_file(oldfd);
+    rc = InterposerContext::real().dup2(oldfd, newfd);
+    if (rc >= 0) {
+      auto drm_close = InterposerContext::ctx.untrack_drm(rc);
+      closed_drm_file_id = drm_close.closed_file_id;
+      auto displaced = InterposerContext::ctx.commit_drm_dup(rc, drm_file);
+      if (displaced)
+        closed_drm_file_id = displaced;
+    }
+  }
   if (rc < 0) {
+    const int saved_errno = errno;
     if (reserved)
       InterposerContext::ctx.release_backend(*reserved);
     InterposerContext::ctx.release_drm_file_reservation(drm_file);
+    errno = saved_errno;
     return rc;
   }
-  reconcile_dup_target(rc, reserved, drm_file);
+  reconcile_dup_target(rc, reserved, closed_drm_file_id);
   return rc;
 }
 
@@ -2438,16 +2642,32 @@ RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
   assert(InterposerContext::real().ready());
   // dup3(fd, fd, ...) is required to fail with EINVAL without altering the
   // descriptor; do not mutate tracking before the syscall confirms that.
-  auto reserved = InterposerContext::ctx.reserve_dup_backend(oldfd);
-  auto drm_file = InterposerContext::ctx.reserve_drm_file(oldfd);
-  int rc = InterposerContext::real().dup3(oldfd, newfd, flags);
+  std::optional<InterposerContext::DupBackend> reserved;
+  InterposerContext::DrmFileToken drm_file;
+  std::optional<uint64_t> closed_drm_file_id;
+  int rc;
+  {
+    auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
+    reserved = InterposerContext::ctx.reserve_dup_backend(oldfd);
+    drm_file = InterposerContext::ctx.reserve_drm_file(oldfd);
+    rc = InterposerContext::real().dup3(oldfd, newfd, flags);
+    if (rc >= 0) {
+      auto drm_close = InterposerContext::ctx.untrack_drm(rc);
+      closed_drm_file_id = drm_close.closed_file_id;
+      auto displaced = InterposerContext::ctx.commit_drm_dup(rc, drm_file);
+      if (displaced)
+        closed_drm_file_id = displaced;
+    }
+  }
   if (rc < 0) {
+    const int saved_errno = errno;
     if (reserved)
       InterposerContext::ctx.release_backend(*reserved);
     InterposerContext::ctx.release_drm_file_reservation(drm_file);
+    errno = saved_errno;
     return rc;
   }
-  reconcile_dup_target(rc, reserved, drm_file);
+  reconcile_dup_target(rc, reserved, closed_drm_file_id);
   return rc;
 }
 #endif
@@ -2524,39 +2744,45 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
   const bool is_dupfd = (cmd == F_DUPFD || cmd == F_DUPFD_CLOEXEC);
   std::optional<InterposerContext::DupBackend> reserved;
   InterposerContext::DrmFileToken drm_file;
+  std::optional<uint64_t> closed_file_id;
+  const auto invoke = [&]() -> long {
+    switch (kind) {
+    case FcntlArgKind::Int:
+      return InterposerContext::real().fcntl(fd, cmd, int_arg);
+    case FcntlArgKind::Ptr:
+      return InterposerContext::real().fcntl(fd, cmd, ptr_arg);
+    case FcntlArgKind::None:
+    default:
+      return InterposerContext::real().fcntl(fd, cmd, 0L);
+    }
+  };
+
+  long rc;
   if (is_dupfd) {
+    auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
     reserved = InterposerContext::ctx.reserve_dup_backend(fd);
     drm_file = InterposerContext::ctx.reserve_drm_file(fd);
-  }
-
-  long rc = 0;
-  switch (kind) {
-  case FcntlArgKind::Int:
-    rc = InterposerContext::real().fcntl(fd, cmd, int_arg);
-    break;
-  case FcntlArgKind::Ptr:
-    rc = InterposerContext::real().fcntl(fd, cmd, ptr_arg);
-    break;
-  case FcntlArgKind::None:
-  default:
-    rc = InterposerContext::real().fcntl(fd, cmd, 0L);
-    break;
+    rc = invoke();
+    if (rc >= 0)
+      closed_file_id = InterposerContext::ctx.commit_drm_dup(static_cast<int>(rc), drm_file);
+  } else {
+    rc = invoke();
   }
 
   if (is_dupfd) {
     if (rc < 0) {
-      // Syscall failed: roll back the reservation.
+      const int saved_errno = errno;
       if (reserved)
         InterposerContext::ctx.release_backend(*reserved);
       InterposerContext::ctx.release_drm_file_reservation(drm_file);
+      errno = saved_errno;
     } else {
       if (reserved)
         InterposerContext::ctx.commit_dup(static_cast<int>(rc), *reserved);
       else
         InterposerContext::ctx.untrack_dup(static_cast<int>(rc));
-      // libdrm duplicates the render fd and expects the new descriptor to share
-      // the same DRM-file handle and syncobj namespaces.
-      InterposerContext::ctx.commit_drm_dup(static_cast<int>(rc), drm_file);
+      if (closed_file_id)
+        InterposerContext::ctx.reap_gem_for_drm_file(*closed_file_id);
     }
   }
   return static_cast<int>(rc);
