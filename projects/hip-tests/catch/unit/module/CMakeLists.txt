@@ -20,6 +20,7 @@ set(TEST_SRC
     hipDrvLaunchKernelEx.cc
     hipModuleGetFunctionCount.cc
     hipModuleLoadFatBinary.cc
+    hipLaunchErrorCodeMatrix.cc
 )
 
 if (HIP_PLATFORM MATCHES "amd")
