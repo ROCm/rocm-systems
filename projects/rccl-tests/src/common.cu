@@ -40,6 +40,7 @@ rcclTestsGetAlgoInfo_t rcclTestsGetAlgoInfo = NULL;
 rcclTestsGetProtocolName_t rcclTestsGetProtocolName = NULL;
 rcclTestsGetAlgoName_t rcclTestsGetAlgoName= NULL;
 rcclTestsGetSymkInfo_t rcclTestsGetSymkInfo = NULL;
+rcclTestsGetCollImplInfo_t rcclTestsGetCollImplInfo = NULL;
 
 static void loadRcclSyms() {
   static void* handle = NULL;
@@ -55,6 +56,8 @@ static void loadRcclSyms() {
   rcclTestsGetAlgoName      = (rcclTestsGetAlgoName_t)     dlsym(handle, "rcclGetAlgoName");
   rcclTestsGetProtocolName  = (rcclTestsGetProtocolName_t) dlsym(handle, "rcclGetProtocolName");
   rcclTestsGetSymkInfo      = (rcclTestsGetSymkInfo_t)     dlsym(handle, "rcclSymKGetInfo");
+  // Optional (newer librccl). Left NULL on older libs -> reporting falls back.
+  rcclTestsGetCollImplInfo  = (rcclTestsGetCollImplInfo_t) dlsym(handle, "rcclGetCollImplInfo");
 }
 
 // RCCL_FLOAT8 support
@@ -1110,16 +1113,27 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
           int algo, proto, nchannels;
           const char* algoName = NULL;
           const char* protoName = NULL;
-          bool fromSymk = false;
+          bool haveInfo = false;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
           if (test_ncclVersion >= NCCL_VERSION(2,27,0) && local_register == SYMMETRIC_REGISTER && ctaPolicy != NCCL_CTA_POLICY_ZERO && rcclTestsGetSymkInfo) {
             if (args->collTest->getSymkInfo) {
               TESTCHECK(args->collTest->getSymkInfo(args->comms[0], args->nbytes / wordSize(type), type, op, &algo, &proto, &nchannels));
-              fromSymk = true;
+              haveInfo = true;
             }
           }
 #endif
-          if (!fromSymk) {
+          // Preferred over getAlgoProtoChannels when the symbol is present: reports the
+          // backend actually dispatched (CE / DDA / symmetric / kernel), op/buffer/graph
+          // aware. Absent on older librccl -> fall back below (backward compatible).
+          if (!haveInfo && rcclTestsGetCollImplInfo && args->collTest->getCollImplInfo) {
+            int graphCapturing = (cudaGraphLaunches >= 1) ? 1 : 0;
+            if (args->collTest->getCollImplInfo(args->comms[0], args->nbytes / wordSize(type), type, op,
+                                                args->sendbuffs[0], args->recvbuffs[0], graphCapturing,
+                                                &algo, &proto, &nchannels) == testSuccess) {
+              haveInfo = true;
+            }
+          }
+          if (!haveInfo) {
             TESTCHECK(args->collTest->getAlgoProtoChannels(args->comms[0], args->nbytes / wordSize(type), type, &algo, &proto, &nchannels));
           }
           if (rcclTestsGetAlgoName && rcclTestsGetProtocolName) {
