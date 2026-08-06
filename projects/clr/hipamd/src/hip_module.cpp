@@ -485,6 +485,56 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
   return hipSuccess;
 }
 
+amd::NDRangeContainer makeHipLaunchNDRange(uint32_t gridX, uint32_t gridY, uint32_t gridZ,
+                                           uint32_t blockX, uint32_t blockY, uint32_t blockZ,
+                                           uint32_t globalRemX, uint32_t globalRemY,
+                                           uint32_t globalRemZ, uint32_t clusterX, uint32_t clusterY,
+                                           uint32_t clusterZ, amd::LaunchConfigStatus& status) {
+  const size_t offset[3] = {0, 0, 0};
+  const size_t global[3] = {static_cast<size_t>(gridX) * blockX + globalRemX,
+                            static_cast<size_t>(gridY) * blockY + globalRemY,
+                            static_cast<size_t>(gridZ) * blockZ + globalRemZ};
+  const size_t local[3] = {blockX, blockY, blockZ};
+  const size_t cluster[3] = {clusterX, clusterY, clusterZ};
+
+  status = amd::LaunchConfigStatus::kOk;
+  // HIP style: the global size must not exceed 32 bits, the max the backend can launch.
+  if (global[0] > std::numeric_limits<uint32_t>::max() ||
+      global[1] > std::numeric_limits<uint32_t>::max() ||
+      global[2] > std::numeric_limits<uint32_t>::max()) {
+    status = amd::LaunchConfigStatus::kGlobalOverflow;
+  } else if (clusterX > 1 || clusterY > 1 || clusterZ > 1) {
+    // The grid (== passed grid dims for HIP style) must be divisible by the cluster dims.
+    if ((gridX % clusterX != 0) || (gridY % clusterY != 0) || (gridZ % clusterZ != 0)) {
+      status = amd::LaunchConfigStatus::kClusterIndivisible;
+    }
+  }
+  return amd::NDRangeContainer(3, offset, global, local, cluster);
+}
+
+amd::NDRangeContainer makeLaunchNDRange(size_t globalX, size_t globalY, size_t globalZ,
+                                        uint32_t localX, uint32_t localY, uint32_t localZ,
+                                        uint32_t clusterX, uint32_t clusterY, uint32_t clusterZ,
+                                        amd::LaunchConfigStatus& status) {
+  const size_t offset[3] = {0, 0, 0};
+  const size_t global[3] = {globalX, globalY, globalZ};
+  const size_t local[3] = {localX, localY, localZ};
+  const size_t cluster[3] = {clusterX, clusterY, clusterZ};
+
+  status = amd::LaunchConfigStatus::kOk;
+  // OpenCL style: app supplies global/local directly; a zero block dim is invalid.
+  if (localX == 0 || localY == 0 || localZ == 0) {
+    status = amd::LaunchConfigStatus::kZeroBlock;
+  } else if (clusterX > 1 || clusterY > 1 || clusterZ > 1) {
+    // The grid (global / local) must be divisible by the cluster dims.
+    if (((globalX / localX) % clusterX != 0) || ((globalY / localY) % clusterY != 0) ||
+        ((globalZ / localZ) % clusterZ != 0)) {
+      status = amd::LaunchConfigStatus::kClusterIndivisible;
+    }
+  }
+  return amd::NDRangeContainer(3, offset, global, local, cluster);
+}
+
 hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_params,
                                   hipStream_t hStream, void** kernelParams, void** extra,
                                   hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags = 0,

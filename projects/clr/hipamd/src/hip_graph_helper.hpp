@@ -49,6 +49,22 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
                                    uint32_t gridId, uint32_t numGrids, uint64_t prevGridSum,
                                    uint64_t allGridSum, uint32_t firstDevice);
 
+//! Build an NDRangeContainer for a HIP-style launch (grid*block geometry). Computes the
+//! global size, validates the 32-bit backend limit and cluster divisibility, and reports the
+//! rejection reason (kOk when valid) via \a status so the caller can pick its own hipError_t.
+amd::NDRangeContainer makeHipLaunchNDRange(uint32_t gridX, uint32_t gridY, uint32_t gridZ,
+                                           uint32_t blockX, uint32_t blockY, uint32_t blockZ,
+                                           uint32_t globalRemX, uint32_t globalRemY,
+                                           uint32_t globalRemZ, uint32_t clusterX, uint32_t clusterY,
+                                           uint32_t clusterZ, amd::LaunchConfigStatus& status);
+
+//! Build an NDRangeContainer for an OpenCL-style launch (global/local given directly).
+//! Validates non-zero block and cluster divisibility, reporting the reason via \a status.
+amd::NDRangeContainer makeLaunchNDRange(size_t globalX, size_t globalY, size_t globalZ,
+                                        uint32_t localX, uint32_t localY, uint32_t localZ,
+                                        uint32_t clusterX, uint32_t clusterY, uint32_t clusterZ,
+                                        amd::LaunchConfigStatus& status);
+
 hipError_t ihipMemcpy3DCommand(amd::Command*& command, const hipMemcpy3DParms* p,
                                hip::Stream* stream);
 

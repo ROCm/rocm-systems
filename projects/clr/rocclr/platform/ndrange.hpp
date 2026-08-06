@@ -264,6 +264,12 @@ class NDRangeContainer {
   //! Return the cluster worksize.
   const NDRange& cluster() const { return cluster_; }
   NDRange& cluster() { return cluster_; }
+
+  //! Fold cluster dimensions carried by the kernel's metadata into this container.
+  //! When the kernel specifies a cluster size (> 1), the grid (global/local) must be
+  //! divisible by it; on success the cluster dims are updated. Returns false if the
+  //! grid is not divisible by the kernel's cluster dimensions (invalid launch).
+  bool UpdateNumClustersFromKernel(const device::Kernel* devKernel);
 };
 
 
