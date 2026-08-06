@@ -1563,6 +1563,8 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Invalid size to validate \n");
     return false;
   }
+
+  // So we do the validation by explicitly getting the ELF headers
   const amd::Elf64_Ehdr* ehdr = reinterpret_cast<const amd::Elf64_Ehdr*>(binary);
   uint16_t type = ehdr->e_type;
 
