@@ -460,7 +460,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     }
 
     /****************************************/
-    /* amdsmi_set_gpu_memory_partition(...) */
+    /* amdsmi_set_gpu_memory_partition_mode(...) */
     /****************************************/
     // Verify api support checking functionality is working
     amdsmi_memory_partition_type_t null_memory_partition = {};
@@ -468,7 +468,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
                        VERB(STANDARD));
     err = amdsmi_set_gpu_memory_partition_mode(processor_handles_[dv_ind], null_memory_partition);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-    std::cout << "\t**amdsmi_set_gpu_memory_partition(amdsmi_set_gpu_memory_partition_mode"
+    std::cout << "\t**amdsmi_set_gpu_memory_partition_mode"
               << "(processor_handles_[" << dv_ind
               << "], nullptr): " << smi_amdgpu_get_status_string(err, false) << "\n";
     // Note: new_memory_partition is not set
@@ -665,13 +665,13 @@ void TestMemoryPartitionReadWrite::Run(void) {
                 << "Returning memory partition to: " << memoryPartitionString(new_memory_partition)
                 << std::endl;
     }
-    DISPLAY_AMDSMI_API("amdsmi_set_gpu_memory_partition", "gpu=" + std::to_string(dv_ind),
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_memory_partition_mode", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
-    ret = amdsmi_set_gpu_memory_partition(processor_handles_[dv_ind], new_memory_partition);
+    ret = amdsmi_set_gpu_memory_partition_mode(processor_handles_[dv_ind], new_memory_partition);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     IF_VERB(STANDARD) {
       std::cout << "\t**"
-                << "amdsmi_set_gpu_memory_partition(processor_handles_[" << dv_ind << "], "
+                << "amdsmi_set_gpu_memory_partition_mode(processor_handles_[" << dv_ind << "], "
                 << orig_memory_partition << "): " << smi_amdgpu_get_status_string(ret, false)
                 << std::endl;
     }

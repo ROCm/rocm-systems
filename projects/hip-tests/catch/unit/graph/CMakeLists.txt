@@ -132,6 +132,7 @@ set(TEST_SRC
   hipGraphNodeGetEnabled.cc
   hipGraphExecDestroy.cc
   hipGraphUpload.cc
+  hipGraphCrossDeviceLaunch.cc
   hipGraphKernelNodeCopyAttributes.cc
   hipGraphCycle.cc
   hipGraphPerf.cc
@@ -147,6 +148,7 @@ set(TEST_SRC
   hipDeviceGetGraphMemAttribute.cc
   hipDeviceGraphMemTrim.cc
   hipDrvGraphExecMemsetNodeSetParams.cc
+  hipGraphMultiDevice.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd")

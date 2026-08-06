@@ -325,22 +325,38 @@ set(AMDSMI_SYSTEM_PYTHON_ABI
     FORCE
 )
 
-# Install the module into the system interpreter's site-packages for the
-# DEB/RPM. Skipped when building the wheel: the wheel packages its own module
-# tree, and on a manylinux-style build host the detected sitelib can be a
-# container-internal path (e.g. /opt/python/cp312-cp312/...) that exists on no
-# target system, so a cpack run in that configuration would ship files nowhere.
+# Install the module into the system site-packages for the DEB/RPM (skipped for
+# the wheel, which ships its own tree). AMDSMI_SYSTEM_PYTHON_SITELIB is absolute,
+# so it is redirected only by DESTDIR -- which CPack and distro packagers set but
+# a plain `cmake --install` does not. Copy at install time and only when DESTDIR
+# is set; a direct install would otherwise hit the host's real /usr and EACCES.
+# Direct installs still get the module via the share/amd_smi copy below.
 if(NOT BUILD_PYTHON_WHEEL)
-    install(
-        DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}
-        DESTINATION ${AMDSMI_SYSTEM_PYTHON_SITELIB}
-        COMPONENT dev
-        # Pin permissions so a permissive build umask cannot leave group/other
-        # writable .py files under a system directory (files 0644, dirs 0755).
+    set(_amdsmi_module_src "${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}")
+    set(_amdsmi_sitelib "${AMDSMI_SYSTEM_PYTHON_SITELIB}")
+    # Pin permissions so a permissive build umask cannot leave group/other
+    # writable .py files under a system directory (files 0644, dirs 0755).
+    string(
+        CONFIGURE
+            [[
+if("$ENV{DESTDIR}" STREQUAL "")
+    message(STATUS "amdsmi: DESTDIR unset; skipping system site-packages install (module still staged under share/amd_smi)")
+else()
+    file(
+        INSTALL
+        "@_amdsmi_module_src@"
+        DESTINATION "@_amdsmi_sitelib@"
         FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
         DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
         PATTERN "libamd_smi*.so" EXCLUDE
     )
+endif()
+]]
+        _amdsmi_sitelib_install_code
+        @ONLY
+        ESCAPE_QUOTES
+    )
+    install(CODE "${_amdsmi_sitelib_install_code}" COMPONENT dev)
 endif()
 
 # Also stage the module under share/amd_smi (the historical location). site-
