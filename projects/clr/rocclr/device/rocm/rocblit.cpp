@@ -2929,17 +2929,6 @@ bool KernelBlitManager::WriteBufferBatch(
 
     while (remaining_size > 0) {
       const size_t max_staging_size = std::min(remaining_size, StagingXferSize);
-      // Flush before getBuffer can rotate the staging pool past queued copies that still use it.
-      if ((staging_batch_size + max_staging_size) > StagingXferSize) {
-        const bool result = ShaderCopyBufferBatchRaw(staging_copy_ops);
-        staging_copy_ops.clear();
-        staging_batch_size = 0;
-        if (!result) {
-          gpu().releaseGpuMemoryFence();
-          gpu().command()->ReleasePinnedMemory();
-          return false;
-        }
-      }
 
       BufferState buffer_state = {0};
       getBuffer(static_cast<const_address>(src_addr + copy_offset), remaining_size, enable_pin,
@@ -3034,20 +3023,6 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
 
     while (remaining_size > 0) {
       const size_t max_staging_size = std::min(remaining_size, StagingXferSize);
-      if ((staging_batch_size + max_staging_size) > StagingXferSize) {
-        if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
-          gpu().releaseGpuMemoryFence();
-          gpu().command()->ReleasePinnedMemory();
-          return false;
-        }
-        gpu().Barriers().WaitCurrent();
-        for (const StagingReadBack& read_back : staging_read_backs) {
-          memcpy(read_back.dst, read_back.staging, read_back.size);
-        }
-        staging_copy_ops.clear();
-        staging_read_backs.clear();
-        staging_batch_size = 0;
-      }
 
       BufferState buffer_state = {0};
       getBuffer(static_cast<const_address>(dst_addr + copy_offset), remaining_size, true,
