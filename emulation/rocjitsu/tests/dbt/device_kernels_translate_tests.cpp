@@ -548,7 +548,11 @@ TEST(KernelDescriptorTranslator, RdnaWave64UsesAmdhsaDescriptorVgprEncoding) {
   }
 }
 
-// TODO: https://github.com/ROCm/rocm-systems/issues/9791
+// TODO: Re-enable after updating the stale entry-offset assertions.
+// BinaryTranslator replaces .text wholesale, so the first descriptor prologue
+// may validly remain at offset 0. Validate the prologue and its branch to the
+// relocated body instead of requiring the translated entry offset to increase.
+// https://github.com/ROCm/rocm-systems/issues/9791
 TEST(BinaryTranslatorE2E,
      DISABLED_DescriptorPrologueRedirectsEntryWithoutOverwritingOriginalEntry) {
   Executable exec(kernel_path("vector_add"));
