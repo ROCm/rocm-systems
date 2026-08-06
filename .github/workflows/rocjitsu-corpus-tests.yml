@@ -309,6 +309,7 @@ jobs:
       - name: Install corpus test dependencies
         if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
+        shell: bash
         run: |
           uv pip install --system -r requirements.txt
           ROCM_SDK_DEVICE_PACKAGES=()
