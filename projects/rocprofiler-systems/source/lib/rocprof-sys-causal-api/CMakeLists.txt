@@ -3,10 +3,8 @@
 
 # ------------------------------------------------------------------------------#
 #
-# rocprofiler-systems causal API library: minimal, near-zero-overhead library
-# backing the ROCPROFSYS_CAUSAL_* macros. An application links this directly
-# without pulling in the full profiler backend; librocprof-sys-dl.so registers
-# the real callbacks at runtime when preloaded.
+# rocprofiler-systems causal API: minimal library backing ROCPROFSYS_CAUSAL_*;
+# linked directly by apps, with librocprof-sys-dl.so providing the real callbacks.
 #
 # ------------------------------------------------------------------------------#
 
