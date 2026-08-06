@@ -22,6 +22,7 @@
 #include "dda_init_detail.h" // nccl_dda_detail::kDdaFabricLLArMaxBlocks
 #include "debug.h"
 #include "fabric_gpu_barrier.h" // meta::comms::kDdaMaxNranks
+#include "param.h"
 
 #include <cuda_runtime.h>
 
@@ -29,6 +30,24 @@
 #include <cstddef>
 #include <cstdint>
 #include <utility>
+
+// Tier selection for the LL AllReduce lives here rather than in collectives.cc,
+// so that file has a single call site (ncclAllReduceDdaFabricLL) and does not
+// need to know that the tier has two variants.
+//
+// DDA_LL / DDA_LL_THRESHOLD are shared with the AllGather, AllToAll and
+// ReduceScatter LL tiers, so they stay defined in collectives.cc and are only
+// declared here. The two-shot knobs are AllReduce-only and are defined here.
+RCCL_PARAM_DECLARE(DdaLL);
+RCCL_PARAM_DECLARE(DdaLLThreshold);
+
+// Two-shot LL tier: transports one shard per rank instead of the whole message.
+// Left inert by default (threshold 0 matches no message) until its range is
+// tuned. Raising DDA_LL_TWOSHOT_THRESHOLD is what opts a run into it; setting
+// DDA_LL_THRESHOLD=0 alongside is what hands the same sizes over from the
+// one-shot tier.
+RCCL_PARAM(DdaLLTwoShot, "DDA_LL_TWOSHOT", 1);
+RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(0));
 
 namespace {
 
@@ -175,10 +194,10 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
   return ncclSuccess;
 }
 
-} // namespace
-
-bool ncclAllReduceDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                      ncclDataType_t datatype, ncclRedOp_t op) {
+// Shape/resource eligibility for the one-shot variant, independent of whether
+// the tier is switched on for this size.
+static bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                   ncclDataType_t datatype, ncclRedOp_t op) {
   (void)sendbuff;
   (void)recvbuff;
   if (comm == nullptr || comm->bootstrap == nullptr) {
@@ -217,23 +236,9 @@ bool ncclAllReduceDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
   return true;
 }
 
-ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                      ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
-  (void)op;
-  switch (datatype) {
-  case ncclFloat32:
-    return ncclAllReduceDdaFabricLLTyped<float>(sendbuff, recvbuff, count, comm, stream);
-  case ncclFloat16:
-    return ncclAllReduceDdaFabricLLTyped<half>(sendbuff, recvbuff, count, comm, stream);
-  case ncclBfloat16:
-    return ncclAllReduceDdaFabricLLTyped<bf16>(sendbuff, recvbuff, count, comm, stream);
-  default:
-    return ncclInvalidArgument;
-  }
-}
-
-bool ncclAllReduceDdaFabricLLTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                             ncclDataType_t datatype, ncclRedOp_t op) {
+// Shape/resource eligibility for the two-shot variant.
+static bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                   ncclDataType_t datatype, ncclRedOp_t op) {
   (void)sendbuff;
   (void)recvbuff;
   if (comm == nullptr || comm->bootstrap == nullptr) {
@@ -276,20 +281,70 @@ bool ncclAllReduceDdaFabricLLTwoShotEligible(ncclComm* comm, const void* sendbuf
   return true;
 }
 
-ncclResult_t ncclAllReduceDdaFabricLLTwoShot(const void* sendbuff, void* recvbuff, size_t count,
-                                             ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
-                                             cudaStream_t stream) {
-  (void)op;
-  switch (datatype) {
-  case ncclFloat32:
-    return ncclAllReduceDdaFabricLLTwoShotTyped<float>(sendbuff, recvbuff, count, comm, stream);
-  case ncclFloat16:
-    return ncclAllReduceDdaFabricLLTwoShotTyped<half>(sendbuff, recvbuff, count, comm, stream);
-  case ncclBfloat16:
-    return ncclAllReduceDdaFabricLLTwoShotTyped<bf16>(sendbuff, recvbuff, count, comm, stream);
-  default:
-    return ncclInvalidArgument;
+// Tier selection: enabled, within this tier's threshold, and shape-eligible.
+// One-shot is tested first, so a message that qualifies for both takes it; a run
+// hands sizes over to two-shot by lowering DDA_LL_THRESHOLD and raising
+// DDA_LL_TWOSHOT_THRESHOLD.
+static bool ddaLLArOneShotSelected(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                   ncclDataType_t datatype, ncclRedOp_t op) {
+  return rcclParamDdaLL() != 0 && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLLThreshold() &&
+         ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op);
+}
+
+static bool ddaLLArTwoShotSelected(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                   ncclDataType_t datatype, ncclRedOp_t op) {
+  return rcclParamDdaLLTwoShot() != 0 && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLLTwoShotThreshold() &&
+         ddaLLArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op);
+}
+
+} // namespace
+
+bool ncclAllReduceDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                      ncclDataType_t datatype, ncclRedOp_t op) {
+  return ddaLLArOneShotSelected(comm, sendbuff, recvbuff, count, datatype, op) ||
+         ddaLLArTwoShotSelected(comm, sendbuff, recvbuff, count, datatype, op);
+}
+
+ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                      ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+  const size_t bytes = count * ncclTypeSize(datatype);
+
+  if (ddaLLArOneShotSelected(comm, sendbuff, recvbuff, count, datatype, op)) {
+    INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL one-shot path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+         comm->nRanks, comm->nNodes, count, (int)datatype, bytes);
+    (void)op;
+    switch (datatype) {
+    case ncclFloat32:
+      return ncclAllReduceDdaFabricLLTyped<float>(sendbuff, recvbuff, count, comm, stream);
+    case ncclFloat16:
+      return ncclAllReduceDdaFabricLLTyped<half>(sendbuff, recvbuff, count, comm, stream);
+    case ncclBfloat16:
+      return ncclAllReduceDdaFabricLLTyped<bf16>(sendbuff, recvbuff, count, comm, stream);
+    default:
+      return ncclInvalidArgument;
+    }
   }
+
+  if (ddaLLArTwoShotSelected(comm, sendbuff, recvbuff, count, datatype, op)) {
+    INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL two-shot path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+         comm->nRanks, comm->nNodes, count, (int)datatype, bytes);
+    switch (datatype) {
+    case ncclFloat32:
+      return ncclAllReduceDdaFabricLLTwoShotTyped<float>(sendbuff, recvbuff, count, comm, stream);
+    case ncclFloat16:
+      return ncclAllReduceDdaFabricLLTwoShotTyped<half>(sendbuff, recvbuff, count, comm, stream);
+    case ncclBfloat16:
+      return ncclAllReduceDdaFabricLLTwoShotTyped<bf16>(sendbuff, recvbuff, count, comm, stream);
+    default:
+      return ncclInvalidArgument;
+    }
+  }
+
+  // Callers gate on ncclAllReduceDdaFabricLLEligible, which is the disjunction of
+  // the two selectors above, so neither matching means the caller skipped it.
+  WARN("ncclAllReduceDdaFabricLL called for a message no LL tier claims: count=%zu datatype=%d bytes=%zu", count,
+       (int)datatype, bytes);
+  return ncclInternalError;
 }
 
 uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
