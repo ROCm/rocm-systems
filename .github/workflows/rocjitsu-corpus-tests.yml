@@ -26,7 +26,7 @@ on:
       corpus_ref:
         description: "Branch, tag, or SHA containing the gfx1250 corpus suites"
         # Last updated on 2026/08/06.
-        default: "7aa806bc0166c5428e0eaee2c0bff47e18769c9e"
+        default: "94484758fad8460409fadb696ccc387c95c922c9"
         required: true
 
 concurrency:
@@ -46,7 +46,7 @@ env:
   ROCJITSU_DBT_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-dbt-test-corpus
   ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
-  ROCJITSU_DBT_CORPUS_REF: 7aa806bc0166c5428e0eaee2c0bff47e18769c9e
+  ROCJITSU_DBT_CORPUS_REF: 94484758fad8460409fadb696ccc387c95c922c9
   ROCJITSU_DBT_SHA_FRAGMENTS: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/fragments
   ROCJITSU_DBT_SHA_MANIFEST: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/gfx1250-b0-a0-sha-pairs.json
   ROCM_SDK_VERSION: 7.15.0a20260728
