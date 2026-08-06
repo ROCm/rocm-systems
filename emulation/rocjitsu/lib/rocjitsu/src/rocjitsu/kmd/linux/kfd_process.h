@@ -205,6 +205,15 @@ public:
     /// the session, so numeric PID reuse cannot turn process exit into EINVAL.
     bool target_exited = false;
 
+    /// @brief The target's KfdProcess has been observed at least once.
+    /// @details Distinguishes the two ways a target can have no KfdProcess.
+    /// The real driver has only one: DBG_TRAP_ENABLE calls kfd_create_process,
+    /// so from then on the kfd_process exists and a failed lookup means the
+    /// process is gone (-ESRCH). Here the KfdProcess appears only when the
+    /// inferior opens /dev/kfd, which can be after the debugger attaches, so
+    /// "not up yet" and "torn down" are otherwise indistinguishable.
+    bool saw_kfd_process = false;
+
     /// @brief Pins the debugger process identity and reports debugger exit.
     /// @details Mirrors the kernel's debugger-process notifier: the session is
     /// disabled when the debugger task exits, even if the target remains alive.

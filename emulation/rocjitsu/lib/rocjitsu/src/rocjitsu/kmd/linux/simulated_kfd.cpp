@@ -2313,6 +2313,8 @@ int SimulatedKfd::runtime_enable_ioctl(KfdProcess &proc, void *arg) {
   // Whether a debugger was already attached when the runtime came up, decided
   // under the same lock that DBG_TRAP_ENABLE uses to publish a session.
   bool notify_debugger = false;
+  // Same decision for the disable direction, which reports the same way.
+  bool notify_disable = false;
   {
     // Scoped so neither lock is held across the handshake wait below.
     std::lock_guard<std::mutex> op_lock(proc.op_mutex_);
@@ -2353,20 +2355,24 @@ int SimulatedKfd::runtime_enable_ioctl(KfdProcess &proc, void *arg) {
       auto session = debug_sessions_.find(proc.client_pid());
       notify_debugger = session != debug_sessions_.end() && session->second.enabled;
     } else {
-      // NOTE: deliberately silent. Real KFD notifies the debugger of the
-      // !disabled -> disabled transition, and rocdbgapi expects it, but raising
-      // EC_PROCESS_RUNTIME here means blocking the exiting inferior on an ack
-      // that a detaching debugger never sends -- every teardown then stalls on
-      // the liveness deadline and gdb.rocm/multi-inferior-stress.exp fails
-      // 10/10 (measured). Notifying disable needs a non-blocking delivery path,
-      // not the enable handshake reused.
+      // Report the !disabled -> disabled transition. rocdbgapi needs it to stop
+      // driving the queues of a process whose runtime has gone away: those ops
+      // are gated on the runtime being enabled and answer -EPERM, which it
+      // turns into a fatal os_driver::resume_queues failure and GDB into an
+      // internal error (gdb.rocm/multi-inferior-stress.exp). Only report a real
+      // transition -- a second disable is not one, and rocdbgapi rejects an
+      // event whose runtime_state has not moved as spurious.
+      notify_disable = proc.runtime_state_.enabled;
       proc.runtime_state_ = KfdProcess::RuntimeState{};
       args->capabilities_mask = 0;
     }
   }
 
-  if (notify_debugger)
-    runtime_enable_debugger_handshake(proc.client_pid());
+  // Ordered after the state reset above so that the debugger's follow-up
+  // QUERY_EXCEPTION_INFO reads the new state, and outside the lock scope
+  // because the handshake blocks.
+  if (notify_debugger || notify_disable)
+    runtime_debugger_handshake(proc.client_pid(), /*enabling=*/notify_debugger);
   return 0;
 }
 
@@ -3293,7 +3299,18 @@ void SimulatedKfd::cancel_runtime_handshake(pid_t target_pid) {
 /// that a merely slow one is never cut off, and noisy when it does fire so the
 /// timeout is never again mistaken for correct behaviour. A debugger that
 /// detaches or dies cancels the wait explicitly and does not pay it at all.
-void SimulatedKfd::runtime_enable_debugger_handshake(pid_t target_pid) {
+///
+/// The disable direction reports the transition and returns. kfd_chardev.c's
+/// runtime_disable does wait there -- it raises EC_PROCESS_RUNTIME and blocks on
+/// runtime_enable_sema, the same way runtime_enable does -- and this deliberately
+/// does not follow it, because the two are not in the same position. The kernel
+/// blocks a task; here the ioctl is served on the daemon's connection thread for
+/// that client, and holding it parks the daemon's side of a process that is
+/// already exiting. Doing it anyway destabilises the daemon-backed tests
+/// (RemoteDriverDbg*) with no measured benefit: the -EPERM storm this was first
+/// written for is answered where it is raised, by the queue gate letting a
+/// suspend or resume of already-destroyed queues through.
+void SimulatedKfd::runtime_debugger_handshake(pid_t target_pid, bool enabling) {
   // The caller already decided, under debug_sessions_mutex_, that a debugger is
   // attached; re-testing here would just re-open the window it closed. Only the
   // self-debug shape still needs distinguishing.
@@ -3310,7 +3327,7 @@ void SimulatedKfd::runtime_enable_debugger_handshake(pid_t target_pid) {
   // have to come from the thread that is, by construction, blocked here. The
   // event is raised so the state is observable; waiting for a reply that can
   // never arrive would just burn the liveness deadline.
-  if (self_debugged)
+  if (self_debugged || !enabling)
     return;
 
   constexpr auto kHandshakeDeadline = std::chrono::seconds(60);
@@ -3365,6 +3382,41 @@ int SimulatedKfd::debug_query_exception_info(pid_t target_pid,
   }
   return 0;
 }
+
+namespace {
+
+/// @brief Whether a suspend/resume names only queues the process has destroyed.
+/// @details Used to tell a request that cannot touch hardware from one that
+/// can, so the runtime-down gate only refuses the latter. Any other op, an
+/// absent process, or an empty request answers false, leaving the kernel's
+/// behaviour in place.
+bool queues_all_dead(KfdProcess *proc, const kfd_ioctl_dbg_trap_args &args) {
+  constexpr uint32_t kQueueStatus =
+      (uint32_t{1} << KFD_DBG_QUEUE_ERROR_BIT) | (uint32_t{1} << KFD_DBG_QUEUE_INVALID_BIT);
+  if (proc == nullptr)
+    return false;
+  uint32_t count = 0;
+  uint64_t array_ptr = 0;
+  if (args.op == KFD_IOC_DBG_TRAP_SUSPEND_QUEUES) {
+    count = args.suspend_queues.num_queues;
+    array_ptr = args.suspend_queues.queue_array_ptr;
+  } else if (args.op == KFD_IOC_DBG_TRAP_RESUME_QUEUES) {
+    count = args.resume_queues.num_queues;
+    array_ptr = args.resume_queues.queue_array_ptr;
+  } else {
+    return false;
+  }
+  if (count == 0 || array_ptr == 0)
+    return false;
+  const auto *queue_ids = reinterpret_cast<const uint32_t *>(static_cast<uintptr_t>(array_ptr));
+  std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+  for (uint32_t index = 0; index < count; ++index)
+    if (proc->queue_snapshot_map_.contains(queue_ids[index] & ~kQueueStatus))
+      return false;
+  return true;
+}
+
+} // namespace
 
 // in real kernel, amd/amdkfd/kfd_chardev.c kfd_ioctl_set_debug_trap
 int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_mem_fd,
@@ -3486,6 +3538,8 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
   std::shared_ptr<KfdProcess> target_ref =
       self_debug ? nullptr : find_process_by_client_pid(target_pid);
   KfdProcess *target_proc = self_debug ? &caller : target_ref.get();
+  if (target_proc != nullptr && session_it != debug_sessions_.end())
+    session_it->second.saw_kfd_process = true;
 
   // Live runtime-enable state, set by ROCr's AMDKFD_IOC_RUNTIME_ENABLE on the
   // inferior; false until the inferior connects and enables its runtime.
@@ -3519,8 +3573,37 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
   case KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH:
   case KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH:
   case KFD_IOC_DBG_TRAP_SET_FLAGS:
-    if (!runtime_enabled)
-      return -EPERM;
+    if (!runtime_enabled) {
+      // A target that had a KfdProcess and no longer has one is a process on
+      // its way out, not a live one refusing the op. The real driver cannot
+      // reach this gate in that state at all: its pid lookup fails first and
+      // returns -ESRCH, which rocdbgapi handles (PROCESS_EXITED -> invalidate
+      // the queues and move on). -EPERM is what it escalates to a fatal
+      // os_driver::resume_queues failure, so getting this distinction wrong
+      // crashes GDB during teardown (gdb.rocm/multi-inferior-stress.exp).
+      if (target_proc == nullptr && session_it != debug_sessions_.end() &&
+          session_it->second.saw_kfd_process)
+        return -ESRCH;
+      // A suspend or resume naming only queues the process has already
+      // destroyed asks nothing of the hardware, and answering it is the only
+      // way rocdbgapi learns to drop them: the per-queue INVALID bit the normal
+      // path writes back. It cannot learn it any other way once the runtime is
+      // down, because its queue-list sweep is gated on the runtime being up
+      // (process.cpp update_queues), and it escalates the -EPERM to a fatal
+      // rather than retiring the queue.
+      //
+      // Upstream refuses this unconditionally, and never has to answer it: its
+      // teardown does not leave a debugger holding a suspended queue across
+      // runtime shutdown, so the request does not arise. Ours does, and the
+      // narrow shape -- no runtime, and not one live queue among those named --
+      // is exactly the one where refusing costs information and buys nothing.
+      // Anything still live keeps the kernel's answer.
+      if (!queues_all_dead(target_proc, *args))
+        return -EPERM;
+      util::Logger::vm("DBG_TRAP op=", args->op, " for pid=", target_pid,
+                       " names only destroyed queues and the runtime is down; reporting them "
+                       "invalid instead of -EPERM");
+    }
     break;
   default:
     break;

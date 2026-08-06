@@ -650,6 +650,93 @@ TEST_F(KfdIoctlTest, DbgTrapQueryRuntimeExceptionInfoClampsAndPopulates) {
                           [](uint8_t byte) { return byte == 0xA5; }));
 }
 
+// rocdbgapi has to learn that a process's runtime went away. Otherwise it keeps
+// driving queues of a process in teardown, and those ops are gated on the
+// runtime being enabled: they answer -EPERM, which rocdbgapi escalates to a
+// fatal os_driver::resume_queues failure and GDB to an internal error
+// (gdb.rocm/multi-inferior-stress.exp).
+//
+// The target here debugs itself, which is the one shape that reports without
+// blocking: the ack would have to come from the thread already inside this
+// ioctl. That keeps the test to what a single process can observe -- the event,
+// the notifier, and the toggled state rocdbgapi reads back.
+TEST_F(KfdIoctlTest, RuntimeDisableReportsProcessRuntimeTransition) {
+  const auto pid = static_cast<uint32_t>(getpid());
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = pid;
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = KFD_EC_MASK(EC_PROCESS_RUNTIME);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  // Attaching to an already-enabled runtime reports it through the returned
+  // runtime_info rather than the notifier, but drain anyway so the read below
+  // can only be answering the disable.
+  uint64_t drained = 0;
+  (void)::read(notifier, &drained, sizeof(drained));
+
+  kfd_ioctl_runtime_enable_args disable{};
+  disable.mode_mask = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &disable), 0);
+
+  uint64_t notifications = 0;
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)))
+      << strerror(errno);
+  EXPECT_EQ(notifications, 1u);
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = pid;
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  query.query_debug_event.exception_mask = KFD_EC_MASK(EC_PROCESS_RUNTIME);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_NE(query.query_debug_event.exception_mask & KFD_EC_MASK(EC_PROCESS_RUNTIME), 0u);
+
+  // The state behind the event has to have toggled: rocdbgapi treats a
+  // runtime_state that reads the same as before as a spurious runtime
+  // exception and aborts.
+  kfd_runtime_info info{};
+  kfd_ioctl_dbg_trap_args info_query{};
+  info_query.pid = pid;
+  info_query.op = KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO;
+  info_query.query_exception_info.exception_code = EC_PROCESS_RUNTIME;
+  info_query.query_exception_info.info_ptr = reinterpret_cast<uint64_t>(&info);
+  info_query.query_exception_info.info_size = sizeof(info);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &info_query), 0);
+  EXPECT_EQ(info.runtime_state, static_cast<uint32_t>(DEBUG_RUNTIME_STATE_DISABLED));
+
+  // The gate the report exists to warn about still stands for anything that
+  // would touch hardware.
+  kfd_ioctl_dbg_trap_args launch_mode{};
+  launch_mode.pid = pid;
+  launch_mode.op = KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE;
+  launch_mode.launch_mode.launch_mode = KFD_DBG_TRAP_WAVE_LAUNCH_MODE_HALT;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &launch_mode), -EPERM);
+
+  // A resume naming a queue the process does not have is the one shape that is
+  // answered instead: it asks nothing of the hardware, and the per-queue INVALID
+  // bit is how rocdbgapi learns to retire the queue rather than escalating the
+  // refusal to a fatal error.
+  constexpr uint32_t kQueueInvalid = uint32_t{1} << KFD_DBG_QUEUE_INVALID_BIT;
+  uint32_t queue_id = 7;
+  kfd_ioctl_dbg_trap_args resume{};
+  resume.pid = pid;
+  resume.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
+  resume.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  resume.resume_queues.num_queues = 1;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &resume), 0);
+  EXPECT_NE(queue_id & kQueueInvalid, 0u);
+}
+
 TEST_F(KfdIoctlTest, DbgTrapAttachDetachConfigOpsValidateAndResetState) {
   kfd_ioctl_runtime_enable_args rt{};
   rt.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;

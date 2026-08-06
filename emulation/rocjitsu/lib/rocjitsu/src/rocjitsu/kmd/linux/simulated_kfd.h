@@ -286,7 +286,11 @@ private:
   int debug_query_exception_info(pid_t target_pid,
                                  kfd_ioctl_dbg_trap_query_exception_info_args &args);
   void raise_process_debug_event(pid_t target_pid, uint64_t exception_mask);
-  void runtime_enable_debugger_handshake(pid_t target_pid);
+  /// @brief Report an EC_PROCESS_RUNTIME transition and block for the ack.
+  /// @param enabling Direction of the transition, which selects the liveness
+  ///        deadline: an inferior coming up can afford to wait out a busy
+  ///        debugger, one tearing down cannot.
+  void runtime_debugger_handshake(pid_t target_pid, bool enabling);
 
   std::optional<amdgpu::ComputeUnitCore::TrapHandlerConfig>
   resolve_trap_handler(const amdgpu::Wavefront &wf, uint32_t gpu_ordinal);
