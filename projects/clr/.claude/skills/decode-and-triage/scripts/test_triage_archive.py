@@ -100,5 +100,61 @@ class ReplayMaskTests(unittest.TestCase):
         self.assertEqual(assignments, [], "ROCR_VISIBLE_DEVICES must not be set")
 
 
+def _bash_at_least(major: int, minor: int) -> bool:
+    """The scripts target Linux bash. Expanding an empty array under `set -u`
+    is an error before bash 4.4, which the macOS system bash still is."""
+    bash = shutil.which("bash")
+    if not bash:
+        return False
+    out = subprocess.run(
+        [bash, "-c", "echo ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    try:
+        got_major, got_minor = (int(part) for part in out.split(".")[:2])
+    except ValueError:
+        return False
+    return (got_major, got_minor) >= (major, minor)
+
+
+@unittest.skipUnless(_bash_at_least(4, 4), "needs bash >= 4.4 (Linux target)")
+class EnsurePlaybackTests(unittest.TestCase):
+    def test_existing_playback_is_returned_outside_a_clr_tree(self) -> None:
+        """A provided binary must be usable where no CLR source tree exists.
+
+        The script runs under `set -e`, so a helper whose last statement is a
+        false conditional aborts it before the path is printed, and the caller
+        reports a build failure even though the binary was there all along.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            shutil.copy(SCRIPT_DIR / "ensure_playback.sh", scripts)
+
+            play = root / "bin" / "hrr-playback"
+            play.parent.mkdir()
+            play.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            play.chmod(0o755)
+
+            env = dict(os.environ)
+            env["HRR_PLAYBACK"] = str(play)
+            env["ROCM_PATH"] = str(root / "absent")
+            for stale in ("CLR_BUILD", "CLR_ROOT", "HRR_ROOT", "ROCR_LIB"):
+                env.pop(stale, None)
+
+            proc = subprocess.run(
+                ["bash", str(scripts / "ensure_playback.sh"), "--build"],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(
+                proc.returncode, 0, f"ensure_playback failed: {proc.stderr}"
+            )
+            self.assertEqual(proc.stdout.strip(), str(play))
+
+
 if __name__ == "__main__":
     unittest.main()
