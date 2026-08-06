@@ -2584,6 +2584,13 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
   size_t globalWorkOffset[3] = {0, 0, 0};
   amd::NDRangeContainer ndrange(1, globalWorkOffset, &globalWorkSize, &localWorkSize);
   address parameters = captureArguments(kernels_[kFillType]);
+  // gfx1250 DPX/NPS spatial partitions report < full XCC count (8); on those
+  // the per-fill agent-scope release fence is not system-visible (GL2A_DEVID!=0,
+  // FWDEV-217396). Upgrade this fill's release fence to SYSTEM scope.
+  if (dev().isa().versionMajor() == 12 && dev().isa().versionMinor() == 5 &&
+      dev().info().numberOfXccs_ < 8) {
+    gpu().addSystemScope();
+  }
   result = gpu().submitKernelInternal(ndrange, *kernels_[kFillType], parameters, nullptr);
   releaseArguments(parameters);
   synchronize();
@@ -2674,6 +2681,13 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
 
     // Execute the blit
     address parameters = captureArguments(kernels_[fillType]);
+    // gfx1250 DPX/NPS spatial partitions report < full XCC count (8); on those
+    // the per-fill agent-scope release fence is not system-visible (GL2A_DEVID!=0,
+    // FWDEV-217396). Upgrade this fill's release fence to SYSTEM scope.
+    if (dev().isa().versionMajor() == 12 && dev().isa().versionMinor() == 5 &&
+        dev().info().numberOfXccs_ < 8) {
+      gpu().addSystemScope();
+    }
     result = gpu().submitKernelInternal(ndrange, *kernels_[fillType], parameters, nullptr);
     releaseArguments(parameters);
   }
