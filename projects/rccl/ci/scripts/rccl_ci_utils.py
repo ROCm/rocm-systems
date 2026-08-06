@@ -149,9 +149,16 @@ def quarantine_rocm_sysdeps(artifact_lib_dir: Path) -> None:
     """
     sysdeps_dir = artifact_lib_dir / "rocm_sysdeps"
     if sysdeps_dir.is_dir():
-        quarantined = artifact_lib_dir / "rocm_sysdeps.quarantined"
-        sysdeps_dir.rename(quarantined)
-        log.info("Quarantined: %s -> %s", sysdeps_dir, quarantined)
+        sysdeps_lib = sysdeps_dir / "lib"
+        if sysdeps_lib.is_dir():
+            for f in sorted(sysdeps_lib.glob("librocm_sysdeps_nl_genl*")):
+                q = f.parent / (f.name + ".quarantined")
+                f.rename(q)
+                log.info("Quarantined: %s", f)
+        else:
+            quarantined = artifact_lib_dir / "rocm_sysdeps.quarantined"
+            sysdeps_dir.rename(quarantined)
+            log.info("Quarantined: %s -> %s", sysdeps_dir, quarantined)
 
     for f in sorted(artifact_lib_dir.glob("libamd_smi*")):
         q = f.parent / (f.name + ".quarantined")
