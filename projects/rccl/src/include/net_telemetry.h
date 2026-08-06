@@ -239,7 +239,7 @@ static inline int64_t rcclTelemetryGetNs(void) {
  * @param bytes    Number of bytes transferred
  */
 static inline void rcclTelemetryBytes(int devIdx, int isSend, uint64_t bytes) {
-  if (!rcclTelemetryEnabled || devIdx < 0) return;
+  if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
   uint64_t* field = isSend ? &rcclTelemetryDevs[devIdx].tx_bytes
                            : &rcclTelemetryDevs[devIdx].rx_bytes;
   __atomic_fetch_add(field, bytes, __ATOMIC_RELAXED);
@@ -252,7 +252,7 @@ static inline void rcclTelemetryBytes(int devIdx, int isSend, uint64_t bytes) {
  * @param devIdx   Device index in rcclTelemetryDevs array
  */
 static inline void rcclTelemetryCqError(int devIdx) {
-  if (!rcclTelemetryEnabled || devIdx < 0) return;
+  if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
   __atomic_fetch_add(&rcclTelemetryDevs[devIdx].num_cq_errors, 1, __ATOMIC_RELAXED);
 }
 
