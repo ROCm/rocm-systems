@@ -105,8 +105,8 @@ struct FuncmapEntry
     FuncmapEntryKind kind{};
     uint32_t id{0}; // 0 for Kernel rows (no ID)
     std::string name{};
-    std::string source_loc{}; // empty if absent
-    uint64_t vaddr{0}; // resolved by CodeobjDecoderComponent; 0 if unresolved
+    std::string source_loc{};        // empty if absent
+    uint64_t vaddr{0};               // resolved by CodeobjDecoderComponent; 0 if unresolved
     uint32_t extra_payload_count{0}; // following shaderdata records owned by this marker header
 };
 
@@ -129,8 +129,7 @@ struct MarkerEncoding
     constexpr bool is_valid() const noexcept
     {
         return shader_clock_bits == 0 ||
-               (shader_clock_bits <= 29 && shader_clock_shift < 32 &&
-                shader_clock_bits <= 32 - shader_clock_shift);
+               (shader_clock_bits <= 29 && shader_clock_shift < 32 && shader_clock_bits <= 32 - shader_clock_shift);
     }
 
     constexpr bool has_shader_clock() const noexcept { return shader_clock_bits != 0; }
@@ -140,16 +139,15 @@ struct MarkerEncoding
     constexpr uint32_t decode_shader_clock(uint32_t raw) const noexcept
     {
         return (!has_shader_clock() || !is_valid())
-                   ? 0u
-                   : (raw >> (32u - shader_clock_bits)) & detail::bit_mask(shader_clock_bits);
+                 ? 0u
+                 : (raw >> (32u - shader_clock_bits)) & detail::bit_mask(shader_clock_bits);
     }
 
     /// Raw marker-word bits that contain the ID. The no-clock layout returns
     /// 0xFFFFFFFC; malformed packed metadata falls back to that safe layout.
     constexpr uint32_t marker_id_mask() const noexcept
     {
-        return (!has_shader_clock() || !is_valid()) ? 0xFFFFFFFCu
-                                                    : detail::bit_mask(30u - shader_clock_bits) << 2u;
+        return (!has_shader_clock() || !is_valid()) ? 0xFFFFFFFCu : detail::bit_mask(30u - shader_clock_bits) << 2u;
     }
 
     /// Raw marker-word bits occupied by the right-aligned sampled clock.
@@ -162,8 +160,7 @@ struct MarkerEncoding
     /// Corresponding bit window in the producer's low shader-clock word.
     constexpr uint32_t shader_clock_source_mask() const noexcept
     {
-        return (!has_shader_clock() || !is_valid()) ? 0u
-                                                    : detail::bit_mask(shader_clock_bits) << shader_clock_shift;
+        return (!has_shader_clock() || !is_valid()) ? 0u : detail::bit_mask(shader_clock_bits) << shader_clock_shift;
     }
 };
 
@@ -365,9 +362,8 @@ inline Funcmap parse_funcmap_section(std::string_view blob, bool silent)
 
         auto record = [&](FuncmapEntryKind kind, uint32_t id, std::string name, std::string source_loc)
         {
-            auto entry = std::make_shared<FuncmapEntry>(
-                FuncmapEntry{kind, id, std::move(name), std::move(source_loc), 0, 0}
-            );
+            auto entry =
+                std::make_shared<FuncmapEntry>(FuncmapEntry{kind, id, std::move(name), std::move(source_loc), 0, 0});
             out.entries.push_back(entry);
 
             if (kind == FuncmapEntryKind::Kernel) return; // K rows have no ID
@@ -459,10 +455,7 @@ inline Funcmap parse_funcmap_section(std::string_view blob, bool silent)
                         silent
                     );
                 }
-                else if (saw_clock_bits)
-                {
-                    out.marker_encoding = encoding;
-                }
+                else if (saw_clock_bits) { out.marker_encoding = encoding; }
                 break;
             }
             case 'R':

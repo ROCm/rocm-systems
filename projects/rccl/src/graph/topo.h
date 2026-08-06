@@ -236,6 +236,8 @@ struct ncclTopoNetInfo {
 };
 
 ncclResult_t ncclTopoProcessNet(ncclXml* xml, const char* dumpXmlFile, struct ncclTopoNetInfo* net);
+ncclResult_t ncclTopoForceMerge(struct ncclXml* xml, struct ncclTopoNetInfo* netInfo, int* placedDevs,
+                                ncclNetProperties_t* propsList, struct ncclXmlNode** physNetNodes, int nPhysDevs);
 ncclResult_t ncclTopoGetFusionEnv(int* mergeLevel, const char** forceMerge);
 
 #define NCCL_TOPO_XML_MAX_NODES 8192

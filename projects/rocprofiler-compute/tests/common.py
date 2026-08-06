@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from threading import Thread
 from unittest.mock import Mock
 
 import pandas as pd
@@ -29,6 +30,7 @@ SUPPORTED_ARCHS = {
     "gfx1150": {"rdna35_point_1": ["RDNA35_POINT_1"]},
     "gfx1151": {"rdna35_halo": ["RDNA35_HALO"]},
     "gfx1152": {"rdna35_point_2": ["RDNA35_POINT_2"]},
+    "gfx1153": {"rdna35_gorgon_point": ["RDNA35_GORGON_POINT"]},
 }
 
 
@@ -238,6 +240,64 @@ def strip_ansi(s: str) -> str:
     return ansi_escape.sub("", s)
 
 
+def _tee(pipe, sink, out) -> None:
+    """Echo each line from pipe to sink while accumulating it in out."""
+    with pipe:
+        for line in pipe:
+            print(line, end="", file=sink, flush=True)
+            out.append(line)
+
+
+def run_subprocess(
+    command, capture_output=False, stream=False
+) -> subprocess.CompletedProcess:
+    """Run command in text mode and return a CompletedProcess.
+
+    capture_output: capture stdout and stderr onto the returned object.
+    stream: echo output line by line as the child produces it (requires
+        capture_output); otherwise captured output is printed once at the end.
+    """
+    if not capture_output:
+        return subprocess.run(command, text=True)
+
+    if not stream:
+        # Capture everything, then echo it in one shot after the child exits.
+        process = subprocess.run(command, text=True, capture_output=True)
+        if process.stdout:
+            print(process.stdout, end="")
+        if process.stderr:
+            print(process.stderr, end="", file=sys.stderr)
+        return process
+
+    # Read each pipe on its own thread; reading serially can deadlock if one
+    # fills its buffer while we block on the other.
+    proc = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    out_buf, err_buf = [], []
+    # Tee to the real fds, not sys.stdout/stderr, which pytest's capsys swaps
+    # for in-memory buffers that never reach the terminal.
+    with os.fdopen(os.dup(1), "w", closefd=True) as real_out, os.fdopen(
+        os.dup(2), "w", closefd=True
+    ) as real_err:
+        readers = [
+            Thread(target=_tee, args=(proc.stdout, real_out, out_buf)),
+            Thread(target=_tee, args=(proc.stderr, real_err, err_buf)),
+        ]
+        for r in readers:
+            r.start()
+        for r in readers:
+            r.join()
+        proc.wait()
+    return subprocess.CompletedProcess(
+        command, proc.returncode, "".join(out_buf), "".join(err_buf)
+    )
+
+
 def patch_console(monkeypatch, module, *names, **overrides):
     """Patch ``module.console_<name>`` with a Mock for each name; return {name: Mock}.
 
@@ -279,7 +339,13 @@ def skip_unsupported_pc_sampling_soc(is_stochastic=False):
     """Skip PC-sampling tests on SoCs that do not support the selected mode."""
     _, soc = gpu_soc()
 
-    unsupported_socs = {"MI100", "RDNA35_POINT_1", "RDNA35_HALO", "RDNA35_POINT_2"}
+    unsupported_socs = {
+        "MI100",
+        "RDNA35_POINT_1",
+        "RDNA35_HALO",
+        "RDNA35_POINT_2",
+        "RDNA35_GORGON_POINT",
+    }
     if is_stochastic:
         unsupported_socs.add("MI200")
 

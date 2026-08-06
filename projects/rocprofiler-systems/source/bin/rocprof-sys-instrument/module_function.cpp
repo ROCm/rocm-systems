@@ -414,10 +414,6 @@ module_function::get_visibility() const
 bool
 module_function::is_internal_constrained() const
 {
-    auto _basename = [](std::string_view _v) {
-        return std::string{ tim::filepath::basename(_v) };
-    };
-
     auto _report = [&](const string_t& _action, const std::string& _type,
                        const string_t& _reason, int _lvl) {
         messages.emplace_back(_lvl, _action, _type, _reason, module_name);
@@ -426,7 +422,7 @@ module_function::is_internal_constrained() const
 
     const auto& _gnu_libs = get_internal_libs_data();
 
-    auto _module_base = _basename(module_name);
+    auto _module_base = rocprofsys::path::filename(module_name);
     auto _module_real = rocprofsys::path::realpath(module_name);
 
     if(std::regex_search(module_name,
@@ -454,7 +450,7 @@ module_function::is_internal_constrained() const
 
     for(const auto& litr : _gnu_libs)
     {
-        if(_module_base == _basename(litr.first) ||
+        if(_module_base == rocprofsys::path::filename(litr.first) ||
            litr.second.find(_module_base) != litr.second.end() ||
            _module_real == litr.first ||
            litr.second.find(_module_real) != litr.second.end() ||

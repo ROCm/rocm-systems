@@ -25,7 +25,7 @@
 /* Declare the template with a generic implementation */
 template <typename T>
 __device__ void alltoall_wave([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unused]] rocshmem_team_t team,
-                              [[maybe_unused]] T *dest, [[maybe_unused]] const T *source, [[maybe_unused]] int nelem) {
+                              [[maybe_unused]] T *dest, [[maybe_unused]] const T *source, [[maybe_unused]] int nelems) {
   return;
 }
 
@@ -33,8 +33,8 @@ __device__ void alltoall_wave([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unuse
 #define ALLTOALLWAVEGEN(T, TNAME)                                              \
   template <>                                                                  \
   __device__ void alltoall_wave<T>(rocshmem_ctx_t ctx, rocshmem_team_t team,   \
-                                 T * dest, const T *source, int nelem) {       \
-    rocshmem_ctx_##TNAME##_alltoall_wave(ctx, team, dest, source, nelem);}
+                                 T * dest, const T *source, int nelems) {      \
+    rocshmem_ctx_##TNAME##_alltoall_wave(ctx, team, dest, source, nelems);}
 
 ALLTOALLWAVEGEN(float, float)
 ALLTOALLWAVEGEN(double, double)
