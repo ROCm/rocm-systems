@@ -47,6 +47,9 @@ System Speed-of-Light:
   WMMA IOPs (Int4):
     rst: Achieved Int4 WMMA throughput.
     unit: GIOP/s
+  Active WGPs:
+    rst: Average number of WGPs that had at least one active wavefront.
+    unit: WGPs
   IPC:
     rst: Average number of instructions per active WGP cycle.
     unit: Instr/cycle
@@ -101,6 +104,9 @@ System Speed-of-Light:
   Instruction Cache BW:
     rst: Total Instruction Cache data bandwidth.
     unit: GB/s
+  Instruction Cache Fetch Latency:
+    rst: Average latency to fetch instruction from GL1 to Instruction Cache.
+    unit: Cycles
   L2 Cache Hit Rate:
     rst: Percentage of GL2 (L2) cache requests satisfied from GL2 without HBM access. High hit rates keep HBM bandwidth demand low and reduce overall memory access latency. Low hit rates confirm the kernel's active working set exceeds GL2 capacity and the kernel is HBM-bandwidth bound -- tile data to fit within GL2.
     unit: pct
@@ -401,9 +407,6 @@ Roofline Performance Rates:
   WMMA IOPs (Int8):
     rst: Achieved Int8 WMMA throughput.
     unit: GIOP/s
-  WMMA IOPs (Int4):
-    rst: Achieved Int4 WMMA throughput.
-    unit: GIOP/s
   HBM Bandwidth:
     rst: Total HBM bandwidth.
     unit: GB/s
@@ -416,6 +419,9 @@ Roofline Performance Rates:
   LDS Bandwidth:
     rst: Total LDS bandwidth.
     unit: GB/s
+  WMMA IOPs (Int4):
+    rst: Achieved Int4 WMMA throughput.
+    unit: GIOP/s
   L2 Cache Bandwidth:
     rst: Achieved GL1-to-GL0 bandwidth (GB/s) representing traffic crossing the GL1 (L2-level) cache boundary. This is the L2 cache roof on the roofline chart. Below-peak values with high GL0 miss rate indicate GL1 is constraining the memory path; if near-peak but HBM bandwidth is low, GL1 is serving traffic from its own cache well.
     unit: GB/s
@@ -447,6 +453,25 @@ Roofline Plot Points:
   AI L0:
     rst: 'Arithmetic intensity relative to L0 (vector GL0) data bandwidth: total FLOPs / total GL0 data bytes. Position on the L0-bounded roofline chart, representing the finest-grained arithmetic intensity measurement. Very low AI L0 with near-peak L0 bandwidth confirms the kernel is data-movement bound even at the on-chip level -- increase arithmetic density per cache access.'
     unit: FLOPs/Byte
+CPC Utilizations:
+  CPC Utilization:
+    rst: Percentage of GPU-active cycles the CPC is processing compute dispatch packets.
+    unit: Percent
+  CPC Micro-Engine Busy Dispatching Workgroups:
+    rst: Percent of CPC-busy cycles the micro-engine is sending dispatch commands to SPI.
+    unit: Percent
+  CPC ADC Pipe0 Busy Dispatching Workgroups:
+    rst: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 0 is issuing workgroups to SPI.
+    unit: Percent
+  CPC ADC Pipe1 Busy Dispatching Workgroups:
+    rst: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 1 is issuing workgroups to SPI.
+    unit: Percent
+  CPC ADC Pipe2 Busy Dispatching Workgroups:
+    rst: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 2 is issuing workgroups to SPI.
+    unit: Percent
+  CPC ADC Pipe3 Busy Dispatching Workgroups:
+    rst: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 3 is issuing workgroups to SPI.
+    unit: Percent
 SPI Utilization:
   SPI Utilization:
     rst: Percentage of GPU-busy cycles the SPI is dispatching workgroups.
@@ -536,6 +561,9 @@ WGP Utilization:
   Wall Clock:
     rst: Total elapsed kernel clock cycles.
     unit: Cycles
+  Active WGPs:
+    rst: Average number of WGPs with at least one active wavefront.
+    unit: Count
 WGP Wave Dispatch:
   Dispatched Waves:
     rst: Total wavefronts dispatched.
@@ -1079,12 +1107,12 @@ GL0-UTCL0 Interface:
   UTCL0 Requests:
     rst: Total address translation requests sent to UTCL0.
     unit: Count per Normalization Unit
-  UTCL0 Requests for GL2 Prefetch:
-    rst: Number of UTCL0 translation requests for GL2 prefetch operations.
-    unit: Count per Normalization Unit
   UTCL0 Thrash Stall Rate:
     rst: Percentage of VMW-busy cycles the UTCL0 TLB is thrashing.
     unit: Percent
+  UTCL0 Requests for GL2 Prefetch:
+    rst: Number of UTCL0 translation requests for GL2 prefetch operations.
+    unit: Count per Normalization Unit
 UTCL0-UTCL1 Interface:
   UTCL0-UTCL1 Requests:
     rst: Number of UTCL0 TLB misses forwarded to UTCL1.
@@ -1358,6 +1386,32 @@ GL2A Processing:
   GL2C3-GL2A Return Stall Rate:
     rst: Percentage of GL2 Arbiter busy cycles GL2 Cache partition 3 cannot return data.
     unit: Percent
+GL2C Utilization:
+  GL2C Utilization:
+    rst: Percentage of GL2 Cache cycles when it's busy.
+    unit: Percent
+GL2C Cache Lookup:
+  GL2 Cache Hit Rate:
+    rst: GL2 cache hit rate.
+    unit: Percent
+  GL2 Pipeline Stall:
+    rst: Percentage of GL2 Cache busy cycles the tag pipeline is stalled.
+    unit: Percent
+  GL2 Latency FIFO Full Stall:
+    rst: Percentage of GL2 Cache busy cycles stalled due to a full latency FIFO.
+    unit: Percent
+  GL2 Source FIFO Full Stall:
+    rst: Percentage of GL2 Cache busy cycles stalled due to a full source data FIFO.
+    unit: Percent
+  GL2 Tag Stall - Set Full:
+    rst: Percentage of GL2 Cache busy cycles the tag pipeline stalled because no replaceable cache line is available.
+    unit: Percent
+  GL2 Tag Stall - Writeback FIFO Full:
+    rst: Percentage of GL2 Cache busy cycles the tag pipeline stalled due to a full writeback FIFO.
+    unit: Percent
+  GL2 Tag Stall - Cached EA FIFO Full:
+    rst: Percentage of GL2 Cache busy cycles the tag pipeline stalled due to a full cached EA FIFO.
+    unit: Percent
 GL2C-EA Stalls:
   GL2-EA Request Stall on VC3:
     rst: Percentage of GL2 Cache busy cycles when it's stalled on the GL2 Cache to EA read request channel (VC3).
@@ -1627,23 +1681,4 @@ GRBM Metrics:
     unit: Percent
   CH Utilization:
     rst: Percentage of GPU-active cycles the Central Hub is handling traffic between shader engines and GL2.
-    unit: Percent
-CPC Utilizations:
-  CPC Utilization:
-    rst: Percentage of GPU-active cycles the CPC is processing compute dispatch packets.
-    unit: Percent
-  CPC Micro-Engine Busy Dispatching Workgroups:
-    rst: Percent of CPC-busy cycles the micro-engine is sending dispatch commands to SPI.
-    unit: Percent
-  CPC ADC Pipe0 Busy Dispatching Workgroups:
-    rst: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 0 is issuing workgroups to SPI.
-    unit: Percent
-  CPC ADC Pipe1 Busy Dispatching Workgroups:
-    rst: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 1 is issuing workgroups to SPI.
-    unit: Percent
-  CPC ADC Pipe2 Busy Dispatching Workgroups:
-    rst: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 2 is issuing workgroups to SPI.
-    unit: Percent
-  CPC ADC Pipe3 Busy Dispatching Workgroups:
-    rst: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 3 is issuing workgroups to SPI.
     unit: Percent

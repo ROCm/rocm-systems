@@ -65,6 +65,7 @@ GFX1250_PANEL_ID_TO_SECTION: dict[int, str] = {
     308: "Memory chart - EA to HBM",
     401: "Roofline Performance Rates",
     402: "Roofline Plot Points",
+    501: "CPC Utilizations",
     601: "SPI Utilization",
     602: "SPI Wave Dispatch",
     603: "SPI Resource Allocation",
@@ -140,7 +141,6 @@ GFX1250_PANEL_ID_TO_SECTION: dict[int, str] = {
     1505: "CHC Bandwidth and Latency",
     1601: "UTCL1 Metrics",
     1701: "GRBM Metrics",
-    1801: "CPC Utilizations",
     2101: "PC Sampling",
 }
 
