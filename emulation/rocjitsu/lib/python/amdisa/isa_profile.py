@@ -1189,7 +1189,7 @@ class Cdna2Profile(CdnaProfile):
 
     @property
     def descriptor_vgpr_count_granule_wave64(self) -> int:
-        return 4
+        return 8
 
     @property
     def flat_scratch_mechanism(self) -> str:
@@ -1317,15 +1317,9 @@ class Rdna1Profile(_AmdgpuProfileBase):
 class Rdna2Profile(Rdna1Profile):
     """ISA profile for RDNA2 (GFX10.3, Navi2x).
 
-    Inherits all properties from ``Rdna1Profile`` except:
-
-    - Wave64 is not supported: ``wave_size_max == 32``.
-    - DPP/SDWA variants still skipped (``_SKIP_DPP_SDWA = True``).
+    Inherits the RDNA1 Wave32 default and Wave64 maximum. DPP/SDWA variants
+    remain skipped (``_SKIP_DPP_SDWA = True``).
     """
-
-    @property
-    def wave_size_max(self) -> int:
-        return 32
 
 
 class Rdna3Profile(_AmdgpuProfileBase):

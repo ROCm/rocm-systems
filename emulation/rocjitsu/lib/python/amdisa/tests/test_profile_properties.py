@@ -3,6 +3,7 @@
 
 """Unit tests for ISA dimension properties on IsaProfile subclasses."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -22,7 +23,9 @@ from amdisa.isa_profile import (
     Gfx1250Profile,
     MemoryCoherencyModel,
     Rdna1Profile,
+    Rdna2Profile,
     Rdna3Profile,
+    Rdna3_5Profile,
     Rdna4Profile,
 )
 
@@ -84,10 +87,12 @@ def test_max_addressable_vgprs_per_wf(profile, expected):
     ('profile', 'expected_wave32', 'expected_wave64'),
     [
         (Cdna1Profile(), 0, 4),
-        (Cdna2Profile(), 0, 4),
+        (Cdna2Profile(), 0, 8),
         (CdnaProfile(), 0, 8),
         (Rdna1Profile(), 8, 4),
+        (Rdna2Profile(), 8, 4),
         (Rdna3Profile(), 8, 4),
+        (Rdna3_5Profile(), 8, 4),
         (Rdna4Profile(), 8, 4),
         (Gfx1250Profile(), 16, 0),
     ],
@@ -198,6 +203,32 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_vgpr_count_granule_wave64 = 0,\n'
         '    };'
     ) in output
+
+
+def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
+    profiles = [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', CdnaProfile()),
+        ('rdna1', Rdna1Profile()),
+        ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+        ('gfx1250', Gfx1250Profile()),
+    ]
+    specs = [
+        (name, SimpleNamespace(profile=profile), None) for name, profile in profiles
+    ]
+
+    generated = emit_isa_properties(str(tmp_path), specs).read_text()
+    checked_in = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/isa_properties.h'
+    ).read_text()
+
+    assert generated == checked_in
 
 
 @pytest.mark.parametrize(

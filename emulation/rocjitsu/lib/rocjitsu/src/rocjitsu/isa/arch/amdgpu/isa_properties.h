@@ -9,8 +9,8 @@
 
 #include "rocjitsu/base/api.h"
 
-#include <cassert>
 #include <cstdint>
+#include <stdexcept>
 
 namespace rocjitsu {
 
@@ -52,7 +52,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 0,
-        .descriptor_vgpr_count_granule_wave64 = 4,
+        .descriptor_vgpr_count_granule_wave64 = 8,
     };
   case ROCJITSU_CODE_ARCH_CDNA3:
     return {
@@ -158,13 +158,12 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
 [[nodiscard]] inline uint32_t descriptor_vgpr_count_granule_for_wavefront(rj_code_arch_t arch,
                                                                           uint32_t wavefront_size) {
   const auto properties = isa_properties(arch);
-  uint32_t granule = 0;
-  if (wavefront_size == 32)
-    granule = properties.descriptor_vgpr_count_granule_wave32;
-  else if (wavefront_size == 64)
-    granule = properties.descriptor_vgpr_count_granule_wave64;
-  assert(granule != 0 && "unsupported wavefront size for VGPR descriptor granule");
-  return granule;
+  if (wavefront_size == 32 && properties.descriptor_vgpr_count_granule_wave32 != 0)
+    return properties.descriptor_vgpr_count_granule_wave32;
+  if (wavefront_size == 64 && properties.descriptor_vgpr_count_granule_wave64 != 0)
+    return properties.descriptor_vgpr_count_granule_wave64;
+  throw std::invalid_argument("unsupported architecture or wavefront size for VGPR "
+                              "descriptor granule");
 }
 
 } // namespace rocjitsu
