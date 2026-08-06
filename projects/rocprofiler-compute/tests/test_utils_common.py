@@ -14,6 +14,7 @@ from unittest import mock
 import pytest
 
 import utils.utils_common as utils_common
+from utils.utils_common import canonical_config_arch
 
 
 class MockArgs:
@@ -1500,3 +1501,13 @@ def test_reconfigure_stdio_utf8_end_to_end_makes_non_ascii_print_safe():
 
 
 ##############################################################################
+
+
+@pytest.mark.misc
+def test_canonical_config_arch_maps_gfx115_variants_to_shared_dir():
+    assert canonical_config_arch(None) is None
+    assert canonical_config_arch("gfx1150") == "gfx115x"
+    assert canonical_config_arch("gfx1151") == "gfx115x"
+    assert canonical_config_arch("gfx1152") == "gfx115x"
+    assert canonical_config_arch("gfx1153") == "gfx115x"
+    assert canonical_config_arch("gfx942") == "gfx942"
