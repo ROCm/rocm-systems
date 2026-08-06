@@ -71,6 +71,20 @@ corpus_work_dir="$(pwd -P)"
 
 for target in "${targets[@]}"; do
   read -r name rocjitsu_config skip_tests_config <<< "${target}"
+
+  # The llama suite runs an executable built for one target at a time. A build
+  # failure fails the run without stopping the suites and targets that do not
+  # depend on it.
+  echo "::group::(${name}) llama setup"
+  if python3 "${corpus_work_dir}/corpus/llama/setup_llama_tests.py" \
+    --targets "${name}"; then
+    echo "::endgroup::"
+  else
+    corpus_test_status=1
+    echo "::endgroup::"
+    echo "::error::(${name}) llama setup failed."
+  fi
+
   echo "::group::(${name}) pytest"
 
   rocjitsu_config_path="${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}"
@@ -81,7 +95,7 @@ for target in "${targets[@]}"; do
   pytest_cmd=(
     rocjitsu --config "${rocjitsu_config_path}" -- pytest tests/test_corpus.py
     --target "${name}"
-    --suite iree,kernels,cts
+    --suite iree,kernels,cts,llama
     --skip-tests-config "${skip_tests_config_path}"
     --artifact-directory "${artifact_dir}"
     --durations=0
