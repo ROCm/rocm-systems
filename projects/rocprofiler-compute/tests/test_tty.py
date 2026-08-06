@@ -6,7 +6,6 @@
 import argparse
 from io import StringIO
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -313,10 +312,18 @@ def test_show_all_membw_analysis_panel_gate(
             sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
         )
     }
-    process_table_data_mock = Mock(return_value=metric_dataframe)
-    format_table_output_mock = Mock(wraps=format_table_output)
-    monkeypatch.setattr("utils.tty.process_table_data", process_table_data_mock)
-    monkeypatch.setattr("utils.tty.format_table_output", format_table_output_mock)
+    actual_calls: list[str] = []
+
+    def record_process_table_data(*_args, **_kwargs):
+        actual_calls.append("process_table_data")
+        return metric_dataframe
+
+    def record_format_table_output(*args, **kwargs):
+        actual_calls.append("format_table_output")
+        return format_table_output(*args, **kwargs)
+
+    monkeypatch.setattr("utils.tty.process_table_data", record_process_table_data)
+    monkeypatch.setattr("utils.tty.format_table_output", record_format_table_output)
     rendered_output = StringIO()
 
     show_all(
@@ -328,8 +335,10 @@ def test_show_all_membw_analysis_panel_gate(
     )
 
     output_lines = rendered_output.getvalue().splitlines()
-    assert process_table_data_mock.called is membw_analysis
-    assert format_table_output_mock.called is membw_analysis
+    expected_calls = (
+        ["process_table_data", "format_table_output"] if membw_analysis else []
+    )
+    assert actual_calls == expected_calls
 
     if not membw_analysis:
         assert output_lines == []

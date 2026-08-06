@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 import common
 import pytest
+import yaml
 
 from pc_sampling.pc_sampling_profile import PCSamplingLimits
 from rocprof_compute_base import RocProfCompute
@@ -20,7 +21,6 @@ from utils.utils_exceptions import (
     NoScriptInCommandError,
     PythonScriptNotFoundError,
 )
-from vendored import yaml
 
 
 def _make_sanitize_args(remaining, torch_trace=False, **overrides):
