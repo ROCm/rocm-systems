@@ -96,6 +96,14 @@ enum ert_cmd_opcode {
   ERT_START_NPU_PREEMPT_ELF = 22,
 };
 
+/// The dispatch path forwards hsa_amd_aie_kernel_dispatch_packet_t::opcode straight into
+/// ert_start_kernel_cmd::opcode, which is only correct while the two enumerations agree
+/// numerically. They are independent definitions, so pin the assumption here rather than let a
+/// renumbering of either silently change which driver command is dispatched.
+static_assert(static_cast<uint32_t>(HSA_AMD_AIE_PACKET_OPCODE_KMQ) ==
+                  static_cast<uint32_t>(ERT_START_CU),
+              "HSA_AMD_AIE_PACKET_OPCODE_KMQ must match ERT_START_CU.");
+
 /// @brief Command state.
 ///
 /// This should match the command states defined in xdna-driver and XRT ERT (ert_cmd_state).
@@ -203,12 +211,42 @@ constexpr uint32_t devnode_max_minor_num = 64;
 constexpr uint32_t DEV_ADDR_BASE = 0x04000000;
 constexpr uint32_t DEV_ADDR_OFFSET_MASK = 0x02FFFFFF;
 
-/// @brief The driver places a structure before each command in a command chain.
-/// Need to increase the size of the command by the size of this structure.
-/// In the following xdna driver source can see where this is implemented:
+/// @brief Padding dwords declared in ert_start_kernel_cmd::count beyond the actual payload.
+///
+/// This does *not* account for the structure the driver places before each command in a
+/// command chain. The driver sizes and writes that structure itself, so userspace must not add
+/// it; see the slot layout and the driver's own sizing of it in the xdna driver source:
 /// https://github.com/amd/xdna-driver/blob/eddd92c0f61592c576a500f16efa24eb23667c23/src/driver/amdxdna/aie2_msg_priv.h#L387
 /// https://github.com/amd/xdna-driver/blob/eddd92c0f61592c576a500f16efa24eb23667c23/src/driver/amdxdna/aie2_message.c#L637
-constexpr uint32_t CMD_COUNT_SIZE_INCREASE = 3;
+///
+/// The padding exists because firmware aborts a command chain when the argument dword count it
+/// derives from the command, (count - num_cu_masks), is odd and below 15; an even count always
+/// works. Unpadded, the layout below yields 5 + 2 * num_kernargs, which is odd, so chains fail
+/// for num_kernargs <= 4. Any odd padding makes that count even, so this is 1: the smallest
+/// one, which leaves the most room under @ref MAX_CMD_ARG_DWORDS for actual kernel arguments
+/// and the most commands per chain (see the chain-length note below).
+///
+/// The padding dwords must be zeroed. Firmware rejects the chain if any of them has bit 31
+/// set, and they are declared out of a pooled command BO that can hold stale data.
+///
+/// This parity rule is documented neither in the driver nor in XRT, so it is a workaround
+/// rather than ABI. Moving to ERT_START_NPU (amdxdna_cmd_start_npu), which carries an explicit
+/// prop_count and leaves no ambiguity about trailing dwords, would remove the need for it.
+constexpr uint32_t CMD_COUNT_SIZE_INCREASE = 1;
+
+/// @brief Maximum number of dwords the driver can place in a command chain slot's argument
+/// array (cmd_chain_slot_npu::args).
+///
+/// Fixed by the driver/firmware ABI as MAX_NPU_ARGS_SIZE in aie2_msg_priv.h. The chain fill
+/// path taken for ERT_START_CU (aie2_cmdlist_fill_npu_cf) does not validate against it — unlike
+/// the DPU, preempt and ELF paths — so the check has to happen here.
+///
+/// The same argument count also bounds how many commands fit in one chain. The driver packs
+/// each command into a cmd_chain_slot_npu (52 bytes) plus its arguments, inside a single
+/// MAX_CHAIN_CMDBUF_SIZE (4 KiB) buffer, so a chain holds
+/// floor(4096 / (52 + 4 * arg_cnt)) commands. Measured on Phoenix: 37 at a padding of 3, 40 at
+/// a padding of 1.
+constexpr uint32_t MAX_CMD_ARG_DWORDS = 26;
 
 /// @brief Default amdxdna_cu_config::cu_func when configuring a CU.
 constexpr uint32_t default_cu_func = 0;
@@ -243,6 +281,14 @@ static hsa_status_t xdna_ioctl(int fd, unsigned long request, void* arg) {
 }
 
 /// @brief Per hardware context PDI cache.
+///
+/// The 32-entry capacity is set by the driver/firmware ABI, not by this class. A PDI is
+/// addressed by its bit position in the command's CU mask, and the driver's CU configuration
+/// message carries a fixed-size 32-entry array (MAX_NUM_CUS in aie2_msg_priv.h) and rejects
+/// anything larger, so enlarging the array here would only move the failure into the driver.
+/// Additional CU mask words do not raise the ceiling either: the driver derives the CU index
+/// with ffs() on the first non-zero mask word and never adds the word offset, so a bit set in
+/// a second mask word aliases onto a different CU instead of selecting a 33rd one.
 class PDICache {
  private:
   /// @brief CU mask size.
@@ -620,7 +666,7 @@ hsa_status_t XdnaDriver::Open() {
 
 hsa_status_t XdnaDriver::Close() {
   int ret(0);
-  if (fd_ > 0) {
+  if (fd_ >= 0) {
     ret = close(fd_);
     fd_ = -1;
   }
@@ -1243,7 +1289,15 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     }
 
     // Add the argument BO handles to bo_handles.
+    //
+    // hsa_amd_aie_kernel_dispatch_packet_t allows a null kernarg_address only when there are no
+    // kernel arguments. Reject the packet instead of faulting in the runtime; this also covers
+    // the later FlushArguments passes over the same packets.
     auto* kernarg_address = static_cast<uint64_t*>(pkt->kernarg_address);
+    if (pkt->num_kernargs != 0 && kernarg_address == nullptr) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
     for (uint32_t kernarg_idx = 0; kernarg_idx < pkt->num_kernargs; ++kernarg_idx) {
       void* ptr = reinterpret_cast<void*>(kernarg_address[kernarg_idx]);
       uint32_t arg_handle = AMDXDNA_INVALID_BO_HANDLE;
@@ -1262,6 +1316,14 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
                                  2 * pkt->num_kernargs);  // arguments (address lo/hi)
     const uint32_t cmd_data_bytesize = cmd_dwords * sizeof(uint32_t);
     const uint32_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + cmd_data_bytesize;
+
+    // The driver copies every dword past the CU mask into cmd_chain_slot_npu::args, so the
+    // argument count it derives is (cmd->count - 1). Reject the packet rather than overrun the
+    // firmware slot, since the chain fill path does not bounds check it.
+    if (cmd_dwords + CMD_COUNT_SIZE_INCREASE - 1 > MAX_CMD_ARG_DWORDS) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
     auto& cmd_bo_handle = kmq_metadata->cmd_bo_pool.AcquireCmdBO();
     cmd_bo_handles.push_back(cmd_bo_handle);
 
@@ -1269,8 +1331,9 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     memset(cmd, 0, cmd_bytesize);
     cmd->state = ERT_CMD_STATE_NEW;
     cmd->extra_cu_masks = 0;
-    // The driver places a structure before each command in a command chain.
-    // Need to increase the size of the command by the size of this structure.
+    // Pad the declared dword count to keep the firmware's derived argument count even; see
+    // CMD_COUNT_SIZE_INCREASE. Note the memset above covers only cmd_dwords, so the padding
+    // dwords declared here are not zeroed as that requires.
     cmd->count = cmd_dwords + CMD_COUNT_SIZE_INCREASE;
     cmd->opcode = pkt->opcode;               // HSA_AMD_AIE_PACKET_OPCODE_KMQ == ERT_START_CU == 0x0
     cmd->data[0] = 0x1 << cached_pdi_index;  // CU mask bit
