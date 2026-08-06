@@ -390,6 +390,9 @@ static const RcclHwConfig* rcclTelemetryResolveHw(const char* driver_name) {
   if (strcmp(driver_name, "ionic") == 0)               return &rcclHwConfigAinic;
   if (strcmp(driver_name, "mlx5_core") == 0)           return &rcclHwConfigMlx5;
   if (strcmp(driver_name, "bnxt_re") == 0)             return &rcclHwConfigThor2;
+  /* Broadcom: the PCI device is bound to bnxt_en; bnxt_re is an auxiliary
+     module, so /sys/class/infiniband/<dev>/device/driver resolves to bnxt_en. */
+  if (strcmp(driver_name, "bnxt_en") == 0)             return &rcclHwConfigThor2;
   return NULL;
 }
 
