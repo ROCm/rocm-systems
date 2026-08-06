@@ -1,11 +1,6 @@
 name: "CodeQL Security Scan"
 
 on:
-  push:
-    branches: [develop]
-    paths:
-      - 'projects/cuid/**'
-      - '.github/workflows/cuid-codeql.yml'
   pull_request:
     branches: [develop]
     paths:
@@ -31,6 +26,7 @@ jobs:
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
+    container:
       image: ${{ vars.Ubuntu22_DOCKER_IMAGE }}
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
     permissions:

@@ -6,11 +6,6 @@ on:
     paths:
       - 'projects/cuid/**'
       - '.github/workflows/cuid-workflow.yml'
-  push:
-    branches: [develop]
-    paths:
-      - 'projects/cuid/**'
-      - '.github/workflows/cuid-workflow.yml'
   workflow_dispatch:
 
 permissions:
@@ -90,9 +85,10 @@ jobs:
              fi
 
              cd /tmp
-             wget https://github.com/openssl/openssl/releases/download/openssl-3.0.12/openssl-3.0.12.tar.gz
-             tar -xzvf openssl-3.0.12.tar.gz
-             cd openssl-3.0.12
+             wget https://github.com/openssl/openssl/releases/download/openssl-3.0.21/openssl-3.0.21.tar.gz
+             echo "617e29af8e421f46649484a4937e48c685e47f46488167c982f88bc4ec1d522f  openssl-3.0.21.tar.gz" | sha256sum -c -
+             tar -xzvf openssl-3.0.21.tar.gz
+             cd openssl-3.0.21
              ./config
              make -j $(nproc)
              make install
