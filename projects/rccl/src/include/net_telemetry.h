@@ -34,6 +34,10 @@ extern "C" {
 #define RCCL_TELEMETRY_MAX_QPS        128
 #define RCCL_TELEMETRY_HISTOGRAM_SIZE 16
 
+/* Power-of-two buckets for the WQE payload-size distribution: bucket b holds
+ * WQEs of [2^(b-1), 2^b - 1] bytes, bucket 0 holds zero-length WQEs. */
+#define RCCL_TELEMETRY_WQE_SIZE_BUCKETS 32
+
 /*
  * Maximum number of scalar hardware counters stored per device.
  * Must be >= the largest per-HW counter table size (see net_telemetry.cc).
@@ -98,10 +102,16 @@ extern RcclTelemetryConfig rcclTelemetryCfg;
  */
 typedef struct {
   int      id;
+  int      is_data_qp;            /* 1 for data QPs, 0 for CTS QPs */
   uint64_t num_wqe_sent;
   uint64_t num_wqe_rcvd;
   uint64_t num_wqe_completed;
   uint64_t num_slot_miss;
+  uint64_t num_cts_sent;
+  uint64_t num_cts_sent_signalled;
+  uint64_t num_cts_sent_unsignalled;
+  uint64_t num_write_wqe;         /* RDMA_WRITE postings */
+  uint64_t num_write_imm_wqe;     /* RDMA_WRITE_WITH_IMM postings */
   int64_t  wqe_completion_ns_min;
   int64_t  wqe_completion_ns_max;
   uint64_t wqe_completion_histogram[RCCL_TELEMETRY_HISTOGRAM_SIZE];
@@ -140,6 +150,8 @@ typedef struct {
   uint64_t tx_bytes;
   uint64_t rx_bytes;
   uint64_t num_cq_errors;
+  uint64_t cq_poll_count;
+  uint64_t wqe_size_histogram[RCCL_TELEMETRY_WQE_SIZE_BUCKETS];
   int      num_channels;
   RcclChannelStats channels[RCCL_TELEMETRY_MAX_CHANNELS];
 
@@ -317,7 +329,11 @@ static inline void rcclTelemetryWqeComplete(int devIdx, int chIdx, int qpIdx, in
  * @param isSend   1 for send, 0 for recv
  */
 static inline void rcclTelemetryWqePosted(int devIdx, int chIdx, int qpIdx, int isSend) {
-  if (!rcclTelemetryEnabled || devIdx < 0) return;
+  if (!rcclTelemetryEnabled ||
+      devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS ||
+      chIdx  < 0 || chIdx  >= RCCL_TELEMETRY_MAX_CHANNELS ||
+      qpIdx  < 0 || qpIdx  >= RCCL_TELEMETRY_MAX_QPS)
+    return;
   RcclChannelStats* ch = &rcclTelemetryDevs[devIdx].channels[chIdx];
   if (isSend) {
     __atomic_fetch_add(&ch->qp[qpIdx].num_wqe_sent, 1, __ATOMIC_RELAXED);
@@ -338,6 +354,80 @@ static inline void rcclTelemetryChannelCompleted(int devIdx, int chIdx) {
   if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS ||
       chIdx < 0 || chIdx >= RCCL_TELEMETRY_MAX_CHANNELS) return;
   __atomic_fetch_add(&rcclTelemetryDevs[devIdx].channels[chIdx].num_wqe_completed, 1, __ATOMIC_RELAXED);
+}
+
+/**
+ * Record a CTS FIFO slot miss.
+ * Call when the sender finds the expected CTS slot not yet published and
+ * returns without posting.
+ */
+static inline void rcclTelemetrySlotMiss(int devIdx, int chIdx, int qpIdx) {
+  if (!rcclTelemetryEnabled ||
+      devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS ||
+      chIdx  < 0 || chIdx  >= RCCL_TELEMETRY_MAX_CHANNELS ||
+      qpIdx  < 0 || qpIdx  >= RCCL_TELEMETRY_MAX_QPS)
+    return;
+  __atomic_fetch_add(&rcclTelemetryDevs[devIdx].channels[chIdx].qp[qpIdx].num_slot_miss,
+                     1, __ATOMIC_RELAXED);
+}
+
+/**
+ * Record a CTS posting on a CTS QP.
+ * Call after ibv_post_send succeeds on the CTS path.
+ *
+ * @param signalled  1 if the work request carried IBV_SEND_SIGNALED
+ */
+static inline void rcclTelemetryCtsSent(int devIdx, int chIdx, int qpIdx, int signalled) {
+  if (!rcclTelemetryEnabled ||
+      devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS ||
+      chIdx  < 0 || chIdx  >= RCCL_TELEMETRY_MAX_CHANNELS ||
+      qpIdx  < 0 || qpIdx  >= RCCL_TELEMETRY_MAX_QPS)
+    return;
+  RcclChannelStats* ch = &rcclTelemetryDevs[devIdx].channels[chIdx];
+  RcclQpStats* qp = &ch->qp[qpIdx];
+  __atomic_fetch_add(&qp->num_cts_sent, 1, __ATOMIC_RELAXED);
+  __atomic_fetch_add(&ch->num_cts_sent, 1, __ATOMIC_RELAXED);
+  if (signalled)
+    __atomic_fetch_add(&qp->num_cts_sent_signalled, 1, __ATOMIC_RELAXED);
+  else
+    __atomic_fetch_add(&qp->num_cts_sent_unsignalled, 1, __ATOMIC_RELAXED);
+}
+
+/**
+ * Record an RDMA_WRITE (withImm=0) or RDMA_WRITE_WITH_IMM (withImm=1) posting.
+ */
+static inline void rcclTelemetryWriteWqe(int devIdx, int chIdx, int qpIdx, int withImm) {
+  if (!rcclTelemetryEnabled ||
+      devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS ||
+      chIdx  < 0 || chIdx  >= RCCL_TELEMETRY_MAX_CHANNELS ||
+      qpIdx  < 0 || qpIdx  >= RCCL_TELEMETRY_MAX_QPS)
+    return;
+  RcclQpStats* qp = &rcclTelemetryDevs[devIdx].channels[chIdx].qp[qpIdx];
+  __atomic_fetch_add(withImm ? &qp->num_write_imm_wqe : &qp->num_write_wqe,
+                     1, __ATOMIC_RELAXED);
+}
+
+/**
+ * Record one ibv_poll_cq invocation on a device's completion queue.
+ */
+static inline void rcclTelemetryCqPoll(int devIdx) {
+  if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
+  __atomic_fetch_add(&rcclTelemetryDevs[devIdx].cq_poll_count, 1, __ATOMIC_RELAXED);
+}
+
+/**
+ * Record the payload size of a posted WQE into the per-device power-of-two
+ * size distribution.
+ */
+static inline void rcclTelemetryWqeSize(int devIdx, uint64_t bytes) {
+  if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
+  int bucket = 0;
+  if (bytes > 0) {
+    bucket = 64 - __builtin_clzll((unsigned long long)bytes);
+    if (bucket >= RCCL_TELEMETRY_WQE_SIZE_BUCKETS)
+      bucket = RCCL_TELEMETRY_WQE_SIZE_BUCKETS - 1;
+  }
+  __atomic_fetch_add(&rcclTelemetryDevs[devIdx].wqe_size_histogram[bucket], 1, __ATOMIC_RELAXED);
 }
 
 /**
@@ -380,6 +470,7 @@ static inline int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, i
   /* Initialize QP slot IDs */
   for (int q = 0; q < numQps && (startSlot + q) < RCCL_TELEMETRY_MAX_QPS; q++) {
     ch->qp[startSlot + q].id = startSlot + q;
+    ch->qp[startSlot + q].is_data_qp = isDataQp ? 1 : 0;
   }
   
   /* Track data QPs vs CTS QPs */

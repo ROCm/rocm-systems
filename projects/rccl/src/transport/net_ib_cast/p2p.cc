@@ -225,6 +225,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
         comm->sges[r].length = length;
         comm->wrs[r].sg_list = comm->sges + r;
         comm->wrs[r].num_sge = 1;
+        rcclTelemetryWqeSize(comm->base.vProps.devs[devIndex], (uint64_t)length);
       }
 
       // wr_id remapping is only used for CAST scheduler RTT timing (BY_INDEX).
@@ -311,8 +312,11 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
 
     NCCLCHECK(wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr));
 
-    if (qp->telQpSlot >= 0)
-      rcclTelemetryWqePosted(comm->base.vProps.devs[qp->devIndex], comm->telChId, qp->telQpSlot, 1);
+    if (qp->telQpSlot >= 0) {
+      int telDevIdx = comm->base.vProps.devs[qp->devIndex];
+      rcclTelemetryWqePosted(telDevIdx, comm->telChId, qp->telQpSlot, 1);
+      rcclTelemetryWriteWqe(telDevIdx, comm->telChId, qp->telQpSlot, useWriteOp ? 0 : 1);
+    }
 
     // Update the send offset and addresses for the next QP according to the
     // actual data size that was sent on the current QP, for every request
@@ -383,6 +387,13 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
     uint32_t idx = (uint32_t)(comm->base.fifoHead + 1);
     if (ctsFifoIdx(slots, 0) != idx) {
       *request = NULL;
+      if (rcclTelemetryEnabled) {
+        int qpIdx = comm->base.qpIndex;
+        if (qpIdx >= 0 && qpIdx < comm->base.nqps) {
+          const struct ncclIbQp* missQp = &comm->base.qps[qpIdx];
+          rcclTelemetrySlotMiss(comm->base.vProps.devs[missQp->devIndex], comm->telChId, missQp->telQpSlot);
+        }
+      }
       return ncclSuccess;
     }
     nreqs = ctsFifoNreqs(slots, 0);
@@ -577,6 +588,10 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
 
   struct ibv_send_wr* bad_wr;
   NCCLCHECK(wrap_ibv_post_send(ctsQp->qp, &wr, &bad_wr));
+
+  if (ctsQp->telQpSlot >= 0)
+    rcclTelemetryCtsSent(comm->base.vProps.devs[ctsQp->devIndex], comm->telChId, ctsQp->telQpSlot,
+                         (wr.send_flags & IBV_SEND_SIGNALED) ? 1 : 0);
 
   TRACE(NCCL_NET,
         "NET/IB: %s: CTS posted (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld, opcode=%d, send_flags=%d, "
@@ -1213,6 +1228,7 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
       }
       TIME_START(3);
       NCCLCHECK(wrap_ibv_poll_cq(r->devBases[i]->cq, cqMaxPollEvent, wcs, &wrDone));
+      rcclTelemetryCqPoll(r->devBases[i]->ibDevN);
       if (wrDone == 0) {
         TIME_CANCEL(3);
       } else {

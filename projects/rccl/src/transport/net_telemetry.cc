@@ -1204,8 +1204,22 @@ static void rcclTelemetryWriteJson(FILE* fp) {
     fprintf(fp, "      \"tx_bytes\": %lu,\n", (unsigned long)dev->tx_bytes);
     fprintf(fp, "      \"rx_bytes\": %lu,\n", (unsigned long)dev->rx_bytes);
     fprintf(fp, "      \"num_cq_errors\": %lu,\n", (unsigned long)dev->num_cq_errors);
+    fprintf(fp, "      \"cq_poll_count\": %lu,\n", (unsigned long)dev->cq_poll_count);
     fprintf(fp, "      \"num_channels\": %d,\n", dev->num_channels);
     fprintf(fp, "      \"active_channels\": %d,\n", activeChannels);
+
+    /* WQE payload-size distribution; only populated buckets are emitted. */
+    fprintf(fp, "      \"wqe_size_stats\": [");
+    int sizesPrinted = 0;
+    for (int b = 0; b < RCCL_TELEMETRY_WQE_SIZE_BUCKETS; b++) {
+      if (dev->wqe_size_histogram[b] == 0) continue;
+      /* Bucket b covers [2^(b-1), 2^b - 1]; bucket 0 is zero-length WQEs. */
+      unsigned long long maxBytes = (b == 0) ? 0ULL : ((1ULL << b) - 1ULL);
+      fprintf(fp, "%s\n        {\"max_wqe_size\": %llu, \"num_wqe\": %lu}",
+              sizesPrinted ? "," : "", maxBytes, (unsigned long)dev->wqe_size_histogram[b]);
+      sizesPrinted++;
+    }
+    fprintf(fp, "%s],\n", sizesPrinted ? "\n      " : "");
 
     fprintf(fp, "      \"channels\": [\n");
     int chPrinted = 0;
@@ -1231,10 +1245,18 @@ static void rcclTelemetryWriteJson(FILE* fp) {
 
         fprintf(fp, "            {\n");
         fprintf(fp, "              \"id\": %d,\n", qp->id);
+        fprintf(fp, "              \"data_qp\": %s,\n", qp->is_data_qp ? "true" : "false");
         fprintf(fp, "              \"num_wqe_sent\": %lu,\n", (unsigned long)qp->num_wqe_sent);
         fprintf(fp, "              \"num_wqe_rcvd\": %lu,\n", (unsigned long)qp->num_wqe_rcvd);
         fprintf(fp, "              \"num_wqe_completed\": %lu,\n", (unsigned long)qp->num_wqe_completed);
         fprintf(fp, "              \"num_slot_miss\": %lu,\n", (unsigned long)qp->num_slot_miss);
+        fprintf(fp, "              \"num_cts_sent\": %lu,\n", (unsigned long)qp->num_cts_sent);
+        fprintf(fp, "              \"num_cts_sent_signalled\": %lu,\n",
+                (unsigned long)qp->num_cts_sent_signalled);
+        fprintf(fp, "              \"num_cts_sent_unsignalled\": %lu,\n",
+                (unsigned long)qp->num_cts_sent_unsignalled);
+        fprintf(fp, "              \"num_write_wqe\": %lu,\n", (unsigned long)qp->num_write_wqe);
+        fprintf(fp, "              \"num_write_imm_wqe\": %lu,\n", (unsigned long)qp->num_write_imm_wqe);
         fprintf(fp, "              \"wqe_completion_ns_min\": %ld,\n", (long)qp->wqe_completion_ns_min);
         fprintf(fp, "              \"wqe_completion_ns_max\": %ld,\n", (long)qp->wqe_completion_ns_max);
 
