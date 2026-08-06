@@ -4,8 +4,8 @@
 
 .. _your-first-rccl-program:
 
-Your first RCCL program
-========================
+Run your first RCCL program
+===========================
 
 This tutorial walks you through writing, building, and running a complete RCCL
 program from scratch. By the end, you will have a working AllReduce benchmark
