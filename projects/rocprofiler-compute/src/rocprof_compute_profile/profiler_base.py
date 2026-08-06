@@ -303,7 +303,6 @@ class RocProfCompute_Base:
             args_dict["filter_blocks"] = self._filter_blocks
             args_dict["config_dir"] = str(args_dict["config_dir"])
             args_dict["format_rocprof_output"] = PROFILE_OUTPUT_FORMAT
-            args_dict.pop("join_type", None)
             yaml.dump(args_dict, f)
 
         # verify soc compatibility
