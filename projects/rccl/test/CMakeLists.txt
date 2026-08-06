@@ -200,6 +200,7 @@ if(BUILD_TESTS)
     CpuAffinityTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
+    IbvSymbolsEnvTests.cpp
     common/main.cpp
     common/CallCollectiveForked.cpp
     common/CollectiveArgs.cpp
@@ -223,6 +224,7 @@ if(BUILD_TESTS)
     list(APPEND TEST_SOURCE_FILES
       ../src/misc/recorder.cc
       ../src/misc/proxy_trace/proxy_trace.cc
+      ../src/misc/ibvsymbols.cc  # buildIbvSymbols() is hidden in librccl; compile it in for IbvSymbolsEnvTests
     )
   endif()
 
@@ -359,6 +361,7 @@ if(BUILD_TESTS)
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
       EnqueueTests.cpp
+      LL128RegVariantKernelTests.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
       TopoNicFusionTests.cpp
@@ -440,6 +443,20 @@ if(BUILD_TESTS)
     endif()
   endif()
 
+  # rccl-UnitTestsGdr: Compiles the peer-memory detection helper (gdr_peermem.cc,
+  # shared by the net_ib and net_ib_cast transports) directly so the sysfs scan can
+  # be exercised against a mock `memory_peers` tree in a temp directory. The helper
+  # is pure (no HIP, no librccl.so symbols, no GPU), so this target builds in
+  # Release and Debug.
+  list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsGdr)
+
+  set(TEST_GDR_SOURCE_FILES
+    GdrPeerMemTests.cpp
+    ../src/misc/gdr_peermem.cc
+    common/main_altrsmi.cpp
+  )
+
+  add_executable(rccl-UnitTestsGdr ${TEST_GDR_SOURCE_FILES})
   # rccl-UnitTestsAmdSmi: tests for the amdsmi_wrap layer.
   #
   # AmdSmiFabricTests.cpp covers the fabric predicates and struct layout pinned in
