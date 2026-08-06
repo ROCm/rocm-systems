@@ -36,6 +36,7 @@
 #include <cerrno>
 #include <filesystem>
 #include <mutex>
+#include <set>
 #include <string>
 #include <unordered_set>
 #include <algorithm>
@@ -215,6 +216,12 @@ static std::atomic<uint64_t> g_blob_count{0};
 // "co:" prefix for code objects matches the playback-side load_code_object key convention.
 static std::mutex                      g_blob_mu;
 static std::unordered_set<std::string> g_written_blobs;
+
+// APIs recorded in this archive that replay cannot reproduce (note_unreplayable).
+// Listed in manifest.json so the gap is a property of the archive rather than
+// something only visible in a replay log.
+static std::mutex                      g_unreplayable_mu;
+static std::set<std::string>           g_unreplayable_apis;
 
 // ---------------------------------------------------------------------------
 // Low-level fd helpers
@@ -499,6 +506,18 @@ static void write_manifest_stdio(const char* output_dir, bool complete) {
           complete ? "true" : "false",
           static_cast<unsigned long long>(g_event_count.load()),
           static_cast<unsigned long long>(g_blob_count.load()));
+  {
+    std::lock_guard<std::mutex> lk(g_unreplayable_mu);
+    if (!g_unreplayable_apis.empty()) {
+      fprintf(mf, ",\n  \"unreplayable_apis\": [");
+      bool first = true;
+      for (const auto& api : g_unreplayable_apis) {
+        fprintf(mf, "%s\"%s\"", first ? "" : ", ", api.c_str());
+        first = false;
+      }
+      fprintf(mf, "]");
+    }
+  }
   if (g_metadata_json_len > 0) {
     fprintf(mf, ",\n  \"metadata\": %.*s\n",
             static_cast<int>(g_metadata_json_len), g_metadata_json);
@@ -749,6 +768,18 @@ void mark_incomplete(const char* reason) {
 }
 
 bool is_incomplete() { return g_capture_incomplete.load(std::memory_order_relaxed); }
+
+void note_unreplayable(const char* api, const char* reason) {
+  if (!api) return;
+  {
+    std::lock_guard<std::mutex> lk(g_unreplayable_mu);
+    if (!g_unreplayable_apis.insert(api).second) return;
+  }
+  fprintf(stderr,
+          "[HRR capture] %s cannot be replayed: %s. The call is recorded, but "
+          "replay will report it as unreplayable rather than reproduce it.\n",
+          api, reason ? reason : "(unspecified)");
+}
 
 void flush(const char* /*output_dir*/) {
   // Always finalize the *effective* directory this process actually wrote to

@@ -78,6 +78,7 @@ HrrReplayClass expect_code_to_class(int code) {
     case kHrrExpectErrorStub: return HrrReplayClass::kErrorStub;
     case kHrrExpectHandlerError: return HrrReplayClass::kHandlerError;
     case kHrrExpectCrash:     return HrrReplayClass::kCrash;
+    case kHrrExpectUnreplayable: return HrrReplayClass::kUnreplayable;
     default:                  return HrrReplayClass::kReal;
   }
 }
@@ -544,7 +545,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_ManifestWellFormed", "[hrr][api-matrix][cpu]") {
     REQUIRE(e.api != nullptr);
     REQUIRE(e.tier != nullptr);
     CHECK(e.expect >= kHrrExpectReal);
-    CHECK(e.expect <= kHrrExpectCrash);
+    CHECK(e.expect <= kHrrExpectUnreplayable);
     CHECK(tiers.count(e.tier) == 1);
     CHECK(seen.insert(e.api).second);
   }
@@ -565,13 +566,15 @@ TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[hrr][api-matrix][cpu]") {
       "[HRR] NOOP playback handler called for hipHostAlloc \xE2\x80\x94 this "
       "API is not replayed; results may differ from capture.\n";
   const std::string stub_line =
-      "[HRR] hipGraphCreate: explicit (node-API) graph construction is NOT "
-      "supported by HRR replay.\n";
+      "[HRR] hipGraphAddNode: not reconstructable at replay, so the call is "
+      "skipped and the graph it belongs to is marked incomplete; "
+      "instantiating that graph fails loudly rather than running a graph "
+      "that is missing work.\n";
   const std::string clean = "[HRR]   D2H checks     : 4 pass, 0 fail\n";
 
   CHECK(hrr_observed_replay_class(noop_line, "hipHostAlloc") ==
         HrrReplayClass::kNoop);
-  CHECK(hrr_observed_replay_class(stub_line, "hipGraphCreate") ==
+  CHECK(hrr_observed_replay_class(stub_line, "hipGraphAddNode") ==
         HrrReplayClass::kErrorStub);
   CHECK(hrr_observed_replay_class(clean, "hipMalloc") == HrrReplayClass::kReal);
 
@@ -579,7 +582,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[hrr][api-matrix][cpu]") {
   // the API name for exactly this reason.
   CHECK(hrr_observed_replay_class(noop_line, "hipHostMalloc") ==
         HrrReplayClass::kReal);
-  CHECK(hrr_observed_replay_class(stub_line, "hipGraphClone") ==
+  CHECK(hrr_observed_replay_class(stub_line, "hipGraphAddMemsetNode") ==
         HrrReplayClass::kReal);
 
   // HIP API names prefix one another, so a marker that is not bounded at the
@@ -600,7 +603,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[hrr][api-matrix][cpu]") {
   const std::string both = noop_line + stub_line;
   CHECK(hrr_observed_replay_class(both, "hipHostAlloc") ==
         HrrReplayClass::kNoop);
-  CHECK(hrr_observed_replay_class(both, "hipGraphCreate") ==
+  CHECK(hrr_observed_replay_class(both, "hipGraphAddNode") ==
         HrrReplayClass::kErrorStub);
 
   // A handler that returns a HIP error reports itself in one of two forms
@@ -632,6 +635,27 @@ TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[hrr][api-matrix][cpu]") {
   CHECK(failed.count("hipStreamAddCallback") == 1);
   CHECK(hrr_observed_replay_class(many, "hipHostAlloc") ==
         HrrReplayClass::kNoop);
+
+  // An unreplayable API returns hipErrorNotSupported, so it appears in the
+  // failed-API list as well. The refusal is the more specific fact and must
+  // win, or a declared scope exclusion would read as a handler that broke.
+  const std::string unreplayable_line =
+      "[HRR] hipStreamAddCallback: NOT REPLAYABLE \xE2\x80\x94 the callback is "
+      "a host function pointer belonging to the capturing process. The call is "
+      "in the archive but its effect cannot be reproduced here.\n";
+  const std::string unreplayable_pair =
+      unreplayable_line +
+      "[HRR] Error: T19 Event 71 (hipStreamAddCallback) returned 801 "
+      "(operation not supported) \xE2\x80\x94 continuing\n";
+  CHECK(hrr_observed_replay_class(unreplayable_pair, "hipStreamAddCallback") ==
+        HrrReplayClass::kUnreplayable);
+  CHECK(hrr_observed_replay_class(unreplayable_pair, "hipMalloc") ==
+        HrrReplayClass::kReal);
+  // A handler that genuinely failed is still HANDLER_ERROR when some other API
+  // was the unreplayable one.
+  CHECK(hrr_observed_replay_class(unreplayable_line + continued_line,
+                                  "hipDrvLaunchKernelEx") ==
+        HrrReplayClass::kHandlerError);
 
   // Only the fatal form means the replay stopped; the continuing form must not
   // be read as a truncated run, or every tier would fail on its own design.
