@@ -29,6 +29,17 @@ in the following table.
       - | String path to configuration file
         | Default: ``~/.rccl.conf`` or ``/etc/rccl.conf``
 
+    * - | ``NCCL_IBVERBS_LIB``
+        | Specifies the libibverbs shared object that RCCL loads at runtime for
+          the InfiniBand/RoCE (IB verbs) transport. Use it when rdma-core is
+          installed in a non-default prefix, such as inside a container or an
+          HPC software module, where the loader cannot find the library by its
+          default name. When the override is unset or fails to load, RCCL falls
+          back to ``libibverbs.so`` and then ``libibverbs.so.1``. ``NCCL_LIBIBVERBS_SO``
+          is accepted as an alias and is used when ``NCCL_IBVERBS_LIB`` is unset.
+      - | String path or soname of the libibverbs shared object
+        | Default: unset (loads ``libibverbs.so`` or ``libibverbs.so.1``)
+
     * - | ``NCCL_HOSTID``
         | Sets the host identifier for multi-node communication.
       - | String value for host identification
