@@ -34,6 +34,8 @@ namespace rocjitsu {
 /// for mmap/munmap operations.
 class EventState {
 public:
+  enum class PageReleaseResult { kNotMapped, kReleased, kOverlap };
+
   ~EventState();
 
   /// @brief Handle KFD CREATE_EVENT ioctl.
@@ -74,11 +76,11 @@ public:
   /// @details Idempotent, subsequent calls after the first are no-ops.
   void adopt_page(void *ptr, size_t size);
 
-  /// @brief If @p ptr is the adopted event page, clear page/page_size and return true.
-  /// @details Clears the fields under mutex_ so the CP interrupt thread (which
-  /// reads page/page_size under the same lock in signal_interrupt) can never race
-  /// a concurrent munmap tearing the mapping down.
-  [[nodiscard]] bool release_page(void *ptr);
+  /// @brief Release an exact event-page mapping or report a protected overlap.
+  /// @details Clears page/page_size only when the requested range exactly matches
+  /// the adopted page. Classification and release happen under mutex_, so the CP
+  /// interrupt thread cannot retain a pointer to an unmapped event page.
+  [[nodiscard]] PageReleaseResult release_page(void *ptr, size_t size);
 
   /// @brief Signal event(s) from the CP's interrupt callback.
   /// @details When event_id is non-zero, signals that specific event. When

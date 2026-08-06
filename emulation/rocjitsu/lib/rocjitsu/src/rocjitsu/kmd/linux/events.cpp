@@ -49,13 +49,25 @@ void EventState::adopt_page(void *ptr, size_t size) {
   }
 }
 
-bool EventState::release_page(void *ptr) {
+EventState::PageReleaseResult EventState::release_page(void *ptr, size_t size) {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (page != ptr)
-    return false;
+  if (!page)
+    return PageReleaseResult::kNotMapped;
+
+  const uintptr_t request_begin = reinterpret_cast<uintptr_t>(ptr);
+  const uintptr_t page_begin = reinterpret_cast<uintptr_t>(page);
+  if (size > UINTPTR_MAX - request_begin || page_size > UINTPTR_MAX - page_begin)
+    return PageReleaseResult::kOverlap;
+  const uintptr_t request_end = request_begin + size;
+  const uintptr_t page_end = page_begin + page_size;
+  if (request_begin >= page_end || request_end <= page_begin)
+    return PageReleaseResult::kNotMapped;
+  if (request_begin != page_begin || size != page_size)
+    return PageReleaseResult::kOverlap;
+
   page = nullptr;
   page_size = 0;
-  return true;
+  return PageReleaseResult::kReleased;
 }
 
 /// @brief Signal event(s) from the CP's interrupt callback.
