@@ -34,6 +34,7 @@
 #include <hip/hiprtc.h>
 #include "hrr_reader.h"
 #include "hrr_api_args.h"
+#include "hrr_test_common.h"
 
 #include <algorithm>
 #include <cctype>
@@ -45,55 +46,10 @@
 #include <string>
 #include <vector>
 
-namespace fs = std::filesystem;
-
-// Platform path separator for setEnv("PATH", ...).
-// ';' on Windows, ':' on POSIX.
-#ifdef _WIN32
-static constexpr char kPathSep = ';';
-#else
-static constexpr char kPathSep = ':';
-#endif
-
-// Set PATH so the subprocess can find the ROCm runtime binaries.
-// On Windows: DLLs are found via PATH.
-// On Linux:   fork() inherits LD_LIBRARY_PATH from the parent automatically;
-//             no explicit setEnv needed.
-static void set_proc_search_path(hip::SpawnProc& proc) {
-  const char* cur_path = getenv("PATH");
-  proc.setEnv("PATH",
-              std::string(ROCM_BIN_PATH) + kPathSep + (cur_path ? cur_path : ""));
-}
-
-// RAII guard: removes a directory tree on scope exit (even on REQUIRE failure).
-struct ScopedDir {
-  fs::path path;
-  explicit ScopedDir(fs::path p) : path(std::move(p)) { fs::remove_all(path); }
-  ~ScopedDir() { fs::remove_all(path); }
-};
-
-static fs::path hrr_single_process_archive(const fs::path& root) {
-  if (fs::exists(root / "events.bin"))
-    return root;
-
-  std::vector<fs::path> archives;
-  for (const auto& ent : fs::directory_iterator(root)) {
-    if (!ent.is_directory()) continue;
-    const std::string name = ent.path().filename().string();
-    if (name.rfind("pid-", 0) == 0 && fs::exists(ent.path() / "events.bin"))
-      archives.push_back(ent.path());
-  }
-  INFO("Process archive count: " << archives.size());
-  REQUIRE(archives.size() == 1);
-  return archives.front();
-}
-
-static std::string read_text_file(const fs::path& path) {
-  std::ifstream in(path, std::ios::binary);
-  std::ostringstream ss;
-  ss << in.rdbuf();
-  return ss.str();
-}
+// fs, kPathSep, set_proc_search_path, ScopedDir, hrr_single_process_archive,
+// read_text_file, hrr_run_playback, hrr_run_roundtrip, hrr_capture_direct,
+// hrr_playback_env and run_playback_raw all live in hrr_test_common.h so the
+// API-matrix tests can reuse them.
 
 static size_t find_string_end(const std::string& json, size_t quote_pos) {
   bool escape = false;
@@ -184,87 +140,6 @@ static bool json_array_exists(const std::string& json, const std::string& key) {
 }
 
 // ---------------------------------------------------------------------------
-// hrr_parse_d2h_summary: extract the pass/fail counts from the playback
-// "D2H checks" summary line, which hrr_playback.cpp prints as:
-//
-//   "[HRR]   D2H checks     : N pass (E exact, T within tol), M fail, K skipped"
-//
-// The parenthetical breakdown is always part of the line, so the format string
-// has to consume it: a format that stops at "pass," matches only the pass count
-// and leaves the fail count at its initial value, which silently turns every
-// caller's fail assertion into a no-op.
-//
-// Returns false when the line is absent or does not match, so a future change
-// to the producer surfaces as a test failure instead of a phantom zero.
-// ---------------------------------------------------------------------------
-static bool hrr_parse_d2h_summary(const std::string& out, int& d2h_pass, int& d2h_fail) {
-  const size_t pos = out.find("D2H checks");
-  if (pos == std::string::npos) return false;
-  const size_t colon = out.find(':', pos);
-  if (colon == std::string::npos) return false;
-  return std::sscanf(out.c_str() + colon + 1, " %d pass (%*d exact, %*d within tol), %d fail",
-                     &d2h_pass, &d2h_fail) == 2;
-}
-
-// ---------------------------------------------------------------------------
-// hrr_run_playback — spawn hrr-playback, capture stdout, assert:
-//   1. Exit code == 0.
-//   2. The "D2H checks" summary line is present and shows >= 1 pass, 0 fail.
-//
-// If require_d2h == true (default) we REQUIRE pass >= 1.
-// Workloads with no D2H memcpy (e.g. DeviceInfo, Occupancy) pass require_d2h=false.
-// ---------------------------------------------------------------------------
-static void hrr_run_playback(const fs::path& cap_path,
-                             const std::string& extra_args = "",
-                             bool require_d2h = true) {
-  hip::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
-  set_proc_search_path(proc);
-  // On Windows, wrap the path in quotes so CreateProcess handles spaces.
-  // On Linux, SpawnProc uses execvp (no shell), so quotes are literal characters
-  // in the argument — pass the raw path without quoting.
-#ifdef _WIN32
-  std::string path_arg = "\"" + cap_path.string() + "\"";
-#else
-  std::string path_arg = cap_path.string();
-#endif
-  int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
-  std::string out = proc.getOutput();
-  INFO("Playback stdout:\n" << out);
-  INFO("Playback exit code: " << ret);
-  // On Windows (gfx1151 consumer iGPU CI target) replay is not guaranteed to
-  // reproduce device output bit-for-bit — kernel output buffers can read back
-  // as zero even though capture and playback both launch successfully. Treat
-  // D2H fidelity as best-effort there (same policy as the Linux fat-binary
-  // limitation below); a crash still fails the test via the ret < 128 check.
-#ifdef _WIN32
-  require_d2h = false;
-#endif
-  // When require_d2h is false (e.g. no D2H in workload, or Linux fat-binary
-  // limitation) we only assert that hrr-playback did not crash (signal).
-  // A non-zero exit due to D2H mismatch is accepted.
-  if (require_d2h) {
-    REQUIRE(ret == 0);
-  } else {
-    // Treat SIGSEGV/SIGBUS (>128) as hard failure; clean exit or D2H-fail (1) is ok.
-    REQUIRE(ret < 128);
-    if (ret != 0) return;  // D2H mismatch expected — skip summary parse
-  }
-
-  // Parse the D2H summary line.
-  int d2h_pass = 0, d2h_fail = 0;
-  if (!hrr_parse_d2h_summary(out, d2h_pass, d2h_fail)) {
-    FAIL("hrr-playback output missing or malformed 'D2H checks' summary line");
-  }
-  INFO("D2H pass=" << d2h_pass << " fail=" << d2h_fail);
-  if (require_d2h) {
-    CHECK(d2h_pass >= 1);
-    CHECK(d2h_fail == 0);
-  }
-}
-
-
-// ---------------------------------------------------------------------------
-
 /**
  * Test Description
  * ----------------
@@ -548,46 +423,6 @@ HIP_TEST_CASE(Unit_HRR_StressApisRoundtrip) {
   hrr_run_playback(cap.path);
 }
 
-// ---------------------------------------------------------------------------
-// Helper: shared roundtrip body — capture → verify archive → playback.
-//
-// min_events:  minimum number of events expected in events.bin.  Every workload
-//   must produce at least a few events (malloc, memcpy, kernel, free) — a value
-//   of 5 is a conservative floor that would catch a totally empty capture.
-//   Use a higher value for workloads known to emit many events (StressApis, etc.).
-// require_d2h: if true (default), asserts that playback validated at least one
-//   D2H blob.  Pass false for workloads that conditionally skip D2H (e.g. the
-//   texture workload on devices without image support).
-// ---------------------------------------------------------------------------
-static void hrr_run_roundtrip(const std::string& direct_case,
-                               const fs::path& cap_path,
-                               size_t min_events = 5,
-                               bool require_d2h = true) {
-  { hip::SpawnProc proc(HRR_TEST_EXE);
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
-    { set_proc_search_path(proc); }
-    int ret = proc.run("\"" + direct_case + "\"");
-    INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
-  fs::path archive_path = hrr_single_process_archive(cap_path);
-  REQUIRE(fs::exists(archive_path / "events.bin"));
-  REQUIRE(fs::exists(archive_path / "blobs"));
-  int bc = 0;
-  for ([[maybe_unused]] const auto& _ :
-       fs::recursive_directory_iterator(archive_path / "blobs")) ++bc;
-  INFO("Blob count: " << bc); REQUIRE(bc >= 1);
-
-  // Load the archive and assert a minimum event count.  This catches generator
-  // bugs that silently produce empty or near-empty archives while still writing
-  // at least one blob (which would otherwise satisfy the blob_count >= 1 check).
-  hrr::Archive arc;
-  bool arc_ok = hrr::load_archive(cap_path.string(), arc);
-  INFO("Archive event count: " << arc.events.size());
-  REQUIRE(arc_ok);
-  REQUIRE(arc.events.size() >= min_events);
-
-  hrr_run_playback(cap_path, /*extra_args=*/"", require_d2h);
-}
-
 static bool hrr_find_peer_accessible_pair(int& src_dev, int& dst_dev, int& ndev) {
   HIP_CHECK(hipGetDeviceCount(&ndev));
   if (ndev < 2) return false;
@@ -605,53 +440,6 @@ static bool hrr_find_peer_accessible_pair(int& src_dev, int& dst_dev, int& ndev)
     }
   }
   return false;
-}
-
-// ---------------------------------------------------------------------------
-// Env-aware capture + playback helpers (used by the repro roundtrips).
-//
-// hrr_capture_direct: spawn a hidden _Direct workload with HIP_HRR_CAPTURE_OUTPUT
-//   set, REQUIRE a clean capture, and assert the archive has >= min_events.
-//
-// hrr_playback_env: run hrr-playback with arbitrary extra environment pairs
-//   (e.g. HIP_HRR_REPLAY_ZERO_INIT / HIP_HRR_REPLAY_DIVERGENCE_ABORT) and return
-//   {exit_code, stdout}.  Note: SpawnProc only captures stdout, not stderr, so
-//   the divergence-guard "[HRR] replay DIVERGED" message (emitted on stderr) is
-//   NOT visible here — the deterministic, observable contract is the exit code
-//   (2 == clean divergence stop), which is what the callers assert.
-// ---------------------------------------------------------------------------
-static void hrr_capture_direct(const std::string& direct_case,
-                               const fs::path& cap_path,
-                               size_t min_events = 5) {
-  { hip::SpawnProc proc(HRR_TEST_EXE);
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
-    { set_proc_search_path(proc); }
-    int ret = proc.run("\"" + direct_case + "\"");
-    INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
-  fs::path archive_path = hrr_single_process_archive(cap_path);
-  REQUIRE(fs::exists(archive_path / "events.bin"));
-  REQUIRE(fs::exists(archive_path / "blobs"));
-  hrr::Archive arc;
-  bool arc_ok = hrr::load_archive(cap_path.string(), arc);
-  INFO("Archive event count: " << arc.events.size());
-  REQUIRE(arc_ok);
-  REQUIRE(arc.events.size() >= min_events);
-}
-
-static std::pair<int, std::string> hrr_playback_env(
-    const fs::path& cap_path,
-    const std::vector<std::pair<std::string, std::string>>& env,
-    const std::string& extra_args = "") {
-  hip::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
-  set_proc_search_path(proc);
-  for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
-#ifdef _WIN32
-  std::string path_arg = "\"" + cap_path.string() + "\"";
-#else
-  std::string path_arg = cap_path.string();
-#endif
-  int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
-  return {ret, proc.getOutput()};
 }
 
 // ---------------------------------------------------------------------------
@@ -1454,15 +1242,6 @@ static std::string build_replacement_co(const fs::path& dir) {
 }
 
 // Spawn hrr-playback with arbitrary extra args; return {exit_code, stdout}.
-static std::pair<int, std::string> run_playback_raw(const fs::path& cap_path,
-                                                    const std::string& extra_args) {
-  hip::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
-  set_proc_search_path(proc);
-  std::string path_arg = cap_path.string();
-  int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
-  return {ret, proc.getOutput()};
-}
-
 // Return the full recorded name of the first kernel-launch event whose name
 // contains `needle`, or "" if none. --replace-kernel matches the recorded name
 // EXACTLY, and C++/chevron kernels are recorded under their mangled symbol
