@@ -833,9 +833,15 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     task.count = count;
     task.datatype = datatype;
     NCCLCHECK(getAlgoInfo(comm, &task, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*numPipeOps=*/1, /*simInfo=*/nullptr));
-    decision->algo = task.algorithm;
     decision->protocol = task.protocol;
+#ifdef ENABLE_WARP_SPEED
+    // WarpSpeed reports as RING* with channels scaled by nWarps, matching rcclGetAlgoInfo.
+    decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : task.nMaxChannels;
+    decision->algo = task.useWarpSpeed ? rcclAddonAlgos_t::RCCL_WARP_SPEED : task.algorithm;
+#else
     decision->nMaxChannels = task.nMaxChannels;
+    decision->algo = task.algorithm;
+#endif
   }
   return ncclSuccess;
 }
