@@ -6,6 +6,7 @@
 #include "binary/analysis.hpp"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "common/synchronized.hpp"
 #include "core/common.hpp"
 #include "core/common_types.hpp"
@@ -438,7 +439,7 @@ get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data
                                      : ((itr.lineno == 0) ? std::string{ "?" }
                                                           : fmt::format("{}", itr.lineno));
             auto _entry = fmt::format("{} @ {}:{}", rocprofsys::utility::demangle(*_func),
-                                      ::basename(_loc->c_str()), _line);
+                                      path::filename(*_loc), _line);
             backtrace[fmt::format("frame#{}", _bt_cnt++)] = _entry;
         }
     }
@@ -760,7 +761,7 @@ tool_tracing_callback_stop(
                                                          : fmt::format("{}", itr.lineno));
                             auto _entry = fmt::format(
                                 "{} @ {}:{}", rocprofsys::utility::demangle(*_func),
-                                ::basename(_loc->c_str()), _line);
+                                path::filename(*_loc), _line);
                             if(_bt_cnt < 10)
                             {
                                 // Prepend zero for better ordering in UI. Only one
@@ -1264,7 +1265,7 @@ ompt_tracing_callback_stop(
                                                      : fmt::format("{}", itr.lineno));
                         auto _entry = fmt::format("{} @ {}:{}",
                                                   rocprofsys::utility::demangle(*_func),
-                                                  ::basename(_loc->c_str()), _line);
+                                                  path::filename(*_loc), _line);
                         if(_bt_cnt < 10)
                         {
                             // Prepend zero for better ordering in UI. Only one zero

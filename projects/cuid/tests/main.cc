@@ -40,6 +40,7 @@
 #include "functional/device_refresh_test.h"
 #include "functional/hmac_test.h"
 #include "functional/reverse_lookup_test.h"
+#include "src/gim_util.h"
 
 // =============================================================================
 // cuidtstUnprivileged — tests that run without root
@@ -202,6 +203,17 @@ TEST(cuidtstPrivileged, ReverseDeviceType) {
     GTEST_SKIP() << "Requires root; run with sudo to enable.";
   }
   TestReverseDeviceType tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstPrivileged, GimDeviceEnumeration) {
+  if (geteuid() != 0) {
+    GTEST_SKIP() << "Requires root; run with sudo to enable.";
+  }
+  if (!cuid::gim::GimClient::is_available()) {
+    GTEST_SKIP() << "GIM device node not present; skipping.";
+  }
+  TestGimDeviceEnumeration tst;
   RunGenericTest(&tst);
 }
 

@@ -8,12 +8,19 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <iterator>
+#include <mutex>
 #include <new>
+#include <regex>
+#include <sstream>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -22,6 +29,17 @@ extern "C" bool OnLoad(HsaApiTable *, uint64_t, uint64_t, const char *const *);
 extern "C" void OnUnload();
 extern "C" size_t rj_test_retained_executable_buffer_count();
 extern "C" void rj_test_clear_retained_storage();
+extern "C" void rj_test_log_translation(uint64_t source_id, size_t changed);
+extern "C" uint64_t rj_test_translation_count();
+extern "C" uint64_t rj_test_translation_memo_bytes();
+extern "C" void rj_test_set_translation_memo_capacity(uint64_t bytes);
+extern "C" void rj_test_close_translation_gate();
+extern "C" void rj_test_open_translation_gate();
+extern "C" uint64_t rj_test_translation_waiters();
+extern "C" void rj_test_force_next_translation_status(int status);
+extern "C" uint64_t rj_test_sample_fingerprint(const void *bytes, size_t size);
+extern "C" void rj_test_retain_completed_claims(bool retain);
+extern "C" void rj_test_fail_next_memo_admission(int stage);
 
 namespace {
 
@@ -122,9 +140,15 @@ hsa_status_t HSA_API fake_isa_get_info(hsa_isa_t isa, hsa_isa_info_t attribute, 
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
 
+// Serialises the loader fakes' shared bookkeeping. Only the concurrency cases call
+// them from more than one thread, but the state they touch is plain globals, so
+// without this those cases would be racing rather than testing.
+std::mutex g_fake_mutex;
+
 hsa_status_t HSA_API fake_create_file(hsa_file_t, hsa_code_object_reader_t *reader) {
   if (reader == nullptr)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  std::lock_guard fake_lock(g_fake_mutex);
   *reader = hsa_code_object_reader_t{g_next_reader++};
   return HSA_STATUS_SUCCESS;
 }
@@ -133,12 +157,14 @@ hsa_status_t HSA_API fake_create_memory(const void *bytes, size_t size,
                                         hsa_code_object_reader_t *reader) {
   if (bytes == nullptr || size == 0 || reader == nullptr)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  std::lock_guard fake_lock(g_fake_mutex);
   *reader = hsa_code_object_reader_t{g_next_reader++};
   g_readers.emplace(reader->handle, ReaderView{static_cast<const uint8_t *>(bytes), size});
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t HSA_API fake_destroy_reader(hsa_code_object_reader_t reader) {
+  std::lock_guard fake_lock(g_fake_mutex);
   ++g_reader_destroy_calls;
   if (g_reader_destroy_status == HSA_STATUS_SUCCESS)
     g_readers.erase(reader.handle);
@@ -151,6 +177,7 @@ hsa_status_t HSA_API fake_destroy_executable(hsa_executable_t) {
 
 hsa_status_t HSA_API fake_load_agent(hsa_executable_t, hsa_agent_t, hsa_code_object_reader_t reader,
                                      const char *, hsa_loaded_code_object_t *loaded) {
+  std::lock_guard fake_lock(g_fake_mutex);
   ++g_load_agent_calls;
   g_loaded_reader = reader;
   if (g_load_agent_status != HSA_STATUS_SUCCESS)
@@ -287,6 +314,39 @@ TEST_F(HsaHotswapHookTest, UnloadRestoresAndAllowsReinstall) {
   EXPECT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
 }
 
+TEST_F(HsaHotswapHookTest, EmitsConcurrentTranslationRecordsAtomically) {
+  constexpr size_t kThreadCount = 8;
+  constexpr size_t kRecordsPerThread = 32;
+
+  ASSERT_EQ(setenv("HSA_HOTSWAP_VERBOSE", "1", 1), 0);
+  testing::internal::CaptureStderr();
+  std::vector<std::thread> workers;
+  workers.reserve(kThreadCount);
+  for (size_t thread_index = 0; thread_index < kThreadCount; ++thread_index) {
+    workers.emplace_back([thread_index] {
+      for (size_t record_index = 0; record_index < kRecordsPerThread; ++record_index) {
+        const uint64_t source_id = thread_index * kRecordsPerThread + record_index;
+        rj_test_log_translation(source_id, record_index);
+      }
+    });
+  }
+  for (auto &worker : workers)
+    worker.join();
+  const std::string log_text = testing::internal::GetCapturedStderr();
+  ASSERT_EQ(unsetenv("HSA_HOTSWAP_VERBOSE"), 0);
+
+  const std::regex record_pattern(
+      R"(^\[hsa-hotswap-rj\] eager translation source_id=fnv1a64:[0-9a-f]{16} input_revision=b0 output_revision=a0 outcome=translated changed=[0-9]+ input_bytes=64 output_bytes=96 translation_status=0 status=0$)");
+  std::istringstream lines(log_text);
+  std::string line;
+  size_t record_count = 0;
+  while (std::getline(lines, line)) {
+    EXPECT_TRUE(std::regex_match(line, record_pattern)) << line;
+    ++record_count;
+  }
+  EXPECT_EQ(record_count, kThreadCount * kRecordsPerThread);
+}
+
 // A rejected install must not leave the hook stuck. install() commits g_state.core
 // only AFTER its one fallible step (building the saved-table snapshot), so a
 // rejected or throwing install cannot latch core non-null and permanently reject
@@ -334,9 +394,13 @@ TEST_F(HsaHotswapHookTest, TranslatesGfx1250AndRetainsOutputUntilDestroy) {
   ASSERT_EQ(
       api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
       HSA_STATUS_SUCCESS);
-  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
-                                                              nullptr, nullptr),
-            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_VERBOSE", "1", 1), 0);
+  testing::internal::CaptureStderr();
+  const hsa_status_t load_status = api.core.hsa_executable_load_agent_code_object_fn(
+      kExecutable, kA0Agent, reader, nullptr, nullptr);
+  const std::string log_text = testing::internal::GetCapturedStderr();
+  ASSERT_EQ(unsetenv("HSA_HOTSWAP_VERBOSE"), 0);
+  ASSERT_EQ(load_status, HSA_STATUS_SUCCESS);
 
   ASSERT_GE(g_loaded_bytes.size(), rocjitsu::EI_MAGIC_SIZE);
   EXPECT_EQ(std::memcmp(g_loaded_bytes.data(), rocjitsu::EI_MAGIC, rocjitsu::EI_MAGIC_SIZE), 0);
@@ -344,6 +408,22 @@ TEST_F(HsaHotswapHookTest, TranslatesGfx1250AndRetainsOutputUntilDestroy) {
   EXPECT_NE(g_loaded_reader.handle, reader.handle);
   EXPECT_EQ(g_load_agent_calls, 1);
   EXPECT_EQ(rj_test_retained_executable_buffer_count(), 1u);
+
+  uint64_t identity = 14695981039346656037ULL;
+  for (uint8_t byte : source) {
+    identity ^= byte;
+    identity *= 1099511628211ULL;
+  }
+  std::ostringstream expected_identity;
+  expected_identity << "source_id=fnv1a64:" << std::hex << std::setfill('0') << std::setw(16)
+                    << identity;
+  EXPECT_NE(log_text.find("[hsa-hotswap-rj] eager translation "), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find(expected_identity.str()), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find(" input_revision=b0 output_revision=a0 outcome=translated changed="),
+            std::string::npos)
+      << log_text;
+  EXPECT_EQ(log_text.find(" changed=0 "), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find(" translation_status=0 status=0"), std::string::npos) << log_text;
 
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
   EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);
@@ -637,5 +717,647 @@ TEST_F(HsaHotswapHookTest, CallbackApiSnapshotIsSafeDuringUnload) {
 
   EXPECT_EQ(unexpected_statuses.load(std::memory_order_relaxed), 0);
 }
+
+// Translation is a pure function of the source bytes, so a caller that registers
+// the same object repeatedly should pay for it once. The cases below assert on the
+// number of translations actually performed rather than on elapsed time: two loads
+// producing equal bytes is also true when both translated, and only the count
+// distinguishes reuse from repetition.
+class HsaHotswapMemoTest : public HsaHotswapHookTest {
+protected:
+  // Loads @p source through a fresh reader, the way a caller that re-registers the
+  // same object does -- a new handle every time, so nothing but the content itself
+  // can connect one load to the next.
+  // Spin until @p expected threads are asleep on an in-flight translation, or a
+  // generous deadline passes. Returns what was actually observed so the caller can
+  // release the gate before asserting on it.
+  static uint64_t wait_for_memo_waiters(uint64_t expected) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    uint64_t waiters = rj_test_translation_waiters();
+    while (waiters < expected && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      waiters = rj_test_translation_waiters();
+    }
+    return waiters;
+  }
+
+  // Build a second object of the SAME size as @p base whose sampled windows are
+  // identical but whose bytes are not, by disturbing one byte of trailing padding
+  // that the sampling happens to miss. Returns empty if no such byte exists, so a
+  // caller can fail loudly rather than quietly test something weaker. The
+  // fingerprint is queried rather than assumed: hand-picking an offset would stop
+  // testing a collision the day the window layout changed.
+  static std::vector<uint8_t> make_fingerprint_twin(const std::vector<uint8_t> &base) {
+    constexpr size_t kPadding = 4096;
+    std::vector<uint8_t> original = base;
+    original.resize(base.size() + kPadding, 0);
+    const uint64_t target = rj_test_sample_fingerprint(original.data(), original.size());
+    for (size_t offset = base.size(); offset < original.size(); ++offset) {
+      std::vector<uint8_t> twin = original;
+      twin[offset] = 0x5a;
+      if (rj_test_sample_fingerprint(twin.data(), twin.size()) == target)
+        return twin;
+    }
+    return {};
+  }
+
+  // Overwrite the first instruction of @p base with @p word. The result is still a
+  // structurally valid gfx1250 object, so it reaches translation rather than being
+  // rejected up front -- which is how the two ways a translation can fail are told
+  // apart: a body the translator cannot render dispatchable, versus one that makes
+  // it throw. Returns empty if .text cannot be located.
+  static std::vector<uint8_t> patch_first_instruction(const std::vector<uint8_t> &base,
+                                                      uint32_t word) {
+    if (base.size() < sizeof(rocjitsu::Elf64_Ehdr))
+      return {};
+    rocjitsu::Elf64_Ehdr header{};
+    std::memcpy(&header, base.data(), sizeof(header));
+    // Bounds-check what the fixture claims before believing it. A truncated or
+    // malformed one should fail the case, not read past the buffer and take the
+    // whole test process down with it.
+    const size_t table_bytes = size_t{header.e_shnum} * sizeof(rocjitsu::Elf64_Shdr);
+    if (header.e_shoff > base.size() || table_bytes > base.size() - header.e_shoff ||
+        header.e_shstrndx >= header.e_shnum)
+      return {};
+    const auto *sections =
+        reinterpret_cast<const rocjitsu::Elf64_Shdr *>(base.data() + header.e_shoff);
+    const size_t names_offset = sections[header.e_shstrndx].sh_offset;
+    if (names_offset >= base.size())
+      return {};
+    const char *names = reinterpret_cast<const char *>(base.data() + names_offset);
+    const size_t names_limit = base.size() - names_offset;
+    for (uint16_t index = 0; index < header.e_shnum; ++index) {
+      if (sections[index].sh_name >= names_limit)
+        return {};
+      const char *name = names + sections[index].sh_name;
+      const size_t name_limit = names_limit - sections[index].sh_name;
+      if (std::memchr(name, '\0', name_limit) == nullptr)
+        return {}; // Unterminated: comparing it would run off the end.
+      if (std::strcmp(name, ".text") != 0)
+        continue;
+      if (sections[index].sh_offset + sizeof(word) > base.size())
+        return {};
+      std::vector<uint8_t> patched = base;
+      std::memcpy(patched.data() + sections[index].sh_offset, &word, sizeof(word));
+      return patched;
+    }
+    return {};
+  }
+
+  hsa_status_t load_through_new_reader(const std::vector<uint8_t> &source,
+                                       hsa_executable_t executable = kExecutable) {
+    hsa_code_object_reader_t reader{};
+    const hsa_status_t create_status = api.core.hsa_code_object_reader_create_from_memory_fn(
+        source.data(), source.size(), &reader);
+    if (create_status != HSA_STATUS_SUCCESS)
+      return create_status;
+    return api.core.hsa_executable_load_agent_code_object_fn(executable, kA0Agent, reader, nullptr,
+                                                             nullptr);
+  }
+};
+
+// The ticket this exists for: a caller registered two distinct code objects 509
+// times each across four devices and paid for 2036 translations.
+TEST_F(HsaHotswapMemoTest, RemembersARefusalInsteadOfRepeatingIt) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
+  constexpr size_t kLoads = 256;
+
+  for (size_t load = 0; load < kLoads; ++load)
+    ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT) << load;
+
+  // A refusal is a property of the bytes: reaching it once is enough, and every
+  // later load must reach the same answer without re-deriving it.
+  EXPECT_EQ(rj_test_translation_count(), 1u);
+  EXPECT_EQ(g_load_agent_calls, 0);
+  EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);
+}
+
+#ifdef GFX1250_B0_TO_A0_FIXTURE
+TEST_F(HsaHotswapMemoTest, RepeatedLoadsOfOneObjectTranslateOnce) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = read_translation_fixture();
+  ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+  constexpr size_t kLoads = 256;
+
+  ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS);
+  const std::vector<uint8_t> first_output = g_loaded_bytes;
+  ASSERT_NE(first_output, source);
+  ASSERT_EQ(rj_test_translation_count(), 1u);
+
+  for (size_t load = 1; load < kLoads; ++load) {
+    g_loaded_bytes.clear();
+    ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS) << load;
+    ASSERT_EQ(g_loaded_bytes, first_output) << load;
+  }
+
+  EXPECT_EQ(rj_test_translation_count(), 1u);
+  EXPECT_EQ(g_load_agent_calls, static_cast<int>(kLoads));
+  // One entry is held, not one per load: the reuses shared that buffer rather
+  // than each taking a copy of it. An entry is its source plus its output,
+  // because identity is settled by comparing bytes rather than trusting a digest.
+  EXPECT_EQ(rj_test_translation_memo_bytes(), source.size() + first_output.size());
+}
+
+// Identity is exact. Two objects that a sampled fingerprint could plausibly place
+// in the same bucket -- same size, differing in one interior byte -- must not be
+// mistaken for each other, because the consequence is running the wrong code.
+TEST_F(HsaHotswapMemoTest, ObjectsDifferingInOneInteriorByteAreNotConfused) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> base = read_translation_fixture();
+  ASSERT_FALSE(base.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+
+  std::vector<uint8_t> altered = base;
+  ASSERT_GT(altered.size(), 2048u);
+  altered[altered.size() / 2] = static_cast<uint8_t>(altered[altered.size() / 2] ^ 0xff);
+
+  ASSERT_EQ(load_through_new_reader(base), HSA_STATUS_SUCCESS);
+  const std::vector<uint8_t> base_output = g_loaded_bytes;
+
+  g_loaded_bytes.clear();
+  const hsa_status_t altered_status = load_through_new_reader(altered);
+  // Whatever the altered object translates to, it must not be served the entry
+  // that belongs to the original.
+  if (altered_status == HSA_STATUS_SUCCESS) {
+    EXPECT_NE(g_loaded_bytes, base_output);
+  }
+  EXPECT_EQ(rj_test_translation_count(), 2u);
+}
+
+TEST_F(HsaHotswapMemoTest, DistinctObjectsAreTranslatedOncePerContent) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> base = read_translation_fixture();
+  ASSERT_FALSE(base.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+
+  // Trailing bytes past the end of the ELF change the content without changing
+  // what translation makes of it, which is what a second distinct object needs to
+  // be here: different bytes, same outcome.
+  std::vector<std::vector<uint8_t>> objects{base, base};
+  objects[1].push_back(0x5a);
+  constexpr size_t kLoadsPerObject = 64;
+
+  for (size_t load = 0; load < kLoadsPerObject; ++load)
+    for (const auto &object : objects)
+      ASSERT_EQ(load_through_new_reader(object), HSA_STATUS_SUCCESS) << load;
+
+  EXPECT_EQ(rj_test_translation_count(), objects.size());
+}
+
+// A control for the case above: without the memo these loads would each translate,
+// so the count must follow the number of DISTINCT objects and not the number of
+// loads. Clearing the memo mid-run makes the same object translate again, which
+// shows the count is measuring translation rather than being pinned at one.
+TEST_F(HsaHotswapMemoTest, ClearingTheMemoMakesTheSameObjectTranslateAgain) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = read_translation_fixture();
+  ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+
+  ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(rj_test_translation_count(), 1u);
+
+  rj_test_clear_retained_storage();
+  // Without this the case proves nothing: the clear also resets the counter, so
+  // the final 1 below would read the same whether a translation happened or not.
+  ASSERT_EQ(rj_test_translation_count(), 0u);
+
+  ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_translation_count(), 1u);
+}
+
+TEST_F(HsaHotswapMemoTest, ConcurrentLoadsOfOneObjectTranslateOnce) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = read_translation_fixture();
+  ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+  constexpr size_t kThreadCount = 8;
+
+  // Hold the first translation open. The fixture translates in well under a
+  // millisecond, so left to itself the claimer would publish before its peers
+  // even reached the memo, and the count below would read 1 whether or not
+  // single-flight waiting works at all.
+  rj_test_close_translation_gate();
+
+  std::atomic<int> failures{0};
+  std::vector<std::thread> workers;
+  workers.reserve(kThreadCount);
+  for (size_t thread_index = 0; thread_index < kThreadCount; ++thread_index) {
+    workers.emplace_back([&] {
+      if (load_through_new_reader(source) != HSA_STATUS_SUCCESS)
+        failures.fetch_add(1, std::memory_order_relaxed);
+    });
+  }
+
+  // Exactly one thread claims and is held at the gate; the rest must be asleep
+  // inside the memo rather than translating alongside it. Sample before opening
+  // the gate, and open it whatever the sample said -- an assertion that fired
+  // here while threads were still held would abort the process instead of failing
+  // the case.
+  const uint64_t waiters = wait_for_memo_waiters(kThreadCount - 1);
+  const uint64_t translations_while_held = rj_test_translation_count();
+  rj_test_open_translation_gate();
+  for (auto &worker : workers)
+    worker.join();
+
+  EXPECT_EQ(waiters, kThreadCount - 1);
+  EXPECT_EQ(translations_while_held, 1u);
+
+  EXPECT_EQ(failures.load(std::memory_order_relaxed), 0);
+  EXPECT_EQ(rj_test_translation_waiters(), 0u);
+  // The waiters resumed onto the published entry rather than each translating.
+  EXPECT_EQ(rj_test_translation_count(), 1u);
+}
+
+// Two objects that merely sample alike must translate side by side. The
+// fingerprint only narrows, so waiting on it would park an independent object
+// behind a translation that for the image RCCL loads runs for 197 s -- and
+// because the sampling is deterministic, so is the stall.
+TEST_F(HsaHotswapMemoTest, ObjectsThatShareAFingerprintDoNotWaitForEachOther) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> base = read_translation_fixture();
+  ASSERT_FALSE(base.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+
+  const std::vector<uint8_t> first = [&] {
+    std::vector<uint8_t> padded = base;
+    padded.resize(base.size() + 4096, 0);
+    return padded;
+  }();
+  const std::vector<uint8_t> second = make_fingerprint_twin(base);
+  ASSERT_FALSE(second.empty()) << "no colliding twin found; the sampling changed";
+  ASSERT_EQ(first.size(), second.size());
+  ASSERT_NE(first, second);
+  ASSERT_EQ(rj_test_sample_fingerprint(first.data(), first.size()),
+            rj_test_sample_fingerprint(second.data(), second.size()));
+
+  // Hold both translations open. If the claim were keyed on the fingerprint, the
+  // second object would be asleep in the memo instead of translating.
+  rj_test_close_translation_gate();
+  std::atomic<int> failures{0};
+  std::vector<std::thread> workers;
+  for (const std::vector<uint8_t> *object : {&first, &second}) {
+    workers.emplace_back([&, object] {
+      if (load_through_new_reader(*object) != HSA_STATUS_SUCCESS)
+        failures.fetch_add(1, std::memory_order_relaxed);
+    });
+  }
+
+  // Both should reach the gate, so two translations are in flight and nobody is
+  // waiting. Sample, then release regardless of what was seen.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (rj_test_translation_count() < 2 && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  const uint64_t translations_while_held = rj_test_translation_count();
+  const uint64_t waiters = rj_test_translation_waiters();
+  rj_test_open_translation_gate();
+  for (auto &worker : workers)
+    worker.join();
+
+  EXPECT_EQ(failures.load(std::memory_order_relaxed), 0);
+  EXPECT_EQ(translations_while_held, 2u) << "a colliding object was serialised behind the other";
+  EXPECT_EQ(waiters, 0u);
+}
+
+// The other way a claim ends. A claimer that gives up without publishing must
+// release its waiters, and one of them must then go on to do the work -- if the
+// claim leaked instead, every later load of these bytes would sleep forever.
+TEST_F(HsaHotswapMemoTest, WaitersResumeWhenAClaimIsReleasedWithoutPublishing) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = read_translation_fixture();
+  ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+  constexpr size_t kThreadCount = 4;
+
+  // The first translation reports an environmental failure, which is not
+  // remembered, so its claim is released rather than published.
+  rj_test_force_next_translation_status(3 /* ROCJITSU_STATUS_OUT_OF_RESOURCES */);
+  rj_test_close_translation_gate();
+
+  std::atomic<int> succeeded{0};
+  std::vector<std::thread> workers;
+  workers.reserve(kThreadCount);
+  for (size_t thread_index = 0; thread_index < kThreadCount; ++thread_index) {
+    workers.emplace_back([&] {
+      if (load_through_new_reader(source) == HSA_STATUS_SUCCESS)
+        succeeded.fetch_add(1, std::memory_order_relaxed);
+    });
+  }
+
+  const uint64_t waiters = wait_for_memo_waiters(kThreadCount - 1);
+  rj_test_open_translation_gate();
+  for (auto &worker : workers)
+    worker.join();
+
+  EXPECT_EQ(waiters, kThreadCount - 1);
+  // One load hit the forced failure; the rest resumed and one of them translated
+  // for real, so the object is usable again despite the transient fault.
+  EXPECT_EQ(succeeded.load(std::memory_order_relaxed), static_cast<int>(kThreadCount) - 1);
+  EXPECT_EQ(rj_test_translation_waiters(), 0u);
+  EXPECT_GE(rj_test_translation_count(), 2u);
+}
+
+// The two ways a real translation fails, told apart by what they imply about the
+// input. A body the translator renders non-dispatchable is a verdict on the bytes
+// and is remembered; a body that makes it throw promises nothing and is not. The
+// header-only object used above never reaches translation at all, so it cannot
+// exercise either.
+TEST_F(HsaHotswapMemoTest, ANonDispatchableObjectIsRememberedButAThrowingOneIsNot) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> base = read_translation_fixture();
+  ASSERT_FALSE(base.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+
+  // A zero opcode translates to completion but yields nothing dispatchable.
+  const std::vector<uint8_t> non_dispatchable = patch_first_instruction(base, 0x00000000u);
+  ASSERT_FALSE(non_dispatchable.empty()) << "could not locate .text";
+  for (size_t load = 0; load < 4; ++load)
+    ASSERT_EQ(load_through_new_reader(non_dispatchable), HSA_STATUS_ERROR_INVALID_CODE_OBJECT)
+        << load;
+  EXPECT_EQ(rj_test_translation_count(), 1u) << "a verdict on the bytes was re-derived";
+
+  // An all-ones opcode makes the translator throw, which says nothing about the
+  // input, so every load has to try again.
+  rj_test_clear_retained_storage();
+  const std::vector<uint8_t> throwing = patch_first_instruction(base, 0xffffffffu);
+  ASSERT_FALSE(throwing.empty());
+  for (size_t load = 0; load < 4; ++load)
+    ASSERT_EQ(load_through_new_reader(throwing), HSA_STATUS_ERROR_INVALID_CODE_OBJECT) << load;
+  EXPECT_EQ(rj_test_translation_count(), 4u) << "an unattributable failure was remembered";
+}
+
+// A failure that says nothing about the bytes must not become a verdict on them.
+// The translator reports an allocation it could not make with the same kind of
+// status as a real refusal, and remembering one would refuse a perfectly valid
+// object for the life of the process.
+TEST_F(HsaHotswapMemoTest, ATransientFailureIsNotRememberedAndTheNextLoadSucceeds) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = read_translation_fixture();
+  ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+
+  rj_test_force_next_translation_status(3 /* ROCJITSU_STATUS_OUT_OF_RESOURCES */);
+  EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  EXPECT_EQ(rj_test_translation_count(), 1u);
+  EXPECT_EQ(rj_test_translation_memo_bytes(), 0u) << "a transient failure was remembered";
+
+  // The control: the same bytes, and nothing was learned from the bad moment.
+  EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_translation_count(), 2u);
+  EXPECT_GT(rj_test_translation_memo_bytes(), 0u);
+}
+
+// A ceiling of zero switches the memo off entirely: nothing is looked up and
+// nothing is kept, so every load translates exactly as it did before the memo
+// existed.
+TEST_F(HsaHotswapMemoTest, ACapacityOfZeroDisablesTheMemo) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = read_translation_fixture();
+  ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+
+  rj_test_set_translation_memo_capacity(0);
+  constexpr size_t kLoads = 4;
+  for (size_t load = 0; load < kLoads; ++load)
+    ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS) << load;
+
+  EXPECT_EQ(rj_test_translation_count(), kLoads);
+  EXPECT_EQ(rj_test_translation_memo_bytes(), 0u);
+}
+
+TEST_F(HsaHotswapMemoTest, DisplacedTranslationsAreTranslatedAgainRatherThanLost) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> base = read_translation_fixture();
+  ASSERT_FALSE(base.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+
+  // Two objects of identical size, so one entry's worth of room holds exactly one
+  // of them and the second must displace the first.
+  const std::vector<uint8_t> other = make_fingerprint_twin(base);
+  ASSERT_FALSE(other.empty());
+  std::vector<uint8_t> first = base;
+  first.resize(base.size() + 4096, 0);
+  ASSERT_EQ(first.size(), other.size());
+
+  ASSERT_EQ(load_through_new_reader(first), HSA_STATUS_SUCCESS);
+  const uint64_t one_entry = rj_test_translation_memo_bytes();
+  ASSERT_GT(one_entry, 0u);
+
+  rj_test_set_translation_memo_capacity(one_entry);
+  ASSERT_EQ(load_through_new_reader(other), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_translation_memo_bytes(), one_entry) << "both entries were held";
+  ASSERT_EQ(rj_test_translation_count(), 2u);
+
+  // Displacement costs throughput and nothing else: the object still loads, it is
+  // simply translated again.
+  ASSERT_EQ(load_through_new_reader(first), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_translation_count(), 3u);
+}
+
+// Declining to cache an oversized result must not turn its waiters into a convoy.
+// They asked for these exact bytes and the work is done, so the cohort is served
+// from it before it is dropped; waking them to find nothing would make each
+// translate the object again in turn -- N x 197 s for the image RCCL loads, worse
+// than switching the memo off.
+TEST_F(HsaHotswapMemoTest, AnOversizedResultStillServesTheWaitersItAlreadyHas) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = read_translation_fixture();
+  ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+  constexpr size_t kThreadCount = 8;
+
+  rj_test_set_translation_memo_capacity(1); // Nothing can be admitted.
+  rj_test_close_translation_gate();
+
+  std::atomic<int> failures{0};
+  std::vector<std::thread> workers;
+  workers.reserve(kThreadCount);
+  for (size_t thread_index = 0; thread_index < kThreadCount; ++thread_index) {
+    workers.emplace_back([&] {
+      if (load_through_new_reader(source) != HSA_STATUS_SUCCESS)
+        failures.fetch_add(1, std::memory_order_relaxed);
+    });
+  }
+
+  const uint64_t waiters = wait_for_memo_waiters(kThreadCount - 1);
+  rj_test_open_translation_gate();
+  for (auto &worker : workers)
+    worker.join();
+
+  EXPECT_EQ(failures.load(std::memory_order_relaxed), 0);
+  EXPECT_EQ(waiters, kThreadCount - 1);
+  // One translation for the whole cohort, and not a byte kept afterwards.
+  EXPECT_EQ(rj_test_translation_count(), 1u);
+  EXPECT_LE(rj_test_translation_memo_bytes(), 1u);
+
+  // The result really was transient: a load arriving after the cohort drained
+  // finds nothing and translates again.
+  ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_translation_count(), 2u);
+  EXPECT_LE(rj_test_translation_memo_bytes(), 1u);
+}
+
+// A load arriving while a finished result is still draining its cohort must take
+// it rather than start again. The window is normally microseconds, but an
+// enrolled waiter can be descheduled for arbitrarily long, and the duplicate
+// costs another 197 s and 15.9 GB for the object RCCL loads.
+TEST_F(HsaHotswapMemoTest, ALateLoadTakesAResultThatIsStillDraining) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = read_translation_fixture();
+  ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+
+  // Oversized, so the result is handed to the cohort rather than cached; and held
+  // open afterwards, so the window this is about does not close before the late
+  // load can enter it.
+  rj_test_set_translation_memo_capacity(1);
+  rj_test_retain_completed_claims(true);
+  rj_test_close_translation_gate();
+
+  std::atomic<int> failures{0};
+  std::vector<std::thread> workers;
+  workers.reserve(2);
+  for (size_t thread_index = 0; thread_index < 2; ++thread_index) {
+    workers.emplace_back([&] {
+      if (load_through_new_reader(source) != HSA_STATUS_SUCCESS)
+        failures.fetch_add(1, std::memory_order_relaxed);
+    });
+  }
+  const uint64_t waiters = wait_for_memo_waiters(1);
+  rj_test_open_translation_gate();
+  for (auto &worker : workers)
+    worker.join();
+
+  EXPECT_EQ(failures.load(std::memory_order_relaxed), 0);
+  EXPECT_EQ(waiters, 1u);
+  ASSERT_EQ(rj_test_translation_count(), 1u);
+
+  // Arriving inside the drain window: the answer is right there.
+  EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_translation_count(), 1u) << "a ready result was ignored";
+}
+
+// Admitting an entry allocates twice, and either allocation can come up short --
+// most plausibly right after a translation that peaked at 15.9 GB. Neither
+// failure may cost the waiters their answer: they would translate the same object
+// one at a time, N x 197 s, which is the convoy in a new place.
+class HsaHotswapAdmissionFaultTest : public HsaHotswapMemoTest,
+                                     public ::testing::WithParamInterface<int> {};
+
+TEST_P(HsaHotswapAdmissionFaultTest, AFailedAdmissionStillServesTheCohort) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = read_translation_fixture();
+  ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+  constexpr size_t kThreadCount = 6;
+
+  // Room to spare, so the entry would be admitted if the allocation succeeded.
+  rj_test_close_translation_gate();
+  rj_test_fail_next_memo_admission(GetParam());
+
+  std::atomic<int> failures{0};
+  std::vector<std::thread> workers;
+  workers.reserve(kThreadCount);
+  for (size_t thread_index = 0; thread_index < kThreadCount; ++thread_index) {
+    workers.emplace_back([&] {
+      if (load_through_new_reader(source) != HSA_STATUS_SUCCESS)
+        failures.fetch_add(1, std::memory_order_relaxed);
+    });
+  }
+  const uint64_t waiters = wait_for_memo_waiters(kThreadCount - 1);
+  rj_test_open_translation_gate();
+  for (auto &worker : workers)
+    worker.join();
+
+  EXPECT_EQ(waiters, kThreadCount - 1);
+  // Every load succeeded, and exactly one translation served all of them.
+  EXPECT_EQ(failures.load(std::memory_order_relaxed), 0);
+  EXPECT_EQ(rj_test_translation_count(), 1u) << "the cohort was made to translate again";
+  // Nothing was cached, which is the cost of the failed admission and all of it.
+  EXPECT_EQ(rj_test_translation_memo_bytes(), 0u);
+
+  // A later load finds no entry and translates, confirming the memo really is
+  // empty rather than holding something unreachable.
+  ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_translation_count(), 2u);
+}
+
+INSTANTIATE_TEST_SUITE_P(ListNodeAndIndexNode, HsaHotswapAdmissionFaultTest,
+                         ::testing::Values(1, 2));
+
+// Eviction has to run to the ceiling in one go, however many entries that takes.
+// Stopping part way -- as it would if anything in the loop could fail -- leaves
+// the memo over its limit with nothing that will ever retry it, because a hit
+// does not evict.
+TEST_F(HsaHotswapMemoTest, ShrinkingTheCeilingDisplacesEveryEntryItHasTo) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> base = read_translation_fixture();
+  ASSERT_FALSE(base.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+  constexpr size_t kObjects = 5;
+
+  // Distinct objects of the same shape: trailing bytes past the ELF change the
+  // content without changing what translation makes of it.
+  uint64_t one_entry = 0;
+  for (size_t index = 0; index < kObjects; ++index) {
+    std::vector<uint8_t> object = base;
+    object.resize(base.size() + 64 + index, 0x11);
+    ASSERT_EQ(load_through_new_reader(object), HSA_STATUS_SUCCESS) << index;
+    if (index == 0)
+      one_entry = rj_test_translation_memo_bytes();
+  }
+  ASSERT_EQ(rj_test_translation_count(), kObjects);
+  const uint64_t all_entries = rj_test_translation_memo_bytes();
+  ASSERT_GT(all_entries, 2 * one_entry) << "the objects did not all stay resident";
+
+  // Room for roughly one of them, so four have to go at once.
+  rj_test_set_translation_memo_capacity(one_entry + 8);
+  EXPECT_LE(rj_test_translation_memo_bytes(), one_entry + 8) << "eviction stopped short";
+}
+
+// The ceiling is a promise about resident memory, and these bytes are never
+// reclaimed, so an entry that does not fit is declined rather than admitted and
+// exempted. The cost is a retranslation per load, which is the operator's to
+// weigh -- the log names the variable that would buy the entry back.
+TEST_F(HsaHotswapMemoTest, AnObjectLargerThanTheCapIsNotRemembered) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = read_translation_fixture();
+  ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+
+  rj_test_set_translation_memo_capacity(1);
+  constexpr size_t kLoads = 4;
+  for (size_t load = 0; load < kLoads; ++load)
+    ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS) << load;
+
+  // Never over the ceiling, and never a failed load -- only slower ones.
+  EXPECT_LE(rj_test_translation_memo_bytes(), 1u);
+  EXPECT_EQ(rj_test_translation_count(), kLoads);
+}
+
+TEST_F(HsaHotswapMemoTest, ReuseIsReportedAgainstTheSameSourceObject) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = read_translation_fixture();
+  ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+
+  ASSERT_EQ(setenv("HSA_HOTSWAP_VERBOSE", "1", 1), 0);
+  testing::internal::CaptureStderr();
+  ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS);
+  const std::string log_text = testing::internal::GetCapturedStderr();
+  ASSERT_EQ(unsetenv("HSA_HOTSWAP_VERBOSE"), 0);
+
+  uint64_t identity = 14695981039346656037ULL;
+  for (uint8_t byte : source) {
+    identity ^= byte;
+    identity *= 1099511628211ULL;
+  }
+  std::ostringstream expected_identity;
+  expected_identity << "source_id=fnv1a64:" << std::hex << std::setfill('0') << std::setw(16)
+                    << identity;
+
+  // A reuse must stay attributable to its source object. Almost every load becomes
+  // a reuse once the memo is warm, so a reuse that reported less would blind the
+  // translation record exactly when it carries the most traffic.
+  EXPECT_NE(log_text.find(" outcome=translated changed="), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find(" outcome=reused changed="), std::string::npos) << log_text;
+  std::istringstream lines(log_text);
+  std::string line;
+  size_t reuse_records = 0;
+  while (std::getline(lines, line)) {
+    EXPECT_NE(line.find(expected_identity.str()), std::string::npos) << line;
+    if (line.find(" outcome=reused ") != std::string::npos)
+      ++reuse_records;
+  }
+  EXPECT_EQ(reuse_records, 1u);
+}
+#endif
 
 } // namespace

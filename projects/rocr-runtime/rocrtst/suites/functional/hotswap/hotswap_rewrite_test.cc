@@ -183,6 +183,7 @@ rocr::hotswap::LoadAgentCodeObjectCallbacks MakeLoadCallbacks(LoadRecorder* reco
 void ResetRuntimeTestEnv() {
   g_fake_hsa_env = FakeHsaEnv{};
   g_fake_env_vars.clear();
+  g_fake_env_vars["HSA_HOTSWAP_ENABLE"] = "1";
   rocr::hotswap::ResetAgentGfxRevisionCache();
   rocr::hotswap::ClearRetargetCacheForTesting();
   rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(false);
@@ -245,6 +246,20 @@ rocr::hotswap::AgentGfxRevision MakeRevision(const std::string& gfx_target, uint
 TEST(HotswapBackendSelection, ConfigurationIsImmutableWithinRuntimeGeneration) {
   ResetRuntimeTestEnv();
   EXPECT_EQ(rocr::hotswap::GetHotswapBackend(), rocr::hotswap::HotswapBackend::kComgr);
+
+  g_fake_env_vars.clear();
+  EXPECT_EQ(rocr::hotswap::GetHotswapBackend(), rocr::hotswap::HotswapBackend::kComgr);
+
+  rocr::hotswap::ConfigureHotswapBackend();
+  EXPECT_EQ(rocr::hotswap::GetHotswapBackend(), rocr::hotswap::HotswapBackend::kRocjitsu);
+  EXPECT_TRUE(rocr::hotswap::IsRocjitsuHotswapEnabled());
+
+  g_fake_env_vars["HSA_HOTSWAP_ENABLE"] = "1";
+  EXPECT_EQ(rocr::hotswap::GetHotswapBackend(), rocr::hotswap::HotswapBackend::kRocjitsu);
+
+  rocr::hotswap::ConfigureHotswapBackend();
+  EXPECT_EQ(rocr::hotswap::GetHotswapBackend(), rocr::hotswap::HotswapBackend::kComgr);
+  EXPECT_FALSE(rocr::hotswap::IsRocjitsuHotswapEnabled());
 
   g_fake_env_vars["HSA_HOTSWAP_ENABLE"] = "2";
   EXPECT_EQ(rocr::hotswap::GetHotswapBackend(), rocr::hotswap::HotswapBackend::kComgr);
