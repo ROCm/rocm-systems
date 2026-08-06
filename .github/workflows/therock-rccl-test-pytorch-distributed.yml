@@ -130,6 +130,10 @@ jobs:
           for d in $(python -c "from rccl_ci_utils import find_pip_sdk_lib_dirs; print('\n'.join(str(d) for d in find_pip_sdk_lib_dirs()))"); do
             export LD_LIBRARY_PATH="${d}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           done
+          # TheRock's libamdhip64.so depends on librocm_sysdeps_elf.so
+          if [ -d "${{ env.OUTPUT_ARTIFACTS_DIR }}/lib/rocm_sysdeps/lib" ]; then
+            export LD_LIBRARY_PATH="${{ env.OUTPUT_ARTIFACTS_DIR }}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          fi
 
           NOTIFY_ARGS=()
           [ -n "$NOTIFY_EMAIL" ] && NOTIFY_ARGS+=(--notify-email "$NOTIFY_EMAIL")

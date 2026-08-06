@@ -80,6 +80,9 @@ def setup_ld_library_path(rccl_lib_dir: Path, rocm_lib_dir: Path | None) -> str:
     parts = [str(rccl_lib_dir.resolve())]
     if rocm_lib_dir:
         parts.append(str(rocm_lib_dir.resolve()))
+    sysdeps_lib = rccl_lib_dir.resolve() / "rocm_sysdeps" / "lib"
+    if sysdeps_lib.is_dir():
+        parts.append(str(sysdeps_lib))
     existing = os.environ.get("LD_LIBRARY_PATH", "")
     if existing:
         parts.append(existing)
