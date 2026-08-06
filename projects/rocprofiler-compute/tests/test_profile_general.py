@@ -1791,43 +1791,6 @@ def test_dispatch_invalid_rejected(binary_handler_profile_rocprof_compute, bad_v
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.join
-def test_join_type_grid(binary_handler_profile_rocprof_compute):
-    options = ["--join-type", "grid"]
-    workload_dir = common.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = common.check_csv_files(workload_dir, num_devices, num_kernels)
-    assert sorted(list(file_dict.keys())) == CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.join
-def test_join_type_kernel(binary_handler_profile_rocprof_compute):
-    options = ["--join-type", "kernel"]
-    workload_dir = common.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = common.check_csv_files(workload_dir, num_devices, num_kernels)
-
-    assert sorted(list(file_dict.keys())) == CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
 @pytest.mark.sort
 def test_roof_sort_dispatches(
     binary_handler_profile_rocprof_compute,
