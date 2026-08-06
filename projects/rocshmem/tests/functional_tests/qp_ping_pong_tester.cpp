@@ -129,6 +129,12 @@ __global__ void QpPingPongTest(int loop, int skip, long long int *start_time,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 QpPingPongTester::QpPingPongTester(TesterArguments args) : Tester(args) {
+  if (rocshmem_query_backend_type() != BackendType::GDA_BACKEND) {
+    if (args.myid == 0) {
+      std::cerr << "QpPingPong requires GDA backend (ROCSHMEM_BACKEND=gda)\n";
+    }
+    exit(1);
+  }
   r_buf = (int *)alloc_test_buffer(sizeof(int) * args.num_wgs);
   data_s_buf = (char *)alloc_test_buffer(max_msg_size * args.num_wgs);
   data_r_buf = (char *)alloc_test_buffer(max_msg_size * args.num_wgs);

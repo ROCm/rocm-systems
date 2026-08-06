@@ -90,6 +90,12 @@ __global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 QpPutNbiTester::QpPutNbiTester(TesterArguments args) : Tester(args) {
+  if (rocshmem_query_backend_type() != BackendType::GDA_BACKEND) {
+    if (args.myid == 0) {
+      std::cerr << "QpPutNbi requires GDA backend (ROCSHMEM_BACKEND=gda)\n";
+    }
+    exit(1);
+  }
   s_buf = (char *)alloc_test_buffer(max_msg_size);
   r_buf = (char *)alloc_test_buffer(max_msg_size * batch_size);
 }
