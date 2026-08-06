@@ -144,6 +144,10 @@ def snapshot_session(session_dir: Path, output: Path) -> dict[str, object]:
         "exec-def.json": session_dir / "exec/e-000000/def.json",
         "exec-status.json": session_dir / "exec/e-000000/status.json",
         "daemon.pid": session_dir / "node/0/pid",
+        # The daemon hosts the emulated KFD, so anything the driver reports
+        # about a failing test is here and nowhere else: its stderr does not
+        # reach the test console.
+        "host.log": session_dir / "node/0/host.log",
     }
     for destination, source in paths.items():
         copy_if_present(source, evidence / destination)
