@@ -39,7 +39,21 @@ RE_FAIL = re.compile(r"\[HRR\] FAIL\b")
 RE_ARCHIVE_RECOVERED = re.compile(
     r"recovered (\d+) events|Archive : (\d+) events, (\d+) kernels, (\d+) blobs, (\d+) code objects"
 )
-RE_ARCHIVE_COMPLETE = re.compile(r"Complete:\s+(YES|NO)")
+# `--info` prints `Complete:     yes (clean shutdown)` or `Complete:     NO (no
+# shutdown trailer; capture likely crashed)`, so the verdict is case-mixed and
+# always carries a trailing explanation.
+RE_ARCHIVE_COMPLETE = re.compile(r"Complete:\s+(yes|no)\b", re.IGNORECASE)
+# `--info` reports the archive as labelled fields, one per line, while a replay
+# run reports the same totals on a single `[HRR] Archive :` line.
+RE_INFO_EVENTS = re.compile(r"^Events:\s+(\d+)\s*$", re.MULTILINE)
+RE_INFO_KERNELS = re.compile(r"^Kernels:\s+(\d+)\s*$", re.MULTILINE)
+RE_INFO_RECOVERED = re.compile(r"^Recovered:\s+(\d+)\s+events\s*$", re.MULTILINE)
+# Rows of the `--info` kernel summary table: id, name, grid, block. A memory
+# fault can kill the replay before any per-launch attribution reaches the log,
+# and then this table is the only record of what the archive ran.
+RE_INFO_KERNEL_ROW = re.compile(
+    r"^\s*\d+\s+(\S+)\s+\[[\d,\s]+\]\s+\[[\d,\s]+\]", re.MULTILINE
+)
 RE_CAPTURE_MAF = RE_MAF
 RE_D2H_SUMMARY = re.compile(r"D2H checks\s+: (\d+) pass.*?, (\d+) fail, (\d+) skipped")
 RE_KERNARG = re.compile(r"kernarg_address=(0x[0-9a-fA-F]+)")
@@ -72,7 +86,10 @@ class Finding:
     d2h_attempted: int | None = None
     archive_events: int | None = None
     archive_kernels: int | None = None
+    archive_kernel_names: list[str] = field(default_factory=list)
     archive_complete: str | None = None
+    archive_format_version: int | None = None
+    reader_format_version: int | None = None
     capture_hip_so: str | None = None
     capture_hip_runtime_version: str | None = None
     capture_comgr_version: str | None = None
@@ -94,6 +111,16 @@ def _classify(text: str, finding: Finding) -> str:
         return "replay_pass"
     if "out of memory" in text.lower() or "hipErrorOutOfMemory" in text:
         return "replay_oom"
+    # A GPU memory fault has to be classified before the generic abort branch.
+    # Surfacing a fault through --sync-after-event makes the runtime print the
+    # memory-fault line and hrr-playback print "Fatal: GPU error after ..." for
+    # the same fault, so testing the abort first would report every fault as a
+    # plain API error, and that is exactly the mode used to localize a fault.
+    if RE_MAF.search(text) or RE_MEM_FAULT_ERR.search(text):
+        reason = (finding.fault_reason or "").lower()
+        if "read-only" in reason:
+            return "read_only_page_fault"
+        return "illegal_memory_access"
     if (
         RE_FATAL_EVENT.search(text)
         or RE_FATAL_GPU.search(text)
@@ -102,11 +129,6 @@ def _classify(text: str, finding: Finding) -> str:
         if "out of memory" in text.lower():
             return "replay_oom"
         return "replay_fatal_api"
-    if RE_MAF.search(text) or RE_MEM_FAULT_ERR.search(text):
-        reason = (finding.fault_reason or "").lower()
-        if "read-only" in reason:
-            return "read_only_page_fault"
-        return "illegal_memory_access"
     if RE_HANG.search(text) and not RE_PASS.search(text):
         return "hang"
     if RE_FAIL.search(text) or (finding.d2h_fail and finding.d2h_fail > 0):
@@ -149,10 +171,28 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
 
     m = RE_ARCHIVE_COMPLETE.search(text)
     if m:
-        finding.archive_complete = m.group(1)
+        finding.archive_complete = m.group(1).lower()
+
+    for regex, attr in (
+        (RE_INFO_RECOVERED, "archive_events"),
+        (RE_INFO_EVENTS, "archive_events"),
+        (RE_INFO_KERNELS, "archive_kernels"),
+    ):
+        m = regex.search(text)
+        if m:
+            setattr(finding, attr, int(m.group(1)))
+
+    for name in RE_INFO_KERNEL_ROW.findall(text):
+        # The table truncates long names to its column width, and a truncated
+        # symbol is worse than none: it cannot be looked up or handed over.
+        if name.endswith("...") or name in finding.archive_kernel_names:
+            continue
+        finding.archive_kernel_names.append(name)
 
     m = RE_VERSION_MISMATCH.search(text)
     if m:
+        finding.archive_format_version = int(m.group(1))
+        finding.reader_format_version = int(m.group(2))
         finding.notes.append(
             f"archive wire version {m.group(1)} does not match hrr-playback reader {m.group(2)}"
         )
@@ -229,6 +269,42 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
     return finding
 
 
+def finalize(finding: Finding) -> Finding:
+    """Settle kernel attribution once every input has been parsed.
+
+    Attribution cannot be decided per input: the replay log and the archive
+    `--info` dump each hold half of the evidence, and which half arrives first
+    depends on how the caller was invoked.
+    """
+    # A clean replay implicates no kernel. The archive still lists the kernels
+    # it ran, and a GEMM matched out of that listing would sit in the report
+    # next to a pass as though it were a culprit.
+    if finding.fault_class == "replay_pass":
+        finding.kernel_name = None
+        finding.kernel_family = None
+        return finding
+
+    # A memory fault can tear the process down before the failing dispatch is
+    # attributed, leaving a log with no kernel at all. When the archive holds
+    # exactly one kernel, that kernel is the one that faulted. More than one
+    # stays unknown: picking among several would be a guess.
+    if (
+        not finding.kernel_name
+        and finding.archive_kernels == 1
+        and len(finding.archive_kernel_names) == 1
+    ):
+        finding.kernel_name = finding.archive_kernel_names[0]
+        finding.notes.append(
+            f"kernel name inferred from the archive, which contains exactly one "
+            f"kernel ({finding.kernel_name}); the replay log carried no "
+            f"per-launch attribution. Re-run with --sync-after-launch to "
+            f"confirm the faulting dispatch directly."
+        )
+
+    finding.kernel_family = _kernel_family(finding.kernel_name)
+    return finding
+
+
 def run_archive_info(archive: Path, hrr_playback: str | None) -> str:
     play = hrr_playback or "hrr-playback"
     try:
@@ -274,7 +350,11 @@ def render_markdown(f: Finding) -> str:
         "## Archive / capture",
         f"- **Events**: {f.archive_events or 'n/a'}",
         f"- **Kernels (archive)**: {f.archive_kernels or 'n/a'}",
+        f"- **Kernel names (archive)**: {', '.join(f.archive_kernel_names) or 'n/a'}",
         f"- **Complete**: {f.archive_complete or 'n/a'}",
+        f"- **Archive / reader format**: "
+        f"{f.archive_format_version if f.archive_format_version is not None else 'n/a'}"
+        f" / {f.reader_format_version if f.reader_format_version is not None else 'n/a'}",
         f"- **Capture HIP**: `{f.capture_hip_so or 'n/a'}`",
         f"- **Capture HIP runtime**: `{f.capture_hip_runtime_version or 'n/a'}`",
         f"- **Capture comgr**: `{f.capture_comgr_version or 'n/a'}`",
@@ -345,6 +425,8 @@ def main() -> int:
                 "hrr-playback --info unavailable; archive path recorded only"
             )
             finding.sources.append(str(arch))
+
+    finalize(finding)
 
     out = (
         json.dumps(finding.to_dict(), indent=2)

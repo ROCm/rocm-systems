@@ -178,6 +178,19 @@ native. Use `--no-replay` for metadata-only (no GPU).
 When outcome is `UNKNOWN` or fault class is `unknown`, say so explicitly in the
 summary — do not invent a fault type.
 
+### Kernel attribution
+
+A clean replay implicates no kernel, so the finding reports none even though the
+archive lists the kernels it ran. Never present a kernel next to a `PASS`.
+
+A memory fault can tear the process down before the failing dispatch is
+attributed, leaving a log with no kernel at all. When the archive holds exactly
+one kernel, the finding names it and says the name was inferred; confirm it with
+`--sync-after-launch`, which stops replay on the faulting dispatch. With more
+than one kernel it stays unknown rather than guessing. Names that `--info`
+truncated to its column width are never used: a cut-off symbol cannot be looked
+up or handed to a kernel developer.
+
 ### Finding summary template (Step 5 / W4)
 
 Print a structured summary directly in the chat reply:

@@ -98,9 +98,19 @@ pick_gpu() {
       [[ -n "$idx" ]] || continue
       (( free > best_free )) && { best_free=$free; best=$idx; }
     done < <(rocm-smi --showmeminfo vram 2>/dev/null | awk '
-      /GPU\[/ { gsub(/[^0-9]/,"",$1); idx=$1 }
-      /Used Memory/ { used=$NF }
-      /Total Memory/ { total=$NF; if (idx!="") { print idx, total-used; idx="" } }')
+      # The used line reads "VRAM Total Used Memory", so it also contains the
+      # word Total and must be tested first. Total and used arrive on separate
+      # lines whose order is not guaranteed, so collect both per device and
+      # subtract at END rather than on whichever line happens to land last.
+      /GPU\[/ {
+        id = $1; gsub(/[^0-9]/, "", id)
+        if ($0 ~ /Total Used Memory/) used[id] = $NF
+        else if ($0 ~ /Total Memory/) total[id] = $NF
+      }
+      END {
+        for (id in total)
+          if (id in used) print id, total[id] - used[id]
+      }')
     [[ -n "$best" ]] && { echo "[triage] GPU $best (most free VRAM)" >&2; echo "$best"; return; }
   fi
   echo "0"
@@ -113,7 +123,10 @@ run_native_replay() {
   [[ -r /dev/kfd ]] || { echo "error: /dev/kfd not accessible" >&2; return 1; }
   echo "[triage] native replay playback=$play GPU=$gpu" >&2
   set +e
-  ROCR_VISIBLE_DEVICES="$gpu" HIP_HRR_REPLAY_PROGRESS_SECONDS="${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
+  # hrr-playback is a HIP program, so HIP_VISIBLE_DEVICES is the mask that
+  # applies to it. Setting ROCR_VISIBLE_DEVICES re-indexes devices underneath a
+  # HIP mask, which can land the replay on a device other than the one picked.
+  HIP_VISIBLE_DEVICES="$gpu" HIP_HRR_REPLAY_PROGRESS_SECONDS="${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
     "$play" "$ARCHIVE" 2>&1 | tee "$log"
   local rc=${PIPESTATUS[0]}
   set -e
