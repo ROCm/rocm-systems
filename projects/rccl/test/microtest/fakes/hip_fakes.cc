@@ -269,7 +269,7 @@ hipError_t hipEventCreate(hipEvent_t* event)
     return hipErrorInvalidValue;
 }
 
-hipError_t hipEventDestroy(hipEvent_t)      { return hipErrorInvalidValue; }
+hipError_t hipEventDestroy(hipEvent_t)      { return hipSuccess; }  // benign teardown (commFree)
 hipError_t hipEventQuery(hipEvent_t)        { return hipErrorInvalidValue; }
 hipError_t hipEventRecord(hipEvent_t, hipStream_t) { return hipErrorInvalidValue; }
 
@@ -296,7 +296,7 @@ hipError_t hipMemPoolCreate(hipMemPool_t* p, const hipMemPoolProps*) {
     if (p) *p = (g_hipMemPoolResult == hipSuccess) ? reinterpret_cast<hipMemPool_t>(0x1) : nullptr;
     return g_hipMemPoolResult;
 }
-hipError_t hipMemPoolDestroy(hipMemPool_t) { return hipErrorInvalidValue; }
+hipError_t hipMemPoolDestroy(hipMemPool_t) { return hipSuccess; }  // benign teardown (commFree)
 hipError_t hipMemPoolSetAttribute(hipMemPool_t, hipMemPoolAttr, void*) { return g_hipMemPoolResult; }
 hipError_t hipPointerGetAttributes(hipPointerAttribute_t*, const void*) { return hipErrorInvalidValue; }
 
@@ -402,7 +402,7 @@ hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int)
     return g_hipStreamCreateResult;
 }
 
-hipError_t hipStreamDestroy(hipStream_t)     { return hipErrorInvalidValue; }
+hipError_t hipStreamDestroy(hipStream_t)     { return hipSuccess; }  // benign teardown (ncclDestroySideStream)
 hipError_t hipStreamSynchronize(hipStream_t) { return hipErrorInvalidValue; }
 
 hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode*)

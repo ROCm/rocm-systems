@@ -812,3 +812,28 @@ TEST_F(InitMicrotest, DevCommSetup_DevCommAllocFails_ReturnsError) {
   g_hipExtMallocWithFlags = [](void**, std::size_t, unsigned) { return hipErrorMemoryAllocation; };
   EXPECT_NE(ncclSuccess, devCommSetup(comm.get()));
 }
+
+// ===========================================================================
+// Tier-E: commFree() -- the teardown path. commFree() ends with free(comm), so
+// the comm MUST be ncclCalloc()'d (malloc-backed) exactly like production, NOT
+// new'd. It also dereferences comm->abortFlag / abortFlagRefCount (set by the
+// init path, not commAlloc); we point them at locals with refCount>1 so the
+// abortFlag free-branch is skipped. The teardown finalizers are benign-success
+// stubs and the HIP destroys succeed, so a commAlloc'd comm frees cleanly.
+// ===========================================================================
+TEST_F(InitMicrotest, CommFree_Null_ReturnsSuccess) {
+  EXPECT_EQ(ncclSuccess, commFree(nullptr));
+}
+
+TEST_F(InitMicrotest, CommFree_AfterCommAlloc_ReturnsSuccessAndFrees) {
+  InstallCommAllocSuccess();
+  ncclComm* comm = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclCalloc(&comm, 1));   // malloc-backed, matches commFree's free()
+  ASSERT_EQ(ncclSuccess, commAlloc(comm, /*parent=*/nullptr, /*ndev=*/8, /*rank=*/0));
+  uint32_t abortFlag = 0;
+  int abortRef = 2;                                // >1 so commFree skips the abortFlag free-branch
+  comm->abortFlag = &abortFlag;
+  comm->abortFlagRefCount = &abortRef;
+  EXPECT_EQ(ncclSuccess, commFree(comm));          // frees comm; do not touch it afterwards
+  EXPECT_EQ(1, abortRef);                          // refcount was decremented
+}

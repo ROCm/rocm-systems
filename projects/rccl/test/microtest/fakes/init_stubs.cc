@@ -31,27 +31,27 @@ ncclResult_t bootstrapInit(int nHandles, void* handle, struct ncclComm* comm, st
 ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, int nranks, int tag) { ::abort(); }
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm) { ::abort(); }
 ncclResult_t initChannel(struct ncclComm* comm, int channelid) { ::abort(); }
-ncclResult_t ncclCeFinalize(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t comm) { ::abort(); }
 ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t comm) { ::abort(); }
 ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTopoGraph* graphs[]) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
 ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) { ::abort(); }
-ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { ::abort(); }
-bool ncclDdaUseFabricPath(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { ::abort(); }
+bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
+ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, struct ncclDevrWindow** outWin) { ::abort(); }
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclGetUserP2pLevel(int* level) { ::abort(); }
-ncclResult_t ncclGinFinalize(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclGinFinalize(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) { ::abort(); }
 ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclNetFinalize(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclNetFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclNvlsBufferSetup(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclNvlsInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent) { ::abort(); }
@@ -60,18 +60,18 @@ ncclResult_t ncclNvlsTuning(struct ncclComm* comm) { ::abort(); }
 int ncclOsCpuCount(const ncclAffinity& affinity) { ::abort(); }
 ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { ::abort(); }
 ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) { ::abort(); }
-ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) { ::abort(); }
-void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { ::abort(); }
+void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
 ncclResult_t ncclProxyCreate(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclProxyDestroy(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclProxyDestroy(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclProxyShmUnlink(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclProxyStop(struct ncclComm* comm) { ::abort(); }
 int ncclPxnDisable(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclRegCleanup(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) { ::abort(); }
+ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclRegCleanup(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) { return ncclSuccess; }
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTopoCheckNicFused(struct ncclComm* comm, bool* fused) { ::abort(); }
 ncclResult_t ncclTopoCompute(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) { ::abort(); }
@@ -106,7 +106,7 @@ bool rcclUseAinic() { ::abort(); }
 // --- manual stubs: complex signatures, extern-C APIs, data/TLS ---
 struct ncclAsyncJob; struct ncclTopoRanks; struct ncclChannel;
 ncclResult_t bootstrapSplit(unsigned long, struct ncclComm*, struct ncclComm*, int, int, int*) { ::abort(); }
-ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { ::abort(); }
+ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { return ncclSuccess; }
 ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob*, ncclResult_t(*)(struct ncclAsyncJob*), void(*)(struct ncclAsyncJob*), void(*)(void*), struct ncclComm*) { ::abort(); }
 ncclResult_t ncclTopoPostset(struct ncclComm*, int*, int*, struct ncclTopoRanks**, int*, struct ncclTopoGraph**, struct ncclComm*, int) { ::abort(); }
 ncclResult_t ncclTransportCheckP2pType(struct ncclComm*, bool*, bool*, bool*) { ::abort(); }
@@ -130,7 +130,7 @@ ncclResult_t rcclCheckRomeTopoModelIdxConsensus(int, std::function<int(int)>,
                                                 std::function<const char*(int)>,
                                                 std::function<unsigned long(int)>) { ::abort(); }
 extern "C" {
-ncclResult_t ncclMemManagerDestroy(struct ncclComm*) { ::abort(); }
+ncclResult_t ncclMemManagerDestroy(struct ncclComm*) { return ncclSuccess; }
 // librocm-core: return non-VerSuccess (benign "version unknown") if ever reached.
 int getROCmVersion(int*, int*, int*) { return 1; }
 }
