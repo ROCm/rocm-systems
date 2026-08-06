@@ -32,18 +32,14 @@ void VCmpLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_lt_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -58,18 +54,14 @@ void VCmpEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_eq_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -84,18 +76,14 @@ void VCmpLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_le_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -110,18 +98,14 @@ void VCmpGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_gt_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -136,18 +120,14 @@ void VCmpLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_lg_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -162,18 +142,14 @@ void VCmpGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_ge_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -188,18 +164,14 @@ void VCmpOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_o_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -214,18 +186,14 @@ void VCmpUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_u_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -240,18 +208,14 @@ void VCmpNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_nge_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -266,18 +230,14 @@ void VCmpNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_nlg_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -292,18 +252,14 @@ void VCmpNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_ngt_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -318,18 +274,14 @@ void VCmpNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_nle_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -344,18 +296,14 @@ void VCmpNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_neq_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -370,18 +318,14 @@ void VCmpNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_nlt_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -396,18 +340,14 @@ void VCmpLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_lt_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -422,18 +362,14 @@ void VCmpEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_eq_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -448,18 +384,14 @@ void VCmpLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_le_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -474,18 +406,14 @@ void VCmpGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_gt_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -500,18 +428,14 @@ void VCmpLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_lg_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -526,18 +450,14 @@ void VCmpGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_ge_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -552,18 +472,14 @@ void VCmpOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_o_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -578,18 +494,14 @@ void VCmpUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_u_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -604,18 +516,14 @@ void VCmpNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_nge_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -630,18 +538,14 @@ void VCmpNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_nlg_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -656,18 +560,14 @@ void VCmpNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_ngt_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -682,18 +582,14 @@ void VCmpNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_nle_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -708,18 +604,14 @@ void VCmpNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_neq_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -734,18 +626,14 @@ void VCmpNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_nlt_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -816,18 +704,14 @@ void VCmpLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_lt_i16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -842,18 +726,14 @@ void VCmpEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_eq_i16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -868,18 +748,14 @@ void VCmpLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_le_i16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -894,18 +770,14 @@ void VCmpGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_gt_i16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -920,18 +792,14 @@ void VCmpNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_ne_i16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -946,18 +814,14 @@ void VCmpGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_ge_i16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -972,18 +836,14 @@ void VCmpLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_lt_u16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -998,18 +858,14 @@ void VCmpEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_eq_u16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1024,18 +880,14 @@ void VCmpLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_le_u16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1050,18 +902,14 @@ void VCmpGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_gt_u16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1076,18 +924,14 @@ void VCmpNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_ne_u16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1102,18 +946,14 @@ void VCmpGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_ge_u16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1128,18 +968,14 @@ void VCmpLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_lt_i32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1154,18 +990,14 @@ void VCmpEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_eq_i32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1180,18 +1012,14 @@ void VCmpLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_le_i32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1206,18 +1034,14 @@ void VCmpGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_gt_i32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1232,18 +1056,14 @@ void VCmpNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_ne_i32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1258,18 +1078,14 @@ void VCmpGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_ge_i32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1284,18 +1100,14 @@ void VCmpLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_lt_u32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1310,18 +1122,14 @@ void VCmpEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_eq_u32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1336,18 +1144,14 @@ void VCmpLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_le_u32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1362,18 +1166,14 @@ void VCmpGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_gt_u32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1388,18 +1188,14 @@ void VCmpNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_ne_u32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1414,18 +1210,14 @@ void VCmpGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_ge_u32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpLtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1488,18 +1280,14 @@ void VCmpClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_class_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1514,18 +1302,14 @@ void VCmpClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
-  if (dpp_src1_)
-    vsrc1.set_delegate(dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
   amdgpu::execute_v_cmp_class_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
   }
-  src0.clear_delegate();
-  vsrc1.clear_delegate();
 }
 
 void VCmpClassF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
