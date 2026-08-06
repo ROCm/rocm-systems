@@ -125,6 +125,34 @@ class RecordedCaptureTests(unittest.TestCase):
         self.assertEqual(finding.archive_complete, "no")
         self.assertTrue(any("inferred from the archive" in n for n in finding.notes))
 
+    def test_short_memory_fault_form_still_names_the_kernel(self) -> None:
+        """Some ROCm builds omit `host:` and start the bracket at `GPU index:`."""
+        finding = self._analyze("replay_aten_chevron.log")
+        self.assertEqual(finding.outcome, "MAF")
+        self.assertEqual(finding.fault_address, "0x7f8c11a00000")
+        self.assertIn("mul_kernel_cuda", finding.kernel_name or "")
+
+    def test_aten_chevron_fault_carries_a_caveat_not_a_new_verdict(self) -> None:
+        """A `<<<>>>` ATen fault can be genuine, so the verdict stands.
+
+        Capture records the pointers such kernels pass inside by-value structs
+        and replay translates them, so reclassifying would suppress a real
+        finding. An archive predating that support has none recorded, which
+        faults identically, so the ambiguity is flagged instead.
+        """
+        finding = self._analyze("replay_aten_chevron.log")
+        self.assertEqual(finding.fault_class, "illegal_memory_access")
+        self.assertTrue(
+            any("hipLaunchByPtr" in n for n in finding.notes),
+            f"expected the ATen caveat, got {finding.notes}",
+        )
+
+    def test_last_launch_attributes_the_failing_event(self) -> None:
+        """Per-event lines are the only record when no Fatal line is written."""
+        finding = self._analyze("replay_aten_chevron.log")
+        self.assertEqual(finding.failing_call_index, 41310)
+        self.assertEqual(finding.failing_api, "hipLaunchKernel")
+
     def test_unreadable_archive_records_both_versions(self) -> None:
         finding = self._analyze("version_mismatch.log")
         self.assertEqual(finding.fault_class, "version_mismatch")
