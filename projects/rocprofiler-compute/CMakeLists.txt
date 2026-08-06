@@ -843,7 +843,7 @@ add_test(
 
 set_tests_properties(
     test_pc_sampling
-    test_pc_sampling_analysis
+    test_pc_sampling_analyze_cli
     PROPERTIES TIMEOUT 300 LABELS "profile" RESOURCE_GROUPS gpus:1
 )
 
