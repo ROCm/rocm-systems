@@ -15,6 +15,9 @@ on:
 
 permissions: {}
 
+env:
+  TEST_COMMIT_SHA: ${{ inputs.commit_sha || '62aebd434513280321db9129c741970a129ebcb9' }}
+
 jobs:
   contents-read-only:
     runs-on: ubuntu-24.04
@@ -27,7 +30,7 @@ jobs:
         run: |
           set -x
           set +e
-          resp=$(gh api -i "repos/${{ github.repository }}/commits/${{ inputs.commit_sha }}/pulls" 2>&1)
+          resp=$(gh api -i "repos/${{ github.repository }}/commits/${{ env.TEST_COMMIT_SHA }}/pulls" 2>&1)
           rc=$?
           echo "--- raw response (headers + body) ---"
           echo "$resp"
@@ -52,7 +55,7 @@ jobs:
         run: |
           set -x
           set +e
-          resp=$(gh api -i "repos/${{ github.repository }}/commits/${{ inputs.commit_sha }}/pulls" 2>&1)
+          resp=$(gh api -i "repos/${{ github.repository }}/commits/${{ env.TEST_COMMIT_SHA }}/pulls" 2>&1)
           rc=$?
           echo "--- raw response (headers + body) ---"
           echo "$resp"
@@ -61,7 +64,7 @@ jobs:
           if echo "$resp" | rg -q "403|Resource not accessible"; then
             echo "verdict=FAIL_403"
           elif [ "$rc" -eq 0 ] && echo "$resp" | rg -q '"number"'; then
-            pr=$(gh api "repos/${{ github.repository }}/commits/${{ inputs.commit_sha }}/pulls" --jq '.[0].number')
+            pr=$(gh api "repos/${{ github.repository }}/commits/${{ env.TEST_COMMIT_SHA }}/pulls" --jq '.[0].number')
             echo "verdict=OK pr=${pr}"
           else
             echo "verdict=OTHER_FAIL"
@@ -79,7 +82,7 @@ jobs:
         run: |
           set -x
           set +e
-          resp=$(gh api -i "repos/${{ github.repository }}/commits/${{ inputs.commit_sha }}/pulls" 2>&1)
+          resp=$(gh api -i "repos/${{ github.repository }}/commits/${{ env.TEST_COMMIT_SHA }}/pulls" 2>&1)
           rc=$?
           echo "--- raw response (headers + body) ---"
           echo "$resp"
@@ -88,7 +91,7 @@ jobs:
           if echo "$resp" | rg -q "403|Resource not accessible"; then
             echo "verdict=FAIL_403"
           elif [ "$rc" -eq 0 ] && echo "$resp" | rg -q '"number"'; then
-            pr=$(gh api "repos/${{ github.repository }}/commits/${{ inputs.commit_sha }}/pulls" --jq '.[0].number')
+            pr=$(gh api "repos/${{ github.repository }}/commits/${{ env.TEST_COMMIT_SHA }}/pulls" --jq '.[0].number')
             echo "verdict=OK pr=${pr}"
           else
             echo "verdict=OTHER_FAIL"
