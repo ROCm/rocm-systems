@@ -73,13 +73,6 @@ target_link_libraries(
     Threads::Threads
 )
 
-# Platform-specific config directory
-if(WIN32)
-    set(CONFIG_INSTALL_DIR "etc") # Relative to prefix
-else()
-    set(CONFIG_INSTALL_DIR "${CMAKE_INSTALL_SYSCONFDIR}")
-endif()
-
 # Install the daemon
 install(
     TARGETS ${AMDCUID_DAEMON_EXECUTABLE}
