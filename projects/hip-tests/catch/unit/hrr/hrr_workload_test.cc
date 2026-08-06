@@ -949,11 +949,25 @@ TEST_CASE("Unit_HRR_StreamWriteValue_Direct", "[.][hrr-direct]") {
   // target, so tolerate a rejection: capture only records successful calls, so
   // on a target that rejects it the slot simply keeps kIncBase in both the
   // recorded blob and the replay.
+  //
+  // The flag is an in-tree HIP extension, and this suite is also built against
+  // SDK headers that predate it. Absent at compile time is the same situation
+  // as rejected at run time, so it takes the same path rather than failing the
+  // build.
+#ifdef hipExtStreamWriteValueIncrement
+  constexpr unsigned kIncFlag = hipExtStreamWriteValueIncrement;
+  constexpr bool kHaveIncFlag = true;
+#else
+  constexpr unsigned kIncFlag = 0;
+  constexpr bool kHaveIncFlag = false;
+#endif
   HIP_CHECK(hipStreamWriteValue32(s, inc, kIncBase, 0));
-  hipError_t incErr = hipStreamWriteValue32(s, inc, kIncDelta,
-                                            hipExtStreamWriteValueIncrement);
-  REQUIRE((incErr == hipSuccess || incErr == hipErrorInvalidValue
-           || incErr == hipErrorNotSupported));
+  hipError_t incErr = hipErrorNotSupported;
+  if (kHaveIncFlag) {
+    incErr = hipStreamWriteValue32(s, inc, kIncDelta, kIncFlag);
+    REQUIRE((incErr == hipSuccess || incErr == hipErrorInvalidValue
+             || incErr == hipErrorNotSupported));
+  }
 
   HIP_CHECK(hipStreamSynchronize(s));
   HIP_CHECK(hipDeviceSynchronize());
