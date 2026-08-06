@@ -47,26 +47,11 @@ jobs:
           cmake -B build -DGPU_TARGETS=gfx942 -DBUILD_TESTS=OFF
           cmake --build build --target hipify_all -j"$(nproc)"
 
-      - name: Build host tests
-        working-directory: projects/rccl/test/host
-        run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DROCM_PATH=/opt/rocm
-          cmake --build build -j"$(nproc)"
-
-      - name: Run host tests
-        working-directory: projects/rccl/test/host
-        shell: bash
-        run: |
-          # Prepend a real-UTC timestamp to each line via `ts` (moreutils), tee the
-          # full stdout+stderr (incl. WARN/debug output) to a log, and keep the
-          # binary's exit code (pipefail) so a failure still fails the job.
-          # For a relative "start = 0" timeline instead, use: ts -s '%.s'
-          set -o pipefail
-          ./build/rccl-HostUnitTests \
-            --gtest_output=xml:host_tests.xml \
-            --gtest_color=no 2>&1 \
-            | TZ=UTC ts '%Y-%m-%dT%H:%M:%.SZ' \
-            | tee host_tests.log
+      - name: Build & run host unit tests
+        # Build/run/log logic lives in the script so the same command runs locally
+        # and in CI, and the suite (filters, flags, build type) can be tuned there
+        # without editing this workflow. See run_host_tests.sh for the knobs.
+        run: bash projects/rccl/test/host/run_host_tests.sh
 
       - name: Upload results
         if: always()
