@@ -141,7 +141,7 @@ struct tagged_backend<callback_domains_rocshmem_hipfile_supported>
 
 // ─── Shared fake name tables ───────────────────────────────────────────────────
 //
-// Every test that calls domain_settings()/operation_settings()/get_buffered_domains()/
+// Every test that calls domain_choices()/operation_settings()/get_buffered_domains()/
 // get_callback_domains() needs Wrapper::get_buffer_tracing_names()/
 // get_callback_tracing_names() (both GMock methods on mock_backend) to return a
 // populated table, since sdk_tracing_config validates/resolves domain names against it.
@@ -212,7 +212,7 @@ make_callback_name_info()
 // get_callback_domains() / get_buffered_domains() read through the Externals
 // policy. Mocking it lets tests control the RCCLP/OMPT/unified-memory-profiling
 // flags without ever touching rocprofsys::settings::instance(). ROCm domain
-// validity is checked via sut::domain_settings() directly (no longer through
+// validity is checked via sut::domain_choices() directly (no longer through
 // Externals), so no settings registry needs to be mocked here.
 
 class gmock_sdk_externals
@@ -455,15 +455,16 @@ TEST_F(sdk_tracing_config_throw_test, get_operations_error_message_contains_kind
     }
 }
 
-// ─── domain_settings ──────────────────────────────────────────────────────────
+// ─── domain_choices / domain_defaults ─────────────────────────────────────────
 //
-// domain_settings()/operation_settings() are pure data-gathering functions: no
-// Externals interaction, so these tests only need g_mock_wrapper (reusing
-// sdk_tracing_config_test). Each test uses its own Tag since operation_settings()
-// populates a function-local-static-scoped-per-(Wrapper,Externals) lookup map, and
-// a shared Tag across tests would make later tests see already-populated state.
+// domain_choices()/domain_defaults()/operation_settings() are pure data-gathering
+// functions: no Externals interaction, so these tests only need g_mock_wrapper
+// (reusing sdk_tracing_config_test). Each test uses its own Tag since
+// operation_settings() populates a function-local-static-scoped-per-(Wrapper,Externals)
+// lookup map, and a shared Tag across tests would make later tests see already-populated
+// state.
 
-TEST_F(sdk_tracing_config_test, domain_settings_returns_expected_choices_and_defaults)
+TEST_F(sdk_tracing_config_test, domain_choices_returns_expected_choices)
 {
     using sut =
         sdk_tracing_config<tagged_backend<domain_settings_test>, mock_sdk_externals>;
@@ -475,18 +476,21 @@ TEST_F(sdk_tracing_config_test, domain_settings_returns_expected_choices_and_def
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    const auto domains = sut::domain_settings();
+    const auto choices = sut::domain_choices();
 
-    EXPECT_THAT(domains.domain_choices,
+    EXPECT_THAT(choices,
                 gtest::IsSupersetOf({ "hip_api", "hsa_api", "marker_api", "roctx" }));
-    EXPECT_THAT(domains.domain_choices,
-                gtest::Not(gtest::Contains(std::string{ "code_object" })));
-    EXPECT_THAT(domains.domain_choices,
-                gtest::Not(gtest::Contains(std::string{ "none" })));
+    EXPECT_THAT(choices, gtest::Not(gtest::Contains(std::string{ "code_object" })));
+    EXPECT_THAT(choices, gtest::Not(gtest::Contains(std::string{ "none" })));
+}
 
-    EXPECT_EQ(domains.domain_defaults,
+TEST_F(sdk_tracing_config_test, domain_defaults_returns_expected_defaults)
+{
+    using sut =
+        sdk_tracing_config<tagged_backend<domain_settings_test>, mock_sdk_externals>;
+
+    EXPECT_EQ(sut::domain_defaults(),
               "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory");
-    EXPECT_THAT(domains.domain_description, gtest::HasSubstr("hip_api"));
 }
 
 // ─── operation_settings ───────────────────────────────────────────────────────
@@ -521,7 +525,7 @@ TEST_F(sdk_tracing_config_test, operation_settings_registers_marker_api_domain_a
 // ─── get_callback_domains ─────────────────────────────────────────────────────
 //
 // get_callback_domains() calls Wrapper::get_callback_tracing_names() directly and
-// also calls domain_settings() (to validate ROCm domain names), which calls both
+// also calls domain_choices() (to validate ROCm domain names), which calls both
 // get_buffer_tracing_names() and get_callback_tracing_names() again;
 // cached_backend_methods memoizes both per-Tag, so each mock still only fires once
 // per test despite the two call sites.
@@ -699,7 +703,7 @@ TEST_F(sdk_tracing_config_domains_test,
 // ─── get_buffered_domains ─────────────────────────────────────────────────────
 //
 // get_buffered_domains() calls Wrapper::get_buffer_tracing_names() directly and
-// also calls domain_settings() (to validate ROCm domain names), which calls both
+// also calls domain_choices() (to validate ROCm domain names), which calls both
 // get_buffer_tracing_names() and get_callback_tracing_names() again;
 // cached_backend_methods memoizes both per-Tag, so each mock still only fires once
 // per test despite the two call sites.

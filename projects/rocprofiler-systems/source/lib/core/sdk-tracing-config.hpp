@@ -12,7 +12,6 @@
 #include <initializer_list>
 #include <iterator>
 #include <ranges>
-#include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
 #include <array>
@@ -116,14 +115,9 @@ public:
         }
     };
 
-    struct domain_choice_settings
-    {
-        std::vector<std::string> domain_choices;
-        std::string              domain_description;
-        std::string              domain_defaults;
-    };
+    static std::vector<std::string> domain_choices();
 
-    static domain_choice_settings domain_settings();
+    static std::string domain_defaults();
 
     struct operation_setting_spec
     {
@@ -262,6 +256,18 @@ private:
 
         return supported;
     }
+
+    /// @brief Domain-name -> kind(s) lookup table for get_callback_domains(),
+    /// covering the alias names plus every compile-time-supported callback domain.
+    static std::unordered_map<std::string,
+                              std::vector<typename SdkBackend::callback_tracing_kind_t>>
+    get_callback_domain_map();
+
+    /// @brief Domain-name -> kind(s) lookup table for get_buffered_domains(),
+    /// covering the alias names plus every buffered domain.
+    static std::unordered_map<std::string,
+                              std::vector<typename SdkBackend::buffer_tracing_kind_t>>
+    get_buffered_domain_map();
 };
 
 }  // namespace rocprofsys::rocprofiler_sdk
@@ -433,11 +439,10 @@ sdk_tracing_config<SdkBackend, Externals>::get_version()
     return version;
 }
 
-// split to 2 functions for, choices and defaults. construct description in config
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-typename sdk_tracing_config<SdkBackend, Externals>::domain_choice_settings
-sdk_tracing_config<SdkBackend, Externals>::domain_settings()
+std::vector<std::string>
+sdk_tracing_config<SdkBackend, Externals>::domain_choices()
 {
     const auto& buffered_tracing_info = SdkBackend::get_buffer_tracing_names();
     const auto& callback_tracing_info = SdkBackend::get_callback_tracing_names();
@@ -450,18 +455,17 @@ sdk_tracing_config<SdkBackend, Externals>::domain_settings()
                                               "marker_name_api",
                                               "code_object" };
 
-    auto domain_choices = std::unordered_set<std::string>{};
-    domain_choices.reserve(buffered_tracing_info.size() + callback_tracing_info.size());
+    auto choices = std::unordered_set<std::string>{};
+    choices.reserve(buffered_tracing_info.size() + callback_tracing_info.size());
 
-    auto add_domain_f = [&domain_choices,
-                         &domains_to_skip](std::string_view domain_to_add) {
+    auto add_domain_f = [&choices, &domains_to_skip](std::string_view domain_to_add) {
         const auto domain_lowercase = to_lower(domain_to_add);
         if(domains_to_skip.contains(domain_lowercase))
         {
             return;
         }
 
-        domain_choices.emplace(domain_lowercase);
+        choices.emplace(domain_lowercase);
     };
 
     add_domain_f("hip_api");
@@ -479,25 +483,27 @@ sdk_tracing_config<SdkBackend, Externals>::domain_settings()
     std::ranges::for_each(buffered_tracing_info, add_domain_f, name_projection);
     std::ranges::for_each(callback_tracing_info, add_domain_f, name_projection);
 
-    std::vector<std::string> domain_choices_vec{ domain_choices.begin(),
-                                                 domain_choices.end() };
-    std::ranges::sort(domain_choices_vec);
+    std::vector<std::string> choices_vec{ choices.begin(), choices.end() };
+    std::ranges::sort(choices_vec);
 
-    const auto domain_description =
-        fmt::format("Specification of ROCm domains to trace/profile. Choices: {}",
-                    fmt::join(domain_choices_vec, ", "));
-    auto domain_defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
-                                        "memory_copy,scratch_memory" };
+    return choices_vec;
+}
+
+template <typename SdkBackend, typename Externals>
+    requires concepts::sdk_tracing_config_externals<Externals>
+std::string
+sdk_tracing_config<SdkBackend, Externals>::domain_defaults()
+{
+    auto defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
+                                 "memory_copy,scratch_memory" };
 
     if constexpr(compile_time_sdk_version <
                  version_info{ .major = 1, .minor = 0, .patch = 0 })
     {
-        domain_defaults.append(",page_migration");
+        defaults.append(",page_migration");
     }
 
-    return domain_choice_settings{ std::move(domain_choices_vec),
-                                   std::move(domain_description),
-                                   std::move(domain_defaults) };
+    return defaults;
 }
 
 template <typename SdkBackend, typename Externals>
@@ -536,18 +542,69 @@ sdk_tracing_config<SdkBackend, Externals>::operation_settings()
 
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
-sdk_tracing_config<SdkBackend, Externals>::get_callback_domains()
+std::unordered_map<std::string, std::vector<typename SdkBackend::callback_tracing_kind_t>>
+sdk_tracing_config<SdkBackend, Externals>::get_callback_domain_map()
 {
     using kind_t              = typename SdkBackend::callback_tracing_kind_t;
     const auto& callback_info = SdkBackend::get_callback_tracing_names();
+    const auto  supported     = get_supported_callback_domains();
+
+    std::unordered_map<std::string, std::vector<kind_t>> domain_map{
+        {
+            "hsa_api",
+            {
+                SdkBackend::CALLBACK_TRACING_HSA_CORE_API,
+                SdkBackend::CALLBACK_TRACING_HSA_AMD_EXT_API,
+                SdkBackend::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+                SdkBackend::CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+            },
+        },
+        {
+            "hip_api",
+            {
+                SdkBackend::CALLBACK_TRACING_HIP_RUNTIME_API,
+                SdkBackend::CALLBACK_TRACING_HIP_COMPILER_API,
+            },
+        },
+        {
+            "marker_api",
+            {
+                SdkBackend::CALLBACK_TRACING_MARKER_CORE_API,
+            },
+        },
+        {
+            "roctx",
+            {
+                SdkBackend::CALLBACK_TRACING_MARKER_CORE_API,
+            },
+        },
+    };
+
+    for(size_t idx = 0; idx < callback_info.size(); ++idx)
+    {
+        const auto& ditr = callback_info[idx];
+        auto        dval = static_cast<kind_t>(idx);
+        if(supported.count(dval) > 0)
+        {
+            domain_map.emplace(to_lower(ditr.name), std::vector<kind_t>{ dval });
+        }
+    }
+
+    return domain_map;
+}
+
+template <typename SdkBackend, typename Externals>
+    requires concepts::sdk_tracing_config_externals<Externals>
+std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
+sdk_tracing_config<SdkBackend, Externals>::get_callback_domains()
+{
+    using kind_t = typename SdkBackend::callback_tracing_kind_t;
 
     const auto sdk_runtime_version = get_version();
     if(sdk_runtime_version == version_info{})
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
     }
-    const auto supported = get_supported_callback_domains();
 
     if constexpr(compile_time_sdk_version >=
                  version_info{ .major = 1, .minor = 3, .patch = 4 })
@@ -573,65 +630,43 @@ sdk_tracing_config<SdkBackend, Externals>::get_callback_domains()
     if constexpr(compile_time_sdk_version >=
                  version_info{ .major = 0, .minor = 6, .patch = 0 })
     {
-        if(sdk_runtime_version >= version_info{ .major = 0, .minor = 6, .patch = 0 })
+        if(Externals::get_use_rcclp())
         {
-            if(Externals::get_use_rcclp())
-            {
-                callback_domains.emplace(SdkBackend::CALLBACK_TRACING_RCCL_API);
-            }
+            callback_domains.emplace(SdkBackend::CALLBACK_TRACING_RCCL_API);
+        }
 
-            if(Externals::get_use_ompt())
-            {
-                callback_domains.emplace(SdkBackend::CALLBACK_TRACING_OMPT);
-            }
+        if(Externals::get_use_ompt())
+        {
+            callback_domains.emplace(SdkBackend::CALLBACK_TRACING_OMPT);
         }
     }
 
-    // Check that the domains are valid
-    const auto valid_choices = domain_settings().domain_choices;
+    const auto domain_map = get_callback_domain_map();
 
-    auto invalid_domain = [&valid_choices](const auto& domainv) {
+    // Check that the domains are valid
+    const auto valid_choices = domain_choices();
+
+    const auto invalid_domain_fn = [&valid_choices](const auto& domainv) {
         return !std::ranges::any_of(
             valid_choices, [&domainv](const auto& choice) { return choice == domainv; });
     };
+    if(const auto invalid_domain_itr =
+           std::ranges::find_if(domains_input, invalid_domain_fn);
+       invalid_domain_itr != domains_input.end())
+    {
+        throw std::runtime_error(fmt::format(
+            "unsupported ROCPROFSYS_ROCM_DOMAINS value: {}", *invalid_domain_itr));
+    }
 
     for(const auto& itr : domains_input)
     {
-        if(invalid_domain(itr))
+        // Domains that pass validation but aren't in the compile-time supported
+        // set (e.g. an older SDK header) have no domain_map entry; skip silently.
+        if(const auto domain_map_itr = domain_map.find(itr);
+           domain_map_itr != domain_map.end())
         {
-            throw std::runtime_error(
-                fmt::format("unsupported ROCPROFSYS_ROCM_DOMAINS value: {}", itr));
-        }
-
-        if(itr == "hsa_api")
-        {
-            callback_domains.insert(
-                { SdkBackend::CALLBACK_TRACING_HSA_CORE_API,
-                  SdkBackend::CALLBACK_TRACING_HSA_AMD_EXT_API,
-                  SdkBackend::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-                  SdkBackend::CALLBACK_TRACING_HSA_FINALIZE_EXT_API });
-        }
-        else if(itr == "hip_api")
-        {
-            callback_domains.insert({ SdkBackend::CALLBACK_TRACING_HIP_RUNTIME_API,
-                                      SdkBackend::CALLBACK_TRACING_HIP_COMPILER_API });
-        }
-        else if(itr == "marker_api" || itr == "roctx")
-        {
-            callback_domains.emplace(SdkBackend::CALLBACK_TRACING_MARKER_CORE_API);
-        }
-        else
-        {
-            for(size_t idx = 0; idx < callback_info.size(); ++idx)
-            {
-                const auto& ditr = callback_info[idx];
-                auto        dval = static_cast<kind_t>(idx);
-                if(itr == to_lower(ditr.name) && supported.contains(dval))
-                {
-                    callback_domains.emplace(dval);
-                    break;
-                }
-            }
+            callback_domains.insert(domain_map_itr->second.begin(),
+                                    domain_map_itr->second.end());
         }
     }
 
@@ -640,19 +675,11 @@ sdk_tracing_config<SdkBackend, Externals>::get_callback_domains()
 
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
-sdk_tracing_config<SdkBackend, Externals>::get_buffered_domains()
+std::unordered_map<std::string, std::vector<typename SdkBackend::buffer_tracing_kind_t>>
+sdk_tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
 {
     using kind_t            = typename SdkBackend::buffer_tracing_kind_t;
     const auto& buffer_info = SdkBackend::get_buffer_tracing_names();
-
-    auto supported = get_supported_buffer_domains();
-
-    auto data    = std::unordered_set<kind_t>{};
-    auto domains = rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
-    // Check that the domains are valid
-
-    const auto valid_choices = domain_settings().domain_choices;
 
     std::unordered_map<std::string, std::vector<kind_t>> domain_map{
         {
@@ -745,12 +772,24 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domains()
         domain_map.insert({ to_lower(domain.name), { domain.value } });
     }
 
+    return domain_map;
+}
+
+template <typename SdkBackend, typename Externals>
+    requires concepts::sdk_tracing_config_externals<Externals>
+std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
+sdk_tracing_config<SdkBackend, Externals>::get_buffered_domains()
+{
+    using kind_t = typename SdkBackend::buffer_tracing_kind_t;
+
+    auto supported = get_supported_buffer_domains();
+
     auto data    = std::unordered_set<kind_t>{};
     auto domains = rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
     // Check that the domains are valid
-    const auto valid_choices = Externals::get_settings()
-                                   ->at(std::string{ env_vars::ROCM_DOMAINS })
-                                   ->get_choices();
+
+    const auto valid_choices = domain_choices();
+    const auto domain_map    = get_buffered_domain_map();
 
     const auto invalid_domain_fn = [&valid_choices](const auto& domainv) {
         return !std::ranges::any_of(

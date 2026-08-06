@@ -477,12 +477,15 @@ configure_rocm_tracing_settings(const std::shared_ptr<settings>& _config)
         backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>,
         rocprofiler_sdk::default_sdk_externals>;
 
-    const auto domains = sdk_tracing_config_t::domain_settings();
+    const auto rocm_domain_choices = sdk_tracing_config_t::domain_choices();
+    const auto rocm_domain_description =
+        fmt::format("Specification of ROCm domains to trace/profile. Choices: {}",
+                    fmt::join(rocm_domain_choices, ", "));
 
-    ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::ROCM_DOMAINS,
-                              domains.domain_description, domains.domain_defaults, "rocm",
-                              "rocprofiler-sdk")
-        ->set_choices(domains.domain_choices);
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, env_vars::ROCM_DOMAINS, rocm_domain_description,
+        sdk_tracing_config_t::domain_defaults(), "rocm", "rocprofiler-sdk")
+        ->set_choices(rocm_domain_choices);
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::ROCM_EVENTS,
                               "ROCm hardware counters. Use ':device=N' syntax to "
@@ -534,8 +537,8 @@ configure_rocm_tracing_settings(const std::shared_ptr<settings>& _config)
 
     // Add the ROCPROFSYS_ROCM_GROUP_BY_QUEUE setting if the hip_stream domain is
     // present in supported ROCProfiler-SDK domains.
-    if(std::ranges::find(domains.domain_choices, std::string{ "hip_stream" }) !=
-       domains.domain_choices.end())
+    if(std::ranges::find(rocm_domain_choices, std::string{ "hip_stream" }) !=
+       rocm_domain_choices.end())
     {
         ROCPROFSYS_CONFIG_SETTING(bool, env_vars::ROCM_GROUP_BY_QUEUE,
                                   "By default, Perfetto trace will show the HIP streams "
