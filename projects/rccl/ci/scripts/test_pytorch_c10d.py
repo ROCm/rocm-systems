@@ -26,6 +26,7 @@ from pathlib import Path
 from rccl_ci_utils import (
     find_pip_sdk_lib_dirs,
     find_rccl_library,
+    override_bundled_hip_runtime,
     override_bundled_rccl,
     parse_junit_xml,
     quarantine_rocm_sysdeps,
@@ -440,6 +441,12 @@ def main() -> None:
 
     # Step 4: Replace pip-bundled librccl.so with CI-built version
     override_bundled_rccl(rccl_lib_dir)
+
+    # Step 4b: Replace pip-bundled libamdhip64.so with TheRock's version
+    # so the HIP runtime matches the compiler that built RCCL's device
+    # code objects (prevents findSymbol → guarantee → abort)
+    override_bundled_hip_runtime(rccl_lib_dir)
+
     setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
 
     # Step 5: Clone PyTorch test sources
