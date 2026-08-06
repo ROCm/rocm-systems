@@ -75,6 +75,7 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   void* tmp;
   void** cast;
   const char* envIbVerbsLib = ncclGetEnv("NCCL_IBVERBS_LIB");
+  if (!envIbVerbsLib) envIbVerbsLib = ncclGetEnv("NCCL_LIBIBVERBS_SO");
   const char* ibVerbsLib[NCCL_IBVERBS_LIBS] = {envIbVerbsLib, "libibverbs.so", "libibverbs.so.1"};
   if (envIbVerbsLib) INFO(NCCL_ENV | NCCL_INIT, "NCCL_IBVERBS_LIB set by environment to %s", envIbVerbsLib);
 
