@@ -308,7 +308,11 @@ def main():
     print(f"Baseline column: {col}  ({len(baseline)} streams)  tolerance: {tol}%\n")
 
     ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    out_dir = PROJECT_ROOT / "perf_results" / ts
+    # Write results outside the repo tree (default: $HOME) so they do not clutter
+    # `git status`. Override the base dir with ROCDECODE_PERF_RESULTS_DIR.
+    results_base = Path(os.path.expanduser(os.environ.get(
+        "ROCDECODE_PERF_RESULTS_DIR", str(Path.home() / "rocDecode_perf_results"))))
+    out_dir = results_base / ts
     out_dir.mkdir(parents=True, exist_ok=True)
     detail_rows = []
     summary_rows = []
