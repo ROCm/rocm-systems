@@ -275,6 +275,23 @@ bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_
   return true;
 }
 
+bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
+                            ncclSymRegType_t winRegType) {
+  if (!ncclCeImplemented(coll, red, ty)) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: not implemented");
+    return false;
+  }
+  if (comm->nNodes > 1) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: comm is not a single node");
+    return false;
+  }
+  if (!comm->symmetricSupport) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: symmetric support is not enabled");
+    return false;
+  }
+  return true;
+}
+
 bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
   int driverVersion;
   if (ncclCudaDriverVersion(&driverVersion) != ncclSuccess) return false;
@@ -640,8 +657,13 @@ ncclResult_t ncclCeAllGather(struct ncclComm* comm, struct ncclCeCollArgs* args,
   // Copy data to other ranks
   for (int r = 1; r < comm->nRanks; r++) {
     int targetRank = (comm->rank + r) % comm->nRanks;
-    offset = myRecvBuff - (uint8_t*)args->recvWin->userPtr;
-    NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, args->recvWin, offset, targetRank, &peerRecvBuff), ret, fail);
+    offset = myRecvBuff - (uint8_t*)args->recvBuff;
+    if (args->useDda) {
+      peerRecvBuff = (uint8_t*)args->ddaPeerBases[targetRank] + offset;
+    } else {
+      size_t winOff = offset + ((uint8_t*)args->recvBuff - (uint8_t*)args->recvWin->userPtr);
+      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, args->recvWin, winOff, targetRank, &peerRecvBuff), ret, fail);
+    }
     batchOpsParams.srcs[batchOpsParams.numOps] = (void*)mySendBuff;
     batchOpsParams.dsts[batchOpsParams.numOps] = (void*)peerRecvBuff;
     batchOpsParams.sizes[batchOpsParams.numOps] = chunkBytes;
@@ -694,8 +716,13 @@ ncclResult_t ncclCeAlltoAll(struct ncclComm* comm, struct ncclCeCollArgs* args, 
       batchOpsParams.numOps++;
     } else {
       // Remote copy to other ranks: send to rank dstRank's receive buffer at position comm->rank
-      offset = dstPtr - (uint8_t*)args->recvWin->userPtr;
-      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, args->recvWin, offset, dstRank, &peerRecvBuff), ret, fail);
+      offset = dstPtr - (uint8_t*)args->recvBuff;
+      if (args->useDda) {
+        peerRecvBuff = (uint8_t*)args->ddaPeerBases[dstRank] + offset;
+      } else {
+        size_t winOff = offset + ((uint8_t*)args->recvBuff - (uint8_t*)args->recvWin->userPtr);
+        NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, args->recvWin, winOff, dstRank, &peerRecvBuff), ret, fail);
+      }
       batchOpsParams.srcs[batchOpsParams.numOps] = (void*)srcPtr;
       batchOpsParams.dsts[batchOpsParams.numOps] = (void*)peerRecvBuff;
       batchOpsParams.sizes[batchOpsParams.numOps] = chunkBytes;
@@ -756,8 +783,13 @@ ncclResult_t ncclCeScatter(struct ncclComm* comm, struct ncclCeCollArgs* args, c
       uint8_t* srcPtr = mySendBuff + dstRank * chunkBytes;
       uint8_t* dstPtr = isInPlace ? myRecvBuff + dstRank * chunkBytes : myRecvBuff;
 
-      offset = dstPtr - (uint8_t*)args->recvWin->userPtr;
-      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, args->recvWin, offset, dstRank, &peerDstPtr), ret, fail);
+      offset = dstPtr - (uint8_t*)args->recvBuff;
+      if (args->useDda) {
+        peerDstPtr = (uint8_t*)args->ddaPeerBases[dstRank] + offset;
+      } else {
+        size_t winOff = offset + ((uint8_t*)args->recvBuff - (uint8_t*)args->recvWin->userPtr);
+        NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, args->recvWin, winOff, dstRank, &peerDstPtr), ret, fail);
+      }
       batchOpsParams.srcs[batchOpsParams.numOps] = (void*)srcPtr;
       batchOpsParams.dsts[batchOpsParams.numOps] = (void*)peerDstPtr;
       batchOpsParams.sizes[batchOpsParams.numOps] = chunkBytes;
@@ -807,8 +839,13 @@ ncclResult_t ncclCeGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cu
   } else {
     // Non-root ranks send their data to root's receive buffer
     uint8_t* rootRecvPtr = (uint8_t*)args->recvBuff + comm->rank * chunkBytes;
-    offset = rootRecvPtr - (uint8_t*)args->recvWin->userPtr;
-    NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, args->recvWin, offset, rootRank, &peerRecvBuff), ret, fail);
+    offset = rootRecvPtr - (uint8_t*)args->recvBuff;
+    if (args->useDda) {
+      peerRecvBuff = (uint8_t*)args->ddaPeerBases[rootRank] + offset;
+    } else {
+      size_t winOff = offset + ((uint8_t*)args->recvBuff - (uint8_t*)args->recvWin->userPtr);
+      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, args->recvWin, winOff, rootRank, &peerRecvBuff), ret, fail);
+    }
     batchOpsParams.srcs[batchOpsParams.numOps] = (void*)mySendBuff;
     batchOpsParams.dsts[batchOpsParams.numOps] = (void*)peerRecvBuff;
     batchOpsParams.sizes[batchOpsParams.numOps] = chunkBytes;
@@ -827,6 +864,7 @@ exit:
 fail:
   goto exit;
 }
+
 // =============================================================================
 // CE AllReduce pipeline: single-op stream memory-op helpers.
 // Thin wrappers over hipStreamBatchMemOp, matching the CUDA-compatible batch
@@ -1150,6 +1188,34 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
     break;
   default:
     ret = ncclInvalidUsage;
+  }
+  // DDA path: results were staged in scratch (args->recvBuff). Copy them back to
+  // the user's recv buffer. Copy-back semantics are collective-specific:
+  //   AllGather / AlltoAll: every rank holds the full nRanks*chunk result.
+  //   Gather:               only the root holds the full nRanks*chunk result.
+  //   Scatter:              every rank receives a single chunk at scratch offset 0.
+  if (args->useDda && args->ddaUserRecvBuff != NULL) {
+    const size_t chunkBytes = args->nElts * args->eltSize;
+    const size_t fullBytes = (size_t)comm->nRanks * chunkBytes;
+    switch (args->func) {
+    case ncclFuncGather:
+      if (comm->rank == args->rootRank) {
+        CUDACHECKGOTO(cudaMemcpyAsync(args->ddaUserRecvBuff, args->recvBuff /*scratch*/, fullBytes,
+                                      cudaMemcpyDeviceToDevice, stream),
+                      ret, fail);
+      }
+      break;
+    case ncclFuncScatter:
+      CUDACHECKGOTO(cudaMemcpyAsync(args->ddaUserRecvBuff, args->recvBuff /*scratch*/, chunkBytes,
+                                    cudaMemcpyDeviceToDevice, stream),
+                    ret, fail);
+      break;
+    default: // AllGather, AlltoAll
+      CUDACHECKGOTO(cudaMemcpyAsync(args->ddaUserRecvBuff, args->recvBuff /*scratch*/, fullBytes,
+                                    cudaMemcpyDeviceToDevice, stream),
+                    ret, fail);
+      break;
+    }
   }
 
 exit:

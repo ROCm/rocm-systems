@@ -92,6 +92,12 @@ struct ncclCeColl {
   uint32_t* d_barrierSync;
   cudaStream_t scatterStream;     // trails the reduce kernel: waits d_reduceDone, then all-gathers
   cudaEvent_t synceEvent;  // join scatterStream back onto the caller's stream
+  // Latched while this comm has live graph-captured plans. CE 2-shot AllReduce
+  // can deadlock on eager calls that share a graph-mode comm, so we disable CE
+  // AR during that period and re-enable it after captured plans are reclaimed.
+  // Written only from rcclCeAllReduceGraphLatchTick(); no internal lock, same
+  // single-writer-per-comm contract as localPersistentRefs (comm.h).
+  bool graphModeSeen;
 };
 
 struct ncclCeInitTask {
@@ -111,7 +117,12 @@ struct alignas(16) ncclCeCollArgs {
   struct ncclDevrWindow* recvWin;
   void* collApiEventHandle;  // Parent API event handle for profiler hierarchy
   void* ceCollProfHandle;    // CE collective profiler event handle
-  ncclRedOp_t redOp;         // Only used for AllReduce
+  bool useDda;
+  void** ddaPeerBases;      // host-side table of every rank's DDA scratch base pointer
+  void*
+    ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
+  size_t ddaCopyBackBytes; // bytes to copy scratch -> user recvbuff
+  ncclRedOp_t redOp; // Only used for AllReduce
 };
 
 struct ncclCeBatchOpsParams {
@@ -129,6 +140,12 @@ struct ncclCeBatchOpsParams {
 
 bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                      ncclSymRegType_t winRegType);
+
+bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
+                            ncclSymRegType_t winRegType);
+
+bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
+                            ncclSymRegType_t winRegType);
 
 bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty);
 

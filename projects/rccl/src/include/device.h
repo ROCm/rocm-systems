@@ -146,8 +146,15 @@ union ncclLLFifoLine {
 #ifdef ENABLE_WARP_SPEED
 #define MAXCHANNELS 512
 #else
-#define MAXCHANNELS 128
+// Raised from 128 -> 256 to let single- and multi-node configurations request
+// up to 256 channels via NCCL_MAX_NCHANNELS / NCCL_MIN_NCHANNELS. The actual
+// per-call channel count is still picked by the existing tuner; this only
+// lifts the upper bound.
+#define MAXCHANNELS 256
 #endif
+// Number of channel bits packed into one uint64_t word of channelMasks. The
+// global channelId for bit `x` in word `i` is `i*CHANNELS_PER_MASK_WORD + x`.
+#define CHANNELS_PER_MASK_WORD 64
 #define CHANNEL_LIMIT 16 // this is used to limit channels for pre MI3xx GPUs
 #define NCCL_MAX_LOCAL_RANKS 72
 #define NCCL_MIN_NTHREADS (4 * WARP_SIZE)
@@ -214,6 +221,7 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define RCCL_DTYPE_SHIFT 16
 #define RCCL_ACC_SHIFT 20
 #define RCCL_PIPELINE_SHIFT 24
+#define RCCL_REG_SHIFT 28
 
 struct ncclConnInfo {
   // Regular comm mechanism
@@ -598,7 +606,7 @@ struct ncclKernelComm {
   bool p2pCrossClique;
   int isAllNvlink;
   int p2pnChannelsPerPeer;
-  int gfx9CheapFenceOff; // RCCL: true if gfx9 cheap post-peer fence is disabled (comm-global)
+  int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int* collNetDenseToUserRank;
 
@@ -635,8 +643,9 @@ enum ncclDevWorkStorageType : uint8_t {
 };
 
 struct channelMasks {
-  uint64_t masks[MAXCHANNELS / 64];
+  uint64_t masks[MAXCHANNELS / CHANNELS_PER_MASK_WORD];
 };
+static_assert(MAXCHANNELS % CHANNELS_PER_MASK_WORD == 0, "MAXCHANNELS must be a multiple of CHANNELS_PER_MASK_WORD");
 
 struct alignas(16) ncclDevKernelArgs {
   struct ncclKernelComm* comm;
@@ -669,7 +678,9 @@ typedef ncclDevKernelArgsStorage<(4 << 10)> ncclDevKernelArgs4K;
 // 5KB should be sufficient for now
 typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
 #else
-typedef ncclDevKernelArgs4K ncclDevKernelArgsDefaultStorage;
+// 5KB needed so 256-channel non-WarpSpeed builds can fit one batch per channel
+// in the kernel-args buffer (4KB only fits ~252 batches).
+typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
 #endif
 __host__ __device__ constexpr int ncclMaxKernelArgsSize(/*int cudaDriver, */ int cudaArch = NCCL_CUDA_ARCH) {
   // return (cudaArch < 700 || cudaDriver < 12010) ? 4<<10 : (32<<10)-4;
@@ -788,16 +799,42 @@ inline bool ncclNvlsSupported(int devRedOp, int type) {
 // Map the uint64_t key to funcIdx
 extern std::unordered_map<uint64_t, int> ncclDevFuncNameToId;
 
+// LL128 for these collectives is generated as two separate kernels selected by
+// user-buffer registration mode (UserRegMode 1=registered, 2=non-registered).
+// Keep in sync with `ll128_reg_variant_colls` in src/device/generate.py.
+inline bool ncclDevFuncIsLL128RegVariant(int coll, int proto) {
+  return proto == NCCL_PROTO_LL128 &&
+         (coll == ncclFuncAllReduce || coll == ncclFuncAllGather || coll == ncclFuncBroadcast);
+}
+
+// Map user-buffer registration status to the LL128 reg-variant UserRegMode:
+//   1 = registered     (Direct path, system-scope cache-bypassing load/store)
+//   2 = non-registered (plain / non-temporal path)
+// A buffer counts as registered if either the IPC/NVLS (regUsed) or the network
+// (netRegUsed) registration is active. Keep in sync with the UserRegMode kernel
+// dimension in src/device/generate.py and the selection in src/enqueue.cc.
+inline int ncclDevFuncLL128RegMode(bool regUsed, bool netRegUsed) {
+  return (regUsed || netRegUsed) ? 1 : 2;
+}
+
+// Which unroll-factor tables were generated in this build, indexed by the
+// NCCL_UNROLL_* enum. Generated in host_table.cpp by generate.py.
+extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
+
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py
-inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, int acc = 0, int pipeline = 0) {
+// `reg` is the user-buffer registration mode (0=n/a, 1=registered, 2=non-registered)
+// and is only used to distinguish the LL128 reg-variant collectives.
+inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, int acc = 0, int pipeline = 0,
+                         int reg = 0) {
   int row = -1;
   uint64_t key;
   // Pack 4-bit fields from right (LSB) to left in order:
-  // coll, algo, proto, devRedOp, type, acc, pipeline
+  // coll, algo, proto, devRedOp, type, acc, pipeline, reg
   // This logic must be in sync with the key generation logic in generate.py
   if (coll == ncclFuncBroadcast) {
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
-          ((uint64_t)(proto & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT);
+          ((uint64_t)(proto & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT) |
+          ((uint64_t)(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
   } else if (coll == ncclFuncSendRecv || coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda ||
              coll == ncclFuncAlltoAllvGda) {
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT);
@@ -808,7 +845,8 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
           ((uint64_t)(devRedOp & RCCL_FUNC_ID_MASK) << RCCL_REDOP_SHIFT) |
           ((uint64_t)(type & RCCL_FUNC_ID_MASK) << RCCL_DTYPE_SHIFT) |
           ((uint64_t)(acc & RCCL_FUNC_ID_MASK) << RCCL_ACC_SHIFT) |
-          ((uint64_t)(pipeline & RCCL_FUNC_ID_MASK) << RCCL_PIPELINE_SHIFT);
+          ((uint64_t)(pipeline & RCCL_FUNC_ID_MASK) << RCCL_PIPELINE_SHIFT) |
+          ((uint64_t)(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
   }
   auto it = ncclDevFuncNameToId.find(key);
   if (it != ncclDevFuncNameToId.end()) {
@@ -816,8 +854,8 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
   }
   if (row < 0) {
     WARN("Fatal error: ncclDevFuncId: %lu not found for coll: %d, algo: %d, proto: %d, devRedOp: %d, type: %d, acc: "
-         "%d, pipeline: %d",
-         key, coll, algo, proto, devRedOp, type, acc, pipeline);
+         "%d, pipeline: %d, reg: %d",
+         key, coll, algo, proto, devRedOp, type, acc, pipeline, reg);
     return -1;
   }
   return row;

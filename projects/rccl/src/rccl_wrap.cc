@@ -527,10 +527,12 @@ bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
   if (!comm->hierarchicalCommsInitialized) return false;
 
   size_t threshold = 0;
-  if (comm->nNodes >= 16) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE;
+  if (comm->nNodes >= 32) {
+    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE; // 128MB
+  } else if (comm->nNodes >= 16) {
+    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2; // 64MB
   } else if (comm->nNodes >= 8) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
+    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 4; // 32MB
   }
 
   return threshold > 0 && msgSize <= threshold;
@@ -596,12 +598,14 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
   static int enabled = rcclParamCeAllReduce();
   static int force = rcclParamForceCeAllReduce();
   if (!enabled) {
-    INFO(NCCL_INIT, "CE AllReduce not enabled. Set RCCL_CE_ALLREDUCE=1 to enable.");
+    // Log once per process, not on every eligibility check (called per AllReduce).
+    static bool warnedDisabled = false;
+    if (!warnedDisabled) {
+      warnedDisabled = true;
+      INFO(NCCL_INIT, "CE AllReduce not enabled. Set RCCL_CE_ALLREDUCE=1 to enable.");
+    }
     return false;
   }
-
-  // if graph capture, CE AllReduce is not supported
-  if (ncclCudaGraphValid(comm->planner.capturingGraph)) return false;
 
   // Requires single-node symmetric memory support with CTA_POLICY_ZERO (CE mode).
   if (!comm->symmetricSupport) return false;
@@ -632,6 +636,31 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
   if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) return false;
 
   return true;
+}
+
+void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing) {
+  if (ceCapturing) {
+    if (!comm->ceColl.graphModeSeen) {
+      INFO(NCCL_COLL, "Disabling CE AllReduce; graph latch set (rank %d): capture detected", comm->rank);
+      comm->ceColl.graphModeSeen = true;
+    }
+    // Stay latched while capturing, even if an unrelated older plan on this
+    // comm was just reclaimed: clearing here would wrongly re-enable CE
+    // mid-capture.
+  } else if (comm->ceColl.graphModeSeen && comm->localPersistentRefs == 0) {
+    // Do not proactively drain comm->callbackQueue to freshen this check.
+    // localPersistentRefs is reclaimed via a per-rank async callback with no
+    // cross-rank sync, but all ranks must reach the same decision for the
+    // same call. The ambient once-every-few-group-ends cadence in group.cc
+    // gives every rank's reclaim equal time to complete first; checking more
+    // eagerly let ranks diverge and deadlock (confirmed experimentally).
+    INFO(NCCL_COLL, "Re-enabling CE AllReduce; graph latch cleared (rank %d): no live captured plans", comm->rank);
+    comm->ceColl.graphModeSeen = false;
+  }
+}
+
+bool rcclCeAllReduceAllowed(struct ncclComm* comm) {
+  return !comm->ceColl.graphModeSeen;
 }
 
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
@@ -955,9 +984,16 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
   if (rcclParamUnrollFactor() != -1) {
     comm->unroll = rcclParamUnrollFactor(); //-1 to map to 0 based indexing
     if (comm->unroll < NCCL_UNROLL_1 || comm->unroll >= NCCL_NUM_UNROLLS) {
-      WARN("Invalid RCCL_UNROLL_FACTOR %d specified. Valid values are 0 to 2 corresponding to unroll factors of 1, 2, "
-           "and 4 respectively.",
-           comm->unroll);
+      WARN("Invalid RCCL_UNROLL_FACTOR %d specified. Valid values are 0 to %d corresponding to unroll factors of 1, 2, "
+           "4, 8, 16, and 32 respectively.",
+           comm->unroll, NCCL_NUM_UNROLLS - 1);
+      return ncclInvalidArgument;
+    }
+    if (!ncclDevFuncUnrollGenerated[comm->unroll]) {
+      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) was not built for arch %s; its device function table is empty and "
+           "dispatching to it would crash. "
+           "Rebuild with this unroll factor, or select one that was generated for this build.",
+           comm->unroll, (int)(pow(2.0, (double)comm->unroll)), comm->archName);
       return ncclInvalidArgument;
     }
     INFO(NCCL_INIT, "RCCL Unroll Factor (user set): %d", (int)(pow(2.0, (double)comm->unroll)));
@@ -968,7 +1004,28 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
     else comm->unroll = NCCL_UNROLL_2;
   } else if (IsArchMatch(comm->archName, "gfx908") || ((IsArchMatch(comm->archName, "gfx942") && comm->cuCount > 80)))
     comm->unroll = NCCL_UNROLL_2;
+  else if (IsArchMatch(comm->archName, "gfx1250")) comm->unroll = NCCL_UNROLL_32;
   else comm->unroll = NCCL_UNROLL_4;
+
+  // Guard against a default that wasn't built for this arch (e.g. the generation
+  // matrix was narrowed). Fall back to any generated unroll rather than segfault.
+  if (!ncclDevFuncUnrollGenerated[comm->unroll]) {
+    int fallback = -1;
+    for (int u = NCCL_NUM_UNROLLS - 1; u >= NCCL_UNROLL_1; u--) {
+      if (ncclDevFuncUnrollGenerated[u]) {
+        fallback = u;
+        break;
+      }
+    }
+    if (fallback < 0) {
+      WARN("No unroll-factor device function tables were generated for arch %s.", comm->archName);
+      return ncclInvalidUsage;
+    }
+    WARN("Default RCCL unroll factor %d was not built for arch %s; falling back to %d. Set RCCL_UNROLL_FACTOR to "
+         "override.",
+         (int)(pow(2.0, (double)comm->unroll)), comm->archName, (int)(pow(2.0, (double)fallback)));
+    comm->unroll = fallback;
+  }
 
   INFO(NCCL_INIT, "RCCL Unroll Factor (pre-set): %d", (int)(pow(2.0, (double)comm->unroll)));
   return ncclSuccess;
