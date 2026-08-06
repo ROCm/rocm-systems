@@ -52,11 +52,11 @@ inline constexpr uint32_t kMovV5V2 = 0x7E0A0302u;   // v_mov_b32 v5, v2 -> reads
 inline constexpr uint32_t kMovV5V3 = 0x7E0A0303u;   // v_mov_b32 v5, v3 -> reads v3 into v5.
 inline constexpr uint32_t kMovV6S8 = 0x7E0C0208u;   // v_mov_b32 v6, s8 -> reads s8 into v6.
 
-// v_mov_b32 v2, <inline const K> for K in [0, 64]. Inline constant 0 is encoded
-// as 128, and 1..64 as 129..192, in the src0 field (bits [8:0]).
-[[nodiscard]] inline constexpr uint32_t make_mov_v2_inline(uint32_t k) {
+// v_mov_b32 v{dst}, <inline const K> for K in [0, 64]. vdst occupies bits [24:17];
+// inline constant 0 is encoded as 128, and 1..64 as 129..192, in the src0 field (bits [8:0]).
+[[nodiscard]] inline constexpr uint32_t make_mov_vgpr_inline(uint16_t dst, uint32_t k) {
   const uint32_t src0 = (k == 0) ? 128u : (128u + k); // 129..192 for 1..64.
-  return 0x7E040200u | (src0 & 0x1FFu);
+  return 0x7E000200u | (static_cast<uint32_t>(dst) << 17) | (src0 & 0x1FFu);
 }
 
 // AccVGPR VOP3 (gfx942/gfx950, identical encodings), two words each.
@@ -72,7 +72,7 @@ inline constexpr uint32_t kAccWriteA0ZeroHi = 0x18000080u;
 
 // v_accvgpr_write_b32 a0, <inline const K> for K in [0, 64]: the lo word is
 // kAccWriteA0ZeroLo; the hi word carries the inline src0 (128 for 0, 128+K for
-// 1..64), same src0 field encoding as make_mov_v2_inline.
+// 1..64), same src0 field encoding as make_mov_vgpr_inline.
 [[nodiscard]] inline constexpr uint32_t make_accvgpr_write_a0_inline_hi(uint32_t k) {
   const uint32_t src0 = (k == 0) ? 128u : (128u + k); // 129..192 for 1..64.
   return 0x18000000u | (src0 & 0x1FFu);
@@ -144,13 +144,15 @@ inline uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
 // paths (each keeps the rest of the image well-formed): `unterminated_kd_name` trims
 // the .strtab size so the `.kd` name runs off the table end with no NUL;
 // `wrap_section_header_table` sets e_shoff so e_shoff + e_shnum*sizeof(Shdr) overflows;
-// `wrap_symtab_range` sets the .symtab sh_offset so sh_offset + sh_size overflows.
+// `wrap_symtab_range` sets the .symtab sh_offset so sh_offset + sh_size overflows;
+// `kd_crosses_section` shrinks the .rodata sh_size below sizeof(KD) so the 64-byte `.kd`
+// descriptor extends past its owning section into the adjacent one.
 inline std::vector<uint8_t>
 make_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words, uint32_t private_bytes,
                        uint32_t granulated_sgpr_count, uint32_t e_flags,
                        uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0,
                        bool unterminated_kd_name = false, bool wrap_section_header_table = false,
-                       bool wrap_symtab_range = false) {
+                       bool wrap_symtab_range = false, bool kd_crosses_section = false) {
   namespace kd = rocr::llvm::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
@@ -261,7 +263,9 @@ make_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words, uint32_t private
   shdrs[2].sh_flags = SHF_ALLOC;
   shdrs[2].sh_addr = rodata_vaddr;
   shdrs[2].sh_offset = rodata_offset;
-  shdrs[2].sh_size = rodata_size;
+  // Declared half-size so the 64-byte `.kd` (still physically present) extends past this
+  // section's end, letting the scanner's owning-section bound reject the crossing symbol.
+  shdrs[2].sh_size = kd_crosses_section ? rodata_size / 2 : rodata_size;
   shdrs[2].sh_addralign = 64;
 
   shdrs[3].sh_name = symtab_name;
@@ -354,6 +358,19 @@ inline std::vector<uint8_t> make_gfx950_wrapping_symtab_elf(const std::vector<ui
                                 EF_AMDGPU_MACH_AMDGCN_GFX950, /*granulated_vgpr_count=*/0,
                                 /*accum_offset=*/0, /*unterminated_kd_name=*/false,
                                 /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/true);
+}
+
+// gfx950 target ELF whose `.kd` symbol's 64-byte descriptor extends past its owning
+// (.rodata) section into the adjacent section, for exercising the scanner's owning-section
+// bound: the descriptor must fit within sh_size, not merely the image.
+inline std::vector<uint8_t>
+make_gfx950_kd_crossing_section_elf(const std::vector<uint32_t> &text_words,
+                                    uint32_t private_bytes) {
+  return make_amdgpu_kernel_elf(text_words, private_bytes, /*granulated_sgpr_count=*/3,
+                                EF_AMDGPU_MACH_AMDGCN_GFX950, /*granulated_vgpr_count=*/0,
+                                /*accum_offset=*/0, /*unterminated_kd_name=*/false,
+                                /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/false,
+                                /*kd_crosses_section=*/true);
 }
 
 // Like make_gfx950_kernel_elf but exports *two* `.kd` descriptors (both entering

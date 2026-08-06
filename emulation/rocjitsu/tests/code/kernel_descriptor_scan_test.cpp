@@ -111,6 +111,16 @@ TEST(KernelDescriptorScan, WrappingSymtabRangeIsRejected) {
   EXPECT_TRUE(scan_kernel_descriptors({image.data(), image.size()}, text_off, text_sz).empty());
 }
 
+// A `.kd` whose 64-byte descriptor extends past its owning section's sh_size into the
+// adjacent section is rejected: the descriptor must be bounded by its section, not just
+// the image, so it cannot be returned (and later mutated) across the section boundary.
+TEST(KernelDescriptorScan, DescriptorCrossingOwningSectionIsRejected) {
+  const std::vector<uint32_t> code = {kMovV3V2, 0xbf810000u};
+  const auto [text_off, text_sz] = clean_text_coords(code);
+  const auto image = make_gfx950_kd_crossing_section_elf(code, /*private_bytes=*/64);
+  EXPECT_TRUE(scan_kernel_descriptors({image.data(), image.size()}, text_off, text_sz).empty());
+}
+
 // When no section matches the requested (text_offset, text_size), the walk cannot
 // resolve .text's base address and returns nothing.
 TEST(KernelDescriptorScan, NoMatchingTextSectionReturnsEmpty) {
@@ -118,6 +128,49 @@ TEST(KernelDescriptorScan, NoMatchingTextSectionReturnsEmpty) {
   const auto found = scan_kernel_descriptors({image.data(), image.size()},
                                              /*text_offset=*/0xDEAD, /*text_size=*/0x4);
   EXPECT_TRUE(found.empty());
+}
+
+// RDNA opts into Wave32 via COMPUTE_PGM_RSRC1's ENABLE_WAVEFRONT_SIZE32; a clear bit
+// means Wave64. CDNA is always Wave64, gfx1250 always Wave32.
+TEST(KernelWavefrontSize, Rdna4HonorsEnableWavefrontSize32Bit) {
+  rocr::llvm::amdhsa::kernel_descriptor_t desc{};
+  EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4, desc), 64); // bit clear
+  AMDHSA_BITS_SET(desc.kernel_code_properties,
+                  rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+  EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4, desc), 32); // bit set
+  EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_CDNA4, desc), 64);
+  EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_GFX1250, desc), 32);
+}
+
+// The AMDHSA descriptor VGPR granule is wave-size dependent on RDNA: 8 for Wave32,
+// 4 for Wave64. Using the Wave32 granule for a Wave64 kernel doubles the decoded
+// allocation.
+TEST(KernelDescriptorVgprGranule, RdnaIsWaveSizeDependent) {
+  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(ROCJITSU_CODE_ARCH_RDNA4, 32), 8u);
+  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(ROCJITSU_CODE_ARCH_RDNA4, 64), 4u);
+  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(ROCJITSU_CODE_ARCH_CDNA4, 64), 8u);
+  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(ROCJITSU_CODE_ARCH_CDNA1, 64), 4u);
+  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(ROCJITSU_CODE_ARCH_GFX1250, 32), 16u);
+}
+
+// Paired Wave32/Wave64 example: an RDNA4 descriptor with GRANULATED_WORKITEM_VGPR_COUNT=0
+// declares v0:v3 (4 VGPRs) under Wave64 but v0:v7 (8) under Wave32. Decoding a Wave64
+// kernel with the Wave32 granule would claim v4:v7 as allocated -- exactly the range a
+// mis-decode could hand to the SGPR spill bridge.
+TEST(KernelDescriptorVgprGranule, Rdna4Wave64ZeroGranulatedCountDeclaresFourVgprs) {
+  constexpr uint32_t granulated = 0;
+
+  rocr::llvm::amdhsa::kernel_descriptor_t wave64{}; // ENABLE_WAVEFRONT_SIZE32 clear
+  const uint32_t g64 = descriptor_vgpr_granularity_for_wavefront(
+      ROCJITSU_CODE_ARCH_RDNA4, kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4, wave64));
+  EXPECT_EQ((granulated + 1) * g64, 4u);
+
+  rocr::llvm::amdhsa::kernel_descriptor_t wave32{};
+  AMDHSA_BITS_SET(wave32.kernel_code_properties,
+                  rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+  const uint32_t g32 = descriptor_vgpr_granularity_for_wavefront(
+      ROCJITSU_CODE_ARCH_RDNA4, kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4, wave32));
+  EXPECT_EQ((granulated + 1) * g32, 8u);
 }
 
 } // namespace

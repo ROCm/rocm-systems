@@ -4,6 +4,7 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/isa/isa_traits.h"
 
 #include <cstring>
 #include <limits>
@@ -122,19 +123,21 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
       // Map the descriptor symbol to the file bytes it points at, validating every
       // step so a crafted symbol cannot form an out-of-bounds pointer: its section
       // index must exist; its value must sit at or above that section's vaddr (so the
-      // vaddr->file delta does not underflow); the delta must land the file offset
-      // within the image (no wrap); and the full 64-byte descriptor must fit from
-      // there. Any failure skips this symbol rather than reading past the image.
+      // vaddr->file delta does not underflow); the owning section must fit within the
+      // image; and the full 64-byte descriptor must fit within *that section* -- not
+      // merely the image -- so a .kd near the section's end cannot extend past sh_size
+      // into an adjacent section and later be mutated across the boundary. Any failure
+      // skips this symbol rather than reading past the section.
       const uint16_t sec_idx = symtab[j].st_shndx;
       if (sec_idx >= ehdr->e_shnum || symtab[j].st_value < shdr[sec_idx].sh_addr)
         continue;
 
-      const uint64_t delta = symtab[j].st_value - shdr[sec_idx].sh_addr;
-      if (!range_in_bounds(shdr[sec_idx].sh_offset, delta, image.size()))
+      const Elf64_Shdr &owner = shdr[sec_idx];
+      const uint64_t delta = symtab[j].st_value - owner.sh_addr;
+      if (!range_in_bounds(owner.sh_offset, owner.sh_size, image.size()) ||
+          !range_in_bounds(delta, sizeof(KD), owner.sh_size))
         continue;
-      const uint64_t file_off = shdr[sec_idx].sh_offset + delta;
-      if (!range_in_bounds(file_off, sizeof(KD), image.size()))
-        continue;
+      const uint64_t file_off = owner.sh_offset + delta;
       if (!seen_descriptor_offsets.insert(file_off).second)
         continue;
 
@@ -158,6 +161,54 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
     }
   }
   return out;
+}
+
+uint8_t kernel_wavefront_size(rj_code_arch_t arch, const KD &desc) {
+  // CDNA kernels are Wave64 in the code objects currently handled here.
+  if (arch_is_cdna(arch))
+    return 64;
+
+  // gfx1250 is Wave32-only. Do not interpret a missing legacy descriptor bit
+  // as Wave64: older producers may omit the bit even though the hardware has
+  // no Wave64 launch mode.
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return 32;
+
+  // RDNA descriptors opt into Wave32 with ENABLE_WAVEFRONT_SIZE32. If the bit is
+  // clear, launch hardware interprets the descriptor as Wave64.
+  if (arch_is_rdna(arch)) {
+    const bool wave32 =
+        AMDHSA_BITS_GET(desc.kernel_code_properties,
+                        rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
+    return wave32 ? 32 : 64;
+  }
+
+  return 64;
+}
+
+uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefront_size) {
+  // This is the AMDHSA kernel-descriptor encoding granularity for
+  // COMPUTE_PGM_RSRC1.GRANULATED_WORKITEM_VGPR_COUNT, not the physical VGPR
+  // allocation block from the ISA manuals. For example, RDNA3/RDNA4 manuals
+  // describe Wave64 physical allocation in blocks of 8 VGPRs (or 12 on
+  // 1536-VGPR/SIMD parts), while the AMDHSA descriptor table encodes
+  // GFX10-GFX12 Wave64 as max(0, ceil(vgprs_used / 4) - 1).
+  //
+  // If/when occupancy modeling needs the physical allocation block size, add a
+  // separate helper for that policy. Reusing this descriptor helper for
+  // occupancy would mix two different hardware contracts.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA1)
+    return 4;
+  if (arch_is_cdna(arch))
+    return 8;
+  // gfx1250 exposes four 256-VGPR banks selected by WAVE_MODE.VGPR_MSB. Its
+  // AMDHSA descriptor allocates that combined Wave32 namespace in blocks of
+  // 16 VGPRs, unlike the 8-VGPR Wave32 granule used by generic RDNA targets.
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return 16;
+  if (arch_is_rdna(arch))
+    return wavefront_size == 32 ? 8 : 4;
+  return 1;
 }
 
 } // namespace rocjitsu

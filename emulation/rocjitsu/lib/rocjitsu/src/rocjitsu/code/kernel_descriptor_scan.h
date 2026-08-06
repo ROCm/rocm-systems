@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/code/rj_code.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
@@ -35,5 +36,22 @@ struct KernelDescriptorInfo {
 /// raw, pre-growth image.
 [[nodiscard]] std::vector<KernelDescriptorInfo>
 scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size);
+
+/// @brief Wavefront size (32 or 64) the launch hardware interprets for @p desc.
+///
+/// @details CDNA is Wave64; gfx1250 is Wave32-only; RDNA opts into Wave32 via the
+/// descriptor's ENABLE_WAVEFRONT_SIZE32 (a clear bit means Wave64). Shared by DBT
+/// resource accounting and DBI descriptor decoding.
+[[nodiscard]] uint8_t kernel_wavefront_size(rj_code_arch_t arch,
+                                            const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+
+/// @brief AMDHSA descriptor encoding granule for GRANULATED_WORKITEM_VGPR_COUNT.
+///
+/// @details This is the descriptor-encoding granularity (kernel VGPR count =
+/// (granulated + 1) * granule), not the physical VGPR allocation block. CDNA1 uses
+/// 4, other CDNA 8, gfx1250 16, and RDNA is wave-size dependent: 8 for Wave32, 4
+/// for Wave64. Shared by DBT resource accounting and DBI descriptor decoding.
+[[nodiscard]] uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch,
+                                                                 uint32_t wavefront_size);
 
 } // namespace rocjitsu
