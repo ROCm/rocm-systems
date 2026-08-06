@@ -355,29 +355,30 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCf
     }
   }
 
-  // Materialize the EXEC state entering each instruction. Size before_ once from
-  // the total instruction count so the per-instruction inserts never rehash.
+  // Materialize the EXEC state entering each instruction. Size full_before_ once
+  // from the total instruction count so the per-instruction inserts never
+  // rehash.
   size_t total_instructions = 0;
   for (const BasicBlock *block : blocks) {
     if (block != nullptr)
       total_instructions += block->num_instructions();
   }
-  before_.reserve(total_instructions);
+  full_before_.reserve(total_instructions);
   for (size_t i = 0; i < blocks.size(); ++i) {
     BasicBlock *block = blocks[i];
     if (block == nullptr)
       continue;
     ExecState state = states_[i].in;
     for (const auto &inst : block->instructions()) {
-      before_.emplace(&inst, state);
+      if (state == ExecState::Full)
+        full_before_.insert(&inst);
       state = transfer(state, inst, wave_size_);
     }
   }
 }
 
 ExecState ExecMaskAnalysis::before(const Instruction &inst) const {
-  auto it = before_.find(&inst);
-  return it != before_.end() ? it->second : ExecState::Unknown;
+  return full_before_.contains(&inst) ? ExecState::Full : ExecState::Unknown;
 }
 
 } // namespace rocjitsu
