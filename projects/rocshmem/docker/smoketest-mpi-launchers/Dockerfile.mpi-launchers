@@ -65,11 +65,12 @@
 ## This stage is the base for both MPI stages and must not contain any
 ## source COPY so that MPI builds are not invalidated by source changes.
 ## ==========================================================================
-ARG ROCM_VERSION=7.13
+ARG ROCM_VERSION=7.14
 
 FROM ubuntu:24.04 AS base-rocm
 
 ARG ROCM_VERSION
+ARG GPU_TARGETS=gfx950
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -82,8 +83,13 @@ RUN mkdir --parents --mode=0755 /etc/apt/keyrings \
  && wget https://repo.amd.com/rocm/packages/gpg/rocm.gpg -O - | gpg --dearmor | tee /etc/apt/keyrings/amdrocm.gpg > /dev/null \
  && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages-multi-arch/ubuntu2404 stable main" > /etc/apt/sources.list.d/rocm.list
 
+## Install arch-specific ROCm packages from GPU_TARGETS (semicolon-separated).
 RUN apt-get update \
- && apt-get install -y amdrocm-core${ROCM_VERSION}-gfx950 amdrocm-core${ROCM_VERSION}-gfx942 amdrocm-core-dev${ROCM_VERSION} amdrocm-developer-tools${ROCM_VERSION} amdrocm-runtime-dev \
+ && arch_pkgs=""; \
+    for arch in $(echo "${GPU_TARGETS}" | tr ';' ' '); do \
+      arch_pkgs="$arch_pkgs amdrocm-core${ROCM_VERSION}-${arch} amdrocm-core-dev${ROCM_VERSION}-${arch}"; \
+    done; \
+    apt-get install -y $arch_pkgs amdrocm-developer-tools${ROCM_VERSION} amdrocm-runtime-dev${ROCM_VERSION} \
  && ln -s /opt/rocm/core/.info /opt/rocm/.info \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -152,7 +158,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends libpmix-dev \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-ARG MPICH_VERSION=4.2.0
+ARG MPICH_VERSION=4.3.0
 ARG MPICH_INSTALL=/opt/mpich
 ENV PMIX_ROOT=/usr/lib/x86_64-linux-gnu/pmix2
 
