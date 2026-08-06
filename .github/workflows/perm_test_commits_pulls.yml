@@ -9,6 +9,9 @@ on:
         description: Commit SHA known to be from a merged PR on develop
         required: true
         default: "62aebd434513280321db9129c741970a129ebcb9"
+  pull_request:
+    paths:
+      - .github/workflows/perm_test_commits_pulls.yml
 
 permissions: {}
 
