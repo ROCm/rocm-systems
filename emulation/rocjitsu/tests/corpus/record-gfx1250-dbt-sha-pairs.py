@@ -36,6 +36,17 @@ ERROR = 1
 COMPARE_CHANGED = 2
 COMPARE_INCOMPATIBLE = 3
 
+# Temporary probe for the PR warning workflow. These inputs still run through the
+# real translator; only their captured output is modified before it is hashed.
+CI_WARNING_PROBE_INPUTS = frozenset(
+    {
+        "00023c9f3fc277f35d928cca3a2e5614bba26b581e71abd3bbcff3fe3a417405",
+        "00045dc998d1757d07529707db095b0ccfe75efbe920276a2415d67d4ec716f3",
+        "00051de4267e657611ddb6f40ee32d2fd20d6d55c2ecabb8cc3d0fdc63f64dc4",
+        "0007bb737edf6cba9b4a66d9235b1bda84e177ef6b5d020b2996947671851ddb",
+    }
+)
+
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
@@ -186,6 +197,8 @@ def _translate_and_hash(args: argparse.Namespace, input_sha256: str) -> dict:
             raise ValueError(
                 f"translation failed with status {returncode}: {stderr.strip() or '<empty>'}"
             )
+        if input_sha256 in CI_WARNING_PROBE_INPUTS:
+            output.write(b"\0")
         output.seek(0)
         output_sha256 = hashlib.sha256()
         output_size = 0
