@@ -23,13 +23,18 @@ included in the non-device-linker (RDC) build and automatically excluded
 device-linker build, with no additional filter rules needed.
 """
 import os
+import shutil
 import sys
 
 out_dir = sys.argv[1]
 
 if os.path.exists(out_dir):
     for name in os.listdir(out_dir):
-        os.remove(os.path.join(out_dir, name))
+        path = os.path.join(out_dir, name)
+        if os.path.isfile(path) or os.path.islink(path):
+            os.remove(path)
+        elif os.path.isdir(path):
+            shutil.rmtree(path)
 else:
     os.makedirs(out_dir)
 
@@ -316,6 +321,9 @@ LAUNCHER_TEMPLATE = COPYRIGHT + '''
 #include <cstdio>
 
 {vec_define}#include "ce_reduce_impl.h"
+#ifdef CE_REDUCE_VECTORIZE_OK
+#undef CE_REDUCE_VECTORIZE_OK
+#endif
 #include "nccl.h"
 
 ncclResult_t ncclCeLocalReduceLaunch_{tag}_{redname}(const void* tmpBuf, void* output, int nRanks,
