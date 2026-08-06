@@ -356,10 +356,17 @@ namespace QueuePairOption {
   /* forward declaration */
   template <typename... Options> struct PostOpt;
 
-  /* deduction guide, required before C++20
-   * see https://clang.llvm.org/docs/HIPSupport.html#deduction-guides
-   * for why this isn't marked __host__ __device__ */
+  /* deduction guide, required before C++20 */
+#if __clang_major__ < 22
+  /* Clang versions < 22 implicitly treats deduction guides as __host__ functions
+   * unless marked otherwise by explicit attributes */
+  template <typename... Options> __host__ __device__ PostOpt(Options...) -> PostOpt<Options...>;
+#else
+  /* Clang versions >= 22 implicitly treats all deduction guides as __host__ __device__
+   * and issues a warning when they have explicit attributes
+   * see https://clang.llvm.org/docs/HIPSupport.html#deduction-guides */
   template <typename... Options> PostOpt(Options...) -> PostOpt<Options...>;
+#endif // __clang_major__
 
   /* Base case with all options defined */
   template <bool ring_db, bool thread_safe, bool check_sq, UpdateThread update_cq>
