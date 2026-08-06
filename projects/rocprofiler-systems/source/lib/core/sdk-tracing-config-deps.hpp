@@ -57,11 +57,7 @@ struct default_sdk_externals
         return ::rocprofsys::get_setting_value<std::string>(std::string{ s });
     }
 
-    using StateType = State;
-
-    constexpr static StateType StateFinalized = State::Finalized;
-
-    static void set_state(StateType state) { ::rocprofsys::set_state(state); }
+    using ProcessState = ::rocprofsys::state::process;
 };
 
 }  // namespace rocprofsys::rocprofiler_sdk

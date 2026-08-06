@@ -277,9 +277,14 @@ struct mock_sdk_externals
         return g_mock_externals->get_setting_value(s);
     }
 
-    using StateType                           = std::uint32_t;
-    constexpr static StateType StateFinalized = 3;
-    static void set_state(StateType state) { g_mock_externals->set_state(state); }
+    // Mirrors ::rocprofsys::state::process's static interface (State/Finalized/set)
+    // instead of a bespoke method, so the DI seam matches the real dependency shape.
+    struct ProcessState
+    {
+        using State                      = std::uint32_t;
+        constexpr static State Finalized = 3;
+        static void            set(State state) { g_mock_externals->set_state(state); }
+    };
 };
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────

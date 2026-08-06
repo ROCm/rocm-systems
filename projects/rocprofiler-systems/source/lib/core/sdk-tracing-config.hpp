@@ -72,24 +72,24 @@ concept tracing_kind_for =
 // at class declaration, not deep in a method body. `default_sdk_externals`
 // is the production policy; tests supply a mock.
 template <typename Externals>
-concept sdk_tracing_config_externals =
-    requires(std::string_view setting_name, typename Externals::StateType state) {
-        typename Externals::Settings;
-        typename Externals::StateType;
-        {
-            Externals::StateFinalized
-        } -> std::convertible_to<typename Externals::StateType>;
-        { Externals::get_settings() } -> std::same_as<typename Externals::Settings*>;
-        { Externals::get_use_rcclp() } -> std::convertible_to<bool>;
-        { Externals::get_use_ompt() } -> std::convertible_to<bool>;
-        { Externals::get_use_unified_memory_profiling() } -> std::convertible_to<bool>;
-        { Externals::get_rocm_domains() } -> std::convertible_to<std::string>;
-        { Externals::get_rocm_events_setting() } -> std::convertible_to<std::string>;
-        {
-            Externals::get_setting_value(setting_name)
-        } -> std::same_as<std::optional<std::string>>;
-        { Externals::set_state(state) } -> std::same_as<void>;
-    };
+concept sdk_tracing_config_externals = requires(std::string_view setting_name) {
+    typename Externals::Settings;
+    typename Externals::ProcessState;
+    typename Externals::ProcessState::State;
+    {
+        Externals::ProcessState::Finalized
+    } -> std::convertible_to<typename Externals::ProcessState::State>;
+    { Externals::ProcessState::set(Externals::ProcessState::Finalized) };
+    { Externals::get_settings() } -> std::same_as<typename Externals::Settings*>;
+    { Externals::get_use_rcclp() } -> std::convertible_to<bool>;
+    { Externals::get_use_ompt() } -> std::convertible_to<bool>;
+    { Externals::get_use_unified_memory_profiling() } -> std::convertible_to<bool>;
+    { Externals::get_rocm_domains() } -> std::convertible_to<std::string>;
+    { Externals::get_rocm_events_setting() } -> std::convertible_to<std::string>;
+    {
+        Externals::get_setting_value(setting_name)
+    } -> std::same_as<std::optional<std::string>>;
+};
 }  // namespace concepts
 
 template <typename SdkApi, typename Externals>
@@ -247,7 +247,7 @@ void
 sdk_tracing_config<SdkApi, Externals>::finalize_and_throw(
     std::string_view exception_message)
 {
-    Externals::set_state(Externals::StateFinalized);
+    Externals::ProcessState::set(Externals::ProcessState::Finalized);
     throw std::runtime_error(std::string{ exception_message });
 }
 
