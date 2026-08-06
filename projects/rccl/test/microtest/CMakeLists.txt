@@ -39,10 +39,14 @@ add_dependencies(rccl-UnitTestsMicro hipify_all copy_nccl_device_headers)
 # amdgcn device pass pulls in LLVM profiling runtime symbols
 # (__llvm_profile_raw_version, __start___llvm_prf_cnts, ...) that don't exist on
 # the device, which makes amdgcn-link fail.
+# The two -Xarch_device flags MUST use SHELL: -- otherwise CMake de-duplicates the
+# repeated `-Xarch_device` token, detaching `-fno-coverage-mapping` from its guard
+# so it disables coverage mapping on the HOST pass too (counters emitted but no
+# __llvm_covmap -> llvm-cov reports "no coverage data found").
 target_compile_options(rccl-UnitTestsMicro PRIVATE
   -fprofile-instr-generate -fcoverage-mapping
-  -Xarch_device -fno-profile-instr-generate
-  -Xarch_device -fno-coverage-mapping)
+  "SHELL:-Xarch_device -fno-profile-instr-generate"
+  "SHELL:-Xarch_device -fno-coverage-mapping")
 target_link_options(rccl-UnitTestsMicro PRIVATE
   -fprofile-instr-generate -fcoverage-mapping)
 
@@ -117,11 +121,16 @@ foreach(_variant "" "-uncached")
   add_dependencies(${_tgt} hipify_all copy_nccl_device_headers)
   # Coverage (host pass only) + -ffunction-sections so --gc-sections drops the
   # unreferenced oracle-TU / deep-path symbols init-test never calls.
+  # NOTE: the two -Xarch_device flags MUST use the SHELL: prefix. Without it CMake
+  # de-duplicates the repeated `-Xarch_device` token, which detaches
+  # `-fno-coverage-mapping` from its `-Xarch_device` guard so it applies to the
+  # HOST pass too -- silently emitting profile counters but NO __llvm_covmap, so
+  # llvm-cov reports "no coverage data found". SHELL: keeps each pair intact.
   target_compile_options(${_tgt} PRIVATE
     -ffunction-sections
     -fprofile-instr-generate -fcoverage-mapping
-    -Xarch_device -fno-profile-instr-generate
-    -Xarch_device -fno-coverage-mapping)
+    "SHELL:-Xarch_device -fno-profile-instr-generate"
+    "SHELL:-Xarch_device -fno-coverage-mapping")
   target_link_options(${_tgt} PRIVATE
     -fprofile-instr-generate -fcoverage-mapping
     -Wl,--gc-sections)
