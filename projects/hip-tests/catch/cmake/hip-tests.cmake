@@ -146,6 +146,23 @@ function(hip_gen_exe_target)
         ADD_TAGS_AS_LABELS
         PROPERTIES ${_DISCOVER_PROPERTIES} DISABLED TRUE
       )
+      # A PRE_TEST include file includes its _tests.cmake unconditionally, but
+      # CatchAddTests.cmake returns without writing that file when the test spec
+      # matches no test case, which is what [disabled] does for every binary
+      # that has no disabled tests. Seed an empty file so ctest can include it.
+      # Only the [disabled] pass is seeded: a seed that is newer than the test
+      # executable suppresses the discovery run that would overwrite it, which
+      # must never be able to hide a binary's enabled tests.
+      get_property(_CTEST_INCLUDE_FILES DIRECTORY PROPERTY TEST_INCLUDE_FILES)
+      list(POP_BACK _CTEST_INCLUDE_FILES _DISABLED_INCLUDE_FILE)
+      string(REPLACE "_include.cmake" "_tests.cmake"
+        _DISABLED_TESTS_FILE "${_DISABLED_INCLUDE_FILE}")
+      if(NOT EXISTS "${_DISABLED_TESTS_FILE}")
+        file(WRITE "${_DISABLED_TESTS_FILE}" "")
+      endif()
+      unset(_CTEST_INCLUDE_FILES)
+      unset(_DISABLED_INCLUDE_FILE)
+      unset(_DISABLED_TESTS_FILE)
     endif()
     file(GLOB CTEST_INC_FILES "${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}-*_include.cmake")
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CTEST_INCLUDE_FILES ${CTEST_INC_FILES})
