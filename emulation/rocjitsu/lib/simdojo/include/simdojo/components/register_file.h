@@ -8,22 +8,18 @@
 #define SIMDOJO_COMPONENTS_REGISTER_FILE_H_
 
 #include "simdojo/sim/component.h"
+#include "util/reclaimable_buffer.h"
 
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
+#include <limits>
 #include <new>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
-
-#if defined(__linux__)
-#include <sys/mman.h>
-#include <unistd.h>
-#endif
 
 namespace simdojo {
 
@@ -59,84 +55,41 @@ private:
   std::vector<RegType> data_;
 };
 
-#if defined(__linux__)
-/// @brief Anonymous, contiguous storage whose untouched pages consume no RSS.
+/// @brief Contiguous register storage with zero-and-reclaim semantics.
 ///
 /// The register types used by rocjitsu are implicit-lifetime, trivially
-/// copyable values. Anonymous mmap storage therefore gives them their required
-/// all-zero initial representation without faulting in every page. Resetting a
-/// reused allocation with MADV_DONTNEED both recycles its physical pages and
-/// restores the same zero-filled state as eager initialization.
+/// copyable values. ReclaimableBuffer therefore gives them their required
+/// all-zero initial representation without eagerly touching storage on systems
+/// with demand-paged backing. Resetting a reused allocation restores that same
+/// zero-filled state and recycles physical pages when the platform supports it.
 template <typename RegType> class DemandPagedRegisterStorage {
 public:
   static_assert(std::is_trivially_copyable_v<RegType>);
   static_assert(std::is_trivially_destructible_v<RegType>);
-  static_assert(alignof(RegType) <= alignof(std::max_align_t));
   static_assert(has_zero_bit_pattern_v<RegType>,
                 "demand-paged registers must use all-zero bytes for RegType{}");
 
   DemandPagedRegisterStorage() = default;
   DemandPagedRegisterStorage(const DemandPagedRegisterStorage &) = delete;
   DemandPagedRegisterStorage &operator=(const DemandPagedRegisterStorage &) = delete;
-
-  ~DemandPagedRegisterStorage() {
-    if (mapping_ != nullptr)
-      munmap(mapping_, mapped_bytes_);
-  }
+  DemandPagedRegisterStorage(DemandPagedRegisterStorage &&) = delete;
+  DemandPagedRegisterStorage &operator=(DemandPagedRegisterStorage &&) = delete;
 
   void init(uint32_t count) {
     assert(data_ == nullptr && "DemandPagedRegisterStorage already initialized");
     if (count == 0)
       return;
+    if (count > std::numeric_limits<size_t>::max() / sizeof(RegType))
+      throw std::bad_alloc();
 
     const size_t bytes = static_cast<size_t>(count) * sizeof(RegType);
-    const size_t page_size = system_page_size();
-    mapped_bytes_ = ((bytes + DATA_OFFSET + page_size - 1) / page_size) * page_size;
-    int flags = MAP_PRIVATE | MAP_ANONYMOUS;
-#ifdef MAP_NORESERVE
-    // A topology can reserve many sparse register files. Avoid having strict
-    // overcommit policies charge untouched virtual pages up front; a later
-    // page fault can still fail if the host exhausts physical memory and swap.
-    flags |= MAP_NORESERVE;
-#endif
-    void *mapping = mmap(nullptr, mapped_bytes_, PROT_READ | PROT_WRITE, flags, -1, 0);
-    if (mapping == MAP_FAILED) {
-      data_ = nullptr;
-      mapped_bytes_ = 0;
-      throw std::bad_alloc();
-    }
-    mapping_ = mapping;
-    // Creating a byte array starts the lifetime of suitable implicit-lifetime
-    // objects within its storage without initializing (and faulting in) pages.
-    auto *storage = ::new (mapping) std::byte[mapped_bytes_];
-    data_ = std::launder(reinterpret_cast<RegType *>(storage + DATA_OFFSET));
-
-#ifdef MADV_NOHUGEPAGE
-    // Register accesses are sparse for many kernels. Avoid turning the first
-    // touched 4 KiB page into a 2 MiB physical commitment under transparent
-    // huge-page policies.
-    (void)madvise(mapping_, mapped_bytes_, MADV_NOHUGEPAGE);
-#endif
+    storage_.allocate(bytes, DATA_ALIGNMENT);
+    data_ = std::launder(reinterpret_cast<RegType *>(storage_.data()));
   }
 
   void reset(uint32_t base, uint32_t count) {
-    auto *first = reinterpret_cast<std::byte *>(data_ + base);
-    auto *last = reinterpret_cast<std::byte *>(data_ + base + count);
-    const uintptr_t page_mask = system_page_size() - 1;
-    auto *page_first = reinterpret_cast<std::byte *>(
-        (reinterpret_cast<uintptr_t>(first) + page_mask) & ~page_mask);
-    auto *page_last = reinterpret_cast<std::byte *>(reinterpret_cast<uintptr_t>(last) & ~page_mask);
-
-    if (page_first >= page_last) {
-      std::memset(first, 0, static_cast<size_t>(last - first));
-      return;
-    }
-
-    std::memset(first, 0, static_cast<size_t>(page_first - first));
-    if (madvise(page_first, static_cast<size_t>(page_last - page_first), MADV_DONTNEED) != 0) {
-      std::memset(page_first, 0, static_cast<size_t>(page_last - page_first));
-    }
-    std::memset(page_last, 0, static_cast<size_t>(last - page_last));
+    storage_.zero_and_reclaim(static_cast<size_t>(base) * sizeof(RegType),
+                              static_cast<size_t>(count) * sizeof(RegType));
   }
 
   RegType &operator[](uint32_t idx) { return data_[idx]; }
@@ -145,27 +98,14 @@ public:
   const RegType *data() const { return data_; }
 
 private:
-  // Match the offset of glibc's max-aligned large allocations instead of
-  // forcing every VGPR file to the same L1 cache-index alignment. The extra
-  // bytes remain inside the anonymous mapping and do not consume RSS.
-  static constexpr size_t DATA_OFFSET = alignof(std::max_align_t);
+  // Retain the allocator-like max-aligned cache index used by the original
+  // register backing store instead of placing ordinary registers at a page
+  // boundary.
+  static constexpr size_t DATA_ALIGNMENT = std::max(alignof(RegType), alignof(std::max_align_t));
 
-  static size_t system_page_size() {
-    static const size_t value = [] {
-      const long result = sysconf(_SC_PAGESIZE);
-      return result > 0 ? static_cast<size_t>(result) : size_t{4096};
-    }();
-    return value;
-  }
-
-  void *mapping_ = nullptr;
+  util::ReclaimableBuffer storage_;
   RegType *data_ = nullptr;
-  size_t mapped_bytes_ = 0;
 };
-#else
-/// @brief Portable eager fallback for platforms without Linux demand paging.
-template <typename RegType> using DemandPagedRegisterStorage = EagerRegisterStorage<RegType>;
-#endif
 
 template <typename RegType, RegisterFileStorage Storage>
 using RegisterStorage =

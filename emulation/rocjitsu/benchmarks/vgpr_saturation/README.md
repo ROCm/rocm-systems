@@ -76,7 +76,9 @@ This is a simulator storage stress, not an achievable hardware occupancy for a
 without reducing occupancy as register use rises. The lazy build still saves
 673,640 KiB because this pure-VGPR kernel touches 253 of the 512 combined
 VGPR/AGPR registers backed for each slot; pages for the unused half remain
-uncommitted.
+uncommitted. Reaching the absolute 512-register limit would require a
+gfx942-specific assembly kernel that explicitly writes all 256 VGPRs and all
+256 AGPRs while keeping every simulator slot resident.
 
 Build with the same ROCm SDK used for rocjitsu:
 
