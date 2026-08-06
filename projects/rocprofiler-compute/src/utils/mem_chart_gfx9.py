@@ -1033,7 +1033,7 @@ class MemChart:
         block_exec.y_min = block_instr_disp.y_min - 6
         block_exec.y_max = block_instr_disp.y_max
 
-        block_exec.active_cus = metric_dict.get("Active CUs", "n/a")
+        block_exec.active_cus = metric_dict.get("Active CUs (deprecated)", "n/a")
         block_exec.num_cus = metric_dict.get("Num CUs", "n/a")
         block_exec.vgprs = metric_dict.get("VGPR", "n/a")
         block_exec.sgprs = metric_dict.get("SGPR", "n/a")
