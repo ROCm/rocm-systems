@@ -456,6 +456,29 @@ aux_source_directory(${ROCRTST_ROOT}/suites/test_common testCommonSources)
 set(ENABLE_COPY_NUMA OFF CACHE BOOL "Build Memory_Async_Copy_NUMA test" FORCE)
 list(FILTER performanceSources EXCLUDE REGEX ".*memory_async_copy_numa\\.cc$")
 
+# =============================================================================
+# SDMA Copy Extensions Test Files (AILIROCR-24)
+# =============================================================================
+# Tests for broadcast and swap copy operations.
+# Enabled by default. To disable: cmake -DENABLE_SDMA_COPY_TESTS=OFF
+# =============================================================================
+option(ENABLE_SDMA_COPY_TESTS "Enable SDMA broadcast/swap copy tests" ON)
+
+if(NOT ENABLE_SDMA_COPY_TESTS)
+  message(STATUS "SDMA copy tests disabled (ENABLE_SDMA_COPY_TESTS=OFF)")
+  # Exclude broadcast copy tests
+  list(FILTER functionalSources EXCLUDE REGEX ".*broadcast_copy.*\\.cc$")
+  # Exclude swap copy tests
+  list(FILTER functionalSources EXCLUDE REGEX ".*swap_copy.*\\.cc$")
+  # Exclude sdma_multicast tests
+  list(FILTER functionalSources EXCLUDE REGEX ".*sdma_multicast.*\\.cc$")
+else()
+  message(STATUS "SDMA copy tests ENABLED (broadcast, swap, multicast)")
+endif()
+
+# Indirect copy tests have been removed - moved to separate development branch
+list(FILTER functionalSources EXCLUDE REGEX ".*indirect_copy.*\\.cc$")
+
 # Optional: enable hwloc membind nodeset call in NUMA test
 set(ENABLE_COPY_NUMA_MEMBIND_NODESET OFF CACHE BOOL "Enable hwloc membind nodeset in NUMA test")
 
