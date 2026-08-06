@@ -133,7 +133,10 @@ main(int argc, char** argv)
         // Child process
         if(poison_register_library_env)
         {
+            // These values should reach the target only through rocattach's injected
+            // environment buffer, not through normal fork/exec inheritance.
             unsetenv("ROCPROFILER_REGISTER_LIBRARY");
+            unsetenv("ROCPROFILER_TEST_FORWARDING");
         }
         std::cout << "child executing " << argv[1] << std::endl;
         int ret = execl(argv[1], argv[1], nullptr);
@@ -167,9 +170,12 @@ main(int argc, char** argv)
         setenv("ROCPROF_ATTACH_TOOL_LIBRARY", argv[2], true);
         if(poison_register_library_env)
         {
+            // Model a stale host SDK path in the attaching process. The sentinel verifies
+            // that other ROCPROFILER_* variables are still forwarded to the target.
             setenv("ROCPROFILER_REGISTER_LIBRARY",
                    "/tmp/rocattach-missing-librocprofiler-sdk.so.999.999.999",
                    true);
+            setenv("ROCPROFILER_TEST_FORWARDING", "preserved", true);
         }
 
         {
