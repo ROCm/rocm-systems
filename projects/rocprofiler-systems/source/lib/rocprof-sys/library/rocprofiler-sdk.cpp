@@ -2779,7 +2779,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         const auto roctx_traced_regions = config::get_trace_region();
         const auto has_trace_regions    = !roctx_traced_regions.empty();
 
-        // Case 1: no marker domain and no trace regions — nothing to do
         if(has_marker_domain || has_trace_regions)
         {
             const auto roctx_config = roctx_client_config{
@@ -2914,6 +2913,8 @@ shutdown()
 {
     if(tool_data && tool_data->client_id && tool_data->client_fini)
         tool_data->client_fini(*tool_data->client_id);
+
+    g_roctx_client.reset();
 }
 
 void

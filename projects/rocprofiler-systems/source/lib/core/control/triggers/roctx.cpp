@@ -7,6 +7,7 @@
 #include "core/control/session.hpp"
 
 #include "logger/debug.hpp"
+#include <spdlog/fmt/fmt.h>
 #include <spdlog/fmt/ranges.h>
 
 #include <cstdint>
@@ -57,13 +58,10 @@ roctx::on_range_start(std::uint64_t range_id, const char* message)
         std::scoped_lock const lk{ m_mutex };
         was_empty = m_active_range_ids.empty();
         m_active_range_ids.insert(range_id);
+        if(was_empty) m_in_region.store(true, std::memory_order_relaxed);
     }
 
-    if(was_empty)
-    {
-        m_in_region.store(true, std::memory_order_relaxed);
-        refresh_state();
-    }
+    if(was_empty) refresh_state();
 }
 
 void
@@ -77,6 +75,7 @@ roctx::on_range_stop(std::uint64_t range_id)
         if(m_active_range_ids.erase(range_id) > 0)
         {
             now_empty = m_active_range_ids.empty();
+            if(now_empty) m_in_region.store(false, std::memory_order_relaxed);
         }
     }
 
@@ -90,7 +89,6 @@ roctx::on_range_stop(std::uint64_t range_id)
             "Target region ended while paused. Subsequent resume will be ignored.");
     }
 
-    m_in_region.store(false, std::memory_order_relaxed);
     refresh_state();
 }
 

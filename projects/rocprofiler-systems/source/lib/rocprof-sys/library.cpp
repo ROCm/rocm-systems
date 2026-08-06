@@ -679,19 +679,19 @@ rocprofsys_init_tooling_hidden(void)
             using ucx_t   = component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>;
 
             // clang-format off
-            const std::array<control::subscriber, 11> subscribers{ {
-                { &rocprofiler_sdk::pause, &rocprofiler_sdk::resume, "rocm" },
-                { &sampling::pause, &sampling::resume, "sampling" },
-                { &component::mpi_gotcha::pause, &component::mpi_gotcha::resume, "mpi" },
-                { &ucx_t::pause, &ucx_t::resume, "ucx" },
-                { &shmem_t::pause, &shmem_t::resume, "shmem" },
-                { &component::vaapi_gotcha::pause, &component::vaapi_gotcha::resume, "vaapi" },
-                { &::rocprofsys::pthread_gotcha::pause, &::rocprofsys::pthread_gotcha::resume, "pthread" },
-                { &component::numa_gotcha::pause, &component::numa_gotcha::resume, "numa" },
-                { &rocprofsys::kokkosp::pause, &rocprofsys::kokkosp::resume, "kokkos" },
-                { &process_sampler::pause, &process_sampler::resume, "process_sampler" },
-                { &invoke_external_pause_callbacks, &invoke_external_resume_callbacks, "external" },
-            } };
+            const auto subscribers = std::to_array<control::subscriber>({
+                { .on_pause = &rocprofiler_sdk::pause, .on_resume = &rocprofiler_sdk::resume, .name = "rocm" },
+                { .on_pause = &sampling::pause, .on_resume = &sampling::resume, .name = "sampling" },
+                { .on_pause = &component::mpi_gotcha::pause, .on_resume = &component::mpi_gotcha::resume, .name = "mpi" },
+                { .on_pause = &ucx_t::pause, .on_resume = &ucx_t::resume, .name = "ucx" },
+                { .on_pause = &shmem_t::pause, .on_resume = &shmem_t::resume, .name = "shmem" },
+                { .on_pause = &component::vaapi_gotcha::pause, .on_resume = &component::vaapi_gotcha::resume, .name = "vaapi" },
+                { .on_pause = &::rocprofsys::pthread_gotcha::pause, .on_resume = &::rocprofsys::pthread_gotcha::resume, .name = "pthread" },
+                { .on_pause = &component::numa_gotcha::pause, .on_resume = &component::numa_gotcha::resume, .name = "numa" },
+                { .on_pause = &rocprofsys::kokkosp::pause, .on_resume = &rocprofsys::kokkosp::resume, .name = "kokkos" },
+                { .on_pause = &process_sampler::pause, .on_resume = &process_sampler::resume, .name = "process_sampler" },
+                { .on_pause = &invoke_external_pause_callbacks, .on_resume = &invoke_external_resume_callbacks, .name = "external" },
+            });
             // clang-format on
             for(const auto& sub : subscribers)
                 g_control_session.subscribe(sub);
