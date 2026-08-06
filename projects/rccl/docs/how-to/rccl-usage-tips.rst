@@ -319,9 +319,9 @@ Releasing the physical backing of a suspended communicator while keeping its
 GPU virtual address space requires cuMem virtual memory management (VMM)
 support. VMM is available only when all of the following conditions are met:
 
-- ``NCCL_CUMEM_ENABLE`` is set to ``1`` (or to ``-2`` to enable VMM
-  automatically when the platform supports it). It is ``0`` (disabled) by
-  default.
+- ``NCCL_CUMEM_ENABLE`` is set to ``1``, or left at its default of ``-2``, which
+  enables VMM automatically when the platform supports it. Auto-detection is
+  limited to gfx1250; on other architectures set ``1`` explicitly.
 - The HIP/ROCm runtime provides the cuMem VMM APIs: ROCm 7.12 or later, or a
   ROCm 7.0.x build that includes the cuMem backport.
 - The Linux kernel is version 6.8 or later.
