@@ -63,7 +63,7 @@ jobs:
       matrix: ${{ steps.generate_matrix.outputs.matrix }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: projects/rocprofiler-compute/.github
 
@@ -106,7 +106,7 @@ jobs:
         --pull always
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'schedule' && 'rocprofiler-compute-develop' || github.ref }}
           sparse-checkout: |
