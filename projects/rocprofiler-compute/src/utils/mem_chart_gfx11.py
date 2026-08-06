@@ -305,10 +305,10 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
 
     m["sarb_util"] = metric_dict.get("SARB Utilization")
     m["sarb_stall"] = metric_dict.get("SARB Stall Rate")
-    m["dram_read_bw"] = metric_dict.get("DRAM Read Bandwidth", 0)
-    m["dram_write_bw"] = metric_dict.get("DRAM Write Bandwidth", 0)
+    m["dram_read_bw"] = metric_dict.get("DRAM Read Bandwidth")
+    m["dram_write_bw"] = metric_dict.get("DRAM Write Bandwidth")
 
-    m["total_bw"] = (m["dram_read_bw"] or 0) + (m["dram_write_bw"] or 0)
+    m["total_bw"] = _safe_float_sum(m["dram_read_bw"], m["dram_write_bw"])
 
     return m
 
@@ -345,9 +345,9 @@ def _build_kernel_and_l0(
         "",
         "     [white]Request[/white]",
         "",
-        f"[{c_rd}]{_fmt_edge('Read', m['lds_insts'])}[/{c_rd}]",
+        f"[{c_rd}]{_fmt_edge('Instr', m['lds_insts'])}[/{c_rd}]",
         f"[{c_rd}]{ka_l}[/{c_rd}]",
-        f"[{c_wr}]{_fmt_edge('Write', m['lds_inst_cycles'])}[/{c_wr}]",
+        f"[{c_wr}]{_fmt_edge('Cycles', m['lds_inst_cycles'])}[/{c_wr}]",
         f"[{c_wr}]{ka_r}[/{c_wr}]",
         f"[{c_at}]{_fmt_edge('Atomic', m['lds_atomic_insts'])}[/{c_at}]",
         f"[{c_at}]{ka_b}[/{c_at}]",
@@ -376,11 +376,13 @@ def _build_kernel_and_l0(
 
     # LDS panel
     lds_bw_line = (
-        metric_line("BW", m["lds_bw"], "Bytes/s", COLORS["bw"]) if m["lds_bw"] else ""
+        metric_line("BW", m["lds_bw"], "Bytes/s", COLORS["bw"])
+        if m["lds_bw"] is not None
+        else ""
     )
     lds_conflict_line = (
         metric_line("Bank Conflict", m["lds_bank_conflict"], "%", COLORS["stall"])
-        if m["lds_bank_conflict"]
+        if m["lds_bank_conflict"] is not None
         else ""
     )
     lds_panel = Panel(
@@ -393,7 +395,9 @@ def _build_kernel_and_l0(
 
     # GL0 (TCP Cache) panel
     tcp_bw_line = (
-        metric_line("BW", m["tcp_bw"], "Bytes/s", COLORS["bw"]) if m["tcp_bw"] else ""
+        metric_line("BW", m["tcp_bw"], "Bytes/s", COLORS["bw"])
+        if m["tcp_bw"] is not None
+        else ""
     )
     tcp_panel = Panel(
         f"{metric_line('Hit Rate', m['tcp_hit'], '%', COLORS['hit'])}\n{tcp_bw_line}",
