@@ -150,16 +150,24 @@ bool arch_has_accvgpr(rj_code_arch_t arch) {
 
 // CDNA2-4 (gfx90a/gfx942/gfx950) carve the AccVGPR file out of a single unified VGPR
 // allocation, split at the descriptor's ACCUM_OFFSET field. CDNA1/gfx908 allocates
-// AGPRs separately and has no such field, so its accumulator window is not derivable
-// from ACCUM_OFFSET -- distinct from merely having an AccVGPR file.
+// AGPRs separately and has no such field; RDNA and gfx1250 have no AccVGPR file at
+// all.
 bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA2:
   case ROCJITSU_CODE_ARCH_CDNA3:
   case ROCJITSU_CODE_ARCH_CDNA4:
     return true;
-  default:
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
     return false;
+  default:
+    throw util::UnimplementedInst("unified VGPR allocation for target architecture");
   }
 }
 
