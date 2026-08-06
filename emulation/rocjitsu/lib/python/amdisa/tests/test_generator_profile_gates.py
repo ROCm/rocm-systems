@@ -2344,9 +2344,9 @@ def test_gfx1250_vop3p_rejects_unencoded_literal64_selectors(
     ctor_end = encodings.index('void Vop3p::implicit_uses', ctor_start)
     vop3p_ctor = encodings[ctor_start:ctor_end]
 
-    assert 'inst_.src0 == 254' in vop3p_ctor
-    assert 'inst_.src1 == 254' in vop3p_ctor
-    assert 'inst_.src2 == 254' in vop3p_ctor
+    assert 'num_encoded_sources > 0 && inst_.src0 == 254' in vop3p_ctor
+    assert 'num_encoded_sources > 1 && inst_.src1 == 254' in vop3p_ctor
+    assert 'num_encoded_sources > 2 && inst_.src2 == 254' in vop3p_ctor
     assert (
         'throw util::InvalidInst("Vop3p does not support Literal64", "")' in vop3p_ctor
     )
@@ -2355,6 +2355,12 @@ def test_gfx1250_vop3p_rejects_unencoded_literal64_selectors(
         body = _generated_constructor_body(vop3p, class_name)
         assert 'OperandType::OPR_SIMM64' not in body
         assert 'literal_word + 1' not in body
+
+    for class_name in ('VPkAddF32Vop3p', 'VPkMulF32Vop3p'):
+        body = _generated_constructor_body(vop3p, class_name)
+        assert re.search(r'selected_exec_fn\(\d+\), 2\)', body)
+    fma_body = _generated_constructor_body(vop3p, 'VPkFmaF32Vop3p')
+    assert re.search(r'selected_exec_fn\(\d+\)\)', fma_body)
 
 
 def test_generated_vop_execution_has_no_instruction_storage_bypass(

@@ -401,13 +401,16 @@ bool Vop3::has_dpp16() {
   return (((inst_.src0 == 250) && (inst_.src1 != 255)) && (inst_.src2 != 255));
 }
 
-Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn)
+Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn,
+             int num_encoded_sources)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if (inst_.src0 == 254 || inst_.src1 == 254 || inst_.src2 == 254)
+  if ((num_encoded_sources > 0 && inst_.src0 == 254) ||
+      (num_encoded_sources > 1 && inst_.src1 == 254) ||
+      (num_encoded_sources > 2 && inst_.src2 == 254))
     throw util::InvalidInst("Vop3p does not support Literal64", "");
   if (has_lit_0() || has_lit_1() || has_lit_0_and_has_lit_1() || has_lit_2() ||
       has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||

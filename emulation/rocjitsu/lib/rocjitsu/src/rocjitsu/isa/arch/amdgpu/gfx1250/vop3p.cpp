@@ -133,7 +133,8 @@ VPkMadI16Vop3p::VPkMadI16Vop3p(const MachineInst *inst)
 }
 
 VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_mul_lo_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1161)),
+    : Vop3p("v_pk_mul_lo_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1161),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -159,7 +160,7 @@ VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
 }
 
 VPkAddI16Vop3p::VPkAddI16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_add_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1162)),
+    : Vop3p("v_pk_add_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1162), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -185,7 +186,7 @@ VPkAddI16Vop3p::VPkAddI16Vop3p(const MachineInst *inst)
 }
 
 VPkSubI16Vop3p::VPkSubI16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_sub_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1163)),
+    : Vop3p("v_pk_sub_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1163), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -211,7 +212,8 @@ VPkSubI16Vop3p::VPkSubI16Vop3p(const MachineInst *inst)
 }
 
 VPkLshlrevB16Vop3p::VPkLshlrevB16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_lshlrev_b16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1164)),
+    : Vop3p("v_pk_lshlrev_b16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1164),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -237,7 +239,8 @@ VPkLshlrevB16Vop3p::VPkLshlrevB16Vop3p(const MachineInst *inst)
 }
 
 VPkLshrrevB16Vop3p::VPkLshrrevB16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_lshrrev_b16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1165)),
+    : Vop3p("v_pk_lshrrev_b16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1165),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -263,7 +266,8 @@ VPkLshrrevB16Vop3p::VPkLshrrevB16Vop3p(const MachineInst *inst)
 }
 
 VPkAshrrevI16Vop3p::VPkAshrrevI16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_ashrrev_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1166)),
+    : Vop3p("v_pk_ashrrev_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1166),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -289,7 +293,7 @@ VPkAshrrevI16Vop3p::VPkAshrrevI16Vop3p(const MachineInst *inst)
 }
 
 VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_max_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1167)),
+    : Vop3p("v_pk_max_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1167), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -315,7 +319,7 @@ VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
 }
 
 VPkMinI16Vop3p::VPkMinI16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_min_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1168)),
+    : Vop3p("v_pk_min_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1168), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -374,7 +378,7 @@ VPkMadU16Vop3p::VPkMadU16Vop3p(const MachineInst *inst)
 }
 
 VPkAddU16Vop3p::VPkAddU16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_add_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1170)),
+    : Vop3p("v_pk_add_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1170), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -400,7 +404,7 @@ VPkAddU16Vop3p::VPkAddU16Vop3p(const MachineInst *inst)
 }
 
 VPkSubU16Vop3p::VPkSubU16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_sub_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1171)),
+    : Vop3p("v_pk_sub_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1171), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -426,7 +430,7 @@ VPkSubU16Vop3p::VPkSubU16Vop3p(const MachineInst *inst)
 }
 
 VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_max_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1172)),
+    : Vop3p("v_pk_max_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1172), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -452,7 +456,7 @@ VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
 }
 
 VPkMinU16Vop3p::VPkMinU16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_min_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1173)),
+    : Vop3p("v_pk_min_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1173), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -511,7 +515,7 @@ VPkFmaF16Vop3p::VPkFmaF16Vop3p(const MachineInst *inst)
 }
 
 VPkAddF16Vop3p::VPkAddF16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1175)),
+    : Vop3p("v_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1175), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -537,7 +541,7 @@ VPkAddF16Vop3p::VPkAddF16Vop3p(const MachineInst *inst)
 }
 
 VPkMulF16Vop3p::VPkMulF16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_mul_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1176)),
+    : Vop3p("v_pk_mul_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1176), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -794,7 +798,8 @@ VDot8U32U4Vop3p::VDot8U32U4Vop3p(const MachineInst *inst)
 }
 
 VPkMinNumF16Vop3p::VPkMinNumF16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_min_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1184)),
+    : Vop3p("v_pk_min_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1184),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -820,7 +825,8 @@ VPkMinNumF16Vop3p::VPkMinNumF16Vop3p(const MachineInst *inst)
 }
 
 VPkMaxNumF16Vop3p::VPkMaxNumF16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_max_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1185)),
+    : Vop3p("v_pk_max_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1185),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -846,7 +852,8 @@ VPkMaxNumF16Vop3p::VPkMaxNumF16Vop3p(const MachineInst *inst)
 }
 
 VPkMinimumF16Vop3p::VPkMinimumF16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_minimum_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1186)),
+    : Vop3p("v_pk_minimum_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1186),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -872,7 +879,8 @@ VPkMinimumF16Vop3p::VPkMinimumF16Vop3p(const MachineInst *inst)
 }
 
 VPkMaximumF16Vop3p::VPkMaximumF16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_maximum_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1187)),
+    : Vop3p("v_pk_maximum_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1187),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1103,7 +1111,7 @@ void VFmaMixhiF16Vop3p::implicit_use_operands(
 }
 
 VPkAddBf16Vop3p::VPkAddBf16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1192)),
+    : Vop3p("v_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1192), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1129,7 +1137,7 @@ VPkAddBf16Vop3p::VPkAddBf16Vop3p(const MachineInst *inst)
 }
 
 VPkMulF32Vop3p::VPkMulF32Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_mul_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1193)),
+    : Vop3p("v_pk_mul_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1193), 2),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1157,7 +1165,7 @@ VPkMulF32Vop3p::VPkMulF32Vop3p(const MachineInst *inst)
 }
 
 VPkAddF32Vop3p::VPkAddF32Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_add_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1194)),
+    : Vop3p("v_pk_add_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1194), 2),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1185,7 +1193,7 @@ VPkAddF32Vop3p::VPkAddF32Vop3p(const MachineInst *inst)
 }
 
 VPkMulBf16Vop3p::VPkMulBf16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_mul_bf16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1195)),
+    : Vop3p("v_pk_mul_bf16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1195), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1211,8 +1219,8 @@ VPkMulBf16Vop3p::VPkMulBf16Vop3p(const MachineInst *inst)
 }
 
 VPkMinNumBf16Vop3p::VPkMinNumBf16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_min_num_bf16", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1196)),
+    : Vop3p("v_pk_min_num_bf16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1196),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1238,8 +1246,8 @@ VPkMinNumBf16Vop3p::VPkMinNumBf16Vop3p(const MachineInst *inst)
 }
 
 VPkMaxNumBf16Vop3p::VPkMaxNumBf16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_max_num_bf16", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1197)),
+    : Vop3p("v_pk_max_num_bf16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1197),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {

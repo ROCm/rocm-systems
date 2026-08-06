@@ -358,6 +358,31 @@ class CodeGenerator:
             and not CodeGenerator._literal64_condition_names(inst_enc)
         )
 
+    def _unsupported_literal64_selector_fields(
+        self, inst_enc: InstEncoding
+    ) -> tuple[str, ...]:
+        """Return source fields whose Literal64 selector this encoding rejects."""
+        literal32_conds = {
+            name
+            for name, _ in inst_enc.enc_conds
+            if name.startswith('has_lit') and not name.startswith('has_lit64')
+        }
+        if not (
+            self._supports_simm64_literal_operands()
+            and literal32_conds
+            and self._rejects_unencoded_vop3p_literal64(inst_enc)
+        ):
+            return ()
+
+        fields: set[str] = set()
+        for name, condition in inst_enc.enc_conds:
+            if name not in literal32_conds:
+                continue
+            fields.update(
+                re.findall(r'inst_\.([A-Za-z_][A-Za-z0-9_]*)\s*==\s*255', condition)
+            )
+        return tuple(sorted(fields))
+
     @staticmethod
     def _opcode_name_fragment(token: str) -> str:
         """Return one C++ constant-name fragment for a mnemonic token.
@@ -2279,6 +2304,9 @@ class CodeGenerator:
         for inst_enc in self.isa_spec.inst_encodings:
             if not inst_enc.insts:
                 continue
+            unsupported_literal64_fields = self._unsupported_literal64_selector_fields(
+                inst_enc
+            )
             dpp_struct, dpp8_struct = self._vop_dpp_struct_names(inst_enc.enc_name)
             dpp_extension_conditions = []
             if dpp_struct is not None and self._supports_dpp_for_encoding(
@@ -2304,6 +2332,11 @@ class CodeGenerator:
                             '*inst',
                         ),
                         cgen.Value('ExecuteFn', 'exec_fn'),
+                        *(
+                            [cgen.Value('int', 'num_encoded_sources = 3')]
+                            if unsupported_literal64_fields
+                            else []
+                        ),
                     ],
                 ),
             ]
@@ -2398,24 +2431,10 @@ class CodeGenerator:
             # can be reported as the base size while a generated instruction
             # constructor reads two extension DWORDs that the encoding does
             # not own.
-            unsupported_literal64_fields: set[str] = set()
-            if (
-                self._supports_simm64_literal_operands()
-                and literal32_conds
-                and self._rejects_unencoded_vop3p_literal64(inst_enc)
-            ):
-                for name, condition in inst_enc.enc_conds:
-                    if name not in literal32_conds:
-                        continue
-                    unsupported_literal64_fields.update(
-                        re.findall(
-                            r'inst_\.([A-Za-z_][A-Za-z0-9_]*)\s*==\s*255', condition
-                        )
-                    )
             if unsupported_literal64_fields:
                 reject_condition = ' || '.join(
-                    f'inst_.{field} == 254'
-                    for field in sorted(unsupported_literal64_fields)
+                    f'(num_encoded_sources > {source_idx} && inst_.{field} == 254)'
+                    for source_idx, field in enumerate(unsupported_literal64_fields)
                 )
                 size_line += (
                     f'\n  if ({reject_condition})'
@@ -2479,9 +2498,13 @@ class CodeGenerator:
                     f'{{ mnemonic_ = owned_mnemonic_;{size_line}}}'
                 )
             else:
+                encoded_sources_param = (
+                    ', int num_encoded_sources' if unsupported_literal64_fields else ''
+                )
                 class_ctor_impl = (
                     f'{inst_enc.fmt_enc_name}::{inst_enc.fmt_enc_name}'
-                    f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst, ExecuteFn exec_fn) '
+                    f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst'
+                    f', ExecuteFn exec_fn{encoded_sources_param}) '
                     f': IsaInstruction<Isa>({mnemonic_expr}, exec_fn), inst_(*inst) '
                     f'{{{size_line}}}'
                 )
@@ -7236,10 +7259,38 @@ class CodeGenerator:
                     exec_fn_expr = f'make_exec_fn<{inst.fmt_name}>()'
                     if profile.split_execution_sources:
                         exec_fn_expr = self._split_execute_expr(inst.fmt_name)
+                    encoded_source_count_arg = ''
+                    unsupported_literal64_fields = (
+                        self._unsupported_literal64_selector_fields(enc)
+                    )
+                    if unsupported_literal64_fields:
+                        active_selector_fields = tuple(
+                            field
+                            for field in unsupported_literal64_fields
+                            if any(
+                                opnd.is_input and opnd.name == field
+                                for opnd in inst.operands
+                            )
+                        )
+                        assert (
+                            active_selector_fields
+                            == unsupported_literal64_fields[
+                                : len(active_selector_fields)
+                            ]
+                        ), (
+                            f'{inst.name}: non-contiguous encoded source selectors '
+                            f'{active_selector_fields}'
+                        )
+                        if len(active_selector_fields) != len(
+                            unsupported_literal64_fields
+                        ):
+                            encoded_source_count_arg = (
+                                f', {len(active_selector_fields)}'
+                            )
                     init_list_parts = [
                         f'{inst.fmt_true_enc_name}("{full_mnemonic}", '
                         f'reinterpret_cast<const OpEncoding*>(inst), '
-                        f'{exec_fn_expr})'
+                        f'{exec_fn_expr}{encoded_source_count_arg})'
                     ] + opnd_ctor_init
                     init_list = ', '.join(init_list_parts)
                     # Check if this is a memory instruction to set MEMORY_OP flag

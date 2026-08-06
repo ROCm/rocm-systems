@@ -2318,6 +2318,19 @@ TEST(Gfx1250DecodeTest, Vop3pRejectsLiteral64SelectorInEverySourcePosition) {
   }
 }
 
+TEST(Gfx1250DecodeTest, BinaryVop3pIgnoresLiteral64SelectorInUnusedSrc2) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  for (const uint32_t opcode : {gfx1250::kVPkAddF32Vop3p, gfx1250::kVPkMulF32Vop3p}) {
+    const auto words = gfx1250::build_vop3p(opcode, {.src0 = 128, .src1 = 129, .src2 = 254});
+    std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
+    ASSERT_NE(instruction, nullptr);
+    EXPECT_EQ(instruction->size(), 8);
+    EXPECT_EQ(instruction->num_src_operands(), 2);
+  }
+}
+
 TEST(Gfx1250ExecutionTest, VCmpGtU32Wave32ExplicitSdstPreservesHighSgpr) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
