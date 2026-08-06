@@ -58,25 +58,7 @@ static bool collInfoCleanup(struct testCollInfo* collInfo) {
   return true;
 }
 
-static bool stopEventCollFixed(struct testCollInfo* collInfo) {
-  int needsCleanup = 0;
-  if (pthread_rwlock_wrlock(&collInfo->guard) != 0) {
-    return false;
-  }
-  inspectorResult_t res = collInfoDeRef(collInfo);
-  if (res == inspectorReturn) {
-    needsCleanup = 1;
-  }
-  if (pthread_rwlock_unlock(&collInfo->guard) != 0) {
-    return false;
-  }
-  if (needsCleanup && !collInfoCleanup(collInfo)) {
-    return false;
-  }
-  return true;
-}
-
-static bool stopEventKernelChFixed(struct testCollInfo* collInfo) {
+static bool stopEventFixed(struct testCollInfo* collInfo) {
   int needsCleanup = 0;
   if (pthread_rwlock_wrlock(&collInfo->guard) != 0) {
     return false;
@@ -131,7 +113,7 @@ static bool wait_for(volatile int* flag, int timeoutMs) {
 TEST(CollInfoLifecycle, UnlockBeforeDestroy) {
   struct testCollInfo collInfo;
   ASSERT_TRUE(collInfoInit(&collInfo, 1));
-  ASSERT_TRUE(stopEventCollFixed(&collInfo));
+  ASSERT_TRUE(stopEventFixed(&collInfo));
   EXPECT_EQ(collInfo.destroyed, 1);
   EXPECT_EQ(collInfo.refCount, 0);
 }
@@ -150,14 +132,14 @@ TEST(CollInfoLifecycle, ProxyUnblockedAfterFixedTeardown) {
   pthread_t proxy;
   ASSERT_EQ(pthread_create(&proxy, NULL, proxyProgressThread, &arg), 0);
 
-  ASSERT_TRUE(stopEventKernelChFixed(&collInfo));
+  ASSERT_TRUE(stopEventFixed(&collInfo));
   ASSERT_TRUE(wait_for(&arg.acquired, 2000));
   EXPECT_EQ(arg.lastGeneration, 1);
 
   arg.stop = 1;
   pthread_join(proxy, NULL);
 
-  ASSERT_TRUE(stopEventKernelChFixed(&collInfo));
+  ASSERT_TRUE(stopEventFixed(&collInfo));
   EXPECT_EQ(collInfo.destroyed, 1);
 }
 
@@ -165,9 +147,9 @@ TEST(CollInfoLifecycle, RepeatedTeardownCycles) {
   for (int cycle = 0; cycle < 100; ++cycle) {
     struct testCollInfo collInfo;
     ASSERT_TRUE(collInfoInit(&collInfo, 3)) << "cycle " << cycle;
-    ASSERT_TRUE(stopEventKernelChFixed(&collInfo)) << "cycle " << cycle;
-    ASSERT_TRUE(stopEventKernelChFixed(&collInfo)) << "cycle " << cycle;
-    ASSERT_TRUE(stopEventCollFixed(&collInfo)) << "cycle " << cycle;
+    ASSERT_TRUE(stopEventFixed(&collInfo)) << "cycle " << cycle;
+    ASSERT_TRUE(stopEventFixed(&collInfo)) << "cycle " << cycle;
+    ASSERT_TRUE(stopEventFixed(&collInfo)) << "cycle " << cycle;
     EXPECT_EQ(collInfo.destroyed, 1) << "cycle " << cycle;
   }
 }

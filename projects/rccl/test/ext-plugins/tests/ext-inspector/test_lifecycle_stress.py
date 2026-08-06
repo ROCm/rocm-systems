@@ -79,10 +79,10 @@ def _mpirun_perf(paths, perf_binary, log_file, env):
 @pytest.mark.inspector_regression
 def test_coll_info_lifecycle_native():
     """Unit regression for NCCL #2000 collInfo unlock-before-destroy ordering."""
-    if shutil.which("make") is None or shutil.which("gcc") is None:
-        pytest.skip("gcc/make not available to build the native inspector unit test")
+    if shutil.which("make") is None or shutil.which("g++") is None:
+        pytest.skip("g++/make not available to build the native inspector unit test")
 
-    src = os.path.join(NATIVE_INSPECTOR_TEST_DIR, "test_coll_info_lifecycle.c")
+    src = os.path.join(NATIVE_INSPECTOR_TEST_DIR, "test_coll_info_lifecycle.cpp")
     if not os.path.exists(src):
         pytest.skip(f"Native inspector unit test not found at {src}")
 
