@@ -195,15 +195,27 @@ struct ReduceOp<T, 3> {
 // W times at runtime instead of being duplicated W times in the binary --
 // semantics are unchanged, only code size/compile time is affected.
 //
-// NOTE on the `for (r = 1; r < nRanks; r++)` rank loops: they are marked
-// unroll(disable)/vectorize(disable) because, left to its own heuristics,
-// LLVM's runtime loop-unroller was unrolling this loop (nRanks is a runtime
-// value, not a compile-time constant) by up to 64x with generated remainder
-// handling, on top of the already-manual U/W unroll/vectorization -- for
-// int8_t/uint8_t Min/Max this produced ~900 PHI nodes and ~150 shufflevector
-// ops per kernel and dominated llc's instruction-selection/register-alloc
-// time. The manual U-way unroll and 16-byte vector loads already provide
-// the intended ILP; this loop does not need LLVM unrolling it again.
+// NOTE on the `for (r = 1; r < nRanks; r++)` rank loops: they always disable
+// LLVM's runtime loop-unroller, because, left to its own heuristics, LLVM was
+// unrolling this loop (nRanks is a runtime value, not a compile-time
+// constant) by up to 64x with generated remainder handling, on top of the
+// already-manual U/W unroll/vectorization -- for int8_t/uint8_t Min/Max this
+// produced ~900 PHI nodes and ~150 shufflevector ops per kernel and
+// dominated llc's instruction-selection/register-alloc time. The manual
+// U-way unroll and 16-byte vector loads already provide the intended ILP;
+// this loop does not need LLVM unrolling it again.
+//
+// Whether the loop *vectorizer* also stays enabled is instantiation-specific
+// (CE_REDUCE_VECTORIZE_OK, defined per .cpp before including this header --
+// see generate.py's VECTORIZE_OK set). Measured on gfx950, >=1MB/rank:
+//   - int8_t Min/Max/Sum, uint8_t Sum:  vectorize ON is ~10-12% faster.
+//   - int32_t/uint32_t Sum/Prod:        vectorize OFF is ~2.2x faster (this
+//     is the dominant win from disabling the runtime unroller in the first
+//     place -- with the vectorizer also left on, most of that win disappears).
+//   - uint8_t Min/Max:                  vectorize OFF is ~7-8% faster.
+//   - everything else:                  no measurable difference either way.
+// So this isn't a single global tradeoff -- each instantiation gets whichever
+// setting measured faster, keyed by (type, redop) in generate.py.
 // *********************************************************************************
 template <typename T, int RedOp, int U>
 __global__ __launch_bounds__(256) void ncclCeLocalReduceKernelVec(const T* __restrict__ in, T* __restrict__ out,
@@ -232,7 +244,11 @@ __global__ __launch_bounds__(256) void ncclCeLocalReduceKernelVec(const T* __res
       acc[i].vec = *reinterpret_cast<const LT*>(in + elementOffset);
     }
 
+#ifdef CE_REDUCE_VECTORIZE_OK
+#pragma clang loop unroll(disable)
+#else
 #pragma clang loop unroll(disable) vectorize(disable)
+#endif
     for (int r = 1; r < nRanks; r++) {
       Pack tmp[U];
 #pragma unroll
@@ -260,7 +276,11 @@ __global__ __launch_bounds__(256) void ncclCeLocalReduceKernelVec(const T* __res
     size_t elementOffset = vi * W;
     acc.vec = *reinterpret_cast<const LT*>(in + elementOffset);
 
+#ifdef CE_REDUCE_VECTORIZE_OK
+#pragma clang loop unroll(disable)
+#else
 #pragma clang loop unroll(disable) vectorize(disable)
+#endif
     for (int r = 1; r < nRanks; r++) {
       Pack tmp;
       size_t rankOffset = (size_t)r * chunkElems + vi * W;
@@ -295,7 +315,7 @@ LAUNCHER_TEMPLATE = COPYRIGHT + '''
 // calls ncclCeLocalReduceLaunch_{tag}_{redname}().
 #include <cstdio>
 
-#include "ce_reduce_impl.h"
+{vec_define}#include "ce_reduce_impl.h"
 #include "nccl.h"
 
 ncclResult_t ncclCeLocalReduceLaunch_{tag}_{redname}(const void* tmpBuf, void* output, int nRanks,
@@ -339,13 +359,27 @@ REDOPS = [
     ("Max", 3),
 ]
 
+# (type, redop) pairs where measurement (gfx950, >=1MB/rank chunks) showed
+# leaving the loop vectorizer enabled on the rank-reduction loop is faster
+# than disabling it -- see the NOTE above ncclCeLocalReduceKernelVec. Not in
+# this set => vectorize(disable), which is faster (or a wash) for everything
+# else, most dramatically int32_t/uint32_t Sum/Prod (~2.2x).
+VECTORIZE_OK = {
+    ("i8", "Min"),
+    ("i8", "Max"),
+    ("i8", "Sum"),
+    ("u8", "Sum"),
+}
+
 with open(os.path.join(out_dir, "ce_reduce_impl.h"), "w") as f:
     f.write(IMPL_HEADER)
 
 for tag, ctype in TYPES:
     for redname, redval in REDOPS:
         fname = "ce_reduce_%s_%s.cpp" % (tag, redname)
+        vec_define = "#define CE_REDUCE_VECTORIZE_OK\n" if (tag, redname) in VECTORIZE_OK else ""
         with open(os.path.join(out_dir, fname), "w") as f:
-            f.write(LAUNCHER_TEMPLATE.format(tag=tag, ctype=ctype, redname=redname, redval=redval))
+            f.write(LAUNCHER_TEMPLATE.format(tag=tag, ctype=ctype, redname=redname, redval=redval,
+                                              vec_define=vec_define))
 
 print("-- Generated %d CE-reduce kernel TUs in %s" % (len(TYPES) * len(REDOPS), out_dir))
