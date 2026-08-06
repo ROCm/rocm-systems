@@ -17,6 +17,7 @@ Usage from GitHub Actions (on ruby-linux-slurm-scale-runner):
       --nodes 2 \
       --results-dir /apps/rccl-ci/perf
 """
+from __future__ import annotations
 
 import argparse
 import csv
@@ -49,7 +50,7 @@ REGRESSION_THRESHOLD_INFERENCE = 0.05  # 5%
 MADENGINE_REPO = "https://github.com/ROCm/madengine.git"
 MADENGINE_REF = "ec4de0b58c49f05d89dd33e38cc3e81e0fb3d992"
 MAD_REPO = "https://github.com/ROCm/MAD.git"
-MAD_REF = "688828bd9d4a"
+MAD_REF = "688828bd9d4ad5be4196bc6161cabb6d7048ee65"
 MAD_BRANCH = "mad-rccl"
 
 WORKLOAD_CONFIGS = {
@@ -146,14 +147,25 @@ def install_madengine(work_dir: Path) -> Path:
             ["git", "clone", "--depth=1", "--branch", MAD_BRANCH, MAD_REPO, str(mad_dir)],
             check=True,
         )
-        subprocess.run(
-            ["git", "-C", str(mad_dir), "fetch", "--depth=1", "origin", MAD_REF],
-            check=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(mad_dir), "checkout", MAD_REF],
-            check=True,
-        )
+        # Verify the clone landed on the expected SHA. The --branch clone
+        # gives us the branch tip; fetch+checkout is only needed if the
+        # pinned ref differs from the tip (e.g. after the branch moves).
+        head = subprocess.run(
+            ["git", "-C", str(mad_dir), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        if not head.startswith(MAD_REF[:12]):
+            log.info("MAD HEAD %s != pinned %s, fetching...", head[:12], MAD_REF[:12])
+            subprocess.run(
+                ["git", "-C", str(mad_dir), "fetch", "--depth=1", "origin", MAD_REF],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(mad_dir), "checkout", MAD_REF],
+                check=True,
+            )
+        else:
+            log.info("MAD HEAD matches pinned ref: %s", head[:12])
 
     log.info("Installing madengine...")
     subprocess.run(
@@ -163,12 +175,16 @@ def install_madengine(work_dir: Path) -> Path:
 
     log.info("madengine installed to: %s", madengine_dir)
 
-    scripts_src = mad_dir / "scripts" / "primus"
-    scripts_dst = work_dir / "scripts" / "primus"
+    scripts_src = mad_dir / "scripts" / "primus_megatron-lm"
+    if not scripts_src.is_dir():
+        scripts_src = mad_dir / "scripts" / "primus" / "megatron-lm"
+    scripts_dst = work_dir / "scripts" / "primus_megatron-lm"
     if scripts_src.is_dir() and not scripts_dst.exists():
         scripts_dst.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(["cp", "-r", str(scripts_src), str(scripts_dst)], check=True)
         log.info("Copied MAD primus scripts to %s", scripts_dst)
+    elif not scripts_src.is_dir():
+        log.error("MAD primus scripts not found — expected at %s", scripts_src)
 
     result = subprocess.run(
         ["madengine", "--version"],
@@ -459,7 +475,8 @@ ENV NCCL_DEBUG=WARN
 
         log.info("Building overlay image: %s", tag)
         subprocess.run(
-            ["docker", "build", "-t", tag, "-f", str(dockerfile), str(work_dir)],
+            ["docker", "build", "--network=none", "-t", tag,
+             "-f", str(dockerfile), str(work_dir)],
             check=True,
         )
         log.info("Overlay image built: %s", tag)
@@ -483,6 +500,7 @@ def generate_manifest(
     overlay_image: str,
     nodes: int,
     work_dir: Path,
+    nodelist: str = "",
 ) -> Path:
     """Generate a madengine manifest.json for the workload."""
     gpus_per_node = workload_config["gpus_per_node"]
@@ -491,6 +509,11 @@ def generate_manifest(
     nccl_env = dict(cluster_config.get("nccl_env", {}))
     if nodes == 1:
         nccl_env.pop("NCCL_NET", None)
+        # Single-node doesn't need multi-NIC; keep only the first interface
+        # to avoid Gloo failures on nodes that lack secondary NICs.
+        ifname = nccl_env.get("NCCL_SOCKET_IFNAME", "")
+        if "," in ifname:
+            nccl_env["NCCL_SOCKET_IFNAME"] = ifname.split(",")[0]
     env_vars = {
         **nccl_env,
         "NCCL_DEBUG": "WARN",
@@ -505,7 +528,9 @@ def generate_manifest(
     # is uploaded as a CI artifact and would leak the credential.
 
     model_repo = workload_config["model_repo"]
-    scripts_dir = work_dir / "scripts" / "primus" / "megatron-lm"
+    scripts_dir = work_dir / "scripts" / "primus_megatron-lm"
+    if not scripts_dir.is_dir():
+        scripts_dir = work_dir / "scripts" / "primus" / "megatron-lm"
     run_sh = scripts_dir / "run.sh"
     if run_sh.exists():
         run_sh_text = run_sh.read_text()
@@ -534,7 +559,7 @@ def generate_manifest(
                 "name": model_repo,
                 "tags": ["pyt", "pretrain", "training"],
                 "dockerfile": "N/A (overlay image)",
-                "scripts": "scripts/primus/megatron-lm/run.sh",
+                "scripts": f"scripts/{scripts_dir.name}/run.sh",
                 "n_gpus": str(total_gpus),
                 "owner": "",
                 "training_precision": workload_config.get("precision", ""),
@@ -578,6 +603,8 @@ def generate_manifest(
             "gpus_per_node": gpus_per_node,
             "time": workload_config["time_limit"],
             "exclusive": True,
+            "enable_node_check": False,
+            **({"nodelist": nodelist} if nodelist else {}),
         },
         "env": env_vars,
     }
@@ -603,6 +630,7 @@ def run_madengine(
     slurm_time: str = "02:00:00",
     nccl_env: dict | None = None,
     network_interface: str = "",
+    nodelist: str = "",
 ) -> int:
     """Run madengine with the given manifest and return the exit code."""
     render_ds = [128 + i for i in range(gpus_per_node)]
@@ -629,6 +657,8 @@ def run_madengine(
             "gpus_per_node": gpus_per_node,
             "time": slurm_time,
             "exclusive": True,
+            "enable_node_check": False,
+            **({"nodelist": nodelist} if nodelist else {}),
         },
         "distributed": {
             "launcher": "primus",
@@ -1029,6 +1059,21 @@ def main() -> None:
         )
 
     # Step 4: Generate manifest
+    # When no registry is configured, the overlay image only exists on the
+    # node that built it. Pin the SLURM job to that node so madengine can
+    # find the image locally.
+    nodelist = ""
+    if not args.registry:
+        nodelist = os.environ.get("SLURM_NODELIST", "")
+        if not nodelist:
+            hostname = subprocess.run(
+                ["hostname", "-s"], capture_output=True, text=True,
+            ).stdout.strip()
+            if hostname:
+                nodelist = hostname
+        if nodelist:
+            log.info("No registry — pinning SLURM job to build node: %s", nodelist)
+
     manifest_path = generate_manifest(
         args.workload,
         workload_config,
@@ -1036,11 +1081,17 @@ def main() -> None:
         overlay_image,
         args.nodes,
         work_dir,
+        nodelist=nodelist,
     )
 
     # Step 5: Run the workload
     output_csv = work_dir / "perf.csv"
-    nccl_env = cluster_config.get("nccl_env", {})
+    nccl_env = dict(cluster_config.get("nccl_env", {}))
+    if args.nodes == 1:
+        nccl_env.pop("NCCL_NET", None)
+        ifname = nccl_env.get("NCCL_SOCKET_IFNAME", "")
+        if "," in ifname:
+            nccl_env["NCCL_SOCKET_IFNAME"] = ifname.split(",")[0]
     exit_code = run_madengine(
         manifest_path, output_csv, work_dir, args.timeout_minutes,
         gpu_target=cluster_config["gpu_target"],
@@ -1050,6 +1101,7 @@ def main() -> None:
         slurm_time=workload_config["time_limit"],
         nccl_env=nccl_env,
         network_interface=nccl_env.get("NCCL_SOCKET_IFNAME", ""),
+        nodelist=nodelist,
     )
 
     # Step 6: Parse results — try perf.csv first, fall back to live log
@@ -1066,8 +1118,11 @@ def main() -> None:
 
         run_id = os.environ.get("GITHUB_RUN_ID", "local")
         run_artifacts = results_dir / "runs" / run_id
-        run_artifacts.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["cp", str(output_csv), str(run_artifacts / "perf.csv")], check=True)
+        try:
+            run_artifacts.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["cp", str(output_csv), str(run_artifacts / "perf.csv")], check=True)
+        except OSError as exc:
+            log.warning("Could not save run artifacts to %s: %s", run_artifacts, exc)
     else:
         log.warning("No perf.csv produced — checking live logs for metrics")
 
