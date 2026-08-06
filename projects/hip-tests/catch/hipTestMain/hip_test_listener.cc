@@ -59,6 +59,8 @@ private:
     std::string extractLevelFromFilter(const std::string& filter) {
         std::regex levelRegex("\\[level_(\\d+)\\]");
         std::smatch match;
+	// TODO: remove this var, it's needed only for testing -Werror
+	auto unused_var = 0;
         if (std::regex_search(filter, match, levelRegex)) {
             return "level_" + match[1].str();
         }
