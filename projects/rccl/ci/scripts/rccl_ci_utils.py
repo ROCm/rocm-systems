@@ -74,6 +74,65 @@ def override_bundled_rccl(rccl_lib_dir: Path) -> None:
         log.info("Replaced %d bundled librccl.so file(s) with CI-built version", replaced)
 
 
+def override_bundled_hip_runtime(artifact_lib_dir: Path) -> None:
+    """Replace pip-bundled libamdhip64.so with TheRock's version.
+
+    The CI-built librccl.so contains device code objects compiled by
+    TheRock's LLVM/HIP compiler.  At test time, the pip-installed HIP
+    runtime (libamdhip64.so) parses these code objects.  If the two
+    versions differ, kernel symbol resolution fails inside
+    Function::BuildKernel → guarantee(symbol != nullptr) → abort().
+
+    Replacing the pip HIP runtime with TheRock's version ensures the
+    runtime that loads code objects matches the compiler that produced
+    them.  TheRock's libamdhip64.so is already present in the artifact
+    directory from the core-hip_lib fetch.
+    """
+    import shutil
+
+    ci_hip = artifact_lib_dir.resolve() / "libamdhip64.so"
+    if not ci_hip.exists():
+        log.warning(
+            "TheRock libamdhip64.so not found at %s — skipping HIP runtime override",
+            ci_hip,
+        )
+        return
+    ci_size = ci_hip.stat().st_size
+    log.info("TheRock HIP runtime: %s (%d bytes)", ci_hip, ci_size)
+
+    bundled = []
+    for d in find_pip_sdk_lib_dirs():
+        bundled.extend(d.glob("libamdhip64.so*"))
+    if not bundled:
+        bundled = list(Path(sys.prefix).rglob("libamdhip64.so*"))
+
+    replaced = 0
+    for target in bundled:
+        if target.is_symlink():
+            continue
+        backup = target.with_suffix(target.suffix + ".pip-original")
+        if backup.exists():
+            log.info("Skipping %s (already replaced in prior run)", target)
+            replaced += 1
+            continue
+        orig_size = target.stat().st_size
+        shutil.copy2(str(target), str(backup))
+        shutil.copy2(str(ci_hip), str(target))
+        new_size = target.stat().st_size
+        log.info("Replaced %s (%d -> %d bytes)", target, orig_size, new_size)
+        replaced += 1
+
+    if replaced == 0:
+        log.warning(
+            "No bundled libamdhip64.so found — HIP runtime override skipped"
+        )
+    else:
+        log.info(
+            "Replaced %d bundled libamdhip64.so file(s) with TheRock version",
+            replaced,
+        )
+
+
 def quarantine_rocm_sysdeps(artifact_lib_dir: Path) -> None:
     """Remove TheRock-bundled libamd_smi and rocm_sysdeps from artifact dir.
 
