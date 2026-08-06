@@ -42,6 +42,7 @@ RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
 RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
 RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
 RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
+RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 1);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 #ifdef ENABLE_WARP_SPEED
@@ -592,6 +593,64 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   return (comm->enableCustColl && (msgSize <= threshold) && (threshold != -1) && !rankMultiple);
 }
 
+bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
+  static int enabled = rcclParamCeAllReduce();
+  if (!enabled) {
+    // Log once per process, not on every eligibility check (called per AllReduce).
+    static bool warnedDisabled = false;
+    if (!warnedDisabled) {
+      warnedDisabled = true;
+      INFO(NCCL_INIT, "CE AllReduce not enabled. Set RCCL_CE_ALLREDUCE=1 to enable.");
+    }
+    return false;
+  }
+
+  // Requires single-node symmetric memory support with CTA_POLICY_ZERO (CE mode).
+  if (!comm->symmetricSupport) return false;
+  if (comm->nNodes != 1) return false;
+
+  // count must divide evenly so every rank owns an equal shard.
+  if (count == 0 || count % (size_t)comm->nRanks != 0) return false;
+
+  // Total message must fit within the pre-allocated staging buffer.
+  size_t msgBytes = count * ncclTypeSize(datatype);
+  if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES || msgBytes < NCCL_CE_AR_MIN_MSG_BYTES) return false;
+
+  // Only standard reduction ops with a simple kernel implementation.
+  // ncclAvg (maps to SumPostDiv) and user-defined PreMulSum fall back to ring.
+  if (op != ncclSum && op != ncclProd && op != ncclMin && op != ncclMax) return false;
+
+  // Float8 types require specialised handling not yet implemented for CE AR.
+  if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) return false;
+
+  return true;
+}
+
+void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing) {
+  if (ceCapturing) {
+    if (!comm->ceColl.graphModeSeen) {
+      INFO(NCCL_COLL, "Disabling CE AllReduce; graph latch set (rank %d): capture detected", comm->rank);
+      comm->ceColl.graphModeSeen = true;
+    }
+    // Stay latched while capturing, even if an unrelated older plan on this
+    // comm was just reclaimed: clearing here would wrongly re-enable CE
+    // mid-capture.
+  } else if (comm->ceColl.graphModeSeen && comm->localPersistentRefs == 0) {
+    // Do not proactively drain comm->callbackQueue to freshen this check.
+    // localPersistentRefs is reclaimed via a per-rank async callback with no
+    // cross-rank sync, but all ranks must reach the same decision for the
+    // same call. The ambient once-every-few-group-ends cadence in group.cc
+    // gives every rank's reclaim equal time to complete first; checking more
+    // eagerly let ranks diverge and deadlock (confirmed experimentally).
+    INFO(NCCL_COLL, "Re-enabling CE AllReduce; graph latch cleared (rank %d): no live captured plans", comm->rank);
+    comm->ceColl.graphModeSeen = false;
+  }
+}
+
+bool rcclCeAllReduceAllowed(struct ncclComm* comm) {
+  return !comm->ceColl.graphModeSeen;
+}
+
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   // Direct ReduceScatter is supported for MI350 (gfx950):
   // Only if PXN is enabled
@@ -913,9 +972,16 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
   if (rcclParamUnrollFactor() != -1) {
     comm->unroll = rcclParamUnrollFactor(); //-1 to map to 0 based indexing
     if (comm->unroll < NCCL_UNROLL_1 || comm->unroll >= NCCL_NUM_UNROLLS) {
-      WARN("Invalid RCCL_UNROLL_FACTOR %d specified. Valid values are 0 to 2 corresponding to unroll factors of 1, 2, "
-           "and 4 respectively.",
-           comm->unroll);
+      WARN("Invalid RCCL_UNROLL_FACTOR %d specified. Valid values are 0 to %d corresponding to unroll factors of 1, 2, "
+           "4, 8, 16, and 32 respectively.",
+           comm->unroll, NCCL_NUM_UNROLLS - 1);
+      return ncclInvalidArgument;
+    }
+    if (!ncclDevFuncUnrollGenerated[comm->unroll]) {
+      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) was not built for arch %s; its device function table is empty and "
+           "dispatching to it would crash. "
+           "Rebuild with this unroll factor, or select one that was generated for this build.",
+           comm->unroll, (int)(pow(2.0, (double)comm->unroll)), comm->archName);
       return ncclInvalidArgument;
     }
     INFO(NCCL_INIT, "RCCL Unroll Factor (user set): %d", (int)(pow(2.0, (double)comm->unroll)));
@@ -926,7 +992,28 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
     else comm->unroll = NCCL_UNROLL_2;
   } else if (IsArchMatch(comm->archName, "gfx908") || ((IsArchMatch(comm->archName, "gfx942") && comm->cuCount > 80)))
     comm->unroll = NCCL_UNROLL_2;
+  else if (IsArchMatch(comm->archName, "gfx1250")) comm->unroll = NCCL_UNROLL_32;
   else comm->unroll = NCCL_UNROLL_4;
+
+  // Guard against a default that wasn't built for this arch (e.g. the generation
+  // matrix was narrowed). Fall back to any generated unroll rather than segfault.
+  if (!ncclDevFuncUnrollGenerated[comm->unroll]) {
+    int fallback = -1;
+    for (int u = NCCL_NUM_UNROLLS - 1; u >= NCCL_UNROLL_1; u--) {
+      if (ncclDevFuncUnrollGenerated[u]) {
+        fallback = u;
+        break;
+      }
+    }
+    if (fallback < 0) {
+      WARN("No unroll-factor device function tables were generated for arch %s.", comm->archName);
+      return ncclInvalidUsage;
+    }
+    WARN("Default RCCL unroll factor %d was not built for arch %s; falling back to %d. Set RCCL_UNROLL_FACTOR to "
+         "override.",
+         (int)(pow(2.0, (double)comm->unroll)), comm->archName, (int)(pow(2.0, (double)fallback)));
+    comm->unroll = fallback;
+  }
 
   INFO(NCCL_INIT, "RCCL Unroll Factor (pre-set): %d", (int)(pow(2.0, (double)comm->unroll)));
   return ncclSuccess;
