@@ -87,6 +87,7 @@ rm -rf "${junit_dir}"
 
 for target in "${targets[@]}"; do
   read -r name rocjitsu_config skip_tests_config <<< "${target}"
+
   echo "::group::(${name}) pytest"
 
   rocjitsu_config_path="${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}"
@@ -98,7 +99,7 @@ for target in "${targets[@]}"; do
   pytest_cmd=(
     rocjitsu --config "${rocjitsu_config_path}" -- pytest tests/test_corpus.py
     --target "${name}"
-    --suite iree,kernels,cts
+    --suite iree,kernels,cts,llama
     --skip-tests-config "${skip_tests_config_path}"
     --artifact-directory "${artifact_dir}"
     --durations=0

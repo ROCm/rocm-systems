@@ -320,6 +320,25 @@ jobs:
           uv pip install --system -e lib/python
           python -m pytest lib/python/amdisa/tests
 
+      - name: Build llama corpus test suite
+        if: matrix.name == 'release'
+        working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
+        shell: bash
+        run: |
+          ROCM_PATH="$(rocm-sdk path --root)"
+          export ROCM_PATH
+          LLAMA_SOURCE_DIR="${ROCJITSU_CORPUS_DIR}/corpus/llama"
+          LLAMA_BUILD_DIR="${LLAMA_SOURCE_DIR}/build"
+          WORKERS="$(( ($(nproc) + 1) / 2 ))"
+
+          cmake \
+            -S "${LLAMA_SOURCE_DIR}" \
+            -B "${LLAMA_BUILD_DIR}" \
+            -DCMAKE_HIP_ARCHITECTURES="${ROCM_SDK_DEVICE_GFX_GROUP// /;}"
+          cmake --build "${LLAMA_BUILD_DIR}" \
+            --target test-backend-ops \
+            -j "${WORKERS}"
+
       - name: Run corpus tests
         if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
