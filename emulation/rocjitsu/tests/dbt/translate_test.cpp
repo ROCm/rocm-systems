@@ -10952,17 +10952,9 @@ TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
           gfx1250::kVWmmaF3216x16x128Bf8Fp8Vop3p,
       (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
           gfx1250::kVWmmaF3216x16x128Bf8Bf8Vop3p,
-      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
-          gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p,
-      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
-          gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p,
-      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
-          gfx1250::kVWmmaF1616x16x128Bf8Fp8Vop3p,
-      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
-          gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p,
   };
-  // The standalone 32x16 FP4 rule is deliberately absent: its split borrows the
-  // VGPR-MSB banks of the source operands, so it queries liveness.
+  // The standalone 32x16 FP4 and packed-f16 K=128 rules are deliberately
+  // absent because they query operand-bank liveness.
   EXPECT_EQ(liveness_free_rules, expected);
 
   rocjitsu::SemanticTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250,
@@ -11148,11 +11140,7 @@ TEST(BinaryTranslatorE2E, Gfx1250F32K128WmmaRejectsClamp) {
       "floating-point results"));
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250F16K128Fp8Bf8WmmaStillFailsClosedForA0) {
-  // A two-K=64 lowering would materialize the first result as packed f16 before
-  // feeding it back as C, adding an intermediate rounding that the K=128 form
-  // does not perform. Keep every f16 form fail-closed until an exact lowering
-  // preserves the single final f16 round.
+TEST(BinaryTranslatorE2E, Gfx1250LowersF16K128Fp8Bf8WmmaThroughF32Scratch) {
   constexpr std::array source_opcodes = {
       gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p,
       gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p,
@@ -11160,7 +11148,13 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128Fp8Bf8WmmaStillFailsClosedForA0) {
       gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p,
   };
   constexpr gfx1250::Vop3pBuilderFields fields{
-      .vdst = 54, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 256 + 48};
+      .vdst = 54,
+      .neg_hi = 4,
+      .src0 = 256 + 16,
+      .src1 = 256 + 32,
+      .src2 = 256 + 48,
+      .neg = 4,
+  };
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
 
   for (const uint16_t source_opcode : source_opcodes) {
@@ -11173,11 +11167,51 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128Fp8Bf8WmmaStillFailsClosedForA0) {
         gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
                                  rocjitsu::ProcessorRevision::Gfx1250A0));
     const auto result = translator.translate(source);
-    EXPECT_FALSE(result.ok());
-    EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
-    EXPECT_TRUE(
-        rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ExpandFailed,
-                                       "f16 K=128 WMMA A0 lowering is not yet implemented"));
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto decoded =
+        decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+    const auto matrix = std::ranges::find_if(decoded, [](const auto &candidate) {
+      return candidate->mnemonic() == "v_wmma_scale_f32_16x16x128_f8f6f4";
+    });
+    ASSERT_NE(matrix, decoded.end());
+    ASSERT_NE(matrix, decoded.begin());
+    EXPECT_EQ((*std::prev(matrix))->mnemonic(), "s_wait_alu");
+    ASSERT_NE(std::next(matrix), decoded.end());
+    EXPECT_EQ((*std::next(matrix))->mnemonic(), "s_wait_alu");
+    ASSERT_NE((*matrix)->raw_encoding(), nullptr);
+    gfx1250::Vop3pMachineInst lowered_matrix{};
+    std::memcpy(&lowered_matrix, (*matrix)->raw_encoding() + 2, sizeof(lowered_matrix));
+    EXPECT_EQ(lowered_matrix.vdst % 2u, 0u) << "WMMA scratch tuples must start at an even VGPR";
+    auto after_wait = std::next(matrix, 2);
+    ASSERT_LE(std::distance(decoded.begin(), after_wait) + 16,
+              std::distance(decoded.begin(), decoded.end()));
+    for (uint16_t slot = 0; slot < 16; ++slot, ++after_wait)
+      EXPECT_EQ((*after_wait)->mnemonic(), "v_nop_e32");
+    EXPECT_EQ(std::ranges::count_if(decoded,
+                                    [](const auto &candidate) {
+                                      return candidate->mnemonic() ==
+                                             "v_wmma_scale_f32_16x16x128_f8f6f4";
+                                    }),
+              1);
+    EXPECT_EQ(std::ranges::count_if(
+                  decoded,
+                  [](const auto &candidate) { return candidate->mnemonic() == "v_cvt_f32_f16"; }),
+              8);
+    EXPECT_EQ(std::ranges::count_if(decoded,
+                                    [](const auto &candidate) {
+                                      return candidate->mnemonic() == "v_cvt_pk_f16_f32";
+                                    }),
+              4);
+    EXPECT_EQ(std::ranges::count_if(decoded,
+                                    [](const auto &candidate) {
+                                      return candidate->mnemonic().find("16x16x64") !=
+                                             std::string_view::npos;
+                                    }),
+              0);
   }
 }
 

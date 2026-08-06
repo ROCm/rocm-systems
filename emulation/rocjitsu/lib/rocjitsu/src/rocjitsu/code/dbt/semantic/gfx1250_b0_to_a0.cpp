@@ -51,6 +51,7 @@ constexpr uint16_t kWmmaScale16PrefixOp = 0x3a;
 constexpr uint16_t kGfx1250InlineZero = 128;
 constexpr uint32_t kGfx1250ScratchMaxDwordOffset = 0x7ffffcu;
 constexpr uint16_t kGfx1250ModeFp16OvflHwreg = 1u | (23u << 6);
+constexpr uint16_t kGfx1250WmmaCompletionWaitImmediate = 0x0f9f;
 
 /// @brief Diagnose control fields that are invalid for floating-point WMMA.
 ///
@@ -1380,9 +1381,8 @@ void append_gfx1250_f32_to_e5m3(std::vector<uint32_t> &words, uint16_t source, u
   };
   const uint8_t source_mode = source >= 256u ? static_cast<uint8_t>(source_bank << 2) : 0;
 
-  // E5M3 is an unsigned scale format. Taking the magnitude also makes the
-  // unsupported source ABS/NEG encodings immaterial, matching the execution
-  // model's conversion helper.
+  // E5M3 ignores the source sign bit, so convert the magnitude. Classify NaNs
+  // after clearing the sign so both NaN signs use the terminal encoding.
   append_gfx1250_vgpr_msb_transition(words, current_mode, source_mode);
   append_literal(gfx1250::kVAndB32Vop3,
                  {.vdst = static_cast<uint8_t>(out), .src0 = 255, .src1 = source}, 0x7fffffffu);
@@ -1464,6 +1464,8 @@ ExpandResult expand_gfx1250_cvt_pk_fp8_f32_e5m3(const Instruction &inst, uint32_
   std::memcpy(&source, inst.raw_encoding(), sizeof(source));
   if (source.clamp == 0)
     return ExpandResult::not_handled();
+  // ABS, NEG, and OMOD are unsupported for this conversion and do not affect
+  // its result, so their encoded values are intentionally ignored.
   if (source.src0 == 233u || source.src0 == 234u || source.src0 == 250u)
     return ExpandResult::failed("gfx1250 E5M3 pack does not support DPP");
   // SRC_LITERAL64 carries a two-word payload, and the expansion has no free
@@ -1613,6 +1615,8 @@ ExpandResult expand_gfx1250_cvt_sr_fp8_f32_e5m3(const Instruction &inst, uint32_
   std::memcpy(&source, inst.raw_encoding(), sizeof(source));
   if (source.clamp == 0)
     return ExpandResult::not_handled();
+  // ABS, NEG, and OMOD are unsupported for this conversion and do not affect
+  // its result, so their encoded values are intentionally ignored.
   if (source.src0 == 233u || source.src0 == 234u || source.src0 == 250u)
     return ExpandResult::failed("gfx1250 stochastic E5M3 does not support DPP");
   if (source.src0 == 254u || source.src1 == 254u)
@@ -1869,6 +1873,8 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   constexpr uint16_t kVgprEncoding = 256;
   if (source.clamp == 0)
     return ExpandResult::not_handled();
+  // ABS, NEG, and OMOD are unsupported for this conversion and do not affect
+  // its result, so their encoded values are intentionally ignored.
   if (source.src0 < kVgprEncoding) {
     return ExpandResult::failed("gfx1250 E5M3 unpack source is not a VGPR");
   }
@@ -2068,9 +2074,24 @@ ExpandResult expand_gfx1250_bare_f8f6f4_wmma(const Instruction &inst, uint32_t, 
   }
 }
 
-/// @brief Lower a B0 K=128 FP8/BF8 WMMA to an A0 K=128 mixed-format WMMA.
+/// @brief Return whether an opcode is a B0 packed-f16 K=128 WMMA.
+[[nodiscard]] bool gfx1250_is_f16_k128_wmma(uint16_t opcode) {
+  switch (opcode) {
+  case gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p:
+  case gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p:
+  case gfx1250::kVWmmaF1616x16x128Bf8Fp8Vop3p:
+  case gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p:
+    return true;
+  default:
+    return false;
+  }
+}
+
+/// @brief Lower B0 K=128 FP8/BF8 WMMAs to A0-supported forms.
 ///
-/// @details The preferred path emits one regular-Scale F8F6F4 operation with
+/// @details Packed-f16 results use the f32 K=128 mixed-format operation in
+/// scratch registers and round once when packing the final result. F32 results
+/// emit one regular-Scale F8F6F4 operation with
 /// FP8/BF8 matrix-format selectors and neutral inline E8M0 scales. It retains
 /// the K=128 accumulation topology and requires no partial destination. Source
 /// reuse hints are cleared: the target instruction family differs, and a
@@ -2082,30 +2103,15 @@ ExpandResult expand_gfx1250_bare_f8f6f4_wmma(const Instruction &inst, uint32_t, 
 /// target belongs to a different instruction family. Only the defined C
 /// absolute and negate bits are transferred.
 ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_t,
-                                      std::span<const uint8_t>, const LivenessAnalysis &,
-                                      TranslationContext &, const LaneLayout *,
+                                      std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                      TranslationContext &context, const LaneLayout *,
                                       const LaneLayout *) {
-  switch (inst.opcode()) {
-  case gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p:
-  case gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p:
-  case gfx1250::kVWmmaF1616x16x128Bf8Fp8Vop3p:
-  case gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p:
-    return ExpandResult::failed(
-        "gfx1250 f16 K=128 WMMA A0 lowering is not yet implemented",
-        {"Provide an exact packed-f16 accumulator and single-rounding lowering."});
-  default:
-    break;
-  }
-
   uint8_t matrix_a_fmt = 0;
   uint8_t matrix_b_fmt = 0;
   if (inst.size() != static_cast<int>(sizeof(gfx1250::Vop3pMachineInst)) ||
       inst.raw_encoding() == nullptr) {
     return ExpandResult::failed("gfx1250 K=128 WMMA has no complete source encoding");
   }
-  if (!gfx1250_k128_wmma_formats(inst.opcode(), matrix_a_fmt, matrix_b_fmt))
-    return ExpandResult::failed("gfx1250 K=128 WMMA rule received an unsupported opcode");
-
   gfx1250::Vop3pMachineInst source{};
   std::memcpy(&source, inst.raw_encoding(), sizeof(source));
   if (const char *error = gfx1250_floating_wmma_control_error(source))
@@ -2115,6 +2121,157 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
   if (source.src0 < kVgprEncoding || source.src1 < kVgprEncoding) {
     return ExpandResult::failed("gfx1250 K=128 WMMA matrix operands are not ordinary VGPR ranges");
   }
+
+  const bool packed_f16 = gfx1250_is_f16_k128_wmma(inst.opcode());
+  if (!gfx1250_k128_wmma_formats(inst.opcode(), matrix_a_fmt, matrix_b_fmt)) {
+    if (packed_f16) {
+      switch (inst.opcode()) {
+      case gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p:
+        matrix_b_fmt = 1;
+        break;
+      case gfx1250::kVWmmaF1616x16x128Bf8Fp8Vop3p:
+        matrix_a_fmt = 1;
+        break;
+      case gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p:
+        matrix_a_fmt = 1;
+        matrix_b_fmt = 1;
+        break;
+      default:
+        break;
+      }
+    } else {
+      return ExpandResult::failed("gfx1250 K=128 WMMA rule received an unsupported opcode");
+    }
+  }
+
+  if (packed_f16) {
+    if (static_cast<uint16_t>(source.vdst) + 4u > 256u)
+      return ExpandResult::failed("gfx1250 f16 K=128 WMMA destination crosses a VGPR bank");
+    if (source.src2 >= kVgprEncoding && source.src2 + 4u > 512u)
+      return ExpandResult::failed("gfx1250 f16 K=128 WMMA accumulator crosses a VGPR bank");
+
+    SemanticScratchAllocator allocator(
+        inst, liveness, context,
+        SemanticScratchPolicy{.max_vgprs = 256,
+                              .max_spill_dword_offset = kGfx1250ScratchMaxDwordOffset});
+    SemanticScratchRequest request;
+    request.count = 9;
+    request.alignment = 2;
+    request.forbidden = gfx1250_instruction_registers(inst);
+    request.allow_spill = true;
+    const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
+    if (!scratch)
+      return ExpandResult::failed(
+          "gfx1250 f16 K=128 WMMA could not allocate f32 accumulator scratch");
+
+    Gfx1250SgprScratchRequest mode_request;
+    mode_request.count = 1;
+    mode_request.forbidden = request.forbidden;
+    mode_request.forbidden.expand(scratch.lease->registers());
+    const auto mode_scratch = acquire_gfx1250_sgprs(inst, liveness, context, nullptr, mode_request);
+    if (!mode_scratch)
+      return ExpandResult::failed("gfx1250 f16 K=128 WMMA could not read FP16 overflow mode");
+
+    const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
+    const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
+    const auto src2_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
+    const auto dst_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
+    if (!src0_bank || !src1_bank || !src2_bank || !dst_bank)
+      return ExpandResult::failed("gfx1250 f16 K=128 WMMA cannot prove the VGPR-MSB mode");
+    const uint8_t original_mode =
+        static_cast<uint8_t>(*src0_bank | (*src1_bank << 2) | (*src2_bank << 4) | (*dst_bank << 6));
+
+    std::vector<uint32_t> words;
+    words.reserve(40);
+    append_gfx1250_scratch_dependency_barrier(words);
+    uint8_t current_mode = original_mode;
+    if (scratch.lease->spilled) {
+      append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
+      if (!append_gfx1250_scratch_preservation(words, *scratch.lease, false))
+        return ExpandResult::failed("gfx1250 f16 K=128 WMMA could not preserve scratch VGPRs");
+    }
+    append_words(words, gfx1250::build_sopk(gfx1250::kSGetregB32Sopk,
+                                            {.simm16 = kGfx1250ModeFp16OvflHwreg,
+                                             .sdst = static_cast<uint8_t>(mode_scratch->base)}));
+
+    const uint16_t scratch_src = gfx1250_vgpr_src(scratch.lease->base);
+    uint16_t f32_accumulator = source.src2;
+    if (source.src2 >= kVgprEncoding) {
+      const uint8_t unpack_mode = static_cast<uint8_t>(*src2_bank << 2);
+      append_gfx1250_vgpr_msb_transition(words, current_mode, unpack_mode);
+      for (uint16_t element = 0; element < 8; ++element) {
+        append_words(words, gfx1250::build_vop3(
+                                gfx1250::kVCvtF32F16Vop3,
+                                {.vdst = static_cast<uint8_t>(scratch.lease->base + element),
+                                 .opsel = static_cast<uint8_t>(element & 1u),
+                                 .src0 = static_cast<uint16_t>(source.src2 + element / 2u)}));
+      }
+      f32_accumulator = scratch_src;
+      append_words(words, gfx1250::build_sopp(gfx1250::kSWaitAluSopp,
+                                              {.simm16 = kGfx1250WmmaCompletionWaitImmediate}));
+    }
+
+    const uint8_t matrix_mode = static_cast<uint8_t>(*src0_bank | (*src1_bank << 2));
+    append_gfx1250_vgpr_msb_transition(words, current_mode, matrix_mode);
+    append_words(words, gfx1250::build_vop3p(kWmmaScaleSrc2PrefixOp, {.src0 = kGfx1250InlineZero,
+                                                                      .src1 = kGfx1250InlineZero,
+                                                                      .src2 = kVgprEncoding}));
+    append_words(words, gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
+                                             {.vdst = static_cast<uint8_t>(scratch.lease->base),
+                                              .neg_hi = static_cast<uint8_t>(source.neg_hi & 0x4u),
+                                              .opsel = matrix_a_fmt,
+                                              .src0 = static_cast<uint16_t>(source.src0),
+                                              .src1 = static_cast<uint16_t>(source.src1),
+                                              .src2 = f32_accumulator,
+                                              .opsel_hi = matrix_b_fmt,
+                                              .neg = static_cast<uint8_t>(source.neg & 0x4u)}));
+    append_words(words, gfx1250::build_sopp(gfx1250::kSWaitAluSopp,
+                                            {.simm16 = kGfx1250WmmaCompletionWaitImmediate}));
+    for (uint16_t slot = 0; slot < 16; ++slot)
+      append_words(words, gfx1250::build_vop1(gfx1250::kVNopVop1));
+    const uint8_t pack_mode = static_cast<uint8_t>(*dst_bank << 6);
+    append_gfx1250_vgpr_msb_transition(words, current_mode, pack_mode);
+    const uint16_t limit = static_cast<uint16_t>(scratch.lease->base + 8u);
+    append_words(words, gfx1250::build_vop3(gfx1250::kVMulLoU32Vop3,
+                                            {.vdst = static_cast<uint8_t>(limit),
+                                             .src0 = 255,
+                                             .src1 = static_cast<uint16_t>(mode_scratch->base)}));
+    words.push_back(0x38002000u);
+    append_words(words,
+                 gfx1250::build_vop3(gfx1250::kVSubNcU32Vop3, {.vdst = static_cast<uint8_t>(limit),
+                                                               .src0 = 255,
+                                                               .src1 = gfx1250_vgpr_src(limit)}));
+    words.push_back(0x7f800000u);
+    for (uint16_t element = 0; element < 8; ++element) {
+      const uint16_t value = static_cast<uint16_t>(scratch.lease->base + element);
+      append_words(words, gfx1250::build_vop3(gfx1250::kVMaximumF32Vop3,
+                                              {.vdst = static_cast<uint8_t>(value),
+                                               .src0 = gfx1250_vgpr_src(value),
+                                               .src1 = gfx1250_vgpr_src(limit),
+                                               .neg = 2}));
+      append_words(words, gfx1250::build_vop3(gfx1250::kVMinimumF32Vop3,
+                                              {.vdst = static_cast<uint8_t>(value),
+                                               .src0 = gfx1250_vgpr_src(value),
+                                               .src1 = gfx1250_vgpr_src(limit)}));
+    }
+    for (uint16_t pair = 0; pair < 4; ++pair) {
+      append_words(words, gfx1250::build_vop3(
+                              gfx1250::kVCvtPkF16F32Vop3,
+                              {.vdst = static_cast<uint8_t>(source.vdst + pair),
+                               .src0 = static_cast<uint16_t>(scratch_src + pair * 2u),
+                               .src1 = static_cast<uint16_t>(scratch_src + pair * 2u + 1u)}));
+    }
+    if (scratch.lease->spilled) {
+      append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
+      if (!append_gfx1250_scratch_preservation(words, *scratch.lease, true))
+        return ExpandResult::failed("gfx1250 f16 K=128 WMMA could not restore scratch VGPRs");
+    }
+    append_gfx1250_vgpr_msb_transition(words, current_mode, original_mode);
+    return ExpandResult::success(std::move(words));
+  }
+
+  if (!gfx1250_k128_wmma_formats(inst.opcode(), matrix_a_fmt, matrix_b_fmt))
+    return ExpandResult::failed("gfx1250 K=128 WMMA rule received an unsupported opcode");
 
   std::vector<uint32_t> words;
   words.reserve(4);
@@ -2160,13 +2317,13 @@ inline constexpr std::array<TranslationRule, 41> kGfx1250B0ToA0ExpandRules = {{
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Bf8Bf8Vop3p, RuleAction::Expand, 0,
      0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Bf8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3232x16x128F4Vop3p, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_wmma_32x16_f4, nullptr, nullptr},
     {gfx1250::encoding::kVimage, gfx1250::kTensorLoadToLdsVimage, RuleAction::Expand, 0, 0, nullptr,
