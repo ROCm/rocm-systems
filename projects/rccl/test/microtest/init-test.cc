@@ -620,24 +620,21 @@ TEST_F(InitMicrotest, CommInitRankDev_PostInit_MyrankGeNranks_ReturnsInvalidArgu
 // once any in-process test runs it (success), it can't be made to fail. The
 // ProcessIsolatedTestRunner re-execs a fresh binary image (pristine call_once)
 // per registered test, so bootstrapNetInit failure genuinely fails ncclInit. --
-namespace {
-const bool kRegisteredIsolatedInitTests = [] {
-  using RcclUnitTesting::ProcessIsolatedTestRunner;
-  ProcessIsolatedTestRunner::registerTest(
-      "Init_NcclInit_BootstrapNetInitFailure_ReturnsSystemError", [] {
-        g_bootstrapNetInitFail = true;  // fresh process: first ncclInit() run hits this
+TEST(InitMicrotestIsolated, NcclInit_BootstrapNetInitFailure_ReturnsSystemError) {
+  // Canonical RUN_ISOLATED_TEST (fork+execv fresh image -> pristine call_once).
+  // If isolation failed (cached ncclInit success), the valid-args path would
+  // reach ncclAsyncLaunch -> fail-loud abort -> child crash -> RED. Green proves
+  // ncclInit genuinely failed via bootstrapNetInit.
+  RUN_ISOLATED_TEST(
+      "Init_NcclInit_BootstrapNetInitFailure",
+      []() {
+        g_bootstrapNetInitFail = true;
         ncclComm_t nc = nullptr;
         ncclUniqueId id{};
         ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
         ncclResult_t r = ncclCommInitRankDev(&nc, 1, 1, &id, 0, 0, &cfg, "t");
-        EXPECT_EQ(ncclSystemError, r);  // ncclInit -> initOnceFunc -> bootstrapNetInit fails
+        ASSERT_EQ(ncclSystemError, r);  // ncclInit -> initOnceFunc -> bootstrapNetInit fails
       });
-  return true;
-}();
-}  // namespace
-
-TEST(InitMicrotestIsolated, NcclInitFailureArms) {
-  EXPECT_TRUE(RcclUnitTesting::ProcessIsolatedTestRunner::executeAllTests());
 }
 
 #if defined(HIP_HOST_UNCACHED_MEMORY)
