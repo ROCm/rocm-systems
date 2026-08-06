@@ -39,8 +39,10 @@ constexpr int SUPPORTED_COUNTS[] = {
 
 template <int Count>
 __global__ __launch_bounds__(WAVE_SIZE, 1) void vgpr_saturation_kernel(uint32_t *output,
-                                                                       uint32_t iterations) {
-  const uint32_t global_id = blockIdx.x * blockDim.x + threadIdx.x;
+                                                                       uint32_t iterations,
+                                                                       uint32_t id_offset) {
+  const uint32_t local_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const uint32_t global_id = id_offset + local_id;
   uint32_t values[Count];
 
 #pragma unroll
@@ -60,13 +62,14 @@ __global__ __launch_bounds__(WAVE_SIZE, 1) void vgpr_saturation_kernel(uint32_t 
   for (int i = 0; i < Count; ++i) {
     checksum ^= values[i] + static_cast<uint32_t>(i);
   }
-  output[global_id] = checksum;
+  output[local_id] = checksum;
 }
 
 struct Options {
   std::vector<int> counts{std::begin(SUPPORTED_COUNTS), std::end(SUPPORTED_COUNTS)};
   std::vector<uint32_t> iterations = {0, 1, 4, 16, 64};
   uint32_t waves = 1;
+  uint32_t streams = 1;
   int samples = DEFAULT_SAMPLES;
   int warmups = DEFAULT_WARMUPS;
   bool csv = false;
@@ -77,6 +80,7 @@ struct Result {
   int reported_vgprs = 0;
   uint32_t iterations = 0;
   uint32_t waves = 0;
+  uint32_t streams = 0;
   int samples = 0;
   double median_us = 0.0;
   double min_us = 0.0;
@@ -137,7 +141,8 @@ void usage(const char *program) {
   std::printf("Usage: %s [options]\n"
               "  --counts N,N,...      Live-value counts (supported: %s)\n"
               "  --iterations N,N,...  Update-loop iterations (default: 0,1,4,16,64)\n"
-              "  --waves N              Wave64 workgroups per launch (default: 1)\n"
+              "  --waves N              Wave64 workgroups per stream (default: 1)\n"
+              "  --streams N            Concurrent HIP streams per launch (default: 1)\n"
               "  --samples N            Timed launches per point (default: 7)\n"
               "  --warmups N            Untimed runtime warmups per point (default: 2)\n"
               "  --csv                  Emit machine-readable CSV\n"
@@ -164,6 +169,11 @@ Options parse_options(int argc, char **argv) {
       if (value == 0 || value > std::numeric_limits<uint32_t>::max() / WAVE_SIZE)
         fail("--waves is too large for the 32-bit global thread index");
       options.waves = static_cast<uint32_t>(value);
+    } else if (argument == "--streams") {
+      const unsigned long value = parse_scalar(next_value("--streams"), "--streams");
+      if (value == 0 || value > std::numeric_limits<uint32_t>::max())
+        fail("--streams must be in [1, UINT32_MAX]");
+      options.streams = static_cast<uint32_t>(value);
     } else if (argument == "--samples") {
       const unsigned long value = parse_scalar(next_value("--samples"), "--samples");
       if (value == 0 || value > std::numeric_limits<int>::max())
@@ -200,17 +210,25 @@ template <int Count> uint32_t reference_checksum(uint32_t global_id, uint32_t it
 }
 
 template <int Count>
-Result run_point(uint32_t *device_output, uint32_t iterations, uint32_t waves, int warmups,
-                 int samples) {
+Result run_point(uint32_t *device_output, const std::vector<hipStream_t> &streams,
+                 uint32_t iterations, uint32_t waves, int warmups, int samples) {
   hipFuncAttributes attributes{};
   check_hip(hipFuncGetAttributes(&attributes,
                                  reinterpret_cast<const void *>(vgpr_saturation_kernel<Count>)),
             "hipFuncGetAttributes");
 
   auto launch = [&] {
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(vgpr_saturation_kernel<Count>), dim3(waves), dim3(WAVE_SIZE),
-                       0, nullptr, device_output, iterations);
-    check_hip(hipGetLastError(), "hipLaunchKernelGGL");
+    const size_t elements_per_stream = static_cast<size_t>(waves) * WAVE_SIZE;
+    for (size_t stream_index = 0; stream_index < streams.size(); ++stream_index) {
+      const size_t element_offset = stream_index * elements_per_stream;
+      if (element_offset > std::numeric_limits<uint32_t>::max())
+        fail("global thread index exceeds UINT32_MAX");
+      hipLaunchKernelGGL(HIP_KERNEL_NAME(vgpr_saturation_kernel<Count>), dim3(waves),
+                         dim3(WAVE_SIZE), 0, streams[stream_index],
+                         device_output + element_offset, iterations,
+                         static_cast<uint32_t>(element_offset));
+      check_hip(hipGetLastError(), "hipLaunchKernelGGL");
+    }
     check_hip(hipDeviceSynchronize(), "hipDeviceSynchronize");
   };
 
@@ -227,7 +245,7 @@ Result run_point(uint32_t *device_output, uint32_t iterations, uint32_t waves, i
   }
   std::sort(elapsed_us.begin(), elapsed_us.end());
 
-  const size_t output_elements = static_cast<size_t>(waves) * WAVE_SIZE;
+  const size_t output_elements = static_cast<size_t>(waves) * WAVE_SIZE * streams.size();
   std::vector<uint32_t> checksums(output_elements);
   check_hip(hipMemcpy(checksums.data(), device_output, checksums.size() * sizeof(uint32_t),
                       hipMemcpyDeviceToHost),
@@ -246,6 +264,7 @@ Result run_point(uint32_t *device_output, uint32_t iterations, uint32_t waves, i
   result.reported_vgprs = attributes.numRegs;
   result.iterations = iterations;
   result.waves = waves;
+  result.streams = static_cast<uint32_t>(streams.size());
   result.samples = samples;
   result.median_us = elapsed_us[elapsed_us.size() / 2];
   result.min_us = elapsed_us.front();
@@ -255,18 +274,19 @@ Result run_point(uint32_t *device_output, uint32_t iterations, uint32_t waves, i
 }
 
 template <int Count>
-void run_count(const Options &options, uint32_t *device_output, std::vector<Result> &results) {
+void run_count(const Options &options, uint32_t *device_output,
+               const std::vector<hipStream_t> &streams, std::vector<Result> &results) {
   for (uint32_t iterations : options.iterations) {
-    results.push_back(run_point<Count>(device_output, iterations, options.waves, options.warmups,
-                                       options.samples));
+    results.push_back(run_point<Count>(device_output, streams, iterations, options.waves,
+                                       options.warmups, options.samples));
   }
 }
 
 void dispatch_count(int count, const Options &options, uint32_t *device_output,
-                    std::vector<Result> &results) {
+                    const std::vector<hipStream_t> &streams, std::vector<Result> &results) {
 #define VGPR_SATURATION_COUNT(N)                                                                   \
   case N:                                                                                          \
-    run_count<N>(options, device_output, results);                                                 \
+    run_count<N>(options, device_output, streams, results);                                        \
     return;
   switch (count) {
 #include "vgpr_saturation_counts.def"
@@ -278,18 +298,19 @@ void dispatch_count(int count, const Options &options, uint32_t *device_output,
 
 void print_results(const Options &options, const std::vector<Result> &results) {
   if (options.csv) {
-    std::printf("requested_vgprs,reported_vgprs,iterations,waves,samples,median_us,min_us,max_us,"
-                "checksum\n");
+    std::printf("requested_vgprs,reported_vgprs,iterations,waves_per_stream,streams,samples,"
+                "median_us,min_us,max_us,checksum\n");
     for (const Result &result : results) {
-      std::printf("%d,%d,%u,%u,%d,%.3f,%.3f,%.3f,0x%08x\n", result.requested_vgprs,
-                  result.reported_vgprs, result.iterations, result.waves, result.samples,
-                  result.median_us, result.min_us, result.max_us, result.checksum);
+      std::printf("%d,%d,%u,%u,%u,%d,%.3f,%.3f,%.3f,0x%08x\n", result.requested_vgprs,
+                  result.reported_vgprs, result.iterations, result.waves, result.streams,
+                  result.samples, result.median_us, result.min_us, result.max_us, result.checksum);
     }
     return;
   }
 
-  std::printf("rocjitsu VGPR saturation benchmark (wave64, %u wave%s/launch)\n", options.waves,
-              options.waves == 1 ? "" : "s");
+  std::printf("rocjitsu VGPR saturation benchmark (wave64, %u wave%s/stream, %u stream%s)\n",
+              options.waves, options.waves == 1 ? "" : "s", options.streams,
+              options.streams == 1 ? "" : "s");
   std::printf("requested  actual  iterations  median_us      min_us      max_us  checksum\n");
   for (const Result &result : results) {
     std::printf("%9d  %6d  %10u  %9.3f  %10.3f  %10.3f  %08x\n", result.requested_vgprs,
@@ -304,17 +325,33 @@ int main(int argc, char **argv) {
   const Options options = parse_options(argc, argv);
   check_hip(hipSetDevice(0), "hipSetDevice");
 
-  const size_t output_elements = static_cast<size_t>(options.waves) * WAVE_SIZE;
+  if (static_cast<size_t>(options.waves) >
+      std::numeric_limits<uint32_t>::max() /
+          (static_cast<size_t>(WAVE_SIZE) * options.streams))
+    fail("combined global thread index exceeds UINT32_MAX");
+  const size_t output_elements =
+      static_cast<size_t>(options.waves) * WAVE_SIZE * options.streams;
   if (output_elements > std::numeric_limits<size_t>::max() / sizeof(uint32_t))
     fail("output allocation size overflow");
 
   uint32_t *device_output = nullptr;
   check_hip(hipMalloc(&device_output, output_elements * sizeof(uint32_t)), "hipMalloc");
 
+  std::vector<hipStream_t> streams(options.streams, nullptr);
+  if (options.streams > 1) {
+    for (hipStream_t &stream : streams)
+      check_hip(hipStreamCreate(&stream), "hipStreamCreate");
+  }
+
   std::vector<Result> results;
   results.reserve(options.counts.size() * options.iterations.size());
   for (int count : options.counts)
-    dispatch_count(count, options, device_output, results);
+    dispatch_count(count, options, device_output, streams, results);
+
+  if (options.streams > 1) {
+    for (hipStream_t stream : streams)
+      check_hip(hipStreamDestroy(stream), "hipStreamDestroy");
+  }
 
   check_hip(hipFree(device_output), "hipFree");
   print_results(options, results);
