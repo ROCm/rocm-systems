@@ -7,11 +7,10 @@
 #
 # rocprofiler-systems-dl: contains minimal symbols and dlopen's rocprofiler-systems
 #
-# rocprofiler-systems-common-api: headers shared by the core public API
-# (rocprofsys_category_t, rocprofsys_annotation_t)
+# rocprofiler-systems-common-api: shared public API headers (rocprofsys_category_t,
+# rocprofsys_annotation_t)
 #
-# rocprofiler-systems-causal-api: minimal library backing the ROCPROFSYS_CAUSAL_*
-# macros, linked directly by applications without pulling in the full backend
+# rocprofiler-systems-causal-api: minimal library backing ROCPROFSYS_CAUSAL_*
 #
 # ----------------------------------------------------------------------------- #
 
