@@ -183,6 +183,17 @@
         {"name": "VersionInfoTests", "description": "HIP/ROCm version string formatting tests", "test_filter": "VersionInfoTests.*"},
         {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*"}
       ]
+    },
+    "unit_tests_gdr": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGdr",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "GdrPeerMem", "description": "net_ib peer-memory client sysfs detection (mock memory_peers tree)", "test_filter": "GdrPeerMem.*"}
+      ]
     }
   },
   "test_suites": [
@@ -196,6 +207,12 @@
       "name": "RCCL Unit Tests - Fixtures",
       "description": "rccl-UnitTestsFixtures (header-level tests including MiscTests.Sorter)",
       "config": "unit_tests_fixtures",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Unit Tests - GDR Peer-Memory Detection",
+      "description": "rccl-UnitTestsGdr (net_ib memory_peers sysfs scan, CPU-only)",
+      "config": "unit_tests_gdr",
       "enabled": true
     }
   ]
