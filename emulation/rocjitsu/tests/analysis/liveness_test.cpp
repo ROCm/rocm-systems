@@ -1867,10 +1867,91 @@ TEST(CfgAnalysis, Gfx1250RecoversSignedDeltaTemplateWithPrefetch) {
   ASSERT_EQ(sub_consumer->static_indirect_call_fixups().size(), 1u);
   EXPECT_EQ(sub_consumer->static_indirect_call_fixups()[0].source_target_offset, 76u);
   EXPECT_TRUE(has_successor_start(*sub_consumer, target->start_offset()));
+  EXPECT_FALSE(sub_consumer->static_indirect_call_fixups()[0].source_requires_xcnt_drain);
 
   ASSERT_EQ(add_consumer->static_indirect_call_fixups().size(), 1u);
   EXPECT_EQ(add_consumer->static_indirect_call_fixups()[0].source_target_offset, 76u);
   EXPECT_TRUE(has_successor_start(*add_consumer, target->start_offset()));
+  EXPECT_FALSE(add_consumer->static_indirect_call_fixups()[0].source_requires_xcnt_drain);
+}
+
+TEST(CfgAnalysis, Gfx1250RecoversSignedDeltaTemplateWithXcntWaitAndPrefetch) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kTmpSreg = 12;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kInlineInt4 = 132;
+  constexpr uint32_t kSignedDeltaLiteral = 68;
+
+  // gfx1250 compiler output drains XCNT immediately before each instruction
+  // prefetch. These waits and prefetches do not modify the PC pair or temporary,
+  // and must remain in the translated body while the two set-PC consumers are
+  // recovered to their common static target.
+  std::vector<uint32_t> words = {
+      gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1,
+                          {.ssrc0 = 0, .sdst = kPcSreg})[0], // 0x00: s_get_pc_i64 s[8:9].
+      gfx1250::build_sop2(gfx1250::kSAddCoI32Sop2,
+                          {.ssrc0 = kLiteralOperand, .ssrc1 = kInlineInt4, .sdst = kTmpSreg})[0],
+      // 0x04: s_add_co_i32.
+      kSignedDeltaLiteral, // 0x08: literal.
+      gfx1250::build_sopc(gfx1250::kSCmpGeI32Sopc,
+                          {.ssrc0 = kTmpSreg, .ssrc1 = kInlineInt0})[0], // 0x0c: s_cmp_ge_i32.
+      gfx1250::build_sopp(gfx1250::kSCbranchScc1Sopp, {.simm16 = 7})[0],
+      // 0x10 -> add half at 0x30.
+      gfx1250::build_sopp(gfx1250::kSWaitXcntSopp, {.simm16 = 0})[0],
+      // 0x14: s_wait_xcnt 0.
+      0xF404A000u,
+      0x1C000000u, // 0x18: s_prefetch_inst_pc_rel.
+      gfx1250::build_sop1(gfx1250::kSAbsI32Sop1,
+                          {.ssrc0 = kTmpSreg, .sdst = kTmpSreg})[0], // 0x20: s_abs_i32.
+      gfx1250::build_sop2(gfx1250::kSSubCoU32Sop2,
+                          {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
+      // 0x24: s_sub_co_u32.
+      gfx1250::build_sop2(gfx1250::kSSubCoCiU32Sop2,
+                          {.ssrc0 = kPcSreg + 1, .ssrc1 = kInlineInt0, .sdst = kPcSreg + 1})[0],
+      // 0x28: s_sub_co_ci_u32.
+      gfx1250::build_sop1(gfx1250::kSSetPcI64Sop1,
+                          {.ssrc0 = kPcSreg, .sdst = 0})[0], // 0x2c: subtract consumer.
+      gfx1250::build_sopp(gfx1250::kSWaitXcntSopp, {.simm16 = 0})[0],
+      // 0x30: s_wait_xcnt 0.
+      0xF404A000u,
+      0x1C000000u, // 0x34: s_prefetch_inst_pc_rel.
+      gfx1250::build_sop2(gfx1250::kSAddCoU32Sop2,
+                          {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
+      // 0x3c: s_add_co_u32.
+      gfx1250::build_sop2(gfx1250::kSAddCoCiU32Sop2,
+                          {.ssrc0 = kPcSreg + 1, .ssrc1 = kInlineInt0, .sdst = kPcSreg + 1})[0],
+      // 0x40: s_add_co_ci_u32.
+      gfx1250::build_sop1(gfx1250::kSSetPcI64Sop1,
+                          {.ssrc0 = kPcSreg, .sdst = 0})[0], // 0x44: add consumer.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),            // 0x48: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),            // 0x4c: shared target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  auto *sub_consumer = block_starting_at(blocks, 44);
+  auto *add_consumer = block_starting_at(blocks, 68);
+  auto *target = block_starting_at(blocks, 76);
+  ASSERT_NE(sub_consumer, nullptr);
+  ASSERT_NE(add_consumer, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  ASSERT_EQ(sub_consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(sub_consumer->static_indirect_call_fixups()[0].source_target_offset, 76u);
+  EXPECT_TRUE(has_successor_start(*sub_consumer, target->start_offset()));
+
+  ASSERT_EQ(add_consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(add_consumer->static_indirect_call_fixups()[0].source_target_offset, 76u);
+  EXPECT_TRUE(has_successor_start(*add_consumer, target->start_offset()));
+
+  // The subtract half's drain is inside the range relocation overwrites, so
+  // both consumers of that shared range must ask the rewrite to reproduce it.
+  EXPECT_TRUE(sub_consumer->static_indirect_call_fixups()[0].source_requires_xcnt_drain);
+  EXPECT_TRUE(add_consumer->static_indirect_call_fixups()[0].source_requires_xcnt_drain);
 }
 
 TEST(CfgAnalysis, Gfx1250SignedDeltaRejectsMoveClobberingTemporary) {
