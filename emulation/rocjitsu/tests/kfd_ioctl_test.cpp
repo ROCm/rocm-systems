@@ -3514,6 +3514,204 @@ TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapReportsWhilePeerRunsBeforeExplicitCwsrSu
   EXPECT_EQ(running->status & (1u << 13), 0u);
 }
 
+// A wave parked between MSG_INTERRUPT and s_rfe is still executing the ROCr
+// trap handler, under the handler's own EXEC rather than the application's.
+// The CWSR record has to carry the interrupted mask -- publishing the handler's
+// makes every lane read as active, which inverts `lane apply -active` and
+// `-inactive` (gdb.rocm/lane-info.exp). The record is also the resume payload,
+// so the reverse shadow matters just as much: an EXEC the debugger edits has to
+// reach the wave through the handler's restore instead of overwriting the mask
+// the unfinished handler is still running under.
+TEST_F(KfdIoctlTest, DbgTrapCwsrShadowsTrapHandlerRegistersAndRoutesDebuggerEdits) {
+  constexpr uint64_t kKernelAddress = 0x600400000ULL;
+  constexpr uint64_t kTrapHandlerAddress = 0x600480000ULL;
+  constexpr uint64_t kCwsrAddress = 0x600500000ULL;
+  constexpr uint32_t kCwsrSize = 0x40000;
+  constexpr uint32_t kSTrapBreakpoint = 0xBF920001u;
+  constexpr uint32_t kSEndpgm = 0xBF810000u;
+  // Lanes 0, 2 and 4 of a five-lane wave: the shape gdb.rocm/lane-info.exp
+  // produces, where half the lanes have converged out of the divergent branch.
+  constexpr uint64_t kInterruptedExec = 0x15ULL;
+  constexpr uint64_t kHandlerExec = 0xFFFFFFFFULL;
+  constexpr uint64_t kDebuggerExec = 0x1FULL;
+  const auto pid = static_cast<uint32_t>(getpid());
+
+  std::vector<uint8_t> code_page(4096);
+  std::vector<uint8_t> trap_handler_page(4096);
+  std::vector<uint8_t> cwsr(kCwsrSize);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kKernelAddress, code_page.data(), code_page.size());
+  process->map_pages(kTrapHandlerAddress, trap_handler_page.data(), trap_handler_page.size());
+  process->map_pages(kCwsrAddress, cwsr.data(), cwsr.size());
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = pid;
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  kfd_ioctl_set_trap_handler_args set_handler{};
+  set_handler.gpu_id = kGpuId;
+  set_handler.tba_addr = kTrapHandlerAddress;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_SET_TRAP_HANDLER, &set_handler), 0);
+
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = kCwsrAddress;
+  create.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (cu == nullptr && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *memory = soc_->memory();
+  ASSERT_NE(memory, nullptr);
+
+  memory->write32(kKernelAddress, kSTrapBreakpoint, driver_->local_process_id());
+  memory->write32(kKernelAddress + 4, kSEndpgm, driver_->local_process_id());
+  // The clobber stands in for the doorbell exchange the real ROCr handler runs
+  // through EXEC_LO, and lands before the halt so the snapshot is taken with
+  // the handler's mask live.
+  const uint32_t trap_handler[] = {
+      0x806C846Cu,              // s_add_u32 ttmp0, ttmp0, 4
+      0x826D806Du,              // s_addc_u32 ttmp1, ttmp1, 0
+      0xBEFE00FFu, 0xFFFFFFFFu, // s_mov_b32 exec_lo, 0xffffffff
+      0xBEF800FFu, 0x00002000u, // s_mov_b32 ttmp12, STATUS.HALT
+      0xBF900001u,              // s_sendmsg sendmsg(MSG_INTERRUPT)
+      0xB978F802u,              // s_setreg_b32 hwreg(HW_REG_STATUS), ttmp12
+      0xBE801F6Cu,              // s_rfe_b64 ttmp[0:1]
+  };
+  for (uint32_t i = 0; i < std::size(trap_handler); ++i)
+    memory->write32(kTrapHandlerAddress + i * 4, trap_handler[i], driver_->local_process_id());
+
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(driver_->local_process_id());
+  wave->set_queue_id(create.queue_id);
+  wave->set_dispatch_id(7);
+  wave->set_exec(kInterruptedExec);
+
+  // Consume EC_QUEUE_NEW the way rocdbgapi does at attach; until it is cleared
+  // the queue reads as invalid and cannot be suspended.
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = pid;
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+  // Stop between MSG_INTERRUPT and s_rfe. s_rfe is what clears in_trap_handler
+  // and reinstalls trap_saved_exec_, so this is the window where the live mask
+  // is the handler's and the debugger can still be handed a snapshot -- the
+  // queue is suspended below while the wave sits here.
+  for (uint32_t i = 0; i < 10 && !wave->trap_interrupt_sent(); ++i)
+    cu->step();
+  ASSERT_TRUE(wave->trap_interrupt_sent());
+  ASSERT_TRUE(wave->in_trap_handler());
+  ASSERT_EQ(wave->exec(), kHandlerExec);
+
+  uint32_t queue_id = create.queue_id;
+  kfd_ioctl_dbg_trap_args control{};
+  control.pid = pid;
+  control.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
+  control.suspend_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  control.suspend_queues.num_queues = 1;
+  control.suspend_queues.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+
+  std::vector<rocjitsu::kmd::CwsrWaveState> states(1);
+  states[0].num_sgprs = 16;
+  states[0].num_vgprs = 4;
+  ASSERT_TRUE(
+      rocjitsu::kmd::deserialize_queue_cwsr(kCwsrAddress, kCwsrSize, states, [&](uint64_t address) {
+        return memory->read32(address, driver_->local_process_id());
+      }));
+  // The debugger sees the application's lanes, and the live register is
+  // untouched by having published them.
+  EXPECT_EQ(states[0].exec, kInterruptedExec);
+  EXPECT_EQ(wave->exec(), kHandlerExec);
+
+  states[0].exec = kDebuggerExec;
+  ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(kCwsrAddress, kCwsrSize, states,
+                                                  [&](uint64_t address, uint32_t value) {
+                                                    memory->write32(address, value,
+                                                                    driver_->local_process_id());
+                                                  })
+                  .ok);
+  control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
+  control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  control.resume_queues.num_queues = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+
+  // The edit went to the shadow, so the handler is still running under its own
+  // mask and only installs the debugger's on s_rfe.
+  EXPECT_EQ(wave->exec(), kHandlerExec);
+
+  // STATUS is the same contract and the costlier half. Step the s_setreg that
+  // raises STATUS.HALT -- the handler announcing it wants the wave kept stopped
+  // -- and take another snapshot before s_rfe consumes it.
+  constexpr uint32_t kStatusHalt = 1u << 13;
+  cu->step();
+  ASSERT_TRUE(wave->in_trap_handler());
+  ASSERT_NE(wave->status_raw() & kStatusHalt, 0u);
+
+  control.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
+  control.suspend_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  control.suspend_queues.num_queues = 1;
+  control.suspend_queues.exception_mask = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+  ASSERT_TRUE(
+      rocjitsu::kmd::deserialize_queue_cwsr(kCwsrAddress, kCwsrSize, states, [&](uint64_t address) {
+        return memory->read32(address, driver_->local_process_id());
+      }));
+  // The wave has not stopped for the debugger yet -- the handler has only asked
+  // -- so the record describes it as running, exactly as it did before.
+  EXPECT_FALSE(states[0].wave_stopped);
+  ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(kCwsrAddress, kCwsrSize, states,
+                                                  [&](uint64_t address, uint32_t value) {
+                                                    memory->write32(address, value,
+                                                                    driver_->local_process_id());
+                                                  })
+                  .ok);
+  control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
+  control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  control.resume_queues.num_queues = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+  // Applying that record must not take the handler's HALT away. It used to, and
+  // s_rfe then resumed a wave the debugger was expecting to catch.
+  EXPECT_NE(wave->status_raw() & kStatusHalt, 0u);
+
+  for (uint32_t i = 0; i < 4 && wave->in_trap_handler(); ++i)
+    cu->step();
+  EXPECT_FALSE(wave->in_trap_handler());
+  EXPECT_TRUE(wave->debug_halted());
+  EXPECT_EQ(wave->exec(), kDebuggerExec);
+}
+
 TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
   constexpr uint64_t kSteppingAddress = 0x600200000ULL;
   constexpr uint64_t kPeerAddress = 0x600201000ULL;

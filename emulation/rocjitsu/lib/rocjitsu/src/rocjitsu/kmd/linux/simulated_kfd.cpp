@@ -2391,35 +2391,39 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
   // then a doorbell id) in EXEC_LO around MSG_GET_DOORBELL. Publishing that
   // makes the debugger report every lane active, which inverts `lane apply
   // -active/-inactive` (gdb.rocm/lane-info.exp). trap_saved_exec_ holds the
-  // interrupted value for the whole handler, so un-shadow it here exactly as
-  // the STATUS field below un-shadows trap_saved_status().
-  // KNOWN DEFECT, deliberately left as-is: a wave stopped inside the trap
-  // handler publishes the HANDLER's EXEC, not the application's -- the handler
-  // runs with its own mask and parks 0x80000000 (then a doorbell id) in EXEC_LO
-  // around MSG_GET_DOORBELL. The debugger then sees every lane active, which
-  // inverts `lane apply -active/-inactive` in gdb.rocm/lane-info.exp roughly one
-  // run in eight.
+  // interrupted value for the whole handler, so un-shadow it here, as the
+  // STATUS field below does with trap_saved_status().
   //
-  // The obvious repair -- publishing trap_saved_exec() the way the STATUS field
-  // below publishes trap_saved_status() -- was tried and reverted, under both
-  // the in_trap_handler() and trap_interrupt_sent() predicates. This record is
-  // not write-only: apply_cwsr_to_wave() feeds it straight back into the live
-  // wave on resume, so substituting the saved mask here also rewrites EXEC out
-  // from under a handler that has not finished, and the inferior never runs to
-  // exit (gdb.rocm/shared-memory.exp fails its final continue, and with the
-  // in_trap_handler() predicate hangs for 600s). Fixing this properly means
-  // separating the debugger-visible view from the restore payload.
-  state.exec = wf.exec();
+  // in_trap_handler() is the predicate for both, and it opens at handler entry
+  // rather than at MSG_INTERRUPT because the doorbell park happens on the way
+  // there. It closes at s_rfe, which puts the interrupted values back, so from
+  // then on the live registers are the application's again.
+  //
+  // The record is not write-only -- apply_cwsr_to_wave() feeds it back on
+  // resume -- so un-shadowing here is only safe because that path shadows in
+  // the other direction under the same predicate: a debugger edit to EXEC is
+  // written to trap_saved_exec_, which the handler's s_rfe installs, instead of
+  // overwriting the mask a mid-flight handler is still running under.
+  state.exec = wf.in_trap_handler() ? wf.trap_saved_exec() : wf.exec();
   state.vcc = wf.vcc();
   state.flat_scratch = wf.scratch_base();
   state.m0 = wf.m0();
   state.mode = wf.mode_raw();
   state.trapsts = wf.trapsts();
-  const uint32_t interrupted_status =
-      wf.trap_interrupt_sent() ? wf.trap_saved_status() : raw_status;
-  state.saved_status_halt = (interrupted_status >> 13) & 1u;
+  // Whether the application was already halted when it trapped outlives the
+  // handler: trap_saved_status_ still describes the interrupted wave after
+  // s_rfe, and trap_interrupt_sent() is the flag that says a handler produced
+  // this stop.
+  state.saved_status_halt =
+      ((wf.trap_interrupt_sent() ? wf.trap_saved_status() : raw_status) >> 13) & 1u;
   state.wave_stopped = wf.debug_halted();
-  state.status = state.wave_stopped ? raw_status | (1u << 13) : raw_status & ~(1u << 13);
+  // The published STATUS shadows on the narrower predicate, the same one EXEC
+  // uses: only while the handler is actually running is the live register the
+  // handler's rather than the application's. Once s_rfe has run, the live value
+  // is the application's again and is what the debugger should see.
+  const uint32_t application_status = wf.in_trap_handler() ? wf.trap_saved_status() : raw_status;
+  state.status =
+      state.wave_stopped ? application_status | (1u << 13) : application_status & ~(1u << 13);
   state.trap_id = wf.trap_id();
   state.wave_id = wf.debug_wave_id();
   state.group_ids = wf.wg_coord();
@@ -2877,11 +2881,30 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
   constexpr uint32_t kModeDebugEnMask = 1u << 11;
   constexpr uint32_t kStatusHaltMask = 1u << 13;
   wave.pc = state.pc;
-  wave.set_exec(state.exec);
+  // Mirror of the un-shadowing in build_cwsr_wave_state(): while a handler is
+  // mid-flight the published EXEC is the interrupted application mask, so the
+  // value coming back belongs to the shadow, not to the live register the
+  // handler is executing under. s_rfe installs it when the handler returns.
+  if (wave.in_trap_handler())
+    wave.set_trap_saved_exec(state.exec);
+  else
+    wave.set_exec(state.exec);
   wave.set_vcc(state.vcc);
   wave.set_m0(state.m0);
-  wave.set_status_raw((state.status & ~kStatusHaltMask) |
-                      (state.saved_status_halt ? kStatusHaltMask : 0u));
+  // STATUS shadows the same way EXEC does, and the cost of getting it wrong is
+  // higher: the ROCr handler raises STATUS.HALT and only then returns, so a
+  // record applied in that window used to clear the HALT the handler had just
+  // set. s_rfe then saw a running wave, resumed it, and the breakpoint was
+  // silently lost -- one inferior in gdb.rocm/multi-inferior-stress.exp running
+  // its kernel to completion and exiting without ever stopping. Route the
+  // record's HALT to the interrupted state the handler restores and leave the
+  // live register to the handler.
+  const uint32_t restored_status =
+      (state.status & ~kStatusHaltMask) | (state.saved_status_halt ? kStatusHaltMask : 0u);
+  if (wave.in_trap_handler())
+    wave.set_trap_saved_status(restored_status);
+  else
+    wave.set_status_raw(restored_status);
   wave.set_mode_raw(state.mode);
   wave.set_trapsts(state.trapsts);
   wave.set_debug_wave_id(state.wave_id);
