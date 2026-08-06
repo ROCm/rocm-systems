@@ -26,6 +26,15 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/test_generate_device_table.py"
   )
 
+  # CPU-only generator unit test: guards src/device/ce_reduce/generate.py's
+  # per-instantiation TU splitting (ce_reduce_impl.h.in / ce_reduce_launcher.cpp.in
+  # template expansion). Needs no GPU and no built library.
+  add_test(
+    NAME rccl-generate-ce-reduce
+    COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
+  )
+
   if (ENABLE_CODE_COVERAGE)
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
