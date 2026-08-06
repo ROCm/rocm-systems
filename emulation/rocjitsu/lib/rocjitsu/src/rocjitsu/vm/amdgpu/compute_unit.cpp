@@ -22,7 +22,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cstring>
 #include <memory>
 #include <stdexcept>
 
@@ -130,12 +129,6 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
     sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
     return nullptr;
   }
-
-  // Zero the allocated register blocks so reused slots don't inherit stale
-  // values from previous kernel runs.
-  std::fill(&sgpr_file_[sgpr_base], &sgpr_file_[sgpr_base] + config_.sgprs_per_wf, 0u);
-  std::memset(raw_vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
-              vgpr_allocation_block_size() * wf_size_ * sizeof(uint32_t));
 
   // Invalidate the L1 scalar cache so this wavefront reads fresh kernel
   // arguments from L2/memory rather than stale lines from a prior kernel.
