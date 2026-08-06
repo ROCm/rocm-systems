@@ -1014,12 +1014,19 @@ class MachineSpecsCDNA(MachineSpecs):
     )
 
     def _get_hbm_channels(self) -> Optional[str]:
-        """HBM channel count, adjusted for the MI300 NPS memory partition."""
+        """HBM channel count, adjusted for the MI300 NPS memory partition.
+
+        Uses the whole-chip (SPX) XCD count rather than ``total_l2_chan``: HBM
+        stays interleaved across XCDs, so it does not follow compute partitions.
+        """
         partition = (self.memory_partition or "").lower()
         if not partition.startswith("nps"):
             return self.total_l2_chan
+        whole_chip_xcds = mi_gpu_specs.get_num_xcds(
+            self.gpu_arch, self.gpu_model or None, "SPX"
+        )
         divisor = {"nps4": 4, "nps8": 8}.get(partition, 1)
-        return str(int(self.total_l2_chan) // divisor)
+        return str(int(self.l2_banks) * whole_chip_xcds // divisor)
 
     def finalize_soc_fields(self, gpu_info: dict[str, Any]) -> None:
         self.compute_partition = gpu_info["compute_partition"]
