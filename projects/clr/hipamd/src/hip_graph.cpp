@@ -76,7 +76,8 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
                                   int globalWorkSizeX_remainder = 0,
                                   int globalWorkSizeY_remainder = 0,
                                   int globalWorkSizeZ_remainder = 0,
-                                  dim3 clusterDim = {1, 1, 1}) {
+                                  dim3 clusterDim = {1, 1, 1},
+                                  uint32_t launchFlags = 0) {
   if (!hip::Graph::isGraphValid(graph)) {
     return hipErrorInvalidValue;
   }
@@ -117,7 +118,8 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
 
   *pGraphNode =
       new hip::GraphKernelNode(pNodeParams, pNodeEvents, coopKernel, globalWorkSizeX_remainder,
-                               globalWorkSizeY_remainder, globalWorkSizeZ_remainder, clusterDim);
+                               globalWorkSizeY_remainder, globalWorkSizeZ_remainder, clusterDim,
+                               launchFlags);
   status = ihipGraphAddNode(*pGraphNode, graph, pDependencies, numDependencies, capture, deviceId);
   return status;
 }
@@ -302,7 +304,8 @@ hipError_t ihipExtLaunchKernel(hipStream_t stream, hipFunction_t f, uint32_t glo
   status = ihipGraphAddKernelNode(
       &pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
       s->GetLastCapturedNodes().size(), &nodeParams, &nodeEvents, true, 0, s->DeviceId(),
-      globalWorkSizeX_remainder, globalWorkSizeY_remainder, globalWorkSizeZ_remainder);
+      globalWorkSizeX_remainder, globalWorkSizeY_remainder, globalWorkSizeZ_remainder,
+      {1, 1, 1}, flags);
 
   if (status != hipSuccess) {
     return status;
@@ -3787,5 +3790,117 @@ hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGra
     HIP_RETURN(hipErrorInvalidValue);
   }
   HIP_RETURN(reinterpret_cast<hip::hipGraphBatchMemOpNode*>(clonedNode)->SetParams(nodeParams));
+}
+
+hipError_t capturehipStreamBatchMemOp(hipStream_t& stream, unsigned int& count,
+                                      hipStreamBatchMemOpParams*& paramArray,
+                                      unsigned int& flags) {
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
+          "[hipGraph] Current capture node StreamBatchMemOp on stream : %p", stream);
+  if (!hip::isValid(stream)) {
+    return hipErrorContextIsDestroyed;
+  }
+  if (paramArray == nullptr || count == 0 || count > 256 || flags != 0) {
+    return hipErrorInvalidValue;
+  }
+  hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+
+  hipBatchMemOpNodeParams nodeParams{};
+  nodeParams.ctx = reinterpret_cast<hipCtx_t>(hip::getCurrentDevice());
+  nodeParams.count = count;
+  nodeParams.paramArray = paramArray;
+  nodeParams.flags = flags;
+
+  // hipGraphBatchMemOpNode deep-copies paramArray internally.
+  hip::GraphNode* node = new hip::hipGraphBatchMemOpNode(&nodeParams);
+
+  hipError_t status = ihipGraphAddNode(node, s->GetCaptureGraph(),
+                                       s->GetLastCapturedNodes().data(),
+                                       s->GetLastCapturedNodes().size());
+  if (status != hipSuccess) {
+    return status;
+  }
+  s->SetLastCapturedNode(node);
+  return hipSuccess;
+}
+
+// Stream-capture helpers for individual stream memory operations.
+// Each is captured as a single-element BatchMemOp node, matching CUDA behaviour
+// where cuStreamWaitValue32/64 and cuStreamWriteValue32/64 produce
+// CU_GRAPH_NODE_TYPE_BATCH_MEM_OP nodes when captured.
+static hipError_t captureStreamMemOp(hipStream_t stream, hipStreamBatchMemOpParams& op) {
+  if (!hip::isValid(stream)) {
+    return hipErrorContextIsDestroyed;
+  }
+  hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+  hipBatchMemOpNodeParams nodeParams{};
+  nodeParams.ctx = reinterpret_cast<hipCtx_t>(hip::getCurrentDevice());
+  nodeParams.count = 1;
+  nodeParams.paramArray = &op;
+  nodeParams.flags = 0;
+
+  hip::GraphNode* node = new hip::hipGraphBatchMemOpNode(&nodeParams);
+  hipError_t status = ihipGraphAddNode(node, s->GetCaptureGraph(),
+                                       s->GetLastCapturedNodes().data(),
+                                       s->GetLastCapturedNodes().size());
+  if (status != hipSuccess) {
+    return status;
+  }
+  s->SetLastCapturedNode(node);
+  return hipSuccess;
+}
+
+hipError_t capturehipStreamWaitValue32(hipStream_t& stream, void*& ptr, uint32_t& value,
+                                       unsigned int& flags, uint32_t& /*mask*/) {
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
+          "[hipGraph] Current capture node StreamWaitValue32 on stream : %p", stream);
+  // mask is not captured: hipStreamBatchMemOpParams has no mask field. CUDA ignores
+  // mask universally (cuStreamWaitValue32/64 do not support it — mask is AMD-only).
+  // The non-capture path passes mask to ihipStreamOperation directly.
+  hipStreamBatchMemOpParams op{};
+  op.operation = hipStreamMemOpWaitValue32;
+  op.waitValue.address = reinterpret_cast<hipDeviceptr_t>(ptr);
+  op.waitValue.value = value;
+  op.waitValue.flags = flags;
+  return captureStreamMemOp(stream, op);
+}
+
+hipError_t capturehipStreamWaitValue64(hipStream_t& stream, void*& ptr, uint64_t& value,
+                                       unsigned int& flags, uint64_t& /*mask*/) {
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
+          "[hipGraph] Current capture node StreamWaitValue64 on stream : %p", stream);
+  // mask is not captured: hipStreamBatchMemOpParams has no mask field. CUDA ignores
+  // mask universally (cuStreamWaitValue32/64 do not support it — mask is AMD-only).
+  // The non-capture path passes mask to ihipStreamOperation directly.
+  hipStreamBatchMemOpParams op{};
+  op.operation = hipStreamMemOpWaitValue64;
+  op.waitValue.address = reinterpret_cast<hipDeviceptr_t>(ptr);
+  op.waitValue.value64 = value;
+  op.waitValue.flags = flags;
+  return captureStreamMemOp(stream, op);
+}
+
+hipError_t capturehipStreamWriteValue32(hipStream_t& stream, void*& ptr, uint32_t& value,
+                                        unsigned int& flags) {
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
+          "[hipGraph] Current capture node StreamWriteValue32 on stream : %p", stream);
+  hipStreamBatchMemOpParams op{};
+  op.operation = hipStreamMemOpWriteValue32;
+  op.writeValue.address = reinterpret_cast<hipDeviceptr_t>(ptr);
+  op.writeValue.value = value;
+  op.writeValue.flags = flags;
+  return captureStreamMemOp(stream, op);
+}
+
+hipError_t capturehipStreamWriteValue64(hipStream_t& stream, void*& ptr, uint64_t& value,
+                                        unsigned int& flags) {
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
+          "[hipGraph] Current capture node StreamWriteValue64 on stream : %p", stream);
+  hipStreamBatchMemOpParams op{};
+  op.operation = hipStreamMemOpWriteValue64;
+  op.writeValue.address = reinterpret_cast<hipDeviceptr_t>(ptr);
+  op.writeValue.value64 = value;
+  op.writeValue.flags = flags;
+  return captureStreamMemOp(stream, op);
 }
 }  // namespace hip

@@ -69,11 +69,11 @@ fastjsonschema==2.20.0
     # via
     #   nbformat
     #   rocm-docs-core
-fonttools==4.55.0
+fonttools==4.60.2
     # via matplotlib
 gitdb==4.0.11
     # via gitpython
-gitpython==3.1.50
+gitpython==3.1.54
     # via rocm-docs-core
 greenlet==3.1.1
     # via sqlalchemy
@@ -198,7 +198,7 @@ pyjson5==1.6.7
     # via doxysphinx
 pyjwt[crypto]==2.13.0
     # via pygithub
-pynacl==1.5.0
+pynacl==1.6.2
     # via pygithub
 pyparsing==3.2.0
     # via

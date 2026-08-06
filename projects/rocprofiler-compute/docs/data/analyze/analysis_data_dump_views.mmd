@@ -1,0 +1,62 @@
+%% Source for analysis_data_dump_views.png. Re-export the PNG via draw.io.
+%% Views mirror the definitions in Database._compile_view_sql in
+%% src/utils/analysis_orm.py.
+
+erDiagram
+    compute_kernel_view {
+        int kernel_uuid
+        int workload_id
+        string workload_name
+        string kernel_name
+        int dispatch_count
+        int duration_ns_sum
+        int duration_ns_min
+        int duration_ns_max
+        float duration_ns_median
+        float duration_ns_mean
+    }
+
+    compute_kernel_metric_view {
+        int workload_id
+        string workload_name
+        int kernel_uuid
+        string kernel_name
+        int metric_uuid
+        string metric_name
+        string metric_id
+        text description
+        string table_name
+        string sub_table_name
+        string unit
+        int value_uuid
+        string value_name
+        float value
+    }
+
+    compute_workload_metric_view {
+        int workload_id
+        string workload_name
+        int metric_uuid
+        string metric_name
+        string metric_id
+        text description
+        string table_name
+        string sub_table_name
+        string unit
+        int value_uuid
+        string value_name
+        float value
+    }
+
+    compute_pc_sampling_view {
+        int workload_id
+        int kernel_uuid
+        string kernel_name
+        int offset
+        text instruction
+        text source
+        int count
+        int count_issue
+        int count_stall
+        json stall_reason
+    }

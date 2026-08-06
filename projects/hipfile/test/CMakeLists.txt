@@ -36,6 +36,7 @@ if(AIS_BUILD_NVIDIA_DETAIL)
     list(APPEND TEST_SYSINCLS ${HIPFILE_NVIDIA_SOURCE_PATH})
 else()
     list(APPEND SYSTEM_TEST_SOURCE_FILES system/amd/io.cpp)
+    list(APPEND SHARED_SOURCE_FILES common/ais-capability.cpp)
     list(APPEND TEST_SYSINCLS ${HIPFILE_AMD_SOURCE_PATH})
 endif()
 
@@ -78,10 +79,16 @@ target_link_libraries(hipfile_system_tests PRIVATE GTest::gtest)
 target_compile_options(hipfile_system_tests PRIVATE -pthread)
 target_link_options(hipfile_system_tests PRIVATE -pthread)
 
+set(_allow_skip_arg "")
+if(HIPFILE_ALLOW_SKIP_FASTPATH_TESTS)
+    set(_allow_skip_arg --allow-skip-fastpath)
+endif()
+
 ais_gtest_discover_tests(
     hipfile_system_tests
-    EXTRA_ARGS --ais-capable-dir ${AIS_CAPABLE_DIR}
-    PROPERTIES "LABELS;system;LABELS;hipfile"
+    EXTRA_ARGS --ais-capable-dir ${AIS_CAPABLE_DIR} ${_allow_skip_arg}
+    # Keep this marker synchronized with the GTEST_SKIP message in system/amd/io.cpp.
+    PROPERTIES "LABELS;system;LABELS;hipfile;SKIP_REGULAR_EXPRESSION;fastpath not available"
     TEST_LIST hipfile_system_tests
 )
 

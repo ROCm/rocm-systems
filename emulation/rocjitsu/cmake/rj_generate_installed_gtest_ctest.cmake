@@ -26,10 +26,12 @@ function(rj_generate_installed_gtest_ctest)
         message(FATAL_ERROR "OUTPUT_FILE is required")
     endif()
 
+    # RequestExitWakesAllPartitions is registered manually with a short
+    # timeout because its expected regression mode is a deadlocked process.
     execute_process(
         COMMAND
             "${ARG_TEST_EXECUTABLE}" --gtest_list_tests
-            "--gtest_filter=-*Benchmark*"
+            "--gtest_filter=-*Benchmark*:*RequestExitWakesAllPartitions*"
         RESULT_VARIABLE _result
         OUTPUT_VARIABLE _tests
         ERROR_VARIABLE _errors

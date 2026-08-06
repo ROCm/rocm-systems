@@ -233,9 +233,14 @@ choose_virtual_lds_temp_range(TranslationContext &context,
 /// @details Returns the first byte after the assigned temp slots so callers can
 /// reserve adjacent extra words for non-temp state, such as saved SGPR-pair
 /// values or a saved high address VGPR.
-uint32_t assign_virtual_lds_spill_offsets(TranslationContext &context,
-                                          const std::vector<VirtualLdsAddressTemp *> &temps,
-                                          uint32_t extra_dwords = 0) {
+///
+/// @returns The first byte past the assigned slots, or std::nullopt if the spill
+/// reservation overflows the 32-bit private segment (the caller must fail the
+/// lowering rather than emit save/restore at a wrapped offset).
+std::optional<uint32_t>
+assign_virtual_lds_spill_offsets(TranslationContext &context,
+                                 const std::vector<VirtualLdsAddressTemp *> &temps,
+                                 uint32_t extra_dwords = 0) {
   uint32_t spilled_count = 0;
   for (const VirtualLdsAddressTemp *temp : temps) {
     if (temp != nullptr && temp->spilled)
@@ -243,17 +248,19 @@ uint32_t assign_virtual_lds_spill_offsets(TranslationContext &context,
   }
   const uint32_t total_dwords = spilled_count + extra_dwords;
   if (total_dwords == 0)
-    return 0;
+    return 0u;
 
-  const uint32_t base_offset = context.reserve_semantic_spill_dwords(total_dwords);
+  const auto base_offset = context.reserve_semantic_spill_dwords(total_dwords);
+  if (!base_offset)
+    return std::nullopt;
   uint32_t index = 0;
   for (VirtualLdsAddressTemp *temp : temps) {
     if (temp == nullptr || !temp->spilled)
       continue;
-    temp->spill_offset = base_offset + index * sizeof(uint32_t);
+    temp->spill_offset = *base_offset + index * sizeof(uint32_t);
     ++index;
   }
-  return base_offset + spilled_count * sizeof(uint32_t);
+  return *base_offset + spilled_count * sizeof(uint32_t);
 }
 
 /// @brief Emit a CDNA3 flat-scratch store used to preserve a borrowed VGPR temp.
@@ -1202,8 +1209,13 @@ lower_cdna4_to_cdna3_virtual_lds_ds_instruction(const Instruction &inst,
       spill_temps.push_back(&(*base_spill_temps)[0]);
       spill_temps.push_back(&(*base_spill_temps)[1]);
     }
-    const uint32_t extra_spill_base_offset =
+    const auto extra_spill_base_offset_opt =
         assign_virtual_lds_spill_offsets(context, spill_temps, extra_spill_dwords);
+    if (!extra_spill_base_offset_opt)
+      return ExpandResult::failed(
+          std::string(inst.mnemonic()) +
+          ": virtual-LDS spill offset overflows the 32-bit private segment");
+    const uint32_t extra_spill_base_offset = *extra_spill_base_offset_opt;
     const uint32_t base_sgpr_save_offset = extra_spill_base_offset;
     uint32_t addr_high_spill_offset = 0;
     if (restore_addr_high) {
@@ -1431,8 +1443,13 @@ lower_cdna4_to_cdna3_virtual_lds_ds_instruction(const Instruction &inst,
       spill_temps.push_back(&(*base_spill_temps)[0]);
       spill_temps.push_back(&(*base_spill_temps)[1]);
     }
-    const uint32_t extra_spill_base_offset =
+    const auto extra_spill_base_offset_opt =
         assign_virtual_lds_spill_offsets(context, spill_temps, base_sgpr_spill_dwords + 1u);
+    if (!extra_spill_base_offset_opt)
+      return ExpandResult::failed(
+          std::string(inst.mnemonic()) +
+          ": virtual-LDS spill offset overflows the 32-bit private segment");
+    const uint32_t extra_spill_base_offset = *extra_spill_base_offset_opt;
     const uint32_t base_sgpr_save_offset = extra_spill_base_offset;
     const uint32_t addr_high_spill_offset =
         extra_spill_base_offset + base_sgpr_spill_dwords * sizeof(uint32_t);
@@ -1672,8 +1689,12 @@ lower_cdna4_to_cdna3_virtual_lds_ds_instruction(const Instruction &inst,
     spill_temps.push_back(&(*base_spill_temps)[0]);
     spill_temps.push_back(&(*base_spill_temps)[1]);
   }
-  const uint32_t extra_spill_base_offset =
+  const auto extra_spill_base_offset_opt =
       assign_virtual_lds_spill_offsets(context, spill_temps, extra_spill_dwords);
+  if (!extra_spill_base_offset_opt)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                ": virtual-LDS spill offset overflows the 32-bit private segment");
+  const uint32_t extra_spill_base_offset = *extra_spill_base_offset_opt;
   const uint32_t base_sgpr_save_offset = extra_spill_base_offset;
   // Save the source high half before any spill-per-use SGPR setup can borrow it
   // as a temporary. It is restored only after the borrowed SGPR pair is restored.

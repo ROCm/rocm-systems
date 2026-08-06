@@ -29,15 +29,13 @@ rocprofiler-compute/
 │       ├── gfx9_config_template.yaml    # CDNA (gfx9) panel contract
 │       └── gfx11_config_template.yaml   # RDNA 3.5 (gfx115*) panel contract
 │
-├── src/utils/
-│   ├── hash_checker.py
-│   ├── .config_hashes.json
-│
 └── tools/config_management/
     ├── master_config_workflow_script.py
     ├── parse_config_template.py
     ├── verify_against_config_template.py
     ├── hash_manager.py
+    ├── hash_checker.py
+    ├── .config_hashes.json
     └── README.md
 ```
 
@@ -55,11 +53,11 @@ analysis_configs/<arch>/*.yaml
 
 - Stored at:
 ```bash
-src/utils/.config_hashes.json
+tools/config_management/.config_hashes.json
 ```
 - Records md5 hashes of panel YAMLs per arch
 - Machine-generated only
-- Enforced in CI and pytest
+- Enforced by the pre-commit `hash-check` hook (see [Automated Testing](#automated-testing))
 
 ## Architecture Diagram (End-to-End Flow)
 ```text
@@ -142,14 +140,16 @@ This runs panel-file hash validation only.
 
 ## Automated Testing
 
-### Pytest Hash Integrity Test
+### Pre-commit Hash Consistency Hook
 
-Located at:
+Hash integrity is enforced automatically by the pre-commit `hash-check` hook,
+which runs `tools/config_management/hash_checker.py` on every commit touching
+the project. The same script can be run manually from the project root:
 ```bash
-tests/test_autogen_config.py
+python3 tools/config_management/hash_checker.py
 ```
 
-This test:
+This check:
 
 - parses `.config_hashes.json`
 - verifies **byte-for-byte** integrity of panel YAMLs

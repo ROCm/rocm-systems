@@ -25,8 +25,6 @@ pytestmark = [
 def rccl_env() -> dict[str, str]:
     """Environment variables for RCCL tests."""
     return {
-        "ROCPROFSYS_TRACE_LEGACY": "OFF",
-        "ROCPROFSYS_TRACE_CACHED": "ON",
         "ROCPROFSYS_PROFILE": "ON",
         "ROCPROFSYS_USE_SAMPLING": "OFF",
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",

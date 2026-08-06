@@ -21,9 +21,10 @@
  */
 
 #include "src/cuid_cpu.h"
-#include "src/acpi_parser.h"
 #include "src/cuid_file.h"
 #include "src/cuid_util.h"
+#include "src/hmac.h"
+#include "src/smbios_util.h"
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -203,15 +204,25 @@ amdcuid_status_t CuidCpu::discover(std::vector<DevicePtr> &cpus) {
   bool cpuid_available =
       get_cpuid_info(vendor_id, family, model, device_id, stepping);
 
-  // Create CPU device for each logical processor
+  // Group logical processors by physical package (socket). For each socket,
+  // pick the representative entry with the lowest APIC ID — this is the
+  // bootstrap processor convention used by firmware to represent the package.
+  std::map<int, const ProcCpuInfo *> socket_rep;
   for (const auto &proc_info : proc_cpus) {
+    auto it = socket_rep.find(proc_info.physical_id);
+    if (it == socket_rep.end() || proc_info.apic_id < it->second->apic_id) {
+      socket_rep[proc_info.physical_id] = &proc_info;
+    }
+  }
+
+  // Create one CPU device per physical socket using the representative entry.
+  for (const auto &kv : socket_rep) {
+    const ProcCpuInfo *rep = kv.second;
     amdcuid_cpu_info info{};
     std::memset(&info.header, 0, sizeof(info.header));
 
-    // Set device type
     info.header.device_type = AMDCUID_DEVICE_TYPE_CPU;
 
-    // Fill CPU fields per CUID design spec
     if (cpuid_available) {
       info.header.fields.cpu.vendor_id = vendor_id;
       info.header.fields.cpu.family = family;
@@ -219,31 +230,26 @@ amdcuid_status_t CuidCpu::discover(std::vector<DevicePtr> &cpus) {
       info.header.fields.cpu.device_id = device_id;
       info.header.fields.cpu.revision_id = stepping;
     } else {
-      // Fallback to /proc/cpuinfo values
-      info.header.fields.cpu.vendor_id = proc_info.is_amd ? 0x1022 : 0x8086;
-      info.header.fields.cpu.family = static_cast<uint16_t>(proc_info.family);
-      info.header.fields.cpu.model = static_cast<uint16_t>(proc_info.model);
+      info.header.fields.cpu.vendor_id = rep->is_amd ? 0x1022 : 0x8086;
+      info.header.fields.cpu.family = static_cast<uint16_t>(rep->family);
+      info.header.fields.cpu.model = static_cast<uint16_t>(rep->model);
       info.header.fields.cpu.device_id =
-          static_cast<uint16_t>((proc_info.family << 8) | proc_info.model);
-      info.header.fields.cpu.revision_id =
-          static_cast<uint8_t>(proc_info.stepping);
+          static_cast<uint16_t>((rep->family << 8) | rep->model);
+      info.header.fields.cpu.revision_id = static_cast<uint8_t>(rep->stepping);
     }
 
-    // UnitID from APIC ID (from /proc/cpuinfo, similar to MADT)
-    info.header.fields.cpu.unit_id = static_cast<uint16_t>(proc_info.apic_id);
+    // unit_id is the lowest APIC ID in this package — the bootstrap processor
+    // representative used by firmware to identify the socket.
+    info.header.fields.cpu.unit_id = static_cast<uint16_t>(rep->apic_id);
+    info.header.fields.cpu.physical_id = static_cast<uint16_t>(kv.first);
+    info.header.fields.cpu.core =
+        static_cast<uint16_t>(rep->processor); // logical CPU number
 
-    // Core and physical_id from /proc/cpuinfo
-    info.header.fields.cpu.core = static_cast<uint16_t>(proc_info.core_id);
-    info.header.fields.cpu.physical_id =
-        static_cast<uint16_t>(proc_info.physical_id);
-
-    // Store the sysfs device path using the logical processor number
-    // (not the APIC ID, which may differ on SMT systems)
+    // device_node points to the representative logical CPU's sysfs path.
     info.device_node =
-        "/sys/devices/system/cpu/cpu" + std::to_string(proc_info.processor);
+        "/sys/devices/system/cpu/cpu" + std::to_string(rep->processor);
 
-    auto cpu = std::make_shared<CuidCpu>(info);
-    cpus.emplace_back(cpu);
+    cpus.emplace_back(std::make_shared<CuidCpu>(info));
   }
 
   return AMDCUID_STATUS_SUCCESS;
@@ -362,45 +368,48 @@ static bool try_read_ppin(uint64_t &ppin, uint32_t core_id) {
 }
 
 /**
- * @brief Get hardware fingerprint for CPU, optionally with ACPI MADT data
+ * @brief Get hardware fingerprint for CPU at socket granularity.
  *
- * Requires root privileges for:
- * - ACPI MADT parsing (for processor UID)
- * - PPIN reading (from MSR)
+ * Priority:
+ * 1. PPIN (per-socket eFuse serial, requires root + firmware enablement)
+ * 2. SMBIOS system uuid + physical_id (platform-level, requires root)
+ *
+ * Both tiers produce a per-socket fingerprint consistent with the spec's
+ * intent that CPU identity is tied to the physical package, not logical cores.
  */
 amdcuid_status_t
 CuidCpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
-  // Try to get PPIN (Protected Processor Inventory Number) if available
+  // PPIN is an eFuse-burned per-socket serial number — the spec's primary
+  // identifier. The core argument only selects which MSR fd to open.
   uint64_t ppin = 0;
   if (try_read_ppin(ppin, m_info.header.fields.cpu.core)) {
-    fingerprint = ppin; // Use PPIN as primary fingerprint if available
+    fingerprint = ppin;
     return AMDCUID_STATUS_SUCCESS;
   }
 
-  // Try to get processor UID from ACPI MADT table
-  // This requires root to read /sys/firmware/acpi/tables/APIC
-  std::vector<AcpiCpuInfo> acpi_cpus;
-  amdcuid_status_t status = AcpiParser::parse_madt(acpi_cpus);
-
-  if (status == AMDCUID_STATUS_SUCCESS) {
-    // Find matching CPU by APIC ID
-    uint32_t target_apic_id = m_info.header.fields.cpu.unit_id;
-    for (const auto &acpi_info : acpi_cpus) {
-      if (acpi_info.apic_id == target_apic_id) {
-        // Use processor UID from ACPI as fingerprint
-        fingerprint = static_cast<uint64_t>(acpi_info.processor_uid) |
-                      (static_cast<uint64_t>(acpi_info.apic_id) << 32);
-        return AMDCUID_STATUS_SUCCESS;
-      }
-    }
+  // Fallback: SMBIOS system uuid hashed with the socket index (physical_id).
+  // physical_id combined with the platform uuid uniquely identifies
+  // "socket N on this board" for per-package scope.
+  uint8_t smbios_uuid[16] = {};
+  amdcuid_status_t status = SmbiosUtil::get_system_uuid(smbios_uuid);
+  if (status != AMDCUID_STATUS_SUCCESS) {
+    return status;
   }
 
-  // Fallback: Use combination of APIC ID and core/physical_id
-  fingerprint =
-      static_cast<uint64_t>(m_info.header.fields.cpu.core) |
-      (static_cast<uint64_t>(m_info.header.fields.cpu.unit_id) << 16) |
-      (static_cast<uint64_t>(m_info.header.fields.cpu.physical_id) << 32);
+  // Append physical_id as little-endian uint16_t so each socket on the same
+  // board produces distinct fingerprint.
+  uint16_t phys_id = m_info.header.fields.cpu.physical_id;
+  uint8_t input[18];
+  std::memcpy(input, smbios_uuid, 16);
+  std::memcpy(input + 16, &phys_id, sizeof(phys_id));
 
+  uint8_t digest[32];
+  status = sha256_unkeyed(input, sizeof(input), digest);
+  if (status != AMDCUID_STATUS_SUCCESS) {
+    return status;
+  }
+
+  std::memcpy(&fingerprint, digest, sizeof(fingerprint));
   return AMDCUID_STATUS_SUCCESS;
 }
 
@@ -418,9 +427,8 @@ amdcuid_status_t CuidCpu::get_primary_cuid(amdcuid_primary_id &id) const {
 
     CuidFileEntry entry;
 
-    // First, try lookup by device_node which is unique per logical CPU
-    // (package_core_id is not unique on SMT systems where sibling threads
-    // share the same physical_id:core_id)
+    // Primary lookup: device_node points to the representative logical CPU
+    // sysfs path for this socket (set during discover()).
     if (!m_info.device_node.empty()) {
       status = primary_file.find_by_device_node(m_info.device_node, entry);
       if (status == AMDCUID_STATUS_SUCCESS && entry.is_temporary == false) {
@@ -431,33 +439,27 @@ amdcuid_status_t CuidCpu::get_primary_cuid(amdcuid_primary_id &id) const {
       }
     }
 
-    // Fallback: try lookup by package_core_id for backward compatibility
-    // with files that don't have device_node for CPU entries
-    std::string package_core_id =
-        std::to_string(m_info.header.fields.cpu.physical_id) + ":" +
-        std::to_string(m_info.header.fields.cpu.core);
-    status = primary_file.find_by_package_core_id(package_core_id, entry);
+    status = primary_file.find_by_package_id(
+        m_info.header.fields.cpu.physical_id, entry);
     if (status == AMDCUID_STATUS_SUCCESS && entry.is_temporary == false) {
       id.UUIDv8_representation = entry.primary_cuid;
       CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
       return AMDCUID_STATUS_SUCCESS;
     }
 
-    // Get hardware fingerprint (PPIN, ACPI UID, or fallback)
+    // Get hardware fingerprint (PPIN or SMBIOS serial + socket index)
     status = get_hardware_fingerprint(fingerprint);
   }
   if (geteuid() != 0 || status != AMDCUID_STATUS_SUCCESS) {
-    // if hardware fingerprint is not available, use physical_id + core +
-    // machine_id as fallback, but set a flag bit to indicate it's not a true
-    // hardware fingerprint
-    std::ifstream machine_id_file("/etc/machine-id");
-    if (!machine_id_file.is_open()) {
+    // Non-root or fingerprint unavailable: use socket index + machine-id as
+    // a stable but non-hardware fallback, flagged as temporary.
+    std::string socket_id =
+        "socket:" + std::to_string(m_info.header.fields.cpu.physical_id);
+    amdcuid_status_t fb_status =
+        CuidUtilities::make_fallback_fingerprint(socket_id, fingerprint);
+    if (fb_status != AMDCUID_STATUS_SUCCESS) {
       return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
     }
-    std::string physical_core_id =
-        std::to_string(m_info.header.fields.cpu.physical_id) + ":" +
-        std::to_string(m_info.header.fields.cpu.core);
-    CuidUtilities::make_fallback_fingerprint(physical_core_id, fingerprint);
     temp = true;
   }
 
