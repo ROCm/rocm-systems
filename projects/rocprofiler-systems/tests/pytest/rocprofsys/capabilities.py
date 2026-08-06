@@ -291,9 +291,14 @@ class SystemCapabilities:
 
     @persistent_cached_property
     def ptrace_scope(self) -> int:
-        """Get the value of the ptrace_scope kernel parameter."""
+        """Get the value of the ptrace_scope kernel parameter.
+
+        A missing file means yama is not active and ptrace is unrestricted, so
+        it maps to 0. A file that exists but cannot be read or parsed maps to
+        the most restrictive value, since yama is active with an unknown scope.
+        """
         if not Path("/proc/sys/kernel/yama/ptrace_scope").exists():
-            return 3
+            return 0
         try:
             return int(Path("/proc/sys/kernel/yama/ptrace_scope").read_text().strip())
         except (OSError, ValueError):
@@ -301,52 +306,67 @@ class SystemCapabilities:
 
     @persistent_cached_property
     def perf_event_paranoid(self) -> int:
-        """Get the value of the perf_event_paranoid kernel parameter."""
+        """Get the value of the perf_event_paranoid kernel parameter.
+
+        Defaults to 2 when the file is absent or unreadable, matching the
+        runtime default in ``source/lib/core/config.cpp``.
+        """
         if not Path("/proc/sys/kernel/perf_event_paranoid").exists():
-            return 4
+            return 2
         try:
             return int(Path("/proc/sys/kernel/perf_event_paranoid").read_text().strip())
         except (OSError, ValueError):
-            return 4
+            return 2
+
+    # Do not cache this
+    def _has_capability(self, name: str) -> bool:
+        """Whether this process holds ``name`` in its effective capability set.
+
+        ``name`` is any ``CAP_*`` identifier accepted by ``rocprof-sys-capchk``,
+        which exits 0 when the capability is held, 1 when it is not, and 2 when
+        the name is unknown to the kernel headers it was built against.
+        """
+        capchk = self.rocprofsys_tests_dir / "rocprof-sys-capchk"
+        if not capchk.exists():
+            return False
+        try:
+            result = subprocess.run(
+                [capchk, name, "effective"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            return result.returncode == 0
+        except (subprocess.SubprocessError, OSError):
+            return False
 
     @persistent_cached_property
     def cap_sys_admin(self) -> bool:
         """Get the value of the CAP_SYS_ADMIN capability."""
-        capchk = self.rocprofsys_tests_dir / "rocprof-sys-capchk"
-        if not capchk.exists():
-            return False
-        try:
-            result = subprocess.run(
-                [capchk, "CAP_SYS_ADMIN", "effective"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode != 0:
-                return False
-            return result.stdout.strip() == "1"
-        except (subprocess.SubprocessError, OSError):
-            return False
+        return self._has_capability("CAP_SYS_ADMIN")
 
     @persistent_cached_property
     def cap_perfmon(self) -> bool:
         """Get the value of the CAP_PERFMON capability."""
-        capchk = self.rocprofsys_tests_dir / "rocprof-sys-capchk"
-        if not capchk.exists():
-            return False
-        try:
-            result = subprocess.run(
-                [capchk, "CAP_PERFMON", "effective"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode != 0:
-                return False
+        return self._has_capability("CAP_PERFMON")
 
-            return result.stdout.strip() == "1"
-        except (subprocess.SubprocessError, OSError):
+    @persistent_cached_property
+    def cap_sys_ptrace(self) -> bool:
+        """Get the value of the CAP_SYS_PTRACE capability."""
+        return self._has_capability("CAP_SYS_PTRACE")
+
+    @persistent_cached_property
+    def ptrace_attach_usable(self) -> bool:
+        """Whether a non-descendant process can be attached to with ptrace.
+
+        Mirrors yama's ``ptrace_access_check``: scope 3 denies unconditionally,
+        scope 0 allows unconditionally, and scopes 1-2 are bypassed by
+        CAP_SYS_PTRACE. Note that being uid 0 is not sufficient -- container
+        root does not hold CAP_SYS_PTRACE unless it is explicitly granted.
+        """
+        if self.ptrace_scope >= 3:
             return False
+        return self.ptrace_scope == 0 or self.cap_sys_ptrace
 
     @persistent_cached_property
     def perf_events_usable(self) -> bool:
@@ -356,10 +376,10 @@ class SystemCapabilities:
         hardware/software counters and overflow sampling. It mirrors the
         runtime gate in ``source/lib/core/config.cpp``, which disables PAPI
         when ``/proc/sys/kernel/perf_event_paranoid`` is greater than 2 unless
-        ``CAP_SYS_ADMIN`` is held. Note the runtime does not consult
-        ``CAP_PERFMON``, so it is intentionally not checked here.
+        CAP_PERFMON or CAP_SYS_ADMIN is held -- the same pair the kernel's
+        ``perfmon_capable()`` accepts.
         """
-        return self.perf_event_paranoid <= 2 or self.cap_sys_admin
+        return self.perf_event_paranoid <= 2 or self.cap_sys_admin or self.cap_perfmon
 
     @persistent_cached_property
     def papi_availability(self) -> bool:

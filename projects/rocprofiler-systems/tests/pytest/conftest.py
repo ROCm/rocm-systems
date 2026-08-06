@@ -336,6 +336,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "minimal",
         "rank_filter",
         "pytest_impl",
+        "conditions",
     ]
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
@@ -740,7 +741,10 @@ def pytest_sessionfinish(session, exitstatus):
 def overflow_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     if rocprof_config.capabilities.perf_events_usable:
         return None
-    return "Requires either perf_event_paranoid <= 2 or CAP_SYS_ADMIN to be available"
+    return (
+        "Requires either perf_event_paranoid <= 2 or CAP_PERFMON/CAP_SYS_ADMIN "
+        "to be available"
+    )
 
 
 def gpu_unavailable_reason() -> Optional[str]:
@@ -760,11 +764,11 @@ def annotate_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[st
 
 
 def attach_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    if rocprof_config.capabilities.ptrace_scope == 0:
+    if rocprof_config.capabilities.ptrace_attach_usable:
         return None
     return (
-        "Requires ptrace_scope to be 0. Run 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope' "
-        "to enable attaching to process"
+        "Requires either ptrace_scope to be 0 or CAP_SYS_PTRACE to be available "
+        f"(ptrace_scope is {rocprof_config.capabilities.ptrace_scope})"
     )
 
 
@@ -772,7 +776,10 @@ def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     caps = rocprof_config.capabilities
     if caps.papi_nic_events is not None and caps.perf_events_usable:
         return None
-    return "Requires PAPI network events and perf_event_paranoid <= 2 (or CAP_SYS_ADMIN) to be available"
+    return (
+        "Requires PAPI network events and perf_event_paranoid <= 2 "
+        "(or CAP_PERFMON/CAP_SYS_ADMIN) to be available"
+    )
 
 
 def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
@@ -1605,8 +1612,10 @@ def _build_rocprofsys_config_header() -> list[str]:
         _row("Perf event paranoid:", cap.perf_event_paranoid),
         _row("CAP_SYS_ADMIN:", cap.cap_sys_admin),
         _row("CAP_PERFMON:", cap.cap_perfmon),
+        _row("CAP_SYS_PTRACE:", cap.cap_sys_ptrace),
         _row("Perf events usable:", cap.perf_events_usable),
         _row("Ptrace scope:", cap.ptrace_scope),
+        _row("Ptrace attach usable:", cap.ptrace_attach_usable),
         _row("Is inside docker:", rocprof_config.capabilities.is_inside_docker),
         _row("PAPI available:", cap.papi_availability),
         _row("AI NIC devices:", cap.ai_nic_devices),
