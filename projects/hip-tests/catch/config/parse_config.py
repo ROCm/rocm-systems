@@ -89,6 +89,7 @@ def generate_parameter_header(cmd_options, output_path):
         f.write("// DO NOT EDIT - This file is generated at build time\n")
         f.write("// Contains compile-time test parameters for each level\n\n")
         f.write("#pragma once\n\n")
+        f.write("#include <array>\n")
         f.write("#include <vector>\n")
         f.write("#include <cstddef>\n")
         f.write("#include <string>\n")
@@ -107,33 +108,33 @@ def generate_parameter_header(cmd_options, output_path):
             # Memory sizes
             if "memory_sizes" in options:
                 sizes = [parse_size_string(s) for s in options["memory_sizes"]]
-                f.write(f"inline const std::vector<size_t> {level_name}_memory_sizes = {{\n")
+                f.write(f"inline constexpr std::array<size_t, {len(sizes)}> {level_name}_memory_sizes = {{\n")
                 f.write("    " + ",\n    ".join(str(s) for s in sizes) + "\n")
                 f.write("};\n\n")
             
             # Block sizes
             if "block_sizes" in options:
                 sizes = options["block_sizes"]
-                f.write(f"inline const std::vector<int> {level_name}_block_sizes = {{\n")
+                f.write(f"inline constexpr std::array<int, {len(sizes)}> {level_name}_block_sizes = {{\n")
                 f.write("    " + ", ".join(str(s) for s in sizes) + "\n")
                 f.write("};\n\n")
             
             # Iterations
             if "iterations" in options:
-                f.write(f"inline const int {level_name}_iterations = {options['iterations']};\n\n")
+                f.write(f"inline constexpr int {level_name}_iterations = {options['iterations']};\n\n")
             
             # Warmups
             if "warmups" in options:
-                f.write(f"inline const int {level_name}_warmups = {options['warmups']};\n\n")
+                f.write(f"inline constexpr int {level_name}_warmups = {options['warmups']};\n\n")
             
             # Max memory
             if "max_memory" in options:
                 max_mem = parse_size_string(str(options["max_memory"]))
-                f.write(f"inline const size_t {level_name}_max_memory = {max_mem};\n\n")
+                f.write(f"inline constexpr size_t {level_name}_max_memory = {max_mem};\n\n")
             
             # Reduction factor
             if "reduction_factor" in options:
-                f.write(f"inline const double {level_name}_reduction_factor = {options['reduction_factor']};\n\n")
+                f.write(f"inline constexpr double {level_name}_reduction_factor = {options['reduction_factor']};\n\n")
         
         # Generate LevelParameters struct and initialization function
         f.write(f"// {'=' * 76}\n")
@@ -155,8 +156,10 @@ def generate_parameter_header(cmd_options, output_path):
         for level_name in levels_found:
             f.write(f"    // {level_name}\n")
             f.write(f"    params[\"{level_name}\"] = {{\n")
-            f.write(f"        {level_name}_memory_sizes,\n")
-            f.write(f"        {level_name}_block_sizes,\n")
+            f.write(f"        std::vector<size_t>({level_name}_memory_sizes.begin(), "
+                    f"{level_name}_memory_sizes.end()),\n")
+            f.write(f"        std::vector<int>({level_name}_block_sizes.begin(), "
+                    f"{level_name}_block_sizes.end()),\n")
             f.write(f"        {level_name}_iterations,\n")
             f.write(f"        {level_name}_warmups,\n")
             f.write(f"        {level_name}_max_memory,\n")
