@@ -178,17 +178,17 @@ class IpcOnImpl {
    * @param[in] pe       Target PE id
    * @return Address of the corresponding data in PE 'pe'
    */
-  __device__ __forceinline__ char *ipcPeerPtr(const void *sym_addr, int my_pe,
-                                               int pe) {
+  __device__ __forceinline__ char *ipcPeerPtr(
+      const void *sym_addr, [[maybe_unused]] int my_pe, int pe) {
     uintptr_t addr = reinterpret_cast<uintptr_t>(sym_addr);
-    uintptr_t heap_base = reinterpret_cast<uintptr_t>(ipc_bases[my_pe]);
+    uintptr_t heap_base = constmem.heap_base;
 
     /*
      * Common case: the address lives in the symmetric heap. Translate it
      * directly and skip the registered-buffer search. The single unsigned
      * compare also rejects addresses below the heap base (they wrap large).
      */
-    if (addr - heap_base < heap_size) {
+    if (addr - heap_base < constmem.heap_size) {
       return ipc_bases[pe] + (addr - heap_base);
     }
 
