@@ -65,6 +65,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
@@ -188,6 +189,15 @@ TEST(IsaPropertiesTest, DescriptorVgprGranuleRejectsUnsupportedInputs) {
       descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_CDNA2, 32).has_value());
   EXPECT_FALSE(
       descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_GFX1250, 64).has_value());
+}
+
+TEST(CommandProcessorTest, ConfigureForCdna2UsesEightVgprDescriptorGranule) {
+  amdgpu::CommandProcessor command_processor("cdna2_command_processor");
+  command_processor.set_vgpr_granularity(4);
+
+  command_processor.configure_for_arch(ROCJITSU_CODE_ARCH_CDNA2);
+
+  EXPECT_EQ(command_processor.vgpr_granularity(), 8u);
 }
 
 class Rdna3MemoryTestCu
