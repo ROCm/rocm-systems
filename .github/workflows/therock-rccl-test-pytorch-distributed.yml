@@ -119,9 +119,10 @@ jobs:
           TORCH_NCCL_BLOCKING_WAIT: 1
           TORCH_NCCL_ASYNC_ERROR_HANDLING: 1
           NOTIFY_EMAIL: ${{ inputs.notify_email }}
-          # Falls back to repo secret for scheduled runs (no input webhook).
+          # workflow_dispatch (manual): only send if user explicitly provides a webhook.
+          # workflow_call (automated CI): fall back to repo secret.
           # Empty on forked PRs (secrets unavailable) — script skips gracefully.
-          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook || secrets.RCCL_CI_TEAMS_WEBHOOK }}
+          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook || (github.event_name != 'workflow_dispatch' && secrets.RCCL_CI_TEAMS_WEBHOOK) || '' }}
         run: |
           # The dynamic linker caches LD_LIBRARY_PATH at process startup.
           # PyTorch's import chain (rocm_sdk.preload_libraries -> ctypes.CDLL)
