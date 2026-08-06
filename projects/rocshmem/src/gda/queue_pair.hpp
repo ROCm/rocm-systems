@@ -356,17 +356,20 @@ namespace QueuePairOption {
   /* forward declaration */
   template <typename... Options> struct PostOpt;
 
-  /* deduction guide, required before C++20 */
-#if __clang_major__ < 22
   /* Clang versions < 22 implicitly treats deduction guides as __host__ functions
-   * unless marked otherwise by explicit attributes */
+   * unless marked otherwise by explicit attributes.
+   *
+   * Clang versions >= 22 implicitly treats all deduction guides as __host__ __device__
+   * and issues a warning when they have explicit attributes.
+   * See https://clang.llvm.org/docs/HIPSupport.html#deduction-guides for details.
+   *
+   * Disable this warning so that Clang >= 22 doesn't cause issues;
+   * remove the attributes once we no longer support older compiler versions. */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-attributes"
+  /* deduction guide, required before C++20 */
   template <typename... Options> __host__ __device__ PostOpt(Options...) -> PostOpt<Options...>;
-#else
-  /* Clang versions >= 22 implicitly treats all deduction guides as __host__ __device__
-   * and issues a warning when they have explicit attributes
-   * see https://clang.llvm.org/docs/HIPSupport.html#deduction-guides */
-  template <typename... Options> PostOpt(Options...) -> PostOpt<Options...>;
-#endif // __clang_major__
+#pragma clang diagnostic pop
 
   /* Base case with all options defined */
   template <bool ring_db, bool thread_safe, bool check_sq, UpdateThread update_cq>
