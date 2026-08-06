@@ -200,6 +200,7 @@ if(BUILD_TESTS)
     CpuAffinityTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
+    IbvSymbolsEnvTests.cpp
     common/main.cpp
     common/CallCollectiveForked.cpp
     common/CollectiveArgs.cpp
@@ -223,6 +224,7 @@ if(BUILD_TESTS)
     list(APPEND TEST_SOURCE_FILES
       ../src/misc/recorder.cc
       ../src/misc/proxy_trace/proxy_trace.cc
+      ../src/misc/ibvsymbols.cc  # buildIbvSymbols() is hidden in librccl; compile it in for IbvSymbolsEnvTests
     )
   endif()
 
@@ -359,6 +361,7 @@ if(BUILD_TESTS)
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
       EnqueueTests.cpp
+      LL128RegVariantKernelTests.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
       TopoNicFusionTests.cpp
