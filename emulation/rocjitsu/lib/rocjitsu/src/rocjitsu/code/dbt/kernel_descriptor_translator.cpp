@@ -457,8 +457,8 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   return arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250;
 }
 
-[[nodiscard]] uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch,
-                                                                 uint32_t wavefront_size) {
+[[nodiscard]] std::optional<uint32_t>
+descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefront_size) {
   // This is the AMDHSA kernel-descriptor encoding granularity for
   // COMPUTE_PGM_RSRC1.GRANULATED_WORKITEM_VGPR_COUNT, not the physical VGPR
   // allocation block from the ISA manuals. For example, RDNA3/RDNA4 manuals
@@ -699,15 +699,21 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   // rounded up. The granularity depends on both ISA family and wave size, so the
   // source count must be decoded with the guest granularity and re-encoded with
   // the host granularity.
-  const uint32_t guest_vgpr_granularity =
+  const auto guest_vgpr_granularity =
       descriptor_vgpr_granularity_for_wavefront(guest_arch, result.guest_wavefront_size);
-  const uint32_t host_vgpr_granularity =
+  const auto host_vgpr_granularity =
       descriptor_vgpr_granularity_for_wavefront(host_arch, result.host_wavefront_size);
+  if (!guest_vgpr_granularity || !host_vgpr_granularity)
+    append_descriptor_error(
+        result, "guest or host architecture does not support the selected wavefront size");
 
   const uint32_t guest_vgpr_granulated =
       AMDHSA_BITS_GET(src.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+  // Keep best-effort descriptor diagnostics deterministic after recording the
+  // unsupported pair above. A one-register granule preserves the encoded lower
+  // bound without pretending that the pair has a valid AMDGPU ABI granularity.
   result.guest_vgpr_allocation_count =
-      granulated_count_to_registers(guest_vgpr_granulated, guest_vgpr_granularity);
+      granulated_count_to_registers(guest_vgpr_granulated, guest_vgpr_granularity.value_or(1));
   result.guest_vgpr_count = result.guest_vgpr_allocation_count;
   if (arch_has_accvgpr(guest_arch) && result.accvgpr_base != 0 &&
       result.guest_vgpr_allocation_count > result.accvgpr_base) {
@@ -823,7 +829,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   }
 
   result.target_vgpr_granulated = clamp_granulated(
-      register_count_to_granulated(required_vgpr_allocation, host_vgpr_granularity),
+      register_count_to_granulated(required_vgpr_allocation, host_vgpr_granularity.value_or(1)),
       kMaxVgprGranulatedField, result, "GRANULATED_WORKITEM_VGPR_COUNT");
 
   // SGPR counts are also stored as a granulated value, but the descriptor

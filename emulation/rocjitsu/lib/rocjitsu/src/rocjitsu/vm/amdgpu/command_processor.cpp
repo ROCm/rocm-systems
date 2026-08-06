@@ -38,8 +38,11 @@ namespace rocjitsu {
 namespace amdgpu {
 
 void CommandProcessor::configure_for_arch(rj_code_arch_t arch) {
-  vgpr_granularity_ =
-      descriptor_vgpr_count_granule_for_wavefront(arch, isa_properties(arch).wave_size);
+  if (const auto granularity =
+          descriptor_vgpr_count_granule_for_wavefront(arch, isa_properties(arch).wave_size))
+    vgpr_granularity_ = *granularity;
+  // Unsupported non-AMDGPU architectures retain the constructor default; this
+  // command processor is not used to execute those ISAs.
 
   // Matches LLVM's FeaturePackedTID: gfx90a and later CDNA targets, plus
   // GFX11 and later RDNA targets, receive work-item IDs packed in v0.

@@ -89,7 +89,6 @@
 #include <mutex>
 #include <shared_mutex>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -173,19 +172,22 @@ TEST(IsaPropertiesTest, DescriptorVgprGranuleSupportsEveryAmdgpuWavefrontMode) {
       ExpectedGranule{ROCJITSU_CODE_ARCH_GFX1250, 32, 16},
   };
 
-  for (const auto &[arch, wavefront_size, granule] : cases)
-    EXPECT_EQ(descriptor_vgpr_count_granule_for_wavefront(arch, wavefront_size), granule);
+  for (const auto &[arch, wavefront_size, granule] : cases) {
+    const auto actual = descriptor_vgpr_count_granule_for_wavefront(arch, wavefront_size);
+    ASSERT_TRUE(actual.has_value());
+    EXPECT_EQ(*actual, granule);
+  }
 }
 
 TEST(IsaPropertiesTest, DescriptorVgprGranuleRejectsUnsupportedInputs) {
-  EXPECT_THROW((void)descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_RV32I, 32),
-               std::invalid_argument);
-  EXPECT_THROW((void)descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_RV64I, 64),
-               std::invalid_argument);
-  EXPECT_THROW((void)descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_CDNA2, 32),
-               std::invalid_argument);
-  EXPECT_THROW((void)descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_GFX1250, 64),
-               std::invalid_argument);
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_RV32I, 32).has_value());
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_RV64I, 64).has_value());
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_CDNA2, 32).has_value());
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_GFX1250, 64).has_value());
 }
 
 class Rdna3MemoryTestCu
