@@ -159,7 +159,7 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${IS_DISABLED}
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PASS_REGULAR_EXPRESSION
-        "Attachment adding environment variable: ROCPROFILER_TEST_FORWARDING=preserved"
+        "Attachment test observed ROCPROFILER_TEST_FORWARDING=preserved"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 # Verify absolute tool library paths fail early when target-side dlopen could not resolve
