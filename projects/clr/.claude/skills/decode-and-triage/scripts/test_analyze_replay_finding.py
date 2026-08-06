@@ -153,6 +153,31 @@ class RecordedCaptureTests(unittest.TestCase):
         self.assertEqual(finding.failing_call_index, 41310)
         self.assertEqual(finding.failing_api, "hipLaunchKernel")
 
+    def test_queue_abort_is_not_a_hang(self) -> None:
+        """Recorded from an out-of-bounds ATen gather replayed on gfx950.
+
+        The queue aborts with a hardware exception. Reading that as a hang
+        sends the reader after stalled work that never existed.
+        """
+        finding = self._analyze("replay_queue_abort_aten.log")
+        self.assertNotEqual(finding.fault_class, "hang")
+        self.assertEqual(finding.fault_class, "replay_aborted")
+        self.assertEqual(finding.outcome, "ABORT")
+        self.assertTrue(
+            any("HSA_STATUS_ERROR_EXCEPTION" in n for n in finding.notes),
+            f"expected the raw HSA status in the notes, got {finding.notes}",
+        )
+
+    def test_queue_abort_keeps_the_kernel_it_named(self) -> None:
+        """That bracket carries a kernel but no faulting address."""
+        finding = self._analyze("replay_queue_abort_aten.log")
+        self.assertIn("indexSelectSmallIndex", finding.kernel_name or "")
+        self.assertEqual(finding.kernel_family, "pytorch_kernel")
+        self.assertTrue(
+            any("hipLaunchByPtr" in n for n in finding.notes),
+            f"expected the ATen caveat, got {finding.notes}",
+        )
+
     def test_unreadable_archive_records_both_versions(self) -> None:
         finding = self._analyze("version_mismatch.log")
         self.assertEqual(finding.fault_class, "version_mismatch")

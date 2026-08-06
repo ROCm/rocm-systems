@@ -1,0 +1,14 @@
+[HRR] Archive has no clean-shutdown trailer (capture likely crashed); recovered 2727 events
+[HRR] NOOP playback handler called for hipDevicePrimaryCtxGetState — this API is not replayed; results may differ from capture.
+[HRR progress] elapsed_s=0.0 seq=1301 kernels=1 d2h_pass=0 d2h_fail=0 d2h_attempted=0 last="_ZN2at6native29vectorized_elementwise_kernelILi4ENS0_11FillFunctorIfEESt5arrayIPcLm1EEEEviT0_T1_"
+Queue error: HSA_STATUS_ERROR_EXCEPTION: An HSAIL operation resulted in a hardware exception.
+GPU coredump: Pipe handler '/usr/share/apport/apport' not found or not executable.
+Falling back to file-based dump. Set HSA_COREDUMP_PATTERN to override.
+VGPU=0x5617c727ec30 SWq=0x7f69e8266000, HWq=0x7f6109e00000, id=1
+	Dispatch Header =0xb02 (type=2, barrier=1, acquire=1, release=1), setup=3
+	grid=[256, 1, 1], workgroup=[256, 1, 1]
+	private_seg_size=0, group_seg_size=0
+	kernel_obj=0x7f69de8aaa40, kernarg_address=0x0x7f60fea00100
+	completion_signal=0x0
+	rptr=18, wptr=20
+:0:rocdevice.cpp            :4312: 3445930657021 us:  Callback: Queue 0x7f6109e00000 aborting with error : HSA_STATUS_ERROR_EXCEPTION: An HSAIL operation resulted in a hardware exception. code: 0x1016 [host: 3d890059944d, GPU index: 0, kernel: void at::native::(anonymous namespace)::indexSelectSmallIndex<float, long, unsigned int, 2, 2, -2>(at::cuda::detail::TensorInfo<float, unsigned int>, at::cuda::detail::TensorInfo<float const, unsigned int>, at::cuda::detail::TensorInfo<long const, unsigned int>, int, int, unsigned int, long)]

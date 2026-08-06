@@ -172,11 +172,18 @@ native. Use `--no-replay` for metadata-only (no GPU).
 | `PASS` | Replay completed; D2H checks passed |
 | `MAF` | GPU memory access fault during replay |
 | `FAIL` | Replay finished but validation failed (e.g. D2H mismatch) |
-| `ABORT` | Replay stopped early (fatal API, version mismatch, user abort) |
+| `ABORT` | Replay stopped early (fatal API, version mismatch, queue abort, user abort) |
 | `UNKNOWN` | Insufficient signal to classify (e.g. metadata-only triage, missing log) |
 
 When outcome is `UNKNOWN` or fault class is `unknown`, say so explicitly in the
 summary — do not invent a fault type.
+
+An HSA queue abort (`HSA_STATUS_ERROR_EXCEPTION`, `ABORTED`, `MEMORY_FAULT`) is
+not a hang: `MEMORY_FAULT` is a fault and the other two are hardware exceptions,
+which an out-of-bounds access raises. The abort line carries the kernel but no
+faulting address, so read the kernel from there. A genuine hang shows up as no
+progress against the clock, which needs a replay timeout this skill does not
+have; do not report one on the strength of an HSA status alone.
 
 ### A faulting ATen kernel needs the original failure signature
 
