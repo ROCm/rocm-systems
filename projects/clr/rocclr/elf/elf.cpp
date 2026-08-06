@@ -800,45 +800,74 @@ bool Elf::dumpImage(std::istream& is, char** buff, size_t* len) const {
   return true;
 }
 
-uint64_t Elf::getElfSize(const void* emi) {
+uint64_t Elf::getElfSize(const void* emi, const size_t buf_size) {
+  // Fail closed: never parse without a known upper bound on the buffer.
+  if (emi == nullptr || buf_size <= EI_CLASS) {
+    return 0;
+  }
   const unsigned char eclass = static_cast<const unsigned char*>(emi)[EI_CLASS];
-  uint64_t total_size = 0;
-  if (eclass == ELFCLASS32) {
-    auto ehdr = static_cast<const Elf32_Ehdr*>(emi);
-    auto shdr = reinterpret_cast<const Elf32_Shdr*>(static_cast<const char*>(emi) + ehdr->e_shoff);
+  // Only 64-bit AMDGPU code objects are supported.
+  if (eclass != ELFCLASS64 || buf_size < sizeof(Elf64_Ehdr)) {
+    return 0;
+  }
 
-    auto max_offset = ehdr->e_shoff;
-    total_size = max_offset + ehdr->e_shentsize * ehdr->e_shnum;
+  // end = off + sz, returns false on overflow.
+  auto checked_end = [](uint64_t off, uint64_t sz, uint64_t& end) -> bool {
+#if __has_builtin(__builtin_add_overflow)
+    return !__builtin_add_overflow(off, sz, &end);
+#else
+    if (off > ~uint64_t(0) - sz) return false;
+    end = off + sz;
+    return true;
+#endif
+  };
 
-    for (decltype(ehdr->e_shnum) i = 0; i < ehdr->e_shnum; ++i) {
-      auto cur_offset = shdr[i].sh_offset;
-      if (max_offset < cur_offset) {
-        max_offset = cur_offset;
-        total_size = max_offset;
-        if (SHT_NOBITS != shdr[i].sh_type) {
-          total_size += shdr[i].sh_size;
-        }
-      }
+  auto ehdr = static_cast<const Elf64_Ehdr*>(emi);
+  uint64_t total_size = sizeof(Elf64_Ehdr);
+
+  // Validate and bound the section-header table before any dereference.
+  if (ehdr->e_shnum != 0) {
+    if (ehdr->e_shentsize != sizeof(Elf64_Shdr) || ehdr->e_shoff >= buf_size) {
+      return 0;
     }
-  } else if (eclass == ELFCLASS64) {
-    auto ehdr = static_cast<const Elf64_Ehdr*>(emi);
+    uint64_t shtab = static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr);
+    if (shtab > buf_size - ehdr->e_shoff) {
+      return 0;
+    }
+    if (ehdr->e_shoff + shtab > total_size) total_size = ehdr->e_shoff + shtab;
+
     auto shdr = reinterpret_cast<const Elf64_Shdr*>(static_cast<const char*>(emi) + ehdr->e_shoff);
-
-    auto max_offset = ehdr->e_shoff;
-    total_size = max_offset + ehdr->e_shentsize * ehdr->e_shnum;
-
-    for (decltype(ehdr->e_shnum) i = 0; i < ehdr->e_shnum; ++i) {
-      auto cur_offset = shdr[i].sh_offset;
-      if (max_offset < cur_offset) {
-        max_offset = cur_offset;
-        total_size = max_offset;
-        if (SHT_NOBITS != shdr[i].sh_type) {
-          total_size += shdr[i].sh_size;
-        }
-      }
+    for (uint64_t i = 0; i < ehdr->e_shnum; ++i) {
+      if (SHT_NOBITS == shdr[i].sh_type) continue;
+      uint64_t end;
+      if (!checked_end(shdr[i].sh_offset, shdr[i].sh_size, end)) return 0;
+      if (end > buf_size) return 0;
+      if (end > total_size) total_size = end;
     }
   }
-  return total_size;
+
+  // Validate and bound the program-header table before any dereference.
+  if (ehdr->e_phnum != 0) {
+    if (ehdr->e_phentsize != sizeof(Elf64_Phdr) || ehdr->e_phoff >= buf_size) {
+      return 0;
+    }
+    uint64_t phtab = static_cast<uint64_t>(ehdr->e_phnum) * sizeof(Elf64_Phdr);
+    if (phtab > buf_size - ehdr->e_phoff) {
+      return 0;
+    }
+    if (ehdr->e_phoff + phtab > total_size) total_size = ehdr->e_phoff + phtab;
+
+    auto phdr = reinterpret_cast<const Elf64_Phdr*>(static_cast<const char*>(emi) + ehdr->e_phoff);
+    for (uint64_t i = 0; i < ehdr->e_phnum; ++i) {
+      if (PT_NULL == phdr[i].p_type) continue;
+      uint64_t end;
+      if (!checked_end(phdr[i].p_offset, phdr[i].p_filesz, end)) return 0;
+      if (end > buf_size) return 0;
+      if (end > total_size) total_size = end;
+    }
+  }
+
+  return (total_size > buf_size) ? 0 : total_size;
 }
 
 bool Elf::isElfMagic(const char* p) {

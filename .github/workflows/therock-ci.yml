@@ -205,7 +205,8 @@ jobs:
     with:
       projects_to_test: "hip-tests, rocrtst"
       amdgpu_families: gfx125X-dcgpu
-      test_runs_on: linux-mi455-gpu-rocm
+      # MI455 machine is down - disabled until back online (was: linux-mi455-gpu-rocm)
+      test_runs_on: ""
       platform: linux
       artifact_run_id: ${{ github.run_id }}
 

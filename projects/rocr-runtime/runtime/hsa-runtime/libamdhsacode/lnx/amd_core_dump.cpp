@@ -345,10 +345,11 @@ static hsa_status_t build_lightweight_coredump_ranges(MemoryRegionFilter& filter
 
       debug_print("Added CWSR area range: %#" PRIx64 " - %#" PRIx64 " (size: %zu)\n",
                   reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader),
-                  reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader) + queue_info.SaveAreaSizeInBytes,
-                  queue_info.SaveAreaSizeInBytes);
+                  reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader)
+                    + (queue_info.SaveAreaAllocSize * gpu_agent->properties().NumXcc),
+                  queue_info.SaveAreaAllocSize * gpu_agent->properties().NumXcc);
       filter.add_range(reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader),
-                       queue_info.SaveAreaSizeInBytes);
+                       queue_info.SaveAreaAllocSize * gpu_agent->properties().NumXcc);
     }
   }
 
@@ -425,7 +426,7 @@ static bool GetCoreQueueInfo(AMD::AqlQueue* queue, kfd_queue_snapshot_entry& ent
     return false;
   }
   entry.ctx_save_restore_address = (uint64_t)queue_info.SaveAreaHeader;
-  entry.ctx_save_restore_area_size = (uint32_t)queue_info.SaveAreaSizeInBytes;
+  entry.ctx_save_restore_area_size = (uint32_t)queue_info.SaveAreaAllocSize;
 
   return true;
 }

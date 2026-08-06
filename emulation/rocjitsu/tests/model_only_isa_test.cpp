@@ -5,36 +5,30 @@
 /// @brief Link and decode smoke test for the narrow model-only ISA boundary.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <memory>
-#include <stdexcept>
 
 namespace rocjitsu {
-
-// A fixed-profile DBT frontend provides its own narrow factory instead of
-// linking the all-architecture decoder registry.
-std::unique_ptr<Decoder> Decoder::create(rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250)
-    return nullptr;
-  return std::make_unique<IsaDecoder<gfx1250::Isa>>();
-}
-
 namespace {
 
 TEST(ModelOnlyIsaTest, DecodesWithoutExecutionCallback) {
   constexpr uint32_t kSNop = 0xBF800000u;
   constexpr uint32_t kVMovB32V0V1 = 0x7E000301u;
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  const IsaTargetRegistry &registry = default_isa_target_registry();
+  ASSERT_EQ(registry.targets().size(), 1u);
+  EXPECT_EQ(registry.targets()[0].id, "gfx1250");
+  EXPECT_FALSE(registry.targets()[0].supports_execution);
+
+  std::unique_ptr<Decoder> decoder = Decoder::create(registry, ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  EXPECT_EQ(Decoder::create(ROCJITSU_CODE_ARCH_RDNA4), nullptr);
-  EXPECT_THROW(gfx1250::Operand::require_execution_backend(), std::logic_error);
+  EXPECT_EQ(Decoder::create(registry, ROCJITSU_CODE_ARCH_RDNA4), nullptr);
 
   std::unique_ptr<Instruction> inst(decoder->decode(&kSNop));
   ASSERT_NE(inst, nullptr);

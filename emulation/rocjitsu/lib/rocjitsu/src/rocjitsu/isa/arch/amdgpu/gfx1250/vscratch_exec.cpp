@@ -23,8 +23,6 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-const bool ScratchLoadU8Vscratch::execute_registered_ = register_exec_fn<ScratchLoadU8Vscratch>();
-
 void ScratchLoadU8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -39,8 +37,6 @@ void ScratchLoadU8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool ScratchLoadI8Vscratch::execute_registered_ = register_exec_fn<ScratchLoadI8Vscratch>();
 
 void ScratchLoadI8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -58,8 +54,6 @@ void ScratchLoadI8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ScratchLoadU16Vscratch::execute_registered_ = register_exec_fn<ScratchLoadU16Vscratch>();
-
 void ScratchLoadU16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -74,8 +68,6 @@ void ScratchLoadU16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool ScratchLoadI16Vscratch::execute_registered_ = register_exec_fn<ScratchLoadI16Vscratch>();
 
 void ScratchLoadI16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -93,8 +85,6 @@ void ScratchLoadI16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ScratchLoadB32Vscratch::execute_registered_ = register_exec_fn<ScratchLoadB32Vscratch>();
-
 void ScratchLoadB32Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -109,8 +99,6 @@ void ScratchLoadB32Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool ScratchLoadB64Vscratch::execute_registered_ = register_exec_fn<ScratchLoadB64Vscratch>();
 
 void ScratchLoadB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -127,8 +115,6 @@ void ScratchLoadB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ScratchLoadB96Vscratch::execute_registered_ = register_exec_fn<ScratchLoadB96Vscratch>();
-
 void ScratchLoadB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -144,9 +130,6 @@ void ScratchLoadB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ScratchLoadB128Vscratch::execute_registered_ =
-    register_exec_fn<ScratchLoadB128Vscratch>();
-
 void ScratchLoadB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -161,8 +144,6 @@ void ScratchLoadB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool ScratchStoreB8Vscratch::execute_registered_ = register_exec_fn<ScratchStoreB8Vscratch>();
 
 void ScratchStoreB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -188,9 +169,6 @@ void ScratchStoreB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ScratchStoreB16Vscratch::execute_registered_ =
-    register_exec_fn<ScratchStoreB16Vscratch>();
-
 void ScratchStoreB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 2;
@@ -215,9 +193,6 @@ void ScratchStoreB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ScratchStoreB32Vscratch::execute_registered_ =
-    register_exec_fn<ScratchStoreB32Vscratch>();
-
 void ScratchStoreB32Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
@@ -241,9 +216,6 @@ void ScratchStoreB32Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool ScratchStoreB64Vscratch::execute_registered_ =
-    register_exec_fn<ScratchStoreB64Vscratch>();
 
 void ScratchStoreB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -270,9 +242,6 @@ void ScratchStoreB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool ScratchStoreB96Vscratch::execute_registered_ =
-    register_exec_fn<ScratchStoreB96Vscratch>();
 
 void ScratchStoreB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -301,9 +270,6 @@ void ScratchStoreB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool ScratchStoreB128Vscratch::execute_registered_ =
-    register_exec_fn<ScratchStoreB128Vscratch>();
 
 void ScratchStoreB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -335,9 +301,6 @@ void ScratchStoreB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ScratchLoadD16U8Vscratch::execute_registered_ =
-    register_exec_fn<ScratchLoadD16U8Vscratch>();
-
 void ScratchLoadD16U8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -353,9 +316,6 @@ void ScratchLoadD16U8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool ScratchLoadD16I8Vscratch::execute_registered_ =
-    register_exec_fn<ScratchLoadD16I8Vscratch>();
 
 void ScratchLoadD16I8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -374,9 +334,6 @@ void ScratchLoadD16I8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ScratchLoadD16B16Vscratch::execute_registered_ =
-    register_exec_fn<ScratchLoadD16B16Vscratch>();
-
 void ScratchLoadD16B16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -393,9 +350,6 @@ void ScratchLoadD16B16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ScratchLoadD16HiU8Vscratch::execute_registered_ =
-    register_exec_fn<ScratchLoadD16HiU8Vscratch>();
-
 void ScratchLoadD16HiU8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -411,9 +365,6 @@ void ScratchLoadD16HiU8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool ScratchLoadD16HiI8Vscratch::execute_registered_ =
-    register_exec_fn<ScratchLoadD16HiI8Vscratch>();
 
 void ScratchLoadD16HiI8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -432,9 +383,6 @@ void ScratchLoadD16HiI8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ScratchLoadD16HiB16Vscratch::execute_registered_ =
-    register_exec_fn<ScratchLoadD16HiB16Vscratch>();
-
 void ScratchLoadD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -450,9 +398,6 @@ void ScratchLoadD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool ScratchStoreD16HiB8Vscratch::execute_registered_ =
-    register_exec_fn<ScratchStoreD16HiB8Vscratch>();
 
 void ScratchStoreD16HiB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -479,9 +424,6 @@ void ScratchStoreD16HiB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ScratchStoreD16HiB16Vscratch::execute_registered_ =
-    register_exec_fn<ScratchStoreD16HiB16Vscratch>();
-
 void ScratchStoreD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 2;
@@ -507,9 +449,6 @@ void ScratchStoreD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ScratchLoadBlockVscratch::execute_registered_ =
-    register_exec_fn<ScratchLoadBlockVscratch>();
-
 void ScratchLoadBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -524,9 +463,6 @@ void ScratchLoadBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool ScratchStoreBlockVscratch::execute_registered_ =
-    register_exec_fn<ScratchStoreBlockVscratch>();
 
 void ScratchStoreBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);

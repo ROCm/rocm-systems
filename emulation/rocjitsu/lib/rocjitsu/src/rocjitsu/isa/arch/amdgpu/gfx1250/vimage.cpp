@@ -12,7 +12,7 @@ namespace gfx1250 {
 
 TensorLoadToLdsVimage::TensorLoadToLdsVimage(const MachineInst *inst)
     : Vimage("tensor_load_to_lds", reinterpret_cast<const OpEncoding *>(inst),
-             registered_exec_fn<TensorLoadToLdsVimage>()),
+             selected_exec_fn(1437)),
       vaddr0(128, OperandType::OPR_SGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr0),
       vaddr1(256, OperandType::OPR_SGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr1),
       vaddr2(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vaddr2),
@@ -27,7 +27,7 @@ TensorLoadToLdsVimage::TensorLoadToLdsVimage(const MachineInst *inst)
 
 TensorStoreFromLdsVimage::TensorStoreFromLdsVimage(const MachineInst *inst)
     : Vimage("tensor_store_from_lds", reinterpret_cast<const OpEncoding *>(inst),
-             registered_exec_fn<TensorStoreFromLdsVimage>()),
+             selected_exec_fn(1438)),
       vaddr0(128, OperandType::OPR_SGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr0),
       vaddr1(256, OperandType::OPR_SGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr1),
       vaddr2(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vaddr2),

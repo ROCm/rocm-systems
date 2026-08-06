@@ -91,3 +91,22 @@ Input (video file) -> Demuxing (FFmpeg or bitstream reader) -> Parsing (codec-sp
 - MIT license header block required on all C/C++ and CMake files
 - Compiler: `amdclang++` from ROCm toolchain
 - Release: `-O3 -DNDEBUG -fPIC`; Debug: `-O0 -gdwarf-4` (Valgrind compatible)
+
+## Validation after code changes
+
+When source files under `api/`, `src/`, `utils/`, or `samples/` have been modified,
+offer to run the `/validate` skill (full build + CTest + conformance sweep) so the change
+is verified.
+
+This is a soft prompt, not an enforced gate. To keep it from becoming noisy, follow these
+rules:
+
+- **Ask once, at the end.** Wait until a logical batch of edits is complete and you are
+  wrapping up the task; then ask a single time whether to run `/validate`. Do not ask after
+  every individual edit.
+- **Only when it matters.** Ask only if files under `api/`/`src/`/`utils/`/`samples/`
+  actually changed this session. Documentation-only, test-script-only, or `.claude/`-only
+  changes do not need validation.
+- **Don't repeat.** If `/validate` has already been run, or the developer has declined the
+  offer this session, don't ask again unless further source changes are made afterward.
+- **Let the developer decide.** If they decline, proceed without running it.

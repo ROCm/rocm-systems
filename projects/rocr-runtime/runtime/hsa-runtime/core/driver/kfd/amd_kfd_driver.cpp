@@ -350,7 +350,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     // no need to map
     // For local memory, only map it to the owning GPU. Mapping to other GPU,
     // if the access is allowed, is performed on AllowAccess.
-    HsaMemMapFlags map_flag = m_region.map_flags();
+    HsaMemFlags mem_flags = m_region.mem_flags();
     size_t map_node_count = 1;
     const uint32_t owner_node_id = m_region.owner()->node_id();
     const uint32_t *map_node_id = &owner_node_id;
@@ -384,7 +384,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     uint64_t alternate_va = 0;
 
     const bool is_resident = (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(
-                                  mem, size, &alternate_va, map_flag, map_node_count,
+                                  mem, size, &alternate_va, mem_flags, map_node_count,
                                   const_cast<uint32_t*>(map_node_id))) == HSAKMT_STATUS_SUCCESS);
 
     // On Windows/DXG, allow allocations to succeed even if MakeResident
@@ -955,7 +955,7 @@ hsa_status_t KfdDriver::DeregisterMemory(void* ptr) const {
 }
 
 hsa_status_t KfdDriver::MakeMemoryResident(const void* mem, size_t size, uint64_t* alternate_va,
-                                           const HsaMemMapFlags* mem_flags, uint32_t num_nodes,
+                                           const HsaMemFlags* mem_flags, uint32_t num_nodes,
                                            const uint32_t* nodes) const {
   if (mem_flags == nullptr && nodes == nullptr) {
     if (HSAKMT_CALL(hsaKmtMapMemoryToGPU(const_cast<void*>(mem), size, alternate_va)) !=

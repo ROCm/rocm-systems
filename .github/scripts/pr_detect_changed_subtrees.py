@@ -35,6 +35,8 @@ import argparse
 import json
 import logging
 import os
+import re
+import subprocess
 import sys
 from typing import List, Optional, Set
 from github_cli_client import GitHubCLIClient
@@ -42,6 +44,12 @@ from repo_config_model import RepoEntry
 from config_loader import load_repo_config
 
 logger = logging.getLogger(__name__)
+
+
+def assert_valid_commit_sha(sha: str) -> str:
+    """Ensure only full commit SHAs are passed to git subprocesses."""
+    assert re.fullmatch(r"[0-9a-f]{40}", sha), f"Invalid commit SHA: {sha!r}"
+    return sha
 
 
 def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -151,13 +159,19 @@ def main(argv=None) -> None:
             "REST API failed or returned no changed files. Falling back to SHA-based Git diff..."
         )
         try:
-            pr_data = os.popen(f"gh api repos/{args.repo}/pulls/{args.pr}").read()
+            pr_data = subprocess.check_output(
+                ["gh", "api", f"repos/{args.repo}/pulls/{args.pr}"],
+                text=True,
+            )
             pr = json.loads(pr_data)
-            base_sha = pr["base"]["sha"]
-            head_sha = pr["head"]["sha"]
+            base_sha = assert_valid_commit_sha(pr["base"]["sha"])
+            head_sha = assert_valid_commit_sha(pr["head"]["sha"])
             logger.debug(f"Base SHA: {base_sha}, Head SHA: {head_sha}")
-            os.system(f"git fetch origin {base_sha} {head_sha}")
-            result = os.popen(f"git diff --name-only {base_sha} {head_sha}").read()
+            subprocess.check_call(["git", "fetch", "origin", base_sha, head_sha])
+            result = subprocess.check_output(
+                ["git", "diff", "--name-only", base_sha, head_sha],
+                text=True,
+            )
             changed_files = result.strip().splitlines()
             logger.info(f"Fallback changed files (SHA-based): {changed_files}")
         except Exception as e:

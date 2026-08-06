@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/encodings.h"
+#include <cstring>
 #include <string>
 
 namespace rocjitsu {
@@ -169,6 +170,8 @@ Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exe
     size_ += 2 * sizeof(MachineInst);
   else if (!default_encoding())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 void Vop1::implicit_uses(RegisterSet &uses) const {
@@ -183,6 +186,20 @@ void Vop1::implicit_uses(RegisterSet &uses) const {
         if (auto ref = dst->to_register_ref())
           if (ref->cls == RegClass::VGPR)
             uses.expand(*ref);
+}
+
+void Vop1::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  bool sdwa_preserve =
+      sdwa_dst_sel_ != amdgpu::sdwa::DWORD && sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE;
+  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
+                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  if (sdwa_preserve || dpp_partial)
+    for (int i = 0; i < num_dst_operands(); ++i)
+      if (const auto *dst = dst_operand(i))
+        if (auto ref = dst->to_register_ref())
+          if (ref->cls == RegClass::VGPR)
+            operands.push_back(dst);
 }
 
 bool Vop1::default_encoding() {
@@ -208,6 +225,8 @@ Vopc::Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exe
     size_ += 2 * sizeof(MachineInst);
   else if (!default_encoding())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Vopc::default_encoding() {
@@ -237,6 +256,8 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   if (hasImpliedLiteral())
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 void Vop2::implicit_uses(RegisterSet &uses) const {
@@ -251,6 +272,20 @@ void Vop2::implicit_uses(RegisterSet &uses) const {
         if (auto ref = dst->to_register_ref())
           if (ref->cls == RegClass::VGPR)
             uses.expand(*ref);
+}
+
+void Vop2::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  bool sdwa_preserve =
+      sdwa_dst_sel_ != amdgpu::sdwa::DWORD && sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE;
+  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
+                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  if (sdwa_preserve || dpp_partial)
+    for (int i = 0; i < num_dst_operands(); ++i)
+      if (const auto *dst = dst_operand(i))
+        if (auto ref = dst->to_register_ref())
+          if (ref->cls == RegClass::VGPR)
+            operands.push_back(dst);
 }
 
 bool Vop2::default_encoding() {
@@ -293,6 +328,10 @@ Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exe
       has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||
       has_lit_0_and_has_lit_1_and_has_lit_2())
     size_ += sizeof(MachineInst);
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
+    size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 void Vop3::implicit_uses(RegisterSet &uses) const {
@@ -305,6 +344,18 @@ void Vop3::implicit_uses(RegisterSet &uses) const {
         if (auto ref = dst->to_register_ref())
           if (ref->cls == RegClass::VGPR)
             uses.expand(*ref);
+}
+
+void Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
+                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  if (dpp_partial)
+    for (int i = 0; i < num_dst_operands(); ++i)
+      if (const auto *dst = dst_operand(i))
+        if (auto ref = dst->to_register_ref())
+          if (ref->cls == RegClass::VGPR)
+            operands.push_back(dst);
 }
 
 bool Vop3::has_lit_0() {
@@ -359,6 +410,10 @@ Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn 
       has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||
       has_lit_0_and_has_lit_1_and_has_lit_2())
     size_ += sizeof(MachineInst);
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
+    size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 void Vop3p::implicit_uses(RegisterSet &uses) const {
@@ -371,6 +426,18 @@ void Vop3p::implicit_uses(RegisterSet &uses) const {
         if (auto ref = dst->to_register_ref())
           if (ref->cls == RegClass::VGPR)
             uses.expand(*ref);
+}
+
+void Vop3p::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
+                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  if (dpp_partial)
+    for (int i = 0; i < num_dst_operands(); ++i)
+      if (const auto *dst = dst_operand(i))
+        if (auto ref = dst->to_register_ref())
+          if (ref->cls == RegClass::VGPR)
+            operands.push_back(dst);
 }
 
 bool Vop3p::has_lit_0() {
@@ -508,6 +575,10 @@ Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst
       has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||
       has_lit_0_and_has_lit_1_and_has_lit_2())
     size_ += sizeof(MachineInst);
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
+    size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 void Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
@@ -520,6 +591,18 @@ void Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
         if (auto ref = dst->to_register_ref())
           if (ref->cls == RegClass::VGPR)
             uses.expand(*ref);
+}
+
+void Vop3SdstEnc::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
+                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  if (dpp_partial)
+    for (int i = 0; i < num_dst_operands(); ++i)
+      if (const auto *dst = dst_operand(i))
+        if (auto ref = dst->to_register_ref())
+          if (ref->cls == RegClass::VGPR)
+            operands.push_back(dst);
 }
 
 bool Vop3SdstEnc::has_lit_0() {
