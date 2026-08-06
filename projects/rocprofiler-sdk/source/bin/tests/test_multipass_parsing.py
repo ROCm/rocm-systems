@@ -98,5 +98,87 @@ def test_parse_input_text_uses_pmc_subdir(rocprofv3, tmp_path):
     assert [j["sub_directory"] for j in jobs] == ["pmc_", "pmc_"]
 
 
+@pytest.mark.parametrize(
+    "cli_multipass,num_jobs,cli_has_pmc,input_has_pmc,expected",
+    [
+        (True, 1, True, False, "multiple --pmc flags"),
+        (False, 2, False, True, "multiple input-file jobs"),
+        (False, 1, True, True, "--pmc combined with input-file pmc"),
+        (True, 3, True, True, "multiple --pmc flags"),
+        (False, 1, True, False, None),
+        (False, 1, False, True, None),
+        (False, 0, False, False, None),
+    ],
+)
+def test_multipass_source(
+    rocprofv3, cli_multipass, num_jobs, cli_has_pmc, input_has_pmc, expected
+):
+    assert (
+        rocprofv3.multipass_source(cli_multipass, num_jobs, cli_has_pmc, input_has_pmc)
+        == expected
+    )
+
+
+def test_no_guard_for_single_pass(rocprofv3):
+    assert rocprofv3.multipass_incompatible_message(None, 12345, ["0:100:1"]) is None
+
+
+def test_no_guard_without_incompatible_option(rocprofv3):
+    assert (
+        rocprofv3.multipass_incompatible_message("multiple --pmc flags", None, None)
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "multiple --pmc flags",
+        "multiple input-file jobs",
+        "--pmc combined with input-file pmc",
+    ],
+)
+def test_guard_reports_the_actual_source(rocprofv3, source):
+    assert rocprofv3.multipass_incompatible_message(source, 12345, None) == (
+        f"Multi-pass counter collection ({source}) is not compatible "
+        "with attach mode (--pid)"
+    )
+    assert rocprofv3.multipass_incompatible_message(source, None, ["0:100:1"]) == (
+        f"Multi-pass counter collection ({source}) is not compatible "
+        "with --collection-period"
+    )
+
+
+def test_guard_reports_pid_before_collection_period(rocprofv3):
+    assert "attach mode (--pid)" in rocprofv3.multipass_incompatible_message(
+        "multiple --pmc flags", 12345, ["0:100:1"]
+    )
+
+
+def test_first_set_attr_finds_value_in_later_job(rocprofv3):
+    jobs = [
+        rocprofv3.dotdict({"pmc": ["SQ_WAVES"]}),
+        rocprofv3.dotdict({"pmc": ["GRBM_COUNT"], "pid": 12345}),
+    ]
+    assert rocprofv3.first_set_attr(jobs, "pid") == 12345
+
+
+def test_first_set_attr_prefers_the_earliest_job(rocprofv3):
+    jobs = [
+        rocprofv3.dotdict({"collection_period": ["0:100:1"]}),
+        rocprofv3.dotdict({"collection_period": ["1:200:2"]}),
+    ]
+    assert rocprofv3.first_set_attr(jobs, "collection_period") == ["0:100:1"]
+
+
+def test_first_set_attr_returns_none_when_unset(rocprofv3):
+    jobs = [rocprofv3.dotdict({"pmc": ["SQ_WAVES"]})]
+    assert rocprofv3.first_set_attr(jobs, "pid") is None
+
+
+def test_first_set_attr_handles_no_input_file(rocprofv3):
+    assert rocprofv3.first_set_attr([rocprofv3.dotdict({})], "pid") is None
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main(["-x", __file__] + sys.argv[1:]))
