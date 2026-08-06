@@ -611,6 +611,18 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   hipError_t r = hrr_playback_dispatch[etype](ctx, ev.raw_payload.data());
 
   if (r != hipSuccess) {
+    if (ctx.continue_on_error) {
+      ctx.events_failed.fetch_add(1, std::memory_order_relaxed);
+      if (log)
+        fprintf(stderr, "[HRR] Error: T%llu Event %zu (%s) returned %d (%s) — continuing\n",
+                (unsigned long long)ev.header().thread_id, idx,
+                hrr::event_type_name(etype), r, hipGetErrorString(r));
+      // Swallow the error so the pass keeps going. The runtime's sticky error
+      // state would otherwise resurface on an unrelated later call and be
+      // reported against the wrong event.
+      (void)hipGetLastError();
+      return hipSuccess;
+    }
     ctx.fatal_error.store(true, std::memory_order_release);
     if (log)
       fprintf(stderr, "[HRR] Fatal: T%llu Event %zu (%s) returned %d (%s) — aborting replay\n",
@@ -918,6 +930,12 @@ static void print_usage(const char* argv0) {
     "                        the archive is not modified.\n"
     "  --sync-after-launch   hipDeviceSynchronize after every kernel launch\n"
     "  --sync-after-event    hipDeviceSynchronize after EVERY event (slowest, most precise)\n"
+    "  --continue-on-error   Do not stop at the first failing event: report it and\n"
+    "                        keep replaying. Use to survey which APIs in an\n"
+    "                        archive fail, not to reproduce a fault: later events\n"
+    "                        run in a state the capture never had, so their\n"
+    "                        results mean less the further past the first error\n"
+    "                        they are.\n"
     "  --sync-watchdog-ms N  Abort with a diagnostic if any device synchronize does\n"
     "                        not complete within N ms (catches hung/deadlocked\n"
     "                        kernels, e.g. StreamK flag spin-waits). 0 = disabled.\n"
@@ -965,6 +983,7 @@ int main(int argc, char** argv) {
     else if (!strcmp(argv[i], "--timing"))            ctx.timing             = true;
     else if (!strcmp(argv[i], "--sync-after-launch")) ctx.sync_after_launch  = true;
     else if (!strcmp(argv[i], "--sync-after-event"))  ctx.sync_after_event   = true;
+    else if (!strcmp(argv[i], "--continue-on-error")) ctx.continue_on_error  = true;
     else if (!strcmp(argv[i], "--sync-watchdog-ms") && i + 1 < argc) {
       char* end = nullptr;
       unsigned long long n = std::strtoull(argv[++i], &end, 10);
@@ -1224,6 +1243,16 @@ int main(int argc, char** argv) {
          ctx.d2h_attempted.load() - ctx.d2h_pass.load() - ctx.d2h_fail.load());
 
   bool ok = (ctx.d2h_fail == 0);
+
+  // --continue-on-error turns what would have been a hard stop into a count.
+  // It must still be reported, and it must still fail the run: a replay that
+  // stepped over ten broken APIs did not reproduce the capture.
+  if (ctx.events_failed.load() > 0) {
+    printf("[HRR]   Events failed  : %zu (continued past each)\n",
+           ctx.events_failed.load());
+    ok = false;
+  }
+
   if (ctx.d2h_pass == 0 && ctx.d2h_fail == 0) {
     if (ctx.d2h_attempted > 0) {
       // D2H events with captured blobs existed, but every validation was skipped
