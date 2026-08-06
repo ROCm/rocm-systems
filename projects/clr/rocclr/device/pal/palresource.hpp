@@ -449,8 +449,9 @@ class Resource {
                    bool forceLinear = false  //!< forces linear tiling for images
   );
 
-  /*! \brief Reopens an imported external buffer (Vulkan/D3D image interop) as a shared image so PAL
-   *   applies the driver's real tiling, then builds the SRD. Used for the ImageExternalBuffer path.
+  /*! \brief Reopens an imported external buffer (Vulkan/D3D12 image interop) as a shared image so
+   *   PAL applies the driver's real tiling, then builds the SRD. Used for the ImageExternalBuffer
+   *   path.
    *
    *  \return True if we successfully created the shared image and SRD
    */
@@ -523,8 +524,9 @@ class Resource {
   uint32_t glType_;             //!< GL interop type
   void* glPlatformContext_;
 
-  //! External shared handle retained from a Vulkan/D3D interop import so an image created on this
-  //! imported buffer can be reopened as a shared image (letting PAL apply the driver's tiling).
+  //! External shared handle retained from a Vulkan/D3D12 interop import so an image created on
+  //! this imported buffer can be reopened as a shared image (letting PAL apply the driver's
+  //! tiling).
   Pal::OsExternalHandle sharedHandle_ = 0;
   bool sharedNtHandle_ = false;
 

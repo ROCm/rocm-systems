@@ -651,7 +651,7 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
   }
   ImgSubresRange.numMips = desc().mipLevels_;
 
-  // Vulkan/D3D image interop imported via an external buffer: reopen as a shared image so PAL uses
+  // Vulkan/D3D12 image interop imported via an external buffer: reopen as a shared image so PAL uses
   // the driver's real tiling. See CreateImageFromExternalBuffer.
   if (memoryType() == ImageExternalBuffer) {
     return CreateImageFromExternalBuffer(format, channels, viewInfo, ImgSubresRange);

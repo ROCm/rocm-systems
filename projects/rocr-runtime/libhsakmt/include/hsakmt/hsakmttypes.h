@@ -621,26 +621,20 @@ typedef struct _HsaGraphicsResourceInfo {
 // resource's VCAM_SURFACE_DESC is available. Provides swizzle mode as a fallback for when
 // the DXX extension (CLQueryResource11/CLQueryResource) or GL extension(wglResourceAttachAMD)
 // is not available.
+// The interop layer (clr) copies this blob opaquely into the ROCr image descriptor's data[] dwords
+// (starting at data[0]) when a full SRD is not available (Windows Vulkan image interop). clr does NOT
+// interpret any field — it stamps the descriptor's version with
+// HSA_AMD_IMAGE_DESC_VERSION_WDDM_SURFACE_METADATA (defined in hsa_ext_amd.h) and memcpy's the bytes.
+// The gfx image managers cast data[] back to HsaWddmSurfaceMetadata and interpret the surface fields
+// to reconstruct the SRD. The `version` field below is unused (retained for ABI stability).
 typedef struct _HsaWddmSurfaceMetadata {
-    HSAuint32 version;           // Always 1
+    HSAuint32 version;           // Unused. clr stamps the descriptor version directly.
     HSAuint32 swizzle_mode;      // VCAM_SURFACE_DESC.swizzleMode (union value)
     HSAuint32 tile_swizzle;      // VCAM_SURFACE_DESC.ulTileSwizzle (pipe-bank XOR)
     HSAuint32 compression_mode;  // VCAM_SURFACE_DESC.ulCompressionMode (0 = uncompressed). gfx12+.
     HSAuint32 max_comp_blk;      // VCAM_SURFACE_DESC.maxCompressedBlockSize. gfx12+.
     HSAuint32 max_uncomp_blk;    // VCAM_SURFACE_DESC.maxUncompressedBlockSize. gfx12+.
 } HsaWddmSurfaceMetadata;
-
-// Fallback slots inside the ROCr image descriptor's data[] dword array where the interop layer
-// (clr) stashes the imported surface's swizzle mode / pipe-bank-XOR when a full SRD is not
-// available (Vulkan image interop on Windows). The gfx image manager reads these to reconstruct
-// the SRD. Chosen at the tail of the 64-dword data region to avoid colliding with SRD words
-// (data[0..7]) and mip offsets (data[8..]).
-#define HSA_WDDM_SWIZZLE_MODE_DATA_OFFSET  62
-#define HSA_WDDM_TILE_SWIZZLE_DATA_OFFSET  63
-// gfx12 compression state, adjacent to the swizzle slots at the tail of data[] (see above).
-#define HSA_WDDM_COMPRESSION_MODE_DATA_OFFSET  61
-#define HSA_WDDM_MAX_COMP_BLK_DATA_OFFSET      60
-#define HSA_WDDM_MAX_UNCOMP_BLK_DATA_OFFSET    59
 
 typedef enum _HSA_CACHING_TYPE
 {

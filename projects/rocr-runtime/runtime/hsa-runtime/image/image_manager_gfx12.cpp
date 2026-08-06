@@ -51,7 +51,7 @@
 #include "core/inc/runtime.h"
 #include "inc/hsa_ext_amd.h"
 #include "core/inc/hsa_internal.h"
-#include "hsakmt/hsakmt.h"  // HSA_WDDM_{SWIZZLE_MODE,TILE_SWIZZLE}_DATA_OFFSET
+#include "hsakmt/hsakmt.h"
 #include "core/util/utils.h"
 #include "addrlib/src/core/addrlib.h"
 #include "image_runtime.h"
@@ -299,14 +299,15 @@ hsa_status_t ImageManagerGfx12::PopulateImageSrd(Image& image,
   // below assumes GL/D3D already filled the SRD words and would leave dims = 0 for an empty desc.
   // (Tiled surfaces are handled by the swizzle-forced mipmap path, PopulateMipmapSrd/BuildMipmapSrd.)
   {
-    const uint32_t* raw = reinterpret_cast<const uint32_t*>(descriptor);
-    const bool srd_words_present =
-        (desc->word0.u32All | desc->word1.u32All | desc->word2.u32All | desc->word3.u32All |
-         desc->word4.u32All | desc->word5.u32All | desc->word6.u32All | desc->word7.u32All) != 0;
-    const uint32_t forced_sw_mode = raw[2 + HSA_WDDM_SWIZZLE_MODE_DATA_OFFSET];
-    const uint32_t max_comp_blk = raw[2 + HSA_WDDM_MAX_COMP_BLK_DATA_OFFSET];
-    const uint32_t max_uncomp_blk = raw[2 + HSA_WDDM_MAX_UNCOMP_BLK_DATA_OFFSET];
-    if (!srd_words_present && forced_sw_mode == 0 && (max_comp_blk != 0 || max_uncomp_blk != 0)) {
+    // clr wrote the surface-metadata blob at the start of the data[] region (metadata_amd_t::words).
+    const auto* meta = reinterpret_cast<const HsaWddmSurfaceMetadata*>(descriptor->words);
+    const uint32_t forced_sw_mode = meta->swizzle_mode;
+    const uint32_t max_comp_blk = meta->max_comp_blk;
+    const uint32_t max_uncomp_blk = meta->max_uncomp_blk;
+    // Reconstruct only when the descriptor carries a WDDM surface-metadata blob (version sentinel)
+    // AND the surface is LINEAR (swizzle 0). Tiled surfaces take the mipmap/BuildMipmapSrd path.
+    if (ClassifyInteropDescriptor(descriptor) == InteropDescriptorContent::kReconstructFromMetadata &&
+        forced_sw_mode == 0) {
       image.tile_mode = Image::TileMode::LINEAR;
       hsa_status_t st = PopulateImageSrd(image);  // native LINEAR build: dims / pitch / SW_MODE
       if (st != HSA_STATUS_SUCCESS) return st;
@@ -994,17 +995,20 @@ hsa_status_t ImageManagerGfx12::FillImage(const Image& image, const void* patter
 }
 
 hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const {
-  return BuildMipmapSrd(mipmap, std::nullopt, 0);
+  return BuildMipmapSrd(mipmap, nullptr);
 }
 
 hsa_status_t ImageManagerGfx12::BuildMipmapSrd(MipmappedArray& mipmap,
-                                               std::optional<uint32_t> forced_sw_mode,
-                                               uint32_t tile_swizzle,
-                                               uint32_t compression_mode,
-                                               uint32_t max_comp_blk,
-                                               uint32_t max_uncomp_blk) const {
+                                               const HsaWddmSurfaceMetadata* meta) const {
   // Imported surface (Vulkan image interop): force the driver-supplied ADDR3 swizzle and inject its
-  // pipe-bank-XOR, instead of letting addrlib pick its best-fit tiling.
+  // pipe-bank-XOR, instead of letting addrlib pick its best-fit tiling. meta==nullptr is the original
+  // (non-interop) path.
+  const std::optional<uint32_t> forced_sw_mode =
+      meta ? std::optional<uint32_t>(meta->swizzle_mode) : std::nullopt;
+  const uint32_t tile_swizzle = meta ? meta->tile_swizzle : 0u;
+  const uint32_t compression_mode = meta ? meta->compression_mode : 0u;
+  const uint32_t max_comp_blk = meta ? meta->max_comp_blk : 0u;
+  const uint32_t max_uncomp_blk = meta ? meta->max_uncomp_blk : 0u;
   const bool imported = forced_sw_mode.has_value();
 
   // Map format/geometry to hardware encoding
@@ -1213,22 +1217,11 @@ hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap_array, 
   // GL/D3D interop fill a real SRD via wglResourceAttachAMD/CLQueryResource and may also carry
   // swizzle metadata; those must keep their exact driver-supplied SRD and never be reconstructed
   // here.
-  {
-    // gfx12 uses ADDR3 swizzle modes: ADDR3_LINEAR (== 0) up to ADDR3_MAX_TYPE - 1.
-    // +2 skips the {version, deviceID} header; HSA_WDDM_*_DATA_OFFSET (hsakmt/hsakmttypes.h) index
-    // the data[] region, matching the slots clr writes on the interop map.
-    const uint32_t* raw = reinterpret_cast<const uint32_t*>(desc);
-    const uint32_t forced_sw_mode = raw[2 + HSA_WDDM_SWIZZLE_MODE_DATA_OFFSET];
-    const uint32_t tile_swizzle = raw[2 + HSA_WDDM_TILE_SWIZZLE_DATA_OFFSET];
-    const uint32_t compression_mode = raw[2 + HSA_WDDM_COMPRESSION_MODE_DATA_OFFSET];
-    const uint32_t max_comp_blk = raw[2 + HSA_WDDM_MAX_COMP_BLK_DATA_OFFSET];
-    const uint32_t max_uncomp_blk = raw[2 + HSA_WDDM_MAX_UNCOMP_BLK_DATA_OFFSET];
-
-    if (ClassifyInteropDescriptor(desc, forced_sw_mode, static_cast<uint32_t>(ADDR3_MAX_TYPE)) ==
-        InteropDescriptorContent::kSwizzleFallback) {
-      return BuildMipmapSrd(mipmap_array, forced_sw_mode, tile_swizzle, compression_mode,
-                            max_comp_blk, max_uncomp_blk);
-    }
+  if (ClassifyInteropDescriptor(desc) == InteropDescriptorContent::kReconstructFromMetadata) {
+    // clr wrote the surface-metadata blob at the start of the data[] region (metadata_amd_t::words);
+    // reconstruct the SRD (swizzle, pipe-bank-XOR, gfx12 compression) from it.
+    const auto* meta = reinterpret_cast<const HsaWddmSurfaceMetadata*>(desc->words);
+    return BuildMipmapSrd(mipmap_array, meta);
   }
 
   const void* mipmap_data_addr = mipmap_array.data;

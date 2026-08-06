@@ -752,7 +752,10 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
       return ErrorCode::InvalidateParams;
     }
     is_phymem_created = 1;
-    if (desc_.swizzle_valid) BuildSurfaceMetadata();
+    // Always build the blob: a swizzled surface copies its real swizzle/compression fields, a LINEAR
+    // surface copies the zero-initialized fields (swizzle_mode 0, compression 0). ROCr needs the blob
+    // even for linear surfaces to reconstruct a native linear SRD.
+    BuildSurfaceMetadata();
     desc_.flags.is_va_required = create_info.flags.alloc_va;
     if (desc_.flags.is_va_required) {
       desc_.flags.is_imported_vram_ipc = 1;

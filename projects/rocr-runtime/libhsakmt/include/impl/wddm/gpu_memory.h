@@ -209,13 +209,16 @@ public:
   inline uint32_t SwizzleMode() const { return desc_.swizzle_mode; }
   inline uint32_t TileSwizzle() const { return desc_.tile_swizzle; }
 
-  // Returns a pointer to the stable surface metadata blob for this allocation.
-  // Valid as long as the GpuMemory object is alive. Returns nullptr if no swizzle info.
+  // Returns a pointer to the stable surface metadata blob for this allocation. Valid as long as the
+  // GpuMemory object is alive. Always non-null: a swizzled (tiled) surface reports its real swizzle
+  // mode / pipe-bank-XOR / compression, while a LINEAR surface reports all-zeros (swizzle_mode 0,
+  // compression 0). The ROCr interop layer needs the blob even for linear surfaces so it can
+  // reconstruct a native linear SRD (the AMD Vulkan driver on Windows exposes no SRD to query).
   const HsaWddmSurfaceMetadata* GetSurfaceMetadata() const {
-    return desc_.swizzle_valid ? &surface_metadata_ : nullptr;
+    return &surface_metadata_;
   }
   void BuildSurfaceMetadata() {
-    surface_metadata_.version = 1;
+    surface_metadata_.version = 0;  // unused; clr stamps the descriptor version.
     surface_metadata_.swizzle_mode = desc_.swizzle_mode;
     surface_metadata_.tile_swizzle = desc_.tile_swizzle;
     surface_metadata_.compression_mode = desc_.compression_mode;

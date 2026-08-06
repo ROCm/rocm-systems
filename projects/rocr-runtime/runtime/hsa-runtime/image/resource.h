@@ -50,6 +50,7 @@
 #include "inc/hsa.h"
 #include "inc/hsa_ext_image.h"
 #include "addrlib/inc/addrinterface.h"
+#include "inc/hsa_ext_amd.h"  // HSA_AMD_IMAGE_DESC_VERSION_WDDM_SURFACE_METADATA
 
 #include "util.h"
 
@@ -79,28 +80,26 @@ typedef struct metadata_amd_s {
     uint32_t mip_offsets[0]; //Mip level offset bits [39:8] for each level (if any)
 } metadata_amd_t;
 
-/// @brief What an imported interop metadata descriptor carries in its SRD words.
+/// @brief What an imported interop metadata descriptor carries.
 enum class InteropDescriptorContent {
   /// Words 0-7 hold a real driver-supplied SRD (GL/D3D interop fills it via
-  /// wglResourceAttachAMD/CLQueryResource): use it verbatim.
+  /// wglResourceAttachAMD/CLQueryResource, or the Linux Vulkan driver via BO metadata): use it
+  /// verbatim.
   kDriverSrd,
-  /// Words 0-7 are empty; only the surface swizzle mode + pipe-bank-XOR are provided in the
-  /// descriptor's fallback slots (Vulkan image interop on Windows, where the AMD Vulkan driver
-  /// exposes no extension to query the SRD): reconstruct the SRD from that metadata.
-  kSwizzleFallback,
+  /// data[] holds an opaque HsaWddmSurfaceMetadata blob (Vulkan image interop on Windows, where the
+  /// AMD Vulkan driver exposes no extension to query the SRD): reconstruct the SRD from that metadata
+  /// (swizzle mode, pipe-bank-XOR, compression).
+  kReconstructFromMetadata,
 };
 
-/// @brief Classify an interop descriptor. Reconstruction (kSwizzleFallback) is chosen only when the
-/// descriptor carries NO SRD (words 0-7 all zero) AND a valid tiled swizzle mode is present
-/// (non-linear and below the architecture's max swizzle mode). Otherwise the driver SRD is honored.
-inline InteropDescriptorContent ClassifyInteropDescriptor(
-    const metadata_amd_t* desc, uint32_t swizzle_mode, uint32_t max_swizzle_mode) {
-  const bool srd_words_present =
-      (desc->words[0] | desc->words[1] | desc->words[2] | desc->words[3] |
-       desc->words[4] | desc->words[5] | desc->words[6] | desc->words[7]) != 0;
-  const bool tiled_swizzle = (swizzle_mode != 0) && (swizzle_mode < max_swizzle_mode);
-  return (!srd_words_present && tiled_swizzle) ? InteropDescriptorContent::kSwizzleFallback
-                                               : InteropDescriptorContent::kDriverSrd;
+/// @brief Classify an interop descriptor purely by its version field. The interop layer (clr) stamps
+/// the WDDM_SURFACE_METADATA sentinel when (and only when) the descriptor carries a surface-metadata
+/// blob that must be reconstructed; every other (small) version means a full driver SRD lives in
+/// words 0-7. No words-are-zero heuristic is needed.
+inline InteropDescriptorContent ClassifyInteropDescriptor(const metadata_amd_t* desc) {
+  return (desc->version == HSA_AMD_IMAGE_DESC_VERSION_WDDM_SURFACE_METADATA)
+             ? InteropDescriptorContent::kReconstructFromMetadata
+             : InteropDescriptorContent::kDriverSrd;
 }
 
 /// @brief Structure to represent image access component.

@@ -158,6 +158,10 @@ class Memory : public device::Memory {
   // Returns true on success (or if already allocated). Windows-only use.
   bool allocateInteropImageDescriptor();
 
+  // Free amdImageDesc_ (if any) and null it. Views borrow their owner's descriptor and must not
+  // call this; Buffer::destroy / Image::destroy skip views before reaching it.
+  void freeInteropImageDescriptor();
+
   // Place interop object into HSA's flat address space
   bool createInteropBuffer(GLenum targetType, int miplevel);
 

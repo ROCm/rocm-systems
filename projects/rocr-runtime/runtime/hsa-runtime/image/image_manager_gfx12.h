@@ -113,14 +113,13 @@ class ImageManagerGfx12 : public ImageManagerKv {
                              ADDR3_COMPUTE_SURFACE_INFO_OUTPUT& out,
                              std::optional<uint32_t> forced_sw_mode = std::nullopt) const;
 
-  /// @brief Build a mipmapped-array image SRD. If forced_sw_mode is empty the native path runs
-  /// (addrlib's best-fit swizzle, mipmap.tile_mode). Otherwise the given ADDR3 swizzle is forced and
-  /// tile_swizzle (pipe-bank-XOR) is injected into the base address, reconstructing the SRD of an
-  /// imported surface whose layout is dictated externally (Vulkan image interop on Windows, where
-  /// the AMD Vulkan driver exposes no extension to query the SRD).
-  hsa_status_t BuildMipmapSrd(MipmappedArray& mipmap, std::optional<uint32_t> forced_sw_mode,
-                             uint32_t tile_swizzle, uint32_t compression_mode = 0,
-                             uint32_t max_comp_blk = 0, uint32_t max_uncomp_blk = 0) const;
+  /// @brief Build a mipmapped-array image SRD. If meta is null the native path runs (addrlib's
+  /// best-fit swizzle, mipmap.tile_mode). Otherwise the surface metadata's ADDR3 swizzle is forced,
+  /// its tile_swizzle (pipe-bank-XOR) is injected into the base address, and its gfx12 compression
+  /// state is applied, reconstructing the SRD of an imported surface whose layout is dictated
+  /// externally (Vulkan image interop on Windows, where the AMD Vulkan driver exposes no extension to
+  /// query the SRD).
+  hsa_status_t BuildMipmapSrd(MipmappedArray& mipmap, const HsaWddmSurfaceMetadata* meta) const;
 
   bool IsLocalMemory(const void* address) const;
   virtual const ImageLutGfx11& ImageLut() const { return image_lut_gfx11; };
