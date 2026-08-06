@@ -4,6 +4,13 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
+
+### Removed
+
+- Removed the `ROCPROFSYS_BUILD_SQLITE3` CMake option and the in-tree SQLite3/rocpd
+  storage backend. This is now handled by profiler-hub.
+
 ## ROCm Systems Profiler 1.8.0 for ROCm 10.0 (unreleased)
 
 ### Added

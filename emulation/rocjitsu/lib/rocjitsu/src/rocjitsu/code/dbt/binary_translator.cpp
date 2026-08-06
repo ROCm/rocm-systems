@@ -1609,15 +1609,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                                   ExternalEntryPolicy::ExplicitOnly);
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   const uint64_t text_vaddr = obj.text_sections().front()->vaddr();
-  const auto relocation_table_dispatches =
-      discover_relocation_table_dispatches(blocks, relocation_function_tables, text_vaddr);
+  const auto relocation_pair_analysis =
+      analyze_relocation_pairs(blocks, relocation_function_tables, text_vaddr);
+  const auto &relocation_table_dispatches = relocation_pair_analysis.dispatches;
   const auto relocation_table_calls = attach_relocation_table_call_edges(
       block_index, relocation_function_tables, relocation_table_dispatches);
 
   // Address materializations that must survive relocation. See the use sites for how a data target
   // and a code target are each rewritten.
-  const auto pc_relative_address_builders =
-      discover_pc_relative_address_builders(blocks, text_vaddr);
+  const auto &pc_relative_address_builders = relocation_pair_analysis.address_builders;
 
   // Whether every code address this object can produce is one this translation will relocate.
   //

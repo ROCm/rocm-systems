@@ -8,6 +8,7 @@
 #define ROCJITSU_ISA_AMDGPU_SHARED_EXECUTE_SHARED_H_
 
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -17912,152 +17913,52 @@ inline void execute_v_rsq_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_s_exp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  if (exec != 0) {
-    amdgpu::RegisterAccess(wf).write_scalar(
-        inst.vdst, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = amdgpu::transcendental::exp_f32([&]() {
-              float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.src0));
-              if (inst.inst_.abs & (1u << 0))
-                sv = std::fabs(sv);
-              if (inst.inst_.neg & (1u << 0))
-                sv = -sv;
-              return sv;
-            }());
-            if (inst.inst_.omod == 1)
-              v *= 2.0f;
-            else if (inst.inst_.omod == 2)
-              v *= 4.0f;
-            else if (inst.inst_.omod == 3)
-              v *= 0.5f;
-            return v;
-          }();
-          if (inst.inst_.clamp)
-            v = std::clamp(v, 0.0f, 1.0f);
-          return v;
-        }()));
-  }
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.vdst, amdgpu::pseudo_scalar::execute_f32(
+                     amdgpu::pseudo_scalar::Operation::EXP2,
+                     std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.src0)),
+                     (inst.inst_.abs & 1u) != 0, (inst.inst_.neg & 1u) != 0, wf.fp_round_mode_f32(),
+                     wf.fp_denorm_mode_f32(), inst.inst_.omod, inst.inst_.clamp));
 }
 
 template <typename Inst>
 inline void execute_v_s_log_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  if (exec != 0) {
-    amdgpu::RegisterAccess(wf).write_scalar(
-        inst.vdst, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = amdgpu::transcendental::log_f32([&]() {
-              float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.src0));
-              if (inst.inst_.abs & (1u << 0))
-                sv = std::fabs(sv);
-              if (inst.inst_.neg & (1u << 0))
-                sv = -sv;
-              return sv;
-            }());
-            if (inst.inst_.omod == 1)
-              v *= 2.0f;
-            else if (inst.inst_.omod == 2)
-              v *= 4.0f;
-            else if (inst.inst_.omod == 3)
-              v *= 0.5f;
-            return v;
-          }();
-          if (inst.inst_.clamp)
-            v = std::clamp(v, 0.0f, 1.0f);
-          return v;
-        }()));
-  }
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.vdst, amdgpu::pseudo_scalar::execute_f32(
+                     amdgpu::pseudo_scalar::Operation::LOG2,
+                     std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.src0)),
+                     (inst.inst_.abs & 1u) != 0, (inst.inst_.neg & 1u) != 0, wf.fp_round_mode_f32(),
+                     wf.fp_denorm_mode_f32(), inst.inst_.omod, inst.inst_.clamp));
 }
 
 template <typename Inst>
 inline void execute_v_s_rcp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  if (exec != 0) {
-    amdgpu::RegisterAccess(wf).write_scalar(
-        inst.vdst, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = amdgpu::transcendental::rcp_f32([&]() {
-              float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.src0));
-              if (inst.inst_.abs & (1u << 0))
-                sv = std::fabs(sv);
-              if (inst.inst_.neg & (1u << 0))
-                sv = -sv;
-              return sv;
-            }());
-            if (inst.inst_.omod == 1)
-              v *= 2.0f;
-            else if (inst.inst_.omod == 2)
-              v *= 4.0f;
-            else if (inst.inst_.omod == 3)
-              v *= 0.5f;
-            return v;
-          }();
-          if (inst.inst_.clamp)
-            v = std::clamp(v, 0.0f, 1.0f);
-          return v;
-        }()));
-  }
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.vdst, amdgpu::pseudo_scalar::execute_f32(
+                     amdgpu::pseudo_scalar::Operation::RCP,
+                     std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.src0)),
+                     (inst.inst_.abs & 1u) != 0, (inst.inst_.neg & 1u) != 0, wf.fp_round_mode_f32(),
+                     wf.fp_denorm_mode_f32(), inst.inst_.omod, inst.inst_.clamp));
 }
 
 template <typename Inst>
 inline void execute_v_s_rsq_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  if (exec != 0) {
-    amdgpu::RegisterAccess(wf).write_scalar(
-        inst.vdst, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = amdgpu::transcendental::rsq_f32([&]() {
-              float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.src0));
-              if (inst.inst_.abs & (1u << 0))
-                sv = std::fabs(sv);
-              if (inst.inst_.neg & (1u << 0))
-                sv = -sv;
-              return sv;
-            }());
-            if (inst.inst_.omod == 1)
-              v *= 2.0f;
-            else if (inst.inst_.omod == 2)
-              v *= 4.0f;
-            else if (inst.inst_.omod == 3)
-              v *= 0.5f;
-            return v;
-          }();
-          if (inst.inst_.clamp)
-            v = std::clamp(v, 0.0f, 1.0f);
-          return v;
-        }()));
-  }
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.vdst, amdgpu::pseudo_scalar::execute_f32(
+                     amdgpu::pseudo_scalar::Operation::RSQ,
+                     std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.src0)),
+                     (inst.inst_.abs & 1u) != 0, (inst.inst_.neg & 1u) != 0, wf.fp_round_mode_f32(),
+                     wf.fp_denorm_mode_f32(), inst.inst_.omod, inst.inst_.clamp));
 }
 
 template <typename Inst>
 inline void execute_v_s_sqrt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  if (exec != 0) {
-    amdgpu::RegisterAccess(wf).write_scalar(
-        inst.vdst, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = amdgpu::transcendental::sqrt_f32([&]() {
-              float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.src0));
-              if (inst.inst_.abs & (1u << 0))
-                sv = std::fabs(sv);
-              if (inst.inst_.neg & (1u << 0))
-                sv = -sv;
-              return sv;
-            }());
-            if (inst.inst_.omod == 1)
-              v *= 2.0f;
-            else if (inst.inst_.omod == 2)
-              v *= 4.0f;
-            else if (inst.inst_.omod == 3)
-              v *= 0.5f;
-            return v;
-          }();
-          if (inst.inst_.clamp)
-            v = std::clamp(v, 0.0f, 1.0f);
-          return v;
-        }()));
-  }
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.vdst, amdgpu::pseudo_scalar::execute_f32(
+                     amdgpu::pseudo_scalar::Operation::SQRT,
+                     std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.src0)),
+                     (inst.inst_.abs & 1u) != 0, (inst.inst_.neg & 1u) != 0, wf.fp_round_mode_f32(),
+                     wf.fp_denorm_mode_f32(), inst.inst_.omod, inst.inst_.clamp));
 }
 
 template <typename Inst>
