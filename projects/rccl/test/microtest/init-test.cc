@@ -51,12 +51,13 @@
 #define RCCL_PARAM_NCCL_ALIAS(name, env, deftVal) \
   int64_t rcclParam##name() { return g_loadParam(("RCCL_" env), (deftVal)); }
 
-// Neutralize the NVTX3 range macros: pull in nvtx.h now (guarded, so init.cc's
-// re-include is a no-op), then redefine the range macros to no-ops so init.cc
-// references no roctx_scoped_range_in symbols (NVTX is pure instrumentation).
-// Expand to nothing: init.cc uses these without a trailing ';' (the real macros
-// self-terminate), so an empty expansion is the safe no-op.
-#include "nvtx.h"
+// Neutralize the NVTX3 range macros so init.cc references no roctx_scoped_range_in
+// symbols (empty expansion: init.cc uses them without a trailing ';'). ONLY when
+// the build hasn't already disabled NVTX -- if NVTX_NO_IMPL / NVTX_DISABLE are set
+// (e.g. ROCm 7.2+ configs) nvtx.h already makes these no-ops, and pre-including it
+// here would double-define its types (nccl_domain).
+#if !defined(NVTX_NO_IMPL) && !defined(NVTX_DISABLE)
+#include "nvtx.h"  // guarded; init.cc's re-include is a no-op
 #undef NCCL_NVTX3_FUNC_RANGE
 #define NCCL_NVTX3_FUNC_RANGE
 #undef NVTX3_RANGE
@@ -65,6 +66,7 @@
 #define NVTX3_RANGE_ADD_PAYLOAD(...)
 #undef NVTX3_FUNC_WITH_PARAMS
 #define NVTX3_FUNC_WITH_PARAMS(...)
+#endif
 
 // getenv seam (plan F2): active ONLY around the UUT include. init.cc's direct
 // getenv("HSA_NO_SCRATCH_RECLAIM")/("HSA_FORCE_FINE_GRAIN_PCIE") reads route
