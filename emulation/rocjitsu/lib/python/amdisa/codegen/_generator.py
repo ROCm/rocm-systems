@@ -8140,6 +8140,7 @@ class CodeGenerator:
                         f'{enc.fmt_enc_name.lower()}.h',
                         False,
                     ),
+                    ('rocjitsu/isa/arch/amdgpu/shared/simd_glue.h', False),
                     ('util/except.h', False),
                 ]
                 _MEM_ENC_NAMES = frozenset(
