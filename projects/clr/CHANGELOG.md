@@ -32,6 +32,7 @@ enabling successful ROCm initialization, HSA agent discovery, and subsequent ROC
 * Resolved a memory leak affecting mipmapped arrays when using `hipMemcpy2DToArray` with levels obtained via `hipGetMipmappedArrayLevel`. Mipmap level references are now properly released, ensuring that memory is correctly freed when `hipFreeMipmappedArray` is called.
 * Fixed a deadlock that could occur when using rocprofiler-sdk with ROCm-aware MVAPICH and MPICH. HIP runtime now performs profiler registration after dispatch table initialization, ensuring proper initialization ordering and guard release. This prevents hangs caused by reentrant initialization during profiler startup.
 * Fixed a deadlock caused by `hipMemMap`/`hipMemUnmap` operations on the null stream that could lead to hangs. The HIP runtime now implements proper synchronization to all devices with access to a mapped pointer before unmapping it.
+* Fixed `cooperative_groups::reduce()` behaviour with kernels whose block dimensions contain .y or .z components different from 1, causing incorrect results or launch failures.
 
 ### Optimized
 
