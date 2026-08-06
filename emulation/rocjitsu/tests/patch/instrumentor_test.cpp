@@ -2188,7 +2188,8 @@ protected:
     EXPECT_NE(std::find(cave.begin(), cave.end(), build_wait_loads_complete(a_.arch)), cave.end());
     const auto store = build_scratch_store_dword(/*vgpr=*/2, /*off=*/64, a_.arch);
     expect_drain_before_store(cave, store);
-    expect_drain_after_return(cave, store, build_scratch_load_dword(/*vgpr=*/2, /*off=*/64, a_.arch));
+    expect_drain_after_return(cave, store,
+                              build_scratch_load_dword(/*vgpr=*/2, /*off=*/64, a_.arch));
     EXPECT_EQ(caved.scratch, 68u);
   }
 
@@ -2275,8 +2276,8 @@ protected:
     const auto drain = build_wait_all_loads_complete(arch());
     size_t count = 0;
     for (auto it = std::search(cave.begin(), cave.end(), drain.begin(), drain.end());
-         it != cave.end(); it = std::search(it + drain.size(), cave.end(), drain.begin(),
-                                            drain.end()))
+         it != cave.end();
+         it = std::search(it + drain.size(), cave.end(), drain.begin(), drain.end()))
       ++count;
     EXPECT_GE(count, 2u) << "a no-spill probe envelope must still be bracketed by boundary drains";
   }
