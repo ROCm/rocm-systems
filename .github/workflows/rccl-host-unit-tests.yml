@@ -49,18 +49,15 @@ jobs:
       - name: Put ROCm on PATH
         run: echo "/opt/rocm/bin" >> "$GITHUB_PATH"
 
-      - name: Configure RCCL
-        working-directory: projects/rccl
-        run: cmake -B build -DGPU_TARGETS="$GPU_TARGETS" -DBUILD_TESTS=OFF
+      # Every pipeline command lives in run_host_tests.sh (single source of truth,
+      # runnable identically in CI and locally). Each phase is its own step so a
+      # failure is clearly attributable to configure vs build vs run.
+      - name: RCCL configure
+        run: bash projects/rccl/test/host/run_host_tests.sh rccl-configure
 
       - name: Stage hipified sources
-        working-directory: projects/rccl
-        run: cmake --build build --target hipify_all -j"$(nproc)"
+        run: bash projects/rccl/test/host/run_host_tests.sh hipify
 
-      # The host-test build/run/log logic lives in run_host_tests.sh so the same
-      # commands run locally and in CI, and the suite (filters, flags, build type)
-      # can be tuned there without editing this workflow. Split into configure /
-      # build / run steps so a failure is clearly attributable.
       - name: Configure host tests
         run: bash projects/rccl/test/host/run_host_tests.sh configure
 
