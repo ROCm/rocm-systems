@@ -65,7 +65,8 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac() : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
-  key_file_path = AMDCUID_CONFIG_DIR "/hmac_key.bin";
+  const char* env_path = getenv("AMDCUID_HMAC_KEY_PATH");
+  key_file_path = env_path ? env_path : AMDCUID_CONFIG_DIR "/hmac_key.bin";
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->hAlg = nullptr;
@@ -264,7 +265,8 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac() : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
-  key_file_path = AMDCUID_CONFIG_DIR "/hmac_key.bin";
+  const char* env_path = getenv("AMDCUID_HMAC_KEY_PATH");
+  key_file_path = env_path ? env_path : AMDCUID_CONFIG_DIR "/hmac_key.bin";
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->mac = nullptr;
@@ -402,7 +404,8 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac() : impl_(nullptr), key(nullptr), key_len(0), valid(false) {
-  key_file_path = AMDCUID_CONFIG_DIR "/hmac_key.bin";
+  const char* env_path = getenv("AMDCUID_HMAC_KEY_PATH");
+  key_file_path = env_path ? env_path : AMDCUID_CONFIG_DIR "/hmac_key.bin";
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->ctx = HMAC_CTX_new();
