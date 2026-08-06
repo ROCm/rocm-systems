@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 import therock_configure_ci
+import therock_matrix
 
 
 class ConfigureCITest(unittest.TestCase):
@@ -487,6 +488,77 @@ class ConfigureCITest(unittest.TestCase):
 
         project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_amdsmi_pr_triggers_amdsmi_group(self, mock_get_modified):
+        """PR with amdsmi changes should build everything and test amdsmi plus
+        its downstream dependents (blas, rocprofiler-systems, rocrtst)."""
+        args = {
+            "is_pull_request": True,
+            "base_ref": "HEAD^",
+            "platform": "linux",
+        }
+
+        mock_get_modified.return_value = ["projects/amdsmi/src/amdsmi.cpp"]
+
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 1)
+        self.assertIn("DTHEROCK_ENABLE_ALL=ON", project_to_run[0]["cmake_options"])
+        tests = {
+            t.strip() for t in project_to_run[0]["projects_to_test"].split(",")
+        }
+        self.assertEqual(
+            tests,
+            {
+                "amdsmi",
+                "rocblas",
+                "hipblas",
+                "hipblaslt",
+                "rocprofiler-systems",
+                "rocrtst",
+            },
+        )
+        # rccl is intentionally excluded: the main Linux build forces
+        # THEROCK_ENABLE_RCCL=OFF and RCCL runs in its own dedicated pipeline.
+        self.assertNotIn("rccl", tests)
+
+    def test_amdsmi_group_uses_valid_test_targets(self):
+        """Every test target in the amdsmi group must be a real TheRock test
+        target (a key in fetch_test_configurations.test_matrix)."""
+        # Keys of TheRock's fetch_test_configurations.test_matrix. Kept in sync
+        # manually since TheRock is not checked out during unit tests.
+        valid_test_targets = {
+            "sanity", "hip-tests", "hipfile", "rocblas", "rocroller",
+            "tensilelite", "origami", "hipblas", "amdsmi", "hipblaslt",
+            "hipsolver", "rocsolver", "rocprim", "hipcub", "rocgdb-cpu",
+            "rocgdb-gpu", "rocr-debug-agent", "rocthrust", "hipsparse",
+            "rocsparse", "hipsparselt", "rocrand", "hiprand", "rocfft",
+            "hipfft", "miopen", "rccl", "rocshmem", "rocprofiler-sdk",
+            "hipdnn", "hipdnn_install", "hipdnn-integration-tests",
+            "hipdnn-samples", "miopenprovider", "hipblasltprovider",
+            "hipkernelprovider", "rocwmma", "rocalution",
+            "rocprofiler-compute", "rocprofiler-systems", "libhipcxx_amdclang",
+            "libhipcxx_hiprtc", "hipthreads", "hipthreads_examples",
+            "rocdecode", "rocjpeg", "aqlprofile", "rocrtst", "hiptensor",
+        }
+        amdsmi_tests = {
+            t.strip()
+            for t in therock_matrix.project_map["amdsmi"][
+                "projects_to_test"
+            ].split(",")
+        }
+        self.assertTrue(amdsmi_tests <= valid_test_targets, amdsmi_tests)
+
+    def test_amdsmi_in_core_all_nightly_test_targets(self):
+        """amdsmi must be an explicit test target in core, all, and nightly."""
+        for group in ("core", "all", "nightly"):
+            tests = {
+                t.strip()
+                for t in therock_matrix.project_map[group][
+                    "projects_to_test"
+                ].split(",")
+            }
+            self.assertIn("amdsmi", tests, group)
 
 
 if __name__ == "__main__":
