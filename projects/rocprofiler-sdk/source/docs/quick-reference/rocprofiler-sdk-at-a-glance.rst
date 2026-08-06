@@ -209,32 +209,7 @@ The output is written to ``ui_output_agent_*/dispatch_*/`` directories of JSON a
 Hardware support
 ^^^^^^^^^^^^^^^^^
 
-ATT support varies by GPU architecture. Full support includes both instruction trace and perfmon streaming; trace-only architectures don't support ``--att-perfcounters``.
-
-.. list-table::
-   :header-rows: 1
-
-   * - Architecture
-     - Support
-     - Notes
-   * - CDNA4 (MI350 series)
-     - Full
-     - gfx950
-   * - CDNA3 (MI300 series)
-     - Full
-     - gfx942
-   * - CDNA2 (MI200 series)
-     - Full
-     - gfx90a
-   * - RDNA2 / gfx10
-     - Trace-only
-     - No perfmon streaming
-   * - RDNA3 / gfx11
-     - Trace-only
-     - No perfmon streaming
-   * - RDNA4 / gfx12
-     - Trace-only
-     - No perfmon streaming
+ATT support varies by GPU architecture: CDNA2/CDNA3/CDNA4 (MI200/MI300/MI350 series) have full support for both instruction trace and perfmon streaming, while RDNA2-4 (gfx10-12) are trace-only and don't support ``--att-perfcounters``. For the full per-architecture matrix, see :ref:`Supported devices <thread-trace-supported-devices>`.
 
 ATT is limited to one compute unit per shader engine. For production workloads, use ``--kernel-include-regex`` to limit tracing to the target kernel and collect from the minimum number of shader engines needed.
 
@@ -340,35 +315,7 @@ The following examples combine the options above into complete, runnable command
 Hardware support
 ^^^^^^^^^^^^^^^^^
 
-The following table lists AMD Instinct GPUs that support PC sampling and shows which sampling methods are available on each.
-
-.. list-table::
-   :header-rows: 1
-
-   * - AMD Instinct GPU
-     - Architecture
-     - Stochastic
-     - Host-trap
-   * - MI355X
-     - CDNA4
-     - ✅
-     - ✅
-   * - MI350X
-     - CDNA4
-     - ✅
-     - ✅
-   * - MI325X
-     - CDNA3
-     - ✅
-     - ✅
-   * - MI300X / MI300A
-     - CDNA3
-     - ✅
-     - ✅
-   * - MI250X / MI250 / MI210
-     - CDNA2
-     - ❌
-     - ✅
+Stochastic PC sampling requires AMD Instinct MI300-series (gfx942) or later; host-trap is supported on MI200-series (gfx90a) and later. For the full per-GPU support matrix, see :ref:`pc-sampling-supported-gpus`.
 
 .. note::
 

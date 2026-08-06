@@ -19,10 +19,37 @@ Thread trace features include:
 * Instruction and source level hotspots
 * Extremely fast and granular counter collection (AMD Instinct)
 
-Supported devices:
+.. _thread-trace-supported-devices:
 
-* AMD Instinct: MI200 and MI300 series
-* AMD Radeon: gfx10, gfx11 and gfx12
+Supported devices
+===================
+
+ATT support varies by GPU architecture. Full support includes both instruction trace and perfmon streaming; trace-only architectures don't support ``--att-perfcounters``.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Architecture
+     - Support
+     - Notes
+   * - CDNA4 (MI350 series)
+     - Full
+     - gfx950
+   * - CDNA3 (MI300 series)
+     - Full
+     - gfx942
+   * - CDNA2 (MI200 series)
+     - Full
+     - gfx90a
+   * - RDNA2 / gfx10
+     - Trace-only
+     - No perfmon streaming
+   * - RDNA3 / gfx11
+     - Trace-only
+     - No perfmon streaming
+   * - RDNA4 / gfx12
+     - Trace-only
+     - No perfmon streaming
 
 Thread trace profiling is performed in the following steps:
 
