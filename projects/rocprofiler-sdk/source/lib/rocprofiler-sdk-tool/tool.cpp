@@ -4544,23 +4544,15 @@ signal_finalization_worker()
 
     if(tool::get_config().enable_process_sync) wait_peer_finished(this_pid, this_ppid);
 
-    // Wait for children to finalize before we terminate.
-    wait_for_children(this_pid, this_ppid, this_tid, this_func);
-
-    ROCP_INFO << fmt::format(
-        "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal... complete",
-        this_ppid,
-        this_pid,
-        this_tid,
-        this_func);
-
     // Signal completion (only the SIGABRT handler path waits on this).
     sw.finalize_done.store(1u, std::memory_order_release);
     syscall(SYS_futex, &sw.finalize_done, FUTEX_WAKE, 1, nullptr, nullptr, 0);
 
-    // Terminate the process now that the flush is complete, but only when we were woken by an
-    // async signal. signo == 0 is normal-exit finalization (main/atexit woke us to be joined);
-    // SIGABRT terminates itself once its (synchronously waiting) handler returns into abort().
+    // Re-raise BEFORE reaping children. The app's own handler needs the signal to run its
+    // coordinated shutdown, and that shutdown is what makes the children exit. Reaping first
+    // deadlocks multi-process apps (e.g. tensor-parallel servers) whose worker processes only
+    // exit once the main tells them to. signo == 0 is normal-exit finalization; SIGABRT
+    // terminates itself once its (synchronously waiting) handler returns into abort().
     if(sw.signo != 0 && sw.signo != SIGABRT)
     {
         const bool have_chained = static_cast<bool>(get_chained_signals().at(sw.signo));
@@ -4578,6 +4570,18 @@ signal_finalization_worker()
         }
         kill(getpid(), sw.signo);
     }
+
+    // Best-effort reap now that the app is tearing its children down. May not complete if we
+    // terminate first -- each child finalizes independently via its own worker; this just avoids
+    // leaving zombies when the app keeps running (e.g. a chained handler that returns).
+    wait_for_children(this_pid, this_ppid, this_tid, this_func);
+
+    ROCP_INFO << fmt::format(
+        "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal... complete",
+        this_ppid,
+        this_pid,
+        this_tid,
+        this_func);
 }
 
 void
