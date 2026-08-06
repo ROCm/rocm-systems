@@ -1136,12 +1136,18 @@ bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup)
            existing.source_recovery_end_offset == fixup.source_recovery_end_offset;
   });
   if (duplicate != out.end()) {
-    // Incompleteness is monotonic: if any iteration observes this fixup as
-    // incomplete, the merged record must stay incomplete. Otherwise a later
-    // fixed-point pass that rediscovers an earlier-complete fact as incomplete
-    // would be dropped here, leaving the consumer wrongly eligible for a direct
-    // window.
+    // Both flags below are monotonic and must survive the merge, because only
+    // the first record of a duplicate group is kept. Incompleteness: if any
+    // iteration observes this fixup as incomplete, the merged record must stay
+    // incomplete, or a later fixed-point pass that rediscovers an
+    // earlier-complete fact as incomplete would be dropped here and leave the
+    // consumer wrongly eligible for a direct window. A drain requirement is the
+    // same shape -- it is a demand on the replacement, so a producer that needs
+    // it cannot be outvoted by one that does not. Any future requirement that
+    // changes the bytes relocation emits belongs here too.
     duplicate->source_incomplete = duplicate->source_incomplete || fixup.source_incomplete;
+    duplicate->source_requires_xcnt_drain =
+        duplicate->source_requires_xcnt_drain || fixup.source_requires_xcnt_drain;
     return false;
   }
   out.push_back(fixup);

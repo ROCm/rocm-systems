@@ -1488,6 +1488,10 @@ ExpandResult expand_gfx1250_cvt_pk_fp8_f32_e5m3(const Instruction &inst, uint32_
   request.allow_spill = true;
   const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
   if (!scratch) {
+    if (scratch.failure == SemanticScratchFailure::DynamicStackUnsupported) {
+      return ExpandResult::failed(
+          "gfx1250 E5M3 pack cannot use private-memory spills in a dynamic-stack kernel");
+    }
     return ExpandResult::failed("gfx1250 E5M3 pack could not allocate four scratch VGPRs");
   }
   const uint16_t out0 = scratch.lease->base;
@@ -1629,8 +1633,13 @@ ExpandResult expand_gfx1250_cvt_sr_fp8_f32_e5m3(const Instruction &inst, uint32_
   request.forbidden = gfx1250_instruction_registers(inst);
   request.allow_spill = true;
   const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
-  if (!scratch)
+  if (!scratch) {
+    if (scratch.failure == SemanticScratchFailure::DynamicStackUnsupported) {
+      return ExpandResult::failed(
+          "gfx1250 stochastic E5M3 cannot use private-memory spills in a dynamic-stack kernel");
+    }
     return ExpandResult::failed("gfx1250 stochastic E5M3 could not allocate five scratch VGPRs");
+  }
   const uint16_t out = scratch.lease->base;
   const uint16_t temp = static_cast<uint16_t>(out + 1u);
   const uint16_t normal = static_cast<uint16_t>(out + 2u);

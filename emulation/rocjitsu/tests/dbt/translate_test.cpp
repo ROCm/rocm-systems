@@ -9729,29 +9729,34 @@ TEST(BinaryTranslatorE2E, Gfx1250CopiesUnaffectedLiteralOperandsForB0ToA0) {
   EXPECT_EQ(target_words[2], kGfx1250SEndpgm);
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250CopiesCvtPkFp8F32WhenClampIsClear) {
-  constexpr auto source_cvt = gfx1250::build_vop3(
-      gfx1250::kVCvtPkFp8F32Vop3, {.vdst = 30, .clamp = 0, .src0 = 256 + 22, .src1 = 256 + 2});
+TEST(BinaryTranslatorE2E, Gfx1250CopiesFp8ConversionsWhenClampIsClear) {
+  // CLAMP selects the E5M3 encoding these rules exist for. With it clear the
+  // instruction already runs on A0, so both rules must decline rather than
+  // rewrite it.
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
-  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
-      {source_cvt[0], source_cvt[1], kGfx1250SEndpgm});
-  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  for (const uint16_t opcode : {gfx1250::kVCvtPkFp8F32Vop3, gfx1250::kVCvtSrFp8F32Vop3}) {
+    const auto source_cvt =
+        gfx1250::build_vop3(opcode, {.vdst = 30, .clamp = 0, .src0 = 256 + 22, .src1 = 256 + 2});
+    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+        {source_cvt[0], source_cvt[1], kGfx1250SEndpgm});
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
 
-  rocjitsu::BinaryTranslator translator(
-      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
-      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
-                               rocjitsu::ProcessorRevision::Gfx1250A0));
-  auto result = translator.translate(source);
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    auto result = translator.translate(source);
 
-  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
-                                                          : result.diagnostics.front().message);
-  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
-  ASSERT_FALSE(translated.text_sections().empty());
-  const auto *target_words =
-      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  EXPECT_EQ(target_words[0], source_cvt[0]);
-  EXPECT_EQ(target_words[1], source_cvt[1]);
-  EXPECT_EQ(target_words[2], kGfx1250SEndpgm);
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto *target_words =
+        reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+    EXPECT_EQ(target_words[0], source_cvt[0]);
+    EXPECT_EQ(target_words[1], source_cvt[1]);
+    EXPECT_EQ(target_words[2], kGfx1250SEndpgm);
+  }
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250EmulatesCvtPkFp8F32ClampSetForA0) {
@@ -9884,6 +9889,27 @@ struct Gfx1250E5m3Execution {
   uint8_t final_msb_mode = 0; ///< VGPR-MSB mode the replacement left in effect.
 };
 
+/// @brief One source of a conversion under test, and where its value lives.
+///
+/// @details The expansions materialize a literal into scratch and read a scalar
+/// through a different operand path than a VGPR, so each kind reaches different
+/// code. VOP3 carries at most one literal, so at most one source may be one.
+struct Gfx1250E5m3Operand {
+  enum class Kind : uint8_t { Vgpr, Sgpr, Literal };
+  Kind kind = Kind::Vgpr;
+  uint32_t value = 0;
+};
+
+constexpr Gfx1250E5m3Operand e5m3_vgpr(uint32_t value) {
+  return {Gfx1250E5m3Operand::Kind::Vgpr, value};
+}
+constexpr Gfx1250E5m3Operand e5m3_sgpr(uint32_t value) {
+  return {Gfx1250E5m3Operand::Kind::Sgpr, value};
+}
+constexpr Gfx1250E5m3Operand e5m3_literal(uint32_t value) {
+  return {Gfx1250E5m3Operand::Kind::Literal, value};
+}
+
 /// @brief Run one translated gfx1250 E5M3 replacement on the emulated CU.
 ///
 /// @details The B0 conversion is translated on its own and every instruction of
@@ -9895,29 +9921,59 @@ struct Gfx1250E5m3Execution {
 ///        written through its own role's bank, so a lowering that forwards the
 ///        wrong role's bank addresses a register the test never wrote.
 std::optional<Gfx1250E5m3Execution>
-run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t opsel, uint32_t src0_value,
-                             uint32_t src1_value, uint32_t vdst_initial, bool fp16_ovfl,
-                             uint8_t vgpr_msb_mode = 0) {
+run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t opsel, Gfx1250E5m3Operand src0,
+                             Gfx1250E5m3Operand src1, uint32_t vdst_initial, bool fp16_ovfl,
+                             uint8_t vgpr_msb_mode = 0, uint16_t live_sgprs = 0) {
   constexpr uint16_t kSrc0Vgpr = 22;
   constexpr uint16_t kSrc1Vgpr = 2;
   constexpr uint16_t kDstVgpr = 30;
+  constexpr uint16_t kSrc0Sgpr = 8;
+  constexpr uint16_t kSrc1Sgpr = 9;
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint16_t kM0Operand = 125;
+  using Kind = Gfx1250E5m3Operand::Kind;
+  if (src0.kind == Kind::Literal && src1.kind == Kind::Literal) {
+    ADD_FAILURE() << "VOP3 carries at most one literal";
+    return std::nullopt;
+  }
   const uint32_t src0_bank = vgpr_msb_mode & 0x3u;
   const uint32_t src1_bank = (vgpr_msb_mode >> 2) & 0x3u;
   const uint32_t dst_bank = (vgpr_msb_mode >> 6) & 0x3u;
+  const auto selector = [](Gfx1250E5m3Operand operand, uint16_t vgpr, uint16_t sgpr) -> uint16_t {
+    switch (operand.kind) {
+    case Kind::Vgpr:
+      return static_cast<uint16_t>(256 + vgpr);
+    case Kind::Sgpr:
+      return sgpr;
+    case Kind::Literal:
+      break;
+    }
+    return 255;
+  };
 
   std::vector<uint32_t> source_words;
   if (vgpr_msb_mode != 0) {
     source_words.push_back(
         gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = vgpr_msb_mode})[0]);
   }
-  const auto conversion = gfx1250::build_vop3(opcode, {.vdst = kDstVgpr,
-                                                       .opsel = opsel,
-                                                       .clamp = 1,
-                                                       .src0 = 256 + kSrc0Vgpr,
-                                                       .src1 = 256 + kSrc1Vgpr});
+  const auto conversion =
+      gfx1250::build_vop3(opcode, {.vdst = kDstVgpr,
+                                   .opsel = opsel,
+                                   .clamp = 1,
+                                   .src0 = selector(src0, kSrc0Vgpr, kSrc0Sgpr),
+                                   .src1 = selector(src1, kSrc1Vgpr, kSrc1Sgpr)});
   source_words.push_back(conversion[0]);
   source_words.push_back(conversion[1]);
+  if (src0.kind == Kind::Literal)
+    source_words.push_back(src0.value);
+  else if (src1.kind == Kind::Literal)
+    source_words.push_back(src1.value);
+  // Readers that keep every ordinary SGPR live, so the expansion has to borrow
+  // VGPR carriers and guard them instead of taking scratch SGPRs outright.
+  for (uint16_t sgpr = 0; sgpr < live_sgprs; ++sgpr) {
+    source_words.push_back(gfx1250::build_sop1(
+        gfx1250::kSMovB32Sop1, {.ssrc0 = static_cast<uint8_t>(sgpr), .sdst = kM0Operand})[0]);
+  }
   source_words.push_back(kGfx1250SEndpgm);
 
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(source_words);
@@ -9962,8 +10018,15 @@ run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t opsel, uint32_t src0_value
   wf->set_exec(0x1u);
   wf->set_mode_raw(fp16_ovfl ? rocjitsu::amdgpu::Wavefront::FP16_OVFL_BIT : 0u);
   const uint32_t vb = wf->vgpr_alloc().base;
-  cu->write_vgpr(vb + (src0_bank << 8) + kSrc0Vgpr, 0, src0_value);
-  cu->write_vgpr(vb + (src1_bank << 8) + kSrc1Vgpr, 0, src1_value);
+  const uint32_t sb = wf->sgpr_alloc().base;
+  const auto place = [&](Gfx1250E5m3Operand operand, uint32_t bank, uint16_t vgpr, uint16_t sgpr) {
+    if (operand.kind == Kind::Vgpr)
+      cu->write_vgpr(vb + (bank << 8) + vgpr, 0, operand.value);
+    else if (operand.kind == Kind::Sgpr)
+      cu->write_sgpr(sb + sgpr, operand.value);
+  };
+  place(src0, src0_bank, kSrc0Vgpr, kSrc0Sgpr);
+  place(src1, src1_bank, kSrc1Vgpr, kSrc1Sgpr);
   cu->write_vgpr(vb + (dst_bank << 8) + kDstVgpr, 0, vdst_initial);
 
   auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
@@ -9973,6 +10036,7 @@ run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t opsel, uint32_t src0_value
   }
   const std::string_view source_mnemonic =
       opcode == gfx1250::kVCvtPkFp8F32Vop3 ? "v_cvt_pk_fp8_f32" : "v_cvt_sr_fp8_f32";
+  bool borrowed_a_carrier = false;
   for (size_t index = 0; index < word_count;) {
     std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(text + index));
     if (inst == nullptr) {
@@ -9987,8 +10051,17 @@ run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t opsel, uint32_t src0_value
       ADD_FAILURE() << "the source conversion survived translation";
       return std::nullopt;
     }
+    borrowed_a_carrier =
+        borrowed_a_carrier || std::string_view(inst->mnemonic()) == "v_readfirstlane_b32_e32";
     cu->execute_instruction(inst.get(), *wf);
     index += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
+  }
+  // A caller that walled off the SGPRs asked for the carrier path. Without this
+  // the shape could quietly degenerate into the ordinary one and still compare
+  // equal, testing nothing it was written for.
+  if (live_sgprs != 0 && !borrowed_a_carrier) {
+    ADD_FAILURE() << "the SGPR-pressure shape did not borrow a VGPR carrier";
+    return std::nullopt;
   }
   return Gfx1250E5m3Execution{cu->read_vgpr(vb + (dst_bank << 8) + kDstVgpr, 0),
                               wf->vgpr_msb_mode()};
@@ -10009,9 +10082,9 @@ TEST(BinaryTranslatorE2E, Gfx1250E5m3PackReplacementMatchesReferenceConversion) 
       for (size_t index = 0; index < kValues.size(); ++index) {
         const uint32_t src0 = kValues[index];
         const uint32_t src1 = kValues[(index + 5) % kValues.size()];
-        const auto produced = run_gfx1250_e5m3_replacement(gfx1250::kVCvtPkFp8F32Vop3,
-                                                           static_cast<uint8_t>(write_high ? 8 : 0),
-                                                           src0, src1, kDstInitial, fp16_ovfl);
+        const auto produced = run_gfx1250_e5m3_replacement(
+            gfx1250::kVCvtPkFp8F32Vop3, static_cast<uint8_t>(write_high ? 8 : 0), e5m3_vgpr(src0),
+            e5m3_vgpr(src1), kDstInitial, fp16_ovfl);
         ASSERT_TRUE(produced.has_value());
         const uint32_t packed =
             util::f32_to_fp8_e5m3_rne_mode(std::bit_cast<float>(src0), fp16_ovfl) |
@@ -10041,9 +10114,9 @@ TEST(BinaryTranslatorE2E, Gfx1250E5m3StochasticReplacementMatchesReferenceConver
     for (uint8_t dst_byte = 0; dst_byte < 4; ++dst_byte) {
       for (const uint32_t seed : kSeeds) {
         for (const uint32_t value : kValues) {
-          const auto produced = run_gfx1250_e5m3_replacement(gfx1250::kVCvtSrFp8F32Vop3,
-                                                             static_cast<uint8_t>(dst_byte << 2),
-                                                             value, seed, kDstInitial, fp16_ovfl);
+          const auto produced = run_gfx1250_e5m3_replacement(
+              gfx1250::kVCvtSrFp8F32Vop3, static_cast<uint8_t>(dst_byte << 2), e5m3_vgpr(value),
+              e5m3_vgpr(seed), kDstInitial, fp16_ovfl);
           ASSERT_TRUE(produced.has_value());
           const uint32_t byte =
               util::f32_to_fp8_e5m3_sr_mode(std::bit_cast<float>(value), seed, fp16_ovfl);
@@ -10079,8 +10152,9 @@ TEST(BinaryTranslatorE2E, Gfx1250E5m3ReplacementsHonorPerRoleVgprBanks) {
         const uint32_t src0 = kValues[index];
         const uint32_t src1 = kValues[(index + 2) % kValues.size()];
 
-        const auto packed_run = run_gfx1250_e5m3_replacement(gfx1250::kVCvtPkFp8F32Vop3, 0, src0,
-                                                             src1, kDstInitial, fp16_ovfl, mode);
+        const auto packed_run =
+            run_gfx1250_e5m3_replacement(gfx1250::kVCvtPkFp8F32Vop3, 0, e5m3_vgpr(src0),
+                                         e5m3_vgpr(src1), kDstInitial, fp16_ovfl, mode);
         ASSERT_TRUE(packed_run.has_value());
         const uint32_t packed =
             util::f32_to_fp8_e5m3_rne_mode(std::bit_cast<float>(src0), fp16_ovfl) |
@@ -10092,8 +10166,9 @@ TEST(BinaryTranslatorE2E, Gfx1250E5m3ReplacementsHonorPerRoleVgprBanks) {
             << " fp16_ovfl=" << fp16_ovfl << " mode=" << static_cast<unsigned>(mode);
         EXPECT_EQ(packed_run->final_msb_mode, mode) << "the incoming mode must be restored";
 
-        const auto stochastic_run = run_gfx1250_e5m3_replacement(
-            gfx1250::kVCvtSrFp8F32Vop3, 2u << 2, src0, src1, kDstInitial, fp16_ovfl, mode);
+        const auto stochastic_run =
+            run_gfx1250_e5m3_replacement(gfx1250::kVCvtSrFp8F32Vop3, 2u << 2, e5m3_vgpr(src0),
+                                         e5m3_vgpr(src1), kDstInitial, fp16_ovfl, mode);
         ASSERT_TRUE(stochastic_run.has_value());
         const uint32_t byte =
             util::f32_to_fp8_e5m3_sr_mode(std::bit_cast<float>(src0), src1, fp16_ovfl);
@@ -10101,6 +10176,71 @@ TEST(BinaryTranslatorE2E, Gfx1250E5m3ReplacementsHonorPerRoleVgprBanks) {
             << "value=" << std::hex << src0 << " seed=" << src1 << std::dec
             << " fp16_ovfl=" << fp16_ovfl << " mode=" << static_cast<unsigned>(mode);
         EXPECT_EQ(stochastic_run->final_msb_mode, mode) << "the incoming mode must be restored";
+      }
+    }
+  }
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250E5m3ReplacementsMatchForNonVgprSources) {
+  // Each source kind reaches different code: a literal is materialized into
+  // scratch first, a scalar is read through the operand's scalar path, and the
+  // SGPR-pressure shape forces VGPR carriers behind an execz guard. All three
+  // must still produce what the reference conversion does.
+  static constexpr std::array<uint32_t, 5> kValues = {0x00000000u, 0x37000000u, 0x3F800000u,
+                                                      0x47E00000u, 0x7FC00000u};
+  constexpr uint32_t kDstInitial = 0xa5a5a5a5u;
+  constexpr uint32_t kSeed = 0x0f0f0f0fu;
+
+  const auto expect_packed = [&](const std::optional<Gfx1250E5m3Execution> &run, uint32_t src0,
+                                 uint32_t src1, bool fp16_ovfl, const char *shape) {
+    ASSERT_TRUE(run.has_value()) << shape;
+    const uint32_t packed = util::f32_to_fp8_e5m3_rne_mode(std::bit_cast<float>(src0), fp16_ovfl) |
+                            (static_cast<uint32_t>(util::f32_to_fp8_e5m3_rne_mode(
+                                 std::bit_cast<float>(src1), fp16_ovfl))
+                             << 8);
+    EXPECT_EQ(run->vdst, (kDstInitial & 0xffff0000u) | packed)
+        << shape << " src0=" << std::hex << src0 << " src1=" << src1 << std::dec
+        << " fp16_ovfl=" << fp16_ovfl;
+  };
+
+  for (const bool fp16_ovfl : {false, true}) {
+    for (size_t index = 0; index < kValues.size(); ++index) {
+      const uint32_t src0 = kValues[index];
+      const uint32_t src1 = kValues[(index + 3) % kValues.size()];
+
+      expect_packed(run_gfx1250_e5m3_replacement(gfx1250::kVCvtPkFp8F32Vop3, 0, e5m3_literal(src0),
+                                                 e5m3_vgpr(src1), kDstInitial, fp16_ovfl),
+                    src0, src1, fp16_ovfl, "literal src0");
+      expect_packed(run_gfx1250_e5m3_replacement(gfx1250::kVCvtPkFp8F32Vop3, 0, e5m3_vgpr(src0),
+                                                 e5m3_literal(src1), kDstInitial, fp16_ovfl),
+                    src0, src1, fp16_ovfl, "literal src1");
+      expect_packed(run_gfx1250_e5m3_replacement(gfx1250::kVCvtPkFp8F32Vop3, 0, e5m3_sgpr(src0),
+                                                 e5m3_vgpr(src1), kDstInitial, fp16_ovfl),
+                    src0, src1, fp16_ovfl, "scalar src0");
+      expect_packed(run_gfx1250_e5m3_replacement(gfx1250::kVCvtPkFp8F32Vop3, 0, e5m3_vgpr(src0),
+                                                 e5m3_sgpr(src1), kDstInitial, fp16_ovfl),
+                    src0, src1, fp16_ovfl, "scalar src1");
+      expect_packed(run_gfx1250_e5m3_replacement(gfx1250::kVCvtPkFp8F32Vop3, 0, e5m3_vgpr(src0),
+                                                 e5m3_vgpr(src1), kDstInitial, fp16_ovfl, 0,
+                                                 rocjitsu::REGISTER_SET_MAX_SGPRS),
+                    src0, src1, fp16_ovfl, "sgpr pressure");
+
+      // The stochastic lowering reads the seed through the same operand paths.
+      for (const auto &[seed, shape] :
+           std::initializer_list<std::pair<Gfx1250E5m3Operand, const char *>>{
+               {e5m3_literal(kSeed), "literal seed"},
+               {e5m3_sgpr(kSeed), "scalar seed"},
+               {e5m3_vgpr(kSeed), "sgpr pressure seed"}}) {
+        const uint16_t live_sgprs =
+            std::string_view(shape) == "sgpr pressure seed" ? rocjitsu::REGISTER_SET_MAX_SGPRS : 0;
+        const auto run =
+            run_gfx1250_e5m3_replacement(gfx1250::kVCvtSrFp8F32Vop3, 0, e5m3_vgpr(src0), seed,
+                                         kDstInitial, fp16_ovfl, 0, live_sgprs);
+        ASSERT_TRUE(run.has_value()) << shape;
+        const uint32_t byte =
+            util::f32_to_fp8_e5m3_sr_mode(std::bit_cast<float>(src0), kSeed, fp16_ovfl);
+        EXPECT_EQ(run->vdst, (kDstInitial & 0xffffff00u) | byte)
+            << shape << " value=" << std::hex << src0 << std::dec << " fp16_ovfl=" << fp16_ovfl;
       }
     }
   }
@@ -12288,6 +12428,17 @@ TEST(BinaryTranslatorE2E, Gfx1250SpillBackedRulesFailClosedForDynamicStackKernel
                                             {.vdst = 30, .opsel = 2, .clamp = 1, .src0 = 256 + 22});
   expect_failure({e5m3[0], e5m3[1]},
                  "gfx1250 E5M3 unpack cannot use private-memory spills in a dynamic-stack kernel");
+
+  constexpr auto pack = gfx1250::build_vop3(
+      gfx1250::kVCvtPkFp8F32Vop3, {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2});
+  expect_failure({pack[0], pack[1]},
+                 "gfx1250 E5M3 pack cannot use private-memory spills in a dynamic-stack kernel");
+
+  constexpr auto stochastic = gfx1250::build_vop3(
+      gfx1250::kVCvtSrFp8F32Vop3, {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2});
+  expect_failure(
+      {stochastic[0], stochastic[1]},
+      "gfx1250 stochastic E5M3 cannot use private-memory spills in a dynamic-stack kernel");
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250SpillWaitsForOutstandingVgprProducer) {
