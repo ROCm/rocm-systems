@@ -320,6 +320,8 @@ having been generated before rocpd support was added. They are regenerated in th
 
 ### Phase A-2: Remove the now-dead `--join-type` option
 
+Status: implemented.
+
 `--join-type {kernel,grid}` only ever fed the csv-format wide merge in
 `join_prof`. With that merge removed in Phase A, nothing
 in `src/` reads it, and `grid` vs `kernel` now produce identical output

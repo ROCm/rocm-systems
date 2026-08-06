@@ -443,17 +443,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "--join-type",
-        metavar="",
-        required=False,
-        choices=["kernel", "grid"],
-        default=None,
-        help=(
-            "\t\t\t[DEPRECATED] No longer has any effect; will be removed in a "
-            "future release."
-        ),
-    )
-    profile_group.add_argument(
         "--no-roof",
         required=False,
         default=False,

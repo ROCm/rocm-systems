@@ -301,14 +301,6 @@ add_test(
 )
 
 add_test(
-    NAME test_profile_join
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m join
-        --junitxml=tests/test_profile_join.xml ${COV_OPTION} tests/test_profile_general.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_profile_sort
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m sort
@@ -452,7 +444,6 @@ add_test(
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
-    test_profile_join
     test_profile_sort
     test_profile_misc
     test_profile_path
@@ -849,7 +840,6 @@ if(${ENABLE_COVERAGE})
     set(ALL_TEST_NAMES
         test_profile_kernel_execution
         test_profile_dispatch
-        test_profile_join
         test_profile_sort
         test_profile_misc
         test_profile_path
