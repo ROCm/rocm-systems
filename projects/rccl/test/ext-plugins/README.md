@@ -258,7 +258,9 @@ Regression coverage for inspector plugin deadlock/UAF teardown (NCCL issue #2000
 make -C rccl/plugins/profiler/inspector/test test
 ```
 
-**Functional comm-reinit stress** (requires RCCL, MPI, rccl-tests, and GPUs):
+**Functional comm lifecycle stress** (requires RCCL, MPI, rccl-tests, and GPUs):
+
+Each pytest iteration launches a fresh `mpirun` job that performs comm init → collectives → destroy.
 
 ```bash
 pytest -m inspector_regression tests/ext-inspector/test_lifecycle_stress.py --cache-clear

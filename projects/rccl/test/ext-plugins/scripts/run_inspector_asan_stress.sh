@@ -9,7 +9,7 @@
 #
 # Builds the native collInfo lifecycle unit test and the inspector plugin with
 # ASAN, then runs the native tests and (when RCCL_TEST env is configured) the
-# ext-inspector comm-reinit stress pytest subset.
+# ext-inspector comm lifecycle stress pytest subset.
 #
 # Usage:
 #   ./scripts/run_inspector_asan_stress.sh
@@ -48,7 +48,7 @@ else
 fi
 
 if [[ "${RUN_FUNCTIONAL:-0}" == "1" ]]; then
-  echo "--- Functional comm-reinit stress (pytest, requires GPU cluster) ---"
+  echo "--- Functional comm lifecycle stress (pytest, requires GPU cluster) ---"
   for var in RCCL_INSTALL_DIR OMPI_INSTALL_DIR RCCL_TESTS_DIR; do
     if [[ -z "${!var:-}" ]]; then
       echo "ERROR: ${var} must be set when RUN_FUNCTIONAL=1" >&2
