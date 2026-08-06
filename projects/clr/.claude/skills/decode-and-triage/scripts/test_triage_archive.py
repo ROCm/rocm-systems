@@ -22,12 +22,18 @@ SCRIPT = SCRIPT_DIR / "triage_archive.sh"
 FIXTURE = SCRIPT_DIR / "fixtures" / "rocm_smi_vram.txt"
 
 
-def _pick_gpu_function() -> str:
+def _shell_function(name: str) -> str:
     text = SCRIPT.read_text(encoding="utf-8")
-    match = re.search(r"^pick_gpu\(\)\s*\{.*?^\}", text, re.MULTILINE | re.DOTALL)
+    match = re.search(
+        rf"^{re.escape(name)}\(\)\s*\{{.*?^\}}", text, re.MULTILINE | re.DOTALL
+    )
     if match is None:
-        raise AssertionError("pick_gpu not found in triage_archive.sh")
+        raise AssertionError(f"{name} not found in triage_archive.sh")
     return match.group(0)
+
+
+def _pick_gpu_function() -> str:
+    return _shell_function("pick_gpu")
 
 
 @unittest.skipUnless(shutil.which("bash"), "bash is required")
@@ -116,6 +122,42 @@ def _bash_at_least(major: int, minor: int) -> bool:
     except ValueError:
         return False
     return (got_major, got_minor) >= (major, minor)
+
+
+@unittest.skipUnless(shutil.which("bash"), "bash is required")
+class LibraryPathTests(unittest.TestCase):
+    def test_packaged_playback_puts_its_own_lib_on_the_path(self) -> None:
+        """A playback shipped as bin/ and lib/ siblings, not a CLR build tree.
+
+        Without its own lib dir the binary loads the system libamdhip64 and
+        fails on the symbols it was built against, which takes out the
+        metadata-only path as well as replay.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bin").mkdir()
+            (root / "lib").mkdir()
+            play = root / "bin" / "hrr-playback"
+            play.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            play.chmod(0o755)
+
+            env = dict(os.environ)
+            env["ROCM_PATH"] = str(root / "absent")
+            env.pop("LD_LIBRARY_PATH", None)
+
+            script = (
+                f'SCRIPT_DIR={root}\nROCM_PATH="${{ROCM_PATH}}"\n'
+                f'{_shell_function("setup_library_path")}\n'
+                f'setup_library_path "{play}"\necho "$LD_LIBRARY_PATH"\n'
+            )
+            proc = subprocess.run(
+                ["bash", "-c", script],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=True,
+            )
+            self.assertIn(str(root / "lib"), proc.stdout.strip())
 
 
 @unittest.skipUnless(_bash_at_least(4, 4), "needs bash >= 4.4 (Linux target)")

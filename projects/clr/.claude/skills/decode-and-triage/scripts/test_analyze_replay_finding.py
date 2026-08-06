@@ -178,6 +178,29 @@ class RecordedCaptureTests(unittest.TestCase):
             f"expected the ATen caveat, got {finding.notes}",
         )
 
+    def test_a_stopped_replay_reports_a_hang(self) -> None:
+        """A hang prints nothing, so the runner's marker is the only signal."""
+        finding = self._analyze("replay_hang_timeout.log")
+        self.assertEqual(finding.outcome, "HANG")
+        self.assertEqual(finding.fault_class, "hang")
+        self.assertIsNone(finding.kernel_name)
+
+    def test_progress_kernel_survives_the_info_pass(self) -> None:
+        """The `--info` dump has no progress lines and must not erase them."""
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(
+            '[HRR progress] elapsed_s=0.0 seq=4 kernels=1 d2h_pass=0 d2h_fail=0 '
+            'd2h_attempted=0 last="crash_oob"\n',
+            "replay.log",
+            finding,
+        )
+        arf.parse_text(
+            (self.FIXTURES / "info_crash.txt").read_text(encoding="utf-8"),
+            "info",
+            finding,
+        )
+        self.assertEqual(finding.last_progress_kernel, "crash_oob")
+
     def test_unreadable_archive_records_both_versions(self) -> None:
         finding = self._analyze("version_mismatch.log")
         self.assertEqual(finding.fault_class, "version_mismatch")

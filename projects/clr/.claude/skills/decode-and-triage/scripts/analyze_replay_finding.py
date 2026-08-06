@@ -37,6 +37,10 @@ RE_MEM_FAULT_ERR = re.compile(
     r"Memory Fault Error \[[^\]]*?faulting addr: (0x[0-9a-fA-F]+), kernel: ([^\]]+)\]"
 )
 RE_HSA_STATUS = re.compile(r"HSA_STATUS_ERROR_(MEMORY_FAULT|ABORTED|EXCEPTION)")
+# The runner bounds the replay and records the fact when it had to stop it.
+# This is the only signal a hang leaves: it makes no progress and prints
+# nothing, so without the marker the archive yields no finding at all.
+RE_REPLAY_TIMEOUT = re.compile(r"replay timed out after (\d+)s")
 # A queue abort carries its own bracket, with the kernel but no faulting
 # address, so the memory-fault regex above cannot see it. Observed on an
 # out-of-bounds ATen gather, where this was the only line naming the culprit.
@@ -71,9 +75,10 @@ RE_INFO_KERNEL_ROW = re.compile(
     r"^[ \t]*(?:\d+[ \t]+)?([A-Za-z_][^\s\[]*)[ \t]+\[[\d,\s]+\][ \t]+\[[\d,\s]+\]",
     re.MULTILINE,
 )
-# `--sync-after-launch` and `--sync-after-event` print one line per replayed
-# event. A GPU fault tears the process down before HRR writes its own Fatal
-# line, so the last of these is often the only record of the failing dispatch.
+# `--verbose` prints one line per replayed event. A GPU fault tears the process
+# down before HRR writes its own Fatal line, so when a run was made verbose the
+# last of these is the only record of the failing dispatch. The sync flags do
+# not emit these lines: `hrr_playback.cpp` gates them on `ctx.verbose` alone.
 RE_EVENT_PROGRESS = re.compile(
     r"^[ \t]*(?:\[HRR\][ \t]*)?Event (\d+):[ \t]*(\w+)"
     r"(?:[^\n]*?->[ \t]*Kernel '([^']+)')?",
@@ -138,6 +143,11 @@ class Finding:
 def _classify(text: str, finding: Finding) -> str:
     if RE_VERSION_MISMATCH.search(text):
         return "version_mismatch"
+    # A replay the runner had to stop made no progress against the clock, which
+    # is what a hang is. This outranks the rest: whatever partial output the
+    # replay printed before stalling does not describe why it stalled.
+    if RE_REPLAY_TIMEOUT.search(text):
+        return "hang"
     if RE_PASS.search(text):
         if finding.d2h_fail and finding.d2h_fail > 0:
             return "nan_inf_divergence"
@@ -263,7 +273,11 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         finding.d2h_fail = int(m.group(4))
         finding.d2h_attempted = int(m.group(5))
         last_prog = m.group(6)
-    finding.last_progress_kernel = last_prog
+    # Only when this input had progress lines. Assigning unconditionally let the
+    # archive `--info` pass, which has none, wipe the kernel the replay log had
+    # already recorded, and the default pipeline always parses both.
+    if last_prog is not None:
+        finding.last_progress_kernel = last_prog
 
     for m in (RE_FATAL_EVENT, RE_FATAL_GPU):
         hit = m.search(text)
@@ -324,7 +338,9 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         finding.fault_class = new_class
 
     new_outcome = finding.outcome
-    if RE_PASS.search(text):
+    if RE_REPLAY_TIMEOUT.search(text):
+        new_outcome = "HANG"
+    elif RE_PASS.search(text):
         new_outcome = "PASS"
     elif RE_MAF.search(text) or RE_MEM_FAULT_ERR.search(text):
         new_outcome = "MAF"
@@ -374,8 +390,8 @@ def finalize(finding: Finding) -> Finding:
         finding.notes.append(
             f"kernel name taken from the last launch to start before the fault "
             f"({finding.last_event_kernel}); the runtime fault line named no "
-            f"kernel. Valid only because the replay ran with "
-            f"--sync-after-launch."
+            f"kernel. Valid only for a replay run with --verbose, which is what "
+            f"prints those per-event lines."
         )
 
     # A memory fault can tear the process down before the failing dispatch is

@@ -33,6 +33,7 @@ Environment (common):
   HRR_DOCKER_IMAGE     Docker image for --replay docker / auto
   HRR_DOCKER_MOUNT_CLR=1  Overlay host CLR for docker replay (dev builds)
   GPU                  Replay GPU ordinal (default: auto-pick)
+  HRR_REPLAY_TIMEOUT   Seconds before a stalled replay is stopped (default 1800, 0 disables)
   HRR_CONTINUE=1       Proceed after preflight HIP/comgr mismatch prompt
   HRR_SKIP_COMPAT=1    Skip manifest preflight
 EOF
@@ -77,6 +78,12 @@ setup_library_path() {
   bin_dir="$(cd "$(dirname "$play")" && pwd)"
   if [[ "$bin_dir" == *"/hipamd/src/hrr/playback" ]]; then
     lib_dirs+=("$(cd "$bin_dir/../../../lib" && pwd)")
+  fi
+  # A packaged playback ships as bin/ and lib/ siblings rather than inside a
+  # CLR build tree. Without this its libamdhip64 is never on the path, so the
+  # binary loads the system one and fails on the symbols it was built against.
+  if [[ -d "$bin_dir/../lib" ]]; then
+    lib_dirs+=("$(cd "$bin_dir/../lib" && pwd)")
   fi
   clr="$(cd "$SCRIPT_DIR/../../../../" 2>/dev/null && pwd || true)"
   for p in "${ROCR_LIB:-}" "${clr:+$clr/../rocr-runtime/build-local/rocr/lib}"; do
@@ -135,14 +142,29 @@ run_native_replay() {
   gpu="$(pick_gpu)"
   [[ -r /dev/kfd ]] || { echo "error: /dev/kfd not accessible" >&2; return 1; }
   read -r -a sync_args <<< "$(replay_sync_args)"
+  # A hung workload replays as a hang, and without a bound the replay never
+  # returns, so the analyzer never runs and the archive yields no finding at
+  # all. The bound belongs here, around the playback process: wrapping the
+  # container instead leaves the replay running inside it. Set
+  # HRR_REPLAY_TIMEOUT=0 to disable.
+  local timeout_s="${HRR_REPLAY_TIMEOUT:-1800}" runner=()
+  if [[ "$timeout_s" != "0" ]] && command -v timeout >/dev/null 2>&1; then
+    runner=(timeout "$timeout_s")
+  fi
   echo "[triage] native replay playback=$play GPU=$gpu ${sync_args[*]}" >&2
   set +e
   # hrr-playback is a HIP program, so HIP_VISIBLE_DEVICES is the mask that
   # applies to it. Setting ROCR_VISIBLE_DEVICES re-indexes devices underneath a
   # HIP mask, which can land the replay on a device other than the one picked.
   HIP_VISIBLE_DEVICES="$gpu" HIP_HRR_REPLAY_PROGRESS_SECONDS="${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
-    "$play" "$ARCHIVE" ${sync_args[@]+"${sync_args[@]}"} 2>&1 | tee "$log"
+    ${runner[@]+"${runner[@]}"} "$play" "$ARCHIVE" ${sync_args[@]+"${sync_args[@]}"} 2>&1 | tee "$log"
   local rc=${PIPESTATUS[0]}
+  # 124 is what `timeout` reports when it had to stop the process. Record it in
+  # the log so the finding says hang rather than inheriting whatever partial
+  # output the replay had managed to print.
+  if [[ "$rc" == "124" ]]; then
+    echo "[triage] replay timed out after ${timeout_s}s" | tee -a "$log"
+  fi
   # Deliberately not re-enabling `set -e` here. The caller wraps this call in
   # `set +e` precisely so a failing replay is survivable, and restores `set -e`
   # afterwards. Re-arming it inside the function made the non-zero return fatal,
@@ -202,6 +224,19 @@ if [[ "$mode" != "skip" && "$mode" == "native" && -x "$ENSURE" ]]; then
     exit 1
   }
   export HRR_PLAYBACK
+elif [[ "$mode" == "skip" && -x "$ENSURE" ]]; then
+  # Metadata-only still wants `hrr-playback --info`, which needs no GPU. Locate
+  # without --build so this never tries to compile; if there is no binary the
+  # analyzer simply reports the archive path, as before.
+  # Not a trailing `&&`: as the last statement of this branch it would become
+  # the `if` statement's exit status and, under `set -e`, end the script.
+  HRR_PLAYBACK="$("$ENSURE" 2>/dev/null || true)"
+  if [[ -n "$HRR_PLAYBACK" ]]; then
+    export HRR_PLAYBACK
+    # The library path is otherwise only prepared inside the native replay, so
+    # without this the analyzer finds the binary and then cannot load it.
+    setup_library_path "$HRR_PLAYBACK"
+  fi
 elif [[ "$mode" == "docker" && "${HRR_DOCKER_MOUNT_CLR:-0}" == "1" && -x "$ENSURE" ]]; then
   HRR_PLAYBACK="$("$ENSURE" --build)" || {
     echo "error: ensure_playback.sh --build failed for HRR_DOCKER_MOUNT_CLR=1" >&2
@@ -210,8 +245,11 @@ elif [[ "$mode" == "docker" && "${HRR_DOCKER_MOUNT_CLR:-0}" == "1" && -x "$ENSUR
   export HRR_PLAYBACK
 fi
 
-REPLAY_GPU="${GPU:-$(pick_gpu)}"
+REPLAY_GPU=""
 if [[ "$mode" != "skip" ]]; then
+  # Only when a device is actually going to be used: metadata-only needs no GPU
+  # and should not announce a choice it never makes.
+  REPLAY_GPU="${GPU:-$(pick_gpu)}"
   run_replay_preflight "$mode" "$REPLAY_GPU"
 fi
 

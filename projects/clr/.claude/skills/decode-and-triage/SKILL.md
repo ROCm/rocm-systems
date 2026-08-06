@@ -173,6 +173,7 @@ native. Use `--no-replay` for metadata-only (no GPU).
 | `MAF` | GPU memory access fault during replay |
 | `FAIL` | Replay finished but validation failed (e.g. D2H mismatch) |
 | `ABORT` | Replay stopped early (fatal API, version mismatch, queue abort, user abort) |
+| `HANG` | Replay made no progress and the runner had to stop it (see `HRR_REPLAY_TIMEOUT`) |
 | `UNKNOWN` | Insufficient signal to classify (e.g. metadata-only triage, missing log) |
 
 When outcome is `UNKNOWN` or fault class is `unknown`, say so explicitly in the
