@@ -51,6 +51,11 @@ struct IndirectCallFixup {
   /// be replaced with a direct transfer window — an unconstrained path would be
   /// redirected to a concrete target it never dynamically reaches.
   bool source_incomplete = false;
+  /// @brief True when the recovery range contains an `s_wait_xcnt` the replacement
+  /// must reproduce. The canonical builder overwrites the whole range and writes
+  /// the same SGPR pair the drain was ordering, so dropping the wait would let the
+  /// pair be rewritten while an operation still has the old value in flight.
+  bool source_requires_xcnt_drain = false;
   uint16_t source_return_sreg = 0;           ///< Low SGPR receiving the return PC for calls.
   uint64_t target_getpc_offset = 0;          ///< Relocated offset of the s_getpc_b64 producer.
   uint64_t target_recovery_begin_offset = 0; ///< Relocated first byte of replaceable builder code.

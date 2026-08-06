@@ -4259,26 +4259,58 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
             "candidate_mask=0x%x",
             vgpu, candidate_mask);
   } else {
-    // Regular read/write/intra: enforce exclusivity (don't share engines)
-    // Build a mask of engines already allocated to other VirtualGPUs
+    // Regular read/write/intra: prefer exclusive affinity to avoid cross-stream contention.
     for (const auto& pair : vgpu_to_engine_) {
       allocated_mask |= pair.second;
     }
 
     uint32_t available_mask = validEngineMask & ~allocated_mask;
 
-    if (available_mask == 0) {
-      ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
-              "No unallocated SDMA engines available for VirtualGPU %p, engine_type=%d "
-              "(valid_mask=0x%x, allocated_mask=0x%x)",
-              vgpu, engine_type, validEngineMask, allocated_mask);
-      return 0;
-    }
+    if (available_mask != 0) {
+      // Prefer high-bandwidth (recommended) engines if available.
+      candidate_mask = available_mask & preferredMask;
+      if (candidate_mask == 0) {
+        candidate_mask = available_mask;
+      }
+    } else {
+      // If all valid engines are assigned, share one and rely on ROCr to serialize submissions.
+      // Prefer idle engines, then preferred engines, and round-robin within the selected class.
+      uint32_t idle_mask = freeEngineMask & validEngineMask;
+      uint32_t selection_mask = idle_mask & preferredMask;
+      if (selection_mask == 0) {
+        selection_mask = idle_mask;
+      }
+      if (selection_mask == 0) {
+        selection_mask = validEngineMask & preferredMask;
+      }
+      if (selection_mask == 0) {
+        selection_mask = validEngineMask;
+      }
+      if (selection_mask == 0) {
+        ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
+                "No valid SDMA engines available for oversubscribed VirtualGPU %p, "
+                "engine_type=%d",
+                vgpu, engine_type);
+        return 0;
+      }
 
-    // Prefer high-bandwidth (recommended) engines if available
-    candidate_mask = available_mask & preferredMask;
-    if (candidate_mask == 0) {
-      candidate_mask = available_mask;
+      uint32_t engine_count = 0;
+      for (uint32_t mask = selection_mask; mask != 0; mask &= mask - 1) {
+        ++engine_count;
+      }
+      uint32_t slot =
+          next_rr_engine_.fetch_add(1, std::memory_order_relaxed) % engine_count;
+      // Select the set bit at the zero-based slot index, starting from the least significant bit.
+      while (slot != 0) {
+        selection_mask &= selection_mask - 1;
+        --slot;
+      }
+      candidate_mask = selection_mask & (~selection_mask + 1);
+
+      ClPrint(amd::LOG_INFO, amd::LOG_COPY,
+              "All valid SDMA engines are assigned; sharing an engine for VirtualGPU %p, "
+              "engine_type=%d (candidate_mask=0x%x, valid_mask=0x%x, allocated_mask=0x%x)",
+              vgpu, engine_type, candidate_mask, validEngineMask, allocated_mask);
     }
   }
 

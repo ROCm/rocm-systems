@@ -256,11 +256,20 @@ struct InstructionFacts {
   bool written_sgprs_computed = false;
 };
 
+[[nodiscard]] bool is_lane_fixup_consumer(const InstructionFacts &facts) {
+  return facts.swappc_ssrc.has_value();
+}
+
 struct AnalysisContext {
   std::span<const Instruction *const> insts;
   std::span<const uint8_t> text;
   rj_code_arch_t arch;
   std::vector<InstructionFacts> facts;
+
+  // Whole-text superset of every SGPR pair that a deferred cross-block
+  // consumer can name. Every PendingConsumer producer must originate from one
+  // of the setpc/swappc operands recorded here.
+  std::bitset<REGISTER_SET_MAX_SGPRS> consumer_pairs;
 };
 
 /// @brief Per-pair summary for one analysis block.
@@ -471,6 +480,21 @@ public:
     return false;
   }
 
+  /// @brief Visit dirty SGPR halves in ascending register order.
+  template <typename F> void for_each_dirty(F &&f) const {
+    uint64_t bits = dirty_lo_;
+    while (bits != 0) {
+      f(static_cast<uint16_t>(std::countr_zero(bits)));
+      bits &= bits - 1;
+    }
+
+    bits = dirty_hi_;
+    while (bits != 0) {
+      f(static_cast<uint16_t>(64 + std::countr_zero(bits)));
+      bits &= bits - 1;
+    }
+  }
+
   /// @brief Invalidate every builder overlapping @p sgpr.
   ///
   /// @details A write to sN can corrupt the pair s[N:N+1] when sN is the low
@@ -509,6 +533,7 @@ private:
 
   std::array<std::optional<PcValue>, REGISTER_SET_MAX_SGPRS> builders_;
   std::vector<uint16_t> active_pairs_;
+  static_assert(REGISTER_SET_MAX_SGPRS <= 128, "dirty set uses two 64-bit words");
   uint64_t dirty_lo_ = 0;
   uint64_t dirty_hi_ = 0;
 };
@@ -1111,12 +1136,18 @@ bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup)
            existing.source_recovery_end_offset == fixup.source_recovery_end_offset;
   });
   if (duplicate != out.end()) {
-    // Incompleteness is monotonic: if any iteration observes this fixup as
-    // incomplete, the merged record must stay incomplete. Otherwise a later
-    // fixed-point pass that rediscovers an earlier-complete fact as incomplete
-    // would be dropped here, leaving the consumer wrongly eligible for a direct
-    // window.
+    // Both flags below are monotonic and must survive the merge, because only
+    // the first record of a duplicate group is kept. Incompleteness: if any
+    // iteration observes this fixup as incomplete, the merged record must stay
+    // incomplete, or a later fixed-point pass that rediscovers an
+    // earlier-complete fact as incomplete would be dropped here and leave the
+    // consumer wrongly eligible for a direct window. A drain requirement is the
+    // same shape -- it is a demand on the replacement, so a producer that needs
+    // it cannot be outvoted by one that does not. Any future requirement that
+    // changes the bytes relocation emits belongs here too.
     duplicate->source_incomplete = duplicate->source_incomplete || fixup.source_incomplete;
+    duplicate->source_requires_xcnt_drain =
+        duplicate->source_requires_xcnt_drain || fixup.source_requires_xcnt_drain;
     return false;
   }
   out.push_back(fixup);
@@ -1174,6 +1205,10 @@ void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
     facts.getpc_sdst = scalar_pc_sreg(arch, inst, facts.word, ScalarPcOp::GetPc64);
     facts.setpc_ssrc = scalar_pc_sreg(arch, inst, facts.word, ScalarPcOp::SetPc64);
     facts.swappc_ssrc = scalar_pc_sreg(arch, inst, facts.word, ScalarPcOp::SwapPc64);
+    if (facts.setpc_ssrc && *facts.setpc_ssrc < kMaxTrackedSgprPair)
+      ctx.consumer_pairs.set(*facts.setpc_ssrc);
+    if (facts.swappc_ssrc && *facts.swappc_ssrc < kMaxTrackedSgprPair)
+      ctx.consumer_pairs.set(*facts.swappc_ssrc);
     if (facts.swappc_ssrc)
       facts.swappc_sdst = static_cast<uint16_t>((facts.word >> 16) & 0x7fu);
     facts.call_sdst = s_call_sdst(inst, facts.word);
@@ -1250,12 +1285,20 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
 
 [[nodiscard]] std::vector<uint8_t>
 explicit_external_entries(const std::vector<AnalysisBlock> &blocks,
-                          std::span<const uint64_t> extra_leaders) {
+                          std::span<const uint64_t> sorted_extra_leaders) {
   std::vector<uint8_t> entries(blocks.size(), 0);
   if (!entries.empty())
     entries[0] = 1;
+
+  // Analysis blocks are built from the ordered instruction stream. Both input
+  // sequences are therefore ascending and can be matched in one merge pass.
+  assert(std::ranges::is_sorted(blocks, {}, &AnalysisBlock::offset));
+  assert(std::ranges::is_sorted(sorted_extra_leaders));
+  auto leader = sorted_extra_leaders.begin();
   for (size_t block_index = 1; block_index < blocks.size(); ++block_index) {
-    if (std::ranges::find(extra_leaders, blocks[block_index].offset) != extra_leaders.end())
+    while (leader != sorted_extra_leaders.end() && *leader < blocks[block_index].offset)
+      ++leader;
+    if (leader != sorted_extra_leaders.end() && *leader == blocks[block_index].offset)
       entries[block_index] = 1;
   }
   return entries;
@@ -1280,15 +1323,18 @@ void set_kill_transfer(AnalysisBlock &block, uint16_t pair_lo) {
     transfer.kind = PairTransfer::Kind::Kill;
 }
 
-void finalize_block_transfers(AnalysisBlock &block, const BlockState &state) {
+void finalize_block_transfers(AnalysisBlock &block, const BlockState &state,
+                              const std::bitset<REGISTER_SET_MAX_SGPRS> &consumer_pairs) {
   // Phase 2 block-exit summary:
   //
-  // 1. Every still-live builder becomes SET. This overrides incoming facts for
-  //    the same pair in Phase 3.
-  // 2. Every dirty half that is not covered by a SET kills both possible pair
-  //    interpretations: s[N:N+1] and, when N > 0, s[N-1:N].
+  // 1. Every still-live builder for a consumer pair becomes SET. This
+  //    overrides incoming facts for the same pair in Phase 3.
+  // 2. Every dirty half overlapping a consumer pair that is not covered by a
+  //    SET kills that interpretation: s[N:N+1] or, when N > 0, s[N-1:N].
   // 3. Pairs never mentioned in transfers are implicit PASS.
   for (uint16_t pair_lo : state.active_pairs()) {
+    if (!consumer_pairs[pair_lo])
+      continue;
     const PcValue *value = state.builder(pair_lo);
     if (value == nullptr)
       continue;
@@ -1297,18 +1343,19 @@ void finalize_block_transfers(AnalysisBlock &block, const BlockState &state) {
     transfer.value = *value;
   }
 
-  for (uint16_t half = 0; half < REGISTER_SET_MAX_SGPRS; ++half) {
-    if (!state.dirty(half))
-      continue;
-    if (!block.transfers.contains(half) || block.transfers[half].kind != PairTransfer::Kind::Set)
+  const auto has_set_transfer = [&](uint16_t pair_lo) {
+    const auto transfer = block.transfers.find(pair_lo);
+    return transfer != block.transfers.end() && transfer->second.kind == PairTransfer::Kind::Set;
+  };
+  state.for_each_dirty([&](uint16_t half) {
+    if (consumer_pairs[half] && !has_set_transfer(half))
       set_kill_transfer(block, half);
     if (half > 0) {
       const uint16_t previous_pair = static_cast<uint16_t>(half - 1);
-      if (!block.transfers.contains(previous_pair) ||
-          block.transfers[previous_pair].kind != PairTransfer::Kind::Set)
+      if (consumer_pairs[previous_pair] && !has_set_transfer(previous_pair))
         set_kill_transfer(block, previous_pair);
     }
-  }
+  });
 }
 
 std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const AnalysisBlock &block,
@@ -1368,20 +1415,24 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
   // this block. We deliberately do not add that temporary to the general
   // lattice; this helper is only for the complete signed-delta template where
   // the sibling subtract block proves both paths are the same static target.
-  if (block.first_index + 2 > block.last_index)
-    return std::nullopt;
-
   const auto add_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddU32);
   const auto addc_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddcU32);
   if (!add_u32_opcode || !addc_u32_opcode)
     return std::nullopt;
 
-  const Instruction &low_inst = *ctx.insts[block.first_index];
   const auto is_gfx1250_padding = [&](size_t index) {
     if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
       return false;
     const Instruction &inst = *ctx.insts[index];
-    if (inst.mnemonic() == "s_prefetch_inst_pc_rel")
+    // The gfx1250 sequence drains XCNT before an instruction prefetch. The
+    // shader manual defines S_WAIT_XCNT as a counter wait, so neither it nor
+    // the prefetch changes the PC pair or the signed-delta temporary. This
+    // block is the conditional branch target, so it lies past the recovery
+    // range and keeps both instructions verbatim; the predicate only skips them
+    // while locating the arithmetic and set-PC consumer. The subtract half sits
+    // inside the range and has to reproduce its drain -- see
+    // match_signed_delta_sub_consumer.
+    if (inst.mnemonic() == "s_wait_xcnt" || inst.mnemonic() == "s_prefetch_inst_pc_rel")
       return true;
     // The compiler also emits a scalar immediate move to configure the
     // prefetch. It is safe to skip only when its destination is outside the
@@ -1394,7 +1445,14 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
   };
 
-  size_t high_index = block.first_index + 1;
+  size_t low_index = block.first_index;
+  while (low_index <= block.last_index && is_gfx1250_padding(low_index))
+    ++low_index;
+  if (low_index > block.last_index)
+    return std::nullopt;
+  const Instruction &low_inst = *ctx.insts[low_index];
+
+  size_t high_index = low_index + 1;
   while (high_index <= block.last_index && is_gfx1250_padding(high_index))
     ++high_index;
   if (high_index > block.last_index)
@@ -1407,8 +1465,8 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
   if (setpc_index > block.last_index)
     return std::nullopt;
   const Instruction &setpc_inst = *ctx.insts[setpc_index];
-  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[block.first_index].word, *add_u32_opcode,
-                                pair_lo, pair_lo, tmp_sreg))
+  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[low_index].word, *add_u32_opcode, pair_lo,
+                                pair_lo, tmp_sreg))
     return std::nullopt;
   if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[high_index].word, *addc_u32_opcode,
                                      static_cast<uint16_t>(pair_lo + 1),
@@ -1421,7 +1479,14 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
   return setpc_index;
 }
 
-[[nodiscard]] std::optional<std::pair<size_t, uint64_t>>
+/// @brief Negative half of the signed PC-delta template, as matched in one block.
+struct SignedDeltaSubMatch {
+  size_t setpc_index = 0;    ///< Index of the subtract half's set-PC consumer.
+  uint64_t recovery_end = 0; ///< One-past-end source byte of the recovery range.
+  bool skipped_xcnt = false; ///< The range holds an `s_wait_xcnt` the rewrite must reproduce.
+};
+
+[[nodiscard]] std::optional<SignedDeltaSubMatch>
 match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock &block,
                                 uint16_t pair_lo, uint16_t tmp_sreg) {
   // Match the negative half of the same signed PC-delta template:
@@ -1444,7 +1509,7 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
     if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
       return false;
     const Instruction &inst = *ctx.insts[index];
-    if (inst.mnemonic() == "s_prefetch_inst_pc_rel")
+    if (inst.mnemonic() == "s_wait_xcnt" || inst.mnemonic() == "s_prefetch_inst_pc_rel")
       return true;
     // Skip a prefetch-config move only when it clobbers neither the getpc pair
     // nor tmp_sreg (whose value s_abs_i32/s_sub_u32 below consume).
@@ -1454,9 +1519,17 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
     return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
   };
 
+  // Padding skipped ahead of the subtract half lies inside the recovery range,
+  // which patch_recovered_builder_fixups overwrites with the canonical builder
+  // and NOP-fills. Losing the prefetch and its configuration move only costs a
+  // hint, but the canonical builder writes the same pair the XCNT drain orders,
+  // so the rewrite has to reproduce the drain.
   size_t abs_index = block.first_index;
-  while (abs_index <= block.last_index && is_gfx1250_padding(abs_index))
+  bool skipped_xcnt = false;
+  while (abs_index <= block.last_index && is_gfx1250_padding(abs_index)) {
+    skipped_xcnt = skipped_xcnt || ctx.insts[abs_index]->mnemonic() == "s_wait_xcnt";
     ++abs_index;
+  }
   if (abs_index + 3 > block.last_index)
     return std::nullopt;
   const Instruction &abs_inst = *ctx.insts[abs_index];
@@ -1481,7 +1554,11 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
       scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[setpc_index].word, ScalarPcOp::SetPc64);
   if (!setpc_sreg || *setpc_sreg != pair_lo)
     return std::nullopt;
-  return std::pair{setpc_index, high_inst.src_loc() + static_cast<uint64_t>(high_inst.size())};
+  return SignedDeltaSubMatch{
+      .setpc_index = setpc_index,
+      .recovery_end = high_inst.src_loc() + static_cast<uint64_t>(high_inst.size()),
+      .skipped_xcnt = skipped_xcnt,
+  };
 }
 
 bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state) {
@@ -1601,6 +1678,8 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
         // predecessor blocks. Defer classification until the block-entry
         // lattice is available. Out-of-range selectors cannot name a tracked
         // SGPR pair and deliberately remain unresolved.
+        assert(ctx.consumer_pairs[*consumer_pair] &&
+               "deferred consumer pair must be in the whole-text consumer set");
         pending_consumers.push_back(PendingConsumer{
             .block_index = block_index,
             .inst_index = index,
@@ -1651,13 +1730,12 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
   }
 
   note_live_pc_builders();
-  finalize_block_transfers(block, state);
+  finalize_block_transfers(block, state, ctx.consumer_pairs);
 }
 
-[[nodiscard]] std::vector<LatticeFacts>
-run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
-                   std::span<const PendingConsumer> pending_consumers,
-                   std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy) {
+[[nodiscard]] std::vector<LatticeFacts> run_block_dataflow(
+    const std::vector<AnalysisBlock> &blocks, std::span<const PendingConsumer> pending_consumers,
+    std::span<const uint64_t> sorted_extra_leaders, ExternalEntryPolicy entry_policy) {
   // Phase 3: compute block-entry facts to a fixed point.
   //
   // entry[B] = JOIN(exit[P]) for every predecessor P of B.
@@ -1672,7 +1750,8 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
     for (size_t successor : blocks[block_index].successors)
       predecessors[successor].push_back(block_index);
   }
-  const std::vector<uint8_t> external_entries = explicit_external_entries(blocks, extra_leaders);
+  const std::vector<uint8_t> external_entries =
+      explicit_external_entries(blocks, sorted_extra_leaders);
 
   // Dataflow results are consumed only by pending cross-block branches. A pair
   // that is built or killed somewhere but never reaches such a consumer cannot
@@ -1946,7 +2025,7 @@ struct VectorLaneFlowState {
 
 void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<AnalysisBlock> &blocks,
                                      std::vector<IndirectCallFixup> &recovered,
-                                     std::span<const uint64_t> extra_leaders,
+                                     std::span<const uint64_t> sorted_extra_leaders,
                                      ExternalEntryPolicy entry_policy) {
   // gfx1250 device functions sometimes keep a small static call set in one
   // VGPR: getpc-built low/high halves are written to fixed lanes, then read
@@ -1975,7 +2054,8 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
 
   if (blocks.empty())
     return;
-  const std::vector<uint8_t> external_entries = explicit_external_entries(blocks, extra_leaders);
+  const std::vector<uint8_t> external_entries =
+      explicit_external_entries(blocks, sorted_extra_leaders);
 
   const auto changes_vgpr_msb_bank = [](std::string_view mnemonic) {
     return mnemonic == "s_set_vgpr_msb" || mnemonic == "s_setreg_b32" ||
@@ -2079,7 +2159,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         continue;
       }
 
-      if (emit_fixups && facts.swappc_ssrc &&
+      if (emit_fixups && is_lane_fixup_consumer(facts) &&
           static_cast<size_t>(*facts.swappc_ssrc + 1) < read_halves.size()) {
         const uint16_t pair_lo = *facts.swappc_ssrc;
         const auto &lo = read_halves[pair_lo];
@@ -2100,24 +2180,28 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
                       [](const auto &item) { return !is_callee_saved_vgpr(item.first.vgpr); });
       }
 
-      RegisterSet vgpr_defs;
-      for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
-        const Operand *op = inst.dst_operand(dst_index);
-        if (op == nullptr)
-          continue;
-        if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::VGPR)
-          vgpr_defs.expand(*ref);
-      }
-      inst.implicit_defs(vgpr_defs);
-      vgpr_defs.for_each([&](RegisterRef ref) {
-        if (ref.cls != RegClass::VGPR)
-          return;
-        // Operand metadata does not expose a role for every implicit/wide def.
-        // Conservatively invalidate every physical bank sharing this selector.
-        std::erase_if(state.slots, [&](const auto &item) {
-          return (item.first.vgpr & 0xffu) == (ref.index & 0xffu);
+      // VGPR defs are decoded only to invalidate tracked slots; no slots makes
+      // this entire region a no-op.
+      if (!state.slots.empty()) {
+        RegisterSet vgpr_defs;
+        for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
+          const Operand *op = inst.dst_operand(dst_index);
+          if (op == nullptr)
+            continue;
+          if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::VGPR)
+            vgpr_defs.expand(*ref);
+        }
+        inst.implicit_defs(vgpr_defs);
+        vgpr_defs.for_each([&](RegisterRef ref) {
+          if (ref.cls != RegClass::VGPR)
+            return;
+          // Operand metadata does not expose a role for every implicit/wide def.
+          // Conservatively invalidate every physical bank sharing this selector.
+          std::erase_if(state.slots, [&](const auto &item) {
+            return (item.first.vgpr & 0xffu) == (ref.index & 0xffu);
+          });
         });
-      });
+      }
 
       if (!builders.active_pairs().empty())
         invalidate_written_sgprs(ctx, index, builders);
@@ -2220,8 +2304,18 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
   }
 
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
-    if (reachable[block_index])
-      (void)scan_block(blocks[block_index], entry_states[block_index], true);
+    if (!reachable[block_index])
+      continue;
+    const AnalysisBlock &block = blocks[block_index];
+    bool has_consumer = false;
+    for (size_t index = block.first_index; index <= block.last_index; ++index) {
+      if (is_lane_fixup_consumer(ctx.facts[index])) {
+        has_consumer = true;
+        break;
+      }
+    }
+    if (has_consumer)
+      (void)scan_block(block, entry_states[block_index], true);
   }
 }
 
@@ -2313,13 +2407,20 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
                   static_cast<int64_t>(static_cast<int32_t>(literal)) + 4,
         .source_getpc_offset = getpc_inst.src_loc(),
         .source_recovery_begin_offset = getpc_next,
-        .source_recovery_end_offset = sub_consumer->second,
+        .source_recovery_end_offset = sub_consumer->recovery_end,
     };
 
-    if (auto fixup = fixup_for_value(ctx, sub_consumer->first, *pair_lo, value))
+    // Both consumers name the same range, so both must ask for the same
+    // replacement: patch_recovered_builder_fixups rewrites it once and requires
+    // the duplicate to agree.
+    if (auto fixup = fixup_for_value(ctx, sub_consumer->setpc_index, *pair_lo, value)) {
+      fixup->source_requires_xcnt_drain = sub_consumer->skipped_xcnt;
       append_unique(recovered, *fixup);
-    if (auto fixup = fixup_for_value(ctx, *add_consumer, *pair_lo, value))
+    }
+    if (auto fixup = fixup_for_value(ctx, *add_consumer, *pair_lo, value)) {
+      fixup->source_requires_xcnt_drain = sub_consumer->skipped_xcnt;
       append_unique(recovered, *fixup);
+    }
   }
 }
 
@@ -2337,7 +2438,11 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     std::vector<PcAddressBuilder> *pc_builders) {
   std::vector<IndirectCallFixup> recovered;
   AnalysisContext ctx = build_context(insts, text, arch);
-  std::vector<uint64_t> leaders(extra_leaders.begin(), extra_leaders.end());
+  std::vector<uint64_t> sorted_extra_leaders(extra_leaders.begin(), extra_leaders.end());
+  std::ranges::sort(sorted_extra_leaders);
+  sorted_extra_leaders.erase(std::ranges::unique(sorted_extra_leaders).begin(),
+                             sorted_extra_leaders.end());
+  std::vector<uint64_t> leaders(sorted_extra_leaders);
 
   PcAddressBuilderMap round_builders;
   for (size_t iteration = 0; iteration < kMaxIndirectDiscoveryIterations; ++iteration) {
@@ -2349,10 +2454,11 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     std::vector<PendingConsumer> pending_consumers;
     std::vector<IndirectCallFixup> iteration_recovered;
     // Lane-stash recovery consumes the same graph as scalar recovery, including
-    // edges proven in earlier rounds. Keep extra_leaders separate from leaders:
-    // recovered targets become reachable through those edges, not by being
-    // promoted to external roots.
-    recover_vector_lane_stashed_pcs(ctx, blocks, iteration_recovered, extra_leaders, entry_policy);
+    // edges proven in earlier rounds. Keep the sorted explicit entries separate
+    // from leaders: recovered targets become reachable through those edges, not
+    // by being promoted to external roots.
+    recover_vector_lane_stashed_pcs(ctx, blocks, iteration_recovered, sorted_extra_leaders,
+                                    entry_policy);
     // Recovered leaders can split a block between rounds, which changes where a
     // builder's block-exit value is observed. Keep only the final round's view
     // so the published records are internally consistent with one CFG.
@@ -2363,7 +2469,7 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 
     if (!pending_consumers.empty()) {
       const auto entry_facts =
-          run_block_dataflow(blocks, pending_consumers, extra_leaders, entry_policy);
+          run_block_dataflow(blocks, pending_consumers, sorted_extra_leaders, entry_policy);
       (void)classify_pending_consumers(ctx, blocks, entry_facts, pending_consumers,
                                        iteration_recovered);
     }
