@@ -1244,6 +1244,22 @@ void VirtualGPU::SetGpuQueue(hsa_queue_t* queue) {
     device_mem_ring_buf_ = extras.deviceMemRingBuf;
     use_movdir64b_ = roc_device_.info().movdir64b_ && device_mem_ring_buf_;
     doorbell_ptr_ = extras.doorbellPtr;
+    // Invalidate stale metadata in the VRAM metadata ring buffer before first use.
+    // When a queue with a device-resident ring buffer is recycled from the pool,
+    // the metadata ring still contains headers from the previous owner. The CP
+    // prefetches metadata speculatively; if it sees a stale-but-valid header at
+    // a slot that is about to be reused, it reads the wrong kernel descriptor
+    // (wrong kernel_code_entry_byte_offset) and computes an invalid entry address
+    // -> APERTURE_VIOLATION. Zero the header fields of every slot so the CP treats
+    // all slots as not-yet-populated.
+    if (extras.metadataRingBuffer != nullptr && device_mem_ring_buf_) {
+      // Zero the entire metadata ring so the CP sees no stale metadata
+      // from a previous queue owner at any slot.
+      const size_t kSlotSize = MetaDataPreloader::kMetadataPacketSize;
+      const uint32_t nslots = queue->size;
+      std::memset(extras.metadataRingBuffer, 0, nslots * kSlotSize);
+      amd::nontemporalStoreFence();  // flush to VRAM before any dispatch
+    }
     metadata_preloader_.SetQueueBase(extras.metadataRingBuffer,
                                      roc_device_.MetadataVersionHeader());
   } else {
@@ -1404,7 +1420,13 @@ void VirtualGPU::writePacketToRingBuffer(AqlPacket* aql_loc, AqlPacket* packet,
 // ================================================================================================
 void VirtualGPU::ringQueueDoorbell(uint64_t index) {
   if (doorbell_ptr_) {
-    amd::ringDoorbell(doorbell_ptr_, index, use_movdir64b_);
+    // skip_fence is only safe when MOVDIR64B is used AND the ring buffer is in
+    // device memory. Even then, the sfence is required to ensure the AQL packet
+    // and metadata (both written via MOVDIR64B/NT to VRAM) are globally visible
+    // before the doorbell UC write arrives at the CP. MOVDIR64B closes the WC
+    // buffer on the CPU but does not guarantee PCIe write ordering relative to
+    // a subsequent MMIO doorbell write on non-coherent paths.
+    amd::ringDoorbell(doorbell_ptr_, index, false);
   } else {
     Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
   }
