@@ -570,6 +570,8 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
       std::memcpy(&rela, image.data() + relocs.sh_offset + i * sizeof(rela), sizeof(rela));
       if (!elf_relocation_place_is_allocated(ehdr, shdrs, relocs, rela.r_offset))
         continue;
+      if (elf_relocation_is_inert(rela.r_info))
+        continue;
       const uint32_t symbol_index = elf_reloc_sym(rela.r_info);
       if (symbol_index == 0 ||
           static_cast<uint64_t>(symbol_index) * sizeof(Elf64_Sym) + sizeof(Elf64_Sym) >
@@ -579,16 +581,11 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
       Elf64_Sym symbol{};
       std::memcpy(&symbol, image.data() + symtab.sh_offset + symbol_index * sizeof(symbol),
                   sizeof(symbol));
-      const bool rocr_dynamic = is_et_dyn_rocr_dynamic_relocation_section(ehdr, relocs);
-      const bool relative64 = elf_reloc_type(rela.r_info) == R_AMDGPU_RELATIVE64;
-      const bool ordinary_symbol = elf_symbol_type(symbol.st_info) != kElfSymbolTypeSection;
-      const bool follows_relocated_symbol =
-          rocr_dynamic ? rocr_dynamic_rela_follows_relocated_symbol(rela, symbol) : ordinary_symbol;
-      // Preserve HEAD's mapping requirement for a redundant text symbol on
-      // RELATIVE64. ROCr derives the stored target from the addend, but still
-      // resolves the referenced symbol before dispatching on relocation type.
+      const TextSymbolRelocationAction action = classify_text_symbol_relocation(
+          ehdr, relocs, rela.r_info, /*has_explicit_addend=*/true, rela.r_addend, symbol);
       if (symbol.st_shndx == text_index &&
-          (follows_relocated_symbol || (rocr_dynamic && relative64 && ordinary_symbol))) {
+          (action == TextSymbolRelocationAction::RequiresSymbolMapping ||
+           action == TextSymbolRelocationAction::RequiresExecutableEntry)) {
         referenced_by_symtab[relocs.sh_link].insert(symbol_index);
       }
     }
@@ -1112,15 +1109,20 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
     for (size_t i = 0; i < count; ++i) {
       const uint64_t offset = relocs.sh_offset + i * entsize;
       uint64_t r_offset = 0;
+      uint64_t r_info = 0;
       if (is_rela) {
         Elf64_Rela rela{};
         std::memcpy(&rela, image_.data() + offset, sizeof(rela));
         r_offset = rela.r_offset;
+        r_info = rela.r_info;
       } else {
         Elf64_Rel rel{};
         std::memcpy(&rel, image_.data() + offset, sizeof(rel));
         r_offset = rel.r_offset;
+        r_info = rel.r_info;
       }
+      if (elf_relocation_is_inert(r_info))
+        continue;
       const bool in_text = is_rel_object
                                ? r_offset < text_size_
                                : (r_offset >= text.sh_addr && r_offset < text.sh_addr + text_size_);
@@ -1200,25 +1202,17 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
       }
       if (!elf_relocation_place_is_allocated(header, shdrs, relocs, r_offset))
         continue;
+      if (elf_relocation_is_inert(r_info))
+        continue;
       const uint32_t sym_index = elf_reloc_sym(r_info);
       if (sym_index != 0) {
         const auto symbol = text_symbol(symtab, sym_index);
         if (!symbol)
           continue;
 
-        // A zero-addend RELA reference to an ordinary text symbol follows the
-        // relocated symbol value written by relocate_text_symbols(). A section
-        // symbol leaves the source offset in the addend, while REL keeps an
-        // implicit addend at the relocation place; neither form can be repaired
-        // safely without interpreting the individual relocation type.
-        const bool rocr_dynamic = is_et_dyn_rocr_dynamic_relocation_section(header, relocs);
-        const bool relative64 = elf_reloc_type(r_info) == R_AMDGPU_RELATIVE64;
-        const bool ordinary_symbol = elf_symbol_type(symbol->st_info) != kElfSymbolTypeSection;
-        const bool supported_rela =
-            rocr_dynamic ? ((relative64 && ordinary_symbol) ||
-                            rocr_dynamic_rela_follows_relocated_symbol(rela, *symbol))
-                         : ordinary_symbol;
-        if (!is_rela || rela.r_addend != 0 || !supported_rela) {
+        const TextSymbolRelocationAction action = classify_text_symbol_relocation(
+            header, relocs, r_info, is_rela, rela.r_addend, *symbol);
+        if (action == TextSymbolRelocationAction::Unsupported) {
           return true;
         }
         continue;

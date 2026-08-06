@@ -8522,7 +8522,7 @@ TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
 TEST(SemanticTranslator, Gfx1250RegistryHasCompleteDischargeContracts) {
   const rocjitsu::RewriteRegistry registry = rocjitsu::rewrite_registry_gfx1250_b0_to_a0();
   EXPECT_TRUE(registry.has_complete_discharge());
-  ASSERT_EQ(registry.opcode_rules.size(), 39u);
+  ASSERT_EQ(registry.opcode_rules.size(), 41u);
   ASSERT_EQ(registry.instruction_rules.size(), 1u);
 
   size_t checked_rules = 0;
@@ -8548,18 +8548,10 @@ TEST(SemanticTranslator, Gfx1250RegistryHasCompleteDischargeContracts) {
       EXPECT_TRUE(rule.discharge.allows(rocjitsu::ExpandStatus::NotHandled));
     }
   }
-  EXPECT_EQ(checked_rules, 34u);
-  EXPECT_EQ(no_success_rules, 5u);
+  EXPECT_EQ(checked_rules, 40u);
+  EXPECT_EQ(no_success_rules, 1u);
   const std::vector<uint32_t> expected_no_success_rule_keys = {
       (static_cast<uint32_t>(gfx1250::encoding::kSop1) << 16) | gfx1250::kSBarrierSignalIsfirstSop1,
-      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
-          gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p,
-      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
-          gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p,
-      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
-          gfx1250::kVWmmaF1616x16x128Bf8Fp8Vop3p,
-      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
-          gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p,
   };
   EXPECT_EQ(no_success_rule_keys, expected_no_success_rule_keys);
   const std::vector<uint32_t> expected_block_context_rule_keys = {
@@ -8676,6 +8668,14 @@ TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule
        }) {
     add_sample(gfx1250::build_vop3p(opcode, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
   }
+  for (const uint16_t opcode : {
+           gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p,
+           gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p,
+           gfx1250::kVWmmaF1616x16x128Bf8Fp8Vop3p,
+           gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p,
+       }) {
+    add_sample(gfx1250::build_vop3p(opcode, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
+  }
   add_sample(
       gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p,
                            {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 40, .src2 = 256 + 64}));
@@ -8685,6 +8685,10 @@ TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule
       {.vaddr4 = 124, .vaddr0 = 8, .vaddr1 = 0, .vaddr2 = 124, .vaddr3 = 124}));
   add_sample(
       gfx1250::build_vop3(gfx1250::kVCvtF32Fp8Vop3, {.vdst = 30, .clamp = 1, .src0 = 256 + 22}));
+  add_sample(gfx1250::build_vop3(gfx1250::kVCvtPkFp8F32Vop3,
+                                 {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2}));
+  add_sample(gfx1250::build_vop3(gfx1250::kVCvtSrFp8F32Vop3,
+                                 {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2}));
 
   constexpr gfx1250::VdsBuilderFields ds2_fields{
       .offset0 = 3, .offset1 = 5, .addr = 20, .data0 = 30, .data1 = 40, .vdst = 50};

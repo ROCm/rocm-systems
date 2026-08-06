@@ -2266,8 +2266,7 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   return source.clamp != 0;
 }
 
-[[nodiscard]] bool cvt_fp8_f32_e5m3_residual(const Instruction &inst,
-                                             std::string_view mnemonic) {
+[[nodiscard]] bool cvt_fp8_f32_e5m3_residual(const Instruction &inst, std::string_view mnemonic) {
   if (inst.mnemonic() != mnemonic ||
       inst.size() < static_cast<int>(sizeof(cdna5::Vop3MachineInst)) ||
       inst.raw_encoding() == nullptr) {
@@ -2663,16 +2662,16 @@ inline constexpr std::array<TranslationRule, 43> kGfx1250B0ToA0ExpandRules = {{
      0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false,
      checked_discharge(always_residual)},
     {cdna5::encoding::kVop3pOpHi1, cdna5::kVWmmaF1616x16x128Fp8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false,
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, true,
      checked_discharge(always_residual)},
     {cdna5::encoding::kVop3pOpHi1, cdna5::kVWmmaF1616x16x128Fp8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false,
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, true,
      checked_discharge(always_residual)},
     {cdna5::encoding::kVop3pOpHi1, cdna5::kVWmmaF1616x16x128Bf8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false,
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, true,
      checked_discharge(always_residual)},
     {cdna5::encoding::kVop3pOpHi1, cdna5::kVWmmaF1616x16x128Bf8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false,
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, true,
      checked_discharge(always_residual)},
     {cdna5::encoding::kVop3pOpHi1, cdna5::kVWmmaF3232x16x128F4Vop3p, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_wmma_32x16_f4, nullptr, nullptr, true,

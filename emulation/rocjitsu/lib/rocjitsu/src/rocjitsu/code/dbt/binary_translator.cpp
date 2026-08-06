@@ -642,10 +642,6 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
   }
 
   std::vector<uint64_t> leaders;
-  // The bool records whether any static/explicit-target reference admitted the
-  // symbol under the pre-existing policy. Dynamic ROCr references use the
-  // narrower loader contract and admit only executable STT_FUNC entries.
-  std::unordered_map<size_t, std::unordered_map<uint32_t, bool>> allocated_relocation_symbols;
 
   for (size_t relocation_section_index = 0; relocation_section_index < shdrs.size();
        ++relocation_section_index) {
@@ -675,14 +671,41 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
       const uint32_t relocation_type = elf_reloc_type(relocation.r_info);
       const uint32_t symbol_index = elf_reloc_sym(relocation.r_info);
       const bool rocr_dynamic = is_et_dyn_rocr_dynamic_relocation_section(ehdr, relocs);
-      const bool has_dynamic_symbol_value =
-          rocr_dynamic && rocr_dynamic_rela_has_relocatable_symbol_value(relocation);
-      const bool has_legacy_static_entry =
-          !rocr_dynamic && relocation_type == R_AMDGPU_ABS64 && symbol_index != 0;
-      if (has_dynamic_symbol_value || has_legacy_static_entry) {
+      const bool may_require_executable_entry =
+          symbol_index != 0 && !elf_relocation_is_inert(relocation.r_info) &&
+          (!rocr_dynamic || rocr_dynamic_relocation_uses_symbol_value(relocation_type));
+      if (may_require_executable_entry) {
         if (relocs.sh_link >= shdrs.size())
           return std::nullopt;
-        allocated_relocation_symbols[relocs.sh_link][symbol_index] |= has_legacy_static_entry;
+        const Elf64_Shdr &symtab = shdrs[relocs.sh_link];
+        if ((symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM) ||
+            symtab.sh_entsize != sizeof(Elf64_Sym) || symtab.sh_size % sizeof(Elf64_Sym) != 0 ||
+            !elf_image_contains(image, symtab.sh_offset, symtab.sh_size)) {
+          return std::nullopt;
+        }
+        const size_t symbol_count = symtab.sh_size / sizeof(Elf64_Sym);
+        if (symbol_index >= symbol_count)
+          return std::nullopt;
+
+        Elf64_Sym symbol{};
+        std::memcpy(&symbol, image.data() + symtab.sh_offset + symbol_index * sizeof(Elf64_Sym),
+                    sizeof(symbol));
+        if (symbol.st_shndx == *text_index &&
+            classify_text_symbol_relocation(ehdr, relocs, relocation.r_info,
+                                            /*has_explicit_addend=*/true, relocation.r_addend,
+                                            symbol) ==
+                TextSymbolRelocationAction::RequiresExecutableEntry) {
+          uint64_t offset = symbol.st_value;
+          if (ehdr.e_type != ET_REL) {
+            if (symbol.st_value < text.vaddr())
+              return std::nullopt;
+            offset = symbol.st_value - text.vaddr();
+          }
+          if (offset > text.size())
+            return std::nullopt;
+          if (offset < text.size())
+            leaders.push_back(offset);
+        }
       }
 
       if (ehdr.e_type != ET_DYN || relocation_type != R_AMDGPU_RELATIVE64 ||
@@ -693,42 +716,6 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
       if (target < text.vaddr())
         continue;
       const uint64_t offset = target - text.vaddr();
-      if (offset < text.size())
-        leaders.push_back(offset);
-    }
-  }
-
-  for (const auto &[symtab_section_index, symbol_indices] : allocated_relocation_symbols) {
-    const Elf64_Shdr &symtab = shdrs[symtab_section_index];
-    if (symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM)
-      return std::nullopt;
-    if (symtab.sh_entsize != sizeof(Elf64_Sym) || symtab.sh_size % sizeof(Elf64_Sym) != 0 ||
-        !elf_image_contains(image, symtab.sh_offset, symtab.sh_size)) {
-      return std::nullopt;
-    }
-
-    const size_t count = symtab.sh_size / sizeof(Elf64_Sym);
-    for (const auto &[symbol_index, legacy_static_entry] : symbol_indices) {
-      if (symbol_index >= count)
-        return std::nullopt;
-      Elf64_Sym symbol{};
-      std::memcpy(&symbol, image.data() + symtab.sh_offset + symbol_index * sizeof(Elf64_Sym),
-                  sizeof(symbol));
-      const uint8_t symbol_type = elf_symbol_type(symbol.st_info);
-      const bool executable_entry = elf_symbol_is_executable_entry(symbol_type) ||
-                                    (legacy_static_entry && symbol_type == kElfSymbolTypeNone);
-      if (symbol.st_shndx != *text_index || !executable_entry) {
-        continue;
-      }
-
-      uint64_t offset = symbol.st_value;
-      if (ehdr.e_type != ET_REL) {
-        if (symbol.st_value < text.vaddr())
-          return std::nullopt;
-        offset = symbol.st_value - text.vaddr();
-      }
-      if (offset > text.size())
-        return std::nullopt;
       if (offset < text.size())
         leaders.push_back(offset);
     }

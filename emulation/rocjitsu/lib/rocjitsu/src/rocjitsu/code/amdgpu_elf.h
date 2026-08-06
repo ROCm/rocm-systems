@@ -226,6 +226,11 @@ inline constexpr uint32_t elf_reloc_type(uint64_t info) {
   return static_cast<uint32_t>(info & 0xffffffffu);
 }
 
+/// @brief Whether an AMDGPU ELF relocation record has no effect.
+inline constexpr bool elf_relocation_is_inert(uint64_t info) {
+  return elf_reloc_type(info) == R_AMDGPU_NONE;
+}
+
 // R_AMDGPU_RELATIVE64 uses symbol index 0 and forms its value from the load bias
 // plus r_addend, so its addend can name an in-.text virtual address with no
 // owning symbol.
@@ -376,28 +381,59 @@ inline constexpr bool elf_symbol_is_executable_entry(uint8_t symbol_type) {
   return symbol_type == kElfSymbolTypeFunc;
 }
 
-/// @brief Whether a supported RELA record can follow a separately relocated symbol value.
-///
-/// @details Callers establish that the relocation place is allocated and that
-/// the symbol belongs to the section being rewritten. An explicit zero addend
-/// leaves the complete target in st_value, so relocating that symbol is enough
-/// for the symbol-valued relocation encodings supported by the runtime loader.
-inline constexpr bool rocr_dynamic_rela_has_relocatable_symbol_value(const Elf64_Rela &relocation) {
-  return elf_reloc_sym(relocation.r_info) != 0 && relocation.r_addend == 0 &&
-         rocr_dynamic_relocation_uses_symbol_value(elf_reloc_type(relocation.r_info));
-}
-
-/// @brief Whether ROCr's dynamic path can follow this symbol-valued RELA reference.
-inline constexpr bool rocr_dynamic_rela_follows_relocated_symbol(const Elf64_Rela &relocation,
-                                                                 const Elf64_Sym &symbol) {
-  return rocr_dynamic_rela_has_relocatable_symbol_value(relocation) &&
-         rocr_dynamic_symbol_address_follows_st_value(elf_symbol_type(symbol.st_info));
-}
-
 /// @brief Whether this supported ET_DYN section uses ROCr's dynamic relocation policy.
 inline constexpr bool is_et_dyn_rocr_dynamic_relocation_section(const Elf64_Ehdr &ehdr,
                                                                 const Elf64_Shdr &relocs) {
   return ehdr.e_type == ET_DYN && relocs.sh_info == SHN_UNDEF;
+}
+
+/// @brief How a relocation reference to an ordinary symbol in rewritten .text must be handled.
+enum class TextSymbolRelocationAction : uint8_t {
+  Ignored,
+  RequiresSymbolMapping,
+  RequiresExecutableEntry,
+  Unsupported,
+};
+
+/// @brief Classify one relocation reference to a symbol defined in rewritten .text.
+///
+/// @details A required executable entry also requires the symbol's st_value to be remapped.
+/// R_AMDGPU_NONE is always inert. ROCr dynamic relocations follow the loader's supported
+/// symbol-valued forms, while explicit-target/static relocation sections retain the broader
+/// pre-existing policy that any ordinary zero-addend RELA reference follows the symbol value.
+inline constexpr TextSymbolRelocationAction
+classify_text_symbol_relocation(const Elf64_Ehdr &ehdr, const Elf64_Shdr &relocs,
+                                uint64_t relocation_info, bool has_explicit_addend, int64_t addend,
+                                const Elf64_Sym &symbol) {
+  const uint32_t relocation_type = elf_reloc_type(relocation_info);
+  if (elf_relocation_is_inert(relocation_info))
+    return TextSymbolRelocationAction::Ignored;
+  if (!has_explicit_addend || addend != 0 || elf_reloc_sym(relocation_info) == 0)
+    return TextSymbolRelocationAction::Unsupported;
+
+  const uint8_t symbol_type = elf_symbol_type(symbol.st_info);
+  if (is_et_dyn_rocr_dynamic_relocation_section(ehdr, relocs)) {
+    if (relocation_type == R_AMDGPU_RELATIVE64) {
+      return symbol_type == kElfSymbolTypeSection
+                 ? TextSymbolRelocationAction::Unsupported
+                 : TextSymbolRelocationAction::RequiresSymbolMapping;
+    }
+    if (!rocr_dynamic_relocation_uses_symbol_value(relocation_type) ||
+        !rocr_dynamic_symbol_address_follows_st_value(symbol_type)) {
+      return TextSymbolRelocationAction::Unsupported;
+    }
+    return elf_symbol_is_executable_entry(symbol_type)
+               ? TextSymbolRelocationAction::RequiresExecutableEntry
+               : TextSymbolRelocationAction::RequiresSymbolMapping;
+  }
+
+  if (symbol_type == kElfSymbolTypeSection)
+    return TextSymbolRelocationAction::Unsupported;
+  if (elf_symbol_is_executable_entry(symbol_type) ||
+      (symbol_type == kElfSymbolTypeNone && relocation_type == R_AMDGPU_ABS64)) {
+    return TextSymbolRelocationAction::RequiresExecutableEntry;
+  }
+  return TextSymbolRelocationAction::RequiresSymbolMapping;
 }
 
 /// @brief Return whether a relocation record applies to storage loaded at runtime.
