@@ -23,11 +23,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.native_tool_finder import NativeToolFinder
-from utils.rocm_stack_preflight import (
-    Rocprofv3Launch,
-    StackResolution,
-    resolve_rocm_stacks,
-)
+from utils.rocm_stack_check import StackFindings, check_single_rocm_stack
 from utils.utils_common import (
     PROFILE_OUTPUT_FORMAT,
     format_time,
@@ -159,11 +155,11 @@ class RocProfCompute_Base:
         self.__profiler = profiler_mode
         self._soc = soc  # OmniSoC obj
 
-        # ROCm stack pre-flight state, populated during pre-processing.
-        self._stack_resolution: Optional[StackResolution] = None
-        self._launch: Rocprofv3Launch = Rocprofv3Launch()
-        # Workload command before ROCTX-injection rewrite, captured in sanitize().
+        # Workload command as given, before ROCTX injection rewrites it.
         self._workload_cmd: list[str] = []
+
+        # ROCm libraries found before profiling, reported again if the run fails.
+        self._stack_findings = StackFindings()
 
     def get_args(self) -> argparse.Namespace:
         return self.__args
@@ -272,7 +268,6 @@ class RocProfCompute_Base:
                 if script_index is None and skip_flag is None:
                     raise NoScriptInCommandError(args.remaining)
 
-            # Capture the workload command before ROCTX injection rewrites it.
             self._workload_cmd = list(args.remaining)
 
             if selected_frameworks:
@@ -303,7 +298,15 @@ class RocProfCompute_Base:
         console_debug("profiling", f"pre-processing using {self.__profiler} profiler")
 
         if args.attach_pid:
+            # An attached process has no workload command to compare and no
+            # environment left to set.
             args.remaining = ""
+        else:
+            self._stack_findings = check_single_rocm_stack(
+                self._workload_cmd,
+                dict(os.environ),
+                getattr(args, "rocprofiler_sdk_tool_path", None),
+            )
 
         self._filter_blocks = self._soc.profiling_setup()
 
@@ -333,17 +336,6 @@ class RocProfCompute_Base:
             skip_roof=args.no_roof,
             mspec=self._soc._mspec,
             soc=self._soc,
-        )
-
-        # Resolve the profiler and workload ROCm stacks for backend pre-flight.
-        self._stack_resolution = (
-            resolve_rocm_stacks(
-                self._workload_cmd,
-                getattr(args, "rocprofiler_sdk_tool_path", None),
-                dict(os.environ),
-            )
-            if self._workload_cmd and not args.attach_pid
-            else None
         )
 
     def profile(
@@ -388,8 +380,7 @@ class RocProfCompute_Base:
                 workload_dir=args.output_directory,
                 ml_api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
                 retain_rocpd_output=args.retain_rocpd_output,
-                launch=self._launch,
-                resolution=self._stack_resolution,
+                stack_findings=self._stack_findings,
             )
 
             end_time = time.time()
@@ -456,6 +447,7 @@ class RocProfCompute_Base:
         pc_sampling = PCSamplingProfile(
             args=args,
             profiler=self.__profiler,
+            stack_findings=self._stack_findings,
         )
         if self.__profiler == "rocprofiler-sdk":
             options = self.get_profiler_options(native_tool_path=native_tool_path)

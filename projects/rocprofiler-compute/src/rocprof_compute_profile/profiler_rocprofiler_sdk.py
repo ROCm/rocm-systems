@@ -9,13 +9,7 @@ from typing import Optional, Union
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.logger import (
-    console_debug,
-    console_error,
-    console_log,
-    demarcate,
-)
-from utils.rocm_stack_preflight import comgr_to_force
+from utils.logger import console_debug, console_error, console_log, demarcate
 from utils.utils_common import (
     PROFILE_OUTPUT_FORMAT,
     resolve_rocm_library_path,
@@ -31,8 +25,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         soc: OmniSoC_Base,
     ) -> None:
         super().__init__(profiling_args, profiler_mode, soc)
-        # Workload comgr to preload, resolved during pre-processing.
-        self._forced_comgr: Optional[Path] = None
 
     def get_profiler_options(
         self, native_tool_path: Optional[str] = None
@@ -40,14 +32,11 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
 
-        forced_comgr = self._forced_comgr
-
-        # Build LD_PRELOAD: the forced comgr first so it interposes, then the
-        # user's existing value, then the profiler tool libraries.
+        # Build LD_PRELOAD: preserve user's existing, then append our libs
+        # Order: [user's existing LD_PRELOAD] : [our profiler libs]
         ld_preload_parts = [
-            str(forced_comgr) if forced_comgr is not None else None,  # Forced comgr
             os.environ.get("LD_PRELOAD"),  # User's existing LD_PRELOAD (if any)
-            args.rocprofiler_sdk_tool_path,  # The rocprofiler-sdk tool
+            args.rocprofiler_sdk_tool_path,  # Our rocprofiler-sdk tool
             native_tool_path,  # Native tool (if provided)
         ]
         # Filter out None and empty string values and join with ':'
@@ -182,9 +171,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
     def pre_processing(self) -> None:
         """Perform any pre-processing steps prior to profiling."""
         super().pre_processing()
-
-        if self._stack_resolution is not None:
-            self._forced_comgr = comgr_to_force(self._stack_resolution)
 
     @demarcate
     def run_profiling(self, version: str, prog: str) -> None:

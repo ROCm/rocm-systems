@@ -572,11 +572,11 @@ add_test(
 )
 
 add_test(
-    NAME test_rocm_stack_preflight
+    NAME test_rocm_stack_check
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_rocm_stack_preflight.xml ${COV_OPTION}
-        tests/test_rocm_stack_preflight.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_rocm_stack_check.xml ${COV_OPTION}
+        tests/test_rocm_stack_check.py ${WORKING_DIR_OPTION}
 )
 
 # Memory chart CLI renderers (gfx9 plotille + gfx11 Rich) — no GPU required
@@ -773,6 +773,18 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_inject_roctx_package.xml ${COV_OPTION}
         tests/test_inject_roctx_package.py ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
+# Profile helper unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_utils_profile
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_utils_profile.xml ${COV_OPTION} tests/test_utils_profile.py
+        ${WORKING_DIR_OPTION}
 )
 
 # ---------------------------------------

@@ -12,7 +12,7 @@ test_categories:
       - test_profile_iteration_multiplexing_1
       - test_profile_sets_func
       - test_utils
-      - test_rocm_stack_preflight
+      - test_rocm_stack_check
       - test_pc_sampling_analysis
       - test_tui_components
       - test_analysis_db
@@ -31,6 +31,7 @@ test_categories:
       - test_rocprofv3_avail_interface
       - test_num_xcds_cli_output
       - test_mi_gpu_spec
+      - test_utils_profile
       - test_utils_profile_csv
       - test_inject_roctx_package
       - test_torch_cpp_loader
@@ -78,7 +79,7 @@ test_categories:
       - test_num_xcds_spec_class
       - test_mi_gpu_spec
       - test_utils
-      - test_rocm_stack_preflight
+      - test_rocm_stack_check
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
@@ -92,6 +93,7 @@ test_categories:
       - test_analysis_orm
       - test_code_object_analysis
       - test_pc_sampling_analysis
+      - test_utils_profile
       - test_utils_profile_csv
       - test_inject_roctx_package
       - test_torch_cpp_loader
@@ -144,7 +146,7 @@ test_categories:
       - test_num_xcds_spec_class
       - test_mi_gpu_spec
       - test_utils
-      - test_rocm_stack_preflight
+      - test_rocm_stack_check
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
@@ -158,6 +160,7 @@ test_categories:
       - test_analysis_orm
       - test_code_object_analysis
       - test_pc_sampling_analysis
+      - test_utils_profile
       - test_utils_profile_csv
       - test_inject_roctx_package
       - test_torch_cpp_loader
@@ -210,7 +213,7 @@ test_categories:
       - test_num_xcds_spec_class
       - test_mi_gpu_spec
       - test_utils
-      - test_rocm_stack_preflight
+      - test_rocm_stack_check
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
@@ -224,6 +227,7 @@ test_categories:
       - test_analysis_orm
       - test_code_object_analysis
       - test_pc_sampling_analysis
+      - test_utils_profile
       - test_utils_profile_csv
       - test_inject_roctx_package
       - test_torch_cpp_loader

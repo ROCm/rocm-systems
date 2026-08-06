@@ -396,6 +396,62 @@ Raw performance counter data produced by the underlying
    ``--retain-rocpd-output`` are deprecated and will be removed in a future release.
    ``.db`` files will be retained by default and the analyze step will read them directly.
 
+.. _rocm-stack-check:
+
+Conflicting ROCm installations
+------------------------------
+
+A workload that carries its own ROCm, such as a PyTorch or pip ROCm wheel, can
+load ROCm libraries that the profiler also loads. Before a profile run starts,
+ROCm Compute Profiler compares the two installations for these conflicts:
+
+* Two copies of ``libamd_comgr`` in one process abort the run.
+* Two copies of a rocprofiler library cannot both register with rocprofiler.
+
+A conflict is a warning that names the conflicting library and the path each
+side loads it from, and profiling continues.
+
+Each path states how it was found. A copy on ``LD_LIBRARY_PATH``,
+``LD_PRELOAD``, ``RPATH`` or ``RUNPATH`` is one the loader searches for. A copy
+in the workload's site-packages is installed rather than searched for, and is
+loaded only if the workload adds its directory to one of those.
+
+If the run then fails, the failure is explained: the message repeats those
+paths and describes how to resolve the conflict. Where the profiler's output
+does not report a conflict itself, the paths are shown only if the run was
+aborted, since a run that ended any other way has another cause.
+
+A conflict is resolved by putting the workload and the profiler on one ROCm.
+There are two ways to do this, and each has a condition.
+
+Point ``ROCM_PATH`` at the workload's ROCm. This works only if that
+installation also provides the rocprofiler-sdk tool, which a framework wheel
+generally does not. Without it, the profiler cannot find the tool it loads into
+the workload and the run does not start.
+
+Or set ``LD_PRELOAD`` to the workload's copy of the conflicting library. This
+merges the two only if that copy carries the same soname as the profiler's; two
+copies with different sonames both remain loaded. Preloading the profiler's
+copy does not resolve the conflict. A copy named in ``LD_PRELOAD`` is never
+reported, so the warning stops whether or not the two copies merge.
+
+Copies that resolve to the same file or hold identical contents are one ROCm,
+not two, and are not reported as a conflict. This includes an installation
+split across directories, such as the ``_rocm_sdk_core`` and
+``_rocm_sdk_devel`` halves of a wheel installation.
+
+When the workload supplies any second copy of these libraries, conflicting or
+not, the profile run sets ``ROCPROF_SIGNAL_HANDLERS=0`` and reports that it has
+done so. rocprofv3 otherwise replaces the workload's signal handlers with its
+own, and an abort can re-enter them instead of ending the process. A value
+already set in the environment is kept.
+
+The comparison cannot be turned off. It runs before every profile run except
+one started with ``--attach-pid``, and for a workload run under a Python
+interpreter it walks that interpreter's site-packages, which adds to startup
+time on a large tree. Presetting ``ROCPROF_SIGNAL_HANDLERS`` is the only part
+of this behavior you control.
+
 
 .. _filtering:
 

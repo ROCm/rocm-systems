@@ -13,6 +13,26 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Analyze mode reports every process in a single run, with a `pid` column
     identifying each one.
 
+* Added a check, run before a profile run starts, for a workload that supplies its own ROCm alongside the profiler's, such as a PyTorch or pip ROCm wheel.
+  * Two copies of `libamd_comgr` in one process abort the run. Two copies of a
+    rocprofiler library cannot both register with rocprofiler.
+  * A conflict is a warning that names the conflicting library and the path each
+    side loads it from. Each path states whether it was found on a directory the
+    loader searches or in the workload's site-packages, which the loader does not
+    search. Profiling continues.
+  * Copies that resolve to the same file or hold identical contents are one
+    ROCm and are not reported as a conflict.
+  * Any second copy, whether it conflicts or not, sets `ROCPROF_SIGNAL_HANDLERS=0`
+    for the run and reports that it has done so, so that an abort ends the
+    process. A value already set in the environment is kept.
+  * A failed run is explained. The profiler's output identifies the conflict
+    where LLVM or the rocprofiler registry reported one; where it does not, the
+    copies the check found are named as a possible cause only if the run was
+    aborted. The message describes how to get the workload and the profiler onto
+    a single ROCm stack.
+  * A run killed by a signal reports the signal by name, such as a conflict that
+    crashes the process rather than reporting itself.
+
 ### Changed
 
 * ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) are no longer allowed with PC-sampling-only profiling; the run now fails with an error telling the user to drop the ML API tracing flag or add a counter block, since without counters there is nothing to correlate the markers against.
@@ -29,6 +49,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Reduced profile-mode peak memory when writing counter data on large workloads.
 
 ### Resolved issues
+
+* Fixed the log level of the profiler's own messages in profile mode. A failed
+  run reported them as errors; they are now logged at debug.
 
 ### Upcoming changes
 
@@ -72,10 +95,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Optimized
 
 ### Resolved issues
-
-* Fixed profiling aborts caused by a workload bundling its own ROCm alongside the profiler's (for example, a PyTorch or pip ROCm wheel), where duplicate ``libamd_comgr`` or rocprofiler libraries caused an LLVM abort or a rocprofiler registration failure (error 16). rocprof-compute now compares the profiler and workload ROCm stacks before profiling, runs them on a single ``libamd_comgr`` when the versions are compatible, and otherwise reports a clear message identifying both stacks.
-
-* Under the ``rocprofv3`` backend, when the workload ships its own ``librocprofiler-sdk`` with a matching ``rocprofv3``, profiling now runs through the workload's ``rocprofv3`` to stay on a single ROCm stack; otherwise it stops early and recommends the rocprofiler-sdk backend.
 
 * The Dual VALU (VOPD) instruction mix metric is now reported for gfx115x in the WGP panel.
 

@@ -21,7 +21,6 @@ import utils.utils_common as utils_common
 import utils.utils_profile as utils_profile
 from utils.amdsmi_interface import _per_device_query
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.rocm_stack_preflight import Rocprofv3Launch
 from utils.tty import (
     format_duration,
     format_node_stats,
@@ -939,50 +938,6 @@ def test_parse_pmc_perf_file_not_found():
 # =============================================================================
 # RUN_PROF TESTS
 # =============================================================================
-
-
-def test_workload_cmd_from_options_keeps_nested_separator():
-    # Torch-trace wraps the app: python3 launch.py --frameworks torch -- net.py
-    assert utils_profile._workload_cmd_from_options([
-        "--",
-        "python3",
-        "launch.py",
-        "--frameworks",
-        "torch",
-        "--",
-        "net.py",
-    ]) == ["python3", "launch.py", "--frameworks", "torch", "--", "net.py"]
-
-
-def test_run_prof_v3_forces_workload_comgr(tmp_path, monkeypatch):
-    """rocprofv3: the pre-flight forced comgr is prepended to LD_PRELOAD."""
-    fname = tmp_path / "pmc_perf_test.yaml"
-    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
-    workload_dir = str(tmp_path / "workload")
-
-    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
-    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
-
-    captured: dict[str, dict[str, str]] = {}
-
-    def fake_capture(cmd, new_env=None, profileMode=False):
-        captured["env"] = new_env
-        raise RuntimeError("stop after launch")
-
-    monkeypatch.setattr("utils.utils_profile.capture_subprocess_output", fake_capture)
-
-    with pytest.raises(RuntimeError, match="stop after launch"):
-        utils_profile.run_prof(
-            str(fname),
-            ["--kernel-trace", "--", "python3", "simple_net.py"],
-            workload_dir,
-            logging.INFO,
-            "csv",
-            launch=Rocprofv3Launch(forced_comgr="/wheel/lib/libamd_comgr.so.3"),
-        )
-
-    assert captured["env"]["LD_PRELOAD"].split(":")[0] == "/wheel/lib/libamd_comgr.so.3"
 
 
 def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):

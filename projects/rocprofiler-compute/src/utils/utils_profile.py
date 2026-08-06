@@ -25,12 +25,10 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.rocm_stack_preflight import (
-    COMGR_LIB_STEM,
-    Rocprofv3Launch,
-    StackResolution,
-    double_comgr_error_message,
-    output_indicates_double_comgr,
+from utils.rocm_stack_check import (
+    StackFindings,
+    disable_rocprof_signal_handlers,
+    explain_failed_run,
 )
 from utils.utils_common import (
     capture_subprocess_output,
@@ -43,7 +41,7 @@ from vendored import yaml
 
 _PROFILER_INTERNAL_RE = re.compile(
     r"^\[rocprofiler"  # rocprofiler-sdk and rocprofiler-compute tool messages
-    r"|^[WI]\d{8}\s"  # glog-style timestamps (W/I followed by YYYYMMDD)
+    r"|^[WI]\d{4} \d{2}:\d{2}:\d"  # glog timestamps, such as 'W0809 13:41:09'
 )
 
 ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
@@ -68,13 +66,6 @@ def is_live_attach(
 def pc_sampling_unit(method: str) -> str:
     """Map a PC sampling method to its sampling unit."""
     return "time" if method == "host_trap" else "cycles"
-
-
-def _workload_cmd_from_options(options: list[str]) -> list[str]:
-    """Return the workload command that follows ``--`` in a rocprofv3 option list."""
-    if "--" in options:
-        return options[options.index("--") + 1 :]
-    return []
 
 
 @contextmanager
@@ -148,8 +139,7 @@ def run_prof(
     ml_api_trace_enabled: bool = False,
     retain_rocpd_output: bool = False,
     extra_env: Optional[dict[str, str]] = None,
-    launch: Optional[Rocprofv3Launch] = None,
-    resolution: Optional[StackResolution] = None,
+    stack_findings: Optional[StackFindings] = None,
 ) -> None:
     multiple_files = isinstance(fnames, list)
     if multiple_files and (
@@ -198,6 +188,7 @@ def run_prof(
     new_env = os.environ.copy()
     if extra_env:
         new_env.update(extra_env)
+    disable_rocprof_signal_handlers(stack_findings, new_env)
 
     # Counter definitions
     with open(
@@ -233,7 +224,6 @@ def run_prof(
     output_path = Path(workload_dir + "/out/pmc_1")
     output_path.mkdir(parents=True, exist_ok=True)
 
-    app_cmd = None
     if get_rocprof_cmd() == "rocprofiler-sdk":
         app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
         for key, value in options.items():
@@ -256,21 +246,11 @@ def run_prof(
                 app_cmd, new_env=new_env, profileMode=True
             )
     else:
-        app_cmd = _workload_cmd_from_options(options)
-        rocprof_bin = get_rocprof_cmd()
-        if launch is not None and app_cmd and not is_live_attach(profiler_options):
-            if launch.rocprofv3 is not None:
-                rocprof_bin = launch.rocprofv3
-            elif launch.forced_comgr is not None:
-                existing = new_env.get("LD_PRELOAD")
-                new_env["LD_PRELOAD"] = ":".join(
-                    part for part in (launch.forced_comgr, existing) if part
-                )
         # print in readable format using shlex
-        console_debug(f"rocprof command: {shlex.join([rocprof_bin] + options)}")
+        console_debug(f"rocprof command: {shlex.join([get_rocprof_cmd()] + options)}")
         # profile the app
         success, output = capture_subprocess_output(
-            [rocprof_bin] + options, new_env=new_env, profileMode=True
+            [get_rocprof_cmd()] + options, new_env=new_env, profileMode=True
         )
 
     time_2 = time.time()
@@ -297,14 +277,7 @@ def run_prof(
             stripped = line.strip()
             if stripped:
                 _classify_output_line(stripped)
-        if output_indicates_double_comgr(output) and resolution is not None:
-            console_error(
-                double_comgr_error_message(
-                    resolution.tool(COMGR_LIB_STEM),
-                    resolution.workload(COMGR_LIB_STEM),
-                ),
-                exit=False,
-            )
+        explain_failed_run(output, stack_findings)
         console_error("Profiling execution failed.")
 
     out_dir = Path(workload_dir) / "out"

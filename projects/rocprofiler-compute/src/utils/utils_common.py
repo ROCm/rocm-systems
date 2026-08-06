@@ -10,6 +10,7 @@ import os
 import re
 import select
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -460,6 +461,18 @@ def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> N
                 console_error(f"Error detaching from process {pid}: {e}")
 
 
+def _terminating_signal_name(return_code: int) -> str:
+    """Return the name of the signal that ``return_code`` reports.
+
+    Popen negates the number of the signal that terminated the process. A
+    signal the platform does not name is reported as its number.
+    """
+    try:
+        return signal.Signals(-return_code).name
+    except ValueError:
+        return f"signal {-return_code}"
+
+
 def capture_subprocess_output(
     subprocess_args: list[str],
     new_env: Optional[dict[str, str]] = None,
@@ -575,6 +588,11 @@ def capture_subprocess_output(
 
     # Get process return code
     return_code = process.wait()
+
+    if return_code < 0:
+        console_warning(
+            f"the command was terminated by {_terminating_signal_name(return_code)}"
+        )
 
     success = return_code == 0
 

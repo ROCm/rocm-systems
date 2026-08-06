@@ -10,6 +10,7 @@ from typing import Optional, Union, cast
 
 from utils import rocprofv3_avail_interface
 from utils.logger import console_debug, console_error, console_log
+from utils.rocm_stack_check import StackFindings, disable_rocprof_signal_handlers
 from utils.utils_common import (
     PC_SAMPLING_BLOCK_IDS,
     capture_subprocess_output,
@@ -101,10 +102,12 @@ class PCSamplingProfile:
         self,
         args: argparse.Namespace,
         profiler: str,
+        stack_findings: Optional[StackFindings] = None,
     ) -> None:
-        """Store the run config (args, profiler backend)."""
+        """Store the run config (args, profiler backend, ROCm stack findings)."""
         self._args = args
         self._profiler = profiler
+        self._stack_findings = stack_findings
 
     def is_requested(self) -> bool:
         """Return True if a PC sampling block (21 / pc_sampling) was requested."""
@@ -151,6 +154,7 @@ class PCSamplingProfile:
         new_env = os.environ.copy()
         for key, value in options.items():
             new_env[key] = value
+        disable_rocprof_signal_handlers(self._stack_findings, new_env)
         # Log only the os.environ delta to avoid leaking secrets in shared logs.
         env_delta = {k: v for k, v in new_env.items() if os.environ.get(k) != v}
         console_debug(f"{log_label}: {env_delta}")
@@ -200,9 +204,11 @@ class PCSamplingProfile:
         console_debug(
             f"rocprof command: {shlex.join([rocprof_cmd] + profiler_options)}"
         )
+        new_env = os.environ.copy()
+        disable_rocprof_signal_handlers(self._stack_findings, new_env)
         success, _ = capture_subprocess_output(
             [rocprof_cmd] + profiler_options,
-            new_env=os.environ.copy(),
+            new_env=new_env,
             profileMode=True,
         )
         if not success:
