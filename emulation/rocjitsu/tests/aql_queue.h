@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "rocjitsu/vm/amdgpu/amd_ext_aql_packet.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 
@@ -14,6 +13,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/amd_ext_aql_packet.h"
 #include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
 
@@ -72,6 +72,12 @@ public:
   }
 
   void submit(const amdgpu::AmdExtKernelDispatchPacket &pkt) {
+    hsa_kernel_dispatch_packet_t raw{};
+    std::memcpy(&raw, &pkt, sizeof(pkt));
+    submit(raw);
+  }
+
+  void submit(const amdgpu::AmdBarrierValuePacket &pkt) {
     hsa_kernel_dispatch_packet_t raw{};
     std::memcpy(&raw, &pkt, sizeof(pkt));
     submit(raw);

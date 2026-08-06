@@ -24,7 +24,7 @@
 
 template <typename T>
 __device__ void wave_broadcast([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unused]] rocshmem_team_t team,
-                                  [[maybe_unused]] T *dest, [[maybe_unused]] const T *source, [[maybe_unused]] int nelem,
+                                  [[maybe_unused]] T *dest, [[maybe_unused]] const T *source, [[maybe_unused]] int nelems,
                                   [[maybe_unused]] int pe_root) {
   return;
 }
@@ -32,10 +32,10 @@ __device__ void wave_broadcast([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unus
 /* Define templates to call ROCSHMEM */
 #define BROADCAST_WAVE_DEF_GEN(T, TNAME)                                      \
   template <>                                                                 \
-  __device__ void wave_broadcast<T>(                                       \
+  __device__ void wave_broadcast<T>(                                          \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,    \
-      int nelem, int pe_root) {                                               \
-    rocshmem_ctx_##TNAME##_broadcast_wave(ctx, team, dest, source, nelem,     \
+      int nelems, int pe_root) {                                              \
+    rocshmem_ctx_##TNAME##_broadcast_wave(ctx, team, dest, source, nelems,    \
                                          pe_root);                            \
   }
 

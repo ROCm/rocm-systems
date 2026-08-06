@@ -21,30 +21,25 @@ inline __device__ void cp_async_bulk_global_to_shared(void* dest, void* src, __m
   uint64_t gmem_ptr = static_cast<uint64_t>(__cvta_generic_to_global(src));
   uint32_t smem_barrier_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(barrier));
 
-  asm volatile(
-    "cp.async.bulk.shared::cluster.global.mbarrier::complete_tx::bytes [%0], [%1], %2, [%3];\n"
-    :
-    : "r"(smem_ptr),
-      "l"(gmem_ptr),
-      "r"(size),
-      "r"(smem_barrier_ptr)
-    : "memory");
+  asm volatile("cp.async.bulk.shared::cluster.global.mbarrier::complete_tx::bytes [%0], [%1], %2, [%3];\n"
+               :
+               : "r"(smem_ptr), "l"(gmem_ptr), "r"(size), "r"(smem_barrier_ptr)
+               : "memory");
 }
 
-inline __device__ void fence_proxy_async(void) { asm volatile("fence.proxy.async.shared::cta;" ::: "memory");}
+inline __device__ void fence_proxy_async(void) {
+  asm volatile("fence.proxy.async.shared::cta;" ::: "memory");
+}
 
 inline __device__ void cp_async_bulk_shared_to_global(void* dest, void* src, int size) {
   // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cp-async-bulk
   uint64_t dest_gmem_ptr = static_cast<uint64_t>(__cvta_generic_to_global(dest));
   uint32_t src_smem_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(src));
 
-  asm volatile(
-    "cp.async.bulk.global.shared::cta.bulk_group [%0], [%1], %2;\n"
-    :
-    : "l"(dest_gmem_ptr),
-      "r"(src_smem_ptr),
-      "r"(size)
-    : "memory");
+  asm volatile("cp.async.bulk.global.shared::cta.bulk_group [%0], [%1], %2;\n"
+               :
+               : "l"(dest_gmem_ptr), "r"(src_smem_ptr), "r"(size)
+               : "memory");
 }
 
 inline __device__ void multimem_cp_async_bulk_shared_to_global(void* dest, void* src, int size) {
@@ -59,9 +54,7 @@ inline __device__ void multimem_cp_async_bulk_shared_to_global(void* dest, void*
     "cp.async.bulk.global.shared::cta.bulk_group [%0], [%1], %2;\n"
 #endif
     :
-    : "l"(dest_gmem_ptr),
-      "r"(src_smem_ptr),
-      "r"(size)
+    : "l"(dest_gmem_ptr), "r"(src_smem_ptr), "r"(size)
     : "memory");
 }
 
@@ -100,8 +93,7 @@ inline __device__ bool barrier_try_wait_token_relaxed(__mbarrier_t* barrier, __m
                "selp.b32 %0, 1, 0, p;\n\t"
                "}"
                : "=r"(__ready)
-               : "r"(static_cast<unsigned int>(__cvta_generic_to_shared(barrier))),
-                 "l"(token)
+               : "r"(static_cast<unsigned int>(__cvta_generic_to_shared(barrier))), "l"(token)
                : "memory");
   return __ready;
 }
@@ -115,7 +107,9 @@ inline __device__ void cp_async_bulk_global_to_shared(void* dest, void* src, __m
   return;
 }
 
-inline __device__ void fence_proxy_async(void) { return; }
+inline __device__ void fence_proxy_async(void) {
+  return;
+}
 
 inline __device__ void cp_async_bulk_shared_to_global(void* dest, void* src, int size) {
   return;

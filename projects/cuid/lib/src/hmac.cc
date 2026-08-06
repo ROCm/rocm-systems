@@ -26,6 +26,7 @@
 //   OpenSSL <  3.0 (all other platforms) -> HMAC_CTX API
 
 #include "hmac.h"
+
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -33,8 +34,7 @@
 #include <iostream>
 
 #ifndef AMDCUID_CONFIG_DIR
-#error                                                                         \
-    "AMDCUID_CONFIG_DIR is not defined. Please define it to the CUID configuration directory path."
+#error "AMDCUID_CONFIG_DIR must be defined via CMake"
 #endif
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -51,13 +51,11 @@ struct cuid_hmac::Impl {
   std::string digest_name;
 
   // Map an OpenSSL-style digest name to the BCrypt HMAC provider ID.
-  static const wchar_t *to_bcrypt_alg(const char *name) {
-    if (!name)
-      return BCRYPT_SHA256_ALGORITHM;
+  static const wchar_t* to_bcrypt_alg(const char* name) {
+    if (!name) return BCRYPT_SHA256_ALGORITHM;
     if (_stricmp(name, "SHA256") == 0 || _stricmp(name, "SHA-256") == 0)
       return BCRYPT_SHA256_ALGORITHM;
-    if (_stricmp(name, "SHA1") == 0 || _stricmp(name, "SHA-1") == 0)
-      return BCRYPT_SHA1_ALGORITHM;
+    if (_stricmp(name, "SHA1") == 0 || _stricmp(name, "SHA-1") == 0) return BCRYPT_SHA1_ALGORITHM;
     if (_stricmp(name, "SHA384") == 0 || _stricmp(name, "SHA-384") == 0)
       return BCRYPT_SHA384_ALGORITHM;
     if (_stricmp(name, "SHA512") == 0 || _stricmp(name, "SHA-512") == 0)
@@ -66,15 +64,14 @@ struct cuid_hmac::Impl {
   }
 };
 
-cuid_hmac::cuid_hmac()
-    : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
+cuid_hmac::cuid_hmac() : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
+  key_file_path = AMDCUID_CONFIG_DIR "/hmac_key.bin";
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->hAlg = nullptr;
 
-  NTSTATUS status =
-      BCryptOpenAlgorithmProvider(&impl_->hAlg, BCRYPT_SHA256_ALGORITHM,
-                                  nullptr, BCRYPT_ALG_HANDLE_HMAC_FLAG);
+  NTSTATUS status = BCryptOpenAlgorithmProvider(&impl_->hAlg, BCRYPT_SHA256_ALGORITHM, nullptr,
+                                                BCRYPT_ALG_HANDLE_HMAC_FLAG);
   if (!BCRYPT_SUCCESS(status)) {
     std::cerr << "Error opening BCrypt HMAC algorithm provider" << std::endl;
     delete impl_;
@@ -84,14 +81,13 @@ cuid_hmac::cuid_hmac()
 
   std::ifstream key_file_stream(key_file_path, std::ios::binary);
   if (!key_file_stream.is_open()) {
-    std::cerr << "Error opening key file" << std::endl;
     return;
   }
   key_file_stream.seekg(0, std::ios::end);
   key_len = static_cast<size_t>(key_file_stream.tellg());
   key_file_stream.seekg(0, std::ios::beg);
   key = new uint8_t[key_len];
-  key_file_stream.read(reinterpret_cast<char *>(key), key_len);
+  key_file_stream.read(reinterpret_cast<char*>(key), key_len);
   key_file_stream.close();
 
   valid = true;
@@ -103,9 +99,8 @@ cuid_hmac::cuid_hmac(uint8_t key_data[key_length])
   impl_->digest_name = "SHA256";
   impl_->hAlg = nullptr;
 
-  NTSTATUS status =
-      BCryptOpenAlgorithmProvider(&impl_->hAlg, BCRYPT_SHA256_ALGORITHM,
-                                  nullptr, BCRYPT_ALG_HANDLE_HMAC_FLAG);
+  NTSTATUS status = BCryptOpenAlgorithmProvider(&impl_->hAlg, BCRYPT_SHA256_ALGORITHM, nullptr,
+                                                BCRYPT_ALG_HANDLE_HMAC_FLAG);
   if (!BCRYPT_SUCCESS(status)) {
     std::cerr << "Error opening BCrypt HMAC algorithm provider" << std::endl;
     delete impl_;
@@ -121,34 +116,29 @@ cuid_hmac::cuid_hmac(uint8_t key_data[key_length])
 
 cuid_hmac::~cuid_hmac() {
   if (impl_) {
-    if (impl_->hAlg)
-      BCryptCloseAlgorithmProvider(impl_->hAlg, 0);
+    if (impl_->hAlg) BCryptCloseAlgorithmProvider(impl_->hAlg, 0);
     delete impl_;
   }
   delete[] key;
 }
 
-amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t *data,
-                                                 size_t data_len,
-                                                 uint8_t *out_hash,
-                                                 size_t *out_len) {
+amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t* data, size_t data_len,
+                                                 uint8_t* out_hash, size_t* out_len) {
   if (!impl_ || !impl_->hAlg) {
     std::cerr << "BCrypt backend not initialized" << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
   }
 
   BCRYPT_HASH_HANDLE hHash = nullptr;
-  NTSTATUS status = BCryptCreateHash(impl_->hAlg, &hHash, nullptr, 0,
-                                     reinterpret_cast<PUCHAR>(key),
+  NTSTATUS status = BCryptCreateHash(impl_->hAlg, &hHash, nullptr, 0, reinterpret_cast<PUCHAR>(key),
                                      static_cast<ULONG>(key_len), 0);
   if (!BCRYPT_SUCCESS(status)) {
     std::cerr << "BCryptCreateHash failed" << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
   }
 
-  status = BCryptHashData(
-      hHash, const_cast<PUCHAR>(reinterpret_cast<const UCHAR *>(data)),
-      static_cast<ULONG>(data_len), 0);
+  status = BCryptHashData(hHash, const_cast<PUCHAR>(reinterpret_cast<const UCHAR*>(data)),
+                          static_cast<ULONG>(data_len), 0);
   if (!BCRYPT_SUCCESS(status)) {
     BCryptDestroyHash(hHash);
     std::cerr << "BCryptHashData failed" << std::endl;
@@ -156,16 +146,14 @@ amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t *data,
   }
 
   DWORD hash_len = 0, result_size = 0;
-  status = BCryptGetProperty(impl_->hAlg, BCRYPT_HASH_LENGTH,
-                             reinterpret_cast<PUCHAR>(&hash_len),
+  status = BCryptGetProperty(impl_->hAlg, BCRYPT_HASH_LENGTH, reinterpret_cast<PUCHAR>(&hash_len),
                              sizeof(hash_len), &result_size, 0);
   if (!BCRYPT_SUCCESS(status)) {
     BCryptDestroyHash(hHash);
     return AMDCUID_STATUS_HMAC_ERROR;
   }
 
-  status =
-      BCryptFinishHash(hHash, reinterpret_cast<PUCHAR>(out_hash), hash_len, 0);
+  status = BCryptFinishHash(hHash, reinterpret_cast<PUCHAR>(out_hash), hash_len, 0);
   BCryptDestroyHash(hHash);
   if (!BCRYPT_SUCCESS(status)) {
     std::cerr << "BCryptFinishHash failed" << std::endl;
@@ -176,23 +164,21 @@ amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t *data,
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t cuid_hmac::set_hmac_algorithm(const char *digest_name) {
-  if (!impl_)
-    return AMDCUID_STATUS_HMAC_ERROR;
+amdcuid_status_t cuid_hmac::set_hmac_algorithm(const char* digest_name) {
+  if (!impl_) return AMDCUID_STATUS_HMAC_ERROR;
 
-  const char *name = digest_name ? digest_name : "SHA256";
-  const wchar_t *alg = Impl::to_bcrypt_alg(name);
+  const char* name = digest_name ? digest_name : "SHA256";
+  const wchar_t* alg = Impl::to_bcrypt_alg(name);
   if (!alg) {
     std::cerr << "Unsupported digest: " << name << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
   }
 
-  if (impl_->hAlg)
-    BCryptCloseAlgorithmProvider(impl_->hAlg, 0);
+  if (impl_->hAlg) BCryptCloseAlgorithmProvider(impl_->hAlg, 0);
   impl_->hAlg = nullptr;
 
-  NTSTATUS status = BCryptOpenAlgorithmProvider(&impl_->hAlg, alg, nullptr,
-                                                BCRYPT_ALG_HANDLE_HMAC_FLAG);
+  NTSTATUS status =
+      BCryptOpenAlgorithmProvider(&impl_->hAlg, alg, nullptr, BCRYPT_ALG_HANDLE_HMAC_FLAG);
   if (!BCRYPT_SUCCESS(status)) {
     std::cerr << "Error opening BCrypt HMAC algorithm provider" << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
@@ -209,14 +195,12 @@ amdcuid_status_t cuid_hmac::set_hmac_key(const uint8_t key_data[key_length]) {
   std::memcpy(key, key_data, key_length);
 
   // Remove existing key file if it exists, ignoring error if it doesn't exist
-  if (std::remove(key_file_path.c_str()) != 0 && errno != ENOENT)
-    return AMDCUID_STATUS_KEY_ERROR;
+  if (std::remove(key_file_path.c_str()) != 0 && errno != ENOENT) return AMDCUID_STATUS_KEY_ERROR;
 
   std::ofstream key_file(key_file_path, std::ios::out | std::ios::binary);
-  if (!key_file)
-    return AMDCUID_STATUS_KEY_ERROR;
+  if (!key_file) return AMDCUID_STATUS_KEY_ERROR;
 
-  key_file.write(reinterpret_cast<const char *>(key), key_length);
+  key_file.write(reinterpret_cast<const char*>(key), key_length);
   if (!key_file) {
     key_file.close();
     return AMDCUID_STATUS_KEY_ERROR;
@@ -227,29 +211,22 @@ amdcuid_status_t cuid_hmac::set_hmac_key(const uint8_t key_data[key_length]) {
 }
 
 amdcuid_status_t cuid_hmac::generate_key(uint8_t out_key[key_length]) {
-  if (!out_key)
-    return AMDCUID_STATUS_INVALID_ARGUMENT;
-  NTSTATUS status =
-      BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(out_key), key_length,
-                      BCRYPT_USE_SYSTEM_PREFERRED_RNG);
-  return BCRYPT_SUCCESS(status) ? AMDCUID_STATUS_SUCCESS
-                                : AMDCUID_STATUS_KEY_ERROR;
+  if (!out_key) return AMDCUID_STATUS_INVALID_ARGUMENT;
+  NTSTATUS status = BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(out_key), key_length,
+                                    BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+  return BCRYPT_SUCCESS(status) ? AMDCUID_STATUS_SUCCESS : AMDCUID_STATUS_KEY_ERROR;
 }
 
-amdcuid_status_t sha256_unkeyed(const uint8_t *data, size_t data_len,
-                                uint8_t out[32]) {
+amdcuid_status_t sha256_unkeyed(const uint8_t* data, size_t data_len, uint8_t out[32]) {
   BCRYPT_ALG_HANDLE hAlg = nullptr;
   BCRYPT_HASH_HANDLE hHash = nullptr;
-  if (!BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(
-          &hAlg, BCRYPT_SHA256_ALGORITHM, nullptr, 0)))
+  if (!BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM, nullptr, 0)))
     return AMDCUID_STATUS_HMAC_ERROR;
-  bool ok = BCRYPT_SUCCESS(
-                BCryptCreateHash(hAlg, &hHash, nullptr, 0, nullptr, 0, 0)) &&
-            BCRYPT_SUCCESS(BCryptHashData(hHash, const_cast<PUCHAR>(data),
-                                          static_cast<ULONG>(data_len), 0)) &&
+  bool ok = BCRYPT_SUCCESS(BCryptCreateHash(hAlg, &hHash, nullptr, 0, nullptr, 0, 0)) &&
+            BCRYPT_SUCCESS(
+                BCryptHashData(hHash, const_cast<PUCHAR>(data), static_cast<ULONG>(data_len), 0)) &&
             BCRYPT_SUCCESS(BCryptFinishHash(hHash, out, 32, 0));
-  if (hHash)
-    BCryptDestroyHash(hHash);
+  if (hHash) BCryptDestroyHash(hHash);
   BCryptCloseAlgorithmProvider(hAlg, 0);
   return ok ? AMDCUID_STATUS_SUCCESS : AMDCUID_STATUS_HMAC_ERROR;
 }
@@ -257,7 +234,7 @@ amdcuid_status_t sha256_unkeyed(const uint8_t *data, size_t data_len,
 // ─────────────────────────────────────────────────────────────────────────────
 // OpenSSL backends (Linux / macOS)
 // ─────────────────────────────────────────────────────────────────────────────
-#else // !defined(_WIN32)
+#else  // !defined(_WIN32)
 
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
@@ -281,13 +258,13 @@ amdcuid_status_t sha256_unkeyed(const uint8_t *data, size_t data_len,
 #include <openssl/params.h>
 
 struct cuid_hmac::Impl {
-  EVP_MAC *mac;
-  EVP_MAC_CTX *ctx;
+  EVP_MAC* mac;
+  EVP_MAC_CTX* ctx;
   std::string digest_name;
 };
 
-cuid_hmac::cuid_hmac()
-    : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
+cuid_hmac::cuid_hmac() : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
+  key_file_path = AMDCUID_CONFIG_DIR "/hmac_key.bin";
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->mac = nullptr;
@@ -312,13 +289,12 @@ cuid_hmac::cuid_hmac()
 
   std::ifstream key_file_stream(key_file_path, std::ios::binary);
   if (!key_file_stream.is_open()) {
-    std::cerr << "Error opening key file" << std::endl;
     return;
   }
 
   key_file_stream.seekg(0, std::ios::end);
   key_len = static_cast<size_t>(key_file_stream.tellg());
-  if (key_len == 0 || key_len != key_length) { // sanity check on key length
+  if (key_len == 0 || key_len != key_length) {  // sanity check on key length
     std::cerr << "Invalid key length in key file" << std::endl;
     key_file_stream.close();
     return;
@@ -326,7 +302,7 @@ cuid_hmac::cuid_hmac()
   key_file_stream.seekg(0, std::ios::beg);
 
   key = new uint8_t[key_length];
-  key_file_stream.read(reinterpret_cast<char *>(key), key_length);
+  key_file_stream.read(reinterpret_cast<char*>(key), key_length);
   key_file_stream.close();
 
   valid = true;
@@ -357,43 +333,37 @@ cuid_hmac::cuid_hmac(uint8_t key_data[key_length])
 
 cuid_hmac::~cuid_hmac() {
   if (impl_) {
-    if (impl_->ctx)
-      EVP_MAC_CTX_free(impl_->ctx);
-    if (impl_->mac)
-      EVP_MAC_free(impl_->mac);
+    if (impl_->ctx) EVP_MAC_CTX_free(impl_->ctx);
+    if (impl_->mac) EVP_MAC_free(impl_->mac);
     delete impl_;
   }
   delete[] key;
 }
 
-amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t *data,
-                                                 size_t data_len,
-                                                 uint8_t *out_hash,
-                                                 size_t *out_len) {
+amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t* data, size_t data_len,
+                                                 uint8_t* out_hash, size_t* out_len) {
   if (!impl_ || !impl_->ctx) {
     std::cerr << "MAC context is not initialized" << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
   }
 
   OSSL_PARAM params[2];
-  params[0] = OSSL_PARAM_construct_utf8_string(
-      "digest", const_cast<char *>(impl_->digest_name.c_str()), 0);
+  params[0] =
+      OSSL_PARAM_construct_utf8_string("digest", const_cast<char*>(impl_->digest_name.c_str()), 0);
   params[1] = OSSL_PARAM_construct_end();
 
-  if (EVP_MAC_init(impl_->ctx, reinterpret_cast<const unsigned char *>(key),
-                   key_len, params) != 1) {
+  if (EVP_MAC_init(impl_->ctx, reinterpret_cast<const unsigned char*>(key), key_len, params) != 1) {
     std::cerr << "Error initializing MAC context" << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
   }
 
-  if (EVP_MAC_update(impl_->ctx, reinterpret_cast<const unsigned char *>(data),
-                     data_len) != 1) {
+  if (EVP_MAC_update(impl_->ctx, reinterpret_cast<const unsigned char*>(data), data_len) != 1) {
     std::cerr << "Error updating MAC context" << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
   }
 
-  if (EVP_MAC_final(impl_->ctx, reinterpret_cast<unsigned char *>(out_hash),
-                    out_len, EVP_MAX_MD_SIZE) != 1) {
+  if (EVP_MAC_final(impl_->ctx, reinterpret_cast<unsigned char*>(out_hash), out_len,
+                    EVP_MAX_MD_SIZE) != 1) {
     std::cerr << "Error finalizing MAC" << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
   }
@@ -401,16 +371,15 @@ amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t *data,
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t cuid_hmac::set_hmac_algorithm(const char *digest_name) {
+amdcuid_status_t cuid_hmac::set_hmac_algorithm(const char* digest_name) {
   if (!impl_ || !impl_->ctx) {
     std::cerr << "MAC context is not initialized" << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
   }
 
-  const char *name = digest_name ? digest_name : "SHA256";
+  const char* name = digest_name ? digest_name : "SHA256";
   OSSL_PARAM params[2];
-  params[0] =
-      OSSL_PARAM_construct_utf8_string("digest", const_cast<char *>(name), 0);
+  params[0] = OSSL_PARAM_construct_utf8_string("digest", const_cast<char*>(name), 0);
   params[1] = OSSL_PARAM_construct_end();
 
   if (EVP_MAC_CTX_set_params(impl_->ctx, params) != 1) {
@@ -425,15 +394,15 @@ amdcuid_status_t cuid_hmac::set_hmac_algorithm(const char *digest_name) {
 // ─────────────────────────────────────────────────────────────────────────────
 // OpenSSL 1.x  — HMAC_CTX API
 // ─────────────────────────────────────────────────────────────────────────────
-#else // OPENSSL_VERSION_NUMBER < 0x30000000L
+#else  // OPENSSL_VERSION_NUMBER < 0x30000000L
 
 struct cuid_hmac::Impl {
-  HMAC_CTX *ctx;
+  HMAC_CTX* ctx;
   std::string digest_name;
 };
 
-cuid_hmac::cuid_hmac()
-    : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
+cuid_hmac::cuid_hmac() : impl_(nullptr), key(nullptr), key_len(0), valid(false) {
+  key_file_path = AMDCUID_CONFIG_DIR "/hmac_key.bin";
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->ctx = HMAC_CTX_new();
@@ -446,13 +415,12 @@ cuid_hmac::cuid_hmac()
 
   std::ifstream key_file_stream(key_file_path, std::ios::binary);
   if (!key_file_stream.is_open()) {
-    std::cerr << "Error opening key file" << std::endl;
     return;
   }
 
   key_file_stream.seekg(0, std::ios::end);
   key_len = static_cast<size_t>(key_file_stream.tellg());
-  if (key_len == 0 || key_len != key_length) { // sanity check on key length
+  if (key_len == 0 || key_len != key_length) {  // sanity check on key length
     std::cerr << "Invalid key length in key file" << std::endl;
     key_file_stream.close();
     return;
@@ -460,7 +428,7 @@ cuid_hmac::cuid_hmac()
   key_file_stream.seekg(0, std::ios::beg);
 
   key = new uint8_t[key_length];
-  key_file_stream.read(reinterpret_cast<char *>(key), key_length);
+  key_file_stream.read(reinterpret_cast<char*>(key), key_length);
   key_file_stream.close();
 
   valid = true;
@@ -486,43 +454,38 @@ cuid_hmac::cuid_hmac(uint8_t key_data[key_length])
 
 cuid_hmac::~cuid_hmac() {
   if (impl_) {
-    if (impl_->ctx)
-      HMAC_CTX_free(impl_->ctx);
+    if (impl_->ctx) HMAC_CTX_free(impl_->ctx);
     delete impl_;
   }
   delete[] key;
 }
 
-amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t *data,
-                                                 size_t data_len,
-                                                 uint8_t *out_hash,
-                                                 size_t *out_len) {
+amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t* data, size_t data_len,
+                                                 uint8_t* out_hash, size_t* out_len) {
   if (!impl_ || !impl_->ctx) {
     std::cerr << "HMAC context is not initialized" << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
   }
 
-  const EVP_MD *md = EVP_get_digestbyname(impl_->digest_name.c_str());
+  const EVP_MD* md = EVP_get_digestbyname(impl_->digest_name.c_str());
   if (!md) {
     std::cerr << "Unknown digest: " << impl_->digest_name << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
   }
 
-  if (HMAC_Init_ex(impl_->ctx, reinterpret_cast<const void *>(key),
-                   static_cast<int>(key_len), md, nullptr) != 1) {
+  if (HMAC_Init_ex(impl_->ctx, reinterpret_cast<const void*>(key), static_cast<int>(key_len), md,
+                   nullptr) != 1) {
     std::cerr << "Error initializing HMAC context" << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
   }
 
-  if (HMAC_Update(impl_->ctx, reinterpret_cast<const unsigned char *>(data),
-                  data_len) != 1) {
+  if (HMAC_Update(impl_->ctx, reinterpret_cast<const unsigned char*>(data), data_len) != 1) {
     std::cerr << "Error updating HMAC context" << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
   }
 
   unsigned int len = 0;
-  if (HMAC_Final(impl_->ctx, reinterpret_cast<unsigned char *>(out_hash),
-                 &len) != 1) {
+  if (HMAC_Final(impl_->ctx, reinterpret_cast<unsigned char*>(out_hash), &len) != 1) {
     std::cerr << "Error finalizing HMAC" << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
   }
@@ -531,14 +494,14 @@ amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t *data,
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t cuid_hmac::set_hmac_algorithm(const char *digest_name) {
+amdcuid_status_t cuid_hmac::set_hmac_algorithm(const char* digest_name) {
   if (!impl_ || !impl_->ctx) {
     std::cerr << "HMAC context is not initialized" << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
   }
 
-  const char *name = digest_name ? digest_name : "SHA256";
-  const EVP_MD *md = EVP_get_digestbyname(name);
+  const char* name = digest_name ? digest_name : "SHA256";
+  const EVP_MD* md = EVP_get_digestbyname(name);
   if (!md) {
     std::cerr << "Unknown digest: " << name << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
@@ -555,23 +518,21 @@ amdcuid_status_t cuid_hmac::set_hmac_algorithm(const char *digest_name) {
   return AMDCUID_STATUS_SUCCESS;
 }
 
-#endif // OPENSSL_VERSION_NUMBER
+#endif  // OPENSSL_VERSION_NUMBER
 
 // ─────────────────────────────────────────────────────────────────────────────
 // set_hmac_key / generate_key  — shared by both OpenSSL backends
 // ─────────────────────────────────────────────────────────────────────────────
 
 amdcuid_status_t cuid_hmac::set_hmac_key(const uint8_t key_data[key_length]) {
-  if (geteuid() != 0)
-    return AMDCUID_STATUS_PERMISSION_DENIED;
+  if (geteuid() != 0) return AMDCUID_STATUS_PERMISSION_DENIED;
 
   delete[] key;
   key = new uint8_t[key_length];
   key_len = key_length;
   std::memcpy(key, key_data, key_length);
 
-  if (std::remove(key_file_path.c_str()) != 0 && errno != ENOENT)
-    return AMDCUID_STATUS_KEY_ERROR;
+  if (std::remove(key_file_path.c_str()) != 0 && errno != ENOENT) return AMDCUID_STATUS_KEY_ERROR;
 
   // TODO: This is backwards, we're never actually reading the stored key file,
   // but we're always overwriting it. Need to rethink this Maybe have public
@@ -582,24 +543,21 @@ amdcuid_status_t cuid_hmac::set_hmac_key(const uint8_t key_data[key_length]) {
   // daemon? Remember to also adjust the Windows CNG implementation to match any
   // changes made here for consistency.
   std::ofstream key_file(key_file_path, std::ios::out | std::ios::binary);
-  if (!key_file)
-    return AMDCUID_STATUS_KEY_ERROR;
-  key_file.write(reinterpret_cast<const char *>(key), key_length);
+  if (!key_file) return AMDCUID_STATUS_KEY_ERROR;
+  key_file.write(reinterpret_cast<const char*>(key), key_length);
   if (!key_file) {
     key_file.close();
     return AMDCUID_STATUS_KEY_ERROR;
   }
   key_file.close();
 
-  if (chmod(key_file_path.c_str(), S_IRUSR | S_IWUSR) != 0)
-    return AMDCUID_STATUS_PERMISSION_DENIED;
+  if (chmod(key_file_path.c_str(), S_IRUSR | S_IWUSR) != 0) return AMDCUID_STATUS_PERMISSION_DENIED;
 
   return AMDCUID_STATUS_SUCCESS;
 }
 
 amdcuid_status_t cuid_hmac::generate_key(uint8_t out_key[key_length]) {
-  if (!out_key)
-    return AMDCUID_STATUS_INVALID_ARGUMENT;
+  if (!out_key) return AMDCUID_STATUS_INVALID_ARGUMENT;
 
   int success = RAND_bytes(out_key, key_length);
   if (success != 1) {
@@ -610,12 +568,11 @@ amdcuid_status_t cuid_hmac::generate_key(uint8_t out_key[key_length]) {
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t sha256_unkeyed(const uint8_t *data, size_t data_len,
-                                uint8_t out[32]) {
+amdcuid_status_t sha256_unkeyed(const uint8_t* data, size_t data_len, uint8_t out[32]) {
   unsigned int len = 0;
   return EVP_Digest(data, data_len, out, &len, EVP_sha256(), nullptr) == 1
              ? AMDCUID_STATUS_SUCCESS
              : AMDCUID_STATUS_HMAC_ERROR;
 }
 
-#endif // _WIN32
+#endif  // _WIN32

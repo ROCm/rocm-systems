@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/instruction.h"
+#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -449,19 +450,21 @@ public:
 class Vop1 : public IsaInstruction<Isa> {
 public:
   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
   bool has_dpp();
   bool has_sdwa();
   using OpEncoding = Vop1MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
-  std::unique_ptr<DppOperand> dpp_src0_;
-  std::unique_ptr<DppOperand> dpp_src1_;
+  std::unique_ptr<StagedOperand> dpp_src0_;
+  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -483,13 +486,14 @@ public:
   bool has_sdwa();
   using OpEncoding = VopcMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
-  std::unique_ptr<DppOperand> dpp_src0_;
-  std::unique_ptr<DppOperand> dpp_src1_;
+  std::unique_ptr<StagedOperand> dpp_src0_;
+  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -505,6 +509,7 @@ public:
 class Vop2 : public IsaInstruction<Isa> {
 public:
   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
   bool has_dpp();
@@ -512,14 +517,15 @@ public:
   bool hasImpliedLiteral();
   using OpEncoding = Vop2MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
   uint32_t literal_ = 0;
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
-  std::unique_ptr<DppOperand> dpp_src0_;
-  std::unique_ptr<DppOperand> dpp_src1_;
+  std::unique_ptr<StagedOperand> dpp_src0_;
+  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;

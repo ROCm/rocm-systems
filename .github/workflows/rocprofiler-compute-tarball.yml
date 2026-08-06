@@ -36,12 +36,13 @@ concurrency:
 
 env:
   ROCM_VERSION: "7.1.0"
+  CONTAINER_ROCM_VERSION: "7.1"
 
 jobs:
   distbuild:
     runs-on: ubuntu-latest
     container:
-      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
+      image: ghcr.io/rocm/rocprofiler-ubuntu:24.04-compute-ci-base
     name: Create distribution tarball
     env:
       INSTALL_DIR: /tmp/foo1
@@ -54,6 +55,7 @@ jobs:
           else
             echo "sha=$GITHUB_SHA" >> $GITHUB_OUTPUT
           fi
+
       - name: Checkout code
         uses: actions/checkout@v6
         with:
@@ -79,34 +81,40 @@ jobs:
           apt install -y rocm-dev
           apt install -y libdw-dev pkg-config
           echo "✅ ROCm Dependencies Installed!"
+
       - name: Install Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
+
       - name: Python dependency installs
         working-directory: projects/rocprofiler-compute
         run: python3 -m pip install -t${INSTALL_DIR}/python-libs -r requirements.txt
+
       - name: Configure
         working-directory: projects/rocprofiler-compute
         run: |
           mkdir build
           cd build
           cmake -DPYTHON_DEPS=${INSTALL_DIR}/python-libs ..
+
       - name: Release tarball
         working-directory: projects/rocprofiler-compute
         run: |
           cd build
           make package_source
+
       - name: Archive tarball
         uses: actions/upload-artifact@v7
         with:
           name: tarball-testing
           path: projects/rocprofiler-compute/build/rocprofiler-compute-*.tar.gz
           retention-days: 3
+
   disttest:
     runs-on: ubuntu-latest
     container:
-      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
+      image: ghcr.io/rocm/rocprofiler-ubuntu:24.04-compute-ci-base
     needs: [distbuild]
     name: Tarball tests
     env:
@@ -116,8 +124,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: tarball-testing
+
       - name: Expand
         run:  tar xfz rocprofiler-compute-*.tar.gz; rm rocprofiler-compute-*.tar.gz
+
       - name: Install ROCm Dependencies
         shell: bash
         run: |
@@ -131,10 +141,12 @@ jobs:
           apt install -y rocm-dev
           apt install -y libdw-dev pkg-config
           echo "✅ ROCm Dependencies Installed!"
+
       - name: Python dependency installs
         run: |
           cd rocprofiler-compute-*
           python3 -m pip install -t${INSTALL_DIR}/python-libs -r requirements.txt
+
       - name: Configure
         run:  |
           cd rocprofiler-compute-*
@@ -142,11 +154,13 @@ jobs:
           cd build
           cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/rocprofiler-compute \
             -DPYTHON_DEPS=${INSTALL_DIR}/python-libs ..
+
       - name: Install
         run:  |
           cd rocprofiler-compute-*
           cd build
           make install
+
       - name: Verify expected paths
         run: |
           # find $INSTALL_DIR
@@ -161,12 +175,15 @@ jobs:
           test -s $INSTALL_DIR/rocprofiler-compute/share/rocprofiler-compute/sample/vcopy.cpp
           test -d $INSTALL_DIR/rocprofiler-compute/share/rocprofiler-compute/modulefiles
           test -s $INSTALL_DIR/rocprofiler-compute/share/doc/rocprofiler-compute/LICENSE.md
+
       - name: Query version (setting PYTHONPATH by hand)
         run: |
           export PYTHONPATH=${INSTALL_DIR}/python-libs:$PYTHONPATH
           $INSTALL_DIR/rocprofiler-compute/bin/rocprof-compute --version
+
       - name: Install Lmod
-        run: sudo apt-get install -y lmod
+        run: apt-get install -y lmod
+
       - name: Access rocprofiler-compute using modulefile
         run: |
           . /etc/profile.d/lmod.sh

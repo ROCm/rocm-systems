@@ -57,7 +57,7 @@ enum HIPIpcHandleType {
   HandleTypeLast
 };
 
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
 struct HIPIpcMemHandlePosix_t {
   uint64_t fd;
   uint32_t pid;
@@ -89,7 +89,7 @@ protected:
 
 };
 
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
 class HIPIpcHandlePosixVec : public HIPIpcHandleVec {
 public:
   friend class HIPAllocatorVMMPosixFd;
@@ -143,7 +143,7 @@ class HIPAllocator : public MemoryAllocator {
     return sizeof(hipIpcMemHandle_t);
   }
 
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   /**
    * @brief HIP VMM handle type used by this allocator's symmetric heap.
    *
@@ -417,7 +417,7 @@ class HIPAllocatorUncached : public HIPAllocator {
 };
 #endif
 
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
 class HIPAllocatorVMMPosixFd : public HIPAllocator {
  private:
   struct VMMAllocationInfo {
@@ -453,20 +453,9 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
     return hipMemHandleTypePosixFileDescriptor;
   }
 };
+#endif  // HIP_VERSION >= 70200000
 
-// Forward declarations for fabric handle support (part of future HIP releases)
-#ifndef hipMemFabricHandle_t
-typedef uint64_t hipMemFabricHandle_t;
-#endif
-
-#ifndef hipMemHandleTypeFabric
-#define hipMemHandleTypeFabric (hipMemAllocationHandleType)3
-#endif
-
-#ifndef hipDeviceAttributeHandleTypeFabricSupported
-#define hipDeviceAttributeHandleTypeFabricSupported (hipDeviceAttribute_t)999
-#endif
-
+#ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
 /**
  * Fabric handle structure for IPC
  */
@@ -502,7 +491,7 @@ class HIPAllocatorVMMFabric : public HIPAllocator {
   struct VMMFabricAllocationInfo {
     hipMemGenericAllocationHandle_t handle;
     size_t size;
-    uint64_t fabric_id;  // Fabric handle ID, 0 if not exported
+    hipMemFabricHandle_t fabric_id;
   };
 
   static std::map<void*, VMMFabricAllocationInfo> allocations_;
@@ -532,7 +521,7 @@ class HIPAllocatorVMMFabric : public HIPAllocator {
     return hipMemHandleTypeFabric;
   }
 };
-#endif
+#endif  // HAVE_AMDSMI_GPU_FABRIC_INFO
 
 class HIPHostAllocator : public MemoryAllocator {
  public:

@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/dbt/hazard_tracker.h"
 
+#include "rocjitsu/isa/arch/amdgpu/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
 
 namespace rocjitsu {
@@ -26,7 +27,7 @@ void HazardTracker::maybe_insert_delay(std::vector<uint32_t> &words, Pipeline co
   }
 
   if (simm16 != 0) {
-    words.push_back(pack_sopp(rdna4::kSDelayAluSopp, simm16));
+    words.push_back(rdna4::build_sopp(rdna4::kSDelayAluSopp, {.simm16 = simm16})[0]);
   }
 }
 

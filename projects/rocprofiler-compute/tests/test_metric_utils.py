@@ -267,11 +267,20 @@ class TestExpression:
         )
         assert "$denom" in result
 
-    def test_update_normal_unit_string_capitalizes_per_wave(self):
-        """update_normal_unit_string substitutes 'per wave' and capitalizes."""
-        result = update_normal_unit_string("(Prefix + $normUnit)", "per_wave")
-        assert "per wave" in result.lower()
-        assert result[0].isupper()
+    @pytest.mark.parametrize(
+        "equation, normal_unit, expected",
+        [
+            ("(Prefix + $normUnit)", "per_wave", "Prefix per wave"),
+            ("GB/s", "per_kernel", "GB/s"),
+            ("Conflicts per Access", "per_kernel", "Conflicts per Access"),
+        ],
+    )
+    def test_update_normal_unit_string(self, equation, normal_unit, expected):
+        """Substitutes $normUnit and leaves case intact elsewhere.
+
+        Regression for .capitalize() mangling "GB/s" into "Gb/s".
+        """
+        assert update_normal_unit_string(equation, normal_unit) == expected
 
 
 # =============================================================================
@@ -854,6 +863,17 @@ class TestMetricEvaluator:
             "B_sum": [np.nan, np.nan, np.nan],
         })
         eval_str = self._to_eval_str("SUM(A_sum) / SUM(B_sum)")
+        assert evaluator.eval_expression(eval_str) == "N/A", (
+            f"Expected 'N/A', got: {evaluator.eval_expression(eval_str)}"
+        )
+
+    def test_eval_expression_returns_na_for_nullified_incomplete_kernel(self):
+        """Both numerator and denominator all-NaN yields NaN, mapped to 'N/A'."""
+        evaluator = self._make_evaluator({
+            "NUMERATOR": [np.nan, np.nan, np.nan],
+            "DENOMINATOR": [np.nan, np.nan, np.nan],
+        })
+        eval_str = self._to_eval_str("SUM(NUMERATOR) / SUM(DENOMINATOR)")
         assert evaluator.eval_expression(eval_str) == "N/A", (
             f"Expected 'N/A', got: {evaluator.eval_expression(eval_str)}"
         )

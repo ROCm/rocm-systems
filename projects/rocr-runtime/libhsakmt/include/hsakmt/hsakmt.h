@@ -437,6 +437,21 @@ hsaKmtGetQueueInfo(
     HsaQueueInfo *QueueInfo	//IN
 );
 
+/**
+ * Get the kernel-assigned internal queue ID from a queue handle.
+ *
+ * @param[in] QueueId Queue handle returned from hsaKmtCreateQueue
+ * @param[out] KernelInternalQueueId Pointer to receive the kernel's internal queue ID
+ *
+ * @returns HSAKMT_STATUS_SUCCESS on success
+ */
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetKernelQueueId(
+    HSA_QUEUEID QueueId,              //IN
+    HSAuint32 *KernelInternalQueueId  //OUT
+);
+
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtQueueRingDoorbell(
@@ -769,7 +784,7 @@ hsaKmtMapMemoryToGPUNodes(
     void*           MemoryAddress,         //IN (page-aligned)
     HSAuint64       MemorySizeInBytes,     //IN (page-aligned)
     HSAuint64*      AlternateVAGPU,        //OUT (page-aligned)
-    HsaMemMapFlags  MemMapFlags,           //IN
+    HsaMemFlags     MemFlags,              //IN
     HSAuint64       NumberOfNodes,         //IN
     HSAuint32*      NodeArray              //IN
     );
@@ -900,6 +915,19 @@ HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtGetRuntimeCapabilities(
     HSAuint32	*caps_mask // OUT
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetCoreRuntimeInfo(
+    struct kfd_runtime_info *runtime_info // OUT
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetCoreDeviceInfo(
+    HSAuint32 gpu_id, // IN
+    struct kfd_dbg_device_info_entry *device_info // OUT
     );
 
 /**

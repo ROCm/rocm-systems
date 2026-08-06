@@ -20,13 +20,11 @@ from therock_matrix import (
     windows_only_subtrees,
 )
 import time
-from typing import Mapping, Optional, Iterable
+from typing import List, Mapping, Optional, Iterable
 import os
 
-# Add TheRock's github_actions to path for shared utilities
-THEROCK_ACTIONS_PATH = Path("TheRock") / "build_tools" / "github_actions"
-sys.path.insert(0, str(THEROCK_ACTIONS_PATH))
-from amdgpu_family_matrix import get_build_runner_labels, select_weighted_label
+# Valid test types in order of comprehensiveness (least to most)
+VALID_TEST_TYPES = ["quick", "standard", "comprehensive", "full"]
 
 logging.basicConfig(level=logging.INFO)
 
@@ -86,12 +84,19 @@ GITHUB_WORKFLOWS_CI_PATTERNS = [
 
 
 def is_path_workflow_file_related_to_ci(path: str) -> bool:
-    return any(
-        fnmatch.fnmatch(path, ".github/workflows/" + pattern)
-        for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
-    ) or any(
-        fnmatch.fnmatch(path, ".github/scripts/" + pattern)
-        for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
+    return (
+        any(
+            fnmatch.fnmatch(path, ".github/workflows/" + pattern)
+            for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
+        )
+        or any(
+            fnmatch.fnmatch(path, ".github/scripts/" + pattern)
+            for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
+        )
+        or any(
+            fnmatch.fnmatch(path, ".github/actions/" + pattern)
+            for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
+        )
     )
 
 
@@ -127,31 +132,38 @@ def check_trigger_windows_ci_for_subtree(subtree: str) -> bool:
 # build or test workflows so any related jobs can be skipped if all paths
 # modified by a commit/PR match a pattern in this list.
 SKIPPABLE_PATH_PATTERNS = [
+    # Miscellaneous git/github files
+    "*.gitignore",
+    "*.pre-commit-config.*",
+    ".github/label*.yml",
+    "*CODEOWNERS",
+    "*LICENSE",
+    "*/.markdownlint-ci2.yaml",
+    "tools/systems_pr_bot/*",
+    # Documentation files
     "docs/*",
-    ".gitignore",
     "*.md",
     "*.rtf",
     "*.rst",
-    "*/.markdownlint-ci2.yaml",
     "*/.readthedocs.yaml",
     "*/.spellcheck.local.yaml",
     "*/.wordlist.txt",
     "projects/*/docs/*",
-    "projects/*/.gitignore",
-    "projects/rocr-runtime/libhsakmt/src/dxg/*",
     "shared/*/docs/*",
-    "shared/*/.gitignore",
-    "experimental/python/perfxpert/*",
-    ".github/CODEOWNERS",
-    ".github/label*.yml",
-    ".github/workflows/labeler.yml",
-    ".github/workflows/amdsmi-manylinux-build.yml",
-    ".github/workflows/rocjitsu-corpus-tests.yml",
+    # Changes to experimental code do not run standard build/test workflows.
+    "experimental/*",
+    # WSL support files (should these still be excluded?)
+    "projects/rocr-runtime/libhsakmt/src/dxg/*",
 ]
 
 
 def is_path_skippable(path: str) -> bool:
     """Determines if a given relative path to a file matches any skippable patterns."""
+    # A workflow or action file only affects TheRock CI when it matches the
+    # CI-related patterns. Treat other workflow and action files as skippable so
+    # they don't need to be enumerated one by one.
+    if path.startswith((".github/workflows/", ".github/actions/")):
+        return not is_path_workflow_file_related_to_ci(path)
     return any(fnmatch.fnmatch(path, pattern) for pattern in SKIPPABLE_PATH_PATTERNS)
 
 
@@ -160,6 +172,15 @@ def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
     if paths is None:
         return False
     return any(not is_path_skippable(p) for p in paths)
+
+
+def get_pr_labels(args) -> List[str]:
+    """Gets a list of labels applied to a pull request."""
+    data = json.loads(args.get("pr_labels", "{}"))
+    labels = []
+    for label in data.get("labels", []):
+        labels.append(label["name"])
+    return labels
 
 
 def check_rccl_changes(modified_paths: Optional[Iterable[str]]) -> bool:
@@ -206,8 +227,7 @@ def check_hip_rocr_changes(modified_paths: Optional[Iterable[str]]) -> bool:
 
     # Check for HIP/ROCR code changes (excluding ignored files)
     return any(
-        is_hip_rocr_code(path) and not is_ignored(path)
-        for path in modified_paths
+        is_hip_rocr_code(path) and not is_ignored(path) for path in modified_paths
     )
 
 
@@ -233,6 +253,9 @@ def check_only_rccl_changes(modified_paths: Iterable[str]) -> bool:
 
 
 def retrieve_projects(args):
+    # Default test type is "standard" for normal CI runs
+    test_type = "standard"
+
     # Nightly (schedule): use same test coverage as TheRock submodule bump PRs —
     # single nightly job with THEROCK_ENABLE_ALL=ON and full projects_to_test list.
     # Run all builds and tests including RCCL.
@@ -242,14 +265,16 @@ def retrieve_projects(args):
             logging.warning(
                 "No 'nightly' entry in project_map, nightly will have no jobs"
             )
-            return []
+            return [], "comprehensive"
+        # Nightly runs use comprehensive testing
+        test_type = "comprehensive"
         # Run full coverage on both Linux and Windows (no path-based skip).
         return [
             {
                 "cmake_options": nightly_config.get("cmake_options", ""),
                 "projects_to_test": nightly_config.get("projects_to_test", ""),
             }
-        ]
+        ], test_type
 
     # Check if CI should be skipped based on modified paths
     # (only for push and pull_request events, not workflow_dispatch or nightly)
@@ -261,16 +286,26 @@ def retrieve_projects(args):
     if args.get("is_push") or args.get("is_pull_request"):
         if not check_for_non_skippable_path(modified_paths):
             logging.info("Only skippable paths were modified, skipping CI")
-            return []
+            return [], test_type
+
+        # Check for ci:skip label on PRs
+        if args.get("is_pull_request"):
+            pr_labels = get_pr_labels(args)
+            if "ci:skip" in pr_labels:
+                logging.info("`ci:skip` label was added, skipping CI")
+                return [], test_type
 
     # Push event → check which subtrees were modified
     if args.get("is_push"):
         matched_subtrees = {get_matched_subtree(p) for p in modified_paths} - {None}
 
-        # Change in CI workflow triggers full subtree evaluation
+        # Change in CI workflow triggers full subtree evaluation with quick tests
         if check_for_workflow_file_related_to_ci(modified_paths):
-            logging.info("CI workflow files changed, evaluating all subtrees")
+            logging.info(
+                "CI workflow files changed, evaluating all subtrees with quick tests"
+            )
             subtrees = list(subtree_to_project_map.keys())
+            test_type = "quick"
         elif matched_subtrees:
             # Known subtrees changed - run CI for those subtrees
             subtrees = list(matched_subtrees)
@@ -302,10 +337,13 @@ def retrieve_projects(args):
                 if path.startswith(subtree + "/") or path == subtree:
                     matched_subtrees.add(subtree)
 
-        # Change in CI workflow triggers full subtree evaluation
+        # Change in CI workflow triggers full subtree evaluation with quick tests
         if check_for_workflow_file_related_to_ci(modified_paths):
-            logging.info("CI workflow files changed, evaluating all subtrees")
+            logging.info(
+                "CI workflow files changed, evaluating all subtrees with quick tests"
+            )
             subtrees = list(subtree_to_project_map.keys())
+            test_type = "quick"
 
         # Pull request
         elif args.get("is_pull_request"):
@@ -347,12 +385,12 @@ def retrieve_projects(args):
         if args.get("is_workflow_dispatch"):
             if not any(check_trigger_windows_ci_for_subtree(s) for s in subtrees):
                 logging.info("Selected subtrees do not require Windows CI, skipping")
-                return []
+                return [], test_type
         elif not any(
             check_trigger_windows_ci_for_subtree_path(path) for path in modified_paths
         ):
             logging.info("Modified paths do not require Windows CI, skipping")
-            return []
+            return [], test_type
     # Determine logical projects impacted
     projects = {
         subtree_to_project_map[subtree]
@@ -361,7 +399,7 @@ def retrieve_projects(args):
     }
 
     if not projects:
-        return []
+        return [], test_type
 
     merged_flags = set()
     merged_tests = set()
@@ -400,11 +438,19 @@ def retrieve_projects(args):
             "cmake_options": final_flags,
             "projects_to_test": ", ".join(sorted(merged_tests)),
         }
-    ]
+    ], test_type
 
 
 def select_build_runner(platform: str) -> str:
     """Select a build runner label based on platform and build variant."""
+    # TheRock is checked out alongside this repository in therock-ci.yml, but it
+    # is not available in a standalone rocm-systems checkout. Keep this import
+    # local so the rest of this module, including its unit tests, can run without
+    # TheRock.
+    therock_actions_path = Path("TheRock") / "build_tools" / "github_actions"
+    sys.path.insert(0, str(therock_actions_path))
+    from amdgpu_family_matrix import get_build_runner_labels, select_weighted_label
+
     build_runner_labels = get_build_runner_labels()
     if platform not in build_runner_labels:
         # Platform not configured for weighted selection, return default
@@ -421,9 +467,13 @@ def select_build_runner(platform: str) -> str:
 
 def run(args):
     platform = args.get("platform")
-    project_to_run = retrieve_projects(args)
+    project_to_run, test_type = retrieve_projects(args)
     build_runs_on = select_build_runner(platform)
-    outputs = {"projects": json.dumps(project_to_run), "build_runs_on": build_runs_on}
+    outputs = {
+        "projects": json.dumps(project_to_run),
+        "build_runs_on": build_runs_on,
+        "test_type": test_type,
+    }
 
     # Determine if RCCL CI should run (only relevant for Linux platform)
     if args.get("platform") == "linux":
@@ -446,12 +496,14 @@ def run(args):
             else:
                 outputs["run_linux_rccl_ci"] = "false"
 
-    # Determine if MI455 CI should run (only for PRs on Linux when HIP/ROCR changes)
+    # Determine if MI455 CI should run (only for PRs on Linux when HIP/ROCR or CI changes)
     if args.get("platform") == "linux":
         if args.get("is_pull_request"):
             base_ref = args.get("base_ref")
             modified_paths = get_modified_paths(base_ref)
-            if check_hip_rocr_changes(modified_paths):
+            if check_for_workflow_file_related_to_ci(
+                modified_paths
+            ) or check_hip_rocr_changes(modified_paths):
                 outputs["run_mi455_test"] = "true"
             else:
                 outputs["run_mi455_test"] = "false"
@@ -481,6 +533,8 @@ if __name__ == "__main__":
 
     input_projects = os.getenv("PROJECTS", "")
     args["input_projects"] = input_projects
+
+    args["pr_labels"] = os.environ.get("PR_LABELS", '{"labels": []}')
 
     input_platform = os.getenv("PLATFORM")
     args["platform"] = input_platform

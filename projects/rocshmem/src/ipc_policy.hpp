@@ -413,7 +413,7 @@ class IpcSdmaImpl : public IpcOnImpl {
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
-      anvil::SdmaQueueDeviceHandle* handle = nullptr;
+      sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_block()) {
         handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
         assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
@@ -427,7 +427,7 @@ class IpcSdmaImpl : public IpcOnImpl {
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
-      anvil::SdmaQueueDeviceHandle* handle = nullptr;
+      sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_wave()) {
         handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
         assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);

@@ -9,6 +9,7 @@
 #include <bit>
 #include <cassert>
 #include <limits>
+#include <optional>
 #include <type_traits>
 
 namespace util {
@@ -269,6 +270,24 @@ template <typename T>
   requires metaprogramming::IsUnsignedInt<T>
 constexpr inline T ceil_div_or_one(T numerator, T divisor) {
   return divisor == 0 ? T{1} : ceil_div(numerator, divisor);
+}
+
+/// @brief Add two unsigned integers when the result is representable.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline std::optional<T> checked_add(T lhs, T rhs) {
+  if (rhs > std::numeric_limits<T>::max() - lhs)
+    return std::nullopt;
+  return lhs + rhs;
+}
+
+/// @brief Multiply two unsigned integers when the result is representable.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline std::optional<T> checked_mul(T lhs, T rhs) {
+  if (lhs != 0 && rhs > std::numeric_limits<T>::max() / lhs)
+    return std::nullopt;
+  return lhs * rhs;
 }
 
 /// @brief Return true when @p val is aligned to @p alignment.

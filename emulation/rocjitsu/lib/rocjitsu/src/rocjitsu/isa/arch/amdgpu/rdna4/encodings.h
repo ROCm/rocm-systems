@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/instruction.h"
+#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -430,18 +431,20 @@ public:
 class Vop1 : public IsaInstruction<Isa> {
 public:
   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
   using OpEncoding = Vop1MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<DppOperand> dpp_src0_;
-  std::unique_ptr<DppOperand> dpp_src1_;
+  std::unique_ptr<StagedOperand> dpp_src0_;
+  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -462,14 +465,15 @@ public:
   bool has_lit();
   using OpEncoding = VopcMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<DppOperand> dpp_src0_;
-  std::unique_ptr<DppOperand> dpp_src1_;
+  std::unique_ptr<StagedOperand> dpp_src0_;
+  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -485,11 +489,13 @@ public:
 class Vop2 : public IsaInstruction<Isa> {
 public:
   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
   bool hasImpliedLiteral();
   using OpEncoding = Vop2MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
   uint32_t literal_ = 0;
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
@@ -497,8 +503,8 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<DppOperand> dpp_src0_;
-  std::unique_ptr<DppOperand> dpp_src1_;
+  std::unique_ptr<StagedOperand> dpp_src0_;
+  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -515,6 +521,7 @@ public:
 class Vop3 : public IsaInstruction<Isa> {
 public:
   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_has_lit_1();
@@ -524,19 +531,21 @@ public:
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 3> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<DppOperand> dpp_src0_;
-  std::unique_ptr<DppOperand> dpp_src1_;
+  std::unique_ptr<StagedOperand> dpp_src0_;
+  std::unique_ptr<StagedOperand> dpp_src1_;
 };
 
 class Vop3p : public IsaInstruction<Isa> {
 public:
   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_has_lit_1();
@@ -546,14 +555,15 @@ public:
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3pMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 3> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<DppOperand> dpp_src0_;
-  std::unique_ptr<DppOperand> dpp_src1_;
+  std::unique_ptr<StagedOperand> dpp_src0_;
+  std::unique_ptr<StagedOperand> dpp_src1_;
 };
 
 class Vinterp : public IsaInstruction<Isa> {
@@ -634,6 +644,7 @@ public:
 class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
   Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_has_lit_1();
@@ -643,14 +654,15 @@ public:
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3SdstEncMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 3> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<DppOperand> dpp_src0_;
-  std::unique_ptr<DppOperand> dpp_src1_;
+  std::unique_ptr<StagedOperand> dpp_src0_;
+  std::unique_ptr<StagedOperand> dpp_src1_;
 };
 
 } // namespace rdna4

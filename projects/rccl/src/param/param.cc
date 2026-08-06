@@ -13,13 +13,11 @@
 
 #include <unordered_set>
 
-DEFINE_NCCL_PARAM(ncclParamDumpAllFlag, bool, NCCL_PARAM_DUMP_ALL, false,
-                  NCCL_PARAM_FLAG_NONE, NCCL_PARAM_DEFAULT,
+DEFINE_NCCL_PARAM(ncclParamDumpAllFlag, bool, NCCL_PARAM_DUMP_ALL, false, NCCL_PARAM_FLAG_NONE, NCCL_PARAM_DEFAULT,
                   "Print all parameters including private ones");
 
 using ncclStringSet = std::unordered_set<std::string>;
-DEFINE_NCCL_PARAM(ncclParamNoCacheStr, const char *, NCCL_NO_CACHE, nullptr,
-                  NCCL_PARAM_FLAG_CACHED, NCCL_PARAM_DEFAULT,
+DEFINE_NCCL_PARAM(ncclParamNoCacheStr, const char*, NCCL_NO_CACHE, nullptr, NCCL_PARAM_FLAG_CACHED, NCCL_PARAM_DEFAULT,
                   "Comma-separated list of param keys to disable caching (or ALL)");
 
 extern "C" NCCL_PARAM_COMPILER_EXPORT_SYMBOL bool ncclParamIsCacheDisabled(const char* key) {
@@ -50,4 +48,3 @@ extern "C" NCCL_PARAM_COMPILER_EXPORT_SYMBOL const char* ncclParamEnvPluginGet(c
   ncclInitEnv();
   return ncclEnvPluginGetEnv(key);
 }
-

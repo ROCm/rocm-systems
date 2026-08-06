@@ -33,6 +33,7 @@ set(AMD_TEST_SRC
     hiprtc_Bitcode_UndefinedFn.cc
     hiprtc_bfloat16_HeaderTst.cc
     hiprtc_fp8.cc
+    hipRtcSpirvCompilation.cc
 )
 
 if(UNIX)

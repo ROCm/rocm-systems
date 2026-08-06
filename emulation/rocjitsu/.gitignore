@@ -40,3 +40,5 @@ __pycache__
 
 # agents
 .claude
+.codex
+.agents

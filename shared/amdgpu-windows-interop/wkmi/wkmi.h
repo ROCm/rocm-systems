@@ -147,6 +147,107 @@ struct KmdDbgVersion {
 };
 
 // ============================================================================
+// GPU Telemetry Structures
+// ============================================================================
+
+/// PMLog sensor IDs (CWDDEPM_SENSOR_TYPE values from cwddepm.h)
+enum PmlogSensorId : uint16_t {
+  kPmlogGfxClk          = 1,
+  kPmlogMemClk           = 2,
+  kPmlogSocClk           = 3,
+  kPmlogTempEdge         = 8,
+  kPmlogTempMem          = 9,
+  // GFX and SOC temperatures — reported on APUs where EDGE/HOTSPOT are absent
+  kPmlogTempGfx          = 28,
+  kPmlogTempSoc          = 29,
+  kPmlogFanRpm           = 14,
+  kPmlogFanPercent       = 15,
+  kPmlogSocVoltage       = 16,
+  kPmlogGfxActivity      = 19,
+  kPmlogMemActivity      = 20,
+  kPmlogGfxVoltage       = 21,
+  kPmlogMemVoltage       = 22,
+  kPmlogAsicPower        = 23,
+  kPmlogTempHotspot      = 27,
+  kPmlogBusSpeed         = 40,
+  kPmlogBusLanes         = 41,
+  kPmlogBoardPower       = 73,
+};
+
+static constexpr uint32_t kPmlogMaxSensors = 256;
+static constexpr uint32_t kSensorUnavailable = 0xFFFFFFFFu;
+
+/// Single PMLog sensor reading: id=0 means slot unused, value in sensor units.
+struct PmlogSensorReading {
+  uint32_t sensor_id;
+  uint32_t value;
+};
+
+/// Snapshot of the PMLog shared-memory page (CWDDEPM_PMLogData_V1 layout).
+struct PmlogSnapshot {
+  uint32_t          version;
+  uint32_t          sample_rate_ms;
+  uint64_t          timestamp;
+  PmlogSensorReading sensors[kPmlogMaxSensors]; // [i][0]=id, [i][1]=value
+};
+
+/// Result of QueryPMLogData (instantaneous sensor read without shared memory).
+struct PmlogQueryResult {
+  bool     supported[kPmlogMaxSensors];
+  uint32_t value[kPmlogMaxSensors];   // kSensorUnavailable if !supported[i]
+};
+
+/// Sensor limit pair (min, max) in sensor-native units.
+struct PmlogSensorLimits {
+  uint32_t limits[kPmlogMaxSensors][2]; // [i][0]=min, [i][1]=max
+};
+
+/// PCIe static capabilities from CWDDECI_CHIPSETIDENTIFICATION.
+struct ChipsetIdInfo {
+  uint32_t current_pcie_lane_width; // current negotiated width
+  uint32_t max_pcie_lane_width;     // max supported width
+  uint32_t nb_caps;                 // CINBCAPS_* bitfield
+  /// PCIe generation derived from nb_caps (1-5, 0=unknown)
+  uint32_t pcie_gen;
+};
+
+/// VBIOS identification from CWDDECI_QUERYVIDEOBIOSINFO.
+struct VideoBiosInfo {
+  char version[24];     // "XXX.YYY.MMM.NNN"
+  char part_number[64];
+  char date[24];        // "yyyy/mm/dd hh:mm"
+};
+
+
+// ============================================================================
+// GPU Telemetry Functions
+// ============================================================================
+
+/// @brief Query supported PMLog sensors for this adapter.
+/// @return NTSTATUS; output->supported[] indicates which sensor IDs exist.
+NTSTATUS QueryPMLogSupport(D3DKMT_HANDLE adapter, D3DKMT_HANDLE device,
+                           uint16_t supported_sensors_out[kPmlogMaxSensors]);
+
+/// @brief Read current PMLog sensor values via a one-shot KMD query (no shm).
+/// Does NOT require starting/stopping the PMLog session.
+NTSTATUS QueryPMLogData(D3DKMT_HANDLE adapter, D3DKMT_HANDLE device,
+                        PmlogQueryResult* out);
+
+/// @brief Read per-sensor min/max limits from the KMD.
+/// Used to determine power_limit (max of kPmlogAsicPower or kPmlogBoardPower).
+NTSTATUS QueryPMLogSensorLimits(D3DKMT_HANDLE adapter, D3DKMT_HANDLE device,
+                                PmlogSensorLimits* out);
+
+/// @brief Read PCIe lane width and generation capabilities.
+NTSTATUS QueryChipsetId(D3DKMT_HANDLE adapter, D3DKMT_HANDLE device,
+                        ChipsetIdInfo* out);
+
+/// @brief Read VBIOS version, part number, and build date.
+NTSTATUS QueryVideoBiosInfo(D3DKMT_HANDLE adapter, D3DKMT_HANDLE device,
+                            VideoBiosInfo* out);
+
+
+// ============================================================================
 // Device Query Functions
 // ============================================================================
 
@@ -303,6 +404,17 @@ void FillinUnregisterEventPrivData(void* priv_data,  ///< Pointer to event unreg
 /// @return Allocation size in bytes
 uint64_t GetMemoryAllocationSize(const void* priv_data);  ///< Pointer to allocation private data structure
 
+/// @brief Surface swizzle information extracted from VCAM_SURFACE_DESC
+struct SurfaceSwizzleInfo {
+  uint32_t swizzle_mode;   ///< Generic swizzle mode (union of eSwizzleMode/gfx12SwizzleMode/eTilingMode)
+  uint32_t tile_swizzle;   ///< Pipe-bank XOR value (ulTileSwizzle) for plane 0
+  bool     valid;          ///< True if surfaceDesc was present and parsed successfully
+};
+
+/// @brief Extract swizzle mode and tile swizzle from allocation private data
+/// @return SurfaceSwizzleInfo with valid=true if surfaceDesc is present, valid=false otherwise
+SurfaceSwizzleInfo GetSurfaceSwizzleInfo(const void* priv_data);  ///< Pointer to allocation private data structure
+
 /// @brief Get the size of the proxy resource info structure
 /// @return Size in bytes of the PROXY_RESOURCE_INFO structure
 size_t GetProxyResourceInfoSize();
@@ -339,5 +451,27 @@ void FillinRegisterRuntimeStatePrivData(void* priv_data, uint32_t runtime_state,
 
 /// @brief Configure the SetTrapHandler private data
 void FillinTrapHandlerPrivData(void* priv_data, uint64_t tba, uint64_t tma);
+
+
+
+/// RAS (Reliability, Availability, Serviceability) feature flags from KMD.
+/// Populated via LHESCAPE_UMDKMDIF_RAS_GET_FEATURES escape.
+struct RasFeatureInfo {
+  uint32_t dram_ecc_supported;     // 1 = KMD reports DRAM ECC support
+  uint32_t sram_ecc_supported;     // 1 = KMD reports SRAM ECC support
+  uint32_t poisoning_supported;    // 1 = KMD reports data poisoning support
+  uint32_t dram_ecc_enabled;       // current mode
+  uint32_t sram_ecc_enabled;
+  uint32_t poisoning_enabled;
+  bool     needs_reboot;           // immediate reboot required to change features
+};
+
+// ============================================================================
+// Additional GPU Telemetry Functions
+// ============================================================================
+
+/// @brief Read RAS (ECC / poisoning) feature flags via LHESCAPE_UMDKMDIF_RAS_GET_FEATURES.
+NTSTATUS QueryRasFeature(D3DKMT_HANDLE adapter, D3DKMT_HANDLE device,
+                         RasFeatureInfo* out);
 
 }  // namespace Wkmi

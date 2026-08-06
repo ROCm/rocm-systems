@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <cstring>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocprofsys
@@ -56,23 +56,24 @@ reserve(ContainerT&, ArgT)
 
 template <typename ContainerT = std::vector<std::string>>
 inline ContainerT
-delimit(const std::string& line, const char* delimiters = "\"',;: ");
+delimit(const std::string& line, std::string_view delimiters = "\"',;: ");
 
 template <typename ContainerT>
 inline ContainerT
-delimit(const std::string& line, const char* delimiters)
+delimit(const std::string& line, std::string_view delimiters)
 {
     ContainerT _result{};
     size_t     _beginp = 0;  // position that is the beginning of the new string
     size_t     _delimp = 0;  // position of the delimiter in the string
     if(reserve(_result, 0))
     {
+        // tally every character in the line that is one of the delimiters
         size_t _nmax = 0;
         for(char itr : line)
         {
-            for(size_t j = 0; j < strlen(delimiters); ++j)
+            if(delimiters.find(itr) != std::string_view::npos)
             {
-                if(itr == delimiters[j]) ++_nmax;
+                ++_nmax;
             }
         }
         reserve(_result, _nmax);

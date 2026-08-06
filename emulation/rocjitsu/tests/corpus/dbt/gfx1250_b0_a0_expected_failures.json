@@ -1,0 +1,12 @@
+{
+  "expected_failures": {
+    "2bff3e6611af6c6de83ff384fd5b659f9c42441c3553cf41c779047d4432b78b": {
+      "kind": "memory-limit",
+      "reason": "RCCL code object exceeds the per-object DBT memory limit in indirect-branch discovery"
+    }
+  },
+  "input_revision": "b0",
+  "output_revision": "a0",
+  "schema_version": 1,
+  "target": "gfx1250"
+}

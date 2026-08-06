@@ -6,7 +6,6 @@
 #include "concepts.hpp"
 
 #include <timemory/mpl/concepts.hpp>
-#include <timemory/utility/delimit.hpp>
 
 #include <algorithm>
 #include <array>

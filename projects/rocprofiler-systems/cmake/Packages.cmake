@@ -53,9 +53,6 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-python
 rocprofiler_systems_add_interface_library(rocprofiler-systems-perfetto
     "Enables Perfetto support"
 )
-rocprofiler_systems_add_interface_library(rocprofiler-systems-sqlite3
-    "Use SQLite3 for rocpd data storage"
-)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-json
     "Use nlohmann/json for json data handling"
 )
@@ -263,147 +260,46 @@ endif()
 
 target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
 
-# Detect AMD SMI library version from header
-set(_AMDSMI_HEADER "${ROCM_PATH}/include/amd_smi/amdsmi.h")
-if(EXISTS "${_AMDSMI_HEADER}")
-    file(READ "${_AMDSMI_HEADER}" _AMDSMI_HEADER_CONTENTS)
-
-    string(
-        REGEX MATCH
-        "#define AMDSMI_LIB_VERSION_MAJOR ([0-9]+)"
-        _
-        "${_AMDSMI_HEADER_CONTENTS}"
-    )
-    set(ROCPROFSYS_AMDSMI_VERSION_MAJOR "${CMAKE_MATCH_1}")
-
-    string(
-        REGEX MATCH
-        "#define AMDSMI_LIB_VERSION_MINOR ([0-9]+)"
-        _
-        "${_AMDSMI_HEADER_CONTENTS}"
-    )
-    set(ROCPROFSYS_AMDSMI_VERSION_MINOR "${CMAKE_MATCH_1}")
-
+# AMD SMI version is provided by config-mode find_package(amd_smi) above.
+# If the package does not report a version, treat it as 0.0 (AI NIC unsupported).
+if(amd_smi_VERSION)
+    message(STATUS "AMD SMI version detected: ${amd_smi_VERSION}")
+else()
+    set(amd_smi_VERSION "0.0")
     message(
         STATUS
-        "AMD SMI version detected: ${ROCPROFSYS_AMDSMI_VERSION_MAJOR}.${ROCPROFSYS_AMDSMI_VERSION_MINOR}"
+        "AMD SMI version not reported by find_package; assuming ${amd_smi_VERSION}"
     )
 endif()
 
 # AINIC requires AMD SMI >= 26.3 AND ROCPROFSYS_USE_AINIC option
 set(ROCPROFSYS_BUILD_AINIC OFF CACHE INTERNAL "Build AINIC support" FORCE)
 if(ROCPROFSYS_USE_AINIC)
-    if(
-        ROCPROFSYS_AMDSMI_VERSION_MAJOR GREATER 26
-        OR (
-            ROCPROFSYS_AMDSMI_VERSION_MAJOR EQUAL 26
-            AND ROCPROFSYS_AMDSMI_VERSION_MINOR GREATER 2
-        )
-    )
+    if(amd_smi_VERSION VERSION_GREATER_EQUAL 26.3)
         set(ROCPROFSYS_BUILD_AINIC ON CACHE INTERNAL "Build AINIC support" FORCE)
         message(STATUS "AINIC support enabled (AMD SMI >= 26.3)")
     else()
-        message(
-            STATUS
-            "AINIC disabled: AMD SMI ${ROCPROFSYS_AMDSMI_VERSION_MAJOR}.${ROCPROFSYS_AMDSMI_VERSION_MINOR} < 26.3"
-        )
+        message(STATUS "AINIC disabled: AMD SMI ${amd_smi_VERSION} < 26.3")
     endif()
 else()
     message(STATUS "AINIC disabled: ROCPROFSYS_USE_AINIC is OFF")
 endif()
 
-# ----------------------------------------------------------------------------------------#
-#
-# ROCpd
-#
-# ----------------------------------------------------------------------------------------#
-
-function(ROCPROFSYS_CONFIGURE_ROCPD_SCHEMA_FILES)
-    rocprofiler_systems_target_compile_definitions(
-        rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_ROCPD_LIBRARY=0
+# Expose ROCPROFSYS_BUILD_AINIC as a global compile definition.
+if(ROCPROFSYS_BUILD_AINIC)
+    target_compile_definitions(
+        rocprofiler-systems-compile-definitions
+        INTERFACE ROCPROFSYS_BUILD_AINIC=1
     )
-
-    set(SCHEMA_FILES
-        "rocpd_tables.sql"
-        "rocpd_views.sql"
-        "data_views.sql"
-        "marker_views.sql"
-        "summary_views.sql"
-    )
-
-    set(SCHEMA_SOURCE_DIR
-        "${PROJECT_SOURCE_DIR}/source/lib/core/rocpd/data_storage/schema"
-    )
-    set(SCHEMA_BINARY_DIR
-        "${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage/schema"
-    )
-    set(TEMPLATE_FILE "${PROJECT_SOURCE_DIR}/cmake/Templates/rocpd_schema.in")
-
-    file(MAKE_DIRECTORY ${SCHEMA_BINARY_DIR})
-
-    foreach(SCHEMA_FILE ${SCHEMA_FILES})
-        file(READ "${SCHEMA_SOURCE_DIR}/${SCHEMA_FILE}" SQL_CONTENT)
-
-        string(REPLACE "\\" "\\\\" SQL_CONTENT "${SQL_CONTENT}")
-        string(REPLACE "\"" "\\\"" SQL_CONTENT "${SQL_CONTENT}")
-        string(REPLACE "\n" "\\n\"\n\"" SQL_CONTENT "${SQL_CONTENT}")
-
-        get_filename_component(SCHEMA_NAME ${SCHEMA_FILE} NAME_WE)
-        string(TOUPPER ${SCHEMA_NAME} SCHEMA_NAME_UPPER)
-
-        configure_file("${TEMPLATE_FILE}" "${SCHEMA_BINARY_DIR}/${SCHEMA_NAME}.hpp" @ONLY)
-    endforeach()
-
-    target_include_directories(
-        rocprofiler-systems-headers
-        INTERFACE
-            $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage>
-    )
-endfunction()
-
-set(ROCPROFSYS_USE_ROCPD_LIBRARY OFF CACHE BOOL "Use rocpd library" FORCE)
-find_package(rocprofiler-sdk-rocpd ${rocprofiler_systems_FIND_QUIETLY})
-
-if(rocprofiler-sdk-rocpd_FOUND)
-    set(ROCPROFSYS_ROCPD_HAS_SQL_H FALSE)
-
-    if(rocprofiler-sdk-rocpd_INCLUDE_DIR)
-        set(_INCLUDE_PATH "${rocprofiler-sdk-rocpd_INCLUDE_DIR}/rocprofiler-sdk-rocpd")
-        message(STATUS "${_INCLUDE_PATH}/sql.h")
-        if(EXISTS "${_INCLUDE_PATH}/sql.h")
-            set(ROCPROFSYS_ROCPD_HAS_SQL_H TRUE)
-        endif()
-    endif()
-
-    if(ROCPROFSYS_ROCPD_HAS_SQL_H)
-        set(ROCPROFSYS_USE_ROCPD_LIBRARY ON CACHE BOOL "Use rocpd library" FORCE)
-
-        rocprofiler_systems_target_compile_definitions(
-            rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_ROCPD_LIBRARY=1
-        )
-
-        target_link_libraries(
-            rocprofiler-systems-rocm
-            INTERFACE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-        )
-
-        message(
-            STATUS
-            "rocprofiler-sdk-rocpd found with sql.h - using latest schema files"
-        )
-    else()
-        message(
-            STATUS
-            "rocprofiler-sdk-rocpd found but sql.h missing - using local schema files"
-        )
-    endif()
-else()
-    message(STATUS "rocprofiler-sdk-rocpd not found - using local schema files")
 endif()
 
-if(NOT ROCPROFSYS_USE_ROCPD_LIBRARY)
-    rocprofsys_configure_rocpd_schema_files()
-endif()
+# ----------------------------------------------------------------------------------------#
+#
+# Profiler Hub
+#
+# ----------------------------------------------------------------------------------------#
+
+include(ProfilerHub)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -718,14 +614,6 @@ rocprofiler_systems_checkout_git_submodule(
 )
 
 include(Perfetto)
-
-# ----------------------------------------------------------------------------------------#
-#
-# SQLite3
-#
-# ----------------------------------------------------------------------------------------#
-
-include(SQLite3)
 
 # ----------------------------------------------------------------------------------------#
 #

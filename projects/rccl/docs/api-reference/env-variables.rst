@@ -46,9 +46,23 @@ in the following table.
           which is required for ``ncclCommSuspend`` and ``ncclCommResume`` to
           release the physical GPU memory of a suspended communicator. See
           :ref:`suspend-resume` for the full prerequisites.
-      - | ``0``: Disabled (default).
-        | ``1``: Enabled.
-        | ``-2``: Auto-detect; enable when the platform supports VMM.
+      - | ``0``: Disabled.
+        | ``1``: Enabled on any architecture.
+        | ``-2``: Auto-detect (default); enable when the platform supports VMM.
+          Auto-detect is limited to gfx1250, the only architecture where the VMM
+          path is validated. Use ``1`` to force it on elsewhere.
+
+    * - | ``NCCL_MIN_CTAS``
+        | Minimum number of CTAs (channels) used for a collective. Overrides
+          the ``minCTAs`` field of ``ncclConfig_t``.
+      - | Positive integer (values ``<= 0`` are ignored).
+        | Default: unset (uses the RCCL default).
+
+    * - | ``NCCL_MAX_CTAS``
+        | Maximum number of CTAs (channels) used for a collective. Overrides
+          the ``maxCTAs`` field of ``ncclConfig_t``.
+      - | Positive integer (values ``<= 0`` are ignored).
+        | Default: unset (uses the RCCL default).
 
 Logging and debugging
 =====================
@@ -96,6 +110,7 @@ in the following table.
         | ``PROFILE``: Prints logs related to the profiling/timing info.
         | ``RAS``: Prints logs related to RAS.
         | ``VERBS``: Prints logs related to IB/Verbs.
+        | ``DESTROY``: Prints logs related to communicator/plugin teardown (destroy, abort, revoke, plugin unload).
         | ``ALL``: Activates all logging subsystems.
 
     * - | ``NCCL_WARN_ENABLE_DEBUG_INFO``
@@ -181,6 +196,24 @@ in the following table.
         | ``AF_INET6``: Force IPv6
         | Unset: Use first available
 
+    * - | ``NCCL_IGNORE_NET_MISMATCH``
+        | Controls what happens when ranks report a different number of local
+          network (NET) devices during communicator initialization. RCCL gathers
+          each rank's local NET device count and compares the minimum and maximum
+          across the communicator. A mismatch usually means the job was launched
+          with an inconsistent NIC selection (for example, an uneven
+          ``NCCL_SOCKET_IFNAME``/``NCCL_IB_HCA`` per rank, or nodes with different
+          NIC counts), which otherwise surfaces later as obscure transport
+          failures. See :ref:`heterogeneous-nic-counts`.
+      - | ``1``: Detect and continue, logging the mismatch at ``INFO`` level (default).
+        | ``0``: Fail initialization with ``ncclSystemError`` and a warning on the mismatch.
+
+    * - | ``NCCL_IGNORE_COLLNET_MISMATCH``
+        | Same as ``NCCL_IGNORE_NET_MISMATCH`` but for the number of local CollNet
+          devices reported by each rank.
+      - | ``0``: Fail initialization with ``ncclSystemError`` and a warning on the mismatch (default).
+        | ``1``: Detect and continue, logging the mismatch at ``INFO`` level.
+
     * - | ``NCCL_NET_MERGE_LEVEL``
         | Controls network device merging behavior.
       - | Integer value specifying merge level
@@ -210,6 +243,17 @@ in the following table.
         | This variable can be leveraged when NIC Fusion (``NCCL_NET_MERGE_LEVEL``) and/or data splitting on QPs (``NCCL_IB_SPLIT_DATA_ON_QPS``) is enabled.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
+
+    * - | ``NCCL_NCHANNELS_PER_NET_PEER``
+        | Sets the number of channels used per network (remote) peer.
+        | This overrides the value of the ``nChannelsPerNetPeer`` field in
+        | ``ncclConfig_t``. When neither this variable nor the config field is
+        | set, RCCL auto-tunes the per-peer channel count based on the
+        | available NIC bandwidth and rank count.
+      - | Integer value, ``1`` to ``MAXCHANNELS`` (default: unset/auto-tuned)
+        | Values ``<= 0`` are ignored and a warning is logged.
+        | Values ``> MAXCHANNELS`` set through ``ncclConfig_t`` are rejected
+        | with ``ncclInvalidArgument`` at communicator initialization.
 
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.
@@ -257,6 +301,21 @@ intended for debugging and development purposes.
           ``ncclCommMemStats`` return ``ncclInvalidUsage``.
       - | ``0``: Memory manager enabled (default).
         | ``1``: Memory manager disabled.
+
+    * - | ``NCCL_NO_CACHE``
+        | Disables caching for selected RCCL environment parameters so their
+          values are re-read from the environment on each access. By default,
+          RCCL caches parameter values after the first read for performance.
+          This variable is intended for testing and debugging when parameters
+          need to be changed without restarting the process. The value is
+          parsed once on first use, so it must be set before RCCL reads any
+          parameters. ``NCCL_NO_CACHE`` itself is always cached and cannot
+          be listed.
+      - | Unset (default): all parameters are cached after first read.
+        | Comma-separated list of parameter names (for example,
+          ``NCCL_DEBUG,NCCL_ALGO``): disable caching for those keys only.
+        | ``ALL``: disable caching for every parameter except
+          ``NCCL_NO_CACHE``.
 
 Multi-communicator ordering
 ===========================

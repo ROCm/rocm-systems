@@ -70,7 +70,15 @@ static constexpr int kPollBlockIndefinitely = -1;
 static constexpr int kDisabledFd = -1;
 
 // Default test timeout (seconds) if none is specified in TestConfig.
-static constexpr int kDefaultTestTimeoutSeconds = 30;
+// Raised from 30s to 300s to accommodate slow-running collective tests in
+// DPX+NPS2 mode:
+//  - gfx1250 (DPX+NPS2): some tests currently take ~133s
+//  - gfx950 (DPX+NPS2): some tests currently take ~68s
+//  ~2x headroom over the observed worst case is intentional to avoid
+//  flaky false-positive timeouts
+//
+// TODO: Reduce this (toward ~70s) once gfx1250's runtime comes down
+static constexpr int kDefaultTestTimeoutSeconds = 300;
 
 // Unset process ID — used before a child is forked or when fork fails.
 static constexpr pid_t kInvalidPid = -1;

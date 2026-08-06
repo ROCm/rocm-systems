@@ -22,14 +22,17 @@ ExpExp::ExpExp(const MachineInst *inst)
       vsrc0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       vsrc2(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc2),
-      vsrc3(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc3) {
+      vsrc3(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc3),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &tgt;
   src_operands_[0] = &vsrc0;
   src_operands_[1] = &vsrc1;
   src_operands_[2] = &vsrc2;
   src_operands_[3] = &vsrc3;
-  num_src_ = 4;
+  src_operands_[4] = &sdst_exec;
+  num_src_ = 5;
   num_dst_ = 1;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void ExpExp::execute_impl(amdgpu::Wavefront &wf) {

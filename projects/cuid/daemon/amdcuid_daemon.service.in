@@ -1,0 +1,13 @@
+[Unit]
+Description=AMD Component Unified ID Daemon
+Documentation=https://github.com/ROCm/rocm-systems/projects/cuid
+After=network.target local-fs.target
+
+[Service]
+Type=simple
+ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/amdcuid_daemon
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
