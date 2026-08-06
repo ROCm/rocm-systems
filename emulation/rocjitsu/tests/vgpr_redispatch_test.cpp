@@ -23,6 +23,7 @@ using namespace rocjitsu::amdgpu;
 struct RedispatchCase {
   rj_code_arch_t arch;
   uint32_t wave_size;
+  uint32_t vgprs_per_wf;
   const char *name;
 };
 
@@ -37,7 +38,7 @@ TEST_P(VgprRedispatchTest, RecycledAllocationStartsZero) {
   config.arch = test_case.arch;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
-  config.vgprs_per_wf = 256;
+  config.vgprs_per_wf = test_case.vgprs_per_wf;
   config.lds_size_kb = 64;
 
   auto compute_unit = ComputeUnitCore::create("vgpr_redispatch_cu", config, &gpu_memory, &l2);
@@ -45,7 +46,7 @@ TEST_P(VgprRedispatchTest, RecycledAllocationStartsZero) {
   ASSERT_EQ(compute_unit->wf_size(), test_case.wave_size);
 
   Wavefront *first = compute_unit->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*num_sgprs=*/32,
-                                               /*num_vgprs=*/256);
+                                               /*num_vgprs=*/test_case.vgprs_per_wf);
   ASSERT_NE(first, nullptr);
   const uint32_t first_sgpr_base = first->sgpr_alloc().base;
   const uint32_t first_base = first->vgpr_alloc().base;
@@ -61,7 +62,7 @@ TEST_P(VgprRedispatchTest, RecycledAllocationStartsZero) {
   ASSERT_EQ(compute_unit->num_wfs(), 0u);
 
   Wavefront *second = compute_unit->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*num_sgprs=*/32,
-                                                /*num_vgprs=*/256);
+                                                /*num_vgprs=*/test_case.vgprs_per_wf);
   ASSERT_NE(second, nullptr);
   ASSERT_EQ(second->sgpr_alloc().base, first_sgpr_base);
   ASSERT_EQ(second->vgpr_alloc().base, first_base);
@@ -76,11 +77,11 @@ TEST_P(VgprRedispatchTest, RecycledAllocationStartsZero) {
   second->halt();
 }
 
-INSTANTIATE_TEST_SUITE_P(WaveSizes, VgprRedispatchTest,
-                         ::testing::Values(RedispatchCase{ROCJITSU_CODE_ARCH_RDNA4, 32, "Wave32"},
-                                           RedispatchCase{ROCJITSU_CODE_ARCH_CDNA4, 64, "Wave64"}),
-                         [](const ::testing::TestParamInfo<RedispatchCase> &info) {
-                           return info.param.name;
-                         });
+INSTANTIATE_TEST_SUITE_P(
+    WaveSizes, VgprRedispatchTest,
+    ::testing::Values(RedispatchCase{ROCJITSU_CODE_ARCH_RDNA4, 32, 256, "Wave32"},
+                      RedispatchCase{ROCJITSU_CODE_ARCH_CDNA4, 64, 256, "Wave64"},
+                      RedispatchCase{ROCJITSU_CODE_ARCH_GFX1250, 32, 1024, "Gfx1250"}),
+    [](const ::testing::TestParamInfo<RedispatchCase> &info) { return info.param.name; });
 
 } // namespace
