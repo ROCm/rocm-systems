@@ -6195,6 +6195,16 @@ public:
   }
 };
 
+class gfx1103_t final : public gfx11_architecture_t
+{
+public:
+  gfx1103_t ()
+    : gfx11_architecture_t (EF_AMDGPU_MACH_AMDGCN_GFX1103,
+                            "amdgcn-amd-amdhsa--gfx1103")
+  {
+  }
+};
+
 class gfx1150_t final : public gfx11_architecture_t
 {
 public:
@@ -8550,6 +8560,7 @@ decltype (architecture_t::s_architecture_map)
       map.emplace (make_architecture<gfx1100_t> ());
       map.emplace (make_architecture<gfx1101_t> ());
       map.emplace (make_architecture<gfx1102_t> ());
+      map.emplace (make_architecture<gfx1103_t> ());
       map.emplace (make_architecture<gfx1150_t> ());
       map.emplace (make_architecture<gfx1151_t> ());
       map.emplace (make_architecture<gfx1152_t> ());
