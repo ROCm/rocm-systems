@@ -14,6 +14,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -220,8 +221,7 @@ inline void validate_supported_descriptor(const TensorDmaDescriptor &desc, bool 
 
 inline void copy_bytes(const TensorDmaDescriptor &desc, Wavefront &wf, uint64_t global_element,
                        uint64_t lds_element, bool in_bounds, bool store_from_lds) {
-  auto *memory = wf.cu().memory();
-  if (!memory)
+  if (!wf.has_gpu_memory())
     throw util::UnimplementedInst("tensor DMA without GPU memory");
 
   const uint64_t global_addr = desc.global_base + global_element * desc.elem_size;
@@ -233,15 +233,21 @@ inline void copy_bytes(const TensorDmaDescriptor &desc, Wavefront &wf, uint64_t 
   }
 
   const uint32_t lds_addr = wf.lds_base() + desc.lds_base + static_cast<uint32_t>(lds_byte);
-  for (uint32_t byte = 0; byte < desc.elem_size; ++byte) {
-    if (store_from_lds) {
-      if (in_bounds)
-        memory->write8(global_addr + byte, wf.lds().read8(lds_addr + byte));
-    } else {
-      const uint8_t value = in_bounds ? memory->read8(global_addr + byte) : 0;
-      wf.lds().write8(lds_addr + byte, value);
-    }
+  std::array<uint8_t, 8> bytes{};
+  auto element_bytes = std::span<uint8_t>(bytes).first(desc.elem_size);
+  if (store_from_lds) {
+    if (!in_bounds)
+      return;
+    for (uint32_t byte = 0; byte < desc.elem_size; ++byte)
+      element_bytes[byte] = wf.lds().read8(lds_addr + byte);
+    wf.write_gpu_memory(global_addr, element_bytes);
+    return;
   }
+
+  if (in_bounds)
+    wf.read_gpu_memory(global_addr, element_bytes);
+  for (uint32_t byte = 0; byte < desc.elem_size; ++byte)
+    wf.lds().write8(lds_addr + byte, element_bytes[byte]);
 }
 
 inline void copy_gather_tensor(const TensorDmaDescriptor &desc, Wavefront &wf,
