@@ -1,0 +1,56 @@
+name: RCCL host unit tests
+
+# Builds and runs RCCL's CPU-only host unit-test binary (rccl-HostUnitTests, added
+# in PR #9320) on every PR touching projects/rccl/**. No GPU or network hardware is
+# required: the binary is compiled with `hipcc --offload-host-only` and links no
+# HIP/ROCm runtime. The workflow's own path is in the trigger so it self-runs on the
+# PR that introduces it. JIRA ID: AICOMRCCL-1711
+
+on:
+  pull_request:
+    paths:
+      - 'projects/rccl/**'
+      - '.github/workflows/rccl-host-unit-tests.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  host-unit-tests:
+    name: Host unit tests (CPU-only)
+    runs-on: ubuntu-latest
+    container:
+      image: rocm/dev-ubuntu-22.04:7.2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Install test deps
+        run: apt-get update && apt-get install -y libgtest-dev libgmock-dev libfmt-dev
+
+      - name: Stage hipified sources
+        working-directory: projects/rccl
+        run: |
+          cmake -B build -DGPU_TARGETS=gfx942 -DBUILD_TESTS=OFF
+          cmake --build build --target hipify_all -j"$(nproc)"
+
+      - name: Build host tests
+        working-directory: projects/rccl/test/host
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DROCM_PATH=/opt/rocm
+          cmake --build build -j"$(nproc)"
+
+      - name: Run host tests
+        working-directory: projects/rccl/test/host
+        run: ./build/rccl-HostUnitTests --gtest_output=xml:host_tests.xml
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: host-unit-test-results
+          path: projects/rccl/test/host/host_tests.xml
