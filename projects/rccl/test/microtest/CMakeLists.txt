@@ -88,6 +88,15 @@ set(TEST_MICRO_INIT_SOURCE_FILES
   ../common/ProcessIsolatedTestRunner.cpp
 )
 
+# The hipified oracle TUs are produced by the hipify build step (add_dependencies
+# below), so they don't exist at configure time. Mark them GENERATED so a FRESH
+# configure doesn't error on missing sources (add_dependencies orders the build).
+set_source_files_properties(
+  ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc
+  ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc
+  ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc
+  PROPERTIES GENERATED TRUE)
+
 # Two compile variants (D2): the default (cached) build leaves HIP_*_UNCACHED_MEMORY
 # undefined -> checkHostUncacheMemSetting takes the gfx950-check arm and fillInfo
 # uses the finegrained-malloc line; the -uncached build defines both -> the
