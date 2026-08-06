@@ -8,6 +8,18 @@
 ///
 /// - `HSA_HOTSWAP_VERBOSE` -- debug logging to stderr. Changes what is reported,
 ///   never what is done. Errors are always reported, independently of this flag.
+/// - `HSA_HOTSWAP_DUMP_SOURCE` -- when set to anything but `0`, a translation
+///   that fails writes the source code object it refused to disk. Off by
+///   default: these objects reach 212 MiB, and a failure the memo declines to
+///   remember recurs on every load of the same bytes.
+/// - `HSA_HOTSWAP_DUMP_DIR` -- where those artifacts go, falling back to
+///   `TMPDIR` and then `/tmp`. Naming a destination does not enable capture;
+///   `HSA_HOTSWAP_DUMP_SOURCE` does that.
+///
+/// Capture writes at most one artifact per source identity and covers at most 32
+/// distinct sources per process. An out-of-resources failure is never captured:
+/// copying a large input adds pressure to a system that just ran out, and the
+/// bytes are not what failed.
 ///
 /// `HSA_HOTSWAP_DISABLE` belongs to CLR rather than this hook: it stops CLR
 /// forwarding anything here at all.
@@ -68,12 +80,27 @@ void log(const char *format, ...) noexcept;
 void log_error(const char *format, ...) noexcept;
 
 #if defined(RJ_HOTSWAP_TEST_HOOKS)
-std::mutex g_test_dump_mutex;
-std::vector<std::string> g_test_dump_paths;
+// The state and its lock live in ordinary functions, not in the template below:
+// a function-local static inside a template belongs to one instantiation, so a
+// second call site with a different callable type would get its own copy.
+std::mutex &test_dump_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+std::vector<std::string> &test_dump_paths() {
+  static std::vector<std::string> paths;
+  return paths;
+}
+
+/// @brief Run @p fn against the recorded capture paths under their own lock.
+template <typename Fn> decltype(auto) with_test_dump_paths(Fn &&fn) {
+  std::lock_guard lock(test_dump_mutex());
+  return fn(test_dump_paths());
+}
+
 void remember_test_dump(const char *path) noexcept {
   try {
-    std::lock_guard lock(g_test_dump_mutex);
-    g_test_dump_paths.emplace_back(path);
+    with_test_dump_paths([&](std::vector<std::string> &paths) { paths.emplace_back(path); });
   } catch (...) {
   }
 }
@@ -106,74 +133,129 @@ const char *source_capture_directory() {
 // produced enough material to diagnose whatever is wrong.
 constexpr size_t kMaxCapturedSources = 32;
 
-std::mutex g_captured_sources_mutex;
-/// Source identity -> whether its artifact was completely written. An entry that
-/// is present but false is a capture in flight on another thread.
-std::unordered_map<uint64_t, bool> g_captured_sources;
-/// Sources the disabled-capture hint has already named. Kept apart from the
-/// capture registry so the hint does not consume the artifact's one slot: an
-/// operator who reads it, exports the variable and retries must get the file.
-std::unordered_set<uint64_t> g_hinted_sources;
+/// @brief Everything the capture policy remembers for the life of the process.
+struct SourceCaptureState {
+  /// Source identity -> whether its artifact was completely written. An entry
+  /// present but false is a capture in flight on another thread.
+  std::unordered_map<uint64_t, bool> captures;
+  /// Sources the disabled-capture hint has already named. Kept apart from
+  /// @ref captures so the hint does not consume the artifact's one slot: an
+  /// operator who reads it, exports the variable and retries must get the file.
+  std::unordered_set<uint64_t> hinted;
+  /// Sources whose write failure has been reported. A failed write is retried,
+  /// so without this a permanently unwritable destination would report itself on
+  /// every load of the same bytes.
+  std::unordered_set<uint64_t> reported_write_failures;
+  /// Whether the registry has already explained that it is full.
+  bool reported_capacity = false;
+};
 
-/// @returns True when @p seen did not already hold @p source_id and has room.
-bool claim_once(std::unordered_set<uint64_t> &seen, uint64_t source_id) noexcept {
+// Held in ordinary functions for the reason given above test_dump_mutex().
+std::mutex &capture_state_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+SourceCaptureState &capture_state() {
+  static SourceCaptureState state;
+  return state;
+}
+
+/// @brief Run @p fn against the capture state under its own lock.
+template <typename Fn> decltype(auto) with_capture_state(Fn &&fn) {
+  std::lock_guard lock(capture_state_mutex());
+  return fn(capture_state());
+}
+
+/// @returns True the first time @p source_id is offered, up to the registry cap.
+bool claim_once(std::unordered_set<uint64_t> SourceCaptureState::*member,
+                uint64_t source_id) noexcept {
   try {
-    std::lock_guard lock(g_captured_sources_mutex);
-    if (seen.size() >= kMaxCapturedSources)
-      return false;
-    return seen.insert(source_id).second;
+    return with_capture_state([&](SourceCaptureState &state) {
+      auto &seen = state.*member;
+      if (seen.size() >= kMaxCapturedSources)
+        return false;
+      return seen.insert(source_id).second;
+    });
   } catch (...) {
     return false;
   }
 }
 
+/// @brief What became of an attempt to claim the capture slot for one source.
+enum class CaptureClaim : uint8_t {
+  Granted,        ///< This call owns the write and must settle it.
+  AlreadyHandled, ///< Captured already, or being written by another thread.
+  RegistryFull,   ///< The per-process source cap is reached.
+};
+
 /// @brief Begin the one capture allowed for @p source_id.
 ///
-/// @returns False when another thread is already writing this source, when it
-/// has been captured, or when the registry is full. A claim taken here is
-/// released by finish_source_capture(), so a capture that could not be written
-/// -- an unwritable directory, a full filesystem -- can be retried once the
-/// operator fixes it rather than being refused for the life of the process.
-bool begin_source_capture(uint64_t source_id) noexcept {
+/// @details A granted claim is settled by finish_source_capture(), so a capture
+/// that could not be written -- an unwritable directory, a full filesystem --
+/// can be retried once the operator fixes it rather than being refused for the
+/// life of the process.
+CaptureClaim begin_source_capture(uint64_t source_id) noexcept {
   try {
-    std::lock_guard lock(g_captured_sources_mutex);
-    if (g_captured_sources.size() >= kMaxCapturedSources && !g_captured_sources.contains(source_id))
-      return false;
-    return g_captured_sources.emplace(source_id, false).second;
+    return with_capture_state([&](SourceCaptureState &state) {
+      if (state.captures.contains(source_id))
+        return CaptureClaim::AlreadyHandled;
+      if (state.captures.size() >= kMaxCapturedSources)
+        return CaptureClaim::RegistryFull;
+      state.captures.emplace(source_id, false);
+      return CaptureClaim::Granted;
+    });
   } catch (...) {
-    return false;
+    return CaptureClaim::AlreadyHandled;
   }
 }
 
 /// @brief Settle a claim taken by begin_source_capture().
 void finish_source_capture(uint64_t source_id, bool written) noexcept {
-  std::lock_guard lock(g_captured_sources_mutex);
-  if (written)
-    g_captured_sources[source_id] = true;
-  else
-    g_captured_sources.erase(source_id);
+  with_capture_state([&](SourceCaptureState &state) {
+    if (written)
+      state.captures[source_id] = true;
+    else
+      state.captures.erase(source_id);
+  });
+}
+
+/// @returns True the one time the full registry should explain itself.
+bool claim_capacity_report() noexcept {
+  return with_capture_state(
+      [](SourceCaptureState &state) { return !std::exchange(state.reported_capacity, true); });
 }
 
 /// @brief Write @p bytes to a fresh file in the configured directory.
 ///
 /// @returns True only once the artifact is completely written and closed.
 bool write_captured_source(uint64_t source_id, std::span<const uint8_t> bytes) noexcept {
+  // The write is retried until it succeeds, so its failure is reported once per
+  // source: a destination that stays unwritable would otherwise repeat itself on
+  // every load of the same bytes.
+  const auto report_failure = [source_id] {
+    return claim_once(&SourceCaptureState::reported_write_failures, source_id);
+  };
   char path[PATH_MAX];
   const int length =
       std::snprintf(path, sizeof(path), "%s/rocjitsu-gfx1250-b0-to-a0-%016" PRIx64 "-XXXXXX.elf",
                     source_capture_directory(), source_id);
   if (length < 0 || static_cast<size_t>(length) >= sizeof(path)) {
-    log_error("translation failed and its source code object could not be saved: path is too long "
-              "source_id=fnv1a64:%016" PRIx64 "; please file a bug report",
-              source_id);
+    if (report_failure()) {
+      log_error(
+          "translation failed and its source code object could not be saved: path is too long "
+          "source_id=fnv1a64:%016" PRIx64 "; please file a bug report",
+          source_id);
+    }
     return false;
   }
 
   const int descriptor = mkstemps(path, 4);
   if (descriptor < 0) {
-    log_error("translation failed and its source code object could not be saved "
-              "source_id=fnv1a64:%016" PRIx64 " errno=%d; please file a bug report",
-              source_id, errno);
+    if (report_failure()) {
+      log_error("translation failed and its source code object could not be saved "
+                "source_id=fnv1a64:%016" PRIx64 " errno=%d; please file a bug report",
+                source_id, errno);
+    }
     return false;
   }
   FILE *output = fdopen(descriptor, "wb");
@@ -181,9 +263,11 @@ bool write_captured_source(uint64_t source_id, std::span<const uint8_t> bytes) n
     const int saved_errno = errno;
     close(descriptor);
     unlink(path);
-    log_error("translation failed and its source code object could not be saved "
-              "source_id=fnv1a64:%016" PRIx64 " path=%s errno=%d; please file a bug report",
-              source_id, path, saved_errno);
+    if (report_failure()) {
+      log_error("translation failed and its source code object could not be saved "
+                "source_id=fnv1a64:%016" PRIx64 " path=%s errno=%d; please file a bug report",
+                source_id, path, saved_errno);
+    }
     return false;
   }
   const size_t written = std::fwrite(bytes.data(), 1, bytes.size(), output);
@@ -191,10 +275,12 @@ bool write_captured_source(uint64_t source_id, std::span<const uint8_t> bytes) n
   if (written != bytes.size() || close_status != 0) {
     const int saved_errno = errno;
     unlink(path);
-    log_error("translation failed and its source code object could not be saved "
-              "source_id=fnv1a64:%016" PRIx64
-              " path=%s written=%zu expected=%zu errno=%d; please file a bug report",
-              source_id, path, written, bytes.size(), saved_errno);
+    if (report_failure()) {
+      log_error("translation failed and its source code object could not be saved "
+                "source_id=fnv1a64:%016" PRIx64
+                " path=%s written=%zu expected=%zu errno=%d; please file a bug report",
+                source_id, path, written, bytes.size(), saved_errno);
+    }
     return false;
   }
   log_error("translation failed; source code object saved source_id=fnv1a64:%016" PRIx64
@@ -206,16 +292,30 @@ bool write_captured_source(uint64_t source_id, std::span<const uint8_t> bytes) n
 
 void dump_failed_source(uint64_t source_id, std::span<const uint8_t> bytes) noexcept {
   if (!source_capture_enabled()) {
-    if (claim_once(g_hinted_sources, source_id)) {
+    if (claim_once(&SourceCaptureState::hinted, source_id)) {
       log_error("translation failed; set HSA_HOTSWAP_DUMP_SOURCE=1 to save the source code object "
                 "source_id=fnv1a64:%016" PRIx64 " input_bytes=%zu; please file a bug report",
                 source_id, bytes.size());
     }
     return;
   }
-  if (!begin_source_capture(source_id))
+  switch (begin_source_capture(source_id)) {
+  case CaptureClaim::Granted:
+    finish_source_capture(source_id, write_captured_source(source_id, bytes));
     return;
-  finish_source_capture(source_id, write_captured_source(source_id, bytes));
+  case CaptureClaim::AlreadyHandled:
+    return;
+  case CaptureClaim::RegistryFull:
+    // Silence here would look identical to a successful capture the operator
+    // then cannot find.
+    if (claim_capacity_report()) {
+      log_error("translation failed; no source code object was saved because %zu distinct sources "
+                "have already been captured source_id=fnv1a64:%016" PRIx64
+                "; please file a bug report",
+                kMaxCapturedSources, source_id);
+    }
+    return;
+  }
 }
 
 void write_log(bool enabled, const char *level, const char *format, va_list args) noexcept {
@@ -1578,19 +1678,12 @@ extern "C" RJ_HOOK_EXPORT size_t rj_test_retained_executable_buffer_count() {
 // paid for the same bytes.
 extern "C" RJ_HOOK_EXPORT void rj_test_clear_retained_storage() {
   std::vector<std::string> dump_paths;
-  {
-    std::lock_guard lock(g_test_dump_mutex);
-    dump_paths.swap(g_test_dump_paths);
-  }
+  with_test_dump_paths([&](std::vector<std::string> &paths) { dump_paths.swap(paths); });
   for (const std::string &path : dump_paths)
     (void)unlink(path.c_str());
-  // The capture claim is process-wide, so a case that leaves its source claimed
-  // would silently suppress the artifact every later case expects.
-  {
-    std::lock_guard lock(g_captured_sources_mutex);
-    g_captured_sources.clear();
-    g_hinted_sources.clear();
-  }
+  // The capture state is process-wide, so a case that leaves its source claimed
+  // or its capacity message spent would silently change what a later one sees.
+  with_capture_state([](SourceCaptureState &state) { state = {}; });
   {
     std::lock_guard lock(g_state.storage_mutex);
     g_state.readers.clear();
@@ -1693,8 +1786,8 @@ extern "C" RJ_HOOK_EXPORT void rj_test_force_next_translation_status(int status)
 
 // Test-only: how many source captures this process has written.
 extern "C" RJ_HOOK_EXPORT uint64_t rj_test_dump_path_count() {
-  std::lock_guard lock(g_test_dump_mutex);
-  return g_test_dump_paths.size();
+  return with_test_dump_paths(
+      [](const std::vector<std::string> &paths) { return static_cast<uint64_t>(paths.size()); });
 }
 
 // Test-only: bytes the memo is currently holding, sources and outputs together.

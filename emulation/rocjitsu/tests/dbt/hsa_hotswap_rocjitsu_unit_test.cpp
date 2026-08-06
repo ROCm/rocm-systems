@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iterator>
@@ -263,8 +264,10 @@ public:
   ScopedTempDirectory(const ScopedTempDirectory &) = delete;
   ScopedTempDirectory &operator=(const ScopedTempDirectory &) = delete;
   ~ScopedTempDirectory() {
-    if (!path_.empty())
-      (void)rmdir(path_.c_str());
+    if (path_.empty())
+      return;
+    std::error_code error;
+    std::filesystem::remove_all(path_, error);
   }
 
   const std::string &path() const { return path_; }
@@ -279,6 +282,13 @@ size_t count_occurrences(const std::string &text, std::string_view needle) {
        at = text.find(needle, at + needle.size()))
     ++count;
   return count;
+}
+
+/// @brief An invalid object whose identity differs from every other salt.
+std::vector<uint8_t> make_invalid_gfx1250_elf(uint8_t salt) {
+  std::vector<uint8_t> image = make_invalid_gfx1250_elf();
+  image.push_back(salt);
+  return image;
 }
 
 void expect_failure_dump(const std::string &log_text, const std::vector<uint8_t> &source) {
@@ -372,8 +382,8 @@ protected:
 
   // Every case runs with these cleared and gets whatever the process had back,
   // so one case cannot decide what a later one observes.
-  static constexpr std::array<const char *, 3> kIsolatedEnvironment = {
-      "HSA_HOTSWAP_VERBOSE", "HSA_HOTSWAP_DUMP_SOURCE", "HSA_HOTSWAP_DUMP_DIR"};
+  static constexpr std::array<const char *, 4> kIsolatedEnvironment = {
+      "HSA_HOTSWAP_VERBOSE", "HSA_HOTSWAP_DUMP_SOURCE", "HSA_HOTSWAP_DUMP_DIR", "TMPDIR"};
 
   FakeApi api;
   std::vector<std::pair<const char *, std::optional<std::string>>> saved_environment_;
@@ -530,7 +540,10 @@ TEST_F(HsaHotswapHookTest, TranslationFailureDoesNotLoadOrRetain) {
   ASSERT_EQ(
       api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
       HSA_STATUS_SUCCESS);
+  ScopedTempDirectory capture_directory;
+  ASSERT_FALSE(capture_directory.path().empty());
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   testing::internal::CaptureStderr();
   EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
                                                               nullptr, nullptr),
@@ -566,7 +579,10 @@ TEST_F(HsaHotswapHookTest, RendersTranslatorDiagnosticsAndDumpsFailedSource) {
       api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
       HSA_STATUS_SUCCESS);
 
+  ScopedTempDirectory capture_directory;
+  ASSERT_FALSE(capture_directory.path().empty());
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   testing::internal::CaptureStderr();
   EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
                                                               nullptr, nullptr),
@@ -660,7 +676,10 @@ TEST_F(HsaHotswapHookTest, CapturedSourceHonorsTheConfiguredDirectory) {
 TEST_F(HsaHotswapHookTest, RepeatedEnvironmentalFailuresCaptureOneArtifact) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
+  ScopedTempDirectory capture_directory;
+  ASSERT_FALSE(capture_directory.path().empty());
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   constexpr size_t kLoads = 8;
 
   // A throwing translator is not remembered, so every load translates again.
@@ -686,7 +705,10 @@ TEST_F(HsaHotswapHookTest, RepeatedEnvironmentalFailuresCaptureOneArtifact) {
 TEST_F(HsaHotswapHookTest, AnOutOfResourcesFailureCapturesNothing) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
+  ScopedTempDirectory capture_directory;
+  ASSERT_FALSE(capture_directory.path().empty());
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   rj_test_force_next_translation_status(3 /* ROCJITSU_STATUS_OUT_OF_RESOURCES */);
 
   hsa_code_object_reader_t reader{};
@@ -725,7 +747,10 @@ TEST_F(HsaHotswapHookTest, EnablingCaptureAfterAHintStillProducesTheArtifact) {
       << hint_text;
   ASSERT_EQ(rj_test_dump_path_count(), 0u);
 
+  ScopedTempDirectory capture_directory;
+  ASSERT_FALSE(capture_directory.path().empty());
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
   testing::internal::CaptureStderr();
   EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
@@ -741,12 +766,18 @@ TEST_F(HsaHotswapHookTest, CorrectingTheCaptureDirectoryRetriesTheArtifact) {
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", "/nonexistent-rocjitsu-hotswap-dump", 1), 0);
 
-  // Forced so the memo does not remember it: the retry below has to translate.
-  rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
+  // Forced so the memo does not remember it: every load below translates again
+  // and retries the write, which is what makes the reporting bound matter.
+  constexpr size_t kFailedLoads = 4;
   testing::internal::CaptureStderr();
-  EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  for (size_t load = 0; load < kFailedLoads; ++load) {
+    rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
+    EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT) << load;
+  }
   const std::string failed_text = testing::internal::GetCapturedStderr();
-  ASSERT_NE(failed_text.find("could not be saved"), std::string::npos) << failed_text;
+  // The destination stays broken, so the write keeps being retried -- but the
+  // operator is told about it once, not once per load.
+  EXPECT_EQ(count_occurrences(failed_text, "could not be saved"), 1u) << failed_text;
   ASSERT_EQ(rj_test_dump_path_count(), 0u);
 
   // A capture that could not be written must not spend the source's slot: the
@@ -761,6 +792,50 @@ TEST_F(HsaHotswapHookTest, CorrectingTheCaptureDirectoryRetriesTheArtifact) {
 
   EXPECT_EQ(rj_test_dump_path_count(), 1u);
   expect_failure_dump(capture_text, source);
+}
+
+TEST_F(HsaHotswapHookTest, CaptureFallsBackToTmpdirWhenNoDirectoryIsNamed) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
+  ScopedTempDirectory directory;
+  ASSERT_FALSE(directory.path().empty());
+  // HSA_HOTSWAP_DUMP_DIR stays unset: TMPDIR is the next choice, and /tmp only
+  // after that.
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("TMPDIR", directory.path().c_str(), 1), 0);
+
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string log_text = testing::internal::GetCapturedStderr();
+
+  std::smatch match;
+  const std::regex path_pattern(
+      R"(path=([^;\s]+); please file a bug report and attach this code object)");
+  ASSERT_TRUE(std::regex_search(log_text, match, path_pattern)) << log_text;
+  EXPECT_EQ(match[1].str().rfind(directory.path() + "/", 0), 0u) << match[1].str();
+  expect_failure_dump(log_text, source);
+}
+
+TEST_F(HsaHotswapHookTest, CaptureStopsAtTheSourceCapAndSaysWhy) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  ScopedTempDirectory capture_directory;
+  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
+  // kMaxCapturedSources in the hook. One more source than the registry holds.
+  constexpr size_t kCap = 32;
+
+  testing::internal::CaptureStderr();
+  for (size_t index = 0; index <= kCap; ++index) {
+    const std::vector<uint8_t> source = make_invalid_gfx1250_elf(static_cast<uint8_t>(index));
+    EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT) << index;
+  }
+  const std::string log_text = testing::internal::GetCapturedStderr();
+
+  // Refusing silently would be indistinguishable from a capture the operator
+  // then cannot find, so the cap explains itself -- once.
+  EXPECT_EQ(rj_test_dump_path_count(), kCap);
+  EXPECT_EQ(count_occurrences(log_text, "have already been captured"), 1u) << log_text;
 }
 
 TEST_F(HsaHotswapHookTest, RetainedStorageSurvivesUnloadAndReinstall) {
