@@ -1,5 +1,32 @@
 ---
 module:
+  # Golden-master matrix for launch-config error codes (see reintroduce_pr3151_plan.md).
+  # Kept enabled on amd_linux (unlike the flaky *_Negative_Parameters PSDB entries) so it
+  # runs as the behavior-preservation oracle for the launch-config refactor.
+  Unit_hipLaunchErrorCodes_ModuleLaunchKernel:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [launch]
+  Unit_hipLaunchErrorCodes_ExtModuleLaunchKernel:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [launch]
+  Unit_hipLaunchErrorCodes_ModuleLaunchCooperativeKernel:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [launch]
+  Unit_hipLaunchErrorCodes_DrvLaunchKernelEx:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [launch]
+  Unit_hipLaunchErrorCodes_LaunchCooperativeKernel:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [launch]
+  Unit_hipLaunchErrorCodes_LaunchKernel:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [launch]
   Unit_hipModuleLaunchCooperativeKernel_Positive_Basic:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
