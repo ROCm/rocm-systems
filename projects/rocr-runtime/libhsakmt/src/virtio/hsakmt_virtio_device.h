@@ -126,7 +126,7 @@ struct vhsakmt_bo {
   struct vhsakmt_device* dev;
 
   _Atomic int refcount;
-  unsigned size;
+  uint64_t size;   /* was unsigned (32-bit): truncated >=4GB allocs -> mmap(0)=EINVAL */
   void* cpu_addr;
   void* host_addr;
   HsaMemFlags flags;
