@@ -31,12 +31,12 @@ namespace meta::comms {
 
 // Per-rank staging slot capacity and hard per-message cap (enforced in the
 // eligibility check). Fixes the slot stride at compile time so the
-// double-buffered layout is identical on every rank and call. A slot has to hold
-// a whole message here, since this tier stages the full payload per peer.
-// Footprint = 2 banks * nRanks * kDdaLLArSlotStridePkts * 16B, i.e. nRanks * 16
-// MiB: 128 MiB at 8 ranks and 1.125 GiB at 72, within the 10 GiB DDA scratch.
+// double-buffered layout is identical on every rank and call. LL is a
+// small-message fast lane, so the full-message payload is well under this cap.
+// Footprint = 2 banks * nRanks * (kDdaLLArMaxBytes * 2) for the 8B->16B
+// expansion; 128 MiB at 4 MiB for 8 ranks
 constexpr size_t kDdaLLArMaxBytes = 4194304;                      // 4 MiB
-constexpr size_t kDdaLLArSlotStridePkts = kDdaLLArMaxBytes / 8;   // 524288 packets
+constexpr size_t kDdaLLArSlotStridePkts = kDdaLLArMaxBytes / 8;   // 524288
 
 // LL flat all-reduce kernel. 1D grid over packets (8B payload each).
 //

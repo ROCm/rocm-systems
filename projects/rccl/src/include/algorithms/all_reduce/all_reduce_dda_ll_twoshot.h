@@ -36,36 +36,32 @@
 
 namespace meta::comms {
 
-// Both tiers stage through comm->ddaScratch under one epoch counter, so bank =
-// flag & 1 has to land where the other tier expects it. A slot here only holds a
-// shard, so it is half the one-shot slot; the bank then spans two of them (the
-// publish stage and the write-back stage), which puts bank 1 at the same offset
-// the one-shot tier uses. Derived from the one-shot constants rather than spelled
-// out so that pairing cannot drift silently -- dda_all_reduce_fabric_ll.cu
-// static_asserts the halving.
+// Both tiers share one scratch and epoch, so bank 1 has to start at the same
+// offset for both: a slot here holds only a shard, and the bank spans two of them
+// (publish + write-back). dda_all_reduce_fabric_ll.cu static_asserts the halving.
 constexpr size_t kDdaLLArTwoShotMaxBytes = kDdaLLArMaxBytes;
 constexpr size_t kDdaLLArTwoShotSlotStridePkts = kDdaLLArSlotStridePkts / 2;
+
+// Fixed-width peer staging for phase 1: a runtime-sized array, or a runtime index
+// into one, is placed in scratch. 8 covers rank counts 4 and 8 in a single pass.
+// TODO: should this be moved to common place so other kernels can do the same
+constexpr int kDdaLLArTwoShotPeerBatch = 8;
 
 // LL two-shot all-reduce kernel. 1D grid over one shard's packets (8B payload
 // each), so the launcher sizes the grid on count/nRanks, not on count.
 //
-// Phase 1 (publish): rank selfRank sends peer p the part of sendbuff that p
-// owns, into p's scratch at slot selfRank, as LL lines carrying the epoch flag.
-// The shard reads are hoisted out of the store loop on purpose: leaving them
-// interleaved makes each store wait on the next load and the per-peer streams
-// stop overlapping, which costs about 2x.
-// Phase 2 (reduce): rank selfRank polls its own scratch slot for each other
-// rank (waiting on the flag), sums those with its own shard of sendbuff into
-// recvbuff, then publishes that reduced shard back to every peer at the
-// write-back stage of the bank.
-// Phase 3 (write-back): poll each peer's reduced shard and drop it into that
-// peer's part of recvbuff. Flag polling provides all the cross-rank ordering, so
-// no GPU barrier is used.
+// Phase 1 (publish): send peer p the shard p owns, into p's scratch at slot
+// selfRank, as LL lines carrying the epoch flag.
+// Phase 2 (reduce and publish): poll my slot for each peer's copy of my shard,
+// sum with my own into my part of recvbuff, then publish the result to every peer.
+// Phase 3 (gather): poll for the reduced shards the peers published and write each
+// into that peer's part of recvbuff.
 //
-// Scratch is double-buffered: bank = epoch & 1, selected via bankOffsetPkts,
-// with bankOffsetPkts_next naming the write-back stage inside that bank. Self
-// does not round-trip through scratch; its contribution is read directly from
-// sendbuff in the reduce.
+// Flag polling provides all the cross-rank ordering, so no GPU barrier is used.
+// Scratch is double-buffered: bank = epoch & 1, selected via bankOffsetPkts, with
+// bankOffsetPkts_next naming the second stage inside that bank. Self does not
+// round-trip through scratch; its contribution is read directly from sendbuff in
+// the reduce.
 //
 // Threads own disjoint packet indices in every phase, so an in-place call (where
 // sendbuff aliases recvbuff) never has one thread's phase-3 store land on a
@@ -110,25 +106,38 @@ __launch_bounds__(512)
   const uint32_t* in = reinterpret_cast<const uint32_t*>(sendbuff) + selfRank * nPk_rank * 2;
   uint32_t* out = reinterpret_cast<uint32_t*>(recvbuff) + selfRank * nPk_rank * 2;
 
-  // Phase 1: publish my payload into every peer's slot[selfRank].
+  // Phase 1: publish my payload into every peer's slot[selfRank]. The gather is
+  // kept out of the store loop on purpose -- interleaved, each store waits on the
+  // next load and the per-peer streams stop overlapping, which costs about 2x. The
+  // fixed trip count with the rank test as a predicate is what unrolls both loops
+  // and keeps d0/d1 in registers rather than scratch.
   for (size_t pk = gtid; pk < nPk_rank; pk += stride) {
-    uint32_t d0[nRanks], d1[nRanks];
+    for (int base = 1; base < nRanks; base += kDdaLLArTwoShotPeerBatch) {
+      uint32_t d0[kDdaLLArTwoShotPeerBatch], d1[kDdaLLArTwoShotPeerBatch];
 #pragma unroll
-    for (int r = 1; r < nRanks; ++r) {
-      const int peer = (selfRank + r) % nRanks;
-      const uint32_t* peer_in = reinterpret_cast<const uint32_t*>(sendbuff) + peer * nPk_rank * 2;
-      d0[r] = peer_in[2 * pk];
-      d1[r] = peer_in[2 * pk + 1];
-    }
+      for (int i = 0; i < kDdaLLArTwoShotPeerBatch; ++i) {
+        const int r = base + i;
+        if (r < nRanks) {
+          const int peer = (selfRank + r) % nRanks;
+          const uint32_t* peer_in = reinterpret_cast<const uint32_t*>(sendbuff) + peer * nPk_rank * 2;
+          d0[i] = peer_in[2 * pk];
+          d1[i] = peer_in[2 * pk + 1];
+        }
+      }
 #pragma unroll
-    for (int r = 1; r < nRanks; ++r) {
-      const int peer = (selfRank + r) % nRanks;
-      LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankOffsetPkts + (size_t)selfRank * slot;
-      ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), d0[r], flag, d1[r], flag);
+      for (int i = 0; i < kDdaLLArTwoShotPeerBatch; ++i) {
+        const int r = base + i;
+        if (r < nRanks) {
+          const int peer = (selfRank + r) % nRanks;
+          LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankOffsetPkts + (size_t)selfRank * slot;
+          ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), d0[i], flag, d1[i], flag);
+        }
+      }
     }
   }
 
-  // Phase 2: poll my slots for the other ranks, reduce with my own data.
+  // Phase 2: poll my slots for the other ranks, reduce with my own data, then
+  // publish the reduced shard to every peer's second stage.
   LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
   for (size_t pk = gtid; pk < nPk_rank; pk += stride) {
     uint32_t acc0 = in[2 * pk];
