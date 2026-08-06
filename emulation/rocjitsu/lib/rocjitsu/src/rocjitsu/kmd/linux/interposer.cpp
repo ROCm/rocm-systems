@@ -160,26 +160,47 @@ int kfd_ioctl_ret(int r) {
   return r;
 }
 
-/// @brief Read the child-process rocjitsu config path from @p cfg_file.
+/// @brief Read the child-process rocjitsu config handoff from @p cfg_file.
 ///
-/// @details The launcher writes the config path to a runtime file (per-PID
-/// invocation directory) that the interposer reads back for both local
-/// simulation and DBT guest mode.
-std::optional<std::string> child_config_path(const std::string &cfg_file) {
-  char cfg_buf[4096]{};
+/// @details The first line is the config path. DBT launches include the resolved
+/// host KFD gpu_id on the second line.
+std::optional<rocjitsu::config::DbtRuntimeConfigHandoff>
+child_config_handoff(const std::string &cfg_file) {
+  constexpr size_t kMaxHandoffSize = 64 * 1024;
+  constexpr size_t kReadChunkSize = 4096;
   auto &real = rocjitsu::libc_passthrough();
   int cfg_fd = real.openat(AT_FDCWD, cfg_file.c_str(), O_RDONLY, 0);
   if (cfg_fd < 0)
     return std::nullopt;
 
-  auto n = real.read(cfg_fd, cfg_buf, sizeof(cfg_buf) - 1);
+  std::string contents;
+  contents.reserve(kReadChunkSize);
+  while (contents.size() < kMaxHandoffSize) {
+    char buffer[kReadChunkSize];
+    const size_t remaining = kMaxHandoffSize - contents.size();
+    ssize_t bytes_read = 0;
+    do {
+      bytes_read = real.read(cfg_fd, buffer, std::min(sizeof(buffer), remaining));
+    } while (bytes_read < 0 && errno == EINTR);
+    if (bytes_read < 0) {
+      real.close(cfg_fd);
+      return std::nullopt;
+    }
+    if (bytes_read == 0)
+      break;
+    contents.append(buffer, static_cast<size_t>(bytes_read));
+  }
+
+  char extra = 0;
+  ssize_t extra_bytes = 0;
+  do {
+    extra_bytes = real.read(cfg_fd, &extra, 1);
+  } while (extra_bytes < 0 && errno == EINTR);
   real.close(cfg_fd);
-  if (n <= 0)
+  if (contents.empty() || extra_bytes != 0)
     return std::nullopt;
 
-  while (n > 0 && (cfg_buf[n - 1] == '\n' || cfg_buf[n - 1] == '\r'))
-    cfg_buf[--n] = '\0';
-  return std::string(cfg_buf);
+  return rocjitsu::config::parse_dbt_runtime_config_handoff(contents);
 }
 
 void *raw_mmap_syscall(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
@@ -1161,31 +1182,31 @@ public:
       cfg_candidates.push_back(invocation_runtime_dir() + "/config_path");
       cfg_candidates.push_back(rocjitsu::rpc_invocation_config_file_path(getpid()));
       cfg_candidates.push_back(rocjitsu::rpc_default_config_file_path());
-      std::optional<std::string> cfg_path;
+      std::optional<rocjitsu::config::DbtRuntimeConfigHandoff> handoff;
       std::string tried_last;
       for (const auto &candidate : cfg_candidates) {
         if (candidate == tried_last)
           continue; // Skip a duplicate tier (e.g. env unset collapses 1 and 2).
         tried_last = candidate;
-        cfg_path = child_config_path(candidate);
-        if (cfg_path)
+        handoff = child_config_handoff(candidate);
+        if (handoff)
           break;
       }
-      if (!cfg_path) {
+      if (!handoff) {
         util::Logger::debug_print("rocjitsu: no child config path");
         in_construction = false;
         return nullptr;
       }
 
       try {
-        auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(*cfg_path);
+        auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_handoff(*handoff);
         if (dbt_guest.enabled) {
           LinuxKfd *execution_driver = nullptr;
           const bool simulator_backend =
               dbt_guest.host.backend == rocjitsu::config::DbtExecutionBackend::Simulator;
           if (simulator_backend) {
             const std::string host_config_path = rocjitsu::config::resolve_dbt_host_config_path(
-                *cfg_path, dbt_guest.host.simulator_config_path);
+                handoff->config_path, dbt_guest.host.simulator_config_path);
             if (!create_local_vm(host_config_path)) {
               in_construction = false;
               return nullptr;
@@ -1212,13 +1233,18 @@ public:
           in_construction = false;
           return driver;
         }
+
+        if (!create_local_vm(handoff->config_path)) {
+          in_construction = false;
+          return nullptr;
+        }
       } catch (const std::exception &e) {
-        util::Logger::debug_print("rocjitsu: failed to load child config: ", e.what());
+        // This is where a broken runtime handoff lands, including an enabled DBT config
+        // with no resolved host gpu_id. Failing closed leaves the process with a null
+        // driver and an opaque downstream failure, so the reason must be audible in a
+        // default build the way the hook layer's equivalent refusal already is.
+        util::Logger::warn("rocjitsu: failed to load child config: ", e.what());
         destroy_local_vm();
-        in_construction = false;
-        return nullptr;
-      }
-      if (!create_local_vm(*cfg_path)) {
         in_construction = false;
         return nullptr;
       }
@@ -1819,8 +1845,12 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
               gpu->gfx_target_version, gpu->revision_id);
           dev->pci_rev = gpu->pci_revision_id;
           dev->family = gpu->family_id;
+          // libdrm reports shader engines, which GpuInfo already stores
+          // directly; the KFD array_count these helpers invert is the derived
+          // value. Round-tripping through drm_shader_engine_count keeps the two
+          // views pinned to one definition.
           dev->num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
-              gpu->num_shader_engines, gpu->num_shader_arrays_per_engine);
+              gpu->array_count_per_xcc(), gpu->num_shader_arrays_per_engine);
           dev->num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
           dev->gpu_counter_freq = 100000;
           dev->max_engine_clock = gpu->max_engine_clk_fcompute;
@@ -1832,7 +1862,7 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
           dev->vram_type = gpu->vram_type;
           dev->vram_bit_width = gpu->mem_width;
           dev->cu_active_number =
-              rocjitsu::kmd::drm_cu_active_number(gpu->num_shader_engines, gpu->num_cu_per_sh);
+              rocjitsu::kmd::drm_cu_active_number(gpu->array_count_per_xcc(), gpu->num_cu_per_sh);
           // VA aperture — libdrm's VA manager (amdgpu_vamgr_init) needs a sane
           // range. Mirror the KFD GPUVM aperture used elsewhere.
           dev->virtual_address_offset = 0x200000;       // 2 MiB

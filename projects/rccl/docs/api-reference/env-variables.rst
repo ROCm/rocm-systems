@@ -29,6 +29,17 @@ in the following table.
       - | String path to configuration file
         | Default: ``~/.rccl.conf`` or ``/etc/rccl.conf``
 
+    * - | ``NCCL_IBVERBS_LIB``
+        | Specifies the libibverbs shared object that RCCL loads at runtime for
+          the InfiniBand/RoCE (IB verbs) transport. Use it when rdma-core is
+          installed in a non-default prefix, such as inside a container or an
+          HPC software module, where the loader cannot find the library by its
+          default name. When the override is unset or fails to load, RCCL falls
+          back to ``libibverbs.so`` and then ``libibverbs.so.1``. ``NCCL_LIBIBVERBS_SO``
+          is accepted as an alias and is used when ``NCCL_IBVERBS_LIB`` is unset.
+      - | String path or soname of the libibverbs shared object
+        | Default: unset (loads ``libibverbs.so`` or ``libibverbs.so.1``)
+
     * - | ``NCCL_HOSTID``
         | Sets the host identifier for multi-node communication.
       - | String value for host identification
@@ -46,9 +57,11 @@ in the following table.
           which is required for ``ncclCommSuspend`` and ``ncclCommResume`` to
           release the physical GPU memory of a suspended communicator. See
           :ref:`suspend-resume` for the full prerequisites.
-      - | ``0``: Disabled (default).
-        | ``1``: Enabled.
-        | ``-2``: Auto-detect; enable when the platform supports VMM.
+      - | ``0``: Disabled.
+        | ``1``: Enabled on any architecture.
+        | ``-2``: Auto-detect (default); enable when the platform supports VMM.
+          Auto-detect is limited to gfx1250, the only architecture where the VMM
+          path is validated. Use ``1`` to force it on elsewhere.
 
     * - | ``NCCL_MIN_CTAS``
         | Minimum number of CTAs (channels) used for a collective. Overrides
@@ -241,6 +254,17 @@ in the following table.
         | This variable can be leveraged when NIC Fusion (``NCCL_NET_MERGE_LEVEL``) and/or data splitting on QPs (``NCCL_IB_SPLIT_DATA_ON_QPS``) is enabled.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
+
+    * - | ``NCCL_NCHANNELS_PER_NET_PEER``
+        | Sets the number of channels used per network (remote) peer.
+        | This overrides the value of the ``nChannelsPerNetPeer`` field in
+        | ``ncclConfig_t``. When neither this variable nor the config field is
+        | set, RCCL auto-tunes the per-peer channel count based on the
+        | available NIC bandwidth and rank count.
+      - | Integer value, ``1`` to ``MAXCHANNELS`` (default: unset/auto-tuned)
+        | Values ``<= 0`` are ignored and a warning is logged.
+        | Values ``> MAXCHANNELS`` set through ``ncclConfig_t`` are rejected
+        | with ``ncclInvalidArgument`` at communicator initialization.
 
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.

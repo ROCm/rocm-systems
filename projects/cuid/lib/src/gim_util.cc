@@ -106,33 +106,51 @@ struct SmiHandshakeWire {
 };
 static_assert(sizeof(SmiHandshakeWire) == 4, "SmiHandshakeWire size mismatch");
 
-// struct smi_server_static_info (Linux, natural alignment).
+// struct smi_device_handle_t (smi_device_handle.h). The GIM SMI ABI identifies
+// a device by a 16-byte handle: an opaque 64-bit handle plus the 64-bit PCI
+// device id. Modeling this as a bare uint64_t (as an earlier revision did)
+// under-sizes every consumer of the handle and corrupts the device array.
+struct SmiDeviceHandleWire {
+  uint64_t handle;
+  uint64_t device_id;
+};
+static_assert(sizeof(SmiDeviceHandleWire) == 16,
+              "SmiDeviceHandleWire size mismatch");
+
+// One entry of struct smi_server_static_info::devices[] (Linux, natural
+// alignment). dev_id is a 16-byte smi_device_handle_t, so each entry is 40
+// bytes.
 struct SmiServerDeviceWire {
-  uint64_t dev_id;
+  SmiDeviceHandleWire dev_id;
   uint64_t bdf;     // union smi_bdf packed 64-bit value
   uint8_t failed;
   uint8_t padding[3];
   uint32_t reserved[3];
 };
-static_assert(sizeof(SmiServerDeviceWire) == 32,
+static_assert(sizeof(SmiServerDeviceWire) == 40,
               "SmiServerDeviceWire size mismatch");
 
+// struct smi_server_static_info (Linux, natural alignment). The trailing
+// reserved area expands the struct to the full 4096-byte SMI payload; the GIM
+// driver validates out_len against this exact size, so it must be 4096.
 struct SmiServerStaticInfoWire {
   uint32_t debug_level;
   uint32_t num_devices;
   SmiServerDeviceWire devices[kSmiMaxDevices];
   uint64_t reserved[351];
 };
-static_assert(sizeof(SmiServerStaticInfoWire) == 3840,
+static_assert(sizeof(SmiServerStaticInfoWire) == 4096,
               "SmiServerStaticInfoWire size mismatch");
 static_assert(sizeof(SmiServerStaticInfoWire) <= kSmiMaxPayloadBytes,
               "SmiServerStaticInfoWire larger than SMI payload");
 
-// struct smi_device_info (input for GET_ASIC_INFO).
+// struct smi_device_info (input for GET_ASIC_INFO). Holds a full 16-byte
+// smi_device_handle_t.
 struct SmiDeviceInfoWire {
-  uint64_t dev_id;
+  SmiDeviceHandleWire dev_id;
 };
-static_assert(sizeof(SmiDeviceInfoWire) == 8, "SmiDeviceInfoWire size mismatch");
+static_assert(sizeof(SmiDeviceInfoWire) == 16,
+              "SmiDeviceInfoWire size mismatch");
 
 // struct smi_asic_info (Linux, natural alignment).
 struct SmiAsicInfoWire {
@@ -305,7 +323,7 @@ amdcuid_status_t GimClient::get_devices(std::vector<GimDeviceEntry> &out) {
   out.reserve(n);
   for (uint32_t i = 0; i < n; ++i) {
     GimDeviceEntry e;
-    e.dev_id = info.devices[i].dev_id;
+    e.dev_id = info.devices[i].dev_id.handle;
     e.bdf = format_bdf(info.devices[i].bdf);
     e.failed = info.devices[i].failed != 0;
     out.push_back(std::move(e));
@@ -338,7 +356,7 @@ amdcuid_status_t GimClient::get_asic_info(uint64_t dev_id, GimAsicInfo &info) {
     return st;
   }
 
-  SmiDeviceInfoWire req{dev_id};
+  SmiDeviceInfoWire req{{dev_id, 0}};
   SmiAsicInfoWire raw;
   std::memset(&raw, 0, sizeof(raw));
   st = do_ioctl(kSmiCmdCodeGetAsicInfo, &req, sizeof(req), &raw, sizeof(raw));

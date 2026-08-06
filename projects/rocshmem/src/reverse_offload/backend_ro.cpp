@@ -68,11 +68,11 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   size_t num_buff_elems = envvar::max_num_contexts * max_wg_size_;
 
-  g_ret_buffer_ = RetBufferProxyT(num_buff_elems);
+  g_ret_buffer_ = RetBufferProxyT(num_buff_elems, ret_buffer_alloc_);
 
-  atomic_ret_buffer_ = RetBufferProxyT(num_buff_elems);
+  atomic_ret_buffer_ = RetBufferProxyT(num_buff_elems, ret_buffer_alloc_);
 
-  status_ = StatusProxyT(num_buff_elems);
+  status_ = StatusProxyT(num_buff_elems, status_alloc_);
 
   queue_ = Queue(envvar::max_num_contexts, queue_size_);
 
@@ -119,7 +119,7 @@ ROBackend::ROBackend(MPI_Comm comm)
    */
   setup_team_shared();
 
-  default_block_handle_proxy_ = DefaultBlockHandleProxyT(
+  default_block_handle_proxy_ = DefaultBlockHandleProxy(
                                 g_ret_buffer_.get(),
                                 atomic_ret_buffer_.get(), &queue_,
                                 status_.get(), default_ctx_status_.get(),
@@ -130,7 +130,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   default_context_proxy_ = DefaultContextProxy(this, tinfo);
 
-  block_handle_proxy_ = BlockHandleProxyT(g_ret_buffer_.get(),
+  block_handle_proxy_ = BlockHandleProxy(g_ret_buffer_.get(),
                         atomic_ret_buffer_.get(), &queue_,
                         max_wg_size_, status_.get(), envvar::max_num_contexts);
   setup_ctxs();
@@ -164,11 +164,11 @@ void ROBackend::setup_ctxs() {
 void ROBackend::setup_default_ctx_buffers() {
   size_t num_buff_elems = envvar::max_wavefront_buffers * wf_size_;
 
-  g_ret_buffer_default_ctx_ = RetBufferProxyT(num_buff_elems);
+  g_ret_buffer_default_ctx_ = RetBufferProxyT(num_buff_elems, ret_buffer_alloc_);
 
-  atomic_ret_buffer_default_ctx_ = RetBufferProxyT(num_buff_elems);
+  atomic_ret_buffer_default_ctx_ = RetBufferProxyT(num_buff_elems, ret_buffer_alloc_);
 
-  status_default_ctx_ = StatusProxyT(num_buff_elems);
+  status_default_ctx_ = StatusProxyT(num_buff_elems, status_alloc_);
 
   default_ctx_status_.get()->allocate_queue(envvar::max_wavefront_buffers);
   default_ctx_g_ret_buffer_.get()->allocate_queue(envvar::max_wavefront_buffers);

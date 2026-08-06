@@ -74,7 +74,7 @@ cp -r /src /tmp/src \
     && cd /tmp/src \
     && rm -rf build .cache \
     && cmake -B build $ENABLE_ESMI_LIB \
-    && make -C build -j $(nproc) \
+    && make -C build -j \$(nproc) \
     && cd /tmp/src/rust-interface \
     && AMDSMI_LIB_DIR=/tmp/src/build/src AMDSMI_GENERATE_RUST_WRAPPER=1 cargo build \
     && cp /tmp/src/rust-interface/src/amdsmi_wrapper.rs /src/rust-interface/src/amdsmi_wrapper.rs \

@@ -21,6 +21,14 @@ target_link_libraries(
 )
 rj_configure_target(rocjitsu_tooling TOOL)
 
-add_executable(rj_dbt_translate dbt_translate_main.cpp)
-target_link_libraries(rj_dbt_translate PRIVATE rocjitsu_tooling)
+add_library(rocjitsu_translate_cli STATIC dbt_translate_cli.cpp)
+target_include_directories(
+    rocjitsu_translate_cli
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(rocjitsu_translate_cli PUBLIC rocjitsu_tooling)
+rj_configure_target(rocjitsu_translate_cli TOOL)
+
+add_executable(rj_dbt_translate rj_dbt_translate_main.cpp)
+target_link_libraries(rj_dbt_translate PRIVATE rocjitsu_translate_cli)
 rj_configure_target(rj_dbt_translate TOOL)
