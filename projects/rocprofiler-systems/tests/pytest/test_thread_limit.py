@@ -73,7 +73,7 @@ THREAD_LIMIT_CASES: dict[str, ThreadLimitCase] = {
         expect_exhausted_warning=False,
     ),
     "exhausted": ThreadLimitCase(
-        thread_count=lambda limit: limit * 2,
+        thread_count=lambda limit: limit * 4,
         pass_value=lambda thread_count, limit: (limit - 1) - INTERNAL_THREAD_OFFSET,
         fail_value=lambda thread_count, limit: limit + 1,
         expect_exhausted_warning=True,
