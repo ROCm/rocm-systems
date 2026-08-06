@@ -92,6 +92,21 @@ using NDRange32 = NDRangeImpl<uint32_t>;  //!< AQL grid_size_{x,y,z}
 using NDRange16 = NDRangeImpl<uint16_t>;  //!< AQL workgroup_size_{x,y,z}
 using NDRange8 = NDRangeImpl<uint8_t>;    //!< AQL cluster_size_{x,y,z}
 
+//! Reason a launch configuration was rejected. Detection is centralized, but the
+//! hipError_t a given reason maps to is a property of the calling entry point, so
+//! callers translate this reason into their own error code (see reintroduce_pr3151_plan.md).
+enum class LaunchConfigStatus : uint32_t {
+  kOk = 0,
+  kZeroGrid,            //!< a global/grid dimension is zero
+  kZeroBlock,           //!< a local/block dimension is zero
+  kBlockOverflow,       //!< a block dimension does not fit the AQL workgroup_size dtype
+  kClusterOverflow,     //!< a cluster dimension does not fit the AQL cluster_size dtype
+  kGlobalOverflow,      //!< HIP style: grid*block exceeds the 32-bit backend limit
+  kBlockExceedsMaxWG,   //!< block work-item count exceeds the device max workgroup size
+  kSharedMemExceeded,   //!< requested shared memory exceeds the device per-CU limit
+  kClusterIndivisible,  //!< grid is not divisible by the requested cluster dimensions
+};
+
 //! Stucture to store launch parameters.
 struct LaunchParams {
   NDRange32 global_;         //!< Total number of work-items in N-dims (matches AQL grid_size)
@@ -100,7 +115,8 @@ struct LaunchParams {
   NDRange32 grid_;           //!< Total number of workgroups in grid in N-dims
   uint32_t sharedMemBytes_;  //!< Shared Memory bytes
   bool hipParams_;           //!< If this is launched through hipParams_
-  bool validConfig_;         //!< Flag will be set to false when config is not correct.
+  //! Reason the config was rejected (kOk when valid). IsValidConfig() is derived from this.
+  LaunchConfigStatus configStatus_;
 
   LaunchParams(size_t globalX, size_t globalY, size_t globalZ, uint32_t localX, uint32_t localY,
                uint32_t localZ, uint32_t sharedMemBytes, const Device& device,
@@ -115,25 +131,25 @@ struct LaunchParams {
         grid_(gridX, gridY, gridZ),
         sharedMemBytes_(sharedMemBytes),
         hipParams_(hipParams),
-        validConfig_(true) {
+        configStatus_(LaunchConfigStatus::kOk) {
     if (!NDRange8::CanSafelyNarrow(clusterX, clusterY, clusterZ)) {
-      validConfig_ = false;
+      RecordFirstRejection(LaunchConfigStatus::kClusterOverflow);
     }
 
     if (!NDRange16::CanSafelyNarrow(localX, localY, localZ)) {
-      validConfig_ = false;
+      RecordFirstRejection(LaunchConfigStatus::kBlockOverflow);
     }
 
     if (hipParams_) {
       // Check that the size_t globals fit in uint32_t before the narrowing cast above.
       if (!NDRange32::CanSafelyNarrow(globalX, globalY, globalZ)) {
-        validConfig_ = false;
+        RecordFirstRejection(LaunchConfigStatus::kGlobalOverflow);
       }
     } else {
       // Non HIPLaunchParams, App directly calculated the global and local size,
       // manually deduce the grid (total blocks) size.
       if (local_[0] == 0 || local_[1] == 0 || local_[2] == 0) {
-        validConfig_ = false;
+        RecordFirstRejection(LaunchConfigStatus::kZeroBlock);
         return;
       }
       grid_[0] = global_[0] / local_[0];
@@ -144,8 +160,17 @@ struct LaunchParams {
     // If cluster parameters is set, then check if it is divisble by grid (total blocks).
     if (clusterX > 1 || clusterY > 1 || clusterZ > 1) {
       if (!CheckClusterDivisibility(clusterX, clusterY, clusterZ)) {
-        validConfig_ = false;
+        RecordFirstRejection(LaunchConfigStatus::kClusterIndivisible);
       }
+    }
+  }
+
+  //! Record \a status only if no earlier check already rejected the config, so the reason
+  //! reported is the first one detected. Without this a block dim that overflows uint16_t
+  //! would narrow to 0 and be re-reported as kZeroBlock, masking the real reason.
+  void RecordFirstRejection(LaunchConfigStatus status) {
+    if (configStatus_ == LaunchConfigStatus::kOk) {
+      configStatus_ = status;
     }
   }
 
@@ -174,7 +199,10 @@ struct LaunchParams {
     return true;
   }
 
-  bool IsValidConfig() const { return validConfig_; }
+  bool IsValidConfig() const { return configStatus_ == LaunchConfigStatus::kOk; }
+
+  //! Reason the config was rejected (kOk when valid); callers map this to a hipError_t.
+  LaunchConfigStatus configStatus() const { return configStatus_; }
 };
 
 //! Structure to store launch parameters in HIP Style (global and local size needs computation).
