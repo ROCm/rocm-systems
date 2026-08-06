@@ -80,14 +80,16 @@ const std::vector<size_t>& TestParameterStore::getMemorySizesForCurrentLevel() c
     if (!currentTestLevel.empty() && levelMemorySizes.count(currentTestLevel)) {
         return levelMemorySizes.at(currentTestLevel);
     }
-    return defaultMemorySizes;
+    static const std::vector<size_t> fallback(defaultMemorySizes.begin(), defaultMemorySizes.end());
+    return fallback;
 }
 
 const std::vector<int>& TestParameterStore::getBlockSizesForCurrentLevel() const {
     if (!currentTestLevel.empty() && levelBlockSizes.count(currentTestLevel)) {
         return levelBlockSizes.at(currentTestLevel);
     }
-    return defaultBlockSizes;
+    static const std::vector<int> fallback(defaultBlockSizes.begin(), defaultBlockSizes.end());
+    return fallback;
 }
 
 int TestParameterStore::getIterationsForCurrentLevel() const {
