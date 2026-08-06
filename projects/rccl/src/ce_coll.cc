@@ -34,6 +34,12 @@ ncclResult_t ncclCeLaunchPersistentReduce(const void* in, void* out, int nRanks,
                                           uint32_t* signalBuffer, size_t totalSteps, uint32_t* d_barrierSync,
                                           ncclDataType_t datatype, ncclRedOp_t op, hipStream_t stream, int coopLaunch);
 
+// Defined in device/ce_local_copy.cc, a self-contained device-only TU that the
+// device linker pipeline compiles with full HIP (see cmake/DeviceLinker.cmake).
+// ce_coll.cc itself has no __global__ call site, so it stays in the main
+// target and is compiled --offload-host-only as usual.
+ncclResult_t ncclCeLaunchLocalCopyKernel(const void* src, void* dst, size_t n, hipStream_t stream);
+
 RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
 RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
 RCCL_PARAM(CeCoopLaunch, "CE_COOP_LAUNCH", 0);
@@ -753,11 +759,16 @@ static ncclResult_t ncclCeAllGatherPipelined(struct ncclComm* comm, struct ncclC
     CUDACHECKGOTO(cudaEventRecord(p->readyEvent[slot], stream), ret, fail);
     CUDACHECKGOTO(cudaStreamWaitEvent(p->copyStream, p->readyEvent[slot], 0), ret, fail);
     for (int r = 0; r < nRanks; r++) {
-      // local slot is read straight from the user sendbuff (no scratch round-trip);
-      // remote slots come from this rank's scratch half written by peers' SDMA.
-      const uint8_t* src = (r == comm->rank) ? (sendBuff + off) : (scratch + slotOff + (size_t)r*sub);
-      CUDACHECKGOTO(cudaMemcpyAsync(userRecv + (size_t)r*totalBytes + off, src, n,
-                                    hipMemcpyDeviceToDevice, p->copyStream), ret, fail);
+      if (r == comm->rank) {
+        // local slot: vectorized kernel copy straight from the user sendbuff (no scratch round-trip)
+        NCCLCHECKGOTO(ncclCeLaunchLocalCopyKernel(sendBuff + off, userRecv + (size_t)r*totalBytes + off, n,
+                                                  p->copyStream), ret, fail);
+      } else {
+        // remote slots come from this rank's scratch half written by peers' SDMA.
+        const uint8_t* src = scratch + slotOff + (size_t)r*sub;
+        CUDACHECKGOTO(cudaMemcpyAsync(userRecv + (size_t)r*totalBytes + off, src, n,
+                                      hipMemcpyDeviceToDevice, p->copyStream), ret, fail);
+      }
     }
     CUDACHECKGOTO(cudaEventRecord(p->doneEvent[slot], p->copyStream), ret, fail);
   }

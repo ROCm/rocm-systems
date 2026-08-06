@@ -83,6 +83,7 @@ set(SRC_FILES
   device/sendrecv.h
   device/hierarchical_shuffle.h
   device/ce_reduce.cc
+  device/ce_local_copy.cc
   device/common.cu
   device/onerank.cu
   device/tdm/cachePolicy.h
