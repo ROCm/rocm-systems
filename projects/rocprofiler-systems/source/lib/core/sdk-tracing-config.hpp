@@ -182,26 +182,6 @@ private:
     static operation_options_env_names assemble_operation_env_names_for_kind(
         TracingKind kind);
 
-    // struct kfd_runtime_support
-    // {
-    //     version_info version{};
-    //     bool         supported = false;
-    // };
-
-    // // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with undefined
-    // // node IDs (0xFFFFFFFF). The compile-time gate confirms the SDK headers declare
-    // // the KFD enums; the loaded runtime library must be checked separately since it
-    // // can be older than the headers this binary was built against.
-    // static kfd_runtime_support get_kfd_runtime_support();
-
-    static bool is_kfd_domain_name(std::string_view name);
-
-    static std::vector<typename SdkBackend::buffer_tracing_kind_t> kfd_kinds_for_name(
-        std::string_view name);
-
-    // static void warn_kfd_disabled_once(std::string_view    domain_name,
-    //                                    const version_info& kfd_version);
-
     const static std::unordered_set<std::string_view>
         s_domains_to_skip_for_operation_options;
 
@@ -266,8 +246,11 @@ private:
             supported.emplace(SdkBackend::BUFFER_TRACING_PAGE_MIGRATION);
         }
 
+        // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with undefined
+        // node IDs (0xFFFFFFFF), so the KFD domains are gated on the bugfix
+        // version rather than the version that first declared the enums (1.0.0).
         if constexpr(compile_time_sdk_version >=
-                     version_info{ .major = 1, .minor = 0, .patch = 0 })
+                     version_info{ .major = 1, .minor = 2, .patch = 2 })
         {
             supported.emplace(SdkBackend::BUFFER_TRACING_KFD_PAGE_FAULT);
             supported.emplace(SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE);
@@ -487,7 +470,7 @@ sdk_tracing_config<SdkBackend, Externals>::domain_settings()
     add_domain_f("roctx");
 
     if constexpr(compile_time_sdk_version >=
-                 version_info{ .major = 1, .minor = 0, .patch = 0 })
+                 version_info{ .major = 1, .minor = 2, .patch = 2 })
     {
         add_domain_f("kfd_events");
     }
@@ -655,97 +638,6 @@ sdk_tracing_config<SdkBackend, Externals>::get_callback_domains()
     return callback_domains;
 }
 
-// template <typename SdkBackend, typename Externals>
-//     requires concepts::sdk_tracing_config_externals<Externals>
-// typename sdk_tracing_config<SdkBackend, Externals>::kfd_runtime_support
-// sdk_tracing_config<SdkBackend, Externals>::get_kfd_runtime_support()
-// {
-//     if constexpr(compile_time_sdk_version >=
-//                  version_info{ .major = 1, .minor = 0, .patch = 0 })
-//     {
-//         constexpr auto kfd_min_version =
-//             version_info{ .major = 1, .minor = 2, .patch = 2 };
-//         const auto kfd_version = get_version();
-//         return kfd_runtime_support{ kfd_version, kfd_version >= kfd_min_version };
-//     }
-//     else
-//     {
-//         return kfd_runtime_support{};
-//     }
-// }
-
-template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
-bool
-sdk_tracing_config<SdkBackend, Externals>::is_kfd_domain_name(std::string_view name)
-{
-    static constexpr auto kfd_domain_names = std::array<std::string_view, 7>{
-        "kfd_events",
-        "kfd_page_fault",
-        "kfd_page_migrate",
-        "kfd_queue",
-        "kfd_event_queue",
-        "kfd_event_unmap_from_gpu",
-        "kfd_event_dropped_events",
-    };
-    return std::ranges::find(kfd_domain_names, name) != kfd_domain_names.end();
-}
-
-template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
-std::vector<typename SdkBackend::buffer_tracing_kind_t>
-sdk_tracing_config<SdkBackend, Externals>::kfd_kinds_for_name(std::string_view name)
-{
-    if constexpr(compile_time_sdk_version >=
-                 version_info{ .major = 1, .minor = 0, .patch = 0 })
-    {
-        using kind_t = typename SdkBackend::buffer_tracing_kind_t;
-        static const auto kfd_kind_table =
-            std::unordered_map<std::string_view, std::vector<kind_t>>{
-                { "kfd_events",
-                  { SdkBackend::BUFFER_TRACING_KFD_PAGE_FAULT,
-                    SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE,
-                    SdkBackend::BUFFER_TRACING_KFD_QUEUE,
-                    SdkBackend::BUFFER_TRACING_KFD_EVENT_QUEUE,
-                    SdkBackend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
-                    SdkBackend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS } },
-                { "kfd_page_fault", { SdkBackend::BUFFER_TRACING_KFD_PAGE_FAULT } },
-                { "kfd_page_migrate", { SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE } },
-                { "kfd_queue", { SdkBackend::BUFFER_TRACING_KFD_QUEUE } },
-                { "kfd_event_queue", { SdkBackend::BUFFER_TRACING_KFD_EVENT_QUEUE } },
-                { "kfd_event_unmap_from_gpu",
-                  { SdkBackend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU } },
-                { "kfd_event_dropped_events",
-                  { SdkBackend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS } },
-            };
-
-        const auto itr = kfd_kind_table.find(name);
-        return itr != kfd_kind_table.end() ? itr->second : std::vector<kind_t>{};
-    }
-    else
-    {
-        return {};
-    }
-}
-
-// template <typename SdkBackend, typename Externals>
-//     requires concepts::sdk_tracing_config_externals<Externals>
-// void
-// sdk_tracing_config<SdkBackend, Externals>::warn_kfd_disabled_once(
-//     std::string_view domain_name, const version_info& kfd_version)
-// {
-//     static bool warned = false;
-//     if(warned)
-//     {
-//         return;
-//     }
-
-//     LOG_WARNING("KFD tracing domain '{}' disabled: rocprofiler-sdk {}.{}.{} has a bug "
-//                 "with undefined KFD node IDs (fixed in >= 1.2.2)",
-//                 domain_name, kfd_version.major, kfd_version.minor, kfd_version.patch);
-//     warned = true;
-// }
-
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
@@ -755,8 +647,6 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domains()
     const auto& buffer_info = SdkBackend::get_buffer_tracing_names();
 
     auto supported = get_supported_buffer_domains();
-
-    // const auto kfd_support = get_kfd_runtime_support();
 
     auto data    = std::unordered_set<kind_t>{};
     auto domains = rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
@@ -810,7 +700,7 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domains()
     }
 
     if constexpr(compile_time_sdk_version >=
-                 version_info{ .major = 1, .minor = 0, .patch = 0 })
+                 version_info{ .major = 1, .minor = 2, .patch = 2 })
     {
         domain_map.insert({
             { "kfd_events",
@@ -866,48 +756,29 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domains()
         return !std::ranges::any_of(
             valid_choices, [&domainv](const auto& choice) { return choice == domainv; });
     };
-    if(const auto& invalid_domain_itr =
-           std::ranges::find_if(domains, invalid_domain_fn) != domains.end())
+    if(const auto invalid_domain_itr = std::ranges::find_if(domains, invalid_domain_fn);
+       invalid_domain_itr != domains.end())
     {
         throw std::runtime_error(fmt::format(
-            "unsupported ROCPROFSYS_ROCM_DOMAINS value: {}", invalid_domain_itr));
+            "unsupported ROCPROFSYS_ROCM_DOMAINS value: {}", *invalid_domain_itr));
     }
 
     for(const auto& itr : domains)
     {
-        // if(is_kfd_domain_name(itr) && !kfd_support.supported)
-        // {
-        //     warn_kfd_disabled_once(itr, kfd_support.version);
-        //     continue;
-        // }
-
         const auto& domain_kinds = domain_map.at(itr);
         data.insert(domain_kinds.begin(), domain_kinds.end());
     }
 
     if constexpr(compile_time_sdk_version >=
-                 version_info{ .major = 1, .minor = 0, .patch = 0 })
+                 version_info{ .major = 1, .minor = 2, .patch = 2 })
     {
         // Automatically enable KFD domains when unified memory profiling is enabled
         if(Externals::get_use_unified_memory_profiling())
         {
-            // if(kfd_support.supported)
-            // {
             LOG_INFO("ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON: implicitly enabling "
                      "KFD page_fault and page_migrate buffered tracing domains.");
             data.emplace(SdkBackend::BUFFER_TRACING_KFD_PAGE_FAULT);
             data.emplace(SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE);
-            // }
-            //     else
-            //     {
-            //         LOG_WARNING("ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON requested
-            //         KFD "
-            //                     "page_fault/page_migrate tracing, but rocprofiler-sdk "
-            //                     "{}.{}.{} is too old (requires >= 1.2.2)",
-            //                     kfd_support.version.major, kfd_support.version.minor,
-            //                     kfd_support.version.patch);
-            //     }
-            // }
         }
     }
 

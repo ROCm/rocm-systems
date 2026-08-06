@@ -159,7 +159,7 @@ struct backend
         Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION;
 #endif
 
-#if ROCPROFILER_VERSION >= 10000
+#if ROCPROFILER_VERSION >= 10202
     static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_PAGE_FAULT =
         Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT;
     static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_PAGE_MIGRATE =

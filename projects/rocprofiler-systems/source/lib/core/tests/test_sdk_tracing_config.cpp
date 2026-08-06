@@ -68,7 +68,6 @@ enum backend_tag : int
     callback_domains_implicit_flags             = 100,
     callback_domains_invalid                    = 101,
     callback_domains_rocshmem_hipfile_supported = 103,
-    buffered_domains_kfd_disabled_runtime       = 106,
 };
 
 // sdk_tracing_config no longer caches get_version()/get_callback_tracing_names()/
@@ -718,14 +717,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 2;
-            *patch = 2;
-            return 0;
-        });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "memory_copy" }));
@@ -750,14 +741,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 2;
-            *patch = 2;
-            return 0;
-        });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "hsa_api,hip_api,marker_api" }));
@@ -789,14 +772,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 2;
-            *patch = 2;
-            return 0;
-        });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "kfd_events" }));
@@ -827,14 +802,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 2;
-            *patch = 2;
-            return 0;
-        });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(
@@ -854,41 +821,6 @@ TEST_F(sdk_tracing_config_domains_test,
                                     backend_t::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS));
 }
 
-// rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with undefined node
-// IDs, so get_buffered_domains() must disable all KFD domains (not throw) when the
-// *runtime* library reports a version below that gate, even though the compile-time
-// headers declare the KFD enums. Previously uncovered branch.
-TEST_F(sdk_tracing_config_domains_test,
-       get_buffered_domains_kfd_events_disabled_when_runtime_below_bugfix_version)
-{
-    using backend_t = tagged_backend<buffered_domains_kfd_disabled_runtime>;
-    using sut       = sdk_tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 2;
-            *patch = 1;
-            return 0;
-        });
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "kfd_events" }));
-    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
-        .Times(1)
-        .WillOnce(gtest::Return(false));
-
-    EXPECT_THAT(sut::get_buffered_domains(), gtest::IsEmpty());
-}
-
 TEST_F(sdk_tracing_config_domains_test,
        get_buffered_domains_memory_allocation_returns_memory_allocation)
 {
@@ -902,14 +834,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 2;
-            *patch = 2;
-            return 0;
-        });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "memory_allocation" }));
@@ -934,14 +858,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 2;
-            *patch = 2;
-            return 0;
-        });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{}));
@@ -967,14 +883,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 2;
-            *patch = 2;
-            return 0;
-        });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "scratch_memory" }));
@@ -998,14 +906,6 @@ TEST_F(sdk_tracing_config_domains_test, get_buffered_domains_invalid_domain_thro
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 2;
-            *patch = 2;
-            return 0;
-        });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "invalid_domain" }));

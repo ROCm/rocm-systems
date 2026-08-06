@@ -2098,7 +2098,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 }
             }
 #endif
-#if (ROCPROFILER_VERSION >= 10000)
+#if (ROCPROFILER_VERSION >= 10202)
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
             {
                 auto* record =
@@ -2642,7 +2642,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if (ROCPROFILER_VERSION >= 10000)
+#if (ROCPROFILER_VERSION >= 10202)
     // Initialize KFD event metadata
     if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0 ||
        _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0 ||
