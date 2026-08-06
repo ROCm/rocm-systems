@@ -32,7 +32,7 @@ on:
         description: "Branch, tag, or SHA for the existing corpus tests"
         # TODO: Drop this pin once the workflow's ROCm SDK includes the gfx1250
         # rocBLAS and hipBLASLt libraries required by the latest corpus.
-        # Last updated on 2026/07/17.
+        # Last updated on 2026/08/06.
         default: "cc781dd88cabd1638d1beeb4539c521ccf27de60"
         required: true
 
