@@ -4222,6 +4222,10 @@ TEST(GeneratedInstDefUse, D16FormatXyzwLoadDoesNotReadDestination) {
   InstDefUse idu(*inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 2}));
   EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 2}));
+  // contains() over a range requires every lane, so assert each register
+  // individually to catch a regression that reads only v5 or only v6.
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 6, 1}));
 }
 
 TEST(GeneratedInstDefUse, D16DsLoadReadsDestination) {
@@ -4285,6 +4289,20 @@ TEST(GeneratedInstDefUse, D16TypedFormatLoadUnderVbufferReadsDestination) {
   InstDefUse idu(*inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
   EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+// Odd-count typed FORMAT under VBUFFER: xyz packs 3 halfwords into two VGPRs,
+// so only the final register's (v6) upper half is preserved. Mirrors the
+// untyped xyz case but through the typed path. VDATA is word1[0:7] (=5).
+TEST(GeneratedInstDefUse, D16TypedFormatXyzLoadUnderVbufferReadsOnlyLastDestination) {
+  auto inst = decode_rdna4({0xC4228000U, 0x00000005U}); // tbuffer_load_d16_format_xyz, vdata=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "tbuffer_load_d16_format_xyz");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 2}));  // writes v5:v6
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 6, 1}));  // last reg partial
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1})); // first reg fully written
 }
 
 // On older MUBUF encodings the LDS bit (word0 bit 16) redirects the loaded data

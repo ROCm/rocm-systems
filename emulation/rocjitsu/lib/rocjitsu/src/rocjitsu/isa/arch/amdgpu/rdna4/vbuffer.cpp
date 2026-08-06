@@ -362,6 +362,7 @@ BufferLoadD16FormatXVbuffer::BufferLoadD16FormatXVbuffer(const MachineInst *inst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void BufferLoadD16FormatXVbuffer::implicit_uses(RegisterSet &uses) const {
@@ -392,6 +393,7 @@ BufferLoadD16FormatXyVbuffer::BufferLoadD16FormatXyVbuffer(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void BufferLoadD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -416,6 +418,7 @@ BufferLoadD16FormatXyzVbuffer::BufferLoadD16FormatXyzVbuffer(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void BufferLoadD16FormatXyzVbuffer::implicit_uses(RegisterSet &uses) const {
@@ -446,6 +449,7 @@ BufferLoadD16FormatXyzwVbuffer::BufferLoadD16FormatXyzwVbuffer(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void BufferLoadD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -470,6 +474,7 @@ BufferStoreD16FormatXVbuffer::BufferStoreD16FormatXVbuffer(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void BufferStoreD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -494,6 +499,7 @@ BufferStoreD16FormatXyVbuffer::BufferStoreD16FormatXyVbuffer(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void BufferStoreD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -518,6 +524,7 @@ BufferStoreD16FormatXyzVbuffer::BufferStoreD16FormatXyzVbuffer(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void BufferStoreD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -542,6 +549,7 @@ BufferStoreD16FormatXyzwVbuffer::BufferStoreD16FormatXyzwVbuffer(const MachineIn
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void BufferStoreD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1424,6 +1432,7 @@ BufferLoadD16HiFormatXVbuffer::BufferLoadD16HiFormatXVbuffer(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void BufferLoadD16HiFormatXVbuffer::implicit_uses(RegisterSet &uses) const {
@@ -1454,6 +1463,7 @@ BufferStoreD16HiFormatXVbuffer::BufferStoreD16HiFormatXVbuffer(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void BufferStoreD16HiFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -3255,6 +3265,7 @@ TbufferLoadD16FormatXVbuffer::TbufferLoadD16FormatXVbuffer(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferLoadD16FormatXVbuffer::implicit_uses(RegisterSet &uses) const {
@@ -3285,6 +3296,7 @@ TbufferLoadD16FormatXyVbuffer::TbufferLoadD16FormatXyVbuffer(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferLoadD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -3309,6 +3321,7 @@ TbufferLoadD16FormatXyzVbuffer::TbufferLoadD16FormatXyzVbuffer(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferLoadD16FormatXyzVbuffer::implicit_uses(RegisterSet &uses) const {
@@ -3339,6 +3352,7 @@ TbufferLoadD16FormatXyzwVbuffer::TbufferLoadD16FormatXyzwVbuffer(const MachineIn
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferLoadD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -3363,6 +3377,7 @@ TbufferStoreD16FormatXVbuffer::TbufferStoreD16FormatXVbuffer(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -3387,6 +3402,7 @@ TbufferStoreD16FormatXyVbuffer::TbufferStoreD16FormatXyVbuffer(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -3411,6 +3427,7 @@ TbufferStoreD16FormatXyzVbuffer::TbufferStoreD16FormatXyzVbuffer(const MachineIn
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -3435,6 +3452,7 @@ TbufferStoreD16FormatXyzwVbuffer::TbufferStoreD16FormatXyzwVbuffer(const Machine
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {

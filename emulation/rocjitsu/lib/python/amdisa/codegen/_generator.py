@@ -7129,6 +7129,8 @@ class CodeGenerator:
                             'buffer_atomic',
                             'tbuffer_load',
                             'tbuffer_store',
+                            'buffer_load_format_d16',
+                            'buffer_store_format_d16',
                             'ds_read',
                             'ds_read2',
                             'ds_write',

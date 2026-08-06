@@ -5767,4 +5767,49 @@ TEST(HwregTest, SetregImm32PartialBitfield) {
   }
 }
 
+// Packed D16 FORMAT loads/stores carry partial-def metadata for liveness but are
+// deliberately non-executable (the memory pipeline does not model the packed
+// two-components-per-VGPR layout). Executing one must throw UnimplementedInst;
+// this locks in that the metadata-only classification never silently starts
+// executing an incorrect layout.
+TEST(D16FormatExecution, PackedFormatD16LoadStoreThrowUnimplemented) {
+  amdgpu::GpuMemory gpu_mem("d16_format_unimpl_mem");
+  amdgpu::L2Cache l2("d16_format_unimpl_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("d16_format_unimpl", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  struct Case {
+    std::string_view mnemonic;
+    std::array<uint32_t, 2> words;
+  };
+  const std::array<Case, 2> cases = {{
+      {"buffer_load_d16_format_x", {0xC4020000U, 0x00000000U}},
+      {"buffer_store_d16_format_x", {0xC4030000U, 0x00000000U}},
+  }};
+
+  // The exec body throws before touching wavefront state, so a single wf can be
+  // reused across cases without any reset.
+  for (const auto &c : cases) {
+    SCOPED_TRACE(c.mnemonic);
+    std::unique_ptr<Instruction> inst(decoder->decode(c.words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(std::string_view(inst->mnemonic()), c.mnemonic);
+    EXPECT_THROW(cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst);
+  }
+}
+
 } // namespace

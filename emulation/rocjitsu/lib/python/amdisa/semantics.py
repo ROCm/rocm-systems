@@ -2068,7 +2068,9 @@ def _derive_buffer_data(
     non-executable classes (``buffer_{load,store}_format_d16``) that carry the
     partial-def metadata (num_elems/elem_size/d16 flags) for liveness without
     activating incorrect execution. Non-D16 FORMAT (one dword per component) and
-    byte/short/dword data execute correctly and keep their normal classes.
+    byte/short/dword data execute correctly and keep their normal classes; the
+    FORMAT variants are modeled as raw dword moves without DFMT/NFMT
+    (data/numeric format) conversion.
 
     ``typed_format_executable`` gates the executable ``tbuffer_*`` class for
     non-D16 typed FORMAT ops. Real MTBUF encodings supply mtbuf-style addressing

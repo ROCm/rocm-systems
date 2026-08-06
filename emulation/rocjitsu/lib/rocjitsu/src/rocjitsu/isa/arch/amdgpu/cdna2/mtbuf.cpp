@@ -380,6 +380,7 @@ TbufferLoadFormatD16XMtbuf::TbufferLoadFormatD16XMtbuf(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferLoadFormatD16XMtbuf::implicit_uses(RegisterSet &uses) const {
@@ -412,6 +413,7 @@ TbufferLoadFormatD16XyMtbuf::TbufferLoadFormatD16XyMtbuf(const MachineInst *inst
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferLoadFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -438,6 +440,7 @@ TbufferLoadFormatD16XyzMtbuf::TbufferLoadFormatD16XyzMtbuf(const MachineInst *in
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferLoadFormatD16XyzMtbuf::implicit_uses(RegisterSet &uses) const {
@@ -470,6 +473,7 @@ TbufferLoadFormatD16XyzwMtbuf::TbufferLoadFormatD16XyzwMtbuf(const MachineInst *
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferLoadFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -496,6 +500,7 @@ TbufferStoreFormatD16XMtbuf::TbufferStoreFormatD16XMtbuf(const MachineInst *inst
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -522,6 +527,7 @@ TbufferStoreFormatD16XyMtbuf::TbufferStoreFormatD16XyMtbuf(const MachineInst *in
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -548,6 +554,7 @@ TbufferStoreFormatD16XyzMtbuf::TbufferStoreFormatD16XyzMtbuf(const MachineInst *
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -574,6 +581,7 @@ TbufferStoreFormatD16XyzwMtbuf::TbufferStoreFormatD16XyzwMtbuf(const MachineInst
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {

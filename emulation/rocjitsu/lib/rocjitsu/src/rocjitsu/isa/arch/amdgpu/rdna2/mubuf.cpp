@@ -1448,6 +1448,7 @@ BufferLoadFormatD16HiXMubuf::BufferLoadFormatD16HiXMubuf(const MachineInst *inst
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
 void BufferLoadFormatD16HiXMubuf::implicit_uses(RegisterSet &uses) const {
@@ -1478,6 +1479,7 @@ BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *in
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
 void BufferStoreFormatD16HiXMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -3023,6 +3025,7 @@ BufferLoadFormatD16XMubuf::BufferLoadFormatD16XMubuf(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
 void BufferLoadFormatD16XMubuf::implicit_uses(RegisterSet &uses) const {
@@ -3053,6 +3056,7 @@ BufferLoadFormatD16XyMubuf::BufferLoadFormatD16XyMubuf(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
 void BufferLoadFormatD16XyMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -3076,6 +3080,7 @@ BufferLoadFormatD16XyzMubuf::BufferLoadFormatD16XyzMubuf(const MachineInst *inst
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
 void BufferLoadFormatD16XyzMubuf::implicit_uses(RegisterSet &uses) const {
@@ -3106,6 +3111,7 @@ BufferLoadFormatD16XyzwMubuf::BufferLoadFormatD16XyzwMubuf(const MachineInst *in
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
 void BufferLoadFormatD16XyzwMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -3129,6 +3135,7 @@ BufferStoreFormatD16XMubuf::BufferStoreFormatD16XMubuf(const MachineInst *inst)
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
 void BufferStoreFormatD16XMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -3152,6 +3159,7 @@ BufferStoreFormatD16XyMubuf::BufferStoreFormatD16XyMubuf(const MachineInst *inst
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
 void BufferStoreFormatD16XyMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -3175,6 +3183,7 @@ BufferStoreFormatD16XyzMubuf::BufferStoreFormatD16XyzMubuf(const MachineInst *in
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
 void BufferStoreFormatD16XyzMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -3198,6 +3207,7 @@ BufferStoreFormatD16XyzwMubuf::BufferStoreFormatD16XyzwMubuf(const MachineInst *
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
 void BufferStoreFormatD16XyzwMubuf::execute_impl(amdgpu::Wavefront &wf) {
