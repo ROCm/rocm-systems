@@ -1,5 +1,8 @@
-// Link-time stubs for HIP symbols referenced by RCCL headers but not defined
-// in fakes/hip_fakes.cc. Filled in as undefined-reference link errors appear.
+// Link-time stubs for HIP symbols referenced by RCCL sources but not defined in
+// fakes/hip_fakes.cc. This build uses the REAL <hip/hip_runtime.h> (hipcc
+// --offload-host-only) and does not link the HIP runtime (-no-hip-rt), so any
+// referenced HIP entry point must be defined here or in the fakes. Filled in as
+// undefined-reference link errors appear.
 #include <hip/hip_runtime.h>
 
 hipError_t hipSetDevice(int) { return hipErrorInvalidValue; }

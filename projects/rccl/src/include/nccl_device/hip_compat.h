@@ -25,13 +25,8 @@
 #elif defined(__CUDACC__)
 #define NCCL_CUDA_PLATFORM 1
 #endif
-// Key device-compile on the device translation unit (compiled by hipcc/nvcc),
-// not the HIP *platform* macro. A pure host-only build defines __HIP_PLATFORM_AMD__
-// to get AMD types but is NOT compiled by hipcc, so it must not pull in device
-// template bodies. __HIPCC__ / __CUDACC__ are set for BOTH the host and device
-// passes of a real device compile, so real builds -- including the device-TU host
-// pass that declares device-only types (ncclGin, ncclCoopCta, barrier sessions) --
-// are unaffected.
+// Key device-compile on the actual device TU (__HIPCC__/__CUDACC__), not the HIP
+// platform macro, so host-only builds don't pull in device template bodies.
 #if defined(__HIPCC__) || defined(__CUDACC__)
 #define NCCL_DEVICE_COMPILE 1
 #else
