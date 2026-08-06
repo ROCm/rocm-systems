@@ -119,11 +119,10 @@ get_registered_contexts(context_array_t& data, context_filter_t filter)
     data.reserve(num_ctx);
     for(auto& itr : *get_registered_contexts_impl())
     {
+        if(!itr.has_value()) continue;
+
         const auto* ctx = &itr.value();
-        if(ctx)
-        {
-            if(!filter || (filter && filter(ctx))) data.emplace_back(ctx);
-        }
+        if(!filter || (filter && filter(ctx))) data.emplace_back(ctx);
     }
     return data;
 }
@@ -422,6 +421,8 @@ get_client_contexts(rocprofiler_client_id_t id)
 
     for(auto& itr : *get_registered_contexts_impl())
     {
+        if(!itr.has_value()) continue;
+
         if(itr->client_idx == id.handle)
         {
             _data.emplace_back(rocprofiler_context_id_t{.handle = itr->context_idx});
@@ -438,6 +439,8 @@ stop_client_contexts(rocprofiler_client_id_t client_id)
     auto ret = ROCPROFILER_STATUS_SUCCESS;
     for(auto& itr : *get_registered_contexts_impl())
     {
+        if(!itr.has_value()) continue;
+
         if(itr->client_idx == client_id.handle)
         {
             auto status = stop_context(rocprofiler_context_id_t{itr->context_idx});
@@ -472,6 +475,8 @@ deregister_client_contexts(rocprofiler_client_id_t client_id)
 {
     for(auto& itr : *get_registered_contexts_impl())
     {
+        if(!itr.has_value()) continue;
+
         if(itr->client_idx == client_id.handle && buffer::get_buffers())
         {
             for(auto& bitr : *buffer::get_buffers())
