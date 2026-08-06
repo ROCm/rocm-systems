@@ -1012,16 +1012,6 @@ finalize()
     std::call_once(_once, []() {
         auto num_clients = get_num_clients();
         set_fini_status(-1);
-
-        // Stop contexts and run tool finalization while queue interception is still
-        // intact. counters::stop_context relies on a live queue controller to drain
-        // in-flight dispatches and coordinate serializer teardown; running that after
-        // queue_controller_fini() is undefined.
-        if(get_init_status() > 0)
-        {
-            invoke_client_finalizers();
-        }
-
         hsa::async_copy_fini();
         counters::device_counting_service_finalize();
         hsa::queue_controller_fini();
@@ -1036,6 +1026,10 @@ finalize()
 #endif
         code_object::finalize();
         context::correlation_id_finalize();
+        if(get_init_status() > 0)
+        {
+            invoke_client_finalizers();
+        }
         if(num_clients > 0) internal_threading::finalize();
         set_fini_status(1);
     });
