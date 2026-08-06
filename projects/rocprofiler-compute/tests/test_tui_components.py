@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, Mock, patch
 import pandas as pd
 import pytest
 
+from rocprof_compute_tui.utils.tui_utils import process_panels_to_dataframes
 from rocprof_compute_tui.widgets.instant_button import InstantButton
 from rocprof_compute_tui.widgets.menu_bar.menu_bar import DropdownMenu, MenuButton
 
@@ -365,8 +366,6 @@ class TestProcessPanelsToDataframes:
 
     def test_returns_dict_structure(self) -> None:
         """Test that function returns proper nested dict structure."""
-        from rocprof_compute_tui.utils.tui_utils import process_panels_to_dataframes
-
         mock_args = MagicMock()
         mock_args.decimal = 2
         mock_args.membw_analysis = False
@@ -386,7 +385,6 @@ class TestProcessPanelsToDataframes:
     def test_skips_hidden_sections(self) -> None:
         """Test that hidden sections are skipped."""
         import config
-        from rocprof_compute_tui.utils.tui_utils import process_panels_to_dataframes
 
         mock_args = MagicMock()
         mock_args.decimal = 2
@@ -412,6 +410,59 @@ class TestProcessPanelsToDataframes:
         # Hidden section should not appear in result
         for section_name in result.keys():
             assert "Hidden Panel" not in section_name
+
+    @pytest.mark.parametrize(
+        "membw_analysis",
+        [
+            pytest.param(False, id="disabled"),
+            pytest.param(True, id="enabled"),
+        ],
+    )
+    def test_membw_analysis_panel_gate(self, membw_analysis: bool) -> None:
+        """Panel 3000 is included only when memory bandwidth analysis is enabled."""
+        mock_args = MagicMock()
+        mock_args.decimal = 2
+        mock_args.membw_analysis = membw_analysis
+
+        mock_arch_configs = MagicMock()
+        mock_arch_configs.panel_configs = {
+            3000: {
+                "title": "Memory Bandwidth Analysis",
+                "data source": [
+                    {
+                        "metric_table": {
+                            "id": 3013,
+                            "title": "EA Interface",
+                        }
+                    }
+                ],
+            }
+        }
+        metric_dataframe = pd.DataFrame({
+            "Metric": ["EA read request fraction - HBM"],
+            "Avg": [50.0],
+            "Unit": ["Percent"],
+        })
+
+        result = process_panels_to_dataframes(
+            mock_args,
+            {3013: metric_dataframe},
+            mock_arch_configs,
+            {},
+        )
+
+        section_name = "30. Memory Bandwidth Analysis"
+        table_name = "30.13 EA Interface"
+
+        if not membw_analysis:
+            assert section_name not in result
+            return
+
+        assert section_name in result
+        assert table_name in result[section_name]
+        pd.testing.assert_frame_equal(
+            result[section_name][table_name]["df"], metric_dataframe
+        )
 
     def test_applies_rounding_logic(self) -> None:
         """Test that decimal rounding is applied to dataframes."""
