@@ -136,7 +136,7 @@ bool Vopd::is_float64_op(uint16_t op) {
 }
 
 Vopd::Vopd(const MachineInst *inst)
-    : IsaInstruction<Isa>("vopd", registered_exec_fn<Vopd>()), dstx_(32, OperandType::OPR_VGPR, 0),
+    : IsaInstruction<Isa>("vopd", selected_exec_fn(0)), dstx_(32, OperandType::OPR_VGPR, 0),
       dsty_(32, OperandType::OPR_VGPR, 0), srcx0_(32, OperandType::OPR_SRC, 0),
       srcx1_(32, OperandType::OPR_VGPR, 0), srcx2_(32, OperandType::OPR_VGPR, 0),
       srcy0_(32, OperandType::OPR_SRC, 0), srcy1_(32, OperandType::OPR_VGPR, 0),

@@ -309,10 +309,10 @@ TEST(codeobj_library, codeobj_table_test)
 
 /**
  * Verifies that DWARF inline annotation produces " -> " separators.
- * The test kernel calls a __device__ function that calls __syncthreads(),
- * which inlines through HIP headers.  This guarantees at least 3 call stack
- * levels (kernel -> device func -> HIP header), i.e. at least two " -> "
- * separators in the comment of the s_barrier instruction.
+ * The test kernel inlines a chain of __device__ helpers
+ * (kernel -> barrier_wrapper -> accumulate -> combine), guaranteeing at least
+ * 3 call stack levels, i.e. at least two " -> " separators in the deepest
+ * instruction comment.
  */
 TEST(codeobj_library, inline_annotation)
 {
@@ -328,7 +328,7 @@ TEST(codeobj_library, inline_annotation)
     ASSERT_FALSE(comp.m_symbol_map.empty());
     EXPECT_TRUE(comp.m_line_number_map.empty());
 
-    constexpr size_t min_depth = 3;  // kernel -> barrier_wrapper -> HIP header(s)
+    constexpr size_t min_depth = 3;  // kernel -> barrier_wrapper -> accumulate -> combine
     size_t           max_depth = 0;
     for(auto& [kaddr, sym] : comp.m_symbol_map)
     {

@@ -113,7 +113,7 @@ jobs:
         shell: bash
         run: |
           resource_dir="$("${ROCM_PATH}/llvm/bin/clang" -print-resource-dir)"
-          sanitizer_lib_dir="${resource_dir}/lib/x86_64-unknown-linux-gnu"
+          sanitizer_lib_dir="${resource_dir}/lib/linux"
           if [ ! -d "${sanitizer_lib_dir}" ]; then
             echo "❌ Missing clang sanitizer runtime: ${sanitizer_lib_dir}"
             exit 1

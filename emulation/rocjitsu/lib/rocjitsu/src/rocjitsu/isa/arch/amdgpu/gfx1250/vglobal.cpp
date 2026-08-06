@@ -19,8 +19,7 @@ template <typename VmemMachineInst> uint32_t vflat_vaddr_bits(const VmemMachineI
 } // namespace
 
 GlobalLoadU8Vglobal::GlobalLoadU8Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_u8", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadU8Vglobal>()),
+    : Vglobal("global_load_u8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1525)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -40,8 +39,7 @@ GlobalLoadU8Vglobal::GlobalLoadU8Vglobal(const MachineInst *inst)
 }
 
 GlobalLoadI8Vglobal::GlobalLoadI8Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_i8", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadI8Vglobal>()),
+    : Vglobal("global_load_i8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1526)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -62,7 +60,7 @@ GlobalLoadI8Vglobal::GlobalLoadI8Vglobal(const MachineInst *inst)
 
 GlobalLoadU16Vglobal::GlobalLoadU16Vglobal(const MachineInst *inst)
     : Vglobal("global_load_u16", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadU16Vglobal>()),
+              selected_exec_fn(1527)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -83,7 +81,7 @@ GlobalLoadU16Vglobal::GlobalLoadU16Vglobal(const MachineInst *inst)
 
 GlobalLoadI16Vglobal::GlobalLoadI16Vglobal(const MachineInst *inst)
     : Vglobal("global_load_i16", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadI16Vglobal>()),
+              selected_exec_fn(1528)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -104,7 +102,7 @@ GlobalLoadI16Vglobal::GlobalLoadI16Vglobal(const MachineInst *inst)
 
 GlobalLoadB32Vglobal::GlobalLoadB32Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadB32Vglobal>()),
+              selected_exec_fn(1529)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -125,7 +123,7 @@ GlobalLoadB32Vglobal::GlobalLoadB32Vglobal(const MachineInst *inst)
 
 GlobalLoadB64Vglobal::GlobalLoadB64Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadB64Vglobal>()),
+              selected_exec_fn(1530)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -146,7 +144,7 @@ GlobalLoadB64Vglobal::GlobalLoadB64Vglobal(const MachineInst *inst)
 
 GlobalLoadB96Vglobal::GlobalLoadB96Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b96", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadB96Vglobal>()),
+              selected_exec_fn(1531)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -167,7 +165,7 @@ GlobalLoadB96Vglobal::GlobalLoadB96Vglobal(const MachineInst *inst)
 
 GlobalLoadB128Vglobal::GlobalLoadB128Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b128", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadB128Vglobal>()),
+              selected_exec_fn(1532)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -188,7 +186,7 @@ GlobalLoadB128Vglobal::GlobalLoadB128Vglobal(const MachineInst *inst)
 
 GlobalStoreB8Vglobal::GlobalStoreB8Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b8", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalStoreB8Vglobal>()),
+              selected_exec_fn(1533)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -209,7 +207,7 @@ GlobalStoreB8Vglobal::GlobalStoreB8Vglobal(const MachineInst *inst)
 
 GlobalStoreB16Vglobal::GlobalStoreB16Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b16", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalStoreB16Vglobal>()),
+              selected_exec_fn(1534)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -230,7 +228,7 @@ GlobalStoreB16Vglobal::GlobalStoreB16Vglobal(const MachineInst *inst)
 
 GlobalStoreB32Vglobal::GlobalStoreB32Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalStoreB32Vglobal>()),
+              selected_exec_fn(1535)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -251,7 +249,7 @@ GlobalStoreB32Vglobal::GlobalStoreB32Vglobal(const MachineInst *inst)
 
 GlobalStoreB64Vglobal::GlobalStoreB64Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalStoreB64Vglobal>()),
+              selected_exec_fn(1536)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -272,7 +270,7 @@ GlobalStoreB64Vglobal::GlobalStoreB64Vglobal(const MachineInst *inst)
 
 GlobalStoreB96Vglobal::GlobalStoreB96Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b96", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalStoreB96Vglobal>()),
+              selected_exec_fn(1537)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -293,7 +291,7 @@ GlobalStoreB96Vglobal::GlobalStoreB96Vglobal(const MachineInst *inst)
 
 GlobalStoreB128Vglobal::GlobalStoreB128Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b128", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalStoreB128Vglobal>()),
+              selected_exec_fn(1538)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -314,7 +312,7 @@ GlobalStoreB128Vglobal::GlobalStoreB128Vglobal(const MachineInst *inst)
 
 GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadD16U8Vglobal>()),
+              selected_exec_fn(1539)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -335,7 +333,7 @@ GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
 
 GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadD16I8Vglobal>()),
+              selected_exec_fn(1540)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -356,7 +354,7 @@ GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
 
 GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadD16B16Vglobal>()),
+              selected_exec_fn(1541)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -377,7 +375,7 @@ GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
 
 GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadD16HiU8Vglobal>()),
+              selected_exec_fn(1542)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -398,7 +396,7 @@ GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
 
 GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadD16HiI8Vglobal>()),
+              selected_exec_fn(1543)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -419,7 +417,7 @@ GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
 
 GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadD16HiB16Vglobal>()),
+              selected_exec_fn(1544)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -440,7 +438,7 @@ GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
 
 GlobalStoreD16HiB8Vglobal::GlobalStoreD16HiB8Vglobal(const MachineInst *inst)
     : Vglobal("global_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalStoreD16HiB8Vglobal>()),
+              selected_exec_fn(1545)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -461,7 +459,7 @@ GlobalStoreD16HiB8Vglobal::GlobalStoreD16HiB8Vglobal(const MachineInst *inst)
 
 GlobalStoreD16HiB16Vglobal::GlobalStoreD16HiB16Vglobal(const MachineInst *inst)
     : Vglobal("global_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalStoreD16HiB16Vglobal>()),
+              selected_exec_fn(1546)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -482,7 +480,7 @@ GlobalStoreD16HiB16Vglobal::GlobalStoreD16HiB16Vglobal(const MachineInst *inst)
 
 GlobalLoadAddtidB32Vglobal::GlobalLoadAddtidB32Vglobal(const MachineInst *inst)
     : Vglobal("global_load_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadAddtidB32Vglobal>()),
+              selected_exec_fn(1547)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0) {
@@ -499,7 +497,7 @@ GlobalLoadAddtidB32Vglobal::GlobalLoadAddtidB32Vglobal(const MachineInst *inst)
 
 GlobalStoreAddtidB32Vglobal::GlobalStoreAddtidB32Vglobal(const MachineInst *inst)
     : Vglobal("global_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalStoreAddtidB32Vglobal>()),
+              selected_exec_fn(1548)),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0) {
@@ -515,22 +513,20 @@ GlobalStoreAddtidB32Vglobal::GlobalStoreAddtidB32Vglobal(const MachineInst *inst
 }
 
 GlobalInvVglobal::GlobalInvVglobal(const MachineInst *inst)
-    : Vglobal("global_inv", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalInvVglobal>()) {
+    : Vglobal("global_inv", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1549)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
 GlobalWbVglobal::GlobalWbVglobal(const MachineInst *inst)
-    : Vglobal("global_wb", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalWbVglobal>()) {
+    : Vglobal("global_wb", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1550)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
 GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicSwapB32Vglobal>()),
+              selected_exec_fn(1551)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -557,7 +553,7 @@ GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst)
 
 GlobalAtomicCmpswapB32Vglobal::GlobalAtomicCmpswapB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicCmpswapB32Vglobal>()),
+              selected_exec_fn(1552)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -584,7 +580,7 @@ GlobalAtomicCmpswapB32Vglobal::GlobalAtomicCmpswapB32Vglobal(const MachineInst *
 
 GlobalAtomicAddU32Vglobal::GlobalAtomicAddU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicAddU32Vglobal>()),
+              selected_exec_fn(1553)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -611,7 +607,7 @@ GlobalAtomicAddU32Vglobal::GlobalAtomicAddU32Vglobal(const MachineInst *inst)
 
 GlobalAtomicSubU32Vglobal::GlobalAtomicSubU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicSubU32Vglobal>()),
+              selected_exec_fn(1554)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -638,7 +634,7 @@ GlobalAtomicSubU32Vglobal::GlobalAtomicSubU32Vglobal(const MachineInst *inst)
 
 GlobalAtomicSubClampU32Vglobal::GlobalAtomicSubClampU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicSubClampU32Vglobal>()),
+              selected_exec_fn(1555)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -665,7 +661,7 @@ GlobalAtomicSubClampU32Vglobal::GlobalAtomicSubClampU32Vglobal(const MachineInst
 
 GlobalAtomicMinI32Vglobal::GlobalAtomicMinI32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicMinI32Vglobal>()),
+              selected_exec_fn(1556)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -692,7 +688,7 @@ GlobalAtomicMinI32Vglobal::GlobalAtomicMinI32Vglobal(const MachineInst *inst)
 
 GlobalAtomicMinU32Vglobal::GlobalAtomicMinU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicMinU32Vglobal>()),
+              selected_exec_fn(1557)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -719,7 +715,7 @@ GlobalAtomicMinU32Vglobal::GlobalAtomicMinU32Vglobal(const MachineInst *inst)
 
 GlobalAtomicMaxI32Vglobal::GlobalAtomicMaxI32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicMaxI32Vglobal>()),
+              selected_exec_fn(1558)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -746,7 +742,7 @@ GlobalAtomicMaxI32Vglobal::GlobalAtomicMaxI32Vglobal(const MachineInst *inst)
 
 GlobalAtomicMaxU32Vglobal::GlobalAtomicMaxU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicMaxU32Vglobal>()),
+              selected_exec_fn(1559)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -773,7 +769,7 @@ GlobalAtomicMaxU32Vglobal::GlobalAtomicMaxU32Vglobal(const MachineInst *inst)
 
 GlobalAtomicAndB32Vglobal::GlobalAtomicAndB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicAndB32Vglobal>()),
+              selected_exec_fn(1560)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -800,7 +796,7 @@ GlobalAtomicAndB32Vglobal::GlobalAtomicAndB32Vglobal(const MachineInst *inst)
 
 GlobalAtomicOrB32Vglobal::GlobalAtomicOrB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicOrB32Vglobal>()),
+              selected_exec_fn(1561)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -827,7 +823,7 @@ GlobalAtomicOrB32Vglobal::GlobalAtomicOrB32Vglobal(const MachineInst *inst)
 
 GlobalAtomicXorB32Vglobal::GlobalAtomicXorB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicXorB32Vglobal>()),
+              selected_exec_fn(1562)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -854,7 +850,7 @@ GlobalAtomicXorB32Vglobal::GlobalAtomicXorB32Vglobal(const MachineInst *inst)
 
 GlobalAtomicIncU32Vglobal::GlobalAtomicIncU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicIncU32Vglobal>()),
+              selected_exec_fn(1563)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -881,7 +877,7 @@ GlobalAtomicIncU32Vglobal::GlobalAtomicIncU32Vglobal(const MachineInst *inst)
 
 GlobalAtomicDecU32Vglobal::GlobalAtomicDecU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicDecU32Vglobal>()),
+              selected_exec_fn(1564)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -908,7 +904,7 @@ GlobalAtomicDecU32Vglobal::GlobalAtomicDecU32Vglobal(const MachineInst *inst)
 
 GlobalAtomicSwapB64Vglobal::GlobalAtomicSwapB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicSwapB64Vglobal>()),
+              selected_exec_fn(1565)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -935,7 +931,7 @@ GlobalAtomicSwapB64Vglobal::GlobalAtomicSwapB64Vglobal(const MachineInst *inst)
 
 GlobalAtomicCmpswapB64Vglobal::GlobalAtomicCmpswapB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicCmpswapB64Vglobal>()),
+              selected_exec_fn(1566)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -962,7 +958,7 @@ GlobalAtomicCmpswapB64Vglobal::GlobalAtomicCmpswapB64Vglobal(const MachineInst *
 
 GlobalAtomicAddU64Vglobal::GlobalAtomicAddU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicAddU64Vglobal>()),
+              selected_exec_fn(1567)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -989,7 +985,7 @@ GlobalAtomicAddU64Vglobal::GlobalAtomicAddU64Vglobal(const MachineInst *inst)
 
 GlobalAtomicSubU64Vglobal::GlobalAtomicSubU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicSubU64Vglobal>()),
+              selected_exec_fn(1568)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1016,7 +1012,7 @@ GlobalAtomicSubU64Vglobal::GlobalAtomicSubU64Vglobal(const MachineInst *inst)
 
 GlobalAtomicMinI64Vglobal::GlobalAtomicMinI64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicMinI64Vglobal>()),
+              selected_exec_fn(1569)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1043,7 +1039,7 @@ GlobalAtomicMinI64Vglobal::GlobalAtomicMinI64Vglobal(const MachineInst *inst)
 
 GlobalAtomicMinU64Vglobal::GlobalAtomicMinU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicMinU64Vglobal>()),
+              selected_exec_fn(1570)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1070,7 +1066,7 @@ GlobalAtomicMinU64Vglobal::GlobalAtomicMinU64Vglobal(const MachineInst *inst)
 
 GlobalAtomicMaxI64Vglobal::GlobalAtomicMaxI64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicMaxI64Vglobal>()),
+              selected_exec_fn(1571)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1097,7 +1093,7 @@ GlobalAtomicMaxI64Vglobal::GlobalAtomicMaxI64Vglobal(const MachineInst *inst)
 
 GlobalAtomicMaxU64Vglobal::GlobalAtomicMaxU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicMaxU64Vglobal>()),
+              selected_exec_fn(1572)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1124,7 +1120,7 @@ GlobalAtomicMaxU64Vglobal::GlobalAtomicMaxU64Vglobal(const MachineInst *inst)
 
 GlobalAtomicAndB64Vglobal::GlobalAtomicAndB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicAndB64Vglobal>()),
+              selected_exec_fn(1573)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1151,7 +1147,7 @@ GlobalAtomicAndB64Vglobal::GlobalAtomicAndB64Vglobal(const MachineInst *inst)
 
 GlobalAtomicOrB64Vglobal::GlobalAtomicOrB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicOrB64Vglobal>()),
+              selected_exec_fn(1574)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1178,7 +1174,7 @@ GlobalAtomicOrB64Vglobal::GlobalAtomicOrB64Vglobal(const MachineInst *inst)
 
 GlobalAtomicXorB64Vglobal::GlobalAtomicXorB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicXorB64Vglobal>()),
+              selected_exec_fn(1575)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1205,7 +1201,7 @@ GlobalAtomicXorB64Vglobal::GlobalAtomicXorB64Vglobal(const MachineInst *inst)
 
 GlobalAtomicIncU64Vglobal::GlobalAtomicIncU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicIncU64Vglobal>()),
+              selected_exec_fn(1576)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1232,7 +1228,7 @@ GlobalAtomicIncU64Vglobal::GlobalAtomicIncU64Vglobal(const MachineInst *inst)
 
 GlobalAtomicDecU64Vglobal::GlobalAtomicDecU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicDecU64Vglobal>()),
+              selected_exec_fn(1577)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1258,15 +1254,14 @@ GlobalAtomicDecU64Vglobal::GlobalAtomicDecU64Vglobal(const MachineInst *inst)
 }
 
 GlobalWbinvVglobal::GlobalWbinvVglobal(const MachineInst *inst)
-    : Vglobal("global_wbinv", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalWbinvVglobal>()) {
+    : Vglobal("global_wbinv", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1578)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
 GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicCondSubU32Vglobal>()),
+              selected_exec_fn(1579)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1293,7 +1288,7 @@ GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *
 
 GlobalAtomicMinNumF32Vglobal::GlobalAtomicMinNumF32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicMinNumF32Vglobal>()),
+              selected_exec_fn(1580)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1320,7 +1315,7 @@ GlobalAtomicMinNumF32Vglobal::GlobalAtomicMinNumF32Vglobal(const MachineInst *in
 
 GlobalAtomicMaxNumF32Vglobal::GlobalAtomicMaxNumF32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicMaxNumF32Vglobal>()),
+              selected_exec_fn(1581)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1347,7 +1342,7 @@ GlobalAtomicMaxNumF32Vglobal::GlobalAtomicMaxNumF32Vglobal(const MachineInst *in
 
 GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
     : Vglobal("global_load_block", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadBlockVglobal>()),
+              selected_exec_fn(1582)),
       vdst(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1370,7 +1365,7 @@ GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
 
 GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
     : Vglobal("global_store_block", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalStoreBlockVglobal>()),
+              selected_exec_fn(1583)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1393,7 +1388,7 @@ GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
 
 GlobalAtomicAddF64Vglobal::GlobalAtomicAddF64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_add_f64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicAddF64Vglobal>()),
+              selected_exec_fn(1584)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1420,7 +1415,7 @@ GlobalAtomicAddF64Vglobal::GlobalAtomicAddF64Vglobal(const MachineInst *inst)
 
 GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicAddF32Vglobal>()),
+              selected_exec_fn(1585)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1447,7 +1442,7 @@ GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst)
 
 GlobalLoadTr16B128Vglobal::GlobalLoadTr16B128Vglobal(const MachineInst *inst)
     : Vglobal("global_load_tr16_b128", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadTr16B128Vglobal>()),
+              selected_exec_fn(1586)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1468,7 +1463,7 @@ GlobalLoadTr16B128Vglobal::GlobalLoadTr16B128Vglobal(const MachineInst *inst)
 
 GlobalLoadTr8B64Vglobal::GlobalLoadTr8B64Vglobal(const MachineInst *inst)
     : Vglobal("global_load_tr8_b64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadTr8B64Vglobal>()),
+              selected_exec_fn(1587)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1489,7 +1484,7 @@ GlobalLoadTr8B64Vglobal::GlobalLoadTr8B64Vglobal(const MachineInst *inst)
 
 GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicPkAddF16Vglobal>()),
+              selected_exec_fn(1588)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1516,7 +1511,7 @@ GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst
 
 GlobalAtomicPkAddBf16Vglobal::GlobalAtomicPkAddBf16Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicPkAddBf16Vglobal>()),
+              selected_exec_fn(1589)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1543,7 +1538,7 @@ GlobalAtomicPkAddBf16Vglobal::GlobalAtomicPkAddBf16Vglobal(const MachineInst *in
 
 GlobalAtomicMinNumF64Vglobal::GlobalAtomicMinNumF64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_num_f64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicMinNumF64Vglobal>()),
+              selected_exec_fn(1590)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1570,7 +1565,7 @@ GlobalAtomicMinNumF64Vglobal::GlobalAtomicMinNumF64Vglobal(const MachineInst *in
 
 GlobalAtomicMaxNumF64Vglobal::GlobalAtomicMaxNumF64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_num_f64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalAtomicMaxNumF64Vglobal>()),
+              selected_exec_fn(1591)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1597,7 +1592,7 @@ GlobalAtomicMaxNumF64Vglobal::GlobalAtomicMaxNumF64Vglobal(const MachineInst *in
 
 GlobalPrefetchB8Vglobal::GlobalPrefetchB8Vglobal(const MachineInst *inst)
     : Vglobal("global_prefetch_b8", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalPrefetchB8Vglobal>()),
+              selected_exec_fn(1592)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -1614,7 +1609,7 @@ GlobalPrefetchB8Vglobal::GlobalPrefetchB8Vglobal(const MachineInst *inst)
 
 GlobalLoadAsyncToLdsB8Vglobal::GlobalLoadAsyncToLdsB8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_async_to_lds_b8", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadAsyncToLdsB8Vglobal>()),
+              selected_exec_fn(1593)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1637,7 +1632,7 @@ GlobalLoadAsyncToLdsB8Vglobal::GlobalLoadAsyncToLdsB8Vglobal(const MachineInst *
 
 GlobalLoadAsyncToLdsB32Vglobal::GlobalLoadAsyncToLdsB32Vglobal(const MachineInst *inst)
     : Vglobal("global_load_async_to_lds_b32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadAsyncToLdsB32Vglobal>()),
+              selected_exec_fn(1594)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1660,7 +1655,7 @@ GlobalLoadAsyncToLdsB32Vglobal::GlobalLoadAsyncToLdsB32Vglobal(const MachineInst
 
 GlobalLoadAsyncToLdsB64Vglobal::GlobalLoadAsyncToLdsB64Vglobal(const MachineInst *inst)
     : Vglobal("global_load_async_to_lds_b64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadAsyncToLdsB64Vglobal>()),
+              selected_exec_fn(1595)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1683,7 +1678,7 @@ GlobalLoadAsyncToLdsB64Vglobal::GlobalLoadAsyncToLdsB64Vglobal(const MachineInst
 
 GlobalLoadAsyncToLdsB128Vglobal::GlobalLoadAsyncToLdsB128Vglobal(const MachineInst *inst)
     : Vglobal("global_load_async_to_lds_b128", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadAsyncToLdsB128Vglobal>()),
+              selected_exec_fn(1596)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1706,7 +1701,7 @@ GlobalLoadAsyncToLdsB128Vglobal::GlobalLoadAsyncToLdsB128Vglobal(const MachineIn
 
 GlobalStoreAsyncFromLdsB8Vglobal::GlobalStoreAsyncFromLdsB8Vglobal(const MachineInst *inst)
     : Vglobal("global_store_async_from_lds_b8", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalStoreAsyncFromLdsB8Vglobal>()),
+              selected_exec_fn(1597)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1729,7 +1724,7 @@ GlobalStoreAsyncFromLdsB8Vglobal::GlobalStoreAsyncFromLdsB8Vglobal(const Machine
 
 GlobalStoreAsyncFromLdsB32Vglobal::GlobalStoreAsyncFromLdsB32Vglobal(const MachineInst *inst)
     : Vglobal("global_store_async_from_lds_b32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalStoreAsyncFromLdsB32Vglobal>()),
+              selected_exec_fn(1598)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1752,7 +1747,7 @@ GlobalStoreAsyncFromLdsB32Vglobal::GlobalStoreAsyncFromLdsB32Vglobal(const Machi
 
 GlobalStoreAsyncFromLdsB64Vglobal::GlobalStoreAsyncFromLdsB64Vglobal(const MachineInst *inst)
     : Vglobal("global_store_async_from_lds_b64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalStoreAsyncFromLdsB64Vglobal>()),
+              selected_exec_fn(1599)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1775,7 +1770,7 @@ GlobalStoreAsyncFromLdsB64Vglobal::GlobalStoreAsyncFromLdsB64Vglobal(const Machi
 
 GlobalStoreAsyncFromLdsB128Vglobal::GlobalStoreAsyncFromLdsB128Vglobal(const MachineInst *inst)
     : Vglobal("global_store_async_from_lds_b128", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalStoreAsyncFromLdsB128Vglobal>()),
+              selected_exec_fn(1600)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1798,7 +1793,7 @@ GlobalStoreAsyncFromLdsB128Vglobal::GlobalStoreAsyncFromLdsB128Vglobal(const Mac
 
 ClusterLoadB32Vglobal::ClusterLoadB32Vglobal(const MachineInst *inst)
     : Vglobal("cluster_load_b32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<ClusterLoadB32Vglobal>()),
+              selected_exec_fn(1601)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1821,7 +1816,7 @@ ClusterLoadB32Vglobal::ClusterLoadB32Vglobal(const MachineInst *inst)
 
 ClusterLoadB64Vglobal::ClusterLoadB64Vglobal(const MachineInst *inst)
     : Vglobal("cluster_load_b64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<ClusterLoadB64Vglobal>()),
+              selected_exec_fn(1602)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1844,7 +1839,7 @@ ClusterLoadB64Vglobal::ClusterLoadB64Vglobal(const MachineInst *inst)
 
 ClusterLoadB128Vglobal::ClusterLoadB128Vglobal(const MachineInst *inst)
     : Vglobal("cluster_load_b128", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<ClusterLoadB128Vglobal>()),
+              selected_exec_fn(1603)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1867,7 +1862,7 @@ ClusterLoadB128Vglobal::ClusterLoadB128Vglobal(const MachineInst *inst)
 
 ClusterLoadAsyncToLdsB8Vglobal::ClusterLoadAsyncToLdsB8Vglobal(const MachineInst *inst)
     : Vglobal("cluster_load_async_to_lds_b8", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<ClusterLoadAsyncToLdsB8Vglobal>()),
+              selected_exec_fn(1604)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1893,7 +1888,7 @@ ClusterLoadAsyncToLdsB8Vglobal::ClusterLoadAsyncToLdsB8Vglobal(const MachineInst
 
 ClusterLoadAsyncToLdsB32Vglobal::ClusterLoadAsyncToLdsB32Vglobal(const MachineInst *inst)
     : Vglobal("cluster_load_async_to_lds_b32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<ClusterLoadAsyncToLdsB32Vglobal>()),
+              selected_exec_fn(1605)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1919,7 +1914,7 @@ ClusterLoadAsyncToLdsB32Vglobal::ClusterLoadAsyncToLdsB32Vglobal(const MachineIn
 
 ClusterLoadAsyncToLdsB64Vglobal::ClusterLoadAsyncToLdsB64Vglobal(const MachineInst *inst)
     : Vglobal("cluster_load_async_to_lds_b64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<ClusterLoadAsyncToLdsB64Vglobal>()),
+              selected_exec_fn(1606)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1945,7 +1940,7 @@ ClusterLoadAsyncToLdsB64Vglobal::ClusterLoadAsyncToLdsB64Vglobal(const MachineIn
 
 ClusterLoadAsyncToLdsB128Vglobal::ClusterLoadAsyncToLdsB128Vglobal(const MachineInst *inst)
     : Vglobal("cluster_load_async_to_lds_b128", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<ClusterLoadAsyncToLdsB128Vglobal>()),
+              selected_exec_fn(1607)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1971,7 +1966,7 @@ ClusterLoadAsyncToLdsB128Vglobal::ClusterLoadAsyncToLdsB128Vglobal(const Machine
 
 GlobalLoadMonitorB32Vglobal::GlobalLoadMonitorB32Vglobal(const MachineInst *inst)
     : Vglobal("global_load_monitor_b32", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadMonitorB32Vglobal>()),
+              selected_exec_fn(1608)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1992,7 +1987,7 @@ GlobalLoadMonitorB32Vglobal::GlobalLoadMonitorB32Vglobal(const MachineInst *inst
 
 GlobalLoadMonitorB64Vglobal::GlobalLoadMonitorB64Vglobal(const MachineInst *inst)
     : Vglobal("global_load_monitor_b64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadMonitorB64Vglobal>()),
+              selected_exec_fn(1609)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2013,7 +2008,7 @@ GlobalLoadMonitorB64Vglobal::GlobalLoadMonitorB64Vglobal(const MachineInst *inst
 
 GlobalLoadMonitorB128Vglobal::GlobalLoadMonitorB128Vglobal(const MachineInst *inst)
     : Vglobal("global_load_monitor_b128", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadMonitorB128Vglobal>()),
+              selected_exec_fn(1610)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2034,7 +2029,7 @@ GlobalLoadMonitorB128Vglobal::GlobalLoadMonitorB128Vglobal(const MachineInst *in
 
 GlobalLoadTr4B64Vglobal::GlobalLoadTr4B64Vglobal(const MachineInst *inst)
     : Vglobal("global_load_tr4_b64", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadTr4B64Vglobal>()),
+              selected_exec_fn(1611)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2055,7 +2050,7 @@ GlobalLoadTr4B64Vglobal::GlobalLoadTr4B64Vglobal(const MachineInst *inst)
 
 GlobalLoadTr6B96Vglobal::GlobalLoadTr6B96Vglobal(const MachineInst *inst)
     : Vglobal("global_load_tr6_b96", reinterpret_cast<const OpEncoding *>(inst),
-              registered_exec_fn<GlobalLoadTr6B96Vglobal>()),
+              selected_exec_fn(1612)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),

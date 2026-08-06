@@ -75,9 +75,8 @@ public:
 
   /// @brief Whether @p inst has a registered semantic expansion rule.
   ///
-  /// @details A true result means the instruction may query instruction-level
-  /// liveness during try_lower_expand(). The rule can still decline expansion
-  /// after inspecting operands or payload bits.
+  /// @details The rule can still decline expansion after inspecting operands or
+  /// payload bits.
   [[nodiscard]] bool has_expand_rule(const Instruction &inst) const;
   [[nodiscard]] bool has_expand_rule(uint16_t encoding_id, uint16_t opcode) const {
     if (!has_expand_rule_encoding(encoding_id))
@@ -85,6 +84,9 @@ public:
     return std::binary_search(expand_rule_keys_.begin(), expand_rule_keys_.end(),
                               packed_rule_key(encoding_id, opcode));
   }
+
+  /// @brief Whether the matching expansion can query kernel liveness.
+  [[nodiscard]] bool expand_rule_requires_liveness(const Instruction &inst) const;
 
   [[nodiscard]] bool has_rules() const { return !expand_rules_.empty(); }
 

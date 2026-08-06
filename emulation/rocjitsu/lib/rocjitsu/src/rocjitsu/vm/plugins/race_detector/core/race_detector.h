@@ -37,9 +37,8 @@ public:
                std::function<void(RaceViolation)> raceHandler);
 
   /// Allocate a workgroup-global event ID and record its metadata.
-  EventId allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
-                          std::vector<uint32_t> registers, uint64_t execMask,
-                          uint8_t byteMask = 0xF, IntervalSet ldsIntervals = {});
+  EventId allocateEventId(WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
+                          uint64_t execMask, uint8_t byteMask = 0xF, IntervalSet ldsIntervals = {});
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);
@@ -67,14 +66,13 @@ public:
 
   /// Format a RaceViolation with assembly context for diagnostics.
   /// getSourceLine(i) returns the original source text for line index i.
-  std::string decorateException(const RaceViolation &v, uint64_t wavePc,
-                                WaveRaceState *waveRaceState, int numSourceLines,
+  std::string decorateException(const RaceViolation &, uint64_t wavePc, int numSourceLines,
                                 std::function<std::string_view(int)> getSourceLine) const;
 
   WaveRaceState &getWaveRaceState(int waveIndex);
 
 private:
-  void setProfiler(ProfilerInterface &p);
+  void setProfiler(ProfilerInterface &);
 
   static void adjustByteCounts(const IntervalSet &ivs, std::vector<int> &counts, int delta);
 

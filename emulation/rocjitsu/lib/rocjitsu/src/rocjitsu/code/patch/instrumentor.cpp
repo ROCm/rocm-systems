@@ -344,6 +344,10 @@ void Instrumentor::add_point_by_offset(uint64_t anchor_offset, InstrumentationKi
 bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   if (blocks_built_)
     return true;
+  if (arch_ == ROCJITSU_CODE_ARCH_RV32I || arch_ == ROCJITSU_CODE_ARCH_RV64I) {
+    report(error_out, "AMDGPU instrumentation does not support RISC-V architectures");
+    return false;
+  }
   auto decoder = Decoder::create(arch_);
   if (!decoder) {
     report(error_out, "no decoder available for the requested architecture");

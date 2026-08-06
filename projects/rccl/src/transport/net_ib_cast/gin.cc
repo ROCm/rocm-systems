@@ -88,7 +88,7 @@ extern ncclGin_t IbCastGinIbProxy;
 ncclResult_t IbCastGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction, int ginType,
                                  ncclGin_t* ginIb) {
   NCCLCHECK(IbCastInitDevices(logFunction, nullptr));
-  if (IbCastNDevs == 0) return ncclInternalError; // Caught in plugin init code, not propagated to user.
+  if (IbCastNDevs <= 0) return ncclInternalError; // Caught in plugin init code, not propagated to user.
 
 #ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
   if (ginType == NCCL_GIN_TYPE_GDAKI) goto try_gdaki;

@@ -1472,19 +1472,31 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
     };
 
     const size_t HALF = HIERARCHICAL_TEMP_BUFFER_SIZE / 2;
+    const size_t QUARTER = HIERARCHICAL_TEMP_BUFFER_SIZE / 4;
     const size_t FULL = HIERARCHICAL_TEMP_BUFFER_SIZE;
 
     std::vector<HierAGCase> testCases = {
         // nNodes < 8 --> disabled
-        {"LessThan8Nodes",            4,  true,  1ULL << 20, false, {}},
+        {"LessThan8Nodes",               4,  true,  1ULL << 20,  false, {}},
         // sub-comms not initialized --> disabled
-        {"CommsNotInitialized",       16, false, 1ULL << 20, false, {}},
-        // 8 node size > 64MB --> disabled
-        {"Disabled_8Nodes_AboveHalf", 8,  true,  HALF + 1,   false, {}},
-        // 16 node size > 128MB --> disabled
-        {"Disabled_16N_AboveFull",    16, true,  FULL + 1,   false, {}},
+        {"CommsNotInitialized",          16, false, 1ULL << 20,  false, {}},
+        // 8-15 nodes --> limit is 32MB
+        {"Enabled_8Nodes_AtQuarter",     8,  true,  QUARTER,     true,  {}},
+        {"Disabled_8Nodes_AboveQuarter", 8,  true,  QUARTER + 1, false, {}},
+        {"Enabled_15Nodes_AtQuarter",    15, true,  QUARTER,     true,  {}},
+        {"Disabled_15Nodes_AtHalf",      15, true,  HALF,        false, {}},
+        // 16-31 nodes --> limit is 64MB
+        {"Enabled_16Nodes_AtHalf",       16, true,  HALF,        true,  {}},
+        {"Disabled_16Nodes_AboveHalf",   16, true,  HALF + 1,    false, {}},
+        {"Enabled_31Nodes_AtHalf",       31, true,  HALF,        true,  {}},
+        {"Disabled_31Nodes_AtFull",      31, true,  FULL,        false, {}},
+        // 32+ nodes --> limit is 128MB
+        {"Enabled_32Nodes_AtHalf",       32, true,  HALF,        true,  {}},
+        {"Enabled_32Nodes_AtFull",       32, true,  FULL,        true,  {}},
+        {"Disabled_32Nodes_AboveFull",   32, true,  FULL + 1,    false, {}},
+        {"Enabled_64Nodes_AtFull",       64, true,  FULL,        true,  {}},
         // env var forces off --> disabled
-        {"DisabledByEnvVar",          16, true,  1ULL << 20, false, {{"RCCL_HIERARCHICAL_ALLGATHER", "0"}}},
+        {"DisabledByEnvVar",             16, true,  1ULL << 20,  false, {{"RCCL_HIERARCHICAL_ALLGATHER", "0"}}},
     };
 
     // Base environment shared by every case
@@ -1640,6 +1652,102 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
         << "One or more rcclUseHierarchicalReduceScatter tests failed";
 
     TEST_INFO("=== Process-Isolated rcclUseHierarchicalReduceScatter Tests Completed ===");
+}
+
+// ===========================================================================
+// CE AllReduce graph latch state machine (rccl_wrap.cc). Regression coverage
+// for the capture-vs-eager ordering bug: the latch must stay set for the
+// entire lifetime of a captured plan and must never clear mid-capture.
+// ===========================================================================
+
+TEST(RcclCeGraphLatch, SetsLatchOnFirstCapture)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = false;
+    comm.localPersistentRefs  = 0;
+
+    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/true);
+
+    EXPECT_TRUE(comm.ceColl.graphModeSeen);
+    EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+}
+
+TEST(RcclCeGraphLatch, StaysSetAcrossRepeatedCaptureTicks)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = false;
+    comm.localPersistentRefs  = 0;
+
+    for(int i = 0; i < 3; ++i)
+    {
+        rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/true);
+        EXPECT_TRUE(comm.ceColl.graphModeSeen) << "iteration " << i;
+    }
+}
+
+// Regression: an unrelated plan reclaiming to zero refs must not re-enable
+// CE AR while still capturing -- this previously caused a cross-rank deadlock.
+TEST(RcclCeGraphLatch, DoesNotClearMidCaptureEvenWithZeroRefs)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = true;
+    comm.localPersistentRefs  = 0;
+
+    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/true);
+
+    EXPECT_TRUE(comm.ceColl.graphModeSeen);
+    EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+}
+
+TEST(RcclCeGraphLatch, ClearsWhenCaptureEndsAndNoRefsRemain)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = true;
+    comm.localPersistentRefs  = 0;
+
+    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/false);
+
+    EXPECT_FALSE(comm.ceColl.graphModeSeen);
+    EXPECT_TRUE(rcclCeAllReduceAllowed(&comm));
+}
+
+TEST(RcclCeGraphLatch, StaysSetWhileCapturedPlanStillReferencesComm)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = true;
+    comm.localPersistentRefs  = 1;
+
+    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/false);
+
+    EXPECT_TRUE(comm.ceColl.graphModeSeen)
+        << "Latch must stay set until every captured plan is reclaimed";
+    EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+
+    // Reclaim completes: the next tick clears the latch.
+    comm.localPersistentRefs = 0;
+    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/false);
+    EXPECT_FALSE(comm.ceColl.graphModeSeen);
+    EXPECT_TRUE(rcclCeAllReduceAllowed(&comm));
+}
+
+TEST(RcclCeGraphLatch, AllowedQueryHasNoSideEffects)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = true;
+
+    for(int i = 0; i < 5; ++i)
+    {
+        EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+    }
+    EXPECT_TRUE(comm.ceColl.graphModeSeen) << "Query must be a pure read, not a state transition";
+}
+
+TEST(RcclCeGraphLatch, NeverLatchedAllowsCeAllReduceByDefault)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = false;
+
+    EXPECT_TRUE(rcclCeAllReduceAllowed(&comm));
 }
 
 #ifdef ENABLE_WARP_SPEED

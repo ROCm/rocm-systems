@@ -288,7 +288,7 @@ TEST(BinaryTranslatorE2E, BuildsCfgForRealMultiKernelIndirectBranches) {
 
   size_t recovered_swappc_blocks = 0;
   size_t recovered_setpc_blocks = 0;
-  size_t direct_scall_blocks = 0;
+  std::vector<uint64_t> direct_scall_offsets;
   for (const auto &block : blocks) {
     const auto *term = block->terminator();
     if (term == nullptr)
@@ -309,21 +309,34 @@ TEST(BinaryTranslatorE2E, BuildsCfgForRealMultiKernelIndirectBranches) {
       EXPECT_FALSE(has_successor_start(*block, block->end_offset()))
           << "indirect branches must not keep a fallthrough edge";
     } else if (mnemonic == "s_call_b64") {
-      ++direct_scall_blocks;
+      direct_scall_offsets.push_back(term->src_loc());
       const auto branch_delta = term->branch_offset_bytes();
       ASSERT_TRUE(branch_delta.has_value());
       const int64_t target =
           static_cast<int64_t>(block->end_offset()) + static_cast<int64_t>(*branch_delta);
       ASSERT_GE(target, 0);
       EXPECT_TRUE(has_successor_start(*block, static_cast<uint64_t>(target)));
-      EXPECT_TRUE(has_successor_start(*block, block->end_offset()))
-          << "direct calls must retain the return/fallthrough edge";
+      EXPECT_TRUE(block->call_edges().empty()) << "fixture s_call sites are tail transfers";
+      EXPECT_FALSE(has_successor_start(*block, block->end_offset()))
+          << "tail transfers must drop their unreachable fallthrough edge";
     }
   }
 
+  std::ranges::sort(direct_scall_offsets);
+  // The fixture is compiled from multikernel_indirect_branch.hip at build time,
+  // so absolute text offsets move with the ROCm compiler and cannot be pinned
+  // to literals. What the CFG owes us is that every s_call_b64 the decoder
+  // finds in .text -- the three RJ_STATIC_SCALL_ISLAND sites -- came back as a
+  // direct-call terminator, each already checked above to be a tail transfer
+  // whose syntactic s_branch continuation is dead.
+  const size_t source_call = count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_call_b64");
+  EXPECT_GE(source_call, 3u) << "fixture should carry the RJ_STATIC_SCALL_ISLAND sites";
   EXPECT_GE(recovered_swappc_blocks, 6u);
   EXPECT_GE(recovered_setpc_blocks, 3u);
-  EXPECT_GE(direct_scall_blocks, 3u);
+  EXPECT_EQ(direct_scall_offsets.size(), source_call)
+      << "every s_call_b64 in .text must terminate a block the CFG classified as a direct call";
+  EXPECT_TRUE(std::ranges::adjacent_find(direct_scall_offsets) == direct_scall_offsets.end())
+      << "each call site must be reported once";
 }
 
 TEST(BinaryTranslatorE2E, CountsRealMultiKernelIndirectBranchCfgBlocksPerKernel) {
@@ -380,11 +393,11 @@ TEST(BinaryTranslatorE2E, CountsRealMultiKernelIndirectBranchCfgBlocksPerKernel)
       // recovered target block, with the surrounding range-check and final
       // store/end blocks making the exact reachable count below.
       {"multikernel_indirect_branch_setpc", 20},
-      // The s_call kernel has three independent direct-call islands. Each call
-      // block has both the direct call-target edge and the return/fallthrough
-      // edge; the exact count catches accidental extra CFG edges between those
-      // islands or into another kernel entry.
-      {"multikernel_indirect_branch_scall", 23},
+      // The s_call kernel has three independent tail-transfer islands. Each
+      // non-returning call reaches its target but not the dead continuation;
+      // the exact count catches accidental CFG edges between those islands or
+      // into another kernel entry.
+      {"multikernel_indirect_branch_scall", 20},
   };
 
   for (const auto &test_case : expected) {
