@@ -195,6 +195,11 @@ else()
   ## Declare the library target name
   add_library (${HSAKMT_TARGET} STATIC "")
 
+  include(CTest)
+  if(BUILD_TESTING)
+    add_subdirectory(tests/vm_timeline)
+  endif()
+
   ## Add sources
   target_sources ( ${HSAKMT_TARGET} PRIVATE ${HSAKMT_SRC} )
 
