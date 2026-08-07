@@ -209,6 +209,10 @@ using rocdecode_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t, domain_type::ROCDECODE>;
 using rocjpeg_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_rocjpeg_api_record_t, domain_type::ROCJPEG>;
+using rocshmem_buffered_output_t =
+    buffered_output<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t, domain_type::ROCSHMEM>;
+using hipfile_buffered_output_t =
+    buffered_output<rocprofiler_buffer_tracing_hipfile_api_ext_record_t, domain_type::HIPFILE>;
 using kernel_dispatch_buffered_output_ext_t =
     buffered_output<tool_buffer_tracing_kernel_dispatch_ext_record_t, domain_type::KERNEL_DISPATCH>;
 using memory_copy_buffered_output_ext_t =
@@ -216,5 +220,7 @@ using memory_copy_buffered_output_ext_t =
 using pc_sampling_stochastic_buffered_output_t =
     buffered_output<rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t,
                     domain_type::PC_SAMPLING_STOCHASTIC>;
+using hip_graph_buffered_output_t =
+    buffered_output<rocprofiler_buffer_tracing_hip_graph_record_t, domain_type::HIP_GRAPH>;
 }  // namespace tool
 }  // namespace rocprofiler

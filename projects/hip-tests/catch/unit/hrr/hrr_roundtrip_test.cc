@@ -35,8 +35,12 @@
 #include "hrr_reader.h"
 #include "hrr_api_args.h"
 
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -81,6 +85,101 @@ static fs::path hrr_single_process_archive(const fs::path& root) {
   INFO("Process archive count: " << archives.size());
   REQUIRE(archives.size() == 1);
   return archives.front();
+}
+
+static std::string read_text_file(const fs::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+static size_t find_string_end(const std::string& json, size_t quote_pos) {
+  bool escape = false;
+  for (size_t i = quote_pos + 1; i < json.size(); ++i) {
+    const char c = json[i];
+    if (escape) {
+      escape = false;
+    } else if (c == '\\') {
+      escape = true;
+    } else if (c == '"') {
+      return i;
+    }
+  }
+  return std::string::npos;
+}
+
+static size_t find_key_value(const std::string& json, const std::string& key) {
+  size_t pos = 0;
+  while ((pos = json.find('"', pos)) != std::string::npos) {
+    const size_t end = find_string_end(json, pos);
+    if (end == std::string::npos) return std::string::npos;
+    if (json.compare(pos + 1, end - pos - 1, key) == 0) {
+      size_t colon = end + 1;
+      while (colon < json.size() && std::isspace(static_cast<unsigned char>(json[colon]))) ++colon;
+      if (colon < json.size() && json[colon] == ':') {
+        size_t value = colon + 1;
+        while (value < json.size() && std::isspace(static_cast<unsigned char>(json[value]))) ++value;
+        return value;
+      }
+    }
+    pos = end + 1;
+  }
+  return std::string::npos;
+}
+
+static std::string json_string_value(const std::string& json, const std::string& key) {
+  size_t pos = find_key_value(json, key);
+  if (pos == std::string::npos || pos >= json.size() || json[pos] != '"') return {};
+  size_t end = find_string_end(json, pos);
+  if (end == std::string::npos) return {};
+  return json.substr(pos + 1, end - pos - 1);
+}
+
+static long long json_integer_value(const std::string& json, const std::string& key,
+                                    long long missing = -1) {
+  size_t pos = find_key_value(json, key);
+  if (pos == std::string::npos) return missing;
+  while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos]))) ++pos;
+  char* end = nullptr;
+  long long value = std::strtoll(json.c_str() + pos, &end, 10);
+  return (end == json.c_str() + pos) ? missing : value;
+}
+
+static std::string json_object_value(const std::string& json, const std::string& key) {
+  size_t pos = find_key_value(json, key);
+  if (pos == std::string::npos || pos >= json.size() || json[pos] != '{') return {};
+
+  int depth = 0;
+  bool in_string = false;
+  bool escape = false;
+  for (size_t i = pos; i < json.size(); ++i) {
+    const char c = json[i];
+    if (in_string) {
+      if (escape) {
+        escape = false;
+      } else if (c == '\\') {
+        escape = true;
+      } else if (c == '"') {
+        in_string = false;
+      }
+      continue;
+    }
+    if (c == '"') {
+      in_string = true;
+    } else if (c == '{') {
+      ++depth;
+    } else if (c == '}') {
+      --depth;
+      if (depth == 0) return json.substr(pos, i - pos + 1);
+    }
+  }
+  return {};
+}
+
+static bool json_array_exists(const std::string& json, const std::string& key) {
+  size_t pos = find_key_value(json, key);
+  return pos != std::string::npos && pos < json.size() && json[pos] == '[';
 }
 
 // ---------------------------------------------------------------------------
@@ -475,6 +574,25 @@ static void hrr_run_roundtrip(const std::string& direct_case,
   hrr_run_playback(cap_path, /*extra_args=*/"", require_d2h);
 }
 
+static bool hrr_find_peer_accessible_pair(int& src_dev, int& dst_dev, int& ndev) {
+  HIP_CHECK(hipGetDeviceCount(&ndev));
+  if (ndev < 2) return false;
+
+  for (int src = 0; src < ndev; ++src) {
+    for (int dst = 0; dst < ndev; ++dst) {
+      if (src == dst) continue;
+      int can_access = 0;
+      HIP_CHECK(hipDeviceCanAccessPeer(&can_access, src, dst));
+      if (can_access) {
+        src_dev = src;
+        dst_dev = dst;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Env-aware capture + playback helpers (used by the repro roundtrips).
 //
@@ -678,6 +796,70 @@ HIP_TEST_CASE(Unit_HRR_DeviceInfoRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_DeviceInfo_Direct", cap.path);
 }
 
+HIP_TEST_CASE(Unit_HRR_MetadataManifest) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_metadata_manifest"};
+
+  {
+    hip::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_DeviceInfo_Direct\"");
+    INFO("Metadata capture subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  fs::path archive_path = hrr_single_process_archive(cap.path);
+  REQUIRE(fs::exists(archive_path / "manifest.json"));
+
+  const std::string proc_manifest = read_text_file(archive_path / "manifest.json");
+  const std::string metadata = json_object_value(proc_manifest, "metadata");
+
+  INFO("Process manifest:\n" << proc_manifest);
+  INFO("Metadata:\n" << metadata);
+
+  REQUIRE_FALSE(metadata.empty());
+
+  CHECK(json_integer_value(metadata, "schema_version") == 1);
+  const std::string runtime_version = json_string_value(metadata, "hip_runtime_version");
+  const std::string comgr_version = json_string_value(metadata, "comgr_version");
+  INFO("hip_runtime_version=" << runtime_version);
+  INFO("comgr_version=" << comgr_version);
+  CHECK_FALSE(runtime_version.empty());
+  CHECK_FALSE(comgr_version.empty());
+  CHECK(std::count(runtime_version.begin(), runtime_version.end(), '.') == 2);
+  CHECK(std::count(comgr_version.begin(), comgr_version.end(), '.') == 1);
+
+  const long long device_count = json_integer_value(metadata, "device_count");
+  const long long captured_device_count = json_integer_value(metadata, "captured_device_count");
+  CHECK(device_count >= 1);
+  CHECK(captured_device_count >= 1);
+  CHECK(captured_device_count <= device_count);
+  CHECK(json_array_exists(metadata, "devices"));
+
+  const long long ordinal = json_integer_value(metadata, "ordinal");
+  const long long total_global_mem = json_integer_value(metadata, "total_global_mem");
+  const long long multi_processor_count = json_integer_value(metadata, "multi_processor_count");
+  const long long compute_mode = json_integer_value(metadata, "compute_mode");
+  const std::string name = json_string_value(metadata, "name");
+  const std::string gcn_arch_name = json_string_value(metadata, "gcn_arch_name");
+  const std::string compute_capability = json_string_value(metadata, "compute_capability");
+  const std::string pci = json_string_value(metadata, "pci");
+  const std::string uuid = json_string_value(metadata, "uuid");
+
+  CHECK(ordinal >= 0);
+  CHECK_FALSE(json_object_value(metadata, "properties").empty());
+  CHECK_FALSE(name.empty());
+  CHECK_FALSE(gcn_arch_name.empty());
+  CHECK(total_global_mem > 0);
+  CHECK(multi_processor_count > 0);
+  CHECK(compute_mode >= 0);
+  CHECK_FALSE(compute_capability.empty());
+  CHECK(std::count(compute_capability.begin(), compute_capability.end(), '.') == 1);
+  CHECK_FALSE(pci.empty());
+  CHECK(std::count(pci.begin(), pci.end(), ':') == 2);
+  CHECK_FALSE(uuid.empty());
+}
+
 HIP_TEST_CASE(Unit_HRR_StreamAdvancedRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamadvanced"};
   hrr_run_roundtrip("Unit_HRR_StreamAdvanced_Direct", cap.path);
@@ -724,6 +906,87 @@ HIP_TEST_CASE(Unit_HRR_HostAliasesRoundtrip) {
 HIP_TEST_CASE(Unit_HRR_MemPoolExtendedRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_mempoolext"};
   hrr_run_roundtrip("Unit_HRR_MemPoolExtended_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_DeviceMemPoolRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_devicemempool"};
+  // Exercises hipDeviceSetMemPool (device stream-ordered pool association),
+  // the one device mem-pool API left untested by Unit_HRR_DeviceInfo_Direct.
+  hrr_run_roundtrip("Unit_HRR_DeviceMemPool_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_ExtMallocRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extmalloc"};
+  // Exercises hipExtMallocWithFlags (device allocation, manual playback handler).
+  hrr_run_roundtrip("Unit_HRR_ExtMalloc_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_StreamWaitEventSptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamwaitspt"};
+  // Exercises hipStreamWaitEvent_spt (per-thread-stream cross-stream ordering).
+  hrr_run_roundtrip("Unit_HRR_StreamWaitEventSpt_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_GraphLaunchSptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_graphlaunchspt"};
+  // Exercises hipGraphLaunch_spt (per-thread-stream graph launch).
+  hrr_run_roundtrip("Unit_HRR_GraphLaunchSpt_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_ExtModuleLaunchKernelRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extmodulelaunch"};
+  // Exercises hipExtModuleLaunchKernel (manual kernarg + device-ptr replay via
+  // the HIPRTC module path, which is captured/replayed on Linux).
+  hrr_run_roundtrip("Unit_HRR_ExtModuleLaunchKernel_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_HostFreeRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_hostfree"};
+  // Exercises hipHostFree + hipHostMalloc (pinned-host alloc-map lifecycle).
+  hrr_run_roundtrip("Unit_HRR_HostFree_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_LoggingRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_logging"};
+  // Exercises hipExtSetLoggingParams / hipExtEnableLogging / hipExtDisableLogging.
+  hrr_run_roundtrip("Unit_HRR_Logging_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_StreamCaptureQuerySptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_capturequeryspt"};
+  // Exercises hipStreamIsCapturing_spt + hipStreamGetCaptureInfo_spt inside a
+  // manual capture frame (graph executes -> D2H validates the whole path).
+  hrr_run_roundtrip("Unit_HRR_StreamCaptureQuerySpt_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_StreamCaptureBeginSptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_capturebeginspt"};
+  // Validates hipStreamBeginCapture_spt on GPU (generated handler omits the
+  // ctx.in_graph_capture bookkeeping; safe for a memset-only capture region).
+  hrr_run_roundtrip("Unit_HRR_StreamCaptureBeginSpt_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_ConfigureCallRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_configurecall"};
+  // Exercises hipConfigureCall (legacy execution-stack launch configuration).
+  hrr_run_roundtrip("Unit_HRR_ConfigureCall_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_MemcpyPeerRoundtrip) {
+  int src_dev = 0;
+  int dst_dev = 1;
+  int ndev = 0;
+  if (!hrr_find_peer_accessible_pair(src_dev, dst_dev, ndev)) {
+    if (ndev < 2) {
+      HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    } else {
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    }
+  }
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memcpypeer"};
+  // Exercises hipMemcpyPeer across two GPUs: capture on a multi-GPU host, replay
+  // must recreate both allocations on their devices and validate the D2H bytes.
+  hrr_run_roundtrip("Unit_HRR_MemcpyPeer_Direct", cap.path);
 }
 
 HIP_TEST_CASE(Unit_HRR_MemsetExtraRoundtrip) {

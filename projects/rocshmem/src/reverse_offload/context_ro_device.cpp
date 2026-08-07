@@ -573,6 +573,15 @@ __device__ uint64_t broadcast(bool lowest_active, uint64_t value) {
   return broadcast_lds(lowest_active, value);
 }
 
+__device__ int ROContext::broadcastmem_wave([[maybe_unused]] rocshmem_team_t team,
+                                        [[maybe_unused]] void *dest, 
+                                        [[maybe_unused]] const void* source, 
+                                        [[maybe_unused]] int nelems,
+                                        [[maybe_unused]] int PE_root) {
+  LOGD_WARN("Broadcastmem Wave API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
 __device__ bool enough_space(BlockHandle *h, uint64_t required) {
   return (h->queue_size - (h->write_index - h->read_index)) >= required;
 }
@@ -776,6 +785,28 @@ __device__ volatile char *ROContext::get_status_flag() {
   return status_addr;
 }
 
+__device__ void ROContext::alltoallmem_wg(rocshmem_team_t team, void *dest,
+                                    const void *source, int nelems) {
+  if (is_thread_zero_in_block()) {
+    ROTeam *team_obj{reinterpret_cast<ROTeam *>(team)};
+
+    build_queue_element(RO_NET_ALLTOALL, dest, const_cast<void *>(source), nelems, 0,
+                        0, 0, 0, team_obj->ata_buffer, nullptr,
+                        (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle, true,
+                        get_status_flag(), is_default_ctx, ROCSHMEM_SUM,
+                        RO_NET_CHAR);
+  }
+  __syncthreads();
+}
+
+__device__ int ROContext::alltoallmem_wave([[maybe_unused]] rocshmem_team_t team, 
+                                           [[maybe_unused]] void* dest, 
+                                           [[maybe_unused]] const void* source, 
+                                           [[maybe_unused]] int nelems){
+  LOGD_WARN("Alltoallmem_wave not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
 /******************************************************************************
  **************** TILE API STUB IMPLEMENTATION (NOT IMPLEMENTED) **************
  *****************************************************************************/
@@ -784,6 +815,44 @@ __device__ int ROContext::tile_collective_wait([[maybe_unused]] rocshmem_team_t 
                                                 [[maybe_unused]] uint64_t flags) {
   LOGD_WARN("Tile API not implemented for reverse offload backend");
   return ROCSHMEM_ERROR;
+}
+
+__device__ void ROContext::broadcastmem_wg(rocshmem_team_t team, void *dest,
+                                     const void *source, int nelems, int pe_root) {
+  if (is_thread_zero_in_block()) {
+    ROTeam *team_obj{reinterpret_cast<ROTeam *>(team)};
+
+    build_queue_element(RO_NET_TEAM_BROADCAST, dest, const_cast<void *>(source),
+                        nelems, 0, 0, 0, pe_root, nullptr, nullptr,
+                        (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle, true,
+                        get_status_flag(), is_default_ctx, ROCSHMEM_SUM,
+                        RO_NET_CHAR);
+  }
+
+  __syncthreads();
+}
+
+__device__ int ROContext::fcollectmem_wave([[maybe_unused]] rocshmem_team_t team,
+                                            [[maybe_unused]] void *dest,
+                                            [[maybe_unused]] const void *source,
+                                            [[maybe_unused]] int nelems) {
+  LOGD_WARN("fcollectmem_wave is not available on reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ void ROContext::fcollectmem_wg(rocshmem_team_t team, void *dest,
+                                    const void *source, int nelems) {
+  if (is_thread_zero_in_block()) {
+    ROTeam *team_obj{reinterpret_cast<ROTeam *>(team)};
+
+    build_queue_element(RO_NET_FCOLLECT, dest, const_cast<void *>(source), nelems, 0,
+                        0, 0, 0, team_obj->ata_buffer, nullptr,
+                        (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle, true,
+                        get_status_flag(), is_default_ctx, ROCSHMEM_SUM,
+                        RO_NET_CHAR);
+  }  
+
+  __syncthreads();
 }
 
 }  // namespace rocshmem

@@ -194,7 +194,7 @@ def px_simple_bar(
         range_color = [0, 100]
         xrange = [0, 110]
     if id == 1701.2:
-        label_txt = "Gb/s"
+        label_txt = "GB/s"
         range_color = [0, 1638]
         xrange = [0, 1638]
 

@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -60,6 +61,36 @@ public:
   const std::string &target_triple() const { return target_triple_; }
 
   uint64_t kernel_descriptor_offset(const std::string &kernel_name) const override;
+
+  /// @brief Smallest per-wavefront SGPR allocation across this object's kernels.
+  ///
+  /// @details Decodes each kernel descriptor's `GRANULATED_WAVEFRONT_SGPR_COUNT`
+  /// and returns the minimum, or nullopt when no readable kernel descriptor is
+  /// present.
+  ///
+  /// Mirrors the command processor's decode: when the descriptor encodes the
+  /// count (granulated != 0, or a CDNA target) the value is `(granulated+1)*8`;
+  /// otherwise the granulated field is an RDNA-style sentinel and the wave owns
+  /// the fixed per-wave SGPR pool. @p arch selects that interpretation.
+  [[nodiscard]] std::optional<uint32_t> min_kernel_sgpr_count(rj_code_arch_t arch) const;
+
+  /// @brief Wavefront size (32 or 64) shared by this object's kernels.
+  ///
+  /// @details CDNA is always Wave64; RDNA opts into Wave32 via the descriptor's
+  /// `ENABLE_WAVEFRONT_SIZE32` bit. Returns 64 (the safe value for whole-object
+  /// EXEC-mask analysis) unless every kernel descriptor is readable and Wave32.
+  [[nodiscard]] uint8_t kernel_wavefront_size(rj_code_arch_t arch) const;
+
+  /// @brief Text-section-relative entry offset of each hardware kernel entry.
+  ///
+  /// @details Decodes each descriptor's `kernel_code_entry_byte_offset` and maps
+  /// it to an offset within the containing .text section, matching
+  /// BasicBlock::start_offset(). Lets whole-object analyses pin the real kernel
+  /// entries even when an entry is a loop header with a backedge. On CDNA3/CDNA4
+  /// a descriptor with a nonzero `KERNARG_PRELOAD_SPEC_LENGTH` has a second
+  /// hardware entry 256 bytes past the descriptor entry (the firmware
+  /// kernarg-preload window), which @p arch also enumerates.
+  [[nodiscard]] std::vector<uint64_t> kernel_entry_text_offsets(rj_code_arch_t arch) const;
 
 private:
   void load_sections();

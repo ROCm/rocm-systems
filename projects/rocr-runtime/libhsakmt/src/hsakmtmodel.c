@@ -23,16 +23,17 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+#define _GNU_SOURCE
+
 #include "hsakmt/hsakmtmodel.h"
 #include "hsakmt/hsakmt_drm.h"
 #include "libhsakmt.h"
 #include "hsakmt/hsakmttypes.h"
 #include "hsakmt/hsakmtmodeliface.h"
-#define _GNU_SOURCE
-#define __USE_GNU
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,9 +42,105 @@
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include <fcntl.h>
+#ifdef HAVE_GETAUXVAL
+#include <sys/auxv.h>
+#endif
+
+#ifndef HSAKMT_INSTALL_LIBDIR
+#define HSAKMT_INSTALL_LIBDIR "/opt/rocm/lib"
+#endif
 
 bool hsakmt_use_model;
 char *hsakmt_model_topology;
+
+/* Returns true when the process is running in "secure-execution" mode, i.e.
+ * it crossed a privilege boundary at exec (setuid/setgid binary, file
+ * capabilities, or an LSM-requested transition). Applications cannot set this
+ * themselves; it is decided by the kernel and exposed via AT_SECURE. */
+static bool hsakmt_is_at_secure(void)
+{
+#if defined(HAVE_GETAUXVAL) && defined(AT_SECURE)
+	return getauxval(AT_SECURE) != 0;
+#else
+	/* If we cannot query the secure-execution state, err on the side of
+	 * caution and behave as if elevated. Note this does more than enforce
+	 * the HSA_MODEL_LIB trusted-path restriction: because model_init_env_vars()
+	 * gates on "!at_secure", returning true here disables model mode
+	 * entirely on such a target. getauxval is universal on modern
+	 * glibc/musl, so this fallback is largely theoretical. */
+	return true;
+#endif
+}
+
+static bool path_contains_dotdot(const char *path)
+{
+	const char *p = path;
+
+	while (*p) {
+		if (p[0] == '.' && p[1] == '.' &&
+		    (p[2] == '\0' || p[2] == '/'))
+			return true;
+		p = strchr(p, '/');
+		if (!p)
+			break;
+		p++;
+	}
+	return false;
+}
+
+static bool model_lib_path_allowed(const char *libname, char *resolved,
+				   size_t resolved_size)
+{
+	const char *prefix = HSAKMT_INSTALL_LIBDIR;
+	size_t prefix_len = strlen(prefix);
+
+	if (!libname || !*libname || path_contains_dotdot(libname))
+		return false;
+
+	if (libname[0] == '/') {
+		if (strncmp(libname, prefix, prefix_len) != 0)
+			return false;
+		if (libname[prefix_len] != '\0' && libname[prefix_len] != '/')
+			return false;
+		return snprintf(resolved, resolved_size, "%s", libname) <
+		       (int)resolved_size;
+	}
+
+	return snprintf(resolved, resolved_size, "%s/%s", prefix, libname) <
+	       (int)resolved_size;
+}
+
+/*
+ * Resolve the HSA_MODEL_LIB value into `resolved` before it is handed to
+ * dlopen(). The raw environment string is never passed to dlopen() directly;
+ * it always flows through this bounded, validating copy:
+ *
+ *   - If it satisfies the trusted-path policy (resides under
+ *     HSAKMT_INSTALL_LIBDIR, no ".." traversal), the canonical path is written
+ *     to `resolved`.
+ *   - Otherwise, in a normal (non-secure) process the value is accepted for
+ *     developer/emulation use and copied into `resolved` as-is.
+ *   - Otherwise, under secure-execution mode (AT_SECURE) it is rejected so a
+ *     privilege-elevated process cannot dlopen() an arbitrary library.
+ *
+ * Returns true when `resolved` holds a usable path, false when the value must
+ * be rejected.
+ */
+static bool model_resolve_lib_path(const char *libname, bool at_secure,
+				   char *resolved, size_t resolved_size)
+{
+	if (!libname || !*libname)
+		return false;
+
+	if (model_lib_path_allowed(libname, resolved, resolved_size))
+		return true;
+
+	if (at_secure)
+		return false;
+
+	return snprintf(resolved, resolved_size, "%s", libname) <
+	       (int)resolved_size;
+}
 
 static pthread_mutex_t model_call_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void *model_library;
@@ -58,20 +155,46 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtModelEnabled(bool* enable)
 
 void model_init_env_vars(void)
 {
-	/* Check whether to use a model instead of real hardware */
+	char resolved_lib[PATH_MAX];
+	const bool at_secure = hsakmt_is_at_secure();
+
+	/* Check whether to use a model instead of real hardware.
+	 *
+	 * Model/emulation mode is a developer-only feature. Do not let the
+	 * environment divert a privilege-elevated process (AT_SECURE) into it:
+	 * both HSA_MODEL_TOPOLOGY (a directory this process reads and parses)
+	 * and HSA_MODEL_LIB (a library it dlopen()s) are attacker-controllable
+	 * across a privilege boundary. When elevated, model mode stays off. */
 	hsakmt_model_topology = getenv("HSA_MODEL_TOPOLOGY");
-	if (hsakmt_model_topology)
+	if (hsakmt_model_topology && !at_secure)
 		hsakmt_use_model = true;
 	if (hsakmt_use_model)
 	{
-		/* Load model library first to get interface functions */
-		const char *libname = getenv("HSA_MODEL_LIB");
-		if (!libname)
+		/* Load model library first to get interface functions.
+		 * HSA_MODEL_LIB always flows through model_resolve_lib_path()
+		 * before dlopen(): it may be an arbitrary path in normal
+		 * (unprivileged) processes to support developer/emulation use.
+		 * The at_secure branch keeps the trusted-path restriction as
+		 * defense-in-depth should model mode ever be reachable while
+		 * elevated. */
+		const char *env_libname = getenv("HSA_MODEL_LIB");
+		if (!env_libname || !*env_libname)
 		{
 			fprintf(stderr, "model: HSA_MODEL_LIB environment variable must be set to FFM .so\n");
 			abort();
 		}
-		// model_library = dlmopen(LM_ID_NEWLM, libname, RTLD_NOW);
+		if (!model_resolve_lib_path(env_libname, at_secure,
+					    resolved_lib, sizeof(resolved_lib)))
+		{
+			if (at_secure)
+				fprintf(stderr, "model: under elevated privileges HSA_MODEL_LIB must be under %s (got %s)\n",
+					HSAKMT_INSTALL_LIBDIR, env_libname);
+			else
+				fprintf(stderr, "model: HSA_MODEL_LIB path is invalid or too long (got %s)\n",
+					env_libname);
+			abort();
+		}
+		const char *libname = resolved_lib;
 		model_library = dlopen(libname, RTLD_NOW | RTLD_LOCAL);
 		if (!model_library)
 		{
@@ -296,7 +419,7 @@ int hsakmt_drm_open_render(int minor)
 		return dup(hsakmt_primary_kfd_ctx.fd);
 	}
 	char path[128];
-	sprintf(path, "/dev/dri/renderD%d", minor);
+	snprintf(path, sizeof(path), "/dev/dri/renderD%d", minor);
 	return open(path, O_RDWR | O_CLOEXEC);
 }
 

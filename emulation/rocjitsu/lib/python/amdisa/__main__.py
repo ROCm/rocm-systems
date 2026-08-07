@@ -31,6 +31,7 @@ from amdisa.encoding_translator_codegen import (
 )
 from amdisa.legalization import LegalizationGenerator
 from amdisa.legalization_codegen import emit_all as emit_legalization
+from amdisa.isa_properties_codegen import emit_isa_properties
 from amdisa.semantics import derive_all_semantics
 
 _ENCODING_TRANSLATOR_PAIRS = [
@@ -175,6 +176,7 @@ def _run_multi(args) -> None:
 
     # Generate per-ISA files, accumulating shared execute bodies.
     if args.gen_isas:
+        emit_isa_properties(args.isa_output, specs)
         body_variants = _collect_shared_execute_body_variants(specs, plan)
         unshared_keys = _unshared_execute_keys_from_variants(body_variants)
         config = CodegenConfig(unshared_execute_keys=unshared_keys)

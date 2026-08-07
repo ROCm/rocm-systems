@@ -12,31 +12,7 @@ set(ROCPROFILER_DEFAULT_FAIL_REGEX
     "threw an exception|Permission denied|Could not create logging file|failed with error code|Subprocess aborted"
     CACHE INTERNAL "Default FAIL_REGULAR_EXPRESSION for tests")
 
-set(DEFAULT_GPU_TARGETS
-    "gfx900"
-    "gfx906"
-    "gfx908"
-    "gfx90a"
-    "gfx942"
-    "gfx950"
-    "gfx1030"
-    "gfx1010"
-    "gfx1100"
-    "gfx1101"
-    "gfx1102"
-    "gfx1151"
-    "gfx1152"
-    "gfx1250")
-
-set(GPU_TARGETS
-    "${DEFAULT_GPU_TARGETS}"
-    CACHE STRING "GPU targets to compile for")
-
-set(AMDGPU_TARGETS
-    "${GPU_TARGETS}"
-    CACHE STRING
-          "GPU targets to compile for AMDGPUs (update GPU_TARGETS, not this variable)"
-          FORCE)
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/rocprofiler_test_gpu_targets.cmake")
 
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
     cmake_policy(SET CMP0135 NEW)

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/rocprofiler-sdk.hpp"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "core/config.hpp"
 #include "timemory.hpp"
@@ -22,6 +23,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -45,11 +47,10 @@ namespace
 std::string
 get_setting_name(std::string _v)
 {
-    constexpr auto _prefix = tim::string_view_t{ "rocprofsys_" };
+    constexpr auto _prefix = std::string_view{ "rocprofsys_" };
     for(auto& itr : _v)
         itr = tolower(itr);
-    auto _pos = _v.find(_prefix);
-    if(_pos == 0) return _v.substr(_prefix.length());
+    if(_v.starts_with(_prefix)) return _v.substr(_prefix.length());
     return _v;
 }
 
@@ -114,14 +115,14 @@ get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
     if(!_val)
     {
         LOG_CRITICAL("no setting {}", optname);
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         std::abort();
     }
 
     if(_val->empty()) return std::unordered_set<std::int32_t>{};
 
     auto _ret = std::unordered_set<std::int32_t>{};
-    for(const auto& itr : tim::delimit(*_val, " ,;:\n\t"))
+    for(const auto& itr : rocprofsys::delimit(*_val, " ,;:\n\t"))
     {
         for(auto iitr : callback_tracing_info[kindv].items())
         {
@@ -159,14 +160,14 @@ get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
     if(!_val)
     {
         LOG_CRITICAL("no setting {}", optname);
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         std::abort();
     }
 
     if(_val->empty()) return std::unordered_set<std::int32_t>{};
 
     auto _ret = std::unordered_set<std::int32_t>{};
-    for(const auto& itr : tim::delimit(*_val, " ,;:\n\t"))
+    for(const auto& itr : rocprofsys::delimit(*_val, " ,;:\n\t"))
     {
         for(auto iitr : buffered_tracing_info[kindv].items())
         {
@@ -416,9 +417,21 @@ get_callback_domains()
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API);
     }
 #endif
+#if(ROCPROFILER_VERSION >= 10304)
+    if(_version.formatted >= 10304)
+    {
+        supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API);
+    }
+#endif
+#if(ROCPROFILER_VERSION >= 10305)
+    if(_version.formatted >= 10305)
+    {
+        supported.emplace(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API);
+    }
+#endif
 
     auto _data    = std::unordered_set<rocprofiler_callback_tracing_kind_t>{};
-    auto _domains = tim::delimit(
+    auto _domains = rocprofsys::delimit(
         config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
             .value_or(std::string{}),
         " ,;:\t\n");
@@ -515,7 +528,7 @@ get_buffered_domains()
     };
 
     auto _data    = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{};
-    auto _domains = tim::delimit(
+    auto _domains = rocprofsys::delimit(
         config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
             .value_or(std::string{}),
         " ,;:\t\n");
@@ -657,7 +670,7 @@ get_buffered_domains()
 std::vector<std::string>
 get_rocm_events()
 {
-    return tim::delimit(
+    return rocprofsys::delimit(
         get_setting_value<std::string>(std::string{ env_vars::ROCM_EVENTS })
             .value_or(std::string{}),
         " ,;\t\n");
@@ -670,7 +683,7 @@ get_operations(rocprofiler_callback_tracing_kind_t kindv)
     {
         LOG_CRITICAL("callback_operation_operation_names does not have value for {}",
                      static_cast<int>(kindv));
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         std::abort();
     }
 
@@ -690,7 +703,7 @@ get_operations(rocprofiler_buffer_tracing_kind_t kindv)
     {
         LOG_CRITICAL("buffered_operation_option_names does not have value for {}",
                      static_cast<int>(kindv));
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         std::abort();
     }
 
@@ -710,7 +723,7 @@ get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv)
     {
         LOG_CRITICAL("callback_operation_option_names does not have value for {}",
                      static_cast<int>(kindv));
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         std::abort();
     }
 
@@ -730,7 +743,7 @@ get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv)
     {
         LOG_CRITICAL("buffered_operation_option_names does not have value for {}",
                      static_cast<int>(kindv));
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         std::abort();
     }
 

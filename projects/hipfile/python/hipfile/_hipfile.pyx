@@ -284,6 +284,177 @@ def hipFileWrite(uintptr_t handle, uintptr_t buffer_base, size_t size,
 
 
 # ---------------------------------------------------------------------------
+#  Asynchronous (stream-attached) I/O
+# ---------------------------------------------------------------------------
+#
+# ``hipFileReadAsync`` / ``hipFileWriteAsync`` take pointer arguments
+# (size, file/buffer offset, bytes-done) that the driver dereferences
+# *after* the C call returns — the transfer actually completes when the
+# stream is synchronised. Passing the address of a Cython stack-local
+# would therefore write back to a dead address (``bytes_done`` reads as
+# 0; later submits can hit ``hipFileInvalidValue``). ``AsyncIOHandle``
+# owns those slots as C members so their addresses stay valid for the
+# object's lifetime; the caller keeps the handle alive past the stream
+# sync and then reads ``bytes_done``. Mirrors the cuFile async pattern.
+
+
+cdef class AsyncIOHandle:
+    """In/out C storage for one async submit.
+
+    Keep this object alive until the stream the I/O was submitted to has
+    been synchronised (synchronise the underlying HIP/CUDA stream, e.g.
+    ``hipStreamSynchronize`` / ``torch.cuda.Stream.synchronize``, or wait on
+    a recorded event), then read :attr:`bytes_done`.
+
+    ``size`` / ``file_offset`` / ``buffer_offset`` are writable: the async API
+    allows setting them after submission (when not known at submit time). The
+    driver reads the underlying C slots when the op runs on the stream.
+    """
+
+    cdef size_t _size
+    cdef _c.hoff_t _file_off
+    cdef _c.hoff_t _buf_off
+    cdef ssize_t _bytes_done
+
+    def __cinit__(self, size_t size, _c.hoff_t file_offset,
+                  _c.hoff_t buffer_offset):
+        self._size = size
+        self._file_off = file_offset
+        self._buf_off = buffer_offset
+        self._bytes_done = 0
+
+    @property
+    def bytes_done(self):
+        """Bytes transferred, valid only after the stream has synced."""
+        return self._bytes_done
+
+    @property
+    def size(self):
+        return self._size
+
+    @size.setter
+    def size(self, value):
+        self._size = value
+
+    @property
+    def file_offset(self):
+        return self._file_off
+
+    @file_offset.setter
+    def file_offset(self, value):
+        self._file_off = value
+
+    @property
+    def buffer_offset(self):
+        return self._buf_off
+
+    @buffer_offset.setter
+    def buffer_offset(self, value):
+        self._buf_off = value
+
+
+def hipFileReadAsync(uintptr_t handle, uintptr_t buffer_base,
+                     AsyncIOHandle io not None, uintptr_t stream_handle):
+    """Wrapper for ``hipFileReadAsync``.
+
+    Submits the read to ``stream_handle`` and returns immediately.
+    ``io`` carries the in/out slots; keep it alive and sync on the
+    stream before reading ``io.bytes_done``.
+
+    Returns ``(err, extra)``: ``err == 0`` on a successful submit;
+    otherwise ``err`` is ``hipFileOpError_t`` and ``extra`` is
+    ``hipError_t`` (when ``err == hipFileHipDriverError``) or ``errno``.
+    """
+    cdef _c.hipFileError_t e
+    cdef int extra = 0
+    cdef size_t *size_p = &io._size
+    cdef _c.hoff_t *foff_p = &io._file_off
+    cdef _c.hoff_t *boff_p = &io._buf_off
+    cdef ssize_t *done_p = &io._bytes_done
+    with nogil:
+        e = _c.hipFileReadAsync(<_c.hipFileHandle_t>handle,
+                                <void *>buffer_base,
+                                size_p, foff_p, boff_p, done_p,
+                                <_c.hipStream_t>stream_handle)
+        if <int>e.err != <int>_c.hipFileSuccess:
+            if <int>e.err == <int>_c.hipFileHipDriverError:
+                extra = <int>e.hip_drv_err
+            elif <int>e.err == -1:
+                # errno is only meaningful for a POSIX/C error (err == -1).
+                extra = errno
+    return (<int>e.err, extra)
+
+
+def hipFileWriteAsync(uintptr_t handle, uintptr_t buffer_base,
+                      AsyncIOHandle io not None, uintptr_t stream_handle):
+    """Wrapper for ``hipFileWriteAsync``. See :func:`hipFileReadAsync`
+    for argument lifetime and return semantics."""
+    cdef _c.hipFileError_t e
+    cdef int extra = 0
+    cdef size_t *size_p = &io._size
+    cdef _c.hoff_t *foff_p = &io._file_off
+    cdef _c.hoff_t *boff_p = &io._buf_off
+    cdef ssize_t *done_p = &io._bytes_done
+    with nogil:
+        e = _c.hipFileWriteAsync(<_c.hipFileHandle_t>handle,
+                                 <void *>buffer_base,
+                                 size_p, foff_p, boff_p, done_p,
+                                 <_c.hipStream_t>stream_handle)
+        if <int>e.err != <int>_c.hipFileSuccess:
+            if <int>e.err == <int>_c.hipFileHipDriverError:
+                extra = <int>e.hip_drv_err
+            elif <int>e.err == -1:
+                # errno is only meaningful for a POSIX/C error (err == -1).
+                extra = errno
+    return (<int>e.err, extra)
+
+
+def hipFileStreamRegister(uintptr_t stream_handle, unsigned flags=0):
+    """Wrapper for ``hipFileStreamRegister``. Register a CUDA/HIP stream
+    before submitting any async I/O to it. Returns the ``(err, extra)``
+    tuple (``err == 0`` on success)."""
+    cdef _c.hipFileError_t e
+    cdef int extra = 0
+    with nogil:
+        e = _c.hipFileStreamRegister(<_c.hipStream_t>stream_handle, flags)
+        if <int>e.err == <int>_c.hipFileHipDriverError:
+            extra = <int>e.hip_drv_err
+        elif <int>e.err == -1:
+            extra = errno  # POSIX/C error
+    return (<int>e.err, extra)
+
+
+def hipFileStreamDeregister(uintptr_t stream_handle):
+    """Wrapper for ``hipFileStreamDeregister``. Returns ``(err, extra)``."""
+    cdef _c.hipFileError_t e
+    cdef int extra = 0
+    with nogil:
+        e = _c.hipFileStreamDeregister(<_c.hipStream_t>stream_handle)
+        if <int>e.err == <int>_c.hipFileHipDriverError:
+            extra = <int>e.hip_drv_err
+        elif <int>e.err == -1:
+            extra = errno  # POSIX/C error
+    return (<int>e.err, extra)
+
+
+def supports_async():
+    """Return ``True`` if the loaded libhipfile implements the async
+    stream API. Probes ``hipFileStreamRegister`` on a null stream and
+    treats anything other than ``hipFileAsyncNotSupported`` as
+    supported (a null stream may be rejected with a different code on a
+    driver that *does* implement the API)."""
+    cdef _c.hipFileError_t e
+    with nogil:
+        e = _c.hipFileStreamRegister(<_c.hipStream_t>0, 0)
+        # If the probe actually registered the default stream, undo it so the
+        # probe leaves no side effect (a leaked permanent registration would
+        # make a later user register fail with AlreadyRegistered).
+        if <int>e.err == <int>_c.hipFileSuccess:
+            _c.hipFileStreamDeregister(<_c.hipStream_t>0)
+    return <int>e.err != <int>_c.hipFileAsyncNotSupported
+
+
+# ---------------------------------------------------------------------------
 #  Driver properties
 # ---------------------------------------------------------------------------
 

@@ -4,6 +4,7 @@
 
 target_sources(amdhip64 PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/hip_capture.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip_capture_metadata.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hip_capture_writer.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hip_capture_generated.cpp
 )

@@ -22,9 +22,14 @@ using namespace mma_exact;
 constexpr uint32_t WF = 32;
 constexpr uint32_t S0 = 0, S1 = 32, ACC = 64, INDEX = 96;
 constexpr uint32_t IN_REGS = 16, ACC_REGS = 8, INDEX_REGS = 4;
-constexpr uint32_t INDEX_ENTRIES = 16, INDEX_KEY = 0;
+constexpr uint32_t INDEX_KEY = 0;
 constexpr uint32_t CONST_ONE = 0x3F800000u;
 constexpr uint32_t SCALE_A = 100, SCALE_B = 104;
+
+using WmmaF32SpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t,
+                               uint32_t, uint32_t);
+using WmmaF16SpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t,
+                               uint32_t);
 
 struct WmmaFixture : ExactFixture {
   WmmaFixture() : ExactFixture(ROCJITSU_CODE_ARCH_GFX1250, WF) {}
@@ -67,19 +72,21 @@ void run_dense_f16(const char *label, Fmt fmt, uint32_t K, uint32_t bits, Ea ea,
 }
 
 template <typename Ea, typename Eb>
-void run_sparse_f32(const char *label, Fmt fmt, uint32_t K, uint32_t bits, Ea ea, Eb eb) {
+void run_sparse_f32(const char *label, Fmt fmt, uint32_t K, uint32_t bits, uint32_t index_entries,
+                    Ea ea, Eb eb) {
   run_case(label, fmt, Fmt::F32, [=](WmmaFixture &fx, uint32_t const_acc) {
     amdgpu::exec_swmmac_f32(*fx.cu, 16, 16, K, bits, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
-                            fx.vbase + ACC, fx.vbase + INDEX, INDEX_ENTRIES, INDEX_KEY, ea, eb,
+                            fx.vbase + ACC, fx.vbase + INDEX, index_entries, INDEX_KEY, ea, eb,
                             const_acc);
   });
 }
 
 template <typename Ea, typename Eb>
-void run_sparse_f16(const char *label, Fmt fmt, uint32_t K, uint32_t bits, Ea ea, Eb eb) {
+void run_sparse_f16(const char *label, Fmt fmt, uint32_t K, uint32_t bits, uint32_t index_entries,
+                    Ea ea, Eb eb) {
   run_case(label, fmt, Fmt::F16, [=](WmmaFixture &fx, uint32_t const_acc) {
     amdgpu::exec_swmmac_f16(*fx.cu, 16, 16, K, bits, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
-                            fx.vbase + ACC, fx.vbase + INDEX, INDEX_ENTRIES, INDEX_KEY, ea, eb,
+                            fx.vbase + ACC, fx.vbase + INDEX, index_entries, INDEX_KEY, ea, eb,
                             const_acc);
   });
 }
@@ -133,12 +140,12 @@ TEST(WmmaSimdExact, Bf16) {
     amdgpu::exec_wmma_bf16_spec<16, 16, 32>(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
                                             fx.vbase + ACC, ca);
   });
-  run_sparse_f32("swmmac_f32_16x16x64_bf16", Fmt::BF16, 64, 16, amdgpu::extract_bf16,
+  run_sparse_f32("swmmac_f32_16x16x64_bf16", Fmt::BF16, 64, 16, 16, amdgpu::extract_bf16,
                  amdgpu::extract_bf16);
   run_case("swmmac_bf16_16x16x64_bf16", Fmt::BF16, Fmt::BF16, [](WmmaFixture &fx, uint32_t ca) {
     amdgpu::exec_swmmac_bf16(*fx.cu, 16, 16, 64, 16, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
-                             fx.vbase + ACC, fx.vbase + INDEX, INDEX_ENTRIES, INDEX_KEY,
-                             amdgpu::extract_bf16, amdgpu::extract_bf16, ca);
+                             fx.vbase + ACC, fx.vbase + INDEX, 16, INDEX_KEY, amdgpu::extract_bf16,
+                             amdgpu::extract_bf16, ca);
   });
 }
 
@@ -163,12 +170,12 @@ TEST(WmmaSimdExact, F8Dense) {
 // all four A/B format pairs, K=64 and K=128, f32 and f16 output. ---
 TEST(WmmaSimdExact, F8SpecDense) {
   SKIP_IF_NO_SIMD();
-  auto spec_f32 = [](auto fn, Fmt fmt, const char *label) {
+  auto spec_f32 = [](WmmaF32SpecFn fn, Fmt fmt, const char *label) {
     run_case(label, fmt, Fmt::F32, [fn](WmmaFixture &fx, uint32_t ca) {
-      fn(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, ca);
+      fn(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, ca, 0);
     });
   };
-  auto spec_f16 = [](auto fn, Fmt fmt, const char *label) {
+  auto spec_f16 = [](WmmaF16SpecFn fn, Fmt fmt, const char *label) {
     run_case(label, fmt, Fmt::F16, [fn](WmmaFixture &fx, uint32_t ca) {
       fn(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, ca);
     });
@@ -208,19 +215,19 @@ TEST(WmmaSimdExact, F8SpecDense) {
 // --- sparse f16/fp8 SWMMAC ---
 TEST(WmmaSimdExact, Sparse) {
   SKIP_IF_NO_SIMD();
-  run_sparse_f32("swmmac_f32_16x16x32_f16", Fmt::F16, 32, 16, amdgpu::extract_f16,
+  run_sparse_f32("swmmac_f32_16x16x32_f16", Fmt::F16, 32, 16, 16, amdgpu::extract_f16,
                  amdgpu::extract_f16);
-  run_sparse_f32("swmmac_f32_16x16x64_f16", Fmt::F16, 64, 16, amdgpu::extract_f16,
+  run_sparse_f32("swmmac_f32_16x16x64_f16", Fmt::F16, 64, 16, 16, amdgpu::extract_f16,
                  amdgpu::extract_f16);
-  run_sparse_f16("swmmac_f16_16x16x64_f16", Fmt::F16, 64, 16, amdgpu::extract_f16,
+  run_sparse_f16("swmmac_f16_16x16x64_f16", Fmt::F16, 64, 16, 16, amdgpu::extract_f16,
                  amdgpu::extract_f16);
-  run_sparse_f32("swmmac_f32_16x16x128_fp8", Fmt::FP8, 128, 8, amdgpu::extract_fp8,
+  run_sparse_f32("swmmac_f32_16x16x128_fp8", Fmt::FP8, 128, 8, 32, amdgpu::extract_fp8,
                  amdgpu::extract_fp8);
-  run_sparse_f32("swmmac_f32_16x16x128_bf8", Fmt::BF8, 128, 8, amdgpu::extract_bf8,
+  run_sparse_f32("swmmac_f32_16x16x128_bf8", Fmt::BF8, 128, 8, 32, amdgpu::extract_bf8,
                  amdgpu::extract_bf8);
-  run_sparse_f16("swmmac_f16_16x16x128_fp8", Fmt::FP8, 128, 8, amdgpu::extract_fp8,
+  run_sparse_f16("swmmac_f16_16x16x128_fp8", Fmt::FP8, 128, 8, 32, amdgpu::extract_fp8,
                  amdgpu::extract_fp8);
-  run_sparse_f16("swmmac_f16_16x16x128_bf8", Fmt::BF8, 128, 8, amdgpu::extract_bf8,
+  run_sparse_f16("swmmac_f16_16x16x128_bf8", Fmt::BF8, 128, 8, 32, amdgpu::extract_bf8,
                  amdgpu::extract_bf8);
 }
 
@@ -244,7 +251,7 @@ TEST(WmmaSimdExact, I32) {
   }
   run_case("swmmac_i32_16x16x32_i8", Fmt::I8, Fmt::I8, [](WmmaFixture &fx, uint32_t ca) {
     amdgpu::exec_swmmac_i32_i8(*fx.cu, 16, 16, 32, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
-                               fx.vbase + ACC, fx.vbase + INDEX, INDEX_ENTRIES, INDEX_KEY, ca);
+                               fx.vbase + ACC, fx.vbase + INDEX, 16, INDEX_KEY, ca);
   });
 }
 

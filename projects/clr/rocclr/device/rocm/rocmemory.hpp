@@ -114,6 +114,18 @@ class Memory : public device::Memory {
     return agent;
   }
 
+  //! Get the global index of the owning agent (computed during create(), thread-safe).
+  //! Lets copy paths classify agents (CPU / local / peer) without handle comparisons.
+  int getOwningAgentIndex() const {
+    return owningAgentIndex_.load(std::memory_order_acquire);
+  }
+
+  //! Recompute and cache the owning agent by querying pointer_info on the (already-backed)
+  //! device memory. Needed for VMM-mapped / VMM-imported (interprocess) memory: the true
+  //! owner is only known after hsa_amd_vmem_map backs the virtual address, which happens
+  //! after create() runs, so the agent cannot be resolved at create() time.
+  void refreshOwningAgentFromPointerInfo();
+
   //! Validates allocated memory for possible workarounds
   virtual bool ValidateMemory() { return true; }
 
@@ -123,9 +135,11 @@ class Memory : public device::Memory {
   // Decrement map count
   void decIndMapCount() override;
 
-  //! Set the owning agent (called during create() after allocation, thread-safe)
+  //! Set the owning agent (called during create() after allocation, thread-safe).
+  //! Also caches the agent's global index for fast classification during copies.
   void setOwningAgent(hsa_agent_t agent) {
     owningAgentHandle_.store(agent.handle, std::memory_order_release);
+    owningAgentIndex_.store(Device::agentGlobalIndex(agent), std::memory_order_release);
   }
 
   // Free / deregister device memory.
@@ -148,7 +162,7 @@ class Memory : public device::Memory {
   void* deviceMemory_;
 
   // Pointer to the interop device memory, which has an offset from deviceMemory_
-  void* interop_deviceMemory_;
+  void* interop_deviceMemory_ = nullptr;
 
   // Track if this memory is interop, lock, gart, or normal.
   MEMORY_KIND kind_;
@@ -176,6 +190,7 @@ class Memory : public device::Memory {
 
   amd::Memory* pinnedMemory_;        //!< Memory used as pinned system memory
   std::atomic<uint64_t> owningAgentHandle_;  //!< HSA agent handle (atomic for thread-safety)
+  std::atomic<int> owningAgentIndex_{-1};    //!< Global index of the owning agent (thread-safe)
 };
 
 class Buffer : public roc::Memory {

@@ -6,6 +6,7 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/except.h"
 
@@ -48,7 +49,7 @@ std::array<uint32_t, N> read_sgpr_group(const Wavefront &wf, int reg, bool allow
     throw util::UnimplementedInst("tensor DMA non-SGPR descriptor operand");
   const uint32_t base = wf.sgpr_alloc().base + static_cast<uint32_t>(reg);
   for (size_t i = 0; i < N; ++i)
-    words[i] = wf.cu().read_sgpr(base + static_cast<uint32_t>(i));
+    words[i] = amdgpu::RegisterAccess(wf).read_sgpr(base + static_cast<uint32_t>(i));
   return words;
 }
 
@@ -227,10 +228,10 @@ inline void copy_bytes(const TensorDmaDescriptor &desc, Wavefront &wf, uint64_t 
   for (uint32_t byte = 0; byte < desc.elem_size; ++byte) {
     if (store_from_lds) {
       if (in_bounds)
-        memory->write8(global_addr + byte, wf.cu().lds().read8(lds_addr + byte));
+        memory->write8(global_addr + byte, wf.lds().read8(lds_addr + byte));
     } else {
       const uint8_t value = in_bounds ? memory->read8(global_addr + byte) : 0;
-      wf.cu().lds().write8(lds_addr + byte, value);
+      wf.lds().write8(lds_addr + byte, value);
     }
   }
 }
@@ -309,8 +310,8 @@ inline void copy_tensor(const TensorDmaDescriptor &desc, Wavefront &wf, bool sto
 
 inline void arrive_atomic_barrier(const TensorDmaDescriptor &desc, Wavefront &wf) {
   const uint32_t addr = wf.lds_base() + desc.atomic_barrier_addr;
-  const uint64_t state = wf.cu().lds().read64(addr);
-  wf.cu().lds().write64(addr, lds_barrier_cell_update_arrive(state));
+  const uint64_t state = wf.lds().read64(addr);
+  wf.lds().write64(addr, lds_barrier_cell_update_arrive(state));
 }
 
 class ScopedWaitCounter {
