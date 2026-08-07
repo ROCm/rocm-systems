@@ -72,6 +72,50 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx950_AlltoAllIgnoresHighUserThreshold)
     EXPECT_TRUE(testRcclDdaEnabled(mockComm_.get(), eightMb, 8388608, 0));
 }
 
+TEST_F(DdaAlltoAllThresholdTest, Gfx1250_ExactlyAt4MbThreshold_Enabled)
+{
+    mockComm_.reset("gfx1250:sramecc+:xnack-");
+    const size_t totalBytes = kDdaAlltoAllGfx1250ThresholdBytes;
+    EXPECT_TRUE(testRcclDdaEnabled(
+        mockComm_.get(),
+        totalBytes,
+        kDdaAlltoAllGfx942ThresholdBytes,
+        kDdaAlltoAllGfx950ThresholdBytes,
+        kDdaAlltoAllGfx1250ThresholdBytes));
+    EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
+        mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
+}
+
+TEST_F(DdaAlltoAllThresholdTest, Gfx1250_OneByteOverThreshold_Disabled)
+{
+    mockComm_.reset("gfx1250:sramecc+:xnack-");
+    const size_t totalBytes = kDdaAlltoAllGfx1250ThresholdBytes + 1;
+    EXPECT_FALSE(testRcclDdaEnabled(
+        mockComm_.get(),
+        totalBytes,
+        kDdaAlltoAllGfx942ThresholdBytes,
+        kDdaAlltoAllGfx950ThresholdBytes,
+        kDdaAlltoAllGfx1250ThresholdBytes));
+    EXPECT_FALSE(testRcclDdaAlltoAllThresholdEnabled(
+        mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold + 1, ncclFloat32));
+}
+
+TEST_F(DdaAlltoAllThresholdTest, Gfx1250_AlltoAllIgnoresHighUserThreshold)
+{
+    mockComm_.reset("gfx1250:sramecc+:xnack-");
+    const size_t overCap = kDdaAlltoAllGfx1250ThresholdBytes + 1;
+    EXPECT_FALSE(testRcclDdaEnabled(
+        mockComm_.get(),
+        overCap,
+        kDdaAlltoAllGfx942ThresholdBytes,
+        kDdaAlltoAllGfx950ThresholdBytes,
+        kDdaAlltoAllGfx1250ThresholdBytes));
+
+    // Other collectives on gfx1250 still honor the user threshold when gfx1250Default is 0.
+    const size_t eightMb = 8 * 1024 * 1024;
+    EXPECT_TRUE(testRcclDdaEnabled(mockComm_.get(), eightMb, 8388608, 0, 0));
+}
+
 TEST_F(DdaAlltoAllThresholdTest, UnsupportedArch_Disabled)
 {
     mockComm_.reset("gfx1100");
