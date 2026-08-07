@@ -96,13 +96,12 @@ constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
 
 // Kernel-replay per-pass descriptor threaded into process_packet_batch. When non-null the batch is
 // one replay pass: the app's original completion signal is suppressed on every pass (fired once
-// after the whole loop by WriteInterceptor), every pass shares one dispatch_id, and a
-// CPU-observable barrier signal (pass_done) is appended so the WriteInterceptor thread can wait for
-// the pass to finish.
+// after the whole loop by WriteInterceptor) and every pass shares one dispatch_id. The
+// WriteInterceptor thread waits for each pass by draining the queue's async completion handler (see
+// replay_drain_or_fatal), not a GPU barrier.
 struct replay_pass_state_t
 {
     rocprofiler_dispatch_id_t fixed_dispatch_id = 0;
-    hsa_signal_t              pass_done         = {.handle = 0};
 };
 
 // Per-agent replay serialization (reader/writer). A replay's snapshot->restore window must exclude
@@ -129,6 +128,25 @@ agent_replay_mutex(rocprofiler_agent_id_t agent_id)
         mtx = slot.get();
     });
     return *mtx;
+}
+
+// Drain a queue's in-flight async completion handler(s) during replay. Unlike Queue::sync()'s
+// teardown use (warn once and proceed), a replay pass must NOT proceed while a handler is still
+// running: PASS-EXIT, the tool's continue-decision, restore(), and the next submit would race the
+// handler that is still emitting records, releasing signals, and dropping correlation-id refs.
+// sync() blocks up to one ~5s slice and reports whether the queue drained. Loop to extend the
+// bound to ~12 slices (~60s) with progress logs, then abort loudly (beta feature) rather than
+// hang forever or silently proceed on a genuinely stuck handler.
+void
+replay_drain_or_fatal(const Queue& queue)
+{
+    constexpr int kMaxSlices = 12;
+    for(int i = 0; i < kMaxSlices; ++i)
+        if(queue.sync()) return;
+    ROCP_FATAL << fmt::format(
+        "kernel replay: async completion handler(s) failed to drain ({} still active after ~{}s)",
+        queue.active_async_packets(),
+        kMaxSlices * 5);
 }
 
 template <typename DomainT, typename... Args>
@@ -813,12 +831,6 @@ WriteInterceptor(const void* packets,
                                        new std::shared_ptr<info_session_t>(shared));
         }
 
-        // Replay: append a CPU-observable barrier so the WriteInterceptor thread can block until
-        // this pass's GPU work (kernel + counter read/stop packets) has fully drained before it
-        // snaps/restores and submits the next pass.
-        if(_replay && _replay->pass_done.handle != 0)
-            CreateBarrierPacket(nullptr, &_replay->pass_done, transformed_packets);
-
         // Command is only executed if GLOG_v=2 or higher, otherwise it is a no-op
         ROCP_TRACE << fmt::format("QueueID {}: {}",
                                   queue.get_id().handle,
@@ -896,7 +908,7 @@ WriteInterceptor(const void* packets,
                 queue_controller->iterate_queues([&replay_agent](const Queue* sibling) {
                     if(sibling != nullptr &&
                        sibling->get_agent().get_hsa_agent().handle == replay_agent.handle)
-                        sibling->sync();
+                        replay_drain_or_fatal(*sibling);
                 });
             }
 
@@ -911,16 +923,10 @@ WriteInterceptor(const void* packets,
             // when the guard exits; global context state is never touched.
             auto local_ctx_tls_guard = kernel_replay::scoped_local_context_control{};
 
-            // pass_done is reused across passes: reset to 1 before each submit so the barrier
-            // appended in process_packet_batch decrements it to 0 when the pass completes.
-            hsa_signal_t pass_done = null_hsa_signal;
-            Queue::create_signal(0, &pass_done, /*use_pool=*/false);
+            auto replay_state = replay_pass_state_t{};
 
-            auto replay_state      = replay_pass_state_t{};
-            replay_state.pass_done = pass_done;
-
-            // Per-pass loop: PASS enter -> submit -> wait for completion -> PASS exit -> ask the
-            // tool whether to continue -> restore device memory before the next pass.
+            // Per-pass loop: PASS enter -> submit -> drain the async handler -> PASS exit -> ask
+            // the tool whether to continue -> restore device memory before the next pass.
             for(uint64_t pass = 0;; ++pass)
             {
                 const bool is_final =
@@ -930,8 +936,6 @@ WriteInterceptor(const void* packets,
                 kernel_replay::execute_pass_phase_enter(
                     replay_plan, pass, thr_id, internal_corr_id, ancestor_corr_id, pass_state);
 
-                core.hsa_signal_store_screlease_fn(pass_done, 1);
-
                 process_packet_batch(
                     packets_arr,
                     1,
@@ -940,8 +944,14 @@ WriteInterceptor(const void* packets,
                     },
                     &replay_state);
 
-                core.hsa_signal_wait_scacquire_fn(
-                    pass_done, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+                // Drain this pass's async handler (separate HSA thread: reads counters, emits
+                // records, releases signals/corr-id refs) before PASS EXIT / continue-decision /
+                // restore() / next submit, else we race its record delivery and reuse buffers and
+                // signals it still holds. This also implies GPU drain. Exactly one handler is in
+                // flight per pass (we drain before each submit, under the agent writer lock).
+                ROCP_FATAL_IF(queue.active_async_packets() > 1)
+                    << "kernel replay: more than one async handler in flight during a replay pass";
+                replay_drain_or_fatal(queue);
 
                 kernel_replay::execute_pass_phase_exit(replay_plan, pass, pass_state);
 
@@ -957,10 +967,10 @@ WriteInterceptor(const void* packets,
                 replay_plan, thr_id, internal_corr_id, ancestor_corr_id);
 
             // Fire the app's original completion signal once, now that the final executed pass has
-            // completed (we already CPU-waited on pass_done above). A trailing barrier decrements
-            // it exactly as the single-pass path would, so the application unblocks and the next
-            // kernel on this GPU can dispatch. This is deferred out of the per-pass path so
-            // early-exit and indefinite loops signal on the actual last pass rather than at pass
+            // completed (we already drained the final pass's handler above). A trailing barrier
+            // decrements it exactly as the single-pass path would, so the application unblocks and
+            // the next kernel on this GPU can dispatch. This is deferred out of the per-pass path
+            // so early-exit and indefinite loops signal on the actual last pass rather than at pass
             // N-1.
             if(app_completion_signal.handle != 0)
             {
@@ -971,7 +981,6 @@ WriteInterceptor(const void* packets,
 
             // Clean up our private signals (never the app's completion signal).
             if(drain_signal.handle != 0) get_core_table()->hsa_signal_destroy_fn(drain_signal);
-            if(pass_done.handle != 0) get_core_table()->hsa_signal_destroy_fn(pass_done);
             return;
         }
     }
@@ -1263,22 +1272,19 @@ Queue::destroy_signal(pooled_signal_t* signal)
     }
 }
 
-void
+bool
 Queue::sync() const
 {
-    if(_active_kernels.handle != 0u)
-    {
-        constexpr auto timeout_hint =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{5});
-        auto _value = _core_api.hsa_signal_wait_relaxed_fn(_active_kernels,
-                                                           HSA_SIGNAL_CONDITION_EQ,
-                                                           0,
-                                                           timeout_hint.count(),
-                                                           HSA_WAIT_STATE_BLOCKED);
+    if(_active_kernels.handle == 0u) return true;
 
-        ROCP_WARNING_IF(_value != 0)
-            << fmt::format("Timeout while waiting for queue sync: {} kernels still active", _value);
-    }
+    constexpr auto timeout_hint =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{5});
+    auto _value = _core_api.hsa_signal_wait_relaxed_fn(
+        _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, timeout_hint.count(), HSA_WAIT_STATE_BLOCKED);
+
+    ROCP_WARNING_IF(_value != 0) << fmt::format(
+        "Timeout while waiting for queue sync: {} kernels still active", _value);
+    return _value == 0;
 }
 
 void
