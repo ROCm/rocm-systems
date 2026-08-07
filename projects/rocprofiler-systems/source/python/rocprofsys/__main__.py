@@ -251,6 +251,23 @@ def run(prof, cmd):
     prof.runctx(code, globs, None)
 
 
+def apply_config_option(args):
+    """Set the config-file environment variable before loading profiler bindings."""
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument("-c", "--config")
+    opts, _ = parser.parse_known_args(args)
+    if opts.config is None:
+        return
+
+    # If the environment already has a config file, keep it and add ours after
+    # it (colon-separated), so both get read. Otherwise, just use ours.
+    existing_config_file = os.environ.get("ROCPROFSYS_CONFIG_FILE")
+    if existing_config_file:
+        os.environ["ROCPROFSYS_CONFIG_FILE"] = existing_config_file + ":" + opts.config
+    else:
+        os.environ["ROCPROFSYS_CONFIG_FILE"] = opts.config
+
+
 def main(main_args=sys.argv):
     """Main function"""
 
@@ -259,6 +276,7 @@ def main(main_args=sys.argv):
     if "--" in main_args:
         _idx = main_args.index("--")
         _argv = main_args[(_idx + 1) :]
+        apply_config_option(main_args[1:_idx])
         opts = parse_args(main_args[1:_idx])
         argv = _argv
     else:
@@ -287,11 +305,6 @@ def main(main_args=sys.argv):
 
     if argv:
         os.environ["ROCPROFSYS_COMMAND_LINE"] = " ".join(argv)
-
-    if opts.config is not None:
-        os.environ["ROCPROFSYS_CONFIG_FILE"] = ":".join(
-            [os.environ.get("ROCPROFSYS_CONFIG_FILE", ""), opts.config]
-        )
 
     from .libpyrocprofsys import initialize
 

@@ -17,6 +17,8 @@ This submodule imports the timemory Python function profiler
 
 try:
     import os
+    import sys
+    import importlib
     from pathlib import Path
 
     # Set up ROCPROFSYS environment variables
@@ -30,24 +32,6 @@ try:
             ),
         }
     )
-
-    from .libpyrocprofsys import coverage
-    from . import user
-    from .profiler import Profiler, FakeProfiler
-    from .libpyrocprofsys.profiler import (
-        profiler_function,
-        profiler_init,
-        profiler_finalize,
-    )
-    from .libpyrocprofsys import initialize
-    from .libpyrocprofsys import finalize
-    from .libpyrocprofsys import is_initialized
-    from .libpyrocprofsys import is_finalized
-    from .libpyrocprofsys.profiler import config as Config
-
-    config = Config
-    profile = Profiler
-    noprofile = FakeProfiler
 
     __all__ = [
         "initialize",
@@ -67,11 +51,46 @@ try:
         "user",
     ]
 
+    def _load_profiler_bindings():
+        """Load the profiler API after command-line configuration is available."""
+        bindings = importlib.import_module(".libpyrocprofsys", __name__)
+        profiler = importlib.import_module(".profiler", __name__)
+        native_profiler = importlib.import_module(".libpyrocprofsys.profiler", __name__)
+        user = importlib.import_module(".user", __name__)
+
+        globals().update(
+            {
+                "coverage": bindings.coverage,
+                "user": user,
+                "Profiler": profiler.Profiler,
+                "FakeProfiler": profiler.FakeProfiler,
+                "profiler_function": native_profiler.profiler_function,
+                "profiler_init": native_profiler.profiler_init,
+                "profiler_finalize": native_profiler.profiler_finalize,
+                "initialize": bindings.initialize,
+                "finalize": bindings.finalize,
+                "is_initialized": bindings.is_initialized,
+                "is_finalized": bindings.is_finalized,
+                "Config": native_profiler.config,
+                "config": native_profiler.config,
+                "profile": profiler.Profiler,
+                "noprofile": profiler.FakeProfiler,
+            }
+        )
+
+    def __getattr__(name):
+        if name not in __all__:
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+        _load_profiler_bindings()
+        return globals()[name]
+
     import atexit
 
     def _finalize_at_exit():
-        if not is_finalized():
-            finalize()
+        bindings = sys.modules.get(f"{__name__}.libpyrocprofsys")
+        if bindings is not None and not bindings.is_finalized():
+            bindings.finalize()
 
     atexit.register(_finalize_at_exit)
 
