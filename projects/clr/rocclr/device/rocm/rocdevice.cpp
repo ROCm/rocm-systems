@@ -3285,6 +3285,16 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
               !second_candidate.second.hasDedicatedQueue_;
           if (first_is_unshared != second_is_unshared) return first_is_unshared;
 
+          // Both idle-unshared: reuse in LRU order (smaller lastReleaseSeq_ == released
+          // longer ago). Avoids immediately re-handing-out a queue whose CP pipe may still
+          // be draining from a prior blocking waiter, which can fault a fresh dispatch.
+          if (first_is_unshared && second_is_unshared &&
+              first_candidate.second.lastReleaseSeq_ !=
+                  second_candidate.second.lastReleaseSeq_) {
+            return first_candidate.second.lastReleaseSeq_ <
+                   second_candidate.second.lastReleaseSeq_;
+          }
+
           if (mode >= 1) {
             // Mode 1+: Advanced weighted metric with dedicated queue penalty
             // Metric = dedicated_queue_penalty + (depth << 4) + refCount
@@ -3629,6 +3639,10 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
         auto& qInfo = qIter->second;
         assert(qInfo.refCount > 0);
         qInfo.refCount--;
+        if (qInfo.refCount == 0) {
+          // Stamp release order so getQueueFromPool reuses idle queues LRU-first.
+          qInfo.lastReleaseSeq_ = ++queueReleaseSeq_;
+        }
         ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "releaseQueue refCount:%p (%d)",
                 qIter->first->base_address, qIter->second.refCount);
         break;  // Found and processed the queue

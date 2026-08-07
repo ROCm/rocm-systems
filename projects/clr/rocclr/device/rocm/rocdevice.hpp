@@ -772,9 +772,13 @@ class Device : public NullDevice {
   struct QueueInfo {
     int refCount;             //! Reference counter. Shows how many time the queue was shared
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
+    //! Monotonic stamp of when this queue last became idle. Larger == released more
+    //! recently. Idle queues are reused LRU-first so a just-released queue (whose CP pipe
+    //! may still be draining) is not immediately handed back out.
+    uint64_t lastReleaseSeq_;
 
     // Constructor
-    QueueInfo() : refCount(0), hasDedicatedQueue_(false) {}
+    QueueInfo() : refCount(0), hasDedicatedQueue_(false), lastReleaseSeq_(0) {}
 
     //! Get the current hardware queue depth (wptr - rptr)
     static uint64_t GetHwQueueDepth(hsa_queue_t* queue) {
@@ -805,6 +809,7 @@ class Device : public NullDevice {
   std::vector<std::map<hsa_queue_t*, QueueInfo, QueueCompare>> queuePool_;
   amd::Monitor active_queue_access_;            //!< Lock to serialise virtual gpu list access
   std::atomic<uint32_t> num_queues_[QueuePriority::Total] = {};  //!< Per-priority queue counters
+  std::atomic<uint64_t> queueReleaseSeq_{0};    //!< Monotonic counter stamped when a queue goes idle
 
   //! Use dynamic queues mode to get a queue from pool
   hsa_queue_t* getQueueFromPool(const uint qIndex, bool force_reuse = false,
