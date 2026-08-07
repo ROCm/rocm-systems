@@ -6,8 +6,19 @@
 #include "agent_utils.h"
 #include "debug.h"
 
+#include <getopt.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <fstream>
+#include <iostream>
+#include <iterator>
+#include <memory>
 #include <sstream>
 
 namespace amd::debug_agent
@@ -139,6 +150,73 @@ sanitize_uri_for_filename (const std::string &uri)
     name[pos] = '_';
 
   return name;
+}
+
+/* Path format token expansion.  */
+
+std::string
+expand_format_tokens (const std::string &format)
+{
+  std::string result;
+  result.reserve (format.size ());
+
+  for (size_t i = 0; i < format.size (); ++i)
+    {
+      if (format[i] != '%' || i + 1 == format.size ())
+        {
+          result += format[i];
+          continue;
+        }
+
+      switch (format[++i])
+        {
+        case 'p':
+          result += std::to_string (::getpid ());
+          break;
+
+        case 'h':
+          {
+            char hostname[256] = {};
+            if (::gethostname (hostname, sizeof (hostname) - 1) == 0)
+              result += hostname;
+          }
+          break;
+
+        case 't':
+          result
+              += std::to_string (static_cast<long long> (std::time (nullptr)));
+          break;
+
+        case 'e':
+          {
+            std::ifstream comm ("/proc/self/comm");
+            std::string name;
+            if (comm && std::getline (comm, name))
+              result += name;
+          }
+          break;
+
+        case 'u':
+          result += std::to_string (::getuid ());
+          break;
+
+        case 'g':
+          result += std::to_string (::getgid ());
+          break;
+
+        case '%':
+          result += '%';
+          break;
+
+        default:
+          /* Leave unrecognized tokens unchanged.  */
+          result += '%';
+          result += format[i];
+          break;
+        }
+    }
+
+  return result;
 }
 
 } /* namespace amd::debug_agent */
