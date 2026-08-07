@@ -137,9 +137,7 @@ def insert_chart_data(mem_data: list[dict[str, Any]], base_data: schema.Workload
                 fill="#FFFF33",
                 fontSize="20px",
                 fontWeight="bold",
-                children=format_value_for_display(
-                    memchart_values.get("Active CUs (deprecated)")
-                ),
+                children=format_value_for_display(memchart_values.get("Active CUs")),
             ),  # x=454
             Text(
                 x="580",
