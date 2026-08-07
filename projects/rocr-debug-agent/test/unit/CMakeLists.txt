@@ -45,12 +45,14 @@ add_executable(
     rocm-debug-agent-unit-tests
     test_uri.cpp
     test_formatting.cpp
+    test_options.cpp
 )
 
 # Link directly to source files (not the .so).
 target_sources(
     rocm-debug-agent-unit-tests
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/agent_config.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/agent_utils.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/logging.cpp
 )
