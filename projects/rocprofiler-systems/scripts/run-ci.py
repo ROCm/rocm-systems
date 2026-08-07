@@ -64,9 +64,19 @@ def log(msg, level="info"):
             print(f"[INFO] {msg}", flush=True)
 
 
+def _escape_workflow_data(text):
+    """Percent-encode the characters that would end a "::command::" line.
+
+    GitHub Actions parses workflow commands one line at a time, so a CR or LF
+    inside a title truncates the command and lets the remainder be read as a
+    new one; "%" has to go first so the escapes below are not re-escaped.
+    """
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
 def log_group_start(title):
     if IS_GITHUB_ACTIONS:
-        print(f"::group::{title}", flush=True)
+        print(f"::group::{_escape_workflow_data(title)}", flush=True)
     else:
         bar = "=" * 60
         print(_color(f"\n{bar}\n{title}\n{bar}", "cyan", "bold"), flush=True)
@@ -581,8 +591,10 @@ def set_python_hints_from_cmake_args(cmake_args):
 # lives only inline in Testing/<TAG>/Build.xml, where CTest's XML writer has
 # already replaced every non-XML-safe control byte (including the ESC byte
 # that starts each compiler color code) with the literal text
-# "[NON-XML-CHAR-0xNN]". Build failures therefore need XML recovery instead
-# of a raw-log read; configure does not.
+# "[NON-XML-CHAR-0xNN]". Build failures therefore need XML recovery to get
+# those bytes back; configure does not. Test failures read Test.xml for an
+# unrelated reason: LastTest.log concatenates every test's output, so only
+# the XML keeps it attributed per test and lets the passing ones be dropped.
 # ---------------------------------------------------------------------------
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
