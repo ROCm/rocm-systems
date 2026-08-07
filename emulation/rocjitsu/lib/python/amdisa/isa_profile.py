@@ -62,6 +62,13 @@ class MatrixLayout(Enum):
     WMMA_SPLIT_K = auto()
 
 
+class Fp8EncodingMode(Enum):
+    """Bit encoding used by FP8 and BF8 matrix operands."""
+
+    OCP = auto()
+    FNUZ = auto()
+
+
 @dataclass
 class EncodingModifier:
     """A disassembly modifier to append to an encoding's mnemonic output.
@@ -904,6 +911,11 @@ class _AmdgpuProfileBase(IsaProfile):
         return MatrixLayout.MFMA_ACCUMULATOR
 
     @property
+    def fp8_encoding_mode(self) -> Fp8EncodingMode:
+        """FP8/BF8 encoding used by matrix instructions."""
+        return Fp8EncodingMode.OCP
+
+    @property
     def supports_matrix_data_type_selectors(self) -> bool:
         """True when instruction fields select the Matrix A and B data types."""
         return False
@@ -1043,6 +1055,11 @@ class CdnaProfile(_AmdgpuProfileBase):
     # uses the correct name; the rename is a no-op there.
     _VOP3P_FIELD_RENAMES: dict[str, str] = {'pad_14': 'op_sel_hi_2'}
 
+    def __init__(
+        self, fp8_encoding_mode: Fp8EncodingMode = Fp8EncodingMode.OCP
+    ) -> None:
+        self._fp8_encoding_mode = fp8_encoding_mode
+
     def field_renames(self, enc_name: str) -> dict[str, str]:
         upper = enc_name.upper()
         if upper == 'ENC_FLAT':
@@ -1091,6 +1108,10 @@ class CdnaProfile(_AmdgpuProfileBase):
     @property
     def has_mfma(self) -> bool:
         return True
+
+    @property
+    def fp8_encoding_mode(self) -> Fp8EncodingMode:
+        return self._fp8_encoding_mode
 
     @property
     def supports_f64_mfma_blgp_neg(self) -> bool:

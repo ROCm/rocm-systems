@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from amdisa.codegen.execute.fp8_formats import FNUZ_FP8_ARCHES, fp8_helper_name
+from amdisa.codegen.execute.fp8_formats import (
+    fp8_fnuz_template_suffix,
+    fp8_helper_name_for_mode,
+)
 from amdisa.isa_profile import MatrixLayout
 
 if TYPE_CHECKING:
@@ -111,7 +114,6 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     initialization without clobbering overlapping source operands.
     """
     inst, dst, src = ctx.inst, ctx.dst_ops, ctx.src_ops
-    arch_name = ctx.arch_name
     name = inst.name
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
 
@@ -159,8 +161,12 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             'BF16': 'amdgpu::smfmac_read_bf16',
         }
         _SMFMAC_FP8_READ = {
-            'FP8': fp8_helper_name(arch_name, 'amdgpu::smfmac_read_fp8'),
-            'BF8': fp8_helper_name(arch_name, 'amdgpu::smfmac_read_bf8'),
+            'FP8': fp8_helper_name_for_mode(
+                ctx.profile.fp8_encoding_mode, 'amdgpu::smfmac_read_fp8'
+            ),
+            'BF8': fp8_helper_name_for_mode(
+                ctx.profile.fp8_encoding_mode, 'amdgpu::smfmac_read_bf8'
+            ),
         }
         L = []
         L.append(f'  auto &cu = wf.cu();')
@@ -260,7 +266,6 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     L = []
     L.append(f'  auto &cu = wf.cu();')
     L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
-    arch = arch_name
     is_dense_wmma = name.startswith('V_WMMA_')
     uses_runtime_wave_split_k_sparse_layout = (
         ctx.profile.matrix_layout is MatrixLayout.WMMA_SPLIT_K
@@ -532,8 +537,14 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             L.append(f'    throw util::UnimplementedInst(mnemonic());')
             return '\n'.join(L)
 
-        ea = fp8_helper_name(arch, _EXTRACT_A.get(input_type, 'amdgpu::extract_f32'))
-        eb = fp8_helper_name(arch, _EXTRACT_B.get(input_type, 'amdgpu::extract_f32'))
+        ea = fp8_helper_name_for_mode(
+            ctx.profile.fp8_encoding_mode,
+            _EXTRACT_A.get(input_type, 'amdgpu::extract_f32'),
+        )
+        eb = fp8_helper_name_for_mode(
+            ctx.profile.fp8_encoding_mode,
+            _EXTRACT_B.get(input_type, 'amdgpu::extract_f32'),
+        )
         # CDNA1-4 VOP3P_MFMA encoding has cbsz/abid/blgp fields for
         # A-matrix broadcast and B-matrix lane permutation. RDNA does
         # not have MFMA (only WMMA), so these fields don't exist.
@@ -708,7 +719,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             s1b = f'amdgpu::src_base(vb, {s1}.encoding_value_)'
             if N % 16 == 0 and input_type in _F8_FIXED and has_matrix_modifiers:
                 a_fp8, b_fp8 = _f8_bools(input_type)
-                fnuz = ', true' if arch in FNUZ_FP8_ARCHES else ''
+                fnuz = fp8_fnuz_template_suffix(ctx.profile.fp8_encoding_mode)
                 L.append(
                     f'  amdgpu::exec_f32_mfma_f8_spec<{M}, {N}, {K}, {a_fp8}, {b_fp8}{fnuz}>('
                     f'cu, dst, {s0b}, {s1b}, s2, const_acc, {cbsz}, {abid}, {blgp});'

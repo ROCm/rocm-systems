@@ -12,13 +12,14 @@ from amdisa.codegen._generator import (
     _ImplOutputs,
     _SourceImplUnit,
 )
-from amdisa.__main__ import _detect_profile
+from amdisa.__main__ import _PROFILES, _detect_profile
 from amdisa.gpuisa import InstEncoding, Instruction, MicrocodeField
 from amdisa.isa_properties_codegen import emit_isa_properties
 from amdisa.isa_profile import (
     Cdna1Profile,
     Cdna2Profile,
     CdnaProfile,
+    Fp8EncodingMode,
     Gfx1250Profile,
     MatrixLayout,
     MemoryCoherencyModel,
@@ -115,6 +116,26 @@ def test_uses_vgpr_msb_indexing(profile, expected):
 )
 def test_matrix_layout(profile, expected):
     assert profile.matrix_layout is expected
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (_PROFILES['cdna'](), Fp8EncodingMode.OCP),
+        (_PROFILES['cdna1'](), Fp8EncodingMode.OCP),
+        (_PROFILES['cdna2'](), Fp8EncodingMode.OCP),
+        (_PROFILES['cdna3'](), Fp8EncodingMode.FNUZ),
+        (_PROFILES['cdna4'](), Fp8EncodingMode.OCP),
+        (_PROFILES['rdna1'](), Fp8EncodingMode.OCP),
+        (_PROFILES['rdna2'](), Fp8EncodingMode.OCP),
+        (_PROFILES['rdna3'](), Fp8EncodingMode.OCP),
+        (_PROFILES['rdna3.5'](), Fp8EncodingMode.OCP),
+        (_PROFILES['rdna4'](), Fp8EncodingMode.OCP),
+        (_PROFILES['gfx1250'](), Fp8EncodingMode.OCP),
+    ],
+)
+def test_fp8_encoding_mode(profile, expected):
+    assert profile.fp8_encoding_mode is expected
 
 
 @pytest.mark.parametrize(

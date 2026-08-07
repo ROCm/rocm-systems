@@ -38,6 +38,7 @@ from amdisa.isa_profile import (
     Cdna1Profile,
     Cdna2Profile,
     CdnaProfile,
+    Fp8EncodingMode,
     Gfx1250Profile,
     MatrixLayout,
     Rdna1Profile,
@@ -105,6 +106,7 @@ def _matrix_profile(
     supports_matrix_data_type_selectors: bool = False,
     matrix_data_type_selector_fields: tuple[str, str, str] | None = None,
     supports_f64_mfma_blgp_neg: bool = False,
+    fp8_encoding_mode: Fp8EncodingMode = Fp8EncodingMode.OCP,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
@@ -114,6 +116,7 @@ def _matrix_profile(
         supports_matrix_data_type_selectors=supports_matrix_data_type_selectors,
         matrix_data_type_selector_fields=matrix_data_type_selector_fields,
         supports_f64_mfma_blgp_neg=supports_f64_mfma_blgp_neg,
+        fp8_encoding_mode=fp8_encoding_mode,
     )
 
 
@@ -1632,27 +1635,43 @@ def test_runtime_wave_split_k_i32_does_not_use_fixed_wave32_executor():
     assert 'inst_.clamp, const_acc, wf.wf_size());' in body
 
 
-def test_cdna3_fp8_mfma_uses_fnuz_helper_variant():
+@pytest.mark.parametrize(
+    ('mode', 'template_args'),
+    [
+        (Fp8EncodingMode.FNUZ, 'true, true, true'),
+        (Fp8EncodingMode.OCP, 'true, true'),
+    ],
+)
+def test_fp8_mfma_uses_profile_encoding_mode(mode, template_args):
     inst = Instruction('V_MFMA_F32_16X16X32_FP8_FP8', 'ENC_VOP3P_MFMA', 0, [])
-    body = _gen_mfma(inst, 'cdna3', enc_field_names={'cbsz', 'abid', 'blgp'})
+    profile = _matrix_profile(fp8_encoding_mode=mode)
+    body = _gen_mfma(
+        inst,
+        'architecture_name_does_not_select_fp8',
+        profile,
+        {'cbsz', 'abid', 'blgp'},
+    )
 
-    assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true, true>(' in body
+    assert f'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, {template_args}>(' in body
 
 
-def test_cdna3_fp8_smfmac_uses_fnuz_readers():
+@pytest.mark.parametrize(
+    ('mode', 'reader_suffix'),
+    [
+        (Fp8EncodingMode.FNUZ, '_fnuz'),
+        (Fp8EncodingMode.OCP, ''),
+    ],
+)
+def test_fp8_smfmac_uses_profile_encoding_mode(mode, reader_suffix):
     inst = Instruction('V_SMFMAC_F32_16X16X64_FP8_BF8', 'ENC_VOP3P_MFMA', 0, [])
-    body = _gen_mfma(inst, 'cdna3')
+    profile = _matrix_profile(fp8_encoding_mode=mode)
+    body = _gen_mfma(inst, 'architecture_name_does_not_select_fp8', profile)
 
-    assert 'amdgpu::smfmac_read_fp8_fnuz' in body
-    assert 'amdgpu::smfmac_read_bf8_fnuz' in body
-
-
-def test_cdna4_fp8_mfma_keeps_ocp_helper_variant():
-    inst = Instruction('V_MFMA_F32_16X16X32_FP8_FP8', 'ENC_VOP3P_MFMA', 0, [])
-    body = _gen_mfma(inst, 'cdna4', enc_field_names={'cbsz', 'abid', 'blgp'})
-
-    assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true>(' in body
-    assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true, true>(' not in body
+    assert f'amdgpu::smfmac_read_fp8{reader_suffix}' in body
+    assert f'amdgpu::smfmac_read_bf8{reader_suffix}' in body
+    if mode is Fp8EncodingMode.OCP:
+        assert 'smfmac_read_fp8_fnuz' not in body
+        assert 'smfmac_read_bf8_fnuz' not in body
 
 
 def test_cdna3_fp8_cvt_uses_fnuz_helper_variant():
@@ -2970,7 +2989,7 @@ def test_shared_execute_preflight_detects_cdna3_fp8_cvt_divergence():
     assert 'util::fp8_e4m3_fnuz_to_f32' not in vop1_fp8_variants['cdna4'][2]
 
 
-def test_multi_isa_regen_keeps_divergent_fp8_cvt_bodies_isa_local(tmp_path):
+def test_multi_isa_regen_uses_each_profile_fp8_encoding_mode(tmp_path):
     args = SimpleNamespace(
         multi=[
             f'cdna3:{_mrisa_dir() / "amdgpu_isa_cdna3.xml"}',
@@ -2987,6 +3006,8 @@ def test_multi_isa_regen_keeps_divergent_fp8_cvt_bodies_isa_local(tmp_path):
     shared = (tmp_path / 'shared' / 'execute_shared.h').read_text()
     cdna3_vop1 = (tmp_path / 'cdna3' / 'vop1.cpp').read_text()
     cdna4_vop1 = (tmp_path / 'cdna4' / 'vop1.cpp').read_text()
+    cdna3_vop3p = (tmp_path / 'cdna3' / 'vop3p.cpp').read_text()
+    cdna4_vop3p = (tmp_path / 'cdna4' / 'vop3p.cpp').read_text()
 
     assert 'inline void execute_v_cvt_f32_fp8_vop1' not in shared
     assert 'inline void execute_v_cvt_f32_bf8_vop1' not in shared
@@ -3008,6 +3029,12 @@ def test_multi_isa_regen_keeps_divergent_fp8_cvt_bodies_isa_local(tmp_path):
     assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_fp8_body
     assert 'amdgpu::execute_v_cvt_f32_fp8_vop1' not in cdna3_fp8_body
     assert 'amdgpu::execute_v_cvt_f32_fp8_vop1' not in cdna4_fp8_body
+    assert 'exec_f32_mfma_f8_spec<16, 16, 32, true, true, true>' in cdna3_vop3p
+    assert 'amdgpu::smfmac_read_fp8_fnuz' in cdna3_vop3p
+    assert 'amdgpu::smfmac_read_bf8_fnuz' in cdna3_vop3p
+    assert 'exec_f32_mfma_f8_spec<16, 16, 32, true, true>' in cdna4_vop3p
+    assert 'amdgpu::smfmac_read_fp8_fnuz' not in cdna4_vop3p
+    assert 'amdgpu::smfmac_read_bf8_fnuz' not in cdna4_vop3p
 
 
 def test_cdna3_generated_cvt_and_mfma_use_same_fnuz_format(
