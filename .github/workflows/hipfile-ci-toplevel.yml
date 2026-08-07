@@ -290,3 +290,21 @@ jobs:
     uses: ./.github/workflows/hipfile-clang-tidy.yml
     with:
       ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}
+
+  # Compile-only check that hipFile's dispatch-table ABI still satisfies the
+  # rocprofiler-sdk profiler's static_asserts. Guards against the profiler build
+  # breaking post-merge when a hipFile ABI change lands without a matching
+  # profiler update. Platform/standard independent, so run once against a single
+  # fixed image (the same convention as clang_tidy/sanitizers above).
+  profiler_abi:
+    if: >-
+      ${{
+        !cancelled() && (
+          needs.build_CI_image.result == 'success' ||
+          needs.build_CI_image.result == 'skipped'
+        )
+      }}
+    needs: [Precheck, build_CI_image]
+    uses: ./.github/workflows/hipfile-profiler-abi.yml
+    with:
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}

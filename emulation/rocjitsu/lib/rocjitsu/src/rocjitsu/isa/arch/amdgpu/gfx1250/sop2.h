@@ -615,6 +615,7 @@ public:
   SAddF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
@@ -625,6 +626,7 @@ public:
   SSubF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
@@ -635,6 +637,7 @@ public:
   SMinNumF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
@@ -645,6 +648,7 @@ public:
   SMaxNumF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
@@ -655,6 +659,7 @@ public:
   SMulF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
@@ -665,6 +670,7 @@ public:
   SFmacF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
@@ -693,6 +699,7 @@ public:
   SMinimumF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
@@ -703,6 +710,7 @@ public:
   SMaximumF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;

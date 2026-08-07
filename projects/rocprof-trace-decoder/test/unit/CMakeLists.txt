@@ -9,6 +9,8 @@ project(att-decoder-unit-tests LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+include(${TTD_PROJECT_SOURCE_DIR}/cmake/version.cmake)
+
 function(create_system_gtest_targets)
     find_path(GTEST_INCLUDE_DIR NAMES gtest/gtest.h)
     find_library(GTEST_LIBRARY NAMES gtest)
@@ -130,7 +132,8 @@ set(TEST_FILES
     quick_scan_api_test.cpp
     sqttparser_test.cpp
     mi400_test.cpp
-    funcmap_test.cpp)
+    funcmap_test.cpp
+    version_test.cpp)
 
 # Function to create a test executable with specific sanitizer options Re-list library sources for sanitizer builds
 # (must be recompiled with sanitizer flags)
@@ -158,6 +161,7 @@ function(add_unit_test_executable TARGET_NAME SANITIZER_TYPE)
     endif()
 
     target_include_directories(${TARGET_NAME} PRIVATE ${SRC_DIR} ${INC_DIR})
+    target_compile_definitions(${TARGET_NAME} PRIVATE ${TTD_VERSION_COMPILE_DEFS})
 
     if(NOT SANITIZER_TYPE STREQUAL "regular")
         if(DISABLE_COMGR)

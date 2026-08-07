@@ -40,10 +40,12 @@ class ProfiledExecutionPluginGroup : public ExecutionPluginGroup {
   };
 
 public:
-  ProfiledExecutionPluginGroup() : start_time_(Clock::now()) {}
+  explicit ProfiledExecutionPluginGroup(PluginSinkConfig config)
+      : ExecutionPluginGroup(std::move(config)), start_time_(Clock::now()) {}
 
   void onInit() override {
-    if (auto *s = build_composite_sink("profile.log"))
+    profile_sink_ = build_sink_bundle("profile.log");
+    if (auto *s = profile_sink_.get())
       sink_ = s;
     ExecutionPluginGroup::onInit();
   }
@@ -202,6 +204,7 @@ private:
   PluginSink &sink() { return *sink_; }
 
   Clock::time_point start_time_;
+  SinkBundle profile_sink_;
   PluginSink *sink_ = &StderrSink::instance();
   std::string current_kernel_name_;
   std::unordered_map<uint32_t, std::string> dispatch_kernel_names_;
