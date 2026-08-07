@@ -675,6 +675,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->ddaFabricMaxBlocks = 0;
   comm->ddaLLEpochDev = nullptr;
   comm->ddaLLEpochLen = 0;
+  comm->ddaLL128AgSlotWords = 0;
+  comm->ddaLL128AgMaxPerRankBytes = 0;
 
   comm->rank = rank;
   comm->nRanks = ndev;

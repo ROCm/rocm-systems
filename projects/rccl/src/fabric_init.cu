@@ -6,6 +6,7 @@
 
 #include "fabric_init.h"
 
+#include "algorithms/all_gather/all_gather_dda_ll128.h" // LL128 AG staging geometry
 #include "alloc.h"
 #include "archinfo.h"
 #include "checks.h"
@@ -151,12 +152,28 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   comm->ddaFabricMaxBlocks = nBlocksMax;
   comm->ddaLLEpochDev = epochDev;
   comm->ddaLLEpochLen = (int)epochLen;
+  // Fix the LL128 all-gather slot stride here, once, so every call addresses the
+  // same slots and banks. A stride of zero (scratch too small for one slice per
+  // slot) leaves the path ineligible rather than failing init.
+  {
+    const int warpSize = comm->WarpSize;
+    const size_t maxSlices =
+        meta::comms::ddaLL128AgMaxSlices(bytes, nRanks, warpSize);
+    comm->ddaLL128AgSlotWords =
+        maxSlices * (size_t)meta::comms::ddaLL128AgWireWordPerSlice(warpSize);
+    comm->ddaLL128AgMaxPerRankBytes = maxSlices *
+        (size_t)meta::comms::ddaLL128AgDataBytesPerSlice(
+            warpSize, comm->ll128LineElems);
+  }
   INFO(
       NCCL_INIT,
-      "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm), FabricGpuBarrier nBlocks=%d, peer table on device",
+      "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm), FabricGpuBarrier nBlocks=%d, peer table on device, "
+      "LL128 AG slotWords=%zu maxPerRankBytes=%zu",
       nRanks,
       bytes,
-      nBlocksMax);
+      nBlocksMax,
+      comm->ddaLL128AgSlotWords,
+      comm->ddaLL128AgMaxPerRankBytes);
   return ncclSuccess;
 
 fail:

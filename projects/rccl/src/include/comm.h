@@ -644,6 +644,13 @@ struct ncclComm {
   // Device-resident per-block epoch cells for the LL-protocol DDA collectives,
   uint32_t* ddaLLEpochDev;
   int ddaLLEpochLen;
+  // LL128 all-gather staging geometry, fixed at comm init so the double-buffered
+  // slot and bank addresses are identical on every call. Deriving the stride from
+  // each call's message size instead lets a small call's bank overlap a large
+  // call's region, where a rank an epoch ahead overwrites flag words a slower
+  // rank is still polling. Zero means the LL128 all-gather is unavailable.
+  size_t ddaLL128AgSlotWords;
+  size_t ddaLL128AgMaxPerRankBytes;
 
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;

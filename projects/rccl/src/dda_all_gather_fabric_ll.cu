@@ -23,8 +23,9 @@
 
 namespace {
 
-namespace ll128 = meta::comms::ll128;
-
+using meta::comms::ddaLL128AgDataBytesPerSlice;
+using meta::comms::ddaLL128AgSlices;
+using meta::comms::ddaLL128AgWireWordPerSlice;
 using meta::comms::ddaLLAgScratchSize;
 using meta::comms::kDdaLLAgMaxPerRankBytes;
 using nccl_dda_detail::kDdaLLMaxBlocks;
@@ -75,10 +76,11 @@ static inline size_t ddaLL128AgWarpsPerBlock(int warpSize) {
 // Blocks in one peer column, the LL128 counterpart of ddaLLAgBlocksPerPeer above:
 // a warp per slice rather than a thread per packet, capped the same way by the
 // column's share of the grid budget. Warps past the slice count own no slice.
+// nCols is nRanks - 1, since LL128 has no column for the local copy.
 unsigned ddaLL128AgBlocksPerPeer(
-    size_t slices, size_t warpsPerBlock, int nRanks, size_t totalBlockCap) {
+    size_t slices, size_t warpsPerBlock, int nCols, size_t totalBlockCap) {
   const size_t warps = warpsPerBlock < 1 ? 1 : warpsPerBlock;
-  const size_t cap = totalBlockCap / (size_t)(nRanks < 1 ? 1 : nRanks);
+  const size_t cap = totalBlockCap / (size_t)(nCols < 1 ? 1 : nCols);
   size_t bpp = (slices + warps - 1) / warps;
   if (bpp > cap) {
     bpp = cap;
@@ -146,18 +148,22 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
     cudaStream_t stream) {
   const int nRanks = comm->nRanks;
   const size_t perRankBytes = sendcount * sizeof(T);
-  const int wireWordPerSlice = comm->WarpSize * ll128::kWordsPerThread;
+  const int wireWordPerSlice = ddaLL128AgWireWordPerSlice(comm->WarpSize);
   const int dataBytesPerSlice =
-      (wireWordPerSlice - wireWordPerSlice / comm->ll128LineElems) * 8;
+      ddaLL128AgDataBytesPerSlice(comm->WarpSize, comm->ll128LineElems);
   const size_t slices =
-      (perRankBytes + dataBytesPerSlice - 1) / dataBytesPerSlice;
+      ddaLL128AgSlices(perRankBytes, comm->WarpSize, comm->ll128LineElems);
+  const size_t slotWords = comm->ddaLL128AgSlotWords;
 
-  // One warp per slice, in a 2D grid of one block column per peer.
+  // One warp per slice, in a 2D grid of one block column per remote peer. There is
+  // no self column: the local copy is folded into the peer columns, which saves
+  // 1/nRanks of the grid.
   const size_t warps = ddaLL128AgWarpsPerBlock(comm->WarpSize);
+  const int nCols = nRanks - 1;
   dim3 block((unsigned)(warps * (size_t)comm->WarpSize));
   dim3 grid(
-      (unsigned)nRanks,
-      ddaLL128AgBlocksPerPeer(slices, warps, nRanks, ddaLL128AgBlockCap()));
+      (unsigned)nCols,
+      ddaLL128AgBlocksPerPeer(slices, warps, nCols, ddaLL128AgBlockCap()));
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
@@ -166,28 +172,28 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   INFO(
       NCCL_COLL,
       "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu "
-      "grid=%ux%u block=%u wave=%d lineElems=%d wire=%dB data=%dB",
+      "grid=%ux%u block=%u wave=%d lineElems=%d wire=%dB data=%dB slotWords=%zu",
       nRanks, perRankBytes, slices, grid.x, grid.y, block.x, comm->WarpSize,
-      comm->ll128LineElems, wireWordPerSlice * 8, dataBytesPerSlice);
+      comm->ll128LineElems, wireWordPerSlice * 8, dataBytesPerSlice, slotWords);
 
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:
     meta::comms::ddaAllGatherLL128<T, 4><<<grid, block, 0, stream>>>(
         peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices,
+        perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, slotWords,
         wireWordPerSlice, dataBytesPerSlice);
     break;
   case 8:
     meta::comms::ddaAllGatherLL128<T, 8><<<grid, block, 0, stream>>>(
         peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices,
+        perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, slotWords,
         wireWordPerSlice, dataBytesPerSlice);
     break;
   default:
     meta::comms::ddaAllGatherLL128<T, 0><<<grid, block, 0, stream>>>(
         peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices,
+        perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, slotWords,
         wireWordPerSlice, dataBytesPerSlice);
     break;
   }
@@ -291,18 +297,12 @@ bool ncclAllGatherDdaFabricLL128Eligible(
       (reinterpret_cast<uintptr_t>(recvbuff) % 16) != 0) {
     return false;
   }
-  // Runtime slot stride: scratch must hold 2 banks * nRanks slots of whole slices
-  // at this arch's wire expansion (16/15 on gfx1250, 8/7 on gfx9). The geometry
-  // must match the launcher's exactly or this admits a launch that overruns
-  // scratch. Falling back (returns false) when it doesn't fit lets the threshold
-  // be raised independently of the scratch allocation.
-  const int wireWordPerSlice = comm->WarpSize * ll128::kWordsPerThread;
-  const int dataBytesPerSlice =
-      (wireWordPerSlice - wireWordPerSlice / comm->ll128LineElems) * 8;
-  const size_t slices =
-      (perRankBytes + dataBytesPerSlice - 1) / dataBytesPerSlice;
-  if ((size_t)2 * comm->nRanks * slices * wireWordPerSlice * sizeof(uint64_t) >
-      comm->ddaScratchBytes) {
+  // The slot stride is fixed at comm init, so anything within the cap it implies
+  // is guaranteed to fit scratch. Zero means the geometry was never established
+  // (a non-fabric comm) or scratch cannot hold one slice per slot; falling back
+  // here lets the threshold be raised independently of the scratch allocation.
+  if (comm->ddaLL128AgMaxPerRankBytes == 0 ||
+      perRankBytes > comm->ddaLL128AgMaxPerRankBytes) {
     return false;
   }
 
