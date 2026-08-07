@@ -312,4 +312,96 @@ std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t a
   return min_count;
 }
 
+uint8_t AmdGpuCodeObject::kernel_wavefront_size(rj_code_arch_t arch) const {
+  namespace kd = rocr::llvm::amdhsa;
+  using KD = kd::kernel_descriptor_t;
+
+  // CDNA kernels are always Wave64.
+  if (is_cdna_arch(arch))
+    return 64;
+
+  // RDNA opts into Wave32 via ENABLE_WAVEFRONT_SIZE32; a clear bit means Wave64.
+  // Return Wave32 only when every kernel is provably Wave32.
+  bool saw_kernel = false;
+  bool all_wave32 = true;
+  for (const auto &[name, kd_vaddr] : kd_offsets_) {
+    bool readable = false;
+    for (const auto &section : all_sections()) {
+      const uint64_t base = section->vaddr();
+      if (base == 0 || kd_vaddr < base)
+        continue;
+      const uint64_t off = kd_vaddr - base;
+      if (off + sizeof(KD) > section->size())
+        continue;
+      KD desc;
+      std::memcpy(&desc, section->data() + off, sizeof(desc));
+      const bool wave32 = AMDHSA_BITS_GET(desc.kernel_code_properties,
+                                          kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
+      saw_kernel = true;
+      all_wave32 = all_wave32 && wave32;
+      readable = true;
+      break;
+    }
+    // An unreadable descriptor could be Wave64; fall back conservatively so a
+    // readable Wave32 kernel can't mislabel it and license unsound EXEC kills.
+    if (!readable)
+      return 64;
+  }
+  return (saw_kernel && all_wave32) ? 32 : 64;
+}
+
+std::vector<uint64_t> AmdGpuCodeObject::kernel_entry_text_offsets(rj_code_arch_t arch) const {
+  namespace kd = rocr::llvm::amdhsa;
+  using KD = kd::kernel_descriptor_t;
+
+  // CDNA3/CDNA4 implement kernarg preloading through the legacy firmware
+  // compatibility window: compatible firmware enters 256 bytes past the
+  // descriptor entry, so a preload kernel has a second hardware entry there.
+  constexpr int64_t kKernargPreloadSkipBytes = 256;
+  const bool preload_firmware_skip =
+      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+
+  std::vector<uint64_t> offsets;
+  for (const auto &[name, kd_vaddr] : kd_offsets_) {
+    for (const auto &section : all_sections()) {
+      const uint64_t base = section->vaddr();
+      if (base == 0 || kd_vaddr < base)
+        continue;
+      const uint64_t off = kd_vaddr - base;
+      if (off + sizeof(KD) > section->size())
+        continue;
+      KD desc;
+      std::memcpy(&desc, section->data() + off, sizeof(desc));
+      const int64_t entry_vaddr =
+          static_cast<int64_t>(kd_vaddr) + desc.kernel_code_entry_byte_offset;
+      if (entry_vaddr < 0)
+        break;
+      for (const Section *text : text_sections()) {
+        const uint64_t tbase = text->vaddr();
+        if (static_cast<uint64_t>(entry_vaddr) >= tbase &&
+            static_cast<uint64_t>(entry_vaddr) < tbase + text->size()) {
+          offsets.push_back(static_cast<uint64_t>(entry_vaddr) - tbase);
+          break;
+        }
+      }
+      // A nonzero KERNARG_PRELOAD_SPEC_LENGTH lets compatible firmware enter the
+      // +256 window directly with unknown EXEC, so seed that second entry too.
+      if (preload_firmware_skip &&
+          AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH) != 0) {
+        const int64_t firmware_vaddr = entry_vaddr + kKernargPreloadSkipBytes;
+        for (const Section *text : text_sections()) {
+          const uint64_t tbase = text->vaddr();
+          if (static_cast<uint64_t>(firmware_vaddr) >= tbase &&
+              static_cast<uint64_t>(firmware_vaddr) < tbase + text->size()) {
+            offsets.push_back(static_cast<uint64_t>(firmware_vaddr) - tbase);
+            break;
+          }
+        }
+      }
+      break;
+    }
+  }
+  return offsets;
+}
+
 } // namespace rocjitsu
