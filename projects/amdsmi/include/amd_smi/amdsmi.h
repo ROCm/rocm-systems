@@ -6910,6 +6910,11 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
  *  reported as 0 (not shared), which is indistinguishable from a genuine
  *  "not shared" result.
  *
+ *  @note The link type, weight, and framebuffer-sharing values are queried
+ *  sequentially and not atomically, so a concurrent topology change between the
+ *  individual queries may leave the returned fields reflecting slightly
+ *  different points in time.
+ *
  *  @param[in] processor_handle_src the source processor handle
  *
  *  @param[in] processor_handle_dst the destination processor handle

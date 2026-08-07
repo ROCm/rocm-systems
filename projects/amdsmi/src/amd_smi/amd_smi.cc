@@ -3295,7 +3295,9 @@ amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handl
 
   // Framebuffer sharing: two GPUs can share framebuffer memory when they are
   // P2P-accessible (e.g. same xGMI hive). Best-effort: a missing P2P result
-  // must not fail the query.
+  // must not fail the query. A failed or unsupported P2P query is reported the
+  // same as "not shared" (fb_sharing = 0); callers that must tell the two apart
+  // should call amdsmi_is_P2P_accessible() directly.
   uint8_t fb_sharing = 0;
   bool accessible = false;
   if (amd::smi::rsmi_to_amdsmi_status(rsmi_is_P2P_accessible(src_id, dst_id, &accessible)) ==
