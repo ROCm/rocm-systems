@@ -1283,7 +1283,7 @@ def test_profile_without_matrix_data_type_selectors_uses_mfma_format_fields():
     assert 'amdgpu::exec_f32_mixed(cu, 16, 16, 128,' in body
 
 
-def test_rdna_wmma_uses_arch_specific_wave32_operand_layout():
+def test_replicated_halfwave_wmma_f32_dispatch_is_feature_selected():
     operands = [
         Operand('vdst', 256, 'OPR_VGPR', False, True, False, False, 0),
         Operand('src0', 256, 'OPR_SRC_VGPR', True, False, False, False, 1),
@@ -1291,23 +1291,28 @@ def test_rdna_wmma_uses_arch_specific_wave32_operand_layout():
         Operand('src2', 256, 'OPR_SRC_VGPR_OR_INLINE', True, False, False, False, 3),
     ]
     inst = Instruction('V_WMMA_F32_16X16X16_F16', 'ENC_VOP3P', 0, operands)
+    replicated_profile = _matrix_profile(
+        matrix_layout=MatrixLayout.WMMA_REPLICATED_HALFWAVE,
+        wave_size=32,
+        wave_size_max=64,
+    )
 
-    for arch in ('rdna3', 'rdna3_5'):
-        body = _gen_mfma(inst, arch)
+    body = _gen_mfma(inst, 'renamed_replicated_halfwave', replicated_profile)
 
-        assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-        assert (
-            'amdgpu::exec_gfx11_wmma_f32(cu, wf.wf_size(), 16, 16, 16, 16, dst,' in body
-        )
-        assert 'amdgpu::exec_f32(cu, 16, 16, 16' not in body
-
-    body = _gen_mfma(inst, 'rdna4')
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-    assert 'amdgpu::exec_wmma_f32(cu, 16, 16, 16, 16, dst,' in body
+    assert 'amdgpu::exec_gfx11_wmma_f32(cu, wf.wf_size(), 16, 16, 16, 16, dst,' in body
     assert 'amdgpu::exec_f32(cu, 16, 16, 16' not in body
 
+    non_replicated_profile = _matrix_profile(
+        matrix_layout=MatrixLayout.WMMA_SPLIT_K,
+        wave_size=32,
+        wave_size_max=64,
+    )
+    non_replicated_body = _gen_mfma(inst, 'rdna3', non_replicated_profile)
+    assert 'exec_gfx11_wmma_f32' not in non_replicated_body
 
-def test_rdna_wmma_i32_iu8_uses_arch_specific_wave32_operand_layout():
+
+def test_replicated_halfwave_wmma_i32_dispatch_is_feature_selected():
     operands = [
         Operand('vdst', 256, 'OPR_VGPR', False, True, False, False, 0),
         Operand('src0', 128, 'OPR_SRC_VGPR', True, False, False, False, 1),
@@ -1315,23 +1320,14 @@ def test_rdna_wmma_i32_iu8_uses_arch_specific_wave32_operand_layout():
         Operand('src2', 256, 'OPR_SRC_VGPR_OR_INLINE', True, False, False, False, 3),
     ]
     inst = Instruction('V_WMMA_I32_16X16X16_IU8', 'ENC_VOP3P', 0, operands)
+    replicated_profile = _matrix_profile(
+        matrix_layout=MatrixLayout.WMMA_REPLICATED_HALFWAVE,
+        wave_size=32,
+        wave_size_max=64,
+    )
 
-    for arch in ('rdna3', 'rdna3_5'):
-        body = _gen_mfma(inst, arch)
+    body = _gen_mfma(inst, 'renamed_replicated_halfwave', replicated_profile)
 
-        assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-        assert (
-            'auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc)'
-            in body
-        )
-        assert '(inst_.neg & 0x1u) ? amdgpu::extract_i8(cu, base, loc)' in body
-        assert '(inst_.neg & 0x2u) ? amdgpu::extract_i8(cu, base, loc)' in body
-        assert (
-            'amdgpu::exec_gfx11_wmma_i32(cu, wf.wf_size(), 16, 16, 16, 8, dst,' in body
-        )
-        assert 'amdgpu::exec_i32_mixed(cu, 16, 16, 16' not in body
-
-    body = _gen_mfma(inst, 'rdna4')
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
     assert (
         'auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc)'
@@ -1339,17 +1335,35 @@ def test_rdna_wmma_i32_iu8_uses_arch_specific_wave32_operand_layout():
     )
     assert '(inst_.neg & 0x1u) ? amdgpu::extract_i8(cu, base, loc)' in body
     assert '(inst_.neg & 0x2u) ? amdgpu::extract_i8(cu, base, loc)' in body
-    assert 'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst,' in body
+    assert 'amdgpu::exec_gfx11_wmma_i32(cu, wf.wf_size(), 16, 16, 16, 8, dst,' in body
     assert 'amdgpu::exec_i32_mixed(cu, 16, 16, 16' not in body
 
+    non_replicated_profile = _matrix_profile(
+        matrix_layout=MatrixLayout.WMMA_SPLIT_K,
+        wave_size=32,
+        wave_size_max=64,
+    )
+    non_replicated_body = _gen_mfma(inst, 'rdna3', non_replicated_profile)
+    assert 'exec_gfx11_wmma_i32' not in non_replicated_body
 
-def test_rdna_wmma_f16_bf16_use_arch_specific_wave32_dispatch():
+
+def test_replicated_halfwave_wmma_f16_bf16_dispatch_is_feature_selected():
     operands = [
         Operand('vdst', 256, 'OPR_VGPR', False, True, False, False, 0),
         Operand('src0', 256, 'OPR_SRC_VGPR', True, False, False, False, 1),
         Operand('src1', 256, 'OPR_SRC_VGPR', True, False, False, False, 2),
         Operand('src2', 256, 'OPR_SRC_VGPR_OR_INLINE', True, False, False, False, 3),
     ]
+    replicated_profile = _matrix_profile(
+        matrix_layout=MatrixLayout.WMMA_REPLICATED_HALFWAVE,
+        wave_size=32,
+        wave_size_max=64,
+    )
+    non_replicated_profile = _matrix_profile(
+        matrix_layout=MatrixLayout.WMMA_SPLIT_K,
+        wave_size=32,
+        wave_size_max=64,
+    )
 
     for dtype in ('F16', 'BF16'):
         inst = Instruction(
@@ -1360,22 +1374,18 @@ def test_rdna_wmma_f16_bf16_use_arch_specific_wave32_dispatch():
         )
         lower = dtype.lower()
 
-        for arch in ('rdna3', 'rdna3_5'):
-            body = _gen_mfma(inst, arch)
+        body = _gen_mfma(inst, 'renamed_replicated_halfwave', replicated_profile)
 
-            assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-            assert (
-                f'amdgpu::exec_gfx11_wmma_{lower}(cu, wf.wf_size(), 16, 16, 16, 16, dst,'
-                in body
-            )
-            assert '(inst_.op_sel >> 2) & 0x1u' in body
-            assert f'amdgpu::exec_wmma_{lower}(cu, 16, 16, 16' not in body
-
-        body = _gen_mfma(inst, 'rdna4')
         assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-        assert f'amdgpu::exec_wmma_{lower}(cu, 16, 16, 16, 16, dst,' in body
-        assert 'wf.wf_size());' in body
-        assert 'exec_gfx11_wmma' not in body
+        assert (
+            f'amdgpu::exec_gfx11_wmma_{lower}(cu, wf.wf_size(), 16, 16, 16, 16, dst,'
+            in body
+        )
+        assert '(inst_.op_sel >> 2) & 0x1u' in body
+        assert f'amdgpu::exec_wmma_{lower}(cu, 16, 16, 16' not in body
+
+        non_replicated_body = _gen_mfma(inst, 'rdna3', non_replicated_profile)
+        assert f'exec_gfx11_wmma_{lower}' not in non_replicated_body
 
 
 def _fixed_wave32_split_k_profile() -> SimpleNamespace:

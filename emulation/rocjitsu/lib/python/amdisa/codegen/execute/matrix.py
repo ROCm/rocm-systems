@@ -271,7 +271,10 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         MatrixLayout.WMMA_REPLICATED_HALFWAVE,
         MatrixLayout.WMMA_SPLIT_K,
     ) and (is_dense_wmma or uses_runtime_wave_split_k_sparse_layout)
-    uses_gfx11_wmma_layout = arch in ('rdna3', 'rdna3_5') and is_dense_wmma
+    uses_replicated_halfwave_wmma_layout = (
+        ctx.profile.matrix_layout is MatrixLayout.WMMA_REPLICATED_HALFWAVE
+        and is_dense_wmma
+    )
     uses_gfx12_wmma_layout = arch == 'rdna4' and is_dense_wmma
     uses_fixed_wave32_split_k_layout = (
         ctx.profile.matrix_layout is MatrixLayout.WMMA_SPLIT_K
@@ -423,7 +426,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f' {swmmac_index_entries}, index_key, extract_a, extract_b,'
                 f' inst_.clamp, const_acc, wf.wf_size());'
             )
-        elif uses_gfx11_wmma_layout:
+        elif uses_replicated_halfwave_wmma_layout:
             if input_type in ('IU4', 'IU8'):
                 suffix = '4' if input_type == 'IU4' else '8'
                 append_signed_extractors(suffix)
@@ -592,7 +595,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f' {ea}, {eb}, const_acc, wf.wf_size());'
             )
         elif (
-            uses_gfx11_wmma_layout
+            uses_replicated_halfwave_wmma_layout
             and result_type == 'F32'
             and input_type not in ('F8_F6_F4', 'F8F6F4')
         ):
@@ -664,7 +667,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             L.append('  }')
             L.append('  if (!dispatched)')
             L.append('    throw util::UnimplementedInst(mnemonic());')
-        elif uses_gfx11_wmma_layout and result_type in ('F16', 'BF16'):
+        elif uses_replicated_halfwave_wmma_layout and result_type in ('F16', 'BF16'):
             exec_fn = (
                 'exec_gfx11_wmma_f16'
                 if result_type == 'F16'
