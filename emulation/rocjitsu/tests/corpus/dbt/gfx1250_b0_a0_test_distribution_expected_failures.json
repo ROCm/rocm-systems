@@ -1,0 +1,856 @@
+{
+  "expected_failures": {
+    "01d81cfe81f43ab2c9f7bbf98c273e49da1dde87b7348f35174531808546f6da": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "0305acf1f6abace62d926ce461491964e5ceaaac9e2eaf570224e54fd8592750": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "034fb15905a208691942a4d5df01fde6c663807c1fc3961a251d831fd76e8323": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "05684105795ee77a01e502f27eb5054020ea9bc221122a195c1819e4ba44f606": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "05dfd9ff0c736153b379f7827dae61dc53f6e1aadec64e74f4b7a6a136aff3af": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "075aa24cc1df3da2f2ea28f35a0a7333e2e8b0083c42fa8e7957043bd8dbcf20": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "079bf63d57a4ee827e0680ffa09e60175834b51eed6809b48a857a847df2ff75": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "0effc9e5abc88068bceb059f2a3a4b62173fa600676f1af2631bf816687a6689": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "0f0157453f7d0fd2fa5eb4a5d6904db5d08e05e6e0acf81d769b57a30c9212cc": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "100dcf02f54f9367e1ca688b778e13945988ddf57cfa7f5d6211db0d61cab5df": {
+      "kind": "timeout",
+      "reason": "Test-distribution code object exceeds the per-object DBT timeout"
+    },
+    "12c7f668031b386f625bb42dda9f98afce158b431916317ad6dfab791901bfce": {
+      "kind": "memory-limit",
+      "reason": "Test-distribution code object exceeds the per-object DBT memory limit"
+    },
+    "132031ce71ac19eca09fd303ff4bce003d9b469c0fbbff31cb3ce65f94e9701c": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "1368a3e9fea8dbaf7c07d1e965482857637561f8cb78179ad48037a19f12cc69": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "14a4bbce5276d8403124cfeb5531cc34e9d4384115e845b6f5709c7cc638dee0": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "16925df3b4b8042fa0c7c65d86be4b107cbd6370949769b08817052d0a8d6fc0": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "18e9c2ccd1f51f0084ee70ba8bd544e174d725c43c4e1ee9a09e45b7aebcc60b": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "19211b6686022a9dc3c9941779e5c278a96cba36908ae8ccab138bfe73b52dbf": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "1a45a068157e7ab75a4b836ef1e15e99e977a588877cddc19eab565f2738ee64": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "1b5ed6dc1b4f401b69494a5b00bbaa8aa665c3c14bf92e4a389be71dc596bbd3": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "1bc1982d80c616d2a8ce49573642645e7ee8cf637eb4cf72ead83fda72450952": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "1c06f8475e6d4b729c6e3ebd7cb603f7b6a19c06abbef594fa7d116d16d42706": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "1c354212043709a863f6b8d9607528b7f1a679935172e1a14128ae165f91a025": {
+      "kind": "translation-error",
+      "reason": "Translated instruction stream contains an unsupported E7 opcode",
+      "returncode": 5,
+      "stderr_regex": "Invalid instruction opcode: E7"
+    },
+    "1f70a524688014566d027d60abe6efd0f7d1980216bcad6315765bb9d738c9ba": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "21ae6c42757a4b4b9684f193a1959d030a4816370c65c04cd54ca23f6d42a822": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "236879a467e3e12c890cab5dda29500c89923a80a7167f6ed75cb6f1e67cdd66": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "293f7a4b2fa160073317cfb32bb66bf8e6d80b7db544aa894cc501b16c09bda2": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "2bff3e6611af6c6de83ff384fd5b659f9c42441c3553cf41c779047d4432b78b": {
+      "kind": "memory-limit",
+      "reason": "RCCL code object exceeds the per-object DBT memory limit in indirect-branch discovery"
+    },
+    "2c4d4c645ff6ae3c3065ace5d045d1fb028fd18cff85447efbb40c3b12e05662": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "2dd2a638c4368caed02053377fb84af90e52e3d276fb3aefca9ea5c33b7ea563": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "2e8252743afeeff96af7866fd3b39702f77b8144b9d9670df187479f080e11a6": {
+      "kind": "timeout",
+      "reason": "Test-distribution code object exceeds the per-object DBT timeout"
+    },
+    "2ea0a982500ab4cb1b20194beeb2d30e7a43c70efe426c8f8722297f74b75a3f": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "2ef06625fe8ec22758cde86b244a6627861bb3ccfe020fede7ff8dd311e62ccd": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "36382f0b14492729a852f8f8cfd10f2dc78e09612472127294fa89f35f33d23f": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "38a96de68dd072a888d036c1906056517ea21c125f229eab661cd180bc5a2f3e": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "3a2bb1c19ae266381545ddb72bb8997706f2eec6e784bbe7b367b0c452878a17": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "3ba1408db009f75faf19165c113009261c095405c1a21a81e3278edeb6c2c65a": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "3bf2f770c38ec62c01483442287a0873259d4b720d6e65f89c0b947eda222abc": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "3ca923080c0767c5555ba27852a52418ed675724f7ce2330691700244b73ddc7": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "3fb6503f37fc130c1e107115b084a09694e2dd29efe490a4126ad1e690a47857": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "3ffe6585137fbcd238e756db3793d0f168a886bffd2f184907d46df42e49765d": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "41b2bdc777c097ee2272abe74c1b62a4e51206a077b643bb4fdcc7fb12cd6d50": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "45586d3312b894731e862dc2edde38baa65411d935617b6bbf914de703155213": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "45a05d33f628f6a3ee5205586641e86a9cb82d07a34877515f05ef6d9e9328b8": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "46266365cb4af7177141ee6651ffdfba83490390e05f563842ef2373c7464cd3": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "463ffa525433631c7461ebadd6c387cfe1b5020b82b692efacaf151205ef3be8": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "475d6ce2939fc29c04f7ed553e9085d912a926eba648d868d973c80aacf18c10": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "47fa9abe0c01319bfdeff8b51fe2166136a7a32401ef06e6cc19cc783917c08c": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "5112f8c3209df763583172a7fa4bb7f03b4029e95c2eed7ea77b4ed1678a3e55": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "51412f80b5c9d1a55a25b2afb22cedcbf8c856064ac0bc59ffa2c13830f57bfc": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "553c29b1c09fab4cc2d4d7eefe644be82d4da68350a377247cec9755b62cc7a4": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "56c68eca347518398cc00b5d2fe8d1663d59ad5c7686685562024bf45a828c8b": {
+      "kind": "translation-error",
+      "reason": "Relocated text exceeds the current safe materialization limits",
+      "returncode": 3,
+      "stderr_regex": "relocated \\.text could not be materialized safely"
+    },
+    "59751efbe0667191f9337c92648da398216de177fd1e6de0011be45e43f98fe7": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "5b602f636f9da19e624932b8ca4993374fa00b847d8ac2a74cc4e0d77b4ce978": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "602b8a154fe2b8957e83b714afa98ef67e8fa721657d5a0fc4962d881b469691": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "6942db2aa78da50c450ce9176482cd9e177f12dfd63b6c284cd15a6352d3e8aa": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "6a5a483f1311c847cff96f7ed0c4fb2c686c3790ee1f99f3eef285f28005308b": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "6a9d255a2f1c1ff1bb6445da9321fc29b769e820db128f24c003bc4e6be733f7": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "6b0b4d38a7a05e92c82481815041f7dcff12bdda818d1f2b8e848bccc5ac1dd2": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "6c8c0917831ab819359b7ffbf74e04ea050792f5438491eb975d11f892180662": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "6d29db434acf94251103e3a7a4cf9d2c301aa18b6ddf4d8e988e565c50f0196e": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "71ab9bcebece1bfebd8bf419a380d385791222dd6c757197616c9003350debcc": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "78897f372c1b23a802eaff4d05b3887c871e131ca46b26b915faad93272b1841": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "7f0e0197cac4bce7bda9f25a2f08d084885c1001d0e1a5c3b6b0c2da980cb012": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "7f8a7bc3b631e672fd25bc798f3978ec72e6608c77742ccfdf736306321f666d": {
+      "kind": "translation-error",
+      "reason": "Flat-scratch-base expansion could not allocate a dead SGPR pair",
+      "returncode": 3,
+      "stderr_regex": "flat-scratch-base rewrite could not allocate a dead SGPR pair"
+    },
+    "80e0b075e85192f1eb8e0f1e37cc734a6907afedfbc61d0f0ee542778aa4c6c1": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "81b588c623cba96aa3feafa813bf739eb041d56ecf7d5875e0a2a76b542261cb": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "83439ac1bab2f11d51c39e220a94ff0826cc5754fd89ae2192dcd06c03debf43": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "84d4554af3fb7e2cbda37e593b4039e510566969cf7cf6b1ff777c07a7d8f250": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "862cf5ac8aed61bfce3e2c410425c732c821fd324bf252328e40e0612f3216bb": {
+      "kind": "timeout",
+      "reason": "Test-distribution code object exceeds the per-object DBT timeout"
+    },
+    "87eb9dac5f6b8611ac545b83b5811e092e89faff9ff0355f4aa3052a0a7b5d6c": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "87f8f7ccbccc43c219b566e9c97d1c9ec479e4a13695eacb85659f377b9fa259": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "888278c944e54d31803974e5ccbb945939d2f9006a5ad0490cf6c8afc7725081": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "88ba496071152931c27cfb682e4a1656504f8982c1269a6b44b3f9cafbf1f883": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "8d44014c2281cb6dfa94efd42a0f9415f8ad64d3f881acf69c3577ae700dcb08": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "8e0f211e19fae2ca2e2186d821dcc6b9f6dde4010ba58c06010c727569fc4e6a": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "8e8149ba2139d18b3e0e16ab3088643bdfb3d2a71a9c201d66c5fbd830078fd6": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "8e8e8f500312f104d5869b5f0e8f3ec3ae776ca93f4d9c4c0ac21535ee70c1d0": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "90cfee09adc9e4518be5f6b3c04c2563f1b1fba7509199796b3fa6fd90320811": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "927b9dd8b97f5805034a19833d6b9ff0ea896f8ae536fbcfdf2ce62e18cf9023": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "92d050b727126c59589600235475d96777a01ab8981352f6e5b706852e93514b": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "933a50ab6501a7e011a9c288a6668c87cdf2d0d367735e04c579d7a41c63dd64": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "9438414c15981ed0904decb143f12383c5165c64af213a667e3d1df9b721d644": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "950a07a8ed50eff78164119c56816ba3f402a1f2d2a391eb9c422fda76fe8bca": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "968a06a0287c67ea664995afc626f7630792b1bdd73ac212af82b38e6675ad50": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "96a87b48bea2e8745e9bc1cc2ab3c441e7063c17346fc4fd70b2e005cb4dad4e": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "97f1a9a90c4e6941db0aa4229cbce96499cd16d3b81c5ef3b4c94a2a57b9fa09": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "9866d610f1e19ac275590659830eef140965572a84aaa410ece4bd6a62b66143": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "9a72e19c390c7f84e36798ac6be1dbe14bd9d8d92781bee0e36d0920e2ae7929": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "9d9235db06c71897e111331e0daa65f7785134923774300b9e814c984afd7e23": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "9db1d37f738fef227567d2582062dadb4019b5a3e4243e17b4cc6b3be7fc53e5": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "9e36d7d2653be1c944d5fe4b26a3d1a5ca7440ca99b74dbe65b9aa29eb83815f": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "9f1aacdf76db6f891b34c151ab13ab642885ac4612302261c94ef50cab18f684": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "a00a55ca3a7caf489ca93acf8838874f27971d25c9d03465e34f7b6f34f6ff6e": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "a05f655f7a1d4b0c920815b4ffe9fec3b2b0e5418015d43bd11d0e80e127c4cd": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "a20a523446e5f2f3e4dcbfaa6d22463cf84e512be423a802ab4dc94209818595": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "a20ecb8ed548bad98639731d227f34ff6c3f1a4e6fb8a4bdc1504dc0f4f7ecd4": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "a56201774974e7d2e9ef69a3e583cc50cb05f0df0fa758eda0fcbc647ed2ec08": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "a9a8426708202a248042ec48d0c7960bbc1c55ab1941b70c98b4016468501a2b": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "a9ec223f379871a4c8f15194f9691d7bd5c3fddb822b332b85c9056415271ef5": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "a9f6ed8737ee97d4035bc37722f47c1ab41b5c62f69804947f4c58c134088a96": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "ac5a504fb4c2f45950c67fac3f918a5d862858b02b817267b99c6df142b24d20": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "ac7fa4bff0e83470a439eaef219af25153edaee7d8647cd2d6b999510de157fa": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "ad9e7ba897ce7b540bd3a5eac8571cc7d8aab3d0139f639a8fd1f452fd034b1f": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "af801adc0ef22d9887981a2c721593c164e8e2e1f8fec230bb9672782241ee71": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "b24e22d2a4569a21a2b5e6a920d9db438ab38bf4ad327fa927305f1c2c4f4ce0": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "b3875aaeaf508cd480ca917e84f92067f05bfc8ac49c8e96a9bcdab3374a4c62": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "b3bdcbef10d3536acf18c6e7c7a8561cde6c226a91f6946944b507f1e3029d4c": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "b8d46155eea4ad5d0e9c19653bcbd274894eab6db3f3a0142abdb7a85881fbc2": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "b8e4c472b211a7a317e4fac9250ce23ab07a80a1bdad8385ee3e0209514756c1": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "bcbadb7d990940dad2d611e033deae87ad2d840df6e3f58f47098e794aab0b10": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "bee1a6a6c494a058d153bb47e54de5e51f58a9426f43261634baacf8f9694b96": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "bffccbe03f1207268b0306c66aac853d24640be54b57a1085ef4addf4208533a": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "c38ab953cbdbe51d4a5dfe438fe7747569ceff8ae04652c46dfd4dc2e1752e4a": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "c49741fecdcf7628109f8d6f0077c9a676fddcea8161f2133aa8edf0095e270c": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "c6b9fb1db0ba9437ace69307193ce3f5972dd5865a8c8e273f79c4e538a2acc4": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "c9d94a2cd55df702d173c0e89c1ec96b1b9a920ee29e4d5816a8a49856528b8f": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "cb404b0c3de41a3a76a1cb19312a7453de1aa376116d101e4f53dd8f141aa2ca": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "cc23c4c9f91e91b29c6a8cb842d0f81889a318f1b80d494c26c84b4420ad086a": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "cddb5f27d5fb79e33216bb26e1e1b262ed0378f485adac360b52572fd9757677": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "ce52bb2dda92ae7b0fe1b9a8605c8fe9bf468b24e842c918d41f6f1dfdef9276": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "cfaf43ded2928a11b6f467faa14adfd86476867b3b228569fc5fa8b2238b3793": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "d201a0b31963254f3a43524e201d4f340ec5ec5bf586db1f9100cf7d658c8f44": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "d3208a28d9a29fba7b82be13655828362e467cd1e4db0af5212656abeb8f80e5": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "d7ccf99cc018eee1569d849ede03990c700b73da6f739c1d5f9f0fd64a1b1f72": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "d7fab77609e6c89b53c28c32f33723f2b2e51284822b04bcc623fa0ce2e72db5": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "db98255cc7433bda30a18a4f6721078f16fe2f1d68c82d50a9592293e23c142d": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "de83ee7fe35d0709de46fd15155b4d39e0d7be5df78e79d50a4eaed8475c9bdb": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "df578c010bee018826b3b794b6861eb3ac3789291e460523e84c9823ec47c897": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "df69ed03f45fc59cc0b3fdf61dfeaa027bf1f38b6c75fcac8a71961ebabad2fb": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "e20c13bd3182c6ba74bab5f9ebb92cef9c07fe818f5b582c431b011bcd454752": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "e38650cd4e9538e23aca6adbc8f542773e5d9bff74de2b2078b7dd7755a22340": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "e468e19ccf9bacdee2dbc951b58c9f7a049fd218900eab6cdf00c57932319f67": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "ec5c87c2214311d80b39bbfe64b154e0f61f781836aabeeeff2e6d0609661a72": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "eeb95456b93e67ba2b8d6432b154fc0708bc8cf30cac03d54a63937c3b773428": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "f0b7efe548714b8e4e6833f90fef5cdd106808d0b8a0b961a89fff5ffa1ed2c9": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "f2d6eaf60369b0a976888903f9240d9140687cc95260be9f9791b4987f584571": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "f436974e480d8c9881d4735c2c763382c89f0c4c93516af595a3fc9795118c30": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "f4f2d35f719dcbea44181fd8ee3daf8113f005a1d7f4be925ae667f131bb5009": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "f856f691d54d56ace90f1700c0975fd7d38f6235de9eb68298817e009b659911": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "fdae325a1a6a6fe17dbecb3b9fd77c48817ad4e83a8b243eedb46768848e8451": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "fdfe000da9afbca615b817a8cd6e01cb104e94dcc9bc7166829668b93237715d": {
+      "kind": "translation-error",
+      "reason": "V_S_RCP_F32 with VCC destination is not supported",
+      "returncode": 3,
+      "stderr_regex": "V_S_RCP_F32 may not use VCC as a destination"
+    },
+    "fec45df25915e3dbab284db254eefb0a24ddc4a116a8b3122699682e55663c54": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    },
+    "fed23067295b23512f94dd3208b3117dda286ca769b95341c022940ed3df66c2": {
+      "kind": "translation-error",
+      "reason": "Indirect s_swap_pc_i64 target recovery is not implemented",
+      "returncode": 3,
+      "stderr_regex": "indirect branch or call target recovery is not implemented"
+    }
+  },
+  "input_revision": "b0",
+  "output_revision": "a0",
+  "schema_version": 1,
+  "target": "gfx1250"
+}

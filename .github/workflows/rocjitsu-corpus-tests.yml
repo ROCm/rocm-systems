@@ -53,7 +53,9 @@ env:
   ROCJITSU_DBT_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-dbt-test-corpus
   ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
-  ROCJITSU_DBT_CORPUS_REF: 42944a3ff37490441dcd0f1838e289a419af082d
+  ROCJITSU_DBT_CORPUS_REF: 4e2608312d4bb2c38d55c33642cc6d82945a7de1
+  ROCJITSU_DBT_TEST_DIST_VERSION: 7.15.0a20260726
+  ROCJITSU_DBT_TEST_DIST_SHA256: 0842af33a89376555df161b6a8d122dc32083fc2f4867ee7236b2258b479c567
   ROCJITSU_DBT_SHA_FRAGMENTS: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/fragments
   ROCJITSU_DBT_SHA_MANIFEST: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/gfx1250-b0-a0-sha-pairs.json
   ROCM_SDK_VERSION: 7.15.0a20260728
@@ -75,8 +77,8 @@ jobs:
         include:
           - name: release
             allow_failure: false
-            # 20,000 verified objects completed in 148.97s locally; 20 minutes
-            # leaves substantial runner headroom while this release-only gate lands.
+            # The combined package and test-distribution corpus runs only in
+            # this lane so the large archive is downloaded once per workflow.
             verify_dbt_idempotence: 1
             dbt_timeout: 60
             dbt_memory_limit_mib: 4096
@@ -142,6 +144,7 @@ jobs:
           apt-get install -y --no-install-recommends \
             build-essential \
             ca-certificates \
+            curl \
             cmake \
             git \
             libclang-rt-dev \
@@ -172,7 +175,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/07/29.
+          # Last updated on 2026/08/07.
           ref: ${{ github.event.inputs.corpus_ref || env.ROCJITSU_DBT_CORPUS_REF }}
           path: rocjitsu-dbt-test-corpus
 
@@ -415,10 +418,10 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Extract pinned gfx1250 packaged HSACOs
+      - name: Extract pinned gfx1250 HSACOs
         id: extract_dbt
         if: ${{ !cancelled() && matrix.enable_tsan == 0 && steps.build_rocjitsu.outcome == 'success' }}
-        timeout-minutes: 10
+        timeout-minutes: 40
         working-directory: ${{ env.ROCJITSU_DBT_CORPUS_DIR }}
         shell: bash
         run: |
@@ -432,11 +435,27 @@ jobs:
             -r "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/requirements-gfx1250-dbt.txt"
           "${ROCJITSU_DBT_VENV}/bin/rocm-sdk" init
 
+          ADDITIONAL_ROOT_ARGS=()
+          if [[ "${{ matrix.name }}" == "release" ]]; then
+            TEST_DIST_ARCHIVE="${RUNNER_TEMP}/therock-dist-linux-multiarch-tests-${ROCJITSU_DBT_TEST_DIST_VERSION}.tar.gz"
+            TEST_DIST_ROOT="${ROCJITSU_DBT_VENV}/test-distribution-${ROCJITSU_DBT_TEST_DIST_VERSION}"
+            curl --fail --location --retry 3 \
+              --output "${TEST_DIST_ARCHIVE}" \
+              "https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-multiarch-tests-${ROCJITSU_DBT_TEST_DIST_VERSION}.tar.gz"
+            printf '%s  %s\n' \
+              "${ROCJITSU_DBT_TEST_DIST_SHA256}" \
+              "${TEST_DIST_ARCHIVE}" | sha256sum --check --strict
+            mkdir -p "${TEST_DIST_ROOT}"
+            tar -xzf "${TEST_DIST_ARCHIVE}" -C "${TEST_DIST_ROOT}"
+            ADDITIONAL_ROOT_ARGS=(--additional-root "${TEST_DIST_ROOT}")
+          fi
+
           DBT_ROCM_PATH="$("${ROCJITSU_DBT_VENV}/bin/rocm-sdk" path --root)"
           LD_LIBRARY_PATH="${DBT_ROCM_PATH}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
             "${ROCJITSU_DBT_VENV}/bin/python" \
             scripts/extract_gfx1250_hsacos.py \
             --environment "${ROCJITSU_DBT_VENV}" \
+            "${ADDITIONAL_ROOT_ARGS[@]}" \
             --destination "${ROCJITSU_HSACO_CORPUS}"
 
       - name: Run gfx1250 DBT corpus tests
@@ -460,14 +479,20 @@ jobs:
           if (( DBT_WORKERS > 16 )); then
             DBT_WORKERS=16
           fi
+          DBT_PACKAGE_LOCK="${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_20260726_package_lock.json"
+          DBT_EXPECTED_FAILURES="${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_expected_failures.json"
+          if [[ "${{ matrix.name }}" == "release" ]]; then
+            DBT_PACKAGE_LOCK="${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_20260726_test_distribution_package_lock.json"
+            DBT_EXPECTED_FAILURES="${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_test_distribution_expected_failures.json"
+          fi
           "${ROCJITSU_DBT_VENV}/bin/python" -m pytest tests/test_corpus.py \
             --target gfx1250 \
             --suite dbt \
             --dbt-corpus "${ROCJITSU_HSACO_CORPUS}" \
             --dbt-translator "${DBT_TRANSLATOR}" \
             --dbt-llvm-objdump "${DBT_ROCM_PATH}/lib/llvm/bin/llvm-objdump" \
-            --dbt-package-lock "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_20260726_package_lock.json" \
-            --dbt-expected-failures "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_expected_failures.json" \
+            --dbt-package-lock "${DBT_PACKAGE_LOCK}" \
+            --dbt-expected-failures "${DBT_EXPECTED_FAILURES}" \
             --dbt-expected-rewrites "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_expected_rewrites.json" \
             --dbt-allow-incomplete-corpus \
             --dbt-timeout "${{ matrix.dbt_timeout }}" \
@@ -504,7 +529,7 @@ jobs:
             --translator "${ROCJITSU_BUILD_DIR}/tools/rj_dbt_translate" \
             --corpus "${ROCJITSU_HSACO_CORPUS}" \
             --input-manifest "${ROCJITSU_HSACO_CORPUS}/manifests/SHA256SUMS" \
-            --expected-failures "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_expected_failures.json" \
+            --expected-failures "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_test_distribution_expected_failures.json" \
             --fragments "${ROCJITSU_DBT_SHA_FRAGMENTS}" \
             --workers "${DBT_WORKERS}" \
             --timeout "${{ matrix.dbt_timeout }}"
@@ -522,9 +547,9 @@ jobs:
             --fragments "${ROCJITSU_DBT_SHA_FRAGMENTS}" \
             --output "${ROCJITSU_DBT_SHA_MANIFEST}" \
             --input-manifest "${ROCJITSU_HSACO_CORPUS}/manifests/SHA256SUMS" \
-            --expected-failures "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_expected_failures.json" \
+            --expected-failures "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_test_distribution_expected_failures.json" \
             --expected-rewrites "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_expected_rewrites.json" \
-            --package-lock "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_20260726_package_lock.json" \
+            --package-lock "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_20260726_test_distribution_package_lock.json" \
             --source-commit "${GITHUB_SHA}" \
             --corpus-commit "$(git rev-parse HEAD)" \
             --rocm-sdk-version "${ROCM_SDK_VERSION}"

@@ -1,0 +1,22 @@
+{
+  "baseline_manifest_sha256": "e3a6794ce84dbb08f2d8009dd57e9b4bbb693f85784605f77c6b285f0d3e63cb",
+  "expected_unique_code_objects": {
+    "materialized": {
+      "minimum": 22410
+    },
+    "skipped": {
+      "exact": 22410
+    }
+  },
+  "packages": {
+    "amd-torch-device-gfx1250": "2.12.0+rocm7.15.0a20260726",
+    "rocm": "7.15.0a20260726",
+    "rocm-sdk-core": "7.15.0a20260726",
+    "rocm-sdk-devel": "7.15.0a20260726",
+    "rocm-sdk-device-gfx1250": "7.15.0a20260726",
+    "rocm-sdk-libraries": "7.15.0a20260726",
+    "torch": "2.12.0+rocm7.15.0a20260726",
+    "triton": "3.8.0+git4cff872c.rocm7.15.0a20260726"
+  },
+  "schema_version": 1
+}
