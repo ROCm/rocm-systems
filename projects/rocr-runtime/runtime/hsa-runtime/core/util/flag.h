@@ -306,6 +306,12 @@ class Flag {
     core_dump_disable_ = (var == "1");
 
     core_dump_pattern_ = os::GetEnvVar("HSA_COREDUMP_PATTERN");
+
+#if defined(HSA_ROCM_TIMESYNC) && HSA_ROCM_TIMESYNC > 0
+    var = os::GetEnvVar("HSA_ENABLE_ROCM_TIMESYNC");
+    rocm_timesync_enable_ = (var == "1") ? true : false;
+    rocm_timesync_config_ = os::GetEnvVar("HSA_ROCM_TIMESYNC_CONFIG");
+#endif
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -449,6 +455,9 @@ class Flag {
   const std::string& core_dump_pattern() const {
                                          return core_dump_pattern_; }
 
+  bool rocm_timesync_enable() const { return rocm_timesync_enable_; }
+  std::string rocm_timesync_config() const { return rocm_timesync_config_; }
+
   void set_sdma(bool peer_sdma, bool sdma_gang) {
     enable_peer_sdma_ = peer_sdma ? SDMA_ENABLE : SDMA_DISABLE;
     enable_sdma_gang_ = sdma_gang ? SDMA_ENABLE : SDMA_DISABLE;
@@ -544,6 +553,9 @@ class Flag {
   bool core_dump_disable_ = false;
   bool enable_core_dump_progress_ = false;
   std::string core_dump_pattern_;
+
+  bool rocm_timesync_enable_ = false;
+  std::string rocm_timesync_config_;
 
   // Map GPU index post RVD to its default cu mask.
   std::map<uint32_t, std::vector<uint32_t>> cu_mask_;

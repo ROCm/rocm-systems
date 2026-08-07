@@ -7,8 +7,8 @@ add_library(rocm-timesync-core
     ${ROCM_TIMESYNC_CORE_SOURCES}
 )
 
-target_compile_options(rocm-timesync-core
-    PRIVATE -fPIC
+set_target_properties(rocm-timesync-core
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
 )
 
 target_link_libraries(rocm-timesync-core

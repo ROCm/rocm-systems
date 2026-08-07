@@ -1,9 +1,9 @@
-#include <sstream>
-
 #include <nlohmann/json.hpp>
 #include <curl/curl.h>
 
 #include "influx_client.hpp"
+
+//#define DBG
 
 namespace rocm_timesync
 {
@@ -42,7 +42,8 @@ influx_client::make_write_url() const
 
     ss << "http://" << host_
        << ":" << port_
-       << "/write?db=" << database_;
+       << "/write?db=" << database_
+       << "&precision=ns";
 
     return ss.str();
 }
@@ -54,53 +55,70 @@ influx_client::make_query_url() const
 
     ss << "http://" << host_
        << ":" << port_
-       << "/query?db=" << database_;
+       << "/query?db=" << database_
+       << "&precision=ns";
 
     return ss.str();
 }
 
 bool
-influx_client::write(uint32_t gpu_id,
-                     uint64_t gpu_timestamp,
-                     uint64_t system_timestamp)
+influx_client::write(const entry_t& entry)
 {
+    std::vector<entry_t> v = {entry};
+    return write_batch(v);
+}
+
+bool
+influx_client::write_batch(const std::vector<entry_t>& entries)
+{
+    if(entries.empty())
+        return true;
+
     std::ostringstream payload;
 
-    payload << "gpu_timesync";
-    payload << ",gpu_id=" << gpu_id;
-    payload << " ";
-    payload << "system_timestamp=" << system_timestamp << "i";
-    payload << " ";
-    payload << gpu_timestamp;
+    for(const auto& entry : entries)
+    {
+        const auto& point = entry.point;
+
+        payload << "gpu_timesync";
+        payload << ",gpu_id=" << entry.gpu_id;
+        payload << " ";
+        payload << "system_timestamp="
+                << point.system_timestamp
+                << "i";
+        payload << " ";
+        payload << point.gpu_timestamp;
+        payload << '\n';
+    }
 
     CURL* curl = curl_easy_init();
     if(!curl)
         return false;
 
-    curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-
     const auto body = payload.str();
 
-    curl_easy_setopt(curl,
-                     CURLOPT_URL,
-                     make_write_url().c_str());
+    curl_easy_setopt(
+        curl,
+        CURLOPT_URL,
+        make_write_url().c_str());
 
-    curl_easy_setopt(curl,
-                     CURLOPT_POSTFIELDS,
-                     body.c_str());
+    curl_easy_setopt(
+        curl,
+        CURLOPT_POSTFIELDS,
+        body.c_str());
 
-    curl_easy_setopt(curl,
-                     CURLOPT_POSTFIELDSIZE,
-                     static_cast<long>(body.size()));
-
-
+    curl_easy_setopt(
+        curl,
+        CURLOPT_POSTFIELDSIZE,
+        static_cast<long>(body.size()));
 
     CURLcode rc = curl_easy_perform(curl);
 
     long http_code = 0;
-    curl_easy_getinfo(curl,
-                      CURLINFO_RESPONSE_CODE,
-                      &http_code);
+    curl_easy_getinfo(
+        curl,
+        CURLINFO_RESPONSE_CODE,
+        &http_code);
 
     curl_easy_cleanup(curl);
 
@@ -109,52 +127,57 @@ influx_client::write(uint32_t gpu_id,
             http_code < 300);
 }
 
-
 bool
-influx_client::lookup(uint32_t gpu_id,
-                      uint64_t gpu_timestamp,
-                      uint64_t& system_timestamp)
+influx_client::lookup_newest_k(
+    uint32_t gpu_id,
+    uint64_t k,
+    std::vector<timesync_point>& k_points)
 {
-    std::ostringstream q;
+    k_points.clear();
 
+    std::ostringstream q;
     q << "SELECT system_timestamp "
       << "FROM gpu_timesync "
       << "WHERE gpu_id='"
       << gpu_id
       << "' "
-      << "AND time="
-      << gpu_timestamp
-      << " "
-      << "LIMIT 1";
+      << "ORDER BY time DESC "
+      << "LIMIT "
+      << k;
 
     auto response = query(q.str());
-
     if(response.empty())
         return false;
 
     auto json = nlohmann::json::parse(response);
 
     auto& results = json["results"];
-
     if(results.empty())
         return false;
 
-    if(!results[0].contains("series"))
+    if(results[0].contains("error"))
         return false;
+
+    if(!results[0].contains("series"))
+        return true; // no points found
 
     auto& series = results[0]["series"];
-
     if(series.empty())
-        return false;
+        return true;
 
     auto& values = series[0]["values"];
 
-    if(values.empty())
-        return false;
+    k_points.reserve(values.size());
+    for(const auto& value : values)
+    {
+        k_points.push_back(timesync_point{
+            .gpu_timestamp = value[0].get<uint64_t>(),
+            .system_timestamp = value[1].get<uint64_t>(),
+        });
+    }
 
-    system_timestamp =
-        values[0][1].get<uint64_t>();
-
+    // return in ASC order
+    std::reverse(k_points.begin(), k_points.end());
     return true;
 }
 
@@ -180,7 +203,11 @@ influx_client::query(std::string_view influxql)
     }
 
     std::string url =
-        make_query_url() + "&q=" + escaped;
+        make_query_url() +
+        "&epoch=ns"
+        "&q=" +
+        escaped;
+
 
     curl_free(escaped);
 
@@ -201,6 +228,133 @@ influx_client::query(std::string_view influxql)
     curl_easy_cleanup(curl);
 
     return (rc == CURLE_OK) ? response : std::string{};
+}
+
+bool
+influx_client::lookup_before(
+    uint32_t gpu_id,
+    uint64_t gpu_timestamp,
+    timesync_point& point)
+{
+    std::ostringstream q;
+
+    q << "SELECT system_timestamp "
+      << "FROM gpu_timesync "
+      << "WHERE gpu_id='"
+      << gpu_id
+      << "' "
+      << "AND time <= "
+      << gpu_timestamp
+      << " "
+      << "ORDER BY time DESC "
+      << "LIMIT 1";
+
+    auto response = query(q.str());
+
+    if(response.empty())
+        return false;
+
+#ifdef DBG
+    std::cerr << "\n========== INFLUX DEBUG ==========\n";
+    std::cerr << "QUERY: " << q.str() << "\n";
+    std::cerr << "RAW RESPONSE:\n" << response << "\n";
+    std::cerr << "==================================\n";
+#endif
+
+    auto json = nlohmann::json::parse(response);
+
+    auto& results = json["results"];
+
+    if(results.empty())
+        return false;
+
+    if(!results[0].contains("series"))
+        return false;
+
+    auto& series = results[0]["series"];
+
+    if(series.empty())
+        return false;
+
+    auto& values = series[0]["values"];
+
+    if(values.empty())
+        return false;
+
+    point.gpu_timestamp =
+        values[0][0].get<uint64_t>();
+
+    point.system_timestamp =
+        values[0][1].get<uint64_t>();
+
+    return true;
+}
+
+bool
+influx_client::lookup_after(
+    uint32_t gpu_id,
+    uint64_t gpu_timestamp,
+    timesync_point& point)
+{
+    std::ostringstream q;
+
+    q << "SELECT system_timestamp "
+      << "FROM gpu_timesync "
+      << "WHERE gpu_id='"
+      << gpu_id
+      << "' "
+      << "AND time >= "
+      << gpu_timestamp
+      << " "
+      << "ORDER BY time ASC "
+      << "LIMIT 1";
+
+    auto response = query(q.str());
+
+    if(response.empty())
+        return false;
+
+#ifdef DBG
+    std::cerr << "\n========== INFLUX DEBUG ==========\n";
+    std::cerr << "QUERY: " << q.str() << "\n";
+    std::cerr << "RAW RESPONSE:\n" << response << "\n";
+    std::cerr << "==================================\n";
+#endif
+
+    auto json = nlohmann::json::parse(response);
+
+    auto& results = json["results"];
+
+    if(results.empty())
+        return false;
+
+    if(results[0].contains("error"))
+        return false;
+
+    if(!results[0].contains("series"))
+        return false;
+
+    auto& series = results[0]["series"];
+    if(series.empty())
+        return false;
+
+    auto& values = series[0]["values"];
+    if(values.empty())
+        return false;
+
+    point.gpu_timestamp = values[0][0].get<uint64_t>();
+    point.system_timestamp = values[0][1].get<uint64_t>();
+
+#ifdef DBG
+    std::cerr
+        << "LOOKUP_AFTER parsed gpu="
+        << point.gpu_timestamp
+        << " sys="
+        << point.system_timestamp
+        << "\n";
+#endif
+
+    return true;
 }
 
 } // namespace rocm_timesync

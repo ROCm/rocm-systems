@@ -12,25 +12,39 @@ namespace ipc
 {
 
 struct ringbuffer_shm_t;
+struct cursor_t;
+
 struct ringbuffer_t
 {
-    ringbuffer_shm_t* rbuf; 
-    std::string name;
-
     ringbuffer_t() = default;
 
+    // producer api
     int create(std::string name, uint8_t ring_order);
-    int attach(std::string name);
     void destroy();
-    void detach();
-    uint64_t size() const;
-    uint64_t length() const;
     void publish(std::vector<event_t>& events);
-    void poll(const callback_t& callback) const;
+
+    // consume api
+    int attach(std::string name);
+    void detach();
+    void poll(const callback_t& callback);
+    void consume(std::vector<event_t>&, int64_t wait_ms);
     void stop();
 
+    // both
+    uint64_t size() const;
+    uint64_t length() const;
 private:
+    struct cursor_t {
+        uint64_t read_idx;
+    };
+
+    ringbuffer_shm_t* rbuf;
+    cursor_t cursor;
+    std::string name;
     mutable std::atomic<bool> stop_requested{false};
+
+    bool await(int64_t wait_ms);
+    void do_consume(std::vector<event_t>& events);
 };
 
 } // namespace ipc

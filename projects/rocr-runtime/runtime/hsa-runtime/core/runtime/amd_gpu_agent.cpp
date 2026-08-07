@@ -229,16 +229,12 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 #endif
 
 #if defined(HSA_ROCM_TIMESYNC) && HSA_ROCM_TIMESYNC > 0
-  {
+  if (core::Runtime::runtime_singleton_->flag().rocm_timesync_enable()) {
       // XXX we might want LOW
       // XXX make configurable through env I guess
-      int status = ::rocm_timesync::timesync_init(::rocm_timesync::ts_config_t{
+      int status = ::rocm_timesync::timesync_client_init(::rocm_timesync::ts_client_config_t{
+          .config_file = core::Runtime::runtime_singleton_->flag().rocm_timesync_config(),
           .precision = ::rocm_timesync::ts_precision_t::TIMESYNC_PRECISION_HIGH,
-          .db_config = ::rocm_timesync::ts_db_influx_t{
-              .host = "influxdb-local",
-              .port = 8086,
-              .database = "rocm_timesync"
-          },
       });
       assert(status == 0 && "timesync_init failed");
   }
@@ -269,8 +265,9 @@ GpuAgent::~GpuAgent() {
   regions_.clear();
 
 #if defined(HSA_ROCM_TIMESYNC) && HSA_ROCM_TIMESYNC > 0
-  // XXX we might want LOW
-  ::rocm_timesync::timesync_deinit();
+  if (core::Runtime::runtime_singleton_->flag().rocm_timesync_enable()) {
+      ::rocm_timesync::timesync_client_deinit();
+  }
 #endif
 }
 
@@ -2180,13 +2177,6 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
     debug_print("Signal %p time stamps may be invalid.\n", &signal->signal_);
 }
 
-#if defined(HSA_ROCM_TIMESYNC) && HSA_ROCM_TIMESYNC > 0
-uint64_t GpuAgent::TranslateTime(uint64_t tick) {
-  uint64_t system_time;
-  ::rocm_timesync::timesync_translate(KfdGpuID(), tick, &system_time);
-  return system_time;
-}
-#else
 /*
 Times during program execution are interpolated to adjust for relative clock drift.
 Interval timing may appear as ticks well before process start, leading to large errors due to
@@ -2196,6 +2186,18 @@ Intervals larger than t0_ will be frequency adjusted.  This admits a numerical e
 than twice the frequency stability (~10^-5).
 */
 uint64_t GpuAgent::TranslateTime(uint64_t tick) {
+
+  uint64_t system_tick = 0;
+
+  //asm volatile("int3");
+
+#if defined(HSA_ROCM_TIMESYNC) && HSA_ROCM_TIMESYNC > 0
+  if (core::Runtime::runtime_singleton_->flag().rocm_timesync_enable()) {
+    ::rocm_timesync::timesync_client_translate(KfdGpuID(), tick, system_tick);
+    return system_tick;
+  }
+#endif
+
   // Only allow short (error bounded) extrapolation for times during program execution.
   // Limit errors due to relative frequency drift to ~0.5us.  Sync clocks at 16Hz.
   const int64_t max_extrapolation = core::Runtime::runtime_singleton_->sys_clock_freq() >> 4;
@@ -2216,7 +2218,6 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
   // return sysLarge;
 
   // Good for ~3.5 months.
-  uint64_t system_tick = 0;
   int64_t elapsed = 0;
   double ratio;
 
@@ -2242,7 +2243,6 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
 
   return system_tick;
 }
-#endif
 
 /* This function is deprecated */
 bool GpuAgent::current_coherency_type(hsa_amd_coherency_type_t type) {

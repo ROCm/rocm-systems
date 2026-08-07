@@ -35,14 +35,8 @@ struct ring_t
     event_t events[];
 };
 
-struct cursor_t
-{
-    uint64_t read_idx;
-};
-
 struct ringbuffer_shm_t
 {
-
     header_t header;
     ring_t ring; // must be last
 };
@@ -156,6 +150,10 @@ int ringbuffer_t::attach(std::string name)
 
     this->name = name;
     this->rbuf = rbuf;
+
+    // cursor starts at current write_idx
+    this->cursor = cursor_t{.read_idx = rbuf->ring.write_idx.load(std::memory_order_acquire)};
+
     return 0;
 
 err_hdr:
@@ -203,45 +201,71 @@ void ringbuffer_t::publish(std::vector<event_t>& events)
     atomic_notify_all(ring.write_seq);
 }
 
-static bool consume(
-    const ringbuffer_shm_t* rbuf, cursor_t& cursor, const callback_t& callback
-)
+void ringbuffer_t::do_consume(std::vector<event_t>& events)
 {
     const header_t& header = rbuf->header;
     const ring_t& ring = rbuf->ring;
     const uint64_t write_idx = ring.write_idx.load(std::memory_order_acquire);
 
     if (write_idx == cursor.read_idx)
-        return false;
+        return;
 
     if ((write_idx - cursor.read_idx) > header.ring_len)
         cursor.read_idx = write_idx - header.ring_len;
 
     while (cursor.read_idx < write_idx) {
-        const event_t& event = ring.events[cursor.read_idx & (header.ring_len - 1)];
-        callback(event);
+        events.push_back(ring.events[cursor.read_idx & (header.ring_len - 1)]);
         ++cursor.read_idx;
     }
-
-    return true;
 }
 
-void ringbuffer_t::poll(const callback_t& callback) const
+bool ringbuffer_t::await(int64_t wait_ms)
 {
     const ring_t& ring = rbuf->ring;
-    auto cursor = cursor_t();
 
     while (!stop_requested.load(std::memory_order_acquire)) {
-        // cache last produced value
+        // see if any data is present
         uint32_t seq = ring.write_seq.load(std::memory_order_relaxed);
+        if (seq == cursor.read_idx) {
+            atomic_wait_for(ring.write_seq, seq, wait_ms);
+            continue;
+        }
+
+        break;
+    }
+
+    // return true only if we broke on data and not stop request
+    return !stop_requested.load(std::memory_order_acquire);
+}
+
+void ringbuffer_t::poll(const callback_t& callback)
+{
+    while (!stop_requested.load(std::memory_order_acquire)) {
+        bool have_data = await(POLL_WAIT_MS);
+        if (!have_data)
+            break;
 
         // read data
-        auto processed = consume(rbuf, cursor, callback);
-        if (!processed) {
-            printf("waiting ...\n");
-            atomic_wait_for(ring.write_seq, seq, POLL_WAIT_MS);
+        std::vector<event_t> events = {};
+        do_consume(events);
+        for (const auto& evt : events) {
+            callback(evt);
         }
     }
+}
+
+// load whatever data is present
+void ringbuffer_t::consume(std::vector<event_t>& events, int64_t wait_ms)
+{
+    const ring_t& ring = rbuf->ring;
+
+    // wait for first event
+    if (wait_ms > 0) {
+        if (!await(wait_ms))
+            return;
+    }
+
+    do_consume(events);
 }
 
 void ringbuffer_t::stop()

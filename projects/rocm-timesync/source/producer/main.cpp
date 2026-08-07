@@ -6,7 +6,7 @@
 #include "config.hpp"
 #include "kfd.hpp"
 
-#define PUBLISH_INTERVAL_MS 100
+#define PUBLISH_INTERVAL_US 10
 
 using namespace rocm_timesync;
 
@@ -34,7 +34,7 @@ int main()
         const uint32_t batch_size = std::max(
             1u,
             static_cast<uint32_t>(
-                (static_cast<uint64_t>(hz) * PUBLISH_INTERVAL_MS) / 1000)
+                (static_cast<uint64_t>(hz) * PUBLISH_INTERVAL_US) / 1000000)
         );
 
         channels.push_back(p_channel_t{
@@ -68,7 +68,6 @@ int main()
                         ipc::publish(channel, events);
                         events.clear();
                     }
-
                 }
 
                 std::this_thread::sleep_for(std::chrono::milliseconds(1000/p_channel.hz));

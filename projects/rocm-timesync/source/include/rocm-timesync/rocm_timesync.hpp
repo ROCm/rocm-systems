@@ -12,22 +12,13 @@ typedef enum {
     TIMESYNC_PRECISION_HIGH
 } ts_precision_t;
 
-struct ts_db_influx_t {
-    std::string host{"localhost"};
-    uint16_t port{8086};
-    std::string database;
-    // TODO: credentials, etc.
-};
-
-using ts_db_config_t = std::variant<ts_db_influx_t>;
-
-struct ts_config_t {
+struct ts_client_config_t {
+    std::string config_file;
     ts_precision_t precision;
-    ts_db_config_t db_config;
 };
 
-int timesync_init(const ts_config_t& cfg);
-int timesync_deinit();
-int timesync_translate(uint32_t agent_kfd_gpu_id, uint64_t agent_timestamp, uint64_t *system_timestamp);
+int timesync_client_init(const ts_client_config_t& cfg);
+int timesync_client_deinit();
+int timesync_client_translate(uint32_t agent_kfd_gpu_id, uint64_t agent_timestamp, uint64_t& system_timestamp);
 
 } // namespace rocm_timesync

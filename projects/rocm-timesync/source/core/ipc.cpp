@@ -83,10 +83,16 @@ void publish(channel_t* channel, std::vector<event_t>& events)
     channel->rbuf.publish(events);
 }
 
-void poll(const channel_t* channel, const callback_t& callback)
+void poll(channel_t* channel, const callback_t& callback)
 {
     assert(channel->mode == channel_t::mode_t::consumer);
     channel->rbuf.poll(callback);
+}
+
+void consume(channel_t* channel, std::vector<event_t>& events, int wait_ms)
+{
+    assert(channel->mode == channel_t::mode_t::consumer);
+    channel->rbuf.consume(events, wait_ms);
 }
 
 void stop(channel_t* channel)

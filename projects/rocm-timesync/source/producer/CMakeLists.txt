@@ -14,7 +14,7 @@ find_package(yaml-cpp REQUIRED)
 
 target_link_libraries(rocm-timesyncd
     PRIVATE
-        rocm-timesync-core-headers 
+        rocm-timesync-core-headers
         hsakmt::hsakmt
         yaml-cpp
 )

@@ -10,7 +10,7 @@ add_executable(test
 find_package(yaml-cpp REQUIRED)
 target_link_libraries(test
     PRIVATE
-        rocm-timesync-core-headers 
+        rocm-timesync-core-headers
 )
 
 install(

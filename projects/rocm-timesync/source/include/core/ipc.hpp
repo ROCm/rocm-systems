@@ -36,7 +36,8 @@ void publish(channel_t* channel, std::vector<event_t>& events);
 // consumer
 channel_t* attach(std::string name);
 void detach(channel_t*);
-void poll(const channel_t* channel, const callback_t& callback);
+void poll(channel_t* channel, const callback_t& callback);
+void consume(channel_t* channel, std::vector<event_t>& events, int wait_ms);
 void stop(channel_t* channel);
 
 } // namespace ipc

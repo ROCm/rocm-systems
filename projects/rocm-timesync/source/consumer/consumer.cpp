@@ -1,7 +1,11 @@
 #include <thread>
+#include <mutex>
+#include <deque>
+#include <chrono>
 #include <iostream>
 #include <cassert>
 #include <variant>
+#include <unistd.h>
 
 #ifdef ROCM_TIMESYNC_BUILD_INFLUXDB
 #include <curl/curl.h>
@@ -10,10 +14,13 @@
 #include <rocm-timesync/rocm_timesync.hpp>
 #include <core/ipc.hpp>
 
+#include "config.hpp"
 #include "timesync_db.hpp"
 #include "influx_client.hpp"
+#include "memory_client.hpp"
 
-#define BATCH_SIZE 100
+#define DFLT_CONFIG         "/etc/rocm/rocm-timesync/client.yml"
+#define STREAM_SLEEP_MS     1
 
 namespace rocm_timesync
 {
@@ -31,20 +38,34 @@ static std::string precision_to_name(ts_precision_t precision)
 
 } // namespace
 
-static ipc::channel_t* channel = nullptr;
-static bool keep_running = true;
-static std::thread streamer;
-static timesync_db* ts_client = nullptr;
+// TODO support mem client by itself
 
-static int _db_init(const ts_config_t& cfg)
+static std::thread streamer;
+static ts_config_t cfg = {};
+static ipc::channel_t* channel = nullptr;
+static std::atomic<bool> stop_requested = false;
+static timesync_db* db_client = nullptr;
+
+static int _db_init()
 {
-    if (std::holds_alternative<ts_db_influx_t>(cfg.db_config)) {
+    if (std::holds_alternative<ts_db_influx_t>(cfg.db)) {
 #ifdef ROCM_TIMESYNC_BUILD_INFLUXDB
-        const auto& influx = std::get<ts_db_influx_t>(cfg.db_config);
-        ts_client = new influx_client(
+        const auto& influx = std::get<ts_db_influx_t>(cfg.db);
+        /*
+        db_client = new influx_client(
             influx.host,
             influx.port,
             influx.database
+        );
+        */
+
+        db_client = new cached_timesync_db(
+            std::make_unique<memory_client>(512),
+            std::make_unique<influx_client>(
+                influx.host,
+                influx.port,
+                influx.database
+            )
         );
         return 0;
 #else
@@ -55,7 +76,7 @@ static int _db_init(const ts_config_t& cfg)
     return -EINVAL;
 }
 
-int timesync_init(const ts_config_t& cfg)
+int timesync_client_init(const ts_client_config_t& ccfg)
 {
     int status;
 
@@ -63,37 +84,57 @@ int timesync_init(const ts_config_t& cfg)
     curl_global_init(CURL_GLOBAL_DEFAULT);
 #endif
 
-    // establish DB connection
-    status = _db_init(cfg);
+    // load config
+    std::string fname = ccfg.config_file;
+    if (fname.empty())
+        fname = DFLT_CONFIG;
+
+    cfg = LoadConfig(fname);
+
+    // create db connection
+    status = _db_init();
     if (status != 0)
         return status;
 
-    // attach to ringbuffer
-    channel = ipc::attach(precision_to_name(cfg.precision));
+    // attach to ringbuffer using client's required precision
+    channel = ipc::attach(precision_to_name(ccfg.precision));
     if (channel == nullptr)
         return -ENODEV;
 
     // spawn thread to stream ringbuffer into database
     streamer = std::thread([]() {
-        while (keep_running) {
-            std::cout << "ipc streamer running...\n";
+        while (!stop_requested.load(std::memory_order_acquire)) {
+            std::vector<timesync_db::entry_t> entries;
+            std::vector<ipc::event_t> events = {};
 
-            std::vector<ipc::event_t> events;
+            ipc::consume(channel, events, STREAM_SLEEP_MS);
+            for (const auto& event : events) {
+                entries.push_back({
+                    .gpu_id = event.gpu_id,
+                    .point = {
+                        .gpu_timestamp = event.gpu_timestamp_ns,
+                        .system_timestamp = event.system_timestamp_ns,
+                    },
+                });
+            }
 
-            ipc::poll(channel, [](const ipc::event_t& event) {
-                std::cout << "processed event with gpu_id:" << event.gpu_id <<
-                    " and gpu_timestamp: " << event.gpu_timestamp_ns << std::endl;
-                ts_client->write(event.gpu_id, event.gpu_timestamp_ns, event.system_timestamp_ns);
-            });
+            const auto num_entries = entries.size();
+            if (num_entries == 0) {
+                if (STREAM_SLEEP_MS == 0)
+                    std::this_thread::yield();
+                continue;
+            }
+
+            db_client->write_batch(entries);
         }
     });
 
     return 0;
 }
 
-int timesync_deinit()
+int timesync_client_deinit()
 {
-    keep_running = false;
+    stop_requested.store(true, std::memory_order_release);
     ipc::stop(channel);
     streamer.join();
 
@@ -103,16 +144,25 @@ int timesync_deinit()
     curl_global_cleanup();
 #endif
 
-    delete ts_client;
-    ts_client = nullptr;
+    delete db_client;
+    db_client = nullptr;
 
     return 0;
 }
 
-int timesync_translate(uint32_t agent_kfd_gpu_id, uint64_t agent_timestamp, uint64_t *system_timestamp)
+int timesync_client_translate(uint32_t agent_kfd_gpu_id, uint64_t agent_timestamp, uint64_t& system_timestamp)
 {
-    std::cerr << "translate_time request for kfd gpu id: " << agent_kfd_gpu_id << std::endl << std::flush;
-    return 0;
+    system_timestamp = 0;
+
+    //return db_client->lookup_or_extrapolate(agent_kfd_gpu_id, agent_timestamp, system_timestamp);
+    auto start = std::chrono::steady_clock::now();
+    auto ret = db_client->lookup_or_extrapolate(agent_kfd_gpu_id, agent_timestamp, system_timestamp);
+    auto end = std::chrono::steady_clock::now();
+
+    assert(ret);
+
+    std::cout << ret << " took " << std::chrono::duration<double, std::micro>(end - start).count() << " us\n" << std::endl;
+    return ret;
 }
 
 } // namespace rocm_timesync

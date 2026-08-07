@@ -3,8 +3,10 @@ option(BUILD_STATIC "Build static library" ON)
 option(BUILD_INFLUXDB "Build InfluxDB support" OFF)
 
 set(ROCM_TIMESYNC_SOURCES
-  consumer.cpp
+  consumer.cpp config.cpp memory_client.cpp
 )
+
+find_package(yaml-cpp REQUIRED)
 
 if(BUILD_INFLUXDB)
   list(APPEND ROCM_TIMESYNC_SOURCES influx_client.cpp)
@@ -12,8 +14,11 @@ endif()
 
 function(rocm_timesync_configure_target target_name)
   target_link_libraries(${target_name}
-    PRIVATE rocm-timesync-core-headers
-    PUBLIC rocm-timesync-headers
+    PRIVATE
+      rocm-timesync-core-headers
+      yaml-cpp
+    PUBLIC
+      rocm-timesync-headers
   )
 
   if(BUILD_INFLUXDB)
