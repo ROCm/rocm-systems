@@ -156,8 +156,8 @@ code_object_t::open ()
   std::string decoded_path;
   decoded_path.reserve (path.length ());
   for (size_t i = 0; i < path.length (); ++i)
-    if (path[i] == '%' && std::isxdigit (path[i + 1])
-        && std::isxdigit (path[i + 2]))
+    if (path[i] == '%' && i + 2 < path.length ()
+        && std::isxdigit (path[i + 1]) && std::isxdigit (path[i + 2]))
       {
         decoded_path += std::stoi (path.substr (i + 1, 2), 0, 16);
         i += 2;
