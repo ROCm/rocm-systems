@@ -108,6 +108,9 @@ GPU: 0
 
 ### Fixed
 
+- **Fixed `amd-smi list --json` emitting multiple concatenated JSON documents on systems with more than one device type**.
+  - When GPUs coexisted with Broadcom NICs, AI-NICs, or switches, each device group printed its own separate JSON document, so the combined stdout was not valid JSON and `json.loads` failed. The command now aggregates every active device type into a single JSON document when more than one type is present. Systems with a single device type are unchanged.
+
 - **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.
   - The common no-entries case printed empty output, so consumers feeding stdout to `json.loads` failed with `Expecting value: line 1 column 1 (char 0)`. The command now always emits exactly one valid JSON document: `[]` when there are no entries, or a single aggregated array across all GPUs when there are. `--follow` mode stays silent until entries appear. The human-readable primary-partition warning is also suppressed in JSON mode so it no longer corrupts the output.
 
