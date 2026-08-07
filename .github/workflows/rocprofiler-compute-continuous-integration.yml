@@ -48,6 +48,9 @@ on:
       - '!projects/rocprofiler-compute/docker/**'
       - '!projects/rocprofiler-compute/CMakePresets.json'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -91,6 +94,7 @@ jobs:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
     permissions:
+      contents: read
       packages: read
     container:
       image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-compute-ci-multiarch
