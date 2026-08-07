@@ -27,6 +27,9 @@ on:
       - '.github/actions/rocprofiler-sdk-util/action.yml'
       - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
