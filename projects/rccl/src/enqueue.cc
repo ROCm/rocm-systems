@@ -1946,29 +1946,7 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
           nPlans += 1;
         }
       } else if (!ncclIntruQueueEmpty(&planner->collCeTaskQueue)) {
-        struct ncclTaskColl* task = ncclIntruQueueHead(&planner->collCeTaskQueue);
-        plan->isCeColl = true;
-        plan->ceCollArgs = ncclMemoryStackAlloc<struct ncclCeCollArgs>(&comm->memScoped);
-        plan->ceCollArgs->rootRank = task->root;
-        plan->ceCollArgs->datatype = task->datatype;
-        plan->ceCollArgs->nElts = task->count;
-        plan->ceCollArgs->eltSize = ncclTypeSize(task->datatype);
-        plan->ceCollArgs->sendBuff = (uint8_t*)task->sendbuff;
-        plan->ceCollArgs->recvBuff = (uint8_t*)task->recvbuff;
-        plan->ceCollArgs->func = task->func;
-        plan->ceCollArgs->sendWin = task->sendWin;
-        plan->ceCollArgs->recvWin = task->recvWin;
-        plan->ceCollArgs->collApiEventHandle = task->collApiEventHandle;
-
-        if (comm->rank == 0) {
-          const char* nvlsSync = comm->nvlsSupport ? "; CE synchronization with NVLS" : "";
-          INFO(NCCL_TUNING, "%s [Copy Engine]: %ld Bytes -> cudaMemcpy%s", ncclFuncToString(task->func),
-               task->count * ncclTypeSize(task->datatype), nvlsSync);
-        }
-
-        ncclIntruQueueEnqueue(&planner->planQueue, plan);
-        ncclIntruQueueDequeue(&planner->collCeTaskQueue);
-        ncclMemoryPoolFree(&comm->memPool_ncclTaskColl, task);
+        NCCLCHECKGOTO(scheduleCeCollTaskToPlan(comm, plan), result, failure);
         nPlans += 1;
       } else {
         if (!ncclIntruQueueEmpty(&planner->collSymTaskQueue)) {

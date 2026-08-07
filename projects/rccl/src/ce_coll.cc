@@ -83,7 +83,8 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
 #endif
 
   uint8_t* ceDevBase = nullptr;
-  size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
+  // Sync window has one ready and one complete slot per LSA-local rank.
+  size_t ceDevBaseSize = alignUp(comm->devrState.lsaSize * sizeof(uint32_t), 16) * 2;
   ncclWindow_vidmem* ceWinDev = nullptr;
   ncclWindow_vidmem* ceWinDevHost = nullptr;
   int i = 0;
@@ -99,7 +100,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   comm->ceColl.ceSyncWin = (struct ncclDevrWindow*)ceWinDevHost->winHost;
 
   comm->ceColl.baseUCSymReadyOffset = 0;
-  comm->ceColl.baseUCSymComplOffset = alignUp(comm->nRanks * sizeof(uint32_t), 16);
+  comm->ceColl.baseUCSymComplOffset = alignUp(comm->devrState.lsaSize * sizeof(uint32_t), 16);
   comm->ceColl.baseUCSymReadyPtr = (uint8_t*)comm->ceColl.ceSyncWin->userPtr + comm->ceColl.baseUCSymReadyOffset;
   comm->ceColl.baseUCSymComplPtr = (uint8_t*)comm->ceColl.ceSyncWin->userPtr + comm->ceColl.baseUCSymComplOffset;
   comm->ceColl.ceSeqNum = 0;
@@ -178,8 +179,8 @@ bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_
     TRACE(NCCL_TUNING, "Skipping CE collective: not implemented");
     return false;
   }
-  if (comm->nNodes > 1) {
-    TRACE(NCCL_TUNING, "Skipping CE collective: comm is not a single node");
+  if (ncclTeamLsa(comm).nRanks < comm->nRanks) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: not all ranks have scale-up connectivity");
     return false;
   }
   if (!comm->symmetricSupport) {
@@ -220,6 +221,8 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
                             size_t* opIdx, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
+  int myLsaRank = comm->devrState.lsaSelf;
+  int lsaSize = comm->devrState.lsaSize;
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
   uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
 
@@ -233,7 +236,7 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
 
   // Use multi-cast address as destination pointer
   void* mcDstPtr;
-  void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
+  void* dstPtr = isComplete ? (void*)&completePtrs[myLsaRank] : (void*)&readyPtrs[myLsaRank];
   size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
   NCCLCHECKGOTO(ncclDevrGetLsaTeamPtrMC(comm, comm->ceColl.ceSyncWin, offset, ncclTeamLsa(comm), &mcDstPtr), ret, fail);
 
@@ -241,8 +244,8 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
   CUDACHECKGOTO(cudaMemcpyAsync(mcDstPtr, srcPtr, sizeof(uint32_t), cudaMemcpyHostToDevice, stream), ret, fail);
 
   // Add local wait operations for every other rank
-  for (int r = 0; r < comm->nRanks; ++r) {
-    if (r == comm->rank) continue;
+  for (int r = 0; r < lsaSize; ++r) {
+    if (r == myLsaRank) continue;
     batchParams[*opIdx] = {};
     batchParams[*opIdx].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
     batchParams[*opIdx].waitValue.address = (CUdeviceptr)(isComplete ? (void*)&completePtrs[r] : (void*)&readyPtrs[r]);
@@ -265,6 +268,8 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
   NCCLCHECK(ceFaultCheck(comm, CE_FAULT_SYNC_PREP, "ncclPrepUCSync"));
 #endif
 
+  int myLsaRank = comm->devrState.lsaSelf;
+  int lsaSize = comm->devrState.lsaSize;
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
   uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
 
@@ -273,10 +278,10 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
 
   // Write our own ready/complete flag to remote ranks
   uint32_t waitValue = capturing ? GRAPH_SYNC_VALUE : currentSeq;
-  for (int r = 0; r < comm->nRanks; ++r) {
-    if (r == comm->rank) continue;
+  for (int r = 0; r < lsaSize; ++r) {
+    if (r == myLsaRank) continue;
     void* peerDstPtr;
-    void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
+    void* dstPtr = isComplete ? (void*)&completePtrs[myLsaRank] : (void*)&readyPtrs[myLsaRank];
     size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
     NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, r, &peerDstPtr), ret, fail);
     batchParams[*opIdx] = {};
@@ -288,8 +293,8 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
   }
 
   // Add local wait operations for every other rank
-  for (int r = 0; r < comm->nRanks; ++r) {
-    if (r == comm->rank) continue;
+  for (int r = 0; r < lsaSize; ++r) {
+    if (r == myLsaRank) continue;
     batchParams[*opIdx] = {};
     batchParams[*opIdx].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
     batchParams[*opIdx].waitValue.address = (CUdeviceptr)(isComplete ? (void*)&completePtrs[r] : (void*)&readyPtrs[r]);
@@ -313,15 +318,16 @@ ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, struct nc
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
   uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
 
-  // Allocate enough slots for all possible ops
-  size_t batchSize = (comm->nvlsSupport ? NCCL_CE_SYNC_OPS_PER_RANK_MC : NCCL_CE_SYNC_OPS_PER_RANK_UC) * comm->nRanks;
+  // Multicast synchronization is not available across scale-up cliques.
+  bool useMCSync = comm->nvlsSupport && !comm->p2pCrossClique;
+  size_t batchSize = (useMCSync ? NCCL_CE_SYNC_OPS_PER_RANK_MC : NCCL_CE_SYNC_OPS_PER_RANK_UC) * lsaSize;
   size_t opIdx = 0;
 
   // Prepare batch memory operations for synchronization
   hipStreamBatchMemOpParams* batchParams = nullptr;
   NCCLCHECKGOTO(ncclCalloc(&batchParams, batchSize), ret, fail);
 
-  if (comm->nvlsSupport) {
+  if (useMCSync) {
     NCCLCHECKGOTO(ncclPrepMCSync(comm, comm->ceColl.useCompletePtr, batchParams, &opIdx, stream), ret, fail);
   } else {
     NCCLCHECKGOTO(ncclPrepUCSync(comm, comm->ceColl.useCompletePtr, batchParams, &opIdx), ret, fail);
@@ -385,11 +391,19 @@ fail:
 
 void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
   if (params->srcs) free(params->srcs);
+  params->srcs = nullptr;
   if (params->dsts) free(params->dsts);
+  params->dsts = nullptr;
   if (params->sizes) free(params->sizes);
+  params->sizes = nullptr;
+  params->numOps = 0;
+  params->intraBatchSync = false;
 #ifdef CE_BATCH_ASYNC_SUPPORTED
   if (params->attrs) free(params->attrs);
+  params->attrs = nullptr;
   if (params->attrIdxs) free(params->attrIdxs);
+  params->attrIdxs = nullptr;
+  params->numAttrs = 0;
 #endif
 }
 
@@ -1408,21 +1422,39 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
   // Start CE collective profiling
   NCCLCHECKGOTO(ncclProfilerStartCeCollEvent(comm, args, stream), ret, fail);
 
-  switch (args->func) {
-  case ncclFuncAllGather:
-    NCCLCHECKGOTO(ncclCeAllGather(comm, args, stream), ret, fail);
-    break;
-  case ncclFuncAlltoAll:
-    NCCLCHECKGOTO(ncclCeAlltoAll(comm, args, stream), ret, fail);
-    break;
-  case ncclFuncScatter:
-    NCCLCHECKGOTO(ncclCeScatter(comm, args, stream), ret, fail);
-    break;
-  case ncclFuncGather:
-    NCCLCHECKGOTO(ncclCeGather(comm, args, stream), ret, fail);
-    break;
-  default:
-    ret = ncclInvalidUsage;
+  // Hierarchical path: inter-node RMA + intra-node CE
+  // Use ncclDevrIsOneLsaTeam instead of comm->nNodes as multi-clique single-NVLD should use CE path
+  if (!ncclDevrIsOneLsaTeam(comm)) {
+    switch (args->func) {
+    case ncclFuncAllGather:
+      NCCLCHECKGOTO(ncclHierCeAllGather(comm, plan, stream), ret, fail);
+      break;
+    case ncclFuncAlltoAll:
+      NCCLCHECKGOTO(ncclHierCeAlltoAll(comm, plan, stream), ret, fail);
+      break;
+    default:
+      WARN("Hierarchical CE collective not supported for %s", ncclFuncToString(args->func));
+      ret = ncclInvalidUsage;
+    }
+  }
+  // LSA-local CE path
+  else {
+    switch (args->func) {
+    case ncclFuncAllGather:
+      NCCLCHECKGOTO(ncclCeAllGather(comm, args, stream), ret, fail);
+      break;
+    case ncclFuncAlltoAll:
+      NCCLCHECKGOTO(ncclCeAlltoAll(comm, args, stream), ret, fail);
+      break;
+    case ncclFuncScatter:
+      NCCLCHECKGOTO(ncclCeScatter(comm, args, stream), ret, fail);
+      break;
+    case ncclFuncGather:
+      NCCLCHECKGOTO(ncclCeGather(comm, args, stream), ret, fail);
+      break;
+    default:
+      ret = ncclInvalidUsage;
+    }
   }
 
 exit:
