@@ -29,7 +29,6 @@ SMovB32Sop1::SMovB32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  flags_ |= RESULT_COPY;
 }
 
 SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
@@ -51,7 +50,6 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
-  flags_ |= RESULT_COPY;
 }
 
 SCmovB32Sop1::SCmovB32Sop1(const MachineInst *inst)
@@ -728,7 +726,6 @@ SAndSaveexecB32Sop1::SAndSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
@@ -759,7 +756,6 @@ SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SOrSaveexecB32Sop1::SOrSaveexecB32Sop1(const MachineInst *inst)
@@ -790,8 +786,6 @@ SOrSaveexecB32Sop1::SOrSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
-  flags_ |= RESULT_OR;
 }
 
 SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
@@ -822,8 +816,6 @@ SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
-  flags_ |= RESULT_OR;
 }
 
 SXorSaveexecB32Sop1::SXorSaveexecB32Sop1(const MachineInst *inst)
@@ -854,7 +846,6 @@ SXorSaveexecB32Sop1::SXorSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
@@ -885,7 +876,6 @@ SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SNandSaveexecB32Sop1::SNandSaveexecB32Sop1(const MachineInst *inst)
@@ -916,7 +906,6 @@ SNandSaveexecB32Sop1::SNandSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
@@ -947,7 +936,6 @@ SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SNorSaveexecB32Sop1::SNorSaveexecB32Sop1(const MachineInst *inst)
@@ -978,7 +966,6 @@ SNorSaveexecB32Sop1::SNorSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
@@ -1009,7 +996,6 @@ SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SXnorSaveexecB32Sop1::SXnorSaveexecB32Sop1(const MachineInst *inst)
@@ -1040,7 +1026,6 @@ SXnorSaveexecB32Sop1::SXnorSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
@@ -1071,7 +1056,6 @@ SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SAndNot0SaveexecB32Sop1::SAndNot0SaveexecB32Sop1(const MachineInst *inst)
@@ -1103,7 +1087,6 @@ SAndNot0SaveexecB32Sop1::SAndNot0SaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SAndNot0SaveexecB64Sop1::SAndNot0SaveexecB64Sop1(const MachineInst *inst)
@@ -1135,7 +1118,6 @@ SAndNot0SaveexecB64Sop1::SAndNot0SaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SOrNot0SaveexecB32Sop1::SOrNot0SaveexecB32Sop1(const MachineInst *inst)
@@ -1167,7 +1149,6 @@ SOrNot0SaveexecB32Sop1::SOrNot0SaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SOrNot0SaveexecB64Sop1::SOrNot0SaveexecB64Sop1(const MachineInst *inst)
@@ -1199,7 +1180,6 @@ SOrNot0SaveexecB64Sop1::SOrNot0SaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SAndNot1SaveexecB32Sop1::SAndNot1SaveexecB32Sop1(const MachineInst *inst)
@@ -1231,7 +1211,6 @@ SAndNot1SaveexecB32Sop1::SAndNot1SaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SAndNot1SaveexecB64Sop1::SAndNot1SaveexecB64Sop1(const MachineInst *inst)
@@ -1263,7 +1242,6 @@ SAndNot1SaveexecB64Sop1::SAndNot1SaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SOrNot1SaveexecB32Sop1::SOrNot1SaveexecB32Sop1(const MachineInst *inst)
@@ -1295,7 +1273,6 @@ SOrNot1SaveexecB32Sop1::SOrNot1SaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SOrNot1SaveexecB64Sop1::SOrNot1SaveexecB64Sop1(const MachineInst *inst)
@@ -1327,7 +1304,6 @@ SOrNot1SaveexecB64Sop1::SOrNot1SaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SAndNot0WrexecB32Sop1::SAndNot0WrexecB32Sop1(const MachineInst *inst)
@@ -1359,7 +1335,6 @@ SAndNot0WrexecB32Sop1::SAndNot0WrexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SAndNot0WrexecB64Sop1::SAndNot0WrexecB64Sop1(const MachineInst *inst)
@@ -1391,7 +1366,6 @@ SAndNot0WrexecB64Sop1::SAndNot0WrexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SAndNot1WrexecB32Sop1::SAndNot1WrexecB32Sop1(const MachineInst *inst)
@@ -1423,7 +1397,6 @@ SAndNot1WrexecB32Sop1::SAndNot1WrexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SAndNot1WrexecB64Sop1::SAndNot1WrexecB64Sop1(const MachineInst *inst)
@@ -1455,7 +1428,6 @@ SAndNot1WrexecB64Sop1::SAndNot1WrexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 SMovrelsB32Sop1::SMovrelsB32Sop1(const MachineInst *inst)

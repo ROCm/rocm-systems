@@ -33,7 +33,6 @@ SMovB32Sop1::SMovB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= RESULT_COPY;
 }
 
 void SMovB32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mov_b32_sop1(*this, wf); }
@@ -50,7 +49,6 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= RESULT_COPY;
 }
 
 void SMovB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mov_b64_sop1(*this, wf); }
@@ -636,7 +634,6 @@ SAndSaveexecB32Sop1::SAndSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SAndSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -665,7 +662,6 @@ SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SAndSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -694,8 +690,6 @@ SOrSaveexecB32Sop1::SOrSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
-  flags_ |= RESULT_OR;
 }
 
 void SOrSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -724,8 +718,6 @@ SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
-  flags_ |= RESULT_OR;
 }
 
 void SOrSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -754,7 +746,6 @@ SXorSaveexecB32Sop1::SXorSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SXorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -783,7 +774,6 @@ SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SXorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -812,7 +802,6 @@ SNandSaveexecB32Sop1::SNandSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SNandSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -841,7 +830,6 @@ SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SNandSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -870,7 +858,6 @@ SNorSaveexecB32Sop1::SNorSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SNorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -899,7 +886,6 @@ SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SNorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -928,7 +914,6 @@ SXnorSaveexecB32Sop1::SXnorSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SXnorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -957,7 +942,6 @@ SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SXnorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -986,7 +970,6 @@ SAndNot0SaveexecB32Sop1::SAndNot0SaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SAndNot0SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1015,7 +998,6 @@ SAndNot0SaveexecB64Sop1::SAndNot0SaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SAndNot0SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1044,7 +1026,6 @@ SOrNot0SaveexecB32Sop1::SOrNot0SaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SOrNot0SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1073,7 +1054,6 @@ SOrNot0SaveexecB64Sop1::SOrNot0SaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SOrNot0SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1102,7 +1082,6 @@ SAndNot1SaveexecB32Sop1::SAndNot1SaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SAndNot1SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1131,7 +1110,6 @@ SAndNot1SaveexecB64Sop1::SAndNot1SaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SAndNot1SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1160,7 +1138,6 @@ SOrNot1SaveexecB32Sop1::SOrNot1SaveexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SOrNot1SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1189,7 +1166,6 @@ SOrNot1SaveexecB64Sop1::SOrNot1SaveexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SOrNot1SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1218,7 +1194,6 @@ SAndNot0WrexecB32Sop1::SAndNot0WrexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SAndNot0WrexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1247,7 +1222,6 @@ SAndNot0WrexecB64Sop1::SAndNot0WrexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SAndNot0WrexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1276,7 +1250,6 @@ SAndNot1WrexecB32Sop1::SAndNot1WrexecB32Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SAndNot1WrexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1305,7 +1278,6 @@ SAndNot1WrexecB64Sop1::SAndNot1WrexecB64Sop1(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
-  flags_ |= WRITES_EXEC;
 }
 
 void SAndNot1WrexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
