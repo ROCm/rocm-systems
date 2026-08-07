@@ -120,6 +120,13 @@ bool ncclAllGatherDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* 
   return true;
 }
 
+int ncclAllGatherDdaFabricBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype) {
+  // Kernel is instantiated for int8_t, so grid math runs on byte counts.
+  const size_t bytes = sendcount * ncclTypeSize(datatype);
+  auto grid = meta::comms::getGridAndBlockDims(bytes, 1, comm->ddaFabricMaxBlocks).first;
+  return (int)grid.x;
+}
+
 ncclResult_t ncclAllGatherDdaFabric(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
                                     ncclComm* comm, cudaStream_t stream) {
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {

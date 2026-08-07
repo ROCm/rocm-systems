@@ -180,6 +180,18 @@ bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
   return true;
 }
 
+int ncclAllGatherDdaFabricLL128Blocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype) {
+  // grid = nRanks (peer) x blocksPerPeer, clamped to the device epoch array.
+  const size_t perRankBytes = sendcount * ncclTypeSize(datatype);
+  int blocksPerPeer = ddaLL128AgBlocksPerPeer(perRankBytes);
+  const int epochLen = comm->ddaLLEpochLen;
+  if (comm->nRanks * blocksPerPeer > epochLen) {
+    blocksPerPeer = epochLen / comm->nRanks;
+    if (blocksPerPeer < 1) blocksPerPeer = 1;
+  }
+  return comm->nRanks * blocksPerPeer;
+}
+
 ncclResult_t ncclAllGatherDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t sendcount,
                                          ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream) {
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {

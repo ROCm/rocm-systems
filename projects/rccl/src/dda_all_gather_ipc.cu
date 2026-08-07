@@ -99,6 +99,14 @@ bool ncclAllGatherDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   return true;
 }
 
+int ncclAllGatherDdaIpcBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype) {
+  (void)comm;
+  // Kernel is instantiated for int8_t, so grid math runs on byte counts.
+  const size_t bytes = sendcount * ncclTypeSize(datatype);
+  auto grid = meta::comms::getGridAndBlockDims(bytes, 1, nccl_dda_detail::ddaMaxNBlocksForScratch()).first;
+  return (int)grid.x;
+}
+
 ncclResult_t ncclAllGatherDdaIpc(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
                                  ncclComm* comm, cudaStream_t stream) {
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {

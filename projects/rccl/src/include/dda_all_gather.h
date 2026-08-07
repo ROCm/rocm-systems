@@ -24,6 +24,13 @@ bool ncclAllGatherDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
 ncclResult_t ncclAllGatherDdaIpc(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
                                  ncclComm* comm, cudaStream_t stream);
 
+// Total CTAs (grid blocks) each DDA allgather launcher would use for the given
+// operands. Mirrors the launch grid math so reporting reflects real occupancy.
+int ncclAllGatherDdaIpcBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype);
+int ncclAllGatherDdaFabricBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype);
+int ncclAllGatherDdaFabricLLBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype);
+int ncclAllGatherDdaFabricLL128Blocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype);
+
 /**
  * Check if DDA allgather is eligible for the fabric/VMM path (runtime nRanks
  * up to kDdaMaxNranks, single- or multi-node within an MNNVL clique).

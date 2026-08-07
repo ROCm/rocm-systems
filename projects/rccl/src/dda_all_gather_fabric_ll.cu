@@ -134,6 +134,12 @@ bool ncclAllGatherDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
   return true;
 }
 
+int ncclAllGatherDdaFabricLLBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype) {
+  // grid = nRanks (peer) x blocksPerPeer; kernel runs on byte counts.
+  const size_t perRankBytes = sendcount * ncclTypeSize(datatype);
+  return comm->nRanks * ddaLLAgBlocksPerPeer(perRankBytes);
+}
+
 ncclResult_t ncclAllGatherDdaFabricLL(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
                                       ncclComm* comm, cudaStream_t stream) {
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
