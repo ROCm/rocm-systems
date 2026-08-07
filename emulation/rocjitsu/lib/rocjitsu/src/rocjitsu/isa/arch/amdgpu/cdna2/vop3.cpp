@@ -6106,6 +6106,7 @@ VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxClassF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6181,6 +6182,7 @@ VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxClassF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6329,6 +6331,7 @@ VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7086,6 +7089,7 @@ VCmpxFF16Vop3::VCmpxFF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7114,6 +7118,7 @@ VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7156,6 +7161,7 @@ VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7198,6 +7204,7 @@ VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7240,6 +7247,7 @@ VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7282,6 +7290,7 @@ VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7324,6 +7333,7 @@ VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7366,6 +7376,7 @@ VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7408,6 +7419,7 @@ VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7450,6 +7462,7 @@ VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7492,6 +7505,7 @@ VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7534,6 +7548,7 @@ VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7576,6 +7591,7 @@ VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7618,6 +7634,7 @@ VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7660,6 +7677,7 @@ VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7702,6 +7720,7 @@ VCmpxTruF16Vop3::VCmpxTruF16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxTruF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7999,6 +8018,7 @@ VCmpxFF32Vop3::VCmpxFF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8027,6 +8047,7 @@ VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8066,6 +8087,7 @@ VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8105,6 +8127,7 @@ VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8144,6 +8167,7 @@ VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8183,6 +8207,7 @@ VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8222,6 +8247,7 @@ VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8261,6 +8287,7 @@ VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8300,6 +8327,7 @@ VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8339,6 +8367,7 @@ VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8378,6 +8407,7 @@ VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8417,6 +8447,7 @@ VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8456,6 +8487,7 @@ VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8495,6 +8527,7 @@ VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8534,6 +8567,7 @@ VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8573,6 +8607,7 @@ VCmpxTruF32Vop3::VCmpxTruF32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxTruF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8870,6 +8905,7 @@ VCmpxFF64Vop3::VCmpxFF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8898,6 +8934,7 @@ VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8937,6 +8974,7 @@ VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8976,6 +9014,7 @@ VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9015,6 +9054,7 @@ VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9054,6 +9094,7 @@ VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9093,6 +9134,7 @@ VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9132,6 +9174,7 @@ VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9171,6 +9214,7 @@ VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9210,6 +9254,7 @@ VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9249,6 +9294,7 @@ VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9288,6 +9334,7 @@ VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9327,6 +9374,7 @@ VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9366,6 +9414,7 @@ VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9405,6 +9454,7 @@ VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9444,6 +9494,7 @@ VCmpxTruF64Vop3::VCmpxTruF64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxTruF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9916,6 +9967,7 @@ VCmpxFI16Vop3::VCmpxFI16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxFI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9944,6 +9996,7 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9982,6 +10035,7 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10020,6 +10074,7 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10058,6 +10113,7 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10096,6 +10152,7 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10134,6 +10191,7 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10172,6 +10230,7 @@ VCmpxTI16Vop3::VCmpxTI16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxTI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10200,6 +10259,7 @@ VCmpxFU16Vop3::VCmpxFU16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxFU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10228,6 +10288,7 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10266,6 +10327,7 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10304,6 +10366,7 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10342,6 +10405,7 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10380,6 +10444,7 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10418,6 +10483,7 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10456,6 +10522,7 @@ VCmpxTU16Vop3::VCmpxTU16Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxTU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10752,6 +10819,7 @@ VCmpxFI32Vop3::VCmpxFI32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxFI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10780,6 +10848,7 @@ VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10811,6 +10880,7 @@ VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10842,6 +10912,7 @@ VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10873,6 +10944,7 @@ VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10904,6 +10976,7 @@ VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10935,6 +11008,7 @@ VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10966,6 +11040,7 @@ VCmpxTI32Vop3::VCmpxTI32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxTI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10994,6 +11069,7 @@ VCmpxFU32Vop3::VCmpxFU32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxFU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11022,6 +11098,7 @@ VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11053,6 +11130,7 @@ VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11084,6 +11162,7 @@ VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11115,6 +11194,7 @@ VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11146,6 +11226,7 @@ VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11177,6 +11258,7 @@ VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11208,6 +11290,7 @@ VCmpxTU32Vop3::VCmpxTU32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxTU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11504,6 +11587,7 @@ VCmpxFI64Vop3::VCmpxFI64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxFI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11532,6 +11616,7 @@ VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11563,6 +11648,7 @@ VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11594,6 +11680,7 @@ VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11625,6 +11712,7 @@ VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11656,6 +11744,7 @@ VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11687,6 +11776,7 @@ VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11718,6 +11808,7 @@ VCmpxTI64Vop3::VCmpxTI64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxTI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11746,6 +11837,7 @@ VCmpxFU64Vop3::VCmpxFU64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxFU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11774,6 +11866,7 @@ VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11805,6 +11898,7 @@ VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11836,6 +11930,7 @@ VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11867,6 +11962,7 @@ VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11898,6 +11994,7 @@ VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11929,6 +12026,7 @@ VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11960,6 +12058,7 @@ VCmpxTU64Vop3::VCmpxTU64Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_EXEC;
 }
 
 void VCmpxTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
