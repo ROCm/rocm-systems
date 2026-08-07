@@ -12,10 +12,14 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_sysfs.h"
 RJ_DIAGNOSTIC_POP
 
+#include <cerrno>
+#include <charconv>
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <unistd.h>
@@ -28,131 +32,114 @@ namespace fs = std::filesystem;
 
 namespace {
 
-std::string make_runtime_temp_dir(const char *prefix) {
+/// @brief Create a process-tagged scratch directory under the XDG runtime root.
+/// @details Replaces raw mkdtemp("/tmp/...") so synthetic sysfs trees live under
+/// rpc_default_runtime_dir() (tmpfs, reaped at logout) and carry the owning PID
+/// in their name (rocjitsu_<kind>_<pid>_XXXXXX) so reap_stale_sysfs_dirs() can
+/// remove the trees an earlier SIGKILL/crash orphaned. Returns empty on failure.
+/// @note The PID tag makes reaping best-effort, not exact: PID reuse means a
+/// recycled-but-live PID can keep a genuinely-orphaned tree from being reaped (a
+/// bounded leak until logout clears the tmpfs), and the mkdtemp XXXXXX suffix keeps
+/// two same-PID generations from colliding. This matches the launcher reaper
+/// (main.cpp reap_stale_runtime_dirs); the tmpfs backstop bounds any leak.
+std::string make_tagged_dir(const char *kind) {
   std::error_code ec;
-  fs::path base = rpc_default_runtime_dir();
-  fs::create_directories(base, ec);
-  if (ec)
+  std::string root = rpc_default_runtime_dir();
+  // Fail closed on an empty root: an empty base would make tmpl "/rocjitsu_..._XXXXXX"
+  // and try to mkdtemp scratch dirs in the filesystem root. rpc_default_runtime_dir()
+  // already treats a set-but-empty $ROCJITSU_RUNTIME_DIR as unset; guard defensively.
+  if (root.empty())
     return {};
-
-  // Synthetic sysfs/DRM trees are process-owned and removed by Sysfs::cleanup().
-  // Place them under the rocjitsu runtime directory so crashes leave state in a
-  // known per-user location instead of scattering entries directly under /tmp.
-  std::string tmpl = (base / (std::string(prefix) + "_XXXXXX")).string();
-  std::vector<char> tmpl_buffer(tmpl.begin(), tmpl.end());
-  tmpl_buffer.push_back('\0');
-  char *dir = mkdtemp(tmpl_buffer.data());
-  if (!dir)
-    return {};
-  return dir;
+  // Errors from create_directories are intentionally not checked here: if the root
+  // could not be created, mkdtemp below fails and returns empty, which both callers
+  // already treat as "no synthetic tree" via an empty-string early return.
+  fs::create_directories(root, ec);
+  std::string tmpl = root + "/rocjitsu_" + kind + "_" + std::to_string(getpid()) + "_XXXXXX";
+  std::vector<char> buf(tmpl.begin(), tmpl.end());
+  buf.push_back('\0');
+  char *dir = mkdtemp(buf.data());
+  return dir ? std::string(dir) : std::string{};
 }
 
-/// @brief Debug-related topology bits derived from a GPU's GFXIP version.
-///
-/// @details Mirrors the per-node values the amdkfd driver programs in
-/// kfd_topology_set_capabilities() (drivers/gpu/drm/amd/amdkfd/kfd_topology.c):
-/// the trap-debugger capability flags, the capability2 flags, and the
-/// debug_prop address-watch-mask range that libhsakmt and rocdbgapi read back.
-struct DebugTopology {
-  uint32_t capability = 0;
-  uint32_t capability2 = 0;
-  uint64_t debug_prop = 0;
-};
-
-/// @brief Reproduces kfd_topology_set_capabilities() for the simulated GPU
-/// identified by @p gfx_target_version.
-///
-/// @details The driver keys every decision on the GC hardware IP version, which
-/// is not the same number as gfx_target_version for CDNA parts (see
-/// kmd::gc_ip_version_for_gfx_target_version), so we translate first and then
-/// apply the driver's exact IP_VERSION thresholds.
-///
-/// \NPI sync this with the KFD driver code in drivers/gpu/drm/amd/amdkfd/kfd_topology.c
-DebugTopology debug_topology_for(uint32_t gfx_target_version) {
-  using kmd::make_gc_ip_version;
-  const uint32_t gc = kmd::gc_ip_version_for_gfx_target_version(gfx_target_version);
-
-  DebugTopology topo;
-
-  // Trap-based debugging is advertised for every debug-capable GPU.
-  topo.capability = HSA_CAP_TRAP_DEBUG_SUPPORT |
-                    HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_TRAP_OVERRIDE_SUPPORTED |
-                    HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_MODE_SUPPORTED;
-
-  // kfd_dbg_has_ttmps_always_setup(): dispatch info (ttmps) is always valid
-  // except on gfx9.4.2 (Aldebaran) below gfx11, and on gfx11 only with modern
-  // MES firmware (sched_version >= 70), which the simulator always models.
-  const bool ttmps_always_setup =
-      (gc < make_gc_ip_version(11, 0, 0) && gc != make_gc_ip_version(9, 4, 2)) ||
-      gc >= make_gc_ip_version(11, 0, 0);
-  if (ttmps_always_setup)
-    topo.debug_prop |= HSA_DBG_DISPATCH_INFO_ALWAYS_VALID;
-
-  if (gc < make_gc_ip_version(10, 0, 0)) {
-    // gfx9 (CDNA). The watch-address-mask range widens by one bit on the
-    // gfx9.4.3/gfx9.4.4 parts (LO 6->7, HI 29->30).
-    if (gc == make_gc_ip_version(9, 4, 3) || gc == make_gc_ip_version(9, 4, 4))
-      topo.debug_prop |= kmd::kWatchAddrMaskLoBitGfx943 | kmd::kWatchAddrMaskHiBitGfx943;
-    else
-      topo.debug_prop |= kmd::kWatchAddrMaskLoBitGfx9 | kmd::kWatchAddrMaskHiBit;
-
-    if (gc >= make_gc_ip_version(9, 4, 2))
-      topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED;
-
-    // Per-queue reset is withheld only from SR-IOV virtual functions, which the
-    // simulator never models.
-    topo.capability |= HSA_CAP_PER_QUEUE_RESET_SUPPORTED;
-  } else {
-    // gfx10+ (RDNA).
-    topo.debug_prop |= kmd::kWatchAddrMaskLoBitGfx10 | kmd::kWatchAddrMaskHiBit;
-
-    if (gc >= make_gc_ip_version(12, 0, 0))
-      topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_ALU_OPERATIONS_SUPPORTED;
-
-    if (gc >= make_gc_ip_version(12, 1, 0)) {
-      topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED |
-                         HSA_CAP_PER_QUEUE_RESET_SUPPORTED;
-      topo.capability2 |= HSA_CAP2_TRAP_DEBUG_LDS_OUT_OF_ADDR_RANGE_SUPPORTED;
+/// @brief Remove orphaned rocjitsu_{drm,topology}_<pid>_* dirs of dead processes.
+/// @details RAII cleanup (Sysfs::cleanup) only fires on graceful teardown; a
+/// SIGKILL/OOM/crash leaks the scratch tree forever. This sweeps the runtime
+/// root once per process, deleting any tagged dir whose embedded PID is no
+/// longer alive (kill(pid, 0) == ESRCH). The live process's own dirs are kept.
+void reap_stale_sysfs_dirs() {
+  // Advance the iterator with an error_code (not the throwing operator++): another
+  // rocjitsu process sharing this runtime root may remove_all an entry concurrently,
+  // and a throw here would escape std::call_once and abort topology generation on a
+  // best-effort cleanup path. Best-effort — any filesystem error just ends the scan.
+  std::error_code ec;
+  std::string root = rpc_default_runtime_dir();
+  // Never scan an empty root: directory_iterator("") walks the CWD, and this loop
+  // remove_all's matching entries. rpc_default_runtime_dir() already maps a set-but-
+  // empty $ROCJITSU_RUNTIME_DIR to a real path; guard here too since we delete.
+  if (root.empty())
+    return;
+  fs::directory_iterator it(root, ec);
+  const fs::directory_iterator end;
+  for (; !ec && it != end; it.increment(ec)) {
+    const auto &entry = *it;
+    // Only reap a real directory, never chase a symlink out of the runtime root:
+    // symlink_status() does NOT follow the link, whereas is_directory() would let a
+    // symlink-to-directory pass and have remove_all() delete its target. Matches the
+    // hardened launcher reaper (main.cpp reap_stale_runtime_dirs).
+    std::error_code st_ec;
+    auto st = fs::symlink_status(entry.path(), st_ec);
+    if (st_ec || st.type() != fs::file_type::directory)
+      continue;
+    std::string name = entry.path().filename().string();
+    if (name.rfind("rocjitsu_drm_", 0) != 0 && name.rfind("rocjitsu_topology_", 0) != 0)
+      continue;
+    // Extract the PID between the last two underscores: <prefix>_<pid>_<suffix>.
+    auto suffix_us = name.rfind('_');
+    if (suffix_us == std::string::npos || suffix_us == 0)
+      continue;
+    auto pid_us = name.rfind('_', suffix_us - 1);
+    if (pid_us == std::string::npos)
+      continue;
+    std::string pid_str = name.substr(pid_us + 1, suffix_us - pid_us - 1);
+    pid_t pid = 0;
+    auto [ptr, perr] = std::from_chars(pid_str.data(), pid_str.data() + pid_str.size(), pid);
+    if (perr != std::errc{} || ptr != pid_str.data() + pid_str.size() || pid <= 0)
+      continue;
+    if (kill(pid, 0) == -1 && errno == ESRCH) {
+      // Use a dedicated error_code for the removal: reusing the loop-control `ec`
+      // would let one un-removable orphan (e.g. EACCES on another user's tree)
+      // set `ec` and terminate the whole sweep, skipping every remaining stale
+      // dir for the life of the process (this runs under std::call_once).
+      std::error_code rm_ec;
+      fs::remove_all(entry.path(), rm_ec);
     }
   }
-
-  // Firmware-backed trap debugging (kfd_topology_set_dbg_firmware_support()).
-  // The simulator always provides compatible "firmware", so advertise it.
-  topo.capability |= HSA_CAP_TRAP_DEBUG_FIRMWARE_SUPPORTED;
-
-  return topo;
 }
 
-/// @brief Non-debug capability bits advertised for the data-center compute GPUs
-/// the simulator models.
-///
-/// @details On real hardware these originate from the ASIC's CRAT tables rather
-/// than kfd_topology_set_capabilities(); reproducing per-ASIC CRAT variation is
-/// out of scope, so the simulator advertises the common data-center feature set
-/// (ECC/RAS, ATS, SVM, coherent host access). The version-specific debug bits
-/// are contributed separately by debug_topology_for().
-uint32_t default_non_debug_capability() {
-  return HSA_CAP_ATS_PRESENT | HSA_CAP_QUEUE_IDLE_EVENT | HSA_CAP_WATCH_POINTS_SUPPORTED |
-         ((4u << HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT) & HSA_CAP_WATCH_POINTS_TOTALBITS_MASK) |
-         ((HSA_CAP_DOORBELL_TYPE_2_0 << HSA_CAP_DOORBELL_TYPE_TOTALBITS_SHIFT) &
-          HSA_CAP_DOORBELL_TYPE_TOTALBITS_MASK) |
-         HSA_CAP_AQL_QUEUE_DOUBLE_MAP | HSA_CAP_MEM_EDCSUPPORTED | HSA_CAP_RASEVENTNOTIFY |
-         HSA_CAP_SRAM_EDCSUPPORTED | HSA_CAP_SVMAPI_SUPPORTED | HSA_CAP_FLAGS_COHERENTHOSTACCESS;
-}
+// The debug-topology derivation (trap-debug capability/capability2/debug_prop
+// per GFXIP) lives in kfd_topology.h so the DBG_TRAP GET_DEVICE_SNAPSHOT path
+// and this sysfs topology generator share one source of truth.
+using kmd::DebugTopology;
 
 } // namespace
 
 Sysfs::~Sysfs() { cleanup(); }
 
-Sysfs::Sysfs(Sysfs &&other) noexcept : topology_dir_(std::move(other.topology_dir_)) {
+Sysfs::Sysfs(Sysfs &&other) noexcept
+    : topology_dir_(std::move(other.topology_dir_)), drm_dir_(std::move(other.drm_dir_)) {
+  // Clear both owned-tree paths in the moved-from object so its cleanup() cannot
+  // remove_all a tree this object now owns.
   other.topology_dir_.clear();
+  other.drm_dir_.clear();
 }
 
 Sysfs &Sysfs::operator=(Sysfs &&other) noexcept {
   if (this != &other) {
     cleanup();
     topology_dir_ = std::move(other.topology_dir_);
+    drm_dir_ = std::move(other.drm_dir_);
     other.topology_dir_.clear();
+    other.drm_dir_.clear();
   }
   return *this;
 }
@@ -166,11 +153,13 @@ void Sysfs::make_dir(const std::string &path) { fs::create_directories(path); }
 
 void Sysfs::cleanup() {
   if (!topology_dir_.empty()) {
-    fs::remove_all(topology_dir_);
+    std::error_code ec;
+    fs::remove_all(topology_dir_, ec);
     topology_dir_.clear();
   }
   if (!drm_dir_.empty()) {
-    fs::remove_all(drm_dir_);
+    std::error_code ec;
+    fs::remove_all(drm_dir_, ec);
     drm_dir_.clear();
   }
 }
@@ -295,24 +284,20 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   write_file(node_dir + "/gpu_id", gpu_id.str());
   write_file(node_dir + "/name", gpu.marketing_name + "\n");
 
-  const DebugTopology dbg = debug_topology_for(gpu.gfx_target_version);
-
-  uint32_t cap = gpu.capability;
-  if (cap == 0)
-    cap = default_non_debug_capability() | dbg.capability;
-  const uint32_t asic_revision = gpu.revision_id;
-  cap = (cap & ~HSA_CAP_ASIC_REVISION_MASK) |
-        ((asic_revision << HSA_CAP_ASIC_REVISION_SHIFT) & HSA_CAP_ASIC_REVISION_MASK);
-
-  uint32_t cap2 = gpu.capability2;
-  if (cap2 == 0)
-    cap2 = dbg.capability2;
-
-  uint64_t debug_prop = gpu.debug_prop;
-  if (debug_prop == 0)
-    debug_prop = dbg.debug_prop;
+  const DebugTopology topology = kmd::effective_topology_for(
+      gpu.gfx_target_version, gpu.capability, gpu.capability2, gpu.debug_prop, gpu.revision_id);
 
   uint32_t p2p_links = total_gpus > 1 ? total_gpus - 1 : 0;
+
+  // array_count is the one geometry property KFD reports per node rather than
+  // per XCC: node_show() emits node_props.array_count * NUM_XCC, while
+  // simd_arrays_per_engine and cu_per_simd_array stay per-XCC. The DBG_TRAP
+  // device snapshot passes the unscaled value through instead (kfd_debug.c),
+  // which is why the two paths report different numbers for the same property.
+  // Normalize once (GpuInfo::effective_num_xcc) so array_count and the num_xcc
+  // property cannot disagree.
+  const uint32_t num_xcc = gpu.effective_num_xcc();
+  const uint32_t node_array_count = gpu.array_count_per_xcc() * num_xcc;
 
   std::ostringstream props;
   props << "cpu_cores_count 0\n"
@@ -328,8 +313,8 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "gds_size_in_kb 0\n"
         << "num_gws 64\n"
         << "wave_front_size " << gpu.wave_front_size << "\n"
-        << "array_count " << gpu.num_shader_engines << "\n"
-        << "simd_arrays_per_engine " << gpu.num_shader_arrays_per_engine << "\n"
+        << "array_count " << node_array_count << "\n"
+        << "simd_arrays_per_engine " << gpu.effective_arrays_per_engine() << "\n"
         << "cu_per_simd_array " << gpu.num_cu_per_sh << "\n"
         << "simd_per_cu " << gpu.simd_per_cu << "\n"
         << "max_slots_scratch_cu " << gpu.max_slots_scratch_cu << "\n"
@@ -348,12 +333,12 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "max_engine_clk_ccompute 0\n"
         << "local_mem_size " << gpu.local_mem_size << "\n"
         << "fw_version " << gpu.fw_version << "\n"
-        << "capability " << cap << "\n"
-        << "capability2 " << cap2 << "\n"
-        << "debug_prop " << debug_prop << "\n"
+        << "capability " << topology.capability << "\n"
+        << "capability2 " << topology.capability2 << "\n"
+        << "debug_prop " << topology.debug_prop << "\n"
         << "sdma_fw_version " << gpu.sdma_fw_version << "\n"
         << "unique_id " << gpu.unique_id << "\n"
-        << "num_xcc " << gpu.num_xcc << "\n"
+        << "num_xcc " << num_xcc << "\n"
         << "vram_public 1\n"
         << "vram_size " << gpu.local_mem_size << "\n";
 
@@ -463,10 +448,9 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
 }
 
 void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
-  std::string dir = make_runtime_temp_dir("rocjitsu_drm");
-  if (dir.empty())
+  drm_dir_ = make_tagged_dir("drm");
+  if (drm_dir_.empty())
     return;
-  drm_dir_ = std::move(dir);
 
   for (size_t i = 0; i < gpus.size(); ++i) {
     auto &gpu = gpus[i];
@@ -522,11 +506,13 @@ std::string Sysfs::generate(const GpuInfo &gpu) { return generate(std::vector<Gp
 std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
   cleanup();
 
-  std::string dir = make_runtime_temp_dir("rocjitsu_topology");
-  if (dir.empty())
+  static std::once_flag reap_once;
+  std::call_once(reap_once, reap_stale_sysfs_dirs);
+
+  topology_dir_ = make_tagged_dir("topology");
+  if (topology_dir_.empty())
     return {};
 
-  topology_dir_ = std::move(dir);
   if (!gpus.empty())
     gpu_info_ = gpus[0];
 
@@ -558,6 +544,9 @@ Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t
   gpu.location_id = dev.location_id;
   gpu.domain = dev.domain;
   gpu.hive_id = dev.hive_id;
+  gpu.capability = dev.capability;
+  gpu.capability2 = dev.capability2;
+  gpu.debug_prop = dev.debug_prop;
   gpu.drm_render_minor = dev.drm_render_minor;
   gpu.marketing_name = dev.marketing_name;
   gpu.revision_id = dev.revision_id;

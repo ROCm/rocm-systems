@@ -57,6 +57,8 @@ CDNA_WORKLOADS = [
     "path",
 ]
 
+GFX115X_WORKLOADS = ["dispatch_0", "ipblocks_CU", "kernel", "no_roof", "path", "vcopy"]
+
 WORKLOADS_BY_ARCH = {
     "MI100": CDNA_WORKLOADS + ["vcopy"],
     "MI200": CDNA_WORKLOADS
@@ -76,7 +78,7 @@ WORKLOADS_BY_ARCH = {
     "MI300A_A1": CDNA_WORKLOADS,
     "MI300X_A1": CDNA_WORKLOADS,
     "MI350": ["no_roof", "vcopy", "vcopy_iteration_multiplexing"],
-    "RDNA35_HALO": ["dispatch_0", "ipblocks_CU", "kernel", "no_roof", "path", "vcopy"],
+    "RDNA35_HALO": GFX115X_WORKLOADS,
 }
 
 # All workloads exit 0 except these.

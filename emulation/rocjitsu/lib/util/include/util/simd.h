@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <string_view>
 #include <type_traits>
 
 #if __has_include(<experimental/simd>)
@@ -46,16 +47,54 @@ inline constexpr bool has_stdx_simd =
     false;
 #endif
 
-/// Process-wide switch that callers check before taking the SIMD fast path.
-/// Read ONCE from the `RJ_FORCE_SCALAR` env var at startup (unset/empty/"0" =>
-/// false, any other value => true). Production code never writes it; a
-/// test-only seam (util/simd_test_hooks.h) may override it in-process so a
-/// single test can drive both the scalar and SIMD execute paths and compare.
+namespace detail {
+
+inline bool init_force_scalar() {
+  const char *e = std::getenv("RJ_FORCE_SCALAR");
+  if (e == nullptr) {
+    return false;
+  }
+  const std::string_view v(e);
+  return !v.empty() && v != "0";
+}
+
+/// Force-scalar gate, initialized ONCE from the `RJ_FORCE_SCALAR` env var at
+/// image load (dynamic init) and read with a plain load thereafter -- no
+/// per-call guard byte. An `inline` variable so the definition lives in this
+/// header and `util` stays header-only. Mutable so the test-only seam
+/// (util/simd_test_hooks.h) can override it; production code never writes it.
 ///
-/// Defined in util/src/simd.cpp; the backing global is hidden in that TU. e2e
-/// runs force the scalar codepath by setting `RJ_FORCE_SCALAR` before launch,
-/// without recompiling.
-bool force_scalar();
+/// THERE IS ONE INSTANCE PER LINKED MODULE, NOT ONE PER PROCESS. rocjitsu builds
+/// with hidden visibility (`CMAKE_CXX_VISIBILITY_PRESET hidden` in the top-level
+/// CMakeLists.txt, plus `-fvisibility=hidden` in cmake/rj_add_object_library.cmake),
+/// so this variable gets local binding in every module that links it: it is
+/// never a dynamic symbol, and librocjitsu.so, librocjitsu_hooks.so, each plugin
+/// module, the hotswap DSOs and every test executable carry a private copy.
+/// Env-var control is unaffected -- each copy parses `RJ_FORCE_SCALAR`
+/// independently at its own load -- but a write through the test seam reaches
+/// ONLY the copy in the caller's module. Making the gate genuinely process-wide
+/// would require a deliberate default-visibility attribute here (or a single
+/// state owner all modules call into); that is an explicit decision, not
+/// something to acquire by accident.
+///
+/// Safe as a dynamic-init global because force_scalar() is only ever read at
+/// runtime instruction-execute, never during another TU's static construction.
+inline bool g_force_scalar = init_force_scalar();
+
+} // namespace detail
+
+/// Switch that callers check before taking the SIMD fast path. Read ONCE from
+/// the `RJ_FORCE_SCALAR` env var at image load (unset/empty/"0" => false, any
+/// other value => true). Production code never writes it; a test-only seam
+/// (util/simd_test_hooks.h) may override it so a single test can drive both the
+/// scalar and SIMD execute paths and compare.
+///
+/// There is one instance per linked module, not one per process -- see
+/// detail::g_force_scalar for why. `RJ_FORCE_SCALAR` therefore applies uniformly
+/// (each module parses it at its own load), while a test-seam override applies
+/// only within the caller's module. e2e runs force the scalar codepath by
+/// setting the env var before launch, without recompiling.
+inline bool force_scalar() { return detail::g_force_scalar; }
 
 #if __has_include(<experimental/simd>)
 namespace stdx = std::experimental;
@@ -467,6 +506,14 @@ inline native<float> f16_to_f32_simd(native<uint32_t> v) {
   return std::bit_cast<native<float>>(bits);
 }
 
+/// Vectorized, bit-exact port of `bf16_to_f32` (util/data_types.h). BF16 shares
+/// the f32 exponent width, so widening is just a 16-bit left shift of the low
+/// half — no exponent rebias or denormal handling, and NaN/Inf survive
+/// unchanged. The high 16 bits of each input lane are ignored.
+inline native<float> bf16_to_f32_simd(native<uint32_t> v) {
+  return std::bit_cast<native<float>>((v & 0xFFFFu) << 16);
+}
+
 /// Vectorized, bit-exact port of `f32_to_f16` (util/data_types.h). Returns the
 /// f16 bits in the low 16 bits of each lane (high bits zero). All conditions
 /// are expressed as unsigned comparisons on the biased f32 exponent `fe`, so
@@ -515,6 +562,48 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
   stdx::where(fe >= 143u && fe <= 254u, out) = sign | 0x7C00u;
 
   // Inf / NaN (fe == 255): NaN keeps payload MSBs and forces the low bit.
+  stdx::where(fe == 255u, out) = sign | 0x7C00u;
+  stdx::where(fe == 255u && fm != 0u, out) = sign | 0x7C00u | (fm >> 13) | 1u;
+
+  return out;
+}
+
+/// Vectorized counterpart of `f32_to_f16_mode`.
+inline native<uint32_t> f32_to_f16_mode_simd(native<float> val, bool fp16_ovfl) {
+  native<uint32_t> out = f32_to_f16_simd(val);
+  if (!fp16_ovfl)
+    return out;
+
+  using U = native<uint32_t>;
+  const U f = std::bit_cast<U>(val);
+  const U fe = (f >> 23) & 0xFFu;
+  stdx::where(fe != 0xFFu && (out & 0x7FFFu) == 0x7C00u, out) = (out & 0x8000u) | 0x7BFFu;
+  return out;
+}
+
+/// One-argument helper for generated lambdas used only on the `FP16_OVFL` path.
+inline native<uint32_t> f32_to_f16_ovfl_simd(native<float> val) {
+  return f32_to_f16_mode_simd(val, true);
+}
+
+/// Vectorized, bit-exact port of `f32_to_f16_rtz` (util/data_types.h).
+inline native<uint32_t> f32_to_f16_rtz_simd(native<float> val) {
+  using U = native<uint32_t>;
+  const U f = std::bit_cast<U>(val);
+  const U sign = (f >> 16) & 0x8000u;
+  const U fe = (f >> 23) & 0xFFu;
+  const U fm = f & 0x7FFFFFu;
+
+  U out = sign | ((fe - 112u) << 10) | (fm >> 13);
+
+  const U mm = fm | 0x800000u;
+  U sh = 126u - fe;
+  stdx::where(sh > 31u, sh) = 31u;
+  stdx::where(fe <= 112u, out) = sign | (mm >> sh);
+
+  stdx::where(fe < 102u, out) = sign;
+  stdx::where(fe >= 143u && fe <= 254u, out) = sign | 0x7BFFu;
+
   stdx::where(fe == 255u, out) = sign | 0x7C00u;
   stdx::where(fe == 255u && fm != 0u, out) = sign | 0x7C00u | (fm >> 13) | 1u;
 

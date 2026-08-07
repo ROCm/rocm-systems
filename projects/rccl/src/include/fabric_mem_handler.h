@@ -17,9 +17,8 @@
 struct ncclMemManager;
 
 class ncclFabricMemHandler {
- public:
-  ncclFabricMemHandler(void* bootstrap, int rank, int nranks,
-                       struct ncclMemManager* manager);
+public:
+  ncclFabricMemHandler(void* bootstrap, int rank, int nranks, struct ncclMemManager* manager);
   ncclFabricMemHandler(const ncclFabricMemHandler&) = delete;
   ncclFabricMemHandler& operator=(const ncclFabricMemHandler&) = delete;
   ncclFabricMemHandler(ncclFabricMemHandler&&) = delete;
@@ -29,14 +28,11 @@ class ncclFabricMemHandler {
   // Register this rank's local VMM allocation: mapped pointer, its cuMem
   // allocation handle (for export), and the requested size (the import side
   // re-aligns to the allocation granularity).
-  ncclResult_t addSelfDeviceMem(
-      void* deviceMemPtr,
-      CUmemGenericAllocationHandle handle,
-      size_t size);
+  ncclResult_t addSelfDeviceMem(void* deviceMemPtr, CUmemGenericAllocationHandle handle, size_t size);
   ncclResult_t exchangeMemPtrs();
   ncclResult_t getPeerDeviceMemPtr(int peerRank, void** outPeerPtr) const;
 
- private:
+private:
   void* bootstrap_;
   const int rank_;
   const int nranks_;

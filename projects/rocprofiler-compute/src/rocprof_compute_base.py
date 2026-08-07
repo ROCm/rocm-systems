@@ -14,7 +14,7 @@ from typing import Any, Optional
 import config
 from argparser import omniarg_parser
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from roofline.run_benchmark import run_roofline_benchmark
+from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils.logger import (
     console_debug,
     console_error,
@@ -689,6 +689,14 @@ class RocProfCompute:
         The microbenchmark is written to a temp location first and only
         promoted to the workload directory after passing validation.
         """
+        if self.__mspec.gpu_arch not in BENCHMARKING_SUPPORTED:
+            console_log(
+                "roofline",
+                f"Skipping benchmark: roofline benchmarking not supported on "
+                f"{self.__mspec.gpu_arch}",
+            )
+            return
+
         output_dir = Path(self.__args.output_directory)
         if not output_dir.exists():
             output_dir.mkdir(parents=True, exist_ok=True)

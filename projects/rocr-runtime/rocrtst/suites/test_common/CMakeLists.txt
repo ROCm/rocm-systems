@@ -593,6 +593,11 @@ set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
 set(CL_FILE_LIST "${KERNELS_DIR}/cu_mask_kernels.cl")
 build_sample_for_devices("cu_mask")
 
+# Trap Handler Test Kernels
+set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
+set(CL_FILE_LIST "${KERNELS_DIR}/trap_handler_test_kernels.cl")
+build_sample_for_devices("trap_handler_test")
+
 # Configure RPATH settings before creating executable target
 set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
 set(CMAKE_SKIP_BUILD_RPATH FALSE)
@@ -892,6 +897,22 @@ set_tests_properties(hotswap_rewrite PROPERTIES
   LABELS "quick;standard;pr;pre-commit;hotswap"
   TIMEOUT 120)
 
+# GPU-free InterceptQueue retry/overflow slot-accounting logic unit tests. These exercise
+# the pure header logic in hsa-runtime's core/inc/intercept_queue_logic.h + GoogleTest, so
+# they need no GPU or hsa-runtime library. ${GOOGLE_TEST_FRWK_NAME} (google-test-frwk64) is a
+# single static lib that compiles src/gtest_main.cpp (see rocrtst/gtest/CMakeLists.txt).
+set(INTERCEPT_QUEUE_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/intercept_queue")
+add_executable(intercept_queue_logic_test
+  ${INTERCEPT_QUEUE_TEST_ROOT}/intercept_queue_logic_test.cc)
+target_include_directories(intercept_queue_logic_test PRIVATE
+  ${HSA_RUNTIME_ROOT}
+  ${ROCRTST_ROOT}/gtest/include)
+target_link_libraries(intercept_queue_logic_test ${GOOGLE_TEST_FRWK_NAME} pthread)
+add_test(NAME intercept_queue_logic_test COMMAND intercept_queue_logic_test)
+set_tests_properties(intercept_queue_logic_test PROPERTIES
+  LABELS "quick;standard;pr;pre-commit"
+  TIMEOUT 60)
+
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
 
@@ -911,7 +932,7 @@ install(TARGETS ${ROCRTST}
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin)
 
-install(TARGETS hotswap_gfx_query hotswap_rewrite
+install(TARGETS hotswap_gfx_query hotswap_rewrite intercept_queue_logic_test
         RUNTIME DESTINATION bin)
 
 # Install platform configuration file
@@ -968,6 +989,8 @@ if(EXISTS "${TEST_CATEGORIES_CMAKE}" AND EXISTS "${TEST_CATEGORIES_YAML}")
         "set_tests_properties(hotswap_gfx_query PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 60)\n\n"
         "add_test(hotswap_rewrite \"../hotswap_rewrite\")\n"
         "set_tests_properties(hotswap_rewrite PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 120)\n\n"
+        "add_test(intercept_queue_logic_test \"../intercept_queue_logic_test\")\n"
+        "set_tests_properties(intercept_queue_logic_test PROPERTIES LABELS \"quick;standard;pr;pre-commit\" TIMEOUT 60)\n\n"
     )
 
     install(

@@ -53,7 +53,10 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<tool_counter_record_t>&                                 counter_collection_gen,
     const generator<tool_spm_counter_record_t>&                             spm_collection_gen,
-    const generator<rocprofiler_buffer_tracing_ompt_record_t>&              ompt_gen);
+    const generator<rocprofiler_buffer_tracing_ompt_record_t>&              ompt_gen,
+    const generator<rocprofiler_buffer_tracing_hip_graph_record_t>&         graph_launch_gen,
+    const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>&  rocshmem_api_gen,
+    const generator<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>&   hipfile_api_gen);
 
 // used in schema generation
 struct argument_info

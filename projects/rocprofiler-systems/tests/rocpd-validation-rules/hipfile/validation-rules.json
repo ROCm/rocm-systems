@@ -1,0 +1,30 @@
+{
+    "required_tables": [
+        {
+            "commit": "Generic validation rules for hipFILE trace",
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Check for any NULL values in the 'name' column of regions",
+                    "error_message": "NULL entries found in the name column of regions",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name IS NULL;"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that some regions were captured",
+                    "error_message": "No regions captured",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions;"
+                }
+            ]
+        }
+    ]
+}

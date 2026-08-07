@@ -25,7 +25,7 @@
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/mpl.hpp"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <cstdint>

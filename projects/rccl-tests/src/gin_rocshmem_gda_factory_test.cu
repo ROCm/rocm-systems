@@ -69,7 +69,7 @@ __global__ void gin_atomic_kernel(rocshmem::QueuePair **qps,
     rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
     printf("gin_atomic_kernel: peer=%d addr=%p rkey=0x%x val=%lld\n",
            peer, remote_addr, rkey, (long long)value);
-    qps[peer]->atomic_add(remote_addr, rkey, value, wf_info, /*fence=*/false);
+    qps[peer]->atomic_nofetch(remote_addr, rkey, value, /*cond=*/0, wf_info);
     printf("gin_atomic_kernel: atomic posted, calling quiet\n");
     qps[peer]->quiet(wf_info);
     printf("gin_atomic_kernel: quiet done\n");
@@ -88,8 +88,8 @@ __global__ void gin_put_signal_kernel(rocshmem::QueuePair **qps,
     printf("gin_put_signal: peer=%d put dst=%p rkey=0x%x src=%p lkey=0x%x bytes=%zu\n",
            peer, dst, dst_rkey, src, src_lkey, nbytes);
     qps[peer]->put_nbi(dst, dst_rkey, src, src_lkey, nbytes, wf_info, /*ring_db=*/false);
-    printf("gin_put_signal: atomic signal=%p rkey=0x%x fence=1\n", signal_addr, signal_rkey);
-    qps[peer]->atomic_add(signal_addr, signal_rkey, 1, wf_info, /*fence=*/true);
+    printf("gin_put_signal: atomic signal=%p rkey=0x%x\n", signal_addr, signal_rkey);
+    qps[peer]->atomic_nofetch(signal_addr, signal_rkey, 1, /*cond=*/0, wf_info);
     printf("gin_put_signal: calling quiet\n");
     qps[peer]->quiet(wf_info);
     printf("gin_put_signal: done\n");

@@ -72,6 +72,19 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
 
         if(_v.find('-') != std::string::npos)
         {
+            // tim::delimit collapses consecutive '-' and drops empty fields, so
+            // "5--7", "-1", and "5-" would otherwise sneak past the size check
+            // below; reject leading/trailing/consecutive dashes explicitly.
+            if(_v.front() == '-' || _v.back() == '-' ||
+               _v.find("--") != std::string::npos)
+            {
+                LOG_WARNING("Invalid {} range specification: {}. Leading, trailing, or "
+                            "consecutive '-' not permitted; required format N-M, "
+                            "e.g. 0-4. Ignoring {}...",
+                            _label, _v, _v);
+                continue;
+            }
+
             // split the string into two parts at the '-' character and check if the
             // result is valid
             auto _vv = rocprofsys::delimit(_v, "-");
