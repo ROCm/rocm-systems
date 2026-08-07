@@ -303,6 +303,9 @@ private:
   void mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroup(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroups(uint32_t dispatch_id);
+  /// @brief Drop cluster LDS pins collected under cluster_placements_mutex_.
+  /// @warning Must run with that lock released; it reaches the CUs' wave-state lock.
+  void release_cluster_lds_pins(const std::vector<std::pair<ComputeUnitCore *, uint64_t>> &unpin);
 
   /// @brief Asynchronous Compute Engine (ACE): dispatch workgroups from all
   /// active queues to SPIs and run CUs to completion.
@@ -382,6 +385,15 @@ private:
     std::vector<uint32_t> peer_wg_ids;
   };
   std::unordered_map<uint64_t, ClusterWorkgroupPlacement> cluster_wg_placements_;
+  /// @brief Guards @ref cluster_wg_placements_ alone, not the queue state.
+  /// @details A multicast LDS write resolves its peers from the CU's execute
+  /// path, which already holds that CU's wave-state lock, while a dispatch takes
+  /// hw_queue_mutex_ and then the wave-state lock. Sharing hw_queue_mutex_ here
+  /// would close that cycle, so the map gets its own lock, ordered after both.
+  /// Nothing may call into a CU while holding it -- see
+  /// erase_cluster_workgroup(), which collects its LDS cleanup and runs it after
+  /// the unlock.
+  mutable std::recursive_mutex cluster_placements_mutex_;
 
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
   std::recursive_mutex hw_queue_mutex_;

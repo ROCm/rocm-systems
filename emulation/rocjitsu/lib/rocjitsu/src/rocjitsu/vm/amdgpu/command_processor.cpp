@@ -624,24 +624,13 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
 }
 
 void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) {
-  // KNOWN DEFECT, deliberately left as-is: this holds hw_queue_mutex_ across
-  // with_wave_state_locked(), while a wave reaching s_endpgm takes them the
-  // other way (ComputeUnitCore::step() holds the wave-state lock and halts into
-  // release_wf() -> notify_wg_complete(), which takes hw_queue_mutex_). A
-  // DESTROY_QUEUE racing an s_endpgm can therefore deadlock the ioctl thread
-  // against the engine worker.
-  //
-  // Both obvious repairs are worse, and were measured:
-  //   * running the halt loop before taking hw_queue_mutex_ only moves the
-  //     cycle -- halt() itself reaches hw_queue_mutex_, and handle_doorbell()
-  //     holds hw_queue_mutex_ across dispatch_wf(), which takes the wave-state
-  //     lock, so the inversion reappears against that path instead;
-  //   * suppressing the CP completion notice to break the halt -> hw_queue edge
-  //     hangs the simulator outright: notify_wg_complete() also releases the
-  //     SPI's WGP workgroup slots and drives the completion callback, so the
-  //     queue never drains (gdb.rocm/shared-memory.exp times out at 600s).
-  // A real fix needs notify_wg_complete() to stop requiring hw_queue_mutex_, or
-  // the halt to be deferred to the engine thread that owns these waves.
+  // Holds hw_queue_mutex_ across with_wave_state_locked(), which is the order
+  // the dispatch path uses too (handle_doorbell -> dispatch_workgroups ->
+  // dispatch_wf). Nothing takes them the other way any more: a wave reaching
+  // s_endpgm under the wave-state lock queues its completion instead of sending
+  // it, and WaveStateGuard delivers it after that lock is dropped. Keep it that
+  // way -- a CU-side call back into the CP while the wave-state lock is held
+  // would deadlock a DESTROY_QUEUE against the engine worker.
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
   for (auto *cu : cus_) {
     cu->with_wave_state_locked([&] {
@@ -996,7 +985,7 @@ void CommandProcessor::register_cluster_workgroup(const DispatchEntry &entry, ui
                                                   uint32_t lds_base) {
   if (!entry.has_workgroup_clusters())
     return;
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
   uint32_t cluster_base_wg_id =
       entry.cluster_base_local_wg_id(local_wg_id) + entry.workgroup_id_offset;
   uint64_t cluster_key = wg_key(entry.dispatch_id, cluster_base_wg_id);
@@ -1016,62 +1005,81 @@ void CommandProcessor::register_cluster_workgroup(const DispatchEntry &entry, ui
 }
 
 void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id) {
-  auto it = cluster_wg_placements_.find(wg_key(dispatch_id, wg_id));
-  if (it == cluster_wg_placements_.end())
-    return;
-
-  it->second.completed = true;
-  uint64_t cluster_key = it->second.cluster_key;
-  auto peer_wg_ids = it->second.peer_wg_ids;
-  for (uint32_t peer_wg_id : peer_wg_ids) {
-    auto peer_it = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
-    if (peer_it == cluster_wg_placements_.end() || !peer_it->second.completed)
+  std::vector<std::pair<ComputeUnitCore *, uint64_t>> unpin;
+  {
+    std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
+    auto it = cluster_wg_placements_.find(wg_key(dispatch_id, wg_id));
+    if (it == cluster_wg_placements_.end())
       return;
-  }
 
-  for (uint32_t peer_wg_id : peer_wg_ids) {
-    auto peer_it = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
-    if (peer_it != cluster_wg_placements_.end() && peer_it->second.cu) {
-      peer_it->second.cu->unpin_lds_for_cluster(cluster_key);
-      // The waves halted (and freed) before the pin was released, so reclaim each
-      // peer CU's LDS now that the whole cluster is done.
-      peer_it->second.cu->maybe_reset_lds_alloc();
+    it->second.completed = true;
+    uint64_t cluster_key = it->second.cluster_key;
+    auto peer_wg_ids = it->second.peer_wg_ids;
+    for (uint32_t peer_wg_id : peer_wg_ids) {
+      auto peer_it = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
+      if (peer_it == cluster_wg_placements_.end() || !peer_it->second.completed)
+        return;
     }
+
+    for (uint32_t peer_wg_id : peer_wg_ids) {
+      auto peer_it = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
+      if (peer_it != cluster_wg_placements_.end() && peer_it->second.cu)
+        unpin.emplace_back(peer_it->second.cu, cluster_key);
+    }
+    for (uint32_t peer_wg_id : peer_wg_ids)
+      cluster_wg_placements_.erase(wg_key(dispatch_id, peer_wg_id));
   }
-  for (uint32_t peer_wg_id : peer_wg_ids)
-    cluster_wg_placements_.erase(wg_key(dispatch_id, peer_wg_id));
+  release_cluster_lds_pins(unpin);
+}
+
+// The waves halted (and freed) before their pin was released, so reclaim each
+// peer CU's LDS once the whole cluster is done. Runs with
+// cluster_placements_mutex_ released: maybe_reset_lds_alloc() reaches the CU's
+// wave-state lock, which is ordered ahead of it.
+void CommandProcessor::release_cluster_lds_pins(
+    const std::vector<std::pair<ComputeUnitCore *, uint64_t>> &unpin) {
+  for (const auto &[cu, cluster_key] : unpin) {
+    cu->unpin_lds_for_cluster(cluster_key);
+    cu->maybe_reset_lds_alloc();
+  }
 }
 
 void CommandProcessor::erase_cluster_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-  auto it = cluster_wg_placements_.find(wg_key(dispatch_id, wg_id));
-  if (it == cluster_wg_placements_.end())
-    return;
-  if (it->second.cu) {
-    it->second.cu->unpin_lds_for_cluster(it->second.cluster_key);
-    it->second.cu->maybe_reset_lds_alloc();
+  // maybe_reset_lds_alloc() takes the CU's wave-state lock, so it runs after the
+  // placements lock is dropped -- see cluster_placements_mutex_.
+  std::vector<std::pair<ComputeUnitCore *, uint64_t>> unpin;
+  {
+    std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
+    auto it = cluster_wg_placements_.find(wg_key(dispatch_id, wg_id));
+    if (it == cluster_wg_placements_.end())
+      return;
+    if (it->second.cu)
+      unpin.emplace_back(it->second.cu, it->second.cluster_key);
+    cluster_wg_placements_.erase(it);
   }
-  cluster_wg_placements_.erase(it);
+  release_cluster_lds_pins(unpin);
 }
 
 void CommandProcessor::erase_cluster_workgroups(uint32_t dispatch_id) {
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-  for (auto it = cluster_wg_placements_.begin(); it != cluster_wg_placements_.end();) {
-    if ((it->first >> 32) == dispatch_id) {
-      if (it->second.cu) {
-        it->second.cu->unpin_lds_for_cluster(it->second.cluster_key);
-        it->second.cu->maybe_reset_lds_alloc();
+  std::vector<std::pair<ComputeUnitCore *, uint64_t>> unpin;
+  {
+    std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
+    for (auto it = cluster_wg_placements_.begin(); it != cluster_wg_placements_.end();) {
+      if ((it->first >> 32) == dispatch_id) {
+        if (it->second.cu)
+          unpin.emplace_back(it->second.cu, it->second.cluster_key);
+        it = cluster_wg_placements_.erase(it);
+      } else {
+        ++it;
       }
-      it = cluster_wg_placements_.erase(it);
-    } else {
-      ++it;
     }
   }
+  release_cluster_lds_pins(unpin);
 }
 
 std::vector<ClusterLdsTarget>
 CommandProcessor::cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id, uint32_t mcast_mask) {
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
   std::vector<ClusterLdsTarget> targets;
   auto src_it = cluster_wg_placements_.find(wg_key(dispatch_id, wg_id));
   if (src_it == cluster_wg_placements_.end())

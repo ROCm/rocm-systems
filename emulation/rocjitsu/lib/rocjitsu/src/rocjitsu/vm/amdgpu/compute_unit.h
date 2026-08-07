@@ -458,7 +458,7 @@ public:
   }
 
   template <typename F> decltype(auto) with_wave_state_locked(F &&fn) {
-    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
+    WaveStateGuard lock(*this);
     return std::forward<F>(fn)();
   }
 
@@ -680,7 +680,45 @@ protected:
   std::unique_ptr<Decoder> decoder_;
   simdojo::RegisterFile<uint32_t> sgpr_file_{"sgpr"};
   std::vector<std::unique_ptr<Wavefront>> wfs_; ///< Pre-allocated wavefront slots.
+  /// @brief Hold the wave-state lock, then notify the CP once it is released.
+  /// @details The CP takes hw_queue_mutex_ and then this lock when it dispatches
+  /// (handle_doorbell -> dispatch_workgroups -> dispatch_wf), so anything running
+  /// under this lock must not reach back into the CP and take hw_queue_mutex_ --
+  /// a wave hitting s_endpgm on the engine thread would otherwise close an AB-BA
+  /// cycle against a concurrent dispatch or DESTROY_QUEUE. release_wf() therefore
+  /// queues its completions instead of sending them, and the outermost guard
+  /// delivers them here, after the lock is dropped and in the same order.
+  class WaveStateGuard {
+  public:
+    explicit WaveStateGuard(ComputeUnitCore &cu) : cu_(cu), lock_(cu.wave_state_mutex_) {
+      ++cu_.wave_state_depth_;
+    }
+    WaveStateGuard(const WaveStateGuard &) = delete;
+    WaveStateGuard &operator=(const WaveStateGuard &) = delete;
+    ~WaveStateGuard() {
+      const bool outermost = --cu_.wave_state_depth_ == 0;
+      lock_.unlock();
+      if (outermost)
+        cu_.flush_wg_completions();
+    }
+
+  private:
+    ComputeUnitCore &cu_;
+    std::unique_lock<std::recursive_mutex> lock_;
+  };
+
+  /// @brief Send the workgroup completions queued under the wave-state lock.
+  /// @warning Must be called with that lock released; it takes hw_queue_mutex_.
+  void flush_wg_completions();
+
   mutable std::recursive_mutex wave_state_mutex_;
+  /// @brief Recursion depth of WaveStateGuard on the thread holding the mutex.
+  /// @details Only ever touched under @ref wave_state_mutex_, so the value
+  /// belongs to whichever thread currently owns it.
+  unsigned wave_state_depth_ = 0;
+  /// @brief Workgroups that finished while the wave-state lock was held.
+  /// @details Drained by @ref flush_wg_completions once the lock is dropped.
+  std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
   std::unique_ptr<WavefrontScheduler> scheduler_ = std::make_unique<OldestFirstScheduler>();
   uint64_t cycle_counter_ = 0;
 

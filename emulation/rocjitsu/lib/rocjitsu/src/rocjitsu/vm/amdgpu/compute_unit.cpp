@@ -210,6 +210,27 @@ void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
   wf.reset();
 }
 
+void ComputeUnitCore::flush_wg_completions() {
+  // Loops because a notification can retire more work and queue another
+  // completion behind it; draining to empty keeps that from waiting for whatever
+  // takes the wave-state lock next.
+  for (;;) {
+    std::vector<std::pair<uint32_t, uint32_t>> ready;
+    {
+      std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
+      if (pending_wg_completions_.empty())
+        return;
+      ready.swap(pending_wg_completions_);
+    }
+    // The lock is released here, so taking hw_queue_mutex_ below cannot invert
+    // against the CP's dispatch path.
+    if (!cp_)
+      return;
+    for (const auto &[dispatch_id, wg_id] : ready)
+      cp_->notify_wg_complete(dispatch_id, wg_id);
+  }
+}
+
 void ComputeUnitCore::maybe_reset_lds_alloc() {
   if (!has_active_wfs() && !lds_allocation_pinned())
     reset_lds_alloc();
@@ -222,8 +243,12 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
   if (it != active_wgs_.end() && --it->second == 0) {
     plugin_group_->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
     active_wgs_.erase(it);
+    // Queued rather than sent: notify_wg_complete() takes the CP's
+    // hw_queue_mutex_, and this runs under the wave-state lock, which the CP
+    // takes in the other order when it dispatches. WaveStateGuard delivers it
+    // once the lock is dropped.
     if (cp_ && notice == Wavefront::CpCompletionNotice::Send)
-      cp_->notify_wg_complete(dispatch_id, wg_id);
+      pending_wg_completions_.emplace_back(dispatch_id, wg_id);
   }
   // The whole workgroup's per-WG LDS region can be reclaimed once the CU has fully
   // drained and no cluster peer can still multicast into it.
@@ -621,7 +646,9 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 }
 
 bool ComputeUnitCore::step() {
-  std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
+  // A wave reaching s_endpgm in this loop retires its workgroup; the guard sends
+  // the CP its completion after the lock is released. See WaveStateGuard.
+  WaveStateGuard wave_state_lock(*this);
   update_wf_states();
 
   for (auto &wf : wfs_) {
