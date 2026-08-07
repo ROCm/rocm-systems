@@ -317,14 +317,13 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 # rccl-UnitTestsMicro: same host-only model as rccl-HostUnitTests (hipcc
 # --offload-host-only, -no-hip-rt), built from the hipified snapshot. It
 # #includes the unit-under-test production .cc directly (via P2P_CC_PATH) and
-# satisfies every HIP/nccl symbol from fakes/ + micro_link_stubs.cc rather
-# than librccl.so or the HIP runtime.
+# satisfies every HIP/nccl symbol from fakes/ rather than librccl.so or the
+# HIP runtime.
 add_executable(rccl-UnitTestsMicro
   p2p-test.cc
   fakes/nccl_fakes.cc
   fakes/p2p_fakes.cc
   fakes/hip_fakes.cc
-  micro_link_stubs.cc
   ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
   ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
 )

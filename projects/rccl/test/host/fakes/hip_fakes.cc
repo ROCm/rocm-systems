@@ -4,31 +4,12 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// HIP runtime fakes for rccl-UnitTestsMicro.
-//
-// The micro-test binary deliberately does NOT link the real HIP runtime
-// (libamdhip64.so): test/CMakeLists.txt pulls hip::host / hip::device in
-// via $<COMPILE_ONLY:...> so the HIP *compile* requirements (amdgcn
-// device intrinsics, gfx target codegen, headers) are satisfied while the
-// runtime stays off the link line. That means every HIP host-API entry
-// point the linked object code references must be provided here -- a
-// missing one is now a link-time error instead of a silent bind to the
-// real driver (which, on a box with a newer HIP than the tests were
-// written against, is exactly how an un-shimmed hipPointerGetAttribute
-// slipped through and aborted a test at runtime).
-//
-// Two kinds of definitions live here:
-//
-//   1. Controllable HIP seams (g_hip*) -- the handful of HIP calls the
-//      unit-under-test drives on its happy path. Tests install per-test
-//      behaviour by overwriting these std::function hooks; the macro shims
-//      in p2p-test.cc route the p2p.cc call sites through them.
-//
-//   2. Plain link-satisfying stubs for every other real HIP symbol the
-//      binary references. These are code paths the micro-tests don't
-//      exercise; the stubs zero any output params and return
-//      hipErrorInvalidValue so an unexpected call surfaces loudly rather
-//      than pretending to succeed.
+// HIP runtime fakes for rccl-UnitTestsMicro. The binary does not link the real
+// HIP runtime, so this file provides (1) controllable std::function seams
+// (g_hip*) the tests drive via the macro shims in p2p-test.cc, and (2) plain
+// stubs for every other HIP symbol the object code references (returning
+// hipErrorInvalidValue so unexercised paths fail loudly instead of binding the
+// real driver).
 
 #include <cstring>
 #include <functional>
@@ -39,11 +20,7 @@
 #include "hip_fakes.h"   // g_hip* hook declarations + ResetHipFakes()
 
 // ===========================================================================
-// Section 1: controllable HIP seams
-//
-// Moved verbatim from p2p_fakes.cc. Defaults return hipErrorInvalidValue so
-// any test that doesn't opt in surfaces the unexpected call as
-// ncclUnhandledCudaError via CUCHECKGOTO.
+// Section 1: controllable HIP seams (defaults return hipErrorInvalidValue)
 // ===========================================================================
 
 // --- hipMemGetAddressRange / hipIpcGetMemHandle -------------------------
@@ -91,8 +68,7 @@ std::function<hipError_t(hipMemGenericAllocationHandle_t)>
 
 // --- hipPointerGetAttribute (legacy-IPC capability query) ---------------
 // Default: succeed and report NOT legacy-capable, so the cuMem-export and
-// nothing-works arms stay reachable. Tests force the legacy arm by
-// installing ForceLegacyIpcCapable() (p2p-test.cc).
+// nothing-works arms stay reachable.
 static hipError_t DefaultHipPointerGetAttribute(void* data,
                                                 hipPointer_attribute attribute,
                                                 hipDeviceptr_t)
@@ -106,7 +82,7 @@ static hipError_t DefaultHipPointerGetAttribute(void* data,
 std::function<hipError_t(void*, hipPointer_attribute, hipDeviceptr_t)>
     g_hipPointerGetAttribute = DefaultHipPointerGetAttribute;
 
-// Restore every HIP hook to its default. Called from ResetP2pFakes().
+// Restore every HIP hook to its default.
 void ResetHipFakes()
 {
     g_hipMemGetAddressRange         = DefaultHipMemGetAddressRange;
@@ -118,19 +94,9 @@ void ResetHipFakes()
 }
 
 // ===========================================================================
-// Section 2: real HIP runtime symbol stubs
-//
-// These provide the exact extern-"C" symbols the linked object code
-// references so the binary links without libamdhip64.so. The signatures
-// match hip_runtime_api.h (included above), so C linkage is inherited from
-// the prior declarations.
-//
-// Three of these (hipMemGetAddressRange, hipMemRetainAllocationHandle,
-// hipMemRelease) are also driven through the controllable seams above from
-// macro-shimmed call sites in p2p-test.cc; here the *real* symbol delegates
-// to the same hook so any non-shimmed call site behaves identically and
-// there is a single behavioural source of truth per HIP function. All other
-// stubs are for paths the micro-tests don't exercise.
+// Section 2: plain HIP runtime symbol stubs (link without libamdhip64.so).
+// Three (hipMemGetAddressRange, hipMemRetainAllocationHandle, hipMemRelease)
+// delegate to the seams above so shimmed and non-shimmed call sites agree.
 // ===========================================================================
 
 // --- hook-backed real symbols -------------------------------------------
@@ -311,3 +277,20 @@ hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode*)
 {
     return hipErrorInvalidValue;
 }
+
+// --- additional stubs (folded in from the former micro_link_stubs.cc):
+//     symbols some ROCm/toolchain versions' hipified sources reference and
+//     others don't. Unreferenced ones are harmless dead defs.
+hipError_t hipSetDevice(int) { return hipErrorInvalidValue; }
+hipError_t hipMalloc(void** p, size_t) { if (p) *p = nullptr; return hipErrorInvalidValue; }
+hipError_t hipMemcpy(void*, const void*, size_t, hipMemcpyKind) { return hipErrorInvalidValue; }
+hipError_t hipMemset(void*, int, size_t) { return hipErrorInvalidValue; }
+hipError_t hipDeviceSynchronize(void) { return hipErrorInvalidValue; }
+hipError_t hipGetDeviceProperties(hipDeviceProp_t*, int) { return hipErrorInvalidValue; }
+hipError_t hipDriverGetVersion(int* v) { if (v) *v = 70002000; return hipSuccess; }
+hipError_t hipStreamWaitEvent(hipStream_t, hipEvent_t, unsigned int) { return hipErrorInvalidValue; }
+hipError_t hipStreamCreate(hipStream_t*) { return hipErrorInvalidValue; }
+hipError_t hipPointerGetAttributes(hipPointerAttribute_t*, const void*) { return hipErrorInvalidValue; }
+hipError_t hipHostGetDevicePointer(void**, void*, unsigned int) { return hipErrorInvalidValue; }
+hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t*, hipEvent_t) { return hipErrorInvalidValue; }
+hipError_t hipEventSynchronize(hipEvent_t) { return hipErrorInvalidValue; }

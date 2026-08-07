@@ -98,8 +98,8 @@ test:
    behaviour by overwriting a `std::function` hook (see the `ScopedHook`
    helper in `p2p-test.cc`) rather than editing a fake's default.
 4. **Only exercise faked seams.** Every external symbol the `#include`d `.cc`
-   reaches must be satisfied by `fakes/` (or `micro_link_stubs.cc` in the
-   standalone build): a missing symbol surfaces as a link error, a wrongly
+   reaches must be satisfied by `fakes/`: a missing symbol surfaces as a
+   link error, a wrongly
    defaulted hook as an unexpected call. Add or override the seam as needed
    (see "Adding more controllable seams" below).
 5. **Build and run** `rccl-UnitTestsMicro` (or `ctest -R rccl-UnitTestsMicro`),
@@ -292,7 +292,7 @@ available"), this build uses `hipcc` in host-only mode (`--offload-host-only`)
 against the **real ROCm headers**. There is no CPU-only / g++ path and no stubbed
 `<hip/*>` / `<hsa/*>` / `<cuda*>` headers. It links **gtest + fmt only** and
 passes `-no-hip-rt`, so it links **neither `librccl.so` nor the HIP runtime** —
-every HIP symbol the tests reach is provided by `fakes/` + `micro_link_stubs.cc`.
+every HIP symbol the tests reach is provided by `fakes/`.
 
 ```bash
 cd projects/rccl/test/host

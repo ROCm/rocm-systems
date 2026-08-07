@@ -11,29 +11,11 @@
 // SetUp(), and ResetP2pFakes() in TearDown() restores defaults so tests
 // don't contaminate each other.
 //
-// SCOPE WARNING -- hook breadth.
-//
-// The macro shims in p2p-test.cc that route through these hooks
-// (`hipMemGetAddressRange`, `hipIpcGetMemHandle`, `ncclCudaCallocAsync`,
-// `ncclCudaMemcpyAsync`) take effect for **every** call site of those
-// symbols inside the `#include`d p2p.cc -- not just inside
-// `ipcRegisterBuffer`. When microtests are added for other functions in
-// the same TU (e.g. `ipcDeregisterBuffer`, `ncclIpcLocalRegisterBuffer`,
-// `ncclIpcGraphRegisterBuffer`), those new tests will silently inherit
-// the default hooks installed here.
-//
-// Practical consequences:
-//   - Setting a hook's default to "return failure loudly" is safe and
-//     desirable -- it surfaces unexpected calls from any new unit
-//     under test, not just the original one.
-//   - Setting a hook's default to a benign success that *happens* to
-//     match `ipcRegisterBuffer`'s usage may be wrong for the next
-//     unit under test. If you add a new test family, revisit each
-//     default and check whether it still makes sense.
-//   - When a new test family needs a *different* default, the
-//     remedy is to overwrite the hook in its fixture's SetUp() (the
-//     ScopedHook helper in p2p-test.cc is the standard pattern), not
-//     to change the default here.
+// SCOPE WARNING: the macro shims in p2p-test.cc route EVERY call site of these
+// symbols inside the #included p2p.cc through these hooks (not just
+// ipcRegisterBuffer), so new tests in the same TU inherit these defaults.
+// Prefer defaults that fail loudly, and override per-test in a fixture's
+// SetUp() (via ScopedHook) rather than changing a default here.
 
 #ifndef RCCL_TEST_HOST_P2P_FAKES_H_
 #define RCCL_TEST_HOST_P2P_FAKES_H_

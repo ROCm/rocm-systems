@@ -26,8 +26,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
-// hipMemGetAddressRange / hipIpcGetMemHandle: HIP runtime entry points
-// reached from ipcRegisterBuffer's fresh-registration arm.
+// hipMemGetAddressRange / hipIpcGetMemHandle
 extern std::function<hipError_t(hipDeviceptr_t* /*pbase*/, std::size_t* /*psize*/,
                                 hipDeviceptr_t /*dptr*/)>
     g_hipMemGetAddressRange;

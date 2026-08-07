@@ -4,8 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Minimal stubs for the p2p-specific symbols p2p.cc references but doesn't
-// define, so rccl-UnitTestsMicro links without pulling in librccl.so.
+// Minimal stubs for the p2p-specific symbols p2p.cc references but doesn't define
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -25,29 +24,10 @@
 #include <type_traits>
 
 // ---------------------------------------------------------------------------
-// Signature-drift watchdog for the HIP seams
-//
-// The nccl* hook drift asserts live in nccl_fakes.cc. The HIP hooks are
-// declared in hip_fakes.h but redefined/redirected from the p2p test TU,
-// so anchor each assert to the production HIP declaration the header pulled
-// in. Any mismatch fires at compile time.
-namespace {
-template <typename F> struct FnSigOf;
-template <typename R, typename... A>
-struct FnSigOf<std::function<R(A...)>> { using type = R(A...); };
-template <typename F> using FnSigOf_t = typename FnSigOf<F>::type;
-
-template <typename Hook, typename ProdFn>
-constexpr bool HookMatchesProd() {
-    return std::is_same_v<FnSigOf_t<Hook>,
-                          std::remove_pointer_t<ProdFn>>;
-}
-}  // namespace
-
-#define ASSERT_HOOK_MATCHES_PROD(hook, prod)                                \
-    static_assert(HookMatchesProd<decltype(hook), decltype(&prod)>(),       \
-                  "signature drift: " #hook " no longer matches " #prod    \
-                  " -- update the std::function signature in hip_fakes.h")
+// Signature-drift watchdog for the HIP seams: the nccl* asserts live in
+// nccl_fakes.cc; here anchor each HIP hook to its production declaration
+// (templates + macro live in fakes/signature-drift.h).
+#include "signature-drift.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAddressRange,     hipMemGetAddressRange);
 ASSERT_HOOK_MATCHES_PROD(g_hipIpcGetMemHandle,        hipIpcGetMemHandle);

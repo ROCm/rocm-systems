@@ -5,12 +5,8 @@
  ************************************************************************/
 
 // Reusable stubs for the NCCL (`nccl*`) symbols the micro-test binary
-// references but doesn't define, so rccl-UnitTestsMicro links without
-// pulling in librccl.so.
-//
-// These are not p2p-specific: any micro-test whose unit-under-test
-// references these `nccl*` symbols can link against this file. See
-// nccl_fakes.h for the philosophy behind the controllable seams.
+// references but doesn't define, so it links without librccl.so. Not
+// p2p-specific; see nccl_fakes.h for the controllable-seam philosophy.
 
 #include <cstdarg>
 #include <cstdio>
@@ -36,38 +32,9 @@
 
 #include <type_traits>
 
-// ---------------------------------------------------------------------------
-// Signature-drift watchdog
-//
-// Each controllable seam in nccl_fakes.h is a std::function whose signature
-// must match the production declaration of the symbol it shadows. If a
-// signature changes upstream (an arg added/removed/retyped), the link
-// step would catch it for `extern`-redeclared functions -- but it would
-// NOT catch it for symbols we redefine ourselves (because our definition
-// becomes the new authority), and it definitely wouldn't catch hook-only
-// drift on `std::function` types.
-//
-// The static_asserts below extract the function-signature type from each
-// std::function<R(A...)> hook and compare it against the production
-// declaration's signature (via decltype(&fn)). Any mismatch fires at
-// compile time with a clear error pointing at the offending hook.
-namespace {
-template <typename F> struct FnSigOf;
-template <typename R, typename... A>
-struct FnSigOf<std::function<R(A...)>> { using type = R(A...); };
-template <typename F> using FnSigOf_t = typename FnSigOf<F>::type;
-
-template <typename Hook, typename ProdFn>
-constexpr bool HookMatchesProd() {
-    return std::is_same_v<FnSigOf_t<Hook>,
-                          std::remove_pointer_t<ProdFn>>;
-}
-}  // namespace
-
-#define ASSERT_HOOK_MATCHES_PROD(hook, prod)                                \
-    static_assert(HookMatchesProd<decltype(hook), decltype(&prod)>(),       \
-                  "signature drift: " #hook " no longer matches " #prod    \
-                  " -- update the std::function signature in nccl_fakes.h")
+// Signature-drift watchdog: assert each hook still matches the production
+// symbol it shadows (templates + macro live in fakes/signature-drift.h).
+#include "signature-drift.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_proxyConnect,              ncclProxyConnect);
 ASSERT_HOOK_MATCHES_PROD(g_proxyCallBlocking,         ncclProxyCallBlocking);
