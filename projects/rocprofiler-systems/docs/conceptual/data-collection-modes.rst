@@ -205,6 +205,8 @@ Profile types:
 
 .. tip:: Start with a flat profile to identify high-impact functions, then use a hierarchical profile to analyze critical paths.
 
+.. _data-collection-modes-output-formats:
+
 Selecting output formats
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
