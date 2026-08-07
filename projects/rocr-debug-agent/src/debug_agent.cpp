@@ -833,83 +833,6 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
   return code_objects_reported;
 }
 
-void
-print_usage ()
-{
-  std::cerr << "ROCdebug-agent usage:" << std::endl;
-  std::cerr << "  -a, --all                   "
-               "Print all wavefronts."
-            << std::endl;
-  std::cerr << "  -s, --save-code-objects[=DIR]   "
-               "Save all loaded code objects. If the directory"
-            << std::endl
-            << "                              "
-               "is not specified, the code objects are saved in"
-            << std::endl
-            << "                              "
-               "the current directory."
-            << std::endl;
-  std::cerr << "  -c, --load-all-code-objects "
-               "Load all code objects as soon as they are loaded"
-            << std::endl
-            << "                              "
-            << "by the runtime.";
-  std::cerr << "  -z, --lazy                  "
-               "Delay inspecting the content of all loaded code "
-            << std::endl
-            << "                              "
-            << "obects until after an exception is reported."
-            << std::endl
-            << "                              "
-            << "Note that the application must not free the code "
-            << std::endl
-            << "                              "
-            << "objects' memory while they are loaded on the device."
-            << std::endl
-            << "                              "
-            << "This option is incompatible with -c."
-            << std::endl;
-  std::cerr << "  -p, --precise-memory        "
-            << "Enable precise memory mode which ensures that " << std::endl
-            << "                              "
-               "when an exception is reported, the PC points to"
-            << std::endl
-            << "                              "
-               "the instruction immediately after the one that"
-            << std::endl
-            << "                              "
-               "caused the exception."
-            << std::endl;
-  std::cerr << "  -o, --output=FILE           "
-               "Save the output in FILE. By default, the output"
-            << std::endl
-            << "                              "
-               "is redirected to stderr."
-            << std::endl;
-  std::cerr << "  -d, --disable-linux-signals "
-               "Disable installing a SIGQUIT signal handler, so"
-            << std::endl
-            << "                              "
-               "that the default Linux handler may dump a core"
-            << std::endl
-            << "                              "
-               "file."
-            << std::endl;
-  std::cerr << "  -l, --log-level={none|error|warning|info|verbose}"
-            << std::endl
-            << "                              "
-               "Change the Debug Agent and Debugger API log"
-            << std::endl
-            << "                              "
-               "level. The default log level is 'none'."
-            << std ::endl;
-  std::cerr << "  -h, --help                  "
-               "Display a usage message and abort the process."
-            << std::endl;
-
-  abort ();
-}
-
 /* Called when we expect dbgapi events to be present.  Fetch all events from
    dbgapi and act on the required events.  */
 
@@ -1612,150 +1535,37 @@ extern "C" bool __attribute__ ((visibility ("default")))
 OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
         const char *const *failed_tool_names)
 {
-  bool disable_sigquit{ false };
-
-  set_log_level (log_level_t::warning);
-
-  std::istringstream args_stream;
-  if (const char *env = ::getenv ("ROCM_DEBUG_AGENT_OPTIONS"))
-    args_stream.str (env);
-
-  std::vector<char *> args = { strdup ("rocm-debug-agent") };
-  std::transform (
-      std::istream_iterator<std::string> (args_stream),
-      std::istream_iterator<std::string> (), std::back_inserter (args),
-      [] (const std::string &str) { return strdup (str.c_str ()); });
-
-  char *const *argv = const_cast<char *const *> (args.data ());
-  int argc = args.size ();
-
-  static struct option options[]
-      = { { "all", no_argument, nullptr, 'a' },
-          { "disable-linux-signals", no_argument, nullptr, 'd' },
-          { "log-level", required_argument, nullptr, 'l' },
-          { "output", required_argument, nullptr, 'o' },
-          { "save-code-objects", optional_argument, nullptr, 's' },
-          { "lazy", no_argument, nullptr, 'z' },
-          { "load-all-code-objects", no_argument, nullptr, 'c' },
-          { "precise-memory", no_argument, nullptr, 'p' },
-          { "precise-alu-exceptions", no_argument, nullptr, 'e' },
-          { "help", no_argument, nullptr, 'h' },
-          { 0 } };
-
-  /* We use getopt_long locally, so make sure to preserve and reset the
-     global optind.  */
-  int saved_optind = optind;
-  optind = 1;
-
-  while (int c
-         = getopt_long (argc, argv, ":as::o:dpezcl:h", options, nullptr))
+  auto result = parse_debug_agent_options (::getenv ("ROCM_DEBUG_AGENT_OPTIONS"));
+  if (std::holds_alternative<std::string> (result))
     {
-      if (c == -1)
-        break;
+      std::string error_msg = std::get<std::string> (result);
+      if (error_msg != "help")
+        std::cerr << error_msg << std::endl;
+      print_usage ();
+      exit (EXIT_FAILURE);
+    }
 
-      std::optional<std::string> argument;
+  debug_agent_options_t options = std::get<debug_agent_options_t> (result);
 
-      if (!optarg && optind < argc && *argv[optind] != '-')
-        optarg = argv[optind++];
+  g_all_wavefronts = options.all_wavefronts;
+  g_precise_emmory = options.precise_memory;
+  g_precise_alu_exceptions = options.precise_alu_exceptions;
+  g_lazy = options.lazy;
+  g_delay_loading = options.delay_loading;
+  g_code_objects_dir = options.code_objects_dir;
 
-      if (optarg)
-        argument.emplace (optarg);
+  set_log_level (options.log_level);
 
-      switch (c)
+  if (options.output_file)
+    {
+      agent_out.open (*options.output_file);
+      if (!agent_out.is_open ())
         {
-        case 'a': /* -a or --all  */
-          g_all_wavefronts = true;
-          break;
-
-        case 'd': /* -d or --disable-linux-signals  */
-          disable_sigquit = true;
-          break;
-
-        case 'p': /* -p or --precise-memory  */
-          g_precise_emmory = true;
-          break;
-
-        case 'e': /* -e or --precise-alu-exceptions  */
-          g_precise_alu_exceptions = true;
-          break;
-
-        case 'l': /* -l or --log-level  */
-          if (!argument)
-            print_usage ();
-
-          if (argument == "none")
-            set_log_level (log_level_t::none);
-          else if (argument == "verbose")
-            set_log_level (log_level_t::verbose);
-          else if (argument == "info")
-            set_log_level (log_level_t::info);
-          else if (argument == "warning")
-            set_log_level (log_level_t::warning);
-          else if (argument == "error")
-            set_log_level (log_level_t::error);
-          else
-            print_usage ();
-          break;
-
-        case 'c': /* -c or --load-all-code-objects.  */
-          g_lazy = false;
-          break;
-
-        case 'z': /* -z or --lazy. */
-          g_delay_loading = true;
-          break;
-
-        case 's': /* -s or --save-code-objects  */
-          if (argument)
-            {
-              struct stat path_stat;
-              if (stat (argument->c_str (), &path_stat) == -1
-                  || !S_ISDIR (path_stat.st_mode))
-                {
-                  std::cerr
-                      << "error: Cannot access code object save directory `"
-                      << *argument << "'" << std::endl;
-                  print_usage ();
-                }
-
-              g_code_objects_dir = *argument;
-            }
-          else
-            {
-              g_code_objects_dir = ".";
-            }
-          break;
-
-        case 'o': /* -o or --output  */
-          if (!argument)
-            print_usage ();
-
-          agent_out.open (*argument);
-          if (!agent_out.is_open ())
-            {
-              std::cerr << "could not open `" << *argument << "'" << std::endl;
-              abort ();
-            }
-          break;
-
-        case '?': /* Unrecognized option  */
-        case 'h': /* -h or --help */
-        default:
-          print_usage ();
+          std::cerr << "could not open `" << *options.output_file << "'"
+                    << std::endl;
+          abort ();
         }
     }
-
-  if (!g_lazy && g_delay_loading)
-    {
-      std::cerr << "\"--load-all-code-objects\" and \"--lazy\" are mutually "
-                   "exclusive" << std::endl;
-      print_usage ();
-    }
-
-  /* Restore the global optind.  */
-  optind = saved_optind;
-
-  std::for_each (args.begin (), args.end (), [] (char *str) { free (str); });
 
   if (!agent_out.is_open ())
     {
@@ -1766,7 +1576,7 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
 
   get_worker_thread ().start ();
 
-  if (!disable_sigquit)
+  if (!options.disable_sigquit)
     {
       struct sigaction sig_action;
 
