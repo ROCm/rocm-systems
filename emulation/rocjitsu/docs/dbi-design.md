@@ -91,7 +91,7 @@ The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPat
 
 Generic byte emitter. Takes a `TrampolinePlan` and returns `TrampolineBytes{patched_anchor_bytes, trampoline_words}`. Knows nothing about `InstrumentationPoint`s or milestones. It emits two body shapes: the inline-nop body, and the probe-call envelope wrapped around the relocated original. `plan_probe_call()` selects the link/target SGPR pairs, the SCC temp, and any special-state (EXEC/VCC/M0) and SGPR-bridge temps, and reports `builder_clobbers`; `emit_probe_call()` lowers the chosen plan to bytes.
 
-The probe-call envelope, in emit order, is: an in-flight-load drain; the special-state saves (`s_mov` EXEC/VCC into dead SGPR pairs, M0 into a dead SGPR) and SCC save; the **spill prologue** (see below); the `s_getpc_b64` + 64-bit add chain that materializes the copied probe body's address; `s_swappc_b64` to it; then after the call the SCC restore, the **spill epilogue**, and the special-state restores, before the relocated original.
+The probe-call envelope, in emit order, is: an in-flight-load drain; the special-state saves (`s_mov` EXEC/VCC into dead SGPR pairs, M0 into a dead SGPR) and SCC save; the **spill prologue** (see below); the `s_getpc_b64` + 64-bit add chain that materializes the copied probe body's address; `s_swappc_b64` to it; then after the call a `build_wait_all_loads_complete()` drain (so the probe's own in-flight loads finish before the restores and host resume), the SCC restore, the **spill epilogue**, and the special-state restores, before the relocated original.
 
 ### Spill bracket
 
@@ -184,7 +184,7 @@ Multi-word, generation-specific encoders for the spill bracket, split out from t
 - `build_v_writelane_b32` / `build_v_readlane_b32` — the SGPR↔VGPR lane bridge (VOP3; CDNA prefix `0x34`, RDNA `0x35`).
 - `build_wait_loads_complete` / `build_wait_stores_complete` — the async-access fences. CDNA uses a unified `s_waitcnt`; RDNA4 splits into `s_wait_loadcnt` (loads on LOADCNT) and `s_wait_storecnt` (stores on STORECNT). `build_wait_all_loads_complete` is the boundary drain used by `emit_probe_call`.
 
-An unmodeled arch throws `UnimplementedInst`; these five builders (plus `max_scratch_offset_bytes`) are the only hard arch gate on spilling.
+An unmodeled arch throws `UnimplementedInst`. The hard arch gates on spilling are these five builders, `max_scratch_offset_bytes`, and — in the orchestrator — `arch_has_accvgpr` (AccVGPR spills require an AGPR file) and `arch_has_unified_vgpr_allocation` (which selects the descriptor's ACCUM_OFFSET split used to size the AccVGPR window).
 
 ### Kernel Descriptor Scan (`code/kernel_descriptor_scan.h`) [shared with DBT]
 
@@ -335,7 +335,7 @@ The probe's calling convention fixes the **link pair** at `s[30:31]` (`AmdGpuFun
 
 The planner also reserves, from the same dead-SGPR pool bounded by `plan.kernel_sgpr_count`, a temp per preserved special register (an even pair for EXEC/VCC, a single for M0) and — for SGPR spills — a bridge VGPR from the kernel's ordinary-VGPR range (`min(kernel_vgpr_count, accum_base)`, so it can never alias an AccVGPR). EXEC is reserved whenever the site spills, not just when the probe clobbers it, because the store/load run under a forced full mask.
 
-The instrumentor does **not yet grow the kernel's SGPR count**, so the kernel must already allocate through `s31` (and through any special-state/bridge temps). Until auto-growth lands, the hardware smoke test instruments a register-padded fixture kernel (`vector_add_probe.hip`, `.sgpr_count` ≥ 32). Resource policy fails closed when the link pair is live at the anchor, when no dead target pair or required temp is available within the kernel's allocation, when the probe clobbers FLAT_SCRATCH (the spill store/load depend on it), when the kernel has zero scratch or is one of several kernels, when a spill offset exceeds the arch's scratch-offset field, or (for SGPR spills) when no dead bridge VGPR exists in the ordinary-VGPR range. The spill set itself is `instrument_clobbers ∩ live_at_anchor` and is spilled, not rejected.
+The instrumentor does **not yet grow the kernel's SGPR count**, so the kernel must already allocate through `s31` (and through any special-state/bridge temps). Until auto-growth lands, the hardware smoke test instruments a register-padded fixture kernel (`vector_add_probe.hip`, `.sgpr_count` ≥ 32). Resource policy fails closed when the link pair is live at the anchor, when no dead target pair or required temp is available within the kernel's allocation, when the probe clobbers FLAT_SCRATCH (the spill store/load depend on it), when the kernel has zero scratch or is one of several kernels, when a spill offset exceeds the arch's scratch-offset field, (for SGPR spills) when no dead bridge VGPR exists in the ordinary-VGPR range, or (for AccVGPR spills) when the target has no AccVGPR file (`arch_has_accvgpr` is false) or an AccVGPR index falls outside the descriptor-derived accumulator window (`kernel_vgpr_count − accum_base`). The spill set itself is `instrument_clobbers ∩ live_at_anchor` and is spilled, not rejected.
 
 ---
 
