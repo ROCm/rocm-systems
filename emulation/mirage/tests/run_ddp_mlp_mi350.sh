@@ -68,7 +68,7 @@ else
   log "SKIP_INSTALL=1: reusing existing venv packages"
 fi
 
-# 2b. Expand the devel package so librocjitsu_kmd.so + configs appear under
+# 2b. Expand the devel package so librocjitsu.so + configs appear under
 #     site-packages/_rocm_sdk_devel. Safe to re-run.
 if [[ -x "$VENV/bin/rocm-sdk" ]]; then
   log "expanding ROCm devel contents (rocm-sdk init)"

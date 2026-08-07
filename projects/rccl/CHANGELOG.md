@@ -58,8 +58,10 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed static build (`BUILD_SHARED_LIBS=OFF`) failing with `install(EXPORT "rccl-targets" ...)` error when `fmt` is fetched via `FetchContent`. The `fmt-header-only` target is now scoped to the build interface and excluded from RCCL's exported usage requirements.
 * Fixed proxy channel staging buffers ignoring the new GDR mode selection on HIP < 7.12 builds. The legacy `#else` branch in `sendProxyConnect` / `recvProxyConnect` now honors `resources->useDmaBuf`, so peermem-equipped hosts on older HIP no longer fall through to `hsa_amd_portable_export_dmabuf` when peermem was selected in `*ProxySetup`. Workaround for affected RCCL builds: `NCCL_DMABUF_ENABLE=0`.
 * Fixed RCCL initialization failing (`Failed to find ROCm runtime library`) on runtime-only ROCm trees that ship no unversioned `libhsa-runtime64.so` developer symlink (e.g. TheRock multi-arch pip-wheel `/opt/rocm-less` deployments). RCCL no longer `dlopen`s the HSA runtime by name; instead it directly links `hsa-runtime64::hsa-runtime64` (already a hard transitive dependency via the HIP runtime) and binds `hsa_init`, `hsa_system_get_info`, `hsa_status_string`, and `hsa_amd_portable_export_dmabuf` to those symbols. The linker records `DT_NEEDED libhsa-runtime64.so.1` and resolves it through librccl's existing RPATH, removing the SONAME version-string fragility and load-scope (`RTLD_LOCAL`) issues. The `RCCL_ROCR_PATH` override is no longer needed and has been removed.
+* Retagged the RCCL-only `COLLTRACE` destroy-time log lines from `NCCL_INIT` to `NCCL_DESTROY` and documented the `DESTROY` `NCCL_DEBUG_SUBSYS` subsystem. The NCCL 2.30.3 sync added `NCCL_DESTROY` and retagged the shared comm-destroy/plugin-unload log lines, but missed these RCCL-specific lines since `COLLTRACE` has no upstream equivalent; they are now excluded from `NCCL_DEBUG=INFO` output by default, consistent with the other destroy-time lines.
 
 ### Known issues
+* On gfx90a (MI210/MI250/MI250X) with ROCm 7.13 or later, per-launch scratch-memory reclaim in the runtime degrades RCCL performance. Set `HSA_NO_SCRATCH_RECLAIM=1` to restore performance.
 * Elastic-buffer support for GIN (multi-segment symmetric memory windows backed by a mix of device and CPU/`HOST_NUMA` memory, exposed through `NCCL_ELASTIC_BUFFER_REGISTER` and `NCCL_SYM_REUSE_SYSMEM_HANDLES`) was newly synced from upstream and compiles on ROCm, but is unverified on AMD hardware.
 
 ## RCCL 2.28.3 for ROCm 7.13
@@ -67,7 +69,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Added
 * Added CAST network transport (`ncclNetCast` / `net_ib_cast`) for AMD AINIC hardware.
 * Added built-in CSV tuner for runtime algorithm/protocol/channel selection without rebuilds.
-* Added multi-node hierarchical AllGather algorithm.
+* Added multi-node hierarchical AllGather algorithm for MI350. Hierarchical AllGather is enabled by default for 8 or more nodes. The message size threshold is 64MB on 8 nodes and 128MB for more than 8 nodes. Set `RCCL_HIERARCHICAL_ALLGATHER=0` to disable.
 * Initial support for symmetric memory kernels on gfx942 and gfx950.
 * Added `RCCL_IB_SPLIT_DATA_THRESHOLD` to split payload across multiple QPs/NICs in `ncclIbMultiSend`.
 * Round-robin single-QP payload and fifo-head-based QP selection in `ncclIbMultiSend`.

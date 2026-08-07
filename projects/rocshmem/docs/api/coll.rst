@@ -221,6 +221,31 @@ ROCSHMEM_FCOLLECT
 This routine concatenates blocks of data from multiple PEs to an array in every
 PE participating in the collective routine.
 
+ROCSHMEM_REDUCE_SCATTER
+-----------------------
+.. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_OPNAME_reduce_scatter_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce)
+.. cpp:function:: __host__ int rocshmem_ctx_TYPENAME_OPNAME_reduce_scatter(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce)
+
+  :param ctx:     Context with which to perform this collective.
+  :param team:    The team participating in the collective.
+  :param dest:    Destination address (``nreduce`` elements). Must be an address on the
+                  symmetric heap.
+  :param source:  Source address (``nreduce * n_pes`` elements). Must be an address on the
+                  symmetric heap.
+  :param nreduce: Number of elements each PE receives.
+  :returns:       Zero on successful local completion. Nonzero otherwise.
+
+**Description:**
+This routine performs a reduce-scatter operation across all PEs in the team.
+Each PE contributes ``nreduce * n_pes`` elements from ``source``; after the element-wise
+reduction across all PEs, PE ``i`` receives the ``nreduce`` elements corresponding to
+block ``i`` (i.e., ``source[i*nreduce .. (i+1)*nreduce - 1]`` reduced across all PEs)
+into its local ``dest`` buffer.
+
+This function must be called as a work-group collective (``_wg`` variant) or from host code.
+
+Valid ``TYPENAME``, ``TYPE``, and ``OPNAME`` values are listed in :ref:`REDUCE_TYPES`.
+
 ROCSHMEM_REDUCTION
 ------------------
 .. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_OPNAME_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce)

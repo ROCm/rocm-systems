@@ -13,7 +13,6 @@ LABEL org.opencontainers.image.source="https://github.com/ROCm/rocm-systems/proj
 
 WORKDIR /app
 COPY README.md help perf-compare /app/
-RUN chmod +x /app/help /app/perf-compare
 ENV PATH="${PATH}:/app/"
 
 # Enable CRB and install system dependencies

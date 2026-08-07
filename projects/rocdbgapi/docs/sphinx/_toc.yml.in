@@ -1,0 +1,18 @@
+defaults:
+  numbered: False
+root: index
+subtrees:
+- caption: Install
+  entries:
+  - file: install/install.rst
+    title: Install ROCdbgapi
+  - url: https://github.com/ROCm/rocm-systems/blob/develop/projects/rocdbgapi/README.md
+    title: Build from source
+- caption: Reference
+  entries:
+  - file: doxygen/html/index
+    title: API library
+  - file: reference/known-issues.rst
+- caption: About
+  entries:
+    - file: license.md

@@ -433,6 +433,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   }
 
   GLint miplevel = 0;
+  GLint miplevels = 1;
   amd::Context& amdContext = *(hip::getCurrentDevice()->asContext());
 
   amd::GLFunctions::SetIntEnv ie(amdContext.glenv());
@@ -561,7 +562,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
       LogWarning("\"miplevel\" is not a valid mipmap level of the GL \"texture\" object");
       HIP_RETURN(hipErrorInvalidValue);
     }
-
+    miplevels = gliTexMaxLevel + 1;
     clearGLErrors(amdContext);
     amdContext.glenv()->glGetTexLevelParameteriv_(target, miplevel, GL_TEXTURE_INTERNAL_FORMAT,
                                                   (GLint*)&glInternalFormat);
@@ -670,7 +671,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   pImageGL = new (amdContext)
       amd::ImageGL(amdContext, clType, cl_flags, clImageFormat, static_cast<size_t>(gliTexWidth),
                    static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget,
-                   image, 0, glInternalFormat, clGLType, numSamples, target);
+                   image, miplevel, glInternalFormat, clGLType, numSamples, miplevels, target);
   if (!pImageGL->create()) {
     pImageGL->release();
     HIP_RETURN(hipErrorUnknown);

@@ -153,6 +153,12 @@ bool Flag::init() {
     }
   }
 
+  // If the user did not explicitly set HSA_ENABLE_DTIF_FAST_COPY, default it ON
+  // whenever HSA_MODEL_TOPOLOGY is set (FFM model mode), mirroring the ROCr-side default.
+  if (flagIsDefault(HSA_ENABLE_DTIF_FAST_COPY) && vars.find("HSA_MODEL_TOPOLOGY") != vars.cend()) {
+    HSA_ENABLE_DTIF_FAST_COPY = true;
+  }
+
   return true;
 }
 

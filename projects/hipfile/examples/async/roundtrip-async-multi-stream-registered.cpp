@@ -80,15 +80,15 @@ static_assert((SLICE_SIZE % BLOCK_ALIGN) == 0, "SLICE_SIZE must be a multiple of
  * must outlive submission. */
 struct slice_state {
     void       *devbuf;
-    bool        buf_registered;
     hipStream_t stream;
-    bool        stream_created;
-    bool        stream_registered;
     size_t      io_size;
     hoff_t      file_offset;
     hoff_t      buf_offset;
     ssize_t     bytes_read;
     ssize_t     bytes_written;
+    bool        buf_registered;
+    bool        stream_created;
+    bool        stream_registered;
 };
 
 int
@@ -232,19 +232,13 @@ main(int argc, char *argv[])
      * file has undefined coherence per open(2); closing first sidesteps that
      * and also flushes file-size metadata for the fresh open() in the hasher.
      * Then hash the full TOTAL_SIZE and compare. */
-    if (close_file(write_path, wfd, whandle)) {
-        wfd          = -1;
-        whandle_open = false;
+    if (close_file(write_path, wfd, whandle))
         goto close_rfile;
-    }
     wfd          = -1;
     whandle_open = false;
 
-    if (close_file(read_path, rfd, rhandle)) {
-        rfd          = -1;
-        rhandle_open = false;
+    if (close_file(read_path, rfd, rhandle))
         goto cleanup_slices;
-    }
     rfd          = -1;
     rhandle_open = false;
 

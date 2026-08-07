@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 ###############################################################################
 # Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 #
@@ -239,6 +240,63 @@ _DEFAULT_CULL_PATTERNS = [
     'cooperative_groups',       # HIP cooperative-groups (grid/thread_block/multi_grid)
 ]
 
+# ---------------------------------------------------------------------------
+# rocSHMEM backend statistics support
+# ---------------------------------------------------------------------------
+#
+# Stats are only meaningful when the library was built with -DPROFILE=ON.
+# Without that flag, ROCStats and ROCHostStats are both NullStats<N> (empty
+# structs, size 1), and every getStat() returns 0.
+#
+# Memory layout (PROFILE=ON):
+#   Context::ctxStats     — Stats<NUM_STATS>         — array of uint64_t
+#                           written by GPU wavefronts via device-side atomicAdd;
+#                           lives in hipMalloc device memory (rocgdb can read it).
+#   Context::ctxHostStats — HostStats<NUM_HOST_STATS> — array of atomic_ullong
+#                           written by host threads via std::atomic; lives in host
+#                           heap memory allocated with the Context object.
+#
+# Backend::globalStats and Backend::globalHostStats are always zero because
+# accumulateStats() is never called.  Stats are read by walking the per-context
+# objects directly: ctx_array (device pool) for device stats and list_of_ctxs
+# (host context vector) for host stats.
+#
+# Stat names and their array indices are read directly from the inferior's
+# DWARF debug info (rocshmem::rocshmem_stats and rocshmem::rocshmem_host_stats
+# enum types) so that new entries added to the enum are automatically picked
+# up without any change to this script.
+
+
+def _load_stat_enum(enum_type_name, strip_prefix, terminator_name):
+    """
+    Read a rocSHMEM stats enum from the inferior's debug info and return
+    a list of ``(index, display_name)`` pairs sorted by index.
+
+    ``strip_prefix`` is removed from the front of each enumerator name and
+    the result is lowercased to form the display name
+    (e.g. ``'NUM_BARRIER_ALL_WG'`` with prefix ``'NUM_'`` → ``'barrier_all_wg'``).
+    The ``terminator_name`` entry (e.g. ``'NUM_STATS'``) is excluded.
+
+    Returns ``None`` if the enum type cannot be found in the debug info.
+    """
+    try:
+        enum_type = gdb.lookup_type(enum_type_name)
+    except gdb.error:
+        return None
+
+    entries = []
+    for field in enum_type.fields():
+        # GDB may return namespace-qualified names (e.g. 'rocshmem::NUM_HOST_PUT').
+        # Strip any leading 'namespace::' qualifiers before comparing or slicing.
+        bare = field.name.rsplit('::', 1)[-1] if field.name else ''
+        if bare == terminator_name:
+            continue
+        display = bare[len(strip_prefix):].lower()
+        entries.append((int(field.enumval), display))
+
+    entries.sort(key=lambda x: x[0])
+    return entries
+
 # Hint rules: ordered most-specific first. First match wins.
 # Each entry: (substring_to_find_in_frame_text, hint_message)
 _HINT_RULES = [
@@ -351,7 +409,7 @@ class DeadlockAnalyzer:
     """
 
     def __init__(self, inferiors=None, output_file=None, color=None,
-                 cull_patterns=None, lane_check=False):
+                 cull_patterns=None, lane_check=False, show_stats=False):
         """
         Parameters
         ----------
@@ -379,6 +437,13 @@ class DeadlockAnalyzer:
             argument values, and report any lanes whose arguments differ.
             This is slow (up to 64 ``bt`` calls per wavefront) so it is
             disabled by default.  Enable with ``--check-lanes``.
+        show_stats : bool
+            When True, read the rocSHMEM backend statistics counters
+            (``Backend::globalStats`` and ``Backend::globalHostStats``) from
+            the stopped process and append a ``=== rocSHMEM Stats ===``
+            section to the report.  Requires the library to have been built
+            with ``-DPROFILE=ON``; without that flag all counters are zero
+            (``NullStats``).  Enabled with ``--stats``.
         """
         self.inferiors = inferiors
         self.out = output_file if output_file is not None else sys.stdout
@@ -392,6 +457,7 @@ class DeadlockAnalyzer:
         else:
             self.cull_patterns = list(cull_patterns)
         self.lane_check = lane_check
+        self.show_stats = show_stats
 
     # ------------------------------------------------------------------
     # Thread collection
@@ -925,6 +991,191 @@ class DeadlockAnalyzer:
         return result
 
     # ------------------------------------------------------------------
+    # Backend statistics
+    # ------------------------------------------------------------------
+
+    def collect_backend_stats(self):
+        """
+        Read rocSHMEM backend statistics from the stopped process.
+
+        ``backend->globalStats`` and ``backend->globalHostStats`` are always zero
+        because ``accumulateStats()`` is never called — GPU wavefronts write into
+        per-context ``ctxStats`` objects (in device memory) and host threads write
+        into per-context ``ctxHostStats`` objects (in host heap memory).
+
+        This method therefore walks the per-context stat objects directly:
+
+        * **Device stats** — cast ``backend`` to its concrete subclass
+          (``IPCBackend``, ``ROBackend``, or ``GDABackend``), access ``ctx_array``
+          (a ``hipMalloc``-allocated pool of device-context objects), and sum
+          ``ctxStats`` across all pool slots.  rocgdb can read device memory
+          directly; unused slots have all-zero stats so over-reading is safe.
+
+        * **Host stats** — walk ``backend->list_of_ctxs`` (a
+          ``std::vector<Context*>`` of all host-created contexts) and sum
+          ``ctxHostStats`` from each.
+
+        Returns a dict with keys:
+
+        ``'profile_on'`` — bool; False when the library was built without
+            ``-DPROFILE=ON`` (all counters would be zero anyway).
+        ``'my_pe'`` — int; the PE rank read from ``Backend::my_pe``.
+        ``'device'`` — dict mapping stat-name → non-zero count.
+        ``'host'`` — dict mapping stat-name → non-zero count.
+        ``'error'`` — str; present only when an error prevented reading.
+
+        Returns None if ``rocshmem::backend`` is not found (symbol absent or
+        the library was not initialised yet).
+        """
+        try:
+            backend_ptr = gdb.parse_and_eval('rocshmem::backend')
+        except gdb.error:
+            return None
+
+        if int(backend_ptr) == 0:
+            return None
+
+        # Detect PROFILE=ON via sizeof(ROCStats):
+        #   Stats<N>     (PROFILE=ON)  → N * sizeof(uint64_t) bytes (> 1)
+        #   NullStats<N> (PROFILE=OFF) → empty struct, sizeof == 1
+        try:
+            roc_stats_sz = int(gdb.parse_and_eval('sizeof(rocshmem::ROCStats)'))
+        except gdb.error:
+            roc_stats_sz = 0
+
+        profile_on = (roc_stats_sz > 1)
+
+        try:
+            backend_val = backend_ptr.dereference()
+            my_pe = int(backend_val['my_pe'])
+        except gdb.error as e:
+            return {'error': str(e), 'profile_on': profile_on}
+
+        result = {'profile_on': profile_on, 'my_pe': my_pe,
+                  'device': {}, 'host': {}}
+
+        if not profile_on:
+            return result
+
+        # Read enum field names and indices directly from the inferior's
+        # DWARF debug info so that new stats added to the enum are picked up
+        # automatically without any change to this script.
+        dev_names  = _load_stat_enum('rocshmem::rocshmem_stats',
+                                     'NUM_', 'NUM_STATS')
+        host_names = _load_stat_enum('rocshmem::rocshmem_host_stats',
+                                     'NUM_HOST_', 'NUM_HOST_STATS')
+
+        if dev_names is None or host_names is None:
+            result['error'] = ('rocshmem::rocshmem_stats or '
+                               'rocshmem::rocshmem_host_stats enum type not '
+                               'found in debug info')
+            return result
+
+        ull_ptr = gdb.lookup_type('unsigned long long').pointer()
+
+        # --- Device stats: walk the backend-specific ctx_array pool ---
+        # BackendType enum: GDA_BACKEND=0, RO_BACKEND=1, IPC_BACKEND=2
+        _BACKEND_SUBCLASS = {
+            0: ('rocshmem::GDABackend', 'rocshmem::GDAContext'),
+            1: ('rocshmem::ROBackend',  'rocshmem::ROContext'),
+            2: ('rocshmem::IPCBackend', 'rocshmem::IPCContext'),
+        }
+        try:
+            backend_type = int(backend_val['type'])
+            mapping = _BACKEND_SUBCLASS.get(backend_type)
+            if mapping is not None:
+                backend_cls, ctx_cls = mapping
+                sub_ptr = backend_ptr.cast(
+                    gdb.lookup_type(backend_cls).pointer())
+                sub = sub_ptr.dereference()
+                ctx_array = sub['ctx_array']  # IPCContext* / ROContext* / GDAContext*
+
+                # Pool size: envvar::max_num_contexts (a var<size_t> whose
+                # underlying value lives in the 'value' member field).
+                try:
+                    n_ctxs = int(gdb.parse_and_eval(
+                        'rocshmem::envvar::max_num_contexts.value'))
+                except gdb.error:
+                    n_ctxs = 32  # default from envvar.cpp
+
+                ctx_type = gdb.lookup_type(ctx_cls)
+                for i in range(n_ctxs):
+                    ctx = (ctx_array + i).dereference()
+                    dev_base = ctx['ctxStats'].address.cast(ull_ptr)
+                    for idx, name in dev_names:
+                        val = int((dev_base + idx).dereference())
+                        if val:
+                            result['device'][name] = (
+                                result['device'].get(name, 0) + val)
+        except gdb.error as e:
+            result['error'] = 'device stats: ' + str(e)
+
+        # --- Host stats: walk list_of_ctxs (all host-created contexts) ---
+        # std::vector<Context*> uses libstdc++ internal layout:
+        #   _M_impl._M_start  — pointer to first element
+        #   _M_impl._M_finish — pointer one past the last element
+        try:
+            vec = backend_val['list_of_ctxs']
+            vec_start  = vec['_M_impl']['_M_start']
+            vec_finish = vec['_M_impl']['_M_finish']
+            n_host_ctxs = int(vec_finish - vec_start)
+            for i in range(n_host_ctxs):
+                ctx_ptr = (vec_start + i).dereference()
+                ctx = ctx_ptr.dereference()
+                host_base = ctx['ctxHostStats'].address.cast(ull_ptr)
+                for idx, name in host_names:
+                    val = int((host_base + idx).dereference())
+                    if val:
+                        result['host'][name] = (
+                            result['host'].get(name, 0) + val)
+        except gdb.error as e:
+            prev = result.get('error', '')
+            result['error'] = (prev + '; ' if prev else '') + 'host stats: ' + str(e)
+
+        return result
+
+    def _format_stats(self, stats_result):
+        """Render the dict returned by ``collect_backend_stats`` as a string."""
+        c = self.c
+        lines = [f'{c.HEADER}=== rocSHMEM Stats ==={c.RESET}']
+
+        if stats_result is None:
+            lines.append('  (rocshmem::backend symbol not found — library not '
+                         'initialised or debug symbols absent)')
+            lines.append('')
+            return '\n'.join(lines)
+
+        if 'error' in stats_result:
+            lines.append(f'  (error reading stats: {stats_result["error"]})')
+            lines.append('')
+            return '\n'.join(lines)
+
+        pe = stats_result.get('my_pe', '?')
+        lines.append(f'  PE {pe}')
+
+        if not stats_result['profile_on']:
+            lines.append('  (library built without -DPROFILE=ON; all counters'
+                         ' are zero)')
+            lines.append('')
+            return '\n'.join(lines)
+
+        lines.append('  (counters reflect activity since process start)')
+
+        for section, data in (('Device', stats_result['device']),
+                               ('Host',   stats_result['host'])):
+            if not data:
+                lines.append(f'  {section}: (all zero)')
+                continue
+            lines.append(f'  {section}:')
+            # Compute column width for alignment
+            w = max(len(k) for k in data)
+            for name, val in data.items():
+                lines.append(f'    {name:<{w}}  {val}')
+
+        lines.append('')
+        return '\n'.join(lines)
+
+    # ------------------------------------------------------------------
     # Main report
     # ------------------------------------------------------------------
 
@@ -1043,6 +1294,11 @@ class DeadlockAnalyzer:
         if all_issues:
             print(self._format_collective_issues(all_issues), file=out)
 
+        # --- Backend stats (optional) ---
+        if self.show_stats:
+            stats_result = self.collect_backend_stats()
+            print(self._format_stats(stats_result), file=out)
+
         # --- Summary ---
         print(f'{c.HEADER}=== Summary ==={c.RESET}', file=out)
         stuck_str = f'{rocshmem_wf_count} wavefront(s) inside rocSHMEM'
@@ -1067,7 +1323,7 @@ class RocshmemDeadlockCommand(gdb.Command):
     """Analyze rocSHMEM deadlocks in the current inferior(s).
 
     Usage: rocshmem-deadlock-analyze [--color|--no-color] [--cull[=pat,...]]
-                                     [--check-lanes] [output_file]
+                                     [--check-lanes] [--stats] [output_file]
 
     --color           Force colored output even when writing to a file.
     --no-color        Disable colored output even on a TTY.
@@ -1081,6 +1337,12 @@ class RocshmemDeadlockCommand(gdb.Command):
                       a call, rocgdb switches to every active lane and compares
                       per-lane argument values (up to 64 bt calls per wavefront;
                       slow but thorough).
+    --stats           Append a rocSHMEM Stats section showing non-zero API call
+                      counters.  Device stats are summed across all slots in
+                      the backend ctx_array pool (rocgdb reads device memory
+                      directly); host stats are summed across all contexts in
+                      list_of_ctxs.  Requires -DPROFILE=ON; counters reflect
+                      activity since process start, not since the deadlock.
 
     When output_file is given the full report is written there;
     otherwise it is printed to stdout.  Color is auto-detected from the
@@ -1097,6 +1359,7 @@ class RocshmemDeadlockCommand(gdb.Command):
         color = None       # auto-detect
         cull_patterns = None  # culling disabled by default
         lane_check = False
+        show_stats = False
 
         remaining = []
         for a in args:
@@ -1110,6 +1373,8 @@ class RocshmemDeadlockCommand(gdb.Command):
                 cull_patterns = [p for p in a[len('--cull='):].split(',') if p]
             elif a == '--check-lanes':
                 lane_check = True
+            elif a == '--stats':
+                show_stats = True
             else:
                 remaining.append(a)
 
@@ -1122,7 +1387,8 @@ class RocshmemDeadlockCommand(gdb.Command):
         try:
             DeadlockAnalyzer(output_file=output_file, color=color,
                              cull_patterns=cull_patterns,
-                             lane_check=lane_check).report()
+                             lane_check=lane_check,
+                             show_stats=show_stats).report()
         finally:
             if output_file is not None:
                 output_file.close()
@@ -1155,6 +1421,10 @@ def _auto_analyzer_kwargs():
     ROCSHMEM_DEADLOCK_CHECK_LANES:
       "1"            — enable lane-level parameter mismatch detection
 
+    ROCSHMEM_DEADLOCK_STATS:
+      "1"            — call rocshmem_dump_stats() and append backend API
+                       call counters to the report (requires PROFILE=ON)
+
     ROCSHMEM_DEADLOCK_COLOR:
       handled by _color_enabled_default(); not overridden here so the
       DeadlockAnalyzer constructor auto-detects it as usual.
@@ -1167,6 +1437,8 @@ def _auto_analyzer_kwargs():
         kwargs['cull_patterns'] = [p for p in cull_env.split(',') if p]
     if os.environ.get('ROCSHMEM_DEADLOCK_CHECK_LANES', '0') == '1':
         kwargs['lane_check'] = True
+    if os.environ.get('ROCSHMEM_DEADLOCK_STATS', '0') == '1':
+        kwargs['show_stats'] = True
     return kwargs
 
 

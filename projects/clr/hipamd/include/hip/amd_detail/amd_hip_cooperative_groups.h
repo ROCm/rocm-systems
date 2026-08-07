@@ -661,7 +661,10 @@ class coalesced_group : public thread_group {
  *  on Microsoft Windows.
  */
 __CG_QUALIFIER__ coalesced_group coalesced_threads() {
-  return cooperative_groups::coalesced_group(__builtin_amdgcn_read_exec());
+  return cooperative_groups::coalesced_group(
+      __builtin_amdgcn_is_invocable(__builtin_amdgcn_read_exec)
+          ? __builtin_amdgcn_read_exec()
+          : 0);
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -756,7 +759,8 @@ __CG_QUALIFIER__ void thread_group::sync() const {
     }
   }
 #if __has_builtin(__builtin_amdgcn_s_wait_asynccnt)
-  __builtin_amdgcn_s_wait_asynccnt(0);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_wait_asynccnt))
+    __builtin_amdgcn_s_wait_asynccnt(0);
 #endif
 }
 

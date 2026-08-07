@@ -25,7 +25,7 @@
  *   - sequence_id    uint64_t  monotonically increasing per capture session
  *   - timestamp_ns   uint64_t  wall-clock at capture time
  *   - thread_id      uint64_t  OS thread that made the call (cached per thread)
- *   - payload_length uint16_t  total record size in bytes (incl. header)
+ *   - payload_length uint32_t  total record size in bytes (incl. header)
  *   - reserved       uint8_t[4]  padding to 32 bytes
  *
  * Payload bytes (after the 32-byte header):
@@ -44,10 +44,14 @@
 #pragma once
 
 #include <stdint.h>
+#include <string.h>
 
 /* ---- Archive format constants ---- */
 #define HRR_MAGIC   ((uint32_t)0x52524845u)  /* "HRRE" */
-#define HRR_VERSION ((uint16_t)3u)
+/* v4: payload_length widened from uint16_t to uint32_t so kernel-launch events
+ * larger than 65535 bytes (many args / long mangled names / large by-value
+ * structs) are no longer dropped. */
+#define HRR_VERSION ((uint16_t)4u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -72,13 +76,50 @@ typedef struct {
     uint64_t sequence_id;    /* monotonically increasing counter          */
     uint64_t timestamp_ns;   /* wall-clock at capture time (MONOTONIC)    */
     uint64_t thread_id;      /* OS thread ID (cached per thread)          */
-    uint16_t payload_length; /* total record size in bytes (incl. header) */
-    uint8_t  reserved[4];    /* padding to 32 bytes; zero on write        */
+    uint32_t payload_length; /* total record size in bytes (incl. header) */
+    uint8_t  reserved[2];    /* padding to 32 bytes; zero on write        */
 } hrr_event_header;
 
 #ifdef __cplusplus
 static_assert(sizeof(hrr_event_header) == 32, "hrr_event_header must be 32 bytes");
 #endif
+
+/* ---- Clean-shutdown trailer ----
+ * Written once at the end of events.bin by the capture writer ONLY on a clean
+ * shutdown (writer::flush). Its ABSENCE tells the reader the capture was
+ * interrupted (e.g. the recorded process crashed) and the trailing record may
+ * be torn — the reader then recovers all complete records instead of failing.
+ * event_type uses a sentinel (HRR_EOF_MARKER) far outside the hrr_api_id_t
+ * range, so playback dispatch and name lookup treat it as unknown/no-op if it
+ * is ever fed to them. */
+#define HRR_EOF_MARKER ((uint16_t)0xFFFFu)     /* hrr_event_header.event_type sentinel */
+#define HRR_EOF_MAGIC  ((uint32_t)0x464F4548u) /* "HEOF" trailer payload magic         */
+
+typedef struct {
+    hrr_event_header hdr;   /* event_type = HRR_EOF_MARKER, payload_length = sizeof(hrr_eof_record) */
+    uint64_t total_events;  /* count of real events written before this trailer */
+    uint32_t eof_magic;     /* HRR_EOF_MAGIC                                     */
+} hrr_eof_record;
+
+#ifdef __cplusplus
+static_assert(sizeof(hrr_eof_record) == 44, "hrr_eof_record must be 44 bytes");
+#endif
+
+/* Build a clean-shutdown trailer record. Single source of truth for the trailer
+ * layout, shared by the capture writer (writer::flush) and the offline repair
+ * tool (hrr-playback --repair) so the two cannot drift. The caller may overwrite
+ * hdr.timestamp_ns / hdr.thread_id afterwards; the offline tool leaves them 0. */
+static inline hrr_eof_record hrr_make_eof_record(uint64_t sequence_id,
+                                                 uint64_t total_events) {
+    hrr_eof_record rec;
+    memset(&rec, 0, sizeof(rec));
+    rec.hdr.event_type     = HRR_EOF_MARKER;
+    rec.hdr.sequence_id    = sequence_id;
+    rec.hdr.payload_length = (uint16_t)sizeof(hrr_eof_record);
+    rec.total_events       = total_events;
+    rec.eof_magic          = HRR_EOF_MAGIC;
+    return rec;
+}
 
 
 /* ---- Compiler dispatch stubs ---- */
@@ -2584,6 +2625,10 @@ typedef struct {
     uint64_t width;
     uint64_t height;
     int32_t kind;
+    uint64_t blob_hash_lo;  /* H2D blob hash lo (0 if not H2D) */
+    uint64_t blob_hash_hi;  /* H2D blob hash hi */
+    uint64_t d2h_hash_lo;  /* D2H expected-output blob hash lo (0 if not D2H) */
+    uint64_t d2h_hash_hi;  /* D2H expected-output blob hash hi */
 } hrr_args_hipMemcpy2D;
 
 /* hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind, hipStream_t stream) */
@@ -2598,6 +2643,10 @@ typedef struct {
     uint64_t height;
     int32_t kind;
     uint64_t stream;
+    uint64_t blob_hash_lo;  /* H2D blob hash lo (0 if not H2D) */
+    uint64_t blob_hash_hi;  /* H2D blob hash hi */
+    uint64_t d2h_hash_lo;  /* D2H expected-output blob hash lo (0 if not D2H) */
+    uint64_t d2h_hash_hi;  /* D2H expected-output blob hash hi */
 } hrr_args_hipMemcpy2DAsync;
 
 /* hipError_t hipMemcpy2DFromArray(void* dst, size_t dpitch, hipArray_const_t src, size_t wOffset, size_t hOffset, size_t width, size_t height, hipMemcpyKind kind) */

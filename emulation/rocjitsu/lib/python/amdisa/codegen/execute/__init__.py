@@ -127,8 +127,10 @@ def _register_handlers() -> None:
         c.dst_ops, c.src_ops, c.op, c.dtype
     )
 
-    # Vector ALU — vector_unary, vector_binop, vector_ternary now handled
-    # by SemaAST pipeline (_SEMA_CLASSES).
+    # Vector ALU — vector_unary, pseudo_scalar_unary, vector_binop, and
+    # vector_ternary are handled by the SemaAST pipeline (_SEMA_CLASSES).
+    # pseudo_scalar_unary retains its VALU expression/encoding contract but
+    # uses ExecModel.SCALAR because the ISA says V_S_* ignores EXEC.
 
     # Vector compare — vector_cmp, vector_add_co handled by SemaAST pipeline
     # (_SEMA_CLASSES). vector_cmp_class is NOT: the SemaAST lowering mangles the
@@ -154,7 +156,7 @@ def _register_handlers() -> None:
         c.dst_ops, c.src_ops, c.dtype
     )
     DISPATCH['vector_mad_32_16'] = lambda c: gen_vector_mad_32_16(
-        c.dst_ops, c.src_ops, c.dtype
+        c.dst_ops, c.src_ops, c.dtype, c.is_vop3
     )
     DISPATCH['vector_div_fixup'] = lambda c: gen_vector_div_fixup(
         c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
@@ -212,6 +214,8 @@ def _register_handlers() -> None:
             if c.is_vop3 and 'opsel' in c.enc_field_names
             else 'inst_.op_sel' if c.is_vop3 and 'op_sel' in c.enc_field_names else '0u'
         ),
+        dtype=c.dtype,
+        is_vop3=c.is_vop3,
         fp8_format_select=(
             'inst_.clamp'
             if c.cls == 'vector_cvt_pk'
@@ -220,9 +224,10 @@ def _register_handlers() -> None:
             and c.arch_name == 'gfx1250'
             else None
         ),
+        arch_name=c.arch_name,
     )
     DISPATCH['vector_cvt_scale'] = lambda c: gen_vector_cvt_scale(
-        c.dst_ops, c.src_ops, c.cls, c.op
+        c.dst_ops, c.src_ops, c.cls, c.op, c.arch_name
     )
     DISPATCH['cvt_fp8'] = lambda c: gen_cvt_fp8(c)
     DISPATCH['cvt_scalef32'] = lambda c: gen_cvt_scalef32(c)
@@ -258,7 +263,6 @@ def _register_handlers() -> None:
         c.dst_ops,
         c.src_ops,
         opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
     )
     DISPATCH['mad_mix_f32'] = lambda c: gen_mad_mix_f32(
         c.dst_ops,

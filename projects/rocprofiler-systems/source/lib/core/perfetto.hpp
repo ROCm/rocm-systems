@@ -12,8 +12,7 @@
 #if defined(TIMEMORY_USE_PERFETTO)
 #    include <timemory/components/perfetto/backends.hpp>
 #else
-#    include <perfetto.h>
-PERFETTO_DEFINE_CATEGORIES(ROCPROFSYS_PERFETTO_CATEGORIES);
+#    include "core/perfetto/category_registry.hpp"
 #endif
 
 #include <timemory/process/process.hpp>

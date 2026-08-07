@@ -5,8 +5,18 @@
 
 #include <algorithm>
 #include <cassert>
+#include <stdexcept>
+#include <string>
 
 namespace simdojo {
+
+namespace {
+
+std::string link_endpoints(const Link &link) {
+  return link.src()->full_path() + " -> " + link.dst()->full_path();
+}
+
+} // namespace
 
 void PartitionContext::drain_incoming() {
   for (auto &queue : incoming)
@@ -17,14 +27,22 @@ SimulationEngine::SimulationEngine(Config config)
     : config_(config), pacer_(PacingController::Config{.ratio = config.wall_clock_ratio}) {}
 
 SimulationEngine::~SimulationEngine() {
-  if (built_)
+  if (created_)
     shutdown();
 }
 
-void SimulationEngine::build() {
-  assert(!built_ && "build() called twice without shutdown()");
-  if (topology_.partitions().empty())
-    topology_.partition(config_.num_threads);
+void SimulationEngine::create() {
+  assert(!created_ && "create() called twice without shutdown()");
+  if (config_.num_threads == 0)
+    throw std::invalid_argument("SimulationEngine requires at least one worker thread");
+
+  if (topology_.partitions().empty()) {
+    if (config_.num_threads > 1) {
+      throw std::invalid_argument(
+          "multi-threaded SimulationEngine requires an explicit topology partition policy");
+    }
+    topology_.partition_balanced(1);
+  }
   setup_partitions();
 
   done_.store(false, std::memory_order_release);
@@ -36,11 +54,11 @@ void SimulationEngine::build() {
   global_lbts_.store(0, std::memory_order_release);
 
   initialize_components();
-  built_ = true;
+  created_ = true;
 }
 
 void SimulationEngine::shutdown() {
-  if (!built_)
+  if (!created_)
     return;
 
   // Signal done. Workers will see this after the next barrier and exit.
@@ -61,13 +79,29 @@ void SimulationEngine::shutdown() {
   running_ = false;
   contexts_.clear();
   async_queues_.clear();
-  built_ = false;
+  created_ = false;
 }
 
 void SimulationEngine::setup_partitions() {
   const uint32_t num_threads = config_.num_threads;
-  assert(num_threads > 0);
-  assert(topology_.partitions().size() == num_threads);
+  if (topology_.partitions().size() != num_threads) {
+    throw std::invalid_argument(
+        "SimulationEngine topology partition count must match the worker thread count");
+  }
+
+  // Validate cross-partition link constraints.
+  for (auto &link : topology_.links()) {
+    if (link->is_cross_partition()) {
+      if (link->latency() == 0) {
+        throw std::invalid_argument("SimulationEngine cross-partition link " +
+                                    link_endpoints(*link) + " requires positive latency");
+      }
+      if (dynamic_cast<QueuedLink *>(link.get()) != nullptr) {
+        throw std::invalid_argument("SimulationEngine QueuedLink " + link_endpoints(*link) +
+                                    " must not cross partition boundaries");
+      }
+    }
+  }
 
   contexts_.reserve(num_threads);
   for (uint32_t i = 0; i < num_threads; ++i)
@@ -77,15 +111,6 @@ void SimulationEngine::setup_partitions() {
   for (uint32_t i = 0; i < num_threads; ++i)
     async_queues_.push_back(std::make_unique<AsyncQueue>());
 
-  // Validate cross-partition link constraints.
-  for (auto &link : topology_.links()) {
-    if (link->is_cross_partition()) {
-      assert(link->latency() > 0 && "cross-partition links require positive latency for LBTS");
-      assert(dynamic_cast<QueuedLink *>(link.get()) == nullptr &&
-             "QueuedLinks must not cross partition boundaries (they bypass the LBTS protocol)");
-    }
-  }
-
   // Set engine pointer on all components.
   for (auto &part : topology_.partitions()) {
     for (auto *comp : part.components)
@@ -94,7 +119,7 @@ void SimulationEngine::setup_partitions() {
 }
 
 ExitStatus SimulationEngine::run() {
-  assert(built_ && "run() called before build()");
+  assert(created_ && "run() called before create()");
   const uint32_t num_threads = config_.num_threads;
 
   startup_components();
@@ -128,7 +153,7 @@ ExitStatus SimulationEngine::run() {
 }
 
 bool SimulationEngine::step() {
-  assert(built_ && "step() called before build()");
+  assert(created_ && "step() called before create()");
   assert(config_.num_threads == 1 && "step() requires single-threaded mode");
 
   if (!running_) {
@@ -192,6 +217,9 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       // threads (e.g. doorbell poll threads) are merged promptly instead of
       // waiting for the main queue to empty — which may never happen when
       // CU work events continuously reschedule.
+      //
+      // Within a tick, defer pushes so that handler reschedules don't
+      // interleave with pops (avoids O(N log N) heap churn per tick).
       Tick last_drained_tick = 0;
       while (!ctx.event_queue.empty()) {
         Tick next_tick = ctx.event_queue.next_event_time();
@@ -295,8 +323,11 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       // Phase 4: Barrier (completion function computes new global_lbts).
       barrier_->arrive_and_wait();
       if (done_.load(std::memory_order_acquire)) {
-        // After arrive_and_wait, if done_ was set by the completion function,
-        // ALL threads see it simultaneously and ALL exit.
+        // request_exit() can set done_ while peers released from the same phase
+        // are already entering the next one. Contribute this worker's arrival
+        // instead of abandoning that phase and stranding those peers.
+        ctx.local_next.store(TICK_MAX, std::memory_order_relaxed);
+        barrier_->arrive_and_drop();
         return;
       }
     }
@@ -464,6 +495,7 @@ void SimulationEngine::schedule_event_async(Event *event, Tick timestamp,
   {
     std::lock_guard<std::mutex> lock(aq.mutex);
     aq.events.push_back(EventQueueEntry{timestamp, 0, event, std::move(message)});
+    aq.pending.store(true, std::memory_order_release);
   }
 
   // Wake the target partition so idle workers pick up the new event.
@@ -484,10 +516,13 @@ void SimulationEngine::schedule_event_now(Event *event, std::unique_ptr<Message>
 void SimulationEngine::drain_async_events() {
   for (uint32_t i = 0; i < async_queues_.size(); ++i) {
     auto &aq = *async_queues_[i];
+    if (!aq.pending.load(std::memory_order_acquire))
+      continue;
     std::lock_guard<std::mutex> lock(aq.mutex);
     for (auto &e : aq.events)
       contexts_[i]->event_queue.push(std::move(e));
     aq.events.clear();
+    aq.pending.store(false, std::memory_order_release);
   }
 }
 
@@ -535,9 +570,9 @@ Tick SimulationEngine::compute_async_floor(const PartitionContext &ctx) const {
 
 void SimulationEngine::drain_async_for_partition(PartitionContext &ctx) {
   auto &aq = *async_queues_[ctx.partition_id];
-  std::lock_guard<std::mutex> lock(aq.mutex);
-  if (aq.events.empty())
+  if (!aq.pending.load(std::memory_order_acquire))
     return;
+  std::lock_guard<std::mutex> lock(aq.mutex);
   Tick floor = compute_async_floor(ctx);
   for (auto &e : aq.events) {
     if (e.timestamp < floor)
@@ -545,6 +580,7 @@ void SimulationEngine::drain_async_for_partition(PartitionContext &ctx) {
     ctx.event_queue.push(std::move(e));
   }
   aq.events.clear();
+  aq.pending.store(false, std::memory_order_release);
 }
 
 } // namespace simdojo

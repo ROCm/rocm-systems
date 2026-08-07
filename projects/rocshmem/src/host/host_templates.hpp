@@ -411,6 +411,30 @@ __host__ int HostInterface::reduce(rocshmem_team_t team, T* dest,
 }
 
 template <typename T, ROCSHMEM_OP Op>
+__host__ int HostInterface::reduce_scatter(rocshmem_team_t team, T* dest,
+                                           const T* source, int nreduce) {
+  LOG_API("host::reduce_scatter (dest=%p, source=%p, nreduce=%d)", dest, source, nreduce);
+
+  Team* team_obj{get_internal_team(team)};
+  MPI_Comm mpi_comm{team_obj->mpi_comm};
+
+  if (mpi_comm == MPI_COMM_NULL) {
+    LOG_WARN("reduce_scatter host variant is only executable on MPI bootstrapping path");
+    return ROCSHMEM_ERROR;
+  }
+
+  MPI_Op mpi_op{get_mpi_op(Op)};
+  MPI_Datatype mpi_type{get_mpi_type<T>()};
+
+  hdp_policy_->hdp_flush();
+
+  mpilib_ftable_.Reduce_scatter_block(
+      const_cast<T*>(source), dest, nreduce, mpi_type, mpi_op, mpi_comm);
+
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename T, ROCSHMEM_OP Op>
 __host__ int HostInterface::reduce_on_stream(rocshmem_team_t team,
                                               T *dest,
                                               const T *source,

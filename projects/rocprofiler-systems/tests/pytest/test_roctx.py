@@ -25,7 +25,6 @@ pytestmark = [
 def roctx_env() -> dict[str, str]:
     """Environment variables for rocTX tests."""
     return {
-        "ROCPROFSYS_TRACE_LEGACY": "ON",
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,marker_api,kernel_dispatch",
         "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,mem_usage,gfx_clock,mem_clock",
         "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "1000",
@@ -51,16 +50,11 @@ def roctx_rules(validation_rules_dir: Path) -> list[Path]:
 class TestROCTx(RocprofsysTest):
     """Tests for rocTX marker API."""
 
-    def roctx_legacy_labels(self) -> list[str]:
+    def roctx_expected_labels(self) -> list[str]:
         # The validate-perfetto-proto.py script aggregates (name, depth) pairs from
-        # the Perfetto slice table in dict-insertion order.  Because roctxRangeStart
-        # and roctxRangePush are each called on BOTH the main thread and the worker
-        # thread, both depths for a given name accumulate into the same outer dict
-        # entry (name → {depth: count}).  The flat list therefore groups all depths
-        # of the same name together, in the order those depths were first seen:
+        # the Perfetto slice table in dict-insertion order. Ex:
         #   roctxRangeStart_GPU_Compute  d=2 (main, first call) then d=0 (worker)
         #   roctxRangePush_HIP_Kernel    d=3 (main)             then d=1 (worker)
-        # The per-thread marks appear after those, in thread-call order.
         return [
             "roctxMark_GPU_workload",
             "roctxRangePush_run_profiling",
@@ -74,31 +68,14 @@ class TestROCTx(RocprofsysTest):
             "roctxMark_Finished_GPU",
         ]
 
-    def roctx_legacy_count(self) -> list[int]:
+    def roctx_expected_count(self) -> list[int]:
         return [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 
-    def roctx_legacy_depth(self) -> list[int]:
+    def roctx_expected_depth(self) -> list[int]:
         return [1, 1, 2, 0, 3, 1, 0, 0, 2, 1]
 
-    def roctx_cached_labels(self) -> list[str]:
-        return [
-            "roctxMark_GPU_workload",
-            "roctxRangePush_HIP_Kernel",
-            "roctxRangeStart_GPU_Compute",
-            "roctxMark_Thread_Start",
-            "roctxMark_Thread_End",
-            "roctxGetThreadId",
-            "roctxRangePush_run_profiling",
-            "roctxMark_Finished_GPU",
-        ]
-
-    def roctx_cached_count(self) -> list[int]:
-        return [1, 2, 2, 1, 1, 1, 1, 1]
-
-    def roctx_cached_depth(self) -> list[int]:
-        return [1, 1, 1, 0, 0, 1, 1, 1]
-
     BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
+    RUNTIME_INSTRUMENT_ARGS = ["-v", "2"]
 
     @pytest.mark.parametrize(
         "mode",
@@ -106,7 +83,7 @@ class TestROCTx(RocprofsysTest):
             pytest.param("baseline", marks=pytest.mark.timeout(120)),
             pytest.param("binary_rewrite", marks=pytest.mark.timeout(120)),
             pytest.param("sys_run", marks=pytest.mark.timeout(120)),
-            pytest.param("runtime_instrument", marks=pytest.mark.timeout(180)),
+            pytest.param("runtime_instrument", marks=pytest.mark.timeout(300)),
         ],
     )
     def test(self, mode, roctx_env):
@@ -115,6 +92,7 @@ class TestROCTx(RocprofsysTest):
             "roctx",
             env=roctx_env,
             binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
             check_target_arch=True,
         )
         self.assert_regex(result)
@@ -128,14 +106,9 @@ class TestROCTx(RocprofsysTest):
     ):
         env = roctx_env.copy()
         categories = ["rocm_marker_api"]
-        if env["ROCPROFSYS_TRACE_LEGACY"] == "ON":
-            labels = self.roctx_legacy_labels()
-            counts = self.roctx_legacy_count()
-            depths = self.roctx_legacy_depth()
-        else:
-            labels = self.roctx_cached_labels()
-            counts = self.roctx_cached_count()
-            depths = self.roctx_cached_depth()
+        labels = self.roctx_expected_labels()
+        counts = self.roctx_expected_count()
+        depths = self.roctx_expected_depth()
 
         result = self.run_test(
             "sampling", target="roctx", env=env, check_target_arch=True

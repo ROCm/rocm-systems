@@ -85,7 +85,7 @@ namespace {
 const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
 #if _WIN32
                  1
-#elif __linux__
+#elif defined(__linux__) || defined(__FreeBSD__)
                  static_cast<size_t>(core::DriverType::NUM_DRIVER_TYPES)
 #endif
                  >

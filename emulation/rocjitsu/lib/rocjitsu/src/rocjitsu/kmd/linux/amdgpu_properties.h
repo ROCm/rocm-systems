@@ -8,8 +8,11 @@
 
 #include "util/bit.h"
 
+#include <charconv>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 
 namespace rocjitsu::kmd {
 
@@ -30,12 +33,85 @@ constexpr GfxIpVersion decode_gfx_target_version(uint32_t gfx_target_version) {
   };
 }
 
+/// @brief Packs a GC (graphics core) hardware IP version exactly like the
+/// amdgpu @c IP_VERSION() macro: @c (major<<24)|(minor<<16)|(rev<<8).
+///
+/// @details Producing the same packed representation the kernel uses lets the
+/// synthetic topology mirror the amdkfd driver's @c KFD_GC_VERSION comparisons
+/// (drivers/gpu/drm/amd/amdkfd/kfd_topology.c) bit-for-bit.
+constexpr uint32_t make_gc_ip_version(uint32_t major, uint32_t minor, uint32_t rev) {
+  return (major << 24) | (minor << 16) | (rev << 8);
+}
+
+/// @brief Maps a @c gfx_target_version (e.g. 90402 for gfx942) to the GC
+/// hardware IP version the amdkfd driver keys its capability logic on.
+///
+/// @details The two identifiers are not interchangeable for CDNA parts. The KFD
+/// device table (drivers/gpu/drm/amd/amdkfd/kfd_device.c) reports, for example,
+/// gfx90a (90010) as GC 9.4.2 and gfx942 (90402) as GC 9.4.3, so a plain
+/// major.minor.stepping decode would land on the wrong side of the driver's
+/// version thresholds (missing precise-memory support on gfx90a, or the
+/// gfx9.4.3 watch-address-mask values on gfx942). Only the parts whose encoding
+/// diverges from a direct decode are listed here; every other GPU -- all of
+/// gfx10/gfx11 and gfx12.0 -- decodes directly, which is exact for the
+/// thresholds the driver compares against.
+///
+/// \NPI add a case when a new GPU's gfx_target_version does not decode directly
+/// to its GC hardware IP version (see the KFD device table in
+/// drivers/gpu/drm/amd/amdkfd/kfd_device.c).
+constexpr uint32_t gc_ip_version_for_gfx_target_version(uint32_t gfx_target_version) {
+  switch (gfx_target_version) {
+  case 90010: // Aldebaran / gfx90a  -> GC 9.4.2
+    return make_gc_ip_version(9, 4, 2);
+  case 90402: // MI300 / gfx942      -> GC 9.4.3
+    return make_gc_ip_version(9, 4, 3);
+  case 90500: // MI350 / gfx950      -> GC 9.5.0
+    return make_gc_ip_version(9, 5, 0);
+  case 120500: // gfx1250            -> GC 12.1.0
+    return make_gc_ip_version(12, 1, 0);
+  default: {
+    const GfxIpVersion ip = decode_gfx_target_version(gfx_target_version);
+    return make_gc_ip_version(ip.major, ip.minor, ip.stepping);
+  }
+  }
+}
+
 inline std::string gfx_target_name(uint32_t gfx_target_version) {
   auto ip = decode_gfx_target_version(gfx_target_version);
   constexpr char kHexDigits[] = "0123456789abcdef";
   if (ip.minor < 16 && ip.stepping < 16)
     return "gfx" + std::to_string(ip.major) + kHexDigits[ip.minor] + kHexDigits[ip.stepping];
   return "gfx" + std::to_string(ip.major) + std::to_string(ip.minor) + std::to_string(ip.stepping);
+}
+
+inline std::optional<uint32_t> gfx_target_version_from_name(std::string_view name) {
+  constexpr std::string_view prefix = "gfx";
+  if (!name.starts_with(prefix) || name.size() < prefix.size() + 3)
+    return std::nullopt;
+
+  name.remove_prefix(prefix.size());
+  auto hex_nibble = [](char digit) -> std::optional<uint32_t> {
+    if (digit >= '0' && digit <= '9')
+      return static_cast<uint32_t>(digit - '0');
+    if (digit >= 'a' && digit <= 'f')
+      return static_cast<uint32_t>(digit - 'a' + 10);
+    if (digit >= 'A' && digit <= 'F')
+      return static_cast<uint32_t>(digit - 'A' + 10);
+    return std::nullopt;
+  };
+
+  const std::string_view major_text = name.substr(0, name.size() - 2);
+  uint32_t major = 0;
+  auto [ptr, err] =
+      std::from_chars(major_text.data(), major_text.data() + major_text.size(), major);
+  if (err != std::errc{} || ptr != major_text.data() + major_text.size())
+    return std::nullopt;
+
+  std::optional<uint32_t> minor = hex_nibble(name[name.size() - 2]);
+  std::optional<uint32_t> stepping = hex_nibble(name[name.size() - 1]);
+  if (!minor || !stepping)
+    return std::nullopt;
+  return major * 10000 + *minor * 100 + *stepping;
 }
 
 constexpr uint32_t external_rev_id_for_gfx_target_version(uint32_t gfx_target_version,

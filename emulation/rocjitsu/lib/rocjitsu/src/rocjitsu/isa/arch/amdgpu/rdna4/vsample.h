@@ -19,6 +19,7 @@ public:
   ImageMsaaLoadVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
 };
 
@@ -27,6 +28,7 @@ public:
   ImageSampleVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -36,6 +38,7 @@ public:
   ImageSampleDVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -45,6 +48,7 @@ public:
   ImageSampleLVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -54,6 +58,7 @@ public:
   ImageSampleBVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -63,6 +68,7 @@ public:
   ImageSampleLzVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -72,6 +78,7 @@ public:
   ImageSampleCVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -81,6 +88,7 @@ public:
   ImageSampleCDVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -90,6 +98,7 @@ public:
   ImageSampleCLVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -99,6 +108,7 @@ public:
   ImageSampleCBVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -108,6 +118,7 @@ public:
   ImageSampleCLzVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -117,6 +128,7 @@ public:
   ImageSampleOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -126,6 +138,7 @@ public:
   ImageSampleDOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -135,6 +148,7 @@ public:
   ImageSampleLOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -144,6 +158,7 @@ public:
   ImageSampleBOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -153,6 +168,7 @@ public:
   ImageSampleLzOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -162,6 +178,7 @@ public:
   ImageSampleCOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -171,6 +188,7 @@ public:
   ImageSampleCDOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -180,6 +198,7 @@ public:
   ImageSampleCLOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -189,6 +208,7 @@ public:
   ImageSampleCBOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -198,6 +218,7 @@ public:
   ImageSampleCLzOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -207,6 +228,7 @@ public:
   ImageGather4Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -216,6 +238,7 @@ public:
   ImageGather4LVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -225,6 +248,7 @@ public:
   ImageGather4BVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -234,6 +258,7 @@ public:
   ImageGather4LzVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -243,6 +268,7 @@ public:
   ImageGather4CVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -252,6 +278,7 @@ public:
   ImageGather4CLzVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -261,6 +288,7 @@ public:
   ImageGather4OVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -270,6 +298,7 @@ public:
   ImageGather4LzOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -279,6 +308,7 @@ public:
   ImageGather4CLzOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -288,6 +318,7 @@ public:
   ImageGetLodVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -297,6 +328,7 @@ public:
   ImageSampleDG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -306,6 +338,7 @@ public:
   ImageSampleCDG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -315,6 +348,7 @@ public:
   ImageSampleDOG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -324,6 +358,7 @@ public:
   ImageSampleCDOG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -333,6 +368,7 @@ public:
   ImageSampleClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -342,6 +378,7 @@ public:
   ImageSampleDClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -351,6 +388,7 @@ public:
   ImageSampleBClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -360,6 +398,7 @@ public:
   ImageSampleCClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -369,6 +408,7 @@ public:
   ImageSampleCDClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -378,6 +418,7 @@ public:
   ImageSampleCBClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -387,6 +428,7 @@ public:
   ImageSampleClOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -396,6 +438,7 @@ public:
   ImageSampleDClOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -405,6 +448,7 @@ public:
   ImageSampleBClOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -414,6 +458,7 @@ public:
   ImageSampleCClOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -423,6 +468,7 @@ public:
   ImageSampleCDClOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -432,6 +478,7 @@ public:
   ImageSampleCBClOVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -441,6 +488,7 @@ public:
   ImageSampleCDClG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -450,6 +498,7 @@ public:
   ImageSampleDClOG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -459,6 +508,7 @@ public:
   ImageSampleCDClOG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -468,6 +518,7 @@ public:
   ImageSampleDClG16Vsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -477,6 +528,7 @@ public:
   ImageGather4ClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -486,6 +538,7 @@ public:
   ImageGather4BClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -495,6 +548,7 @@ public:
   ImageGather4CClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -504,6 +558,7 @@ public:
   ImageGather4CLVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -513,6 +568,7 @@ public:
   ImageGather4CBVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -522,6 +578,7 @@ public:
   ImageGather4CBClVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };
@@ -531,6 +588,7 @@ public:
   ImageGather4hVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vaddr;
   Operand rsrc;
   Operand samp;
 };

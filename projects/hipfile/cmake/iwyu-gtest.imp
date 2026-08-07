@@ -1,0 +1,9 @@
+[
+  { "include": ["@[\"<]gtest/gtest-.*[\">]", "private", "<gtest/gtest.h>", "public"] },
+  { "include": ["@[\"<]gtest/internal/.*", "private", "<gtest/gtest.h>", "public"] },
+  { "include": ["@[\"<]gtest/gtest_pred_impl\\.h[\">]", "private", "<gtest/gtest.h>", "public"] },
+  { "include": ["\"gtest/gtest.h\"", "private", "<gtest/gtest.h>", "public"] },
+  { "include": ["@[\"<]gmock/gmock-.*[\">]", "private", "<gmock/gmock.h>", "public"] },
+  { "include": ["@[\"<]gmock/internal/.*", "private", "<gmock/gmock.h>", "public"] },
+  { "include": ["\"gmock/gmock.h\"", "private", "<gmock/gmock.h>", "public"] }
+]

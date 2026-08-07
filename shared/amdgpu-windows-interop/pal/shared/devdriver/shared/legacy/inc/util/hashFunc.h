@@ -47,18 +47,7 @@ struct DefaultHashFunc
 template<>
 struct DefaultHashFunc<const char*>
 {
-    uint32 operator()(const char* pKey) const
-    {
-        // We cannot pass NULL strings to strlen() and friends, so guard against it anyway.
-        uint32 hash = 0;
-        DD_ASSERT(pKey != nullptr);
-        if (pKey != nullptr)
-        {
-            hash = MetroHash::MetroHash32(reinterpret_cast<const uint8*>(pKey), Platform::Strlen_s(pKey, SIZE_MAX));
-        }
-
-        return hash;
-    }
+    uint32 operator()(const char* pKey) const;
 };
 
 /// Pointer keys are usually a mistake, so this version is explicitly 'delete'd
@@ -82,12 +71,7 @@ struct DefaultEqualFunc
 template<>
 struct DefaultEqualFunc<const char*>
 {
-    bool operator()(const char* pKey1, const char* pKey2) const
-    {
-        DD_ASSERT(pKey1 != nullptr);
-        DD_ASSERT(pKey2 != nullptr);
-        return (strcmp(pKey1, pKey2) == 0);
-    }
+    bool operator()(const char* pKey1, const char* pKey2) const;
 };
 
 /// Generic compare functor for types with arbitrary size
