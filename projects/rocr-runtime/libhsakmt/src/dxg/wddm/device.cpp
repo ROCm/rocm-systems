@@ -604,6 +604,15 @@ void WDDMDevice::InitCmdbufInfo(void) {
   // Add safety margin to account for alignment and future additions
   cmdbuf_aql_frame_size_ += 128;
 
+  // Headroom for vendor-specific AQL->PM4 IBs (aqlprofile SQTT/PMC start/stop
+  // packets). VendorSpecificAqlToPm4 (wddm/queue.cpp) memcpys the vendor PM4 IB
+  // into the per-frame command buffer alongside the normal CopyData/Barrier/
+  // AcquireMem/AtomicMem commands. The SQTT IB alone is 512 B and PMC can be
+  // larger; the default frame budget (560 B) is too small and submission fails
+  // with "PM4 command buffer overflow in VendorSpecific". Reserve 4 KB so the
+  // largest vendor IB plus its surrounding commands fit.
+  cmdbuf_aql_frame_size_ += 4096;
+
   cmdbuf_aql_frame_size_ = rocr::AlignUp(cmdbuf_aql_frame_size_, 0x10);
 
   cmdbuf_size_ = rocr::AlignUp(cmdbuf_aql_frame_num_ * cmdbuf_aql_frame_size_, 0x1000);
