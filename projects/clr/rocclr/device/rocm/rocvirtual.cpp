@@ -1428,26 +1428,22 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
   adjustHeader(header);
 
-  // Decide the barrier bit here: the reserved slot (index) is the ordering key, and running after
-  // adjustHeader ensures its fence-scope rewrite cannot re-set a bit we clear.
-  if (DEBUG_HIP_SHARED_QUEUE_ANYORDER != 0 && !dedicated_queue_) {
-    // Only user-kernel dispatches set sharedAnyOrderActive_; consume-and-reset per packet.
-    if (sharedAnyOrderActive_) {
-      // First dispatch only if the stream never dispatched here; a slot lost on re-bind is not first.
+  // Decide the barrier bit here (after adjustHeader, so its fence-scope rewrite can't re-set a cleared bit).
+  if (DEBUG_HIP_ANYORDER_DISPATCH != 0) {
+    if (anyOrderMayClear_) {
       const bool treat_as_first =
-          (last_dispatch_index_ == kInvalidQueueIndex) && !sharedAnyOrderDispatched_;
+          (last_dispatch_index_ == kInvalidQueueIndex) && !anyOrderDispatched_;
       if ((header & (1 << HSA_PACKET_HEADER_BARRIER)) != 0 &&
-          roc_device_.SharedQueueAnyOrderDecision(gpu_queue_, index, last_dispatch_index_,
-                                                  sharedAnyOrderEligible_, treat_as_first)) {
+          roc_device_.AnyOrderBarrierDecision(gpu_queue_, index, last_dispatch_index_,
+                                              treat_as_first)) {
         header &= ~(1 << HSA_PACKET_HEADER_BARRIER);
       }
-      sharedAnyOrderActive_ = false;
+      anyOrderMayClear_ = false;
     }
-    // Record every dispatch (kernels and internal fills/copies) as the stream's predecessor so the
-    // next kernel is not misread as first. Explicit barriers are recorded from dispatchBarrierPacket.
+    // Track every dispatch as the stream's predecessor so the next one is not misread as first.
     last_dispatch_index_ = index;
     last_dispatch_queue_ = gpu_queue_;
-    sharedAnyOrderDispatched_ = true;
+    anyOrderDispatched_ = true;
   }
 
   bool attachSignal = timestamp_ != nullptr || attach_signal;
@@ -2058,9 +2054,9 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
 
   TrackQueueProgress(barrier_packet_, index, external_signal);
 
-  // Record this fence slot for the any-order decision (NOP dep-signal splits are harmless: the real barrier records a higher slot).
-  if (DEBUG_HIP_SHARED_QUEUE_ANYORDER != 0 && !dedicated_queue_) {
-    roc_device_.SharedQueueRecordBarrier(gpu_queue_, index);
+  // A barrier fences the ring; record its slot for the any-order decision.
+  if (DEBUG_HIP_ANYORDER_DISPATCH != 0) {
+    roc_device_.RecordQueueBarrier(gpu_queue_, index);
   }
 
   // Reset fence_dirty_ flag if we submit a barrier with system scopes
@@ -2148,8 +2144,8 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   TrackQueueProgress(barrier_value_packet_, index, external_signal);
 
   // A barrier-value packet also fences the ring, so record its slot like an ordinary barrier.
-  if (DEBUG_HIP_SHARED_QUEUE_ANYORDER != 0 && !dedicated_queue_) {
-    roc_device_.SharedQueueRecordBarrier(gpu_queue_, index);
+  if (DEBUG_HIP_ANYORDER_DISPATCH != 0) {
+    roc_device_.RecordQueueBarrier(gpu_queue_, index);
   }
 
   WaitForQueueSlot(index, queueMask);
@@ -4924,14 +4920,10 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
         aqlHeaderWithOrder &= kAqlHeaderMask;
       }
 
-      // Decide the barrier bit per packet at the write point (skip explicit-flag and graph capture).
-      // Track on every eligible dispatch (even sole-tenant) so a later dispatch sees its true
-      // predecessor; refCount>1 gates only the clear, not the tracking.
-      sharedAnyOrderActive_ = DEBUG_HIP_SHARED_QUEUE_ANYORDER != 0 && !dedicated_queue_ &&
-          !isGraphCapture && !vcmd->getAnyOrderLaunchFlag();
-      // Clear only when the ring is shared (refCount>1) and independent (no event wait, not coop).
-      sharedAnyOrderEligible_ = vcmd->eventWaitList().empty() && !vcmd->cooperativeGroups() &&
-          roc_device_.SharedHwQueueRefCount(gpu_queue_, priority_) > 1;
+      // Eligible only for independent user-kernel dispatches (not graph capture, ext-launch, or cooperative).
+      // Cross-stream waits are enforced by dependency signals, so clearing the bit cannot bypass a dependency.
+      anyOrderMayClear_ = (DEBUG_HIP_ANYORDER_DISPATCH != 0) && !isGraphCapture &&
+                          !vcmd->getAnyOrderLaunchFlag() && !vcmd->cooperativeGroups();
 
       if (vcmd->getCommandEntryScope() == amd::Device::kCacheStateSystem) {
         addSystemScope_ = true;

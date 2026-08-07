@@ -8,16 +8,10 @@
  * @addtogroup hipSharedQueueAnyOrderOverlap hipSharedQueueAnyOrderOverlap
  * @{
  * @ingroup StreamTest
- * Correctness tests for the shared-queue any-order overlap optimization
- * (DEBUG_HIP_SHARED_QUEUE_ANYORDER). When more streams than the HW queue pool
- * (GPU_MAX_HW_QUEUES, default 4) are created, the extras share HW queues; with the
- * flag ON a kernel's AQL barrier bit is cleared when its in-stream order is already
- * preserved, letting independent streams overlap on the ring.
- *
- * Each test below asserts a property that must hold with the flag OFF and ON. Run
- * with DEBUG_HIP_SHARED_QUEUE_ANYORDER=1 (optionally GPU_MAX_HW_QUEUES=1 to force a
- * single shared ring) to exercise the ON path; correctness is checked via observable
- * ordering, not by inspecting packets.
+ * Correctness tests for DEBUG_HIP_ANYORDER_DISPATCH. Each test asserts a property that
+ * must hold with the flag OFF and ON; run with the flag set (optionally
+ * GPU_MAX_HW_QUEUES=1 to force one shared ring) to exercise the ON path. Correctness is
+ * checked via observable ordering, not by inspecting packets.
  */
 
 #include <hip_test_common.hh>
@@ -115,7 +109,7 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_Independence") {
  * ------------------------
  *  - Oversubscribed producer/consumer pairs linked by hipEventRecord/
  *    hipStreamWaitEvent (producer writes late, consumer reads early). The consumer
- *    must never see a stale value -- the optimization skips launches with an event wait.
+ *    must never see a stale value.
  * Test source
  * ------------------------
  *  - unit/stream/hipSharedQueueAnyOrderOverlap.cc
@@ -430,7 +424,7 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_GraphUnaffected") {
  * ------------------------
  *  - Barrier-value fence on a shared ring: a hipStreamWaitValue32 consumer must
  *    always observe its hipStreamWriteValue32 producer's payload. Must hold with
- *    DEBUG_HIP_SHARED_QUEUE_ANYORDER OFF, ON, and ON with GPU_MAX_HW_QUEUES=1.
+ *    DEBUG_HIP_ANYORDER_DISPATCH OFF, ON, and ON with GPU_MAX_HW_QUEUES=1.
  * Test source
  * ------------------------
  *  - unit/stream/hipSharedQueueAnyOrderOverlap.cc

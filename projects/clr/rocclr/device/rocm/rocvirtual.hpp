@@ -946,14 +946,11 @@ class VirtualGPU : public device::VirtualDevice {
   uint64_t last_write_index_ = kInvalidQueueIndex; //!< The last HW queue write index for any packet
   uint64_t last_packet_with_signal_index_ = kInvalidQueueIndex; //!< The last HW queue write index for a packet
                                               //!< with a completion signal
-  uint64_t last_dispatch_index_ = kInvalidQueueIndex; //!< This stream's last kernel-dispatch HW slot
-                                              //!< on the current queue (shared-queue any-order tracker)
-  hsa_queue_t* last_dispatch_queue_ = nullptr; //!< HW queue that last_dispatch_index_ refers to; lets the
-                                              //!< predecessor slot survive a release/re-acquire of the same ring
-  bool sharedAnyOrderDispatched_ = false;     //!< This stream has issued at least one shared-ring dispatch ever;
-                                              //!< once true, a lost predecessor slot must never be treated as "first"
-  bool sharedAnyOrderActive_ = false;         //!< Run the shared-queue any-order tracker for the next dispatch
-  bool sharedAnyOrderEligible_ = false;       //!< The next dispatch is independent enough to clear its barrier
+  uint64_t last_dispatch_index_ = kInvalidQueueIndex; //!< This stream's last dispatch slot on the queue
+  hsa_queue_t* last_dispatch_queue_ = nullptr; //!< Queue that last_dispatch_index_ refers to (survives re-bind)
+  bool anyOrderDispatched_ = false;           //!< Stream has ever dispatched; a lost slot is not "first"
+  //! Set at submit, consumed at queue-write: this dispatch may clear its barrier bit.
+  bool anyOrderMayClear_ = false;
 
   //! SDMA engine affinity tracking for this VirtualGPU/stream
   uint32_t assigned_sdma_engine_ = 0;           //!< Assigned SDMA engine mask for all operations

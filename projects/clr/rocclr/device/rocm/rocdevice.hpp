@@ -815,24 +815,19 @@ class Device : public NullDevice {
   //! Populated at queue creation, erased when non-pooled queues are destroyed.
   std::unordered_map<hsa_queue_t*, QueueExtras> queue_extras_;
 
-  //! Newest AQL slot (HW write index) carrying a barrier bit per shared HW queue. Drives the
-  //! shared-queue any-order barrier-bit decision. Keyed by queue pointer; absence == no barrier yet.
-  std::unordered_map<hsa_queue_t*, uint64_t> shared_queue_barrier_index_;
-  amd::Monitor shared_queue_barrier_lock_;  //!< Guards shared_queue_barrier_index_
+  //! Newest slot carrying a barrier bit per queue; absence == none yet.
+  std::unordered_map<hsa_queue_t*, uint64_t> queue_barrier_index_;
+  amd::Monitor queue_barrier_lock_;  //!< Guards queue_barrier_index_
 
  public:
-  //! Pool share count for a HW queue in its priority pool (0 if untracked); >1 means shared.
-  int SharedHwQueueRefCount(hsa_queue_t* queue, amd::CommandQueue::Priority priority);
-
-  //! Decide the AQL barrier bit for a dispatch at slot \p my_slot whose stream last dispatched here at
-  //! \p my_prev_slot; returns true if the bit may be cleared (else records \p my_slot as the newest
-  //! barrier). \p eligible_to_clear gates the clear; \p treat_as_first marks a first-ever dispatch.
-  bool SharedQueueAnyOrderDecision(hsa_queue_t* queue, uint64_t my_slot, uint64_t my_prev_slot,
-                                   bool eligible_to_clear, bool treat_as_first);
-  //! Record \p slot as this queue's newest barrier-bit slot (for explicit barrier/fence packets).
-  void SharedQueueRecordBarrier(hsa_queue_t* queue, uint64_t slot);
-  //! Drop tracked barrier state for \p queue (call when a fresh HW queue is created at this key).
-  void SharedQueueResetBarrier(hsa_queue_t* queue);
+  //! Return true if the dispatch at \p my_slot may clear its barrier bit; else record \p my_slot as the
+  //! newest barrier. \p my_prev_slot is the stream's previous slot; \p treat_as_first marks a first dispatch.
+  bool AnyOrderBarrierDecision(hsa_queue_t* queue, uint64_t my_slot, uint64_t my_prev_slot,
+                               bool treat_as_first);
+  //! Record \p slot as this queue's newest barrier slot.
+  void RecordQueueBarrier(hsa_queue_t* queue, uint64_t slot);
+  //! Drop tracked barrier state for \p queue.
+  void ResetQueueBarrier(hsa_queue_t* queue);
 
  private:
   //! returns value for corresponding LinkAttrbutes in a vector given Memory pool.

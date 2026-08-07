@@ -8,8 +8,8 @@
  * @addtogroup hipPerfSharedQueueAnyOrderOverlap hipPerfSharedQueueAnyOrderOverlap
  * @{
  * @ingroup PerformanceTestStream
- * Characterizes the shared-queue any-order overlap optimization
- * (DEBUG_HIP_SHARED_QUEUE_ANYORDER) for plain HIP streams.
+ * Characterizes the any-order dispatch overlap optimization
+ * (DEBUG_HIP_ANYORDER_DISPATCH) for plain HIP streams.
  *
  * When more streams are created than the HW queue pool (GPU_MAX_HW_QUEUES,
  * default 4), the extra streams share HW queues. With the flag OFF the first
@@ -19,8 +19,8 @@
  *
  * This test sweeps the stream count and reports per-iteration launch time. Run it
  * twice to see the effect (the flag is read once at process init):
- *   DEBUG_HIP_SHARED_QUEUE_ANYORDER=0 <exe> "Performance_hipPerfSharedQueueAnyOrderOverlap"
- *   DEBUG_HIP_SHARED_QUEUE_ANYORDER=1 <exe> "Performance_hipPerfSharedQueueAnyOrderOverlap"
+ *   DEBUG_HIP_ANYORDER_DISPATCH=0 <exe> "Performance_hipPerfSharedQueueAnyOrderOverlap"
+ *   DEBUG_HIP_ANYORDER_DISPATCH=1 <exe> "Performance_hipPerfSharedQueueAnyOrderOverlap"
  * At/below the pool size the two must match (no regression); above it the ON run
  * should stay roughly flat while the OFF run grows with the stream count.
  */

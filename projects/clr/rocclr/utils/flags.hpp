@@ -265,13 +265,10 @@ release(bool, DEBUG_CLR_SYSMEM_POOL, false,                                   \
 release(uint, DEBUG_HIP_DYNAMIC_QUEUES, 1,                                    \
         "Dynamic queue management: 0=off, 1=Depth heuristic,"                 \
         " 2=1 + dedicated null-stream queue")                                 \
-release(uint, DEBUG_HIP_SHARED_QUEUE_ANYORDER, 0,                             \
-        "Any-order overlap for oversubscribed HW queues on non-graph "        \
-        "streams: per-packet, clears the AQL barrier bit on kernel "          \
-        "dispatches that share a pooled HW queue with other streams whenever "\
-        "in-stream ordering is already preserved, letting independent "       \
-        "streams overlap on the same queue. 0=off, 1=on. "                    \
-        "Opt-in/unsafe: the app must guarantee the sharing streams are "      \
+release(uint, DEBUG_HIP_ANYORDER_DISPATCH, 0,                                 \
+        "Clear the AQL barrier bit on independent kernel dispatches when "    \
+        "in-stream order is already preserved, letting streams overlap. "     \
+        "0=off, 1=on. Opt-in: app must ensure streams sharing a queue are "   \
         "independent (no cross-stream data hazard).")                         \
 release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, false,                        \
         "Ignore priority streams")                                            \

@@ -3320,33 +3320,13 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
   }
   return nullptr;
 }
-
 // ================================================================================================
-int Device::SharedHwQueueRefCount(hsa_queue_t* queue, amd::CommandQueue::Priority priority) {
-  if (queue == nullptr) {
-    return 0;
-  }
-  // A queue lives in exactly one priority pool; search only that one (mirrors acquireQueue).
-  uint qIndex = QueuePriority::Normal;
-  if (!DEBUG_HIP_IGNORE_STREAM_PRIORITY) {
-    if (priority == amd::CommandQueue::Priority::Low) {
-      qIndex = QueuePriority::Low;
-    } else if (priority == amd::CommandQueue::Priority::High) {
-      qIndex = QueuePriority::High;
-    }
-  }
-  amd::ScopedLock l(active_queue_access_);
-  auto it = queuePool_[qIndex].find(queue);
-  return (it != queuePool_[qIndex].end()) ? it->second.refCount : 0;
-}
-
-// ================================================================================================
-bool Device::SharedQueueAnyOrderDecision(hsa_queue_t* queue, uint64_t my_slot, uint64_t my_prev_slot,
-                                         bool eligible_to_clear, bool treat_as_first) {
+bool Device::AnyOrderBarrierDecision(hsa_queue_t* queue, uint64_t my_slot, uint64_t my_prev_slot,
+                                     bool treat_as_first) {
   constexpr uint64_t kNone = ~static_cast<uint64_t>(0);
-  amd::ScopedLock l(shared_queue_barrier_lock_);
-  auto it = shared_queue_barrier_index_.find(queue);
-  const uint64_t largest = (it != shared_queue_barrier_index_.end()) ? it->second : kNone;
+  amd::ScopedLock l(queue_barrier_lock_);
+  auto it = queue_barrier_index_.find(queue);
+  const uint64_t largest = (it != queue_barrier_index_.end()) ? it->second : kNone;
 
   bool clear;
   if (treat_as_first) {
@@ -3359,30 +3339,29 @@ bool Device::SharedQueueAnyOrderDecision(hsa_queue_t* queue, uint64_t my_slot, u
     // Predecessor exists but its slot is unknown: keep the bit to preserve ordering.
     clear = false;
   }
-  clear = clear && eligible_to_clear;
 
   if (!clear) {
     // Bit stays set: this dispatch becomes the queue's newest barrier.
     if (largest == kNone || my_slot > largest) {
-      shared_queue_barrier_index_[queue] = my_slot;
+      queue_barrier_index_[queue] = my_slot;
     }
   }
   return clear;
 }
 
 // ================================================================================================
-void Device::SharedQueueRecordBarrier(hsa_queue_t* queue, uint64_t slot) {
-  amd::ScopedLock l(shared_queue_barrier_lock_);
-  auto it = shared_queue_barrier_index_.find(queue);
-  if (it == shared_queue_barrier_index_.end() || slot > it->second) {
-    shared_queue_barrier_index_[queue] = slot;
+void Device::RecordQueueBarrier(hsa_queue_t* queue, uint64_t slot) {
+  amd::ScopedLock l(queue_barrier_lock_);
+  auto it = queue_barrier_index_.find(queue);
+  if (it == queue_barrier_index_.end() || slot > it->second) {
+    queue_barrier_index_[queue] = slot;
   }
 }
 
 // ================================================================================================
-void Device::SharedQueueResetBarrier(hsa_queue_t* queue) {
-  amd::ScopedLock l(shared_queue_barrier_lock_);
-  shared_queue_barrier_index_.erase(queue);
+void Device::ResetQueueBarrier(hsa_queue_t* queue) {
+  amd::ScopedLock l(queue_barrier_lock_);
+  queue_barrier_index_.erase(queue);
 }
 
 // ================================================================================================
@@ -3622,7 +3601,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     }
     queue_extras_[queue] = extras;
     // Fresh HW queue at this key: drop any stale barrier-slot state from a prior queue.
-    SharedQueueResetBarrier(queue);
+    ResetQueueBarrier(queue);
   };
 
   if (!final_mask.empty()) {
@@ -3716,7 +3695,7 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
       ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting CG enabled hardware queue %p ",
               queue->base_address);
       // Drop any barrier-slot state for this queue before its pointer is freed.
-      SharedQueueResetBarrier(queue);
+      ResetQueueBarrier(queue);
       Hsa::queue_destroy(queue);
     }
   }
@@ -3738,7 +3717,7 @@ void Device::DrainDeferredQueueDestroys() {
   for (hsa_queue_t* queue : pending) {
     ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting deferred hardware queue %p", queue->base_address);
     // Drop any barrier-slot state for this queue before its pointer is freed.
-    SharedQueueResetBarrier(queue);
+    ResetQueueBarrier(queue);
     Hsa::queue_destroy(queue);
   }
 }
