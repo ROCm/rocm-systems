@@ -1133,6 +1133,10 @@ def test_matrix_resolved_dense_operands_support_vgpr_and_inline_accumulators():
     assert 'const_acc = amdgpu::ACC_FROM_VGPR;' in body
     assert 's2 = vb + *src2_off;' in body
     assert 'const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);' in body
+    assert (
+        'amdgpu::exec_wmma_f32(cu, 16, 16, 32, 16, dst, src0_base, '
+        'src1_base, s2,' in body
+    )
 
 
 def test_matrix_resolved_sparse_index_rejects_missing_vgpr_offset():
@@ -1147,6 +1151,10 @@ def test_matrix_resolved_sparse_index_rejects_missing_vgpr_offset():
     ) in body
     assert 'if (!index_off)\n    throw util::UnimplementedInst(mnemonic());' in body
     assert 'uint32_t index_base = vb + *index_off;' in body
+    assert (
+        'amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 16, dst, src0_base, '
+        'src1_base, s2, index_base, 16, index_key,' in body
+    )
 
 
 def test_matrix_direct_offsets_do_not_use_resolved_operand_setup():
@@ -1158,6 +1166,179 @@ def test_matrix_direct_offsets_do_not_use_resolved_operand_setup():
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
     assert 'Isa::resolved_vgpr_offset' not in body
     assert 'amdgpu::resolve_acc(vb, dst,' in body
+    assert (
+        'amdgpu::exec_wmma_f32(cu, 16, 16, 16, 16, dst, '
+        'amdgpu::src_base(vb, src0.encoding_value_), '
+        'amdgpu::src_base(vb, src1.encoding_value_), s2,' in body
+    )
+
+
+def test_matrix_direct_sparse_operands_reach_final_call():
+    inst = Instruction('V_SWMMAC_F32_16X16X32_F16', 'ENC_VOP3P', 0, [])
+    profile = SimpleNamespace(uses_vgpr_msb_indexing=False)
+
+    body = _gen_mfma(inst, 'gfx1250', profile)
+
+    assert 'Isa::resolved_vgpr_offset' not in body
+    assert 'uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);' in body
+    assert (
+        'amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 16, dst, '
+        'amdgpu::src_base(vb, src0.encoding_value_), '
+        'amdgpu::src_base(vb, src1.encoding_value_), s2, index_base, '
+        '16, index_key,' in body
+    )
+
+
+def test_matrix_i32_final_call_sources_follow_profile_gate():
+    inst = Instruction('V_WMMA_I32_16X16X16_IU8', 'ENC_VOP3P', 0, [])
+
+    resolved = _gen_mfma(inst, 'rdna4', SimpleNamespace(uses_vgpr_msb_indexing=True))
+    direct = _gen_mfma(inst, 'gfx1250', SimpleNamespace(uses_vgpr_msb_indexing=False))
+
+    assert (
+        'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst, src0_base, '
+        'src1_base, s2,' in resolved
+    )
+    assert (
+        'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst, '
+        'amdgpu::src_base(vb, src0.encoding_value_), '
+        'amdgpu::src_base(vb, src1.encoding_value_), s2,' in direct
+    )
+
+
+def _generated_matrix_call(body: str, callee: str) -> str:
+    start = body.index(f'amdgpu::{callee}')
+    end = body.index(');', start) + 2
+    return ' '.join(body[start:end].split())
+
+
+@pytest.mark.parametrize(
+    ('mnemonic', 'arch', 'callee', 'is_sparse'),
+    [
+        # Fixed-wave I32: sparse, specialized dense, and generic dense.
+        ('V_SWMMAC_I32_16X16X32_IU8', 'gfx1250', 'exec_swmmac_i32', True),
+        (
+            'V_WMMA_I32_16X16X64_IU8',
+            'gfx1250',
+            'exec_wmma_i32_16x16x64_iu8',
+            False,
+        ),
+        ('V_WMMA_I32_16X16X16_IU4', 'gfx1250', 'exec_wmma_i32', False),
+        # Runtime-wave and replicated-half-wave I32.
+        ('V_SWMMAC_I32_16X16X32_IU8', 'rdna4', 'exec_swmmac_i32', True),
+        ('V_WMMA_I32_16X16X16_IU8', 'rdna3', 'exec_gfx11_wmma_i32', False),
+        ('V_WMMA_I32_16X16X16_IU8', 'rdna4', 'exec_wmma_i32', False),
+        # I32 MFMA-style fallback dispatches.
+        ('V_WMMA_I32_16X16X16_IU8', 'test_arch', 'exec_i32_mixed', False),
+        ('V_MFMA_I32_16X16X16_IU4', 'cdna3', 'exec_i32_mixed', False),
+        ('V_MFMA_I32_16X16X16_I8', 'cdna3', 'exec_i32_i8', False),
+        # Dynamic matrix-format WMMA.
+        (
+            'V_WMMA_F32_16X16X128_F8F6F4',
+            'gfx1250',
+            'exec_wmma_f32_mixed',
+            False,
+        ),
+        # Fixed-wave sparse float result variants.
+        ('V_SWMMAC_F32_16X16X32_F16', 'gfx1250', 'exec_swmmac_f32', True),
+        ('V_SWMMAC_F16_16X16X32_F16', 'gfx1250', 'exec_swmmac_f16', True),
+        ('V_SWMMAC_BF16_16X16X32_BF16', 'gfx1250', 'exec_swmmac_bf16', True),
+        # Runtime-wave sparse float result variants.
+        ('V_SWMMAC_F32_16X16X32_F16', 'rdna4', 'exec_swmmac_f32', True),
+        ('V_SWMMAC_F16_16X16X32_F16', 'rdna4', 'exec_swmmac_f16', True),
+        ('V_SWMMAC_BF16_16X16X32_BF16', 'rdna4', 'exec_swmmac_bf16', True),
+        # Fixed-wave specialized dense result variants.
+        (
+            'V_WMMA_F32_16X16X32_F16',
+            'gfx1250',
+            'exec_wmma_f32_16x16x32_f16',
+            False,
+        ),
+        (
+            'V_WMMA_BF16F32_16X16X32_BF16',
+            'gfx1250',
+            'exec_wmma_bf16f32_16x16x32_bf16',
+            False,
+        ),
+        ('V_WMMA_F16_16X16X32_F16', 'gfx1250', 'exec_wmma_f16_spec', False),
+        ('V_WMMA_BF16_16X16X32_BF16', 'gfx1250', 'exec_wmma_bf16_spec', False),
+        # Fixed-wave generic dense result variants.
+        ('V_WMMA_F32_16X16X16_F16', 'gfx1250', 'exec_wmma_f32', False),
+        ('V_WMMA_F16_16X16X16_F16', 'gfx1250', 'exec_wmma_f16', False),
+        ('V_WMMA_BF16_16X16X16_BF16', 'gfx1250', 'exec_wmma_bf16', False),
+        # Replicated-half-wave and runtime-wave float dispatches.
+        ('V_WMMA_F32_16X16X16_F16', 'rdna3', 'exec_gfx11_wmma_f32', False),
+        ('V_WMMA_F16_16X16X16_F16', 'rdna3', 'exec_gfx11_wmma_f16', False),
+        ('V_WMMA_BF16_16X16X16_BF16', 'rdna3', 'exec_gfx11_wmma_bf16', False),
+        ('V_WMMA_F32_16X16X16_F16', 'rdna4', 'exec_wmma_f32', False),
+        ('V_WMMA_F16_16X16X16_F16', 'rdna4', 'exec_wmma_f16', False),
+        ('V_WMMA_BF16_16X16X16_BF16', 'rdna4', 'exec_wmma_bf16', False),
+        # MFMA specialized and generic float dispatches.
+        (
+            'V_MFMA_F32_16X16X32_FP8_FP8',
+            'cdna3',
+            'exec_f32_mfma_f8_spec',
+            False,
+        ),
+        ('V_MFMA_F32_16X16X16_F16', 'cdna3', 'exec_f32_mfma_f16_spec', False),
+        ('V_MFMA_F32_16X16X16_F4', 'cdna3', 'exec_f32', False),
+        ('V_MFMA_F32_16X16X16_F16', 'test_arch', 'exec_f32', False),
+    ],
+)
+@pytest.mark.parametrize('uses_vgpr_msb_indexing', [False, True])
+def test_every_matrix_executor_uses_profile_selected_operand_bases(
+    mnemonic, arch, callee, is_sparse, uses_vgpr_msb_indexing
+):
+    body = _gen_mfma(
+        Instruction(mnemonic, 'ENC_VOP3P', 0, []),
+        arch,
+        SimpleNamespace(uses_vgpr_msb_indexing=uses_vgpr_msb_indexing),
+    )
+    call = _generated_matrix_call(body, callee)
+
+    if uses_vgpr_msb_indexing:
+        expected_operands = 'dst, src0_base, src1_base, s2'
+        assert 'uint32_t src0_base = vb + *Isa::resolved_vgpr_offset' in body
+        assert 'uint32_t src1_base = vb + *Isa::resolved_vgpr_offset' in body
+    else:
+        expected_operands = (
+            'dst, amdgpu::src_base(vb, src0.encoding_value_), '
+            'amdgpu::src_base(vb, src1.encoding_value_), s2'
+        )
+        assert 'Isa::resolved_vgpr_offset' not in body
+
+    assert expected_operands in call
+    if is_sparse:
+        assert f'{expected_operands}, index_base,' in call
+        if uses_vgpr_msb_indexing:
+            assert 'uint32_t index_base = vb + *index_off;' in body
+        else:
+            assert (
+                'uint32_t index_base = '
+                'amdgpu::src_base(vb, src2.encoding_value_);' in body
+            )
+
+
+@pytest.mark.parametrize('uses_vgpr_msb_indexing', [False, True])
+def test_dynamic_mfma_aliases_use_profile_selected_operand_bases(
+    uses_vgpr_msb_indexing,
+):
+    body = _gen_mfma(
+        Instruction('V_MFMA_F32_16X16X128_F8F6F4', 'ENC_VOP3P_MFMA', 0, []),
+        'cdna3',
+        SimpleNamespace(uses_vgpr_msb_indexing=uses_vgpr_msb_indexing),
+    )
+
+    if uses_vgpr_msb_indexing:
+        assert 'uint32_t s0b = src0_base;' in body
+        assert 'uint32_t s1b = src1_base;' in body
+    else:
+        assert 'uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);' in body
+        assert 'uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);' in body
+    assert (
+        'a_bits, b_bits, dst, s0b, s1b, s2, ea, eb, const_acc);'
+        in _generated_matrix_call(body, 'exec_f32_mixed')
+    )
 
 
 def test_matrix_f64_resolved_sources_use_normalized_base_expressions():
