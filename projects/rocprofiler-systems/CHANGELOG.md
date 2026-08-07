@@ -6,6 +6,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 
+### Changed
+
+- `ROCPROFSYS_SAMPLING_GPUS` is now restricted by the GPUs the ROCm runtime exposes
+  via `ROCR_VISIBLE_DEVICES` / `HIP_VISIBLE_DEVICES`.
+
 ### Removed
 
 - Removed the `ROCPROFSYS_BUILD_SQLITE3` CMake option and the in-tree SQLite3/rocpd
@@ -44,9 +49,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   demonstrating two-PE usage of all nine APIs is included under `examples/rocshmem`.
 
 ### Changed
-
-- `ROCPROFSYS_SAMPLING_GPUS` is now restricted by the GPUs the ROCm runtime exposes
-  via `ROCR_VISIBLE_DEVICES` / `HIP_VISIBLE_DEVICES`.
 
 - `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
 

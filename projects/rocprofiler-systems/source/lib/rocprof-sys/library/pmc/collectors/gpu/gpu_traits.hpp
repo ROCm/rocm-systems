@@ -19,12 +19,29 @@
 #include <utility>
 #include <vector>
 
+#include <spdlog/fmt/fmt.h>
+#include <spdlog/fmt/ranges.h>
+
 namespace rocprofsys::pmc::collectors::gpu
 {
 
 using ::rocprofsys::pmc::device_filter;
 using ::rocprofsys::pmc::device_selection_mode;
 using ::rocprofsys::pmc::device_type;
+
+/**
+ * @brief Whether a device's PCIe BDF indicates it is visible to the ROCm runtime.
+ *
+ * A device is runtime-visible iff it reports a non-empty PCIe BDF that appears in
+ * @p visible_bdfs (the set the runtime exposes via ROCR_VISIBLE_DEVICES /
+ * HIP_VISIBLE_DEVICES). An empty BDF means the device identity could not be
+ * determined, so it is treated as NOT visible.
+ */
+[[nodiscard]] inline bool
+is_runtime_visible(const std::string& bdf, const std::set<std::string>& visible_bdfs)
+{
+    return !bdf.empty() && visible_bdfs.count(bdf) > 0;
+}
 
 /**
  * @brief Traits type for GPU collector configuration.
@@ -253,9 +270,12 @@ struct gpu_traits
         // line per masked device.
         if(selected_count > 0 && excluded.size() == selected_count)
         {
+            // An empty set is reachable and meaningful here (agents exist, all masked)
             LOG_WARNING("None of the {} selected {} device(s) are visible to the ROCm "
                         "runtime; GPU sampling is disabled. Runtime-visible BDFs: {}",
-                        selected_count, device_name, format_bdf_list(*visible));
+                        selected_count, device_name,
+                        visible->empty() ? std::string{ "<none>" }
+                                         : fmt::format("{}", fmt::join(*visible, ", ")));
             return;
         }
 
@@ -292,22 +312,6 @@ struct gpu_traits
                       "runtime; excluding from sampling",
                       device_name, index, bdf, bdfid);
         }
-    }
-
-    /**
-     * @brief Render a BDF set for logging, e.g. "0000:03:00.0, 0000:26:00.0".
-     */
-    static std::string format_bdf_list(const std::set<std::string>& bdfs)
-    {
-        if(bdfs.empty()) return "<none>";
-
-        std::string result;
-        for(const auto& bdf : bdfs)
-        {
-            if(!result.empty()) result.append(", ");
-            result.append(bdf);
-        }
-        return result;
     }
 
     /**

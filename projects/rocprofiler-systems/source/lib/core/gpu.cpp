@@ -15,6 +15,7 @@
 
 #include "common/defines.h"
 #include "common/pci_bdf.hpp"
+#include "core/gpu_visibility.hpp"
 #include "gpu.hpp"
 
 #include <timemory/manager.hpp>

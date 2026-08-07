@@ -43,11 +43,12 @@ TEST(pci_bdf_test, decode_location_id)
 TEST(pci_bdf_test, location_id_matches_component_form)
 {
     const std::uint32_t domain   = 0x0000;
-    const std::uint32_t bus      = 0x03;
-    const std::uint32_t device   = 0x00;
-    const std::uint32_t function = 0x0;
+    const std::uint16_t bus      = 0x03;
+    const std::uint16_t device   = 0x00;
+    const std::uint16_t function = 0x0;
 
-    const std::uint32_t location_id = (bus << 8U) | (device << 3U) | function;
+    const auto location_id =
+        static_cast<std::uint32_t>((bus << 8U) | (device << 3U) | function);
 
     EXPECT_EQ(format_pci_bdf(domain, bus, device, function),
               format_pci_bdf_from_location_id(domain, location_id));
@@ -86,15 +87,28 @@ TEST(pci_bdf_test, bdfid_from_string)
     EXPECT_EQ(pci_bdfid_from_string("not-a-bdf"), 0U);
 }
 
+// Parsing is all-or-nothing: matching the four leading fields is not enough, the whole
+// string has to be consumed. A stray suffix is rejected rather than silently ignored, so
+// a partially-recognized string cannot be reported as a valid BDFID.
+TEST(pci_bdf_test, bdfid_from_string_rejects_trailing_characters)
+{
+    EXPECT_EQ(pci_bdfid_from_string("0000:03:00.0xyz"), 0U);
+    EXPECT_EQ(pci_bdfid_from_string("0000:03:00.0 "), 0U);
+    EXPECT_EQ(pci_bdfid_from_string("0000:03:00.0:99"), 0U);
+    EXPECT_EQ(pci_bdfid_from_string("0000:03:00.0.7"), 0U);
+}
+
 // BDFID equals the KFD/rocprofiler-sdk location_id combined with the domain (same
 // packing).
 TEST(pci_bdf_test, bdfid_matches_location_id)
 {
-    const std::uint32_t domain      = 0x0001;
-    const std::uint32_t bus         = 0x0A;
-    const std::uint32_t device      = 0x1F;
-    const std::uint32_t function    = 0x7;
-    const std::uint32_t location_id = (bus << 8U) | (device << 3U) | function;
+    const std::uint32_t domain   = 0x0001;
+    const std::uint16_t bus      = 0x0A;
+    const std::uint16_t device   = 0x1F;
+    const std::uint16_t function = 0x7;
+
+    const auto location_id =
+        static_cast<std::uint32_t>((bus << 8U) | (device << 3U) | function);
 
     EXPECT_EQ(pci_bdfid(domain, bus, device, function), (domain << 16U) | location_id);
 }

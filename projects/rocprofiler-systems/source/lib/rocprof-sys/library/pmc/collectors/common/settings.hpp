@@ -12,7 +12,6 @@
 #include "library/pmc/collectors/nic/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
-#include <cstdint>
 
 #include <algorithm>
 #include <cstdint>
