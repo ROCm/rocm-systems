@@ -2121,17 +2121,6 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
   if (source.src0 < kVgprEncoding || source.src1 < kVgprEncoding) {
     return ExpandResult::failed("gfx1250 K=128 WMMA matrix operands are not ordinary VGPR ranges");
   }
-  if ((source.src0 & 1u) != 0 || (source.src1 & 1u) != 0 || (source.vdst & 1u) != 0) {
-    return ExpandResult::failed(
-        "gfx1250 K=128 WMMA matrix operands and destination are not even VGPR ranges");
-  }
-  if (source.src2 < kVgprEncoding && source.src2 != kGfx1250InlineZero) {
-    return ExpandResult::failed(
-        "gfx1250 K=128 WMMA accumulator is not a VGPR range or inline zero");
-  }
-  if (source.src2 >= kVgprEncoding && (source.src2 & 1u) != 0)
-    return ExpandResult::failed("gfx1250 K=128 WMMA accumulator is not an even VGPR range");
-
   const bool packed_f16 = gfx1250_is_f16_k128_wmma(inst.opcode());
   if (!gfx1250_k128_wmma_formats(inst.opcode(), matrix_a_fmt, matrix_b_fmt)) {
     if (packed_f16) {
@@ -2155,6 +2144,22 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
   }
 
   if (packed_f16) {
+    // These operand restrictions belong to the packed-f16 lowering alone: it
+    // addresses the accumulator and destination one dword at a time and needs
+    // an f32 source it can materialize. The f32 path re-encodes VDST, SRC0,
+    // SRC1, and SRC2 unchanged, so it must keep accepting whatever the source
+    // instruction already encoded.
+    if ((source.src0 & 1u) != 0 || (source.src1 & 1u) != 0 || (source.vdst & 1u) != 0) {
+      return ExpandResult::failed(
+          "gfx1250 f16 K=128 WMMA matrix operands and destination are not even VGPR ranges");
+    }
+    if (source.src2 < kVgprEncoding && source.src2 != kGfx1250InlineZero) {
+      return ExpandResult::failed(
+          "gfx1250 f16 K=128 WMMA accumulator is not a VGPR range or inline zero");
+    }
+    if (source.src2 >= kVgprEncoding && (source.src2 & 1u) != 0)
+      return ExpandResult::failed("gfx1250 f16 K=128 WMMA accumulator is not an even VGPR range");
+
     SemanticScratchAllocator allocator(
         inst, liveness, context,
         SemanticScratchPolicy{.max_vgprs = 256,
@@ -2252,9 +2257,20 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
                                             {.simm16 = kGfx1250WmmaCompletionWaitImmediate}));
     for (uint16_t slot = 0; slot < 16; ++slot)
       append_words(words, gfx1250::build_vop1(gfx1250::kVNopVop1));
-    // Ordinary FP16 conversions preserve infinities, while packed-f16 WMMA
-    // saturates them when MODE.FP16_OVFL is set. Apply that WMMA-specific
-    // behavior in the low scratch bank before selecting each destination bank.
+    // MI400 Shader Programming 4.6.12: a WMMA or SWMMAC result of 16 bits or
+    // fewer becomes +/-MAX rather than +/-infinity when MODE.FP16_OVFL is set,
+    // and the MODE table adds that WMMA saturates INF on this generation while
+    // every other opcode preserves it. V_CVT_PK_F16_F32 is one of those other
+    // opcodes, so the pack below reproduces only the finite-overflow half of
+    // the contract; clamp the infinities here. The clamp bound is
+    // MODE.FP16_OVFL scaled to 0x38002000 and subtracted from f32 +infinity,
+    // giving +infinity when the mode is clear and 65504.0 when it is set.
+    // Do this in the low scratch bank before selecting each destination bank.
+    //
+    // V_MAXIMUM_F32 and V_MINIMUM_F32 return the canonical quiet NaN, so a NaN
+    // result keeps its NaN class but loses the sign and payload the source
+    // instruction would have produced. IEEE 754 leaves both uninterpreted and
+    // the ISA promises only that a NaN input yields a NaN output.
     append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
     const uint16_t limit = static_cast<uint16_t>(scratch.lease->base + 8u);
     append_words(words, gfx1250::build_vop3(gfx1250::kVMulLoU32Vop3,
