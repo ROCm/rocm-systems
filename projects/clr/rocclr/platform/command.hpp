@@ -169,6 +169,11 @@ class Event : public RuntimeObject {
     profilingInfo_.marker_ts_ = true;
   }
 
+  //! Enable profiling for this command without forcing a marker timestamp.
+  //! Used by the RGP/SQTT capture path to collect GPU begin/end ticks for a plain
+  //! dispatch without altering the barrier packet type (marker_ts_ stays false).
+  void EnableProfilingForCapture() { EnableProfiling(); }
+
   //! Return the context for this event.
   virtual const Context& context() const = 0;
 
