@@ -27,6 +27,8 @@
 
 #include "hmac.h"
 
+#include <stdlib.h>
+
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -65,8 +67,8 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac() : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
-  const char* env_path = getenv("AMDCUID_HMAC_KEY_PATH");
-  key_file_path = env_path ? env_path : AMDCUID_CONFIG_DIR "/hmac_key.bin";
+  const char* env_path = std::getenv("AMDCUID_HMAC_KEY_PATH");
+  key_file_path = (env_path && env_path[0]) ? env_path : AMDCUID_CONFIG_DIR "/hmac_key.bin";
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->hAlg = nullptr;
@@ -86,6 +88,11 @@ cuid_hmac::cuid_hmac() : impl_(nullptr), key(nullptr), key_len(key_length), vali
   }
   key_file_stream.seekg(0, std::ios::end);
   key_len = static_cast<size_t>(key_file_stream.tellg());
+  if (key_len == 0 || key_len != key_length) {  // sanity check on key length
+    std::cerr << "Invalid key length in key file" << std::endl;
+    key_file_stream.close();
+    return;
+  }
   key_file_stream.seekg(0, std::ios::beg);
   key = new uint8_t[key_len];
   key_file_stream.read(reinterpret_cast<char*>(key), key_len);
@@ -265,8 +272,8 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac() : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
-  const char* env_path = getenv("AMDCUID_HMAC_KEY_PATH");
-  key_file_path = env_path ? env_path : AMDCUID_CONFIG_DIR "/hmac_key.bin";
+  const char* env_path = std::getenv("AMDCUID_HMAC_KEY_PATH");
+  key_file_path = (env_path && env_path[0]) ? env_path : AMDCUID_CONFIG_DIR "/hmac_key.bin";
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->mac = nullptr;
@@ -404,8 +411,8 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac() : impl_(nullptr), key(nullptr), key_len(0), valid(false) {
-  const char* env_path = getenv("AMDCUID_HMAC_KEY_PATH");
-  key_file_path = env_path ? env_path : AMDCUID_CONFIG_DIR "/hmac_key.bin";
+  const char* env_path = std::getenv("AMDCUID_HMAC_KEY_PATH");
+  key_file_path = (env_path && env_path[0]) ? env_path : AMDCUID_CONFIG_DIR "/hmac_key.bin";
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->ctx = HMAC_CTX_new();
