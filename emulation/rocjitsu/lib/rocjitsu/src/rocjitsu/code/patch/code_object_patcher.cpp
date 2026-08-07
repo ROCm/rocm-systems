@@ -570,8 +570,6 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
       std::memcpy(&rela, image.data() + relocs.sh_offset + i * sizeof(rela), sizeof(rela));
       if (!elf_relocation_place_is_allocated(ehdr, shdrs, relocs, rela.r_offset))
         continue;
-      if (elf_relocation_is_inert(rela.r_info))
-        continue;
       const uint32_t symbol_index = elf_reloc_sym(rela.r_info);
       if (symbol_index == 0 ||
           static_cast<uint64_t>(symbol_index) * sizeof(Elf64_Sym) + sizeof(Elf64_Sym) >
@@ -1201,8 +1199,6 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
         r_offset = rel.r_offset;
       }
       if (!elf_relocation_place_is_allocated(header, shdrs, relocs, r_offset))
-        continue;
-      if (elf_relocation_is_inert(r_info))
         continue;
       const uint32_t sym_index = elf_reloc_sym(r_info);
       if (sym_index != 0) {

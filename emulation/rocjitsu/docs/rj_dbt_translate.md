@@ -146,9 +146,14 @@ external agent symbol by name, so a text-defined `STT_NOTYPE` relocation is not
 accepted as a local code reference. Global or weak `STT_FUNC` symbols without a
 supported runtime reference remain symbol-table metadata rather than independent
 execution roots.
-Relocations with an explicit section target retain the translator's existing
-static/metadata policy; the ROCr dynamic-loader allowlist above does not redefine
-their symbol or relocation-type rules.
+ROCr skips explicit-target/static relocation sections for supported code objects,
+so they retain the translator's broader metadata-preservation policy rather than
+the dynamic-loader allowlist above. An allocated, zero-addend explicit-target
+`RELA` reference to a text `STT_FUNC` creates an executable entry for every
+non-`R_AMDGPU_NONE` relocation type. An explicit-target `STT_NOTYPE` reference
+also creates an entry for `R_AMDGPU_ABS64`; other ordinary non-section text
+symbols require only symbol remapping. Explicit-target `R_AMDGPU_NONE` records
+are ignored.
 Relocation sections explicitly targeting non-allocated sections are likewise
 metadata and do not create executable entries. If a runtime-referenced source
 entry is emitted at multiple output placements, materialization fails closed:

@@ -398,21 +398,26 @@ enum class TextSymbolRelocationAction : uint8_t {
 /// @brief Classify one relocation reference to a symbol defined in rewritten .text.
 ///
 /// @details A required executable entry also requires the symbol's st_value to be remapped.
-/// R_AMDGPU_NONE is always inert. ROCr dynamic relocations follow the loader's supported
-/// symbol-valued forms, while explicit-target/static relocation sections retain the broader
-/// pre-existing policy that any ordinary zero-addend RELA reference follows the symbol value.
+/// ROCr rejects R_AMDGPU_NONE in target-less dynamic relocation sections, but skips
+/// explicit-target/static relocation sections for supported code objects. Other ROCr dynamic
+/// relocations follow the loader's supported symbol-valued forms, while explicit-target/static
+/// sections retain the broader pre-existing policy that any ordinary zero-addend RELA reference
+/// follows the symbol value.
 inline constexpr TextSymbolRelocationAction
 classify_text_symbol_relocation(const Elf64_Ehdr &ehdr, const Elf64_Shdr &relocs,
                                 uint64_t relocation_info, bool has_explicit_addend, int64_t addend,
                                 const Elf64_Sym &symbol) {
   const uint32_t relocation_type = elf_reloc_type(relocation_info);
-  if (elf_relocation_is_inert(relocation_info))
-    return TextSymbolRelocationAction::Ignored;
+  const bool rocr_dynamic = is_et_dyn_rocr_dynamic_relocation_section(ehdr, relocs);
+  if (relocation_type == R_AMDGPU_NONE) {
+    return rocr_dynamic ? TextSymbolRelocationAction::Unsupported
+                        : TextSymbolRelocationAction::Ignored;
+  }
   if (!has_explicit_addend || addend != 0 || elf_reloc_sym(relocation_info) == 0)
     return TextSymbolRelocationAction::Unsupported;
 
   const uint8_t symbol_type = elf_symbol_type(symbol.st_info);
-  if (is_et_dyn_rocr_dynamic_relocation_section(ehdr, relocs)) {
+  if (rocr_dynamic) {
     if (relocation_type == R_AMDGPU_RELATIVE64) {
       return symbol_type == kElfSymbolTypeSection
                  ? TextSymbolRelocationAction::Unsupported

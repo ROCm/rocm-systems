@@ -456,7 +456,8 @@ make_minimal_amdgpu_elf_with_relocation_after_text(bool place_reloc_in_text = fa
 // chosen type, defined either in .text or .data. Supported zero-addend text
 // symbols can follow their relocated st_value; section symbols, nonzero
 // addends, and unrecognized dynamic relocation types remain unsupported.
-// R_AMDGPU_NONE is inert even when it carries a nonzero symbol index.
+// ROCr rejects R_AMDGPU_NONE in target-less dynamic sections, while explicit-target
+// sections are skipped for supported code objects and therefore treat NONE as inert.
 constexpr std::array kSupportedExplicitSymbolRelocations = {
     R_AMDGPU_ABS32_LO,
     R_AMDGPU_ABS32_HI,
@@ -1392,7 +1393,7 @@ TEST(BinaryTranslatorE2E, ExplicitTargetNonAbs64FunctionReferenceCreatesTextEntr
                                    "invalid final executable entry"));
 }
 
-TEST(BinaryTranslatorE2E, IgnoresDynamicNoneRelocationToTextSymbol) {
+TEST(BinaryTranslatorE2E, RejectsDynamicNoneRelocationToTextSymbol) {
   constexpr auto compound = gfx1250::build_vop3p(
       gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272});
   static_assert(compound.size() == 2);
@@ -1420,8 +1421,70 @@ TEST(BinaryTranslatorE2E, IgnoresDynamicNoneRelocationToTextSymbol) {
   ASSERT_NE(rela_it, shdrs.end());
 
   // Keep the second kernel entry at the instruction following the compound.
-  // Offset four is then referenced only by the inert NONE record and must not
-  // become an executable entry or required text-symbol mapping.
+  // Offset four is then referenced only by the target-less dynamic NONE record,
+  // which ROCr rejects because its dynamic relocation switch has no NONE case.
+  write_kernel_descriptor_entry_offset(
+      image.data() + rodata_it->sh_offset + kKernelDescriptorSize,
+      static_cast<int64_t>(text_it->sh_addr + sizeof(compound)) -
+          static_cast<int64_t>(rodata_it->sh_addr + kKernelDescriptorSize));
+  auto rela = read_elf_struct_for_test<Elf64_Rela>(image, rela_it->sh_offset);
+  rela.r_offset = text_it->sh_addr;
+  rela.r_addend = 17;
+  write_elf_struct_for_test(image, rela_it->sh_offset, rela);
+
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  CodeObjectPatcher patcher(source);
+  EXPECT_FALSE(patcher.has_relocations_within_text());
+  EXPECT_TRUE(patcher.has_unsupported_relocation_to_text());
+
+  BinaryTranslatorOptions options;
+  options.input_revision = ProcessorRevision::Gfx1250B0;
+  options.output_revision = ProcessorRevision::Gfx1250A0;
+  options.verify_rewrite_discharge = true;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(has_error_containing(result, DiagnosticKind::Legalization,
+                                   "unsupported relocation referencing .text"));
+}
+
+TEST(BinaryTranslatorE2E, IgnoresExplicitTargetNoneRelocationToTextSymbol) {
+  constexpr auto compound = gfx1250::build_vop3p(
+      gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272});
+  static_assert(compound.size() == 2);
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = make_minimal_amdgpu_elf_with_two_kernel_descriptors(
+      {compound[0], compound[1], kGfx1250SEndpgm},
+      TestRuntimeTextReference{
+          .relocation = TestRuntimeTextRelocation::Abs64,
+          .relocation_type = R_AMDGPU_NONE,
+          .target_text_offset = sizeof(uint32_t),
+      });
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                 EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+  const auto text_it = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return (section.sh_flags & SHF_EXECINSTR) != 0; });
+  const auto rodata_it = std::ranges::find_if(shdrs, [](const Elf64_Shdr &section) {
+    return (section.sh_flags & SHF_ALLOC) != 0 && (section.sh_flags & SHF_EXECINSTR) == 0;
+  });
+  const auto rela_it = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_RELA; });
+  ASSERT_NE(text_it, shdrs.end());
+  ASSERT_NE(rodata_it, shdrs.end());
+  ASSERT_NE(rela_it, shdrs.end());
+
+  // ROCr skips explicit-target/static relocation sections for supported code objects.
+  // Point this record at allocated data and make its symbol-table link unusable. NONE must be
+  // ignored before entry recovery resolves that metadata, so it neither creates the otherwise
+  // invalid entry at the compound instruction's second dword nor requires symbol remapping.
+  rela_it->sh_info = static_cast<uint32_t>(rodata_it - shdrs.begin());
+  rela_it->sh_link = static_cast<uint32_t>(shdrs.size());
+  write_bytes_for_test(image, ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
   write_kernel_descriptor_entry_offset(
       image.data() + rodata_it->sh_offset + kKernelDescriptorSize,
       static_cast<int64_t>(text_it->sh_addr + sizeof(compound)) -
@@ -2671,6 +2734,36 @@ TEST(BinaryTranslatorE2E, RejectsRelocationTargetingText) {
 }
 
 TEST(CodeObjectPatcher, ClassifiesTextSymbolRelocationCompatibility) {
+  auto dynamic_none = make_amdgpu_elf_with_symbol_relocation(
+      kElfSymbolTypeFunc, /*defined_in_text=*/true, /*addend=*/0, R_AMDGPU_NONE);
+  AmdGpuCodeObject dynamic_none_co(dynamic_none.data(), dynamic_none.size());
+  ASSERT_TRUE(dynamic_none_co.is_valid());
+  CodeObjectPatcher dynamic_none_patcher(dynamic_none_co);
+  EXPECT_TRUE(dynamic_none_patcher.has_unsupported_relocation_to_text())
+      << "ROCr rejects NONE in a target-less dynamic relocation section";
+
+  auto explicit_none = dynamic_none;
+  const auto explicit_none_ehdr = read_elf_struct_for_test<Elf64_Ehdr>(explicit_none, 0);
+  auto explicit_none_shdrs = read_elf_array_for_test<Elf64_Shdr>(
+      explicit_none, explicit_none_ehdr.e_shoff, explicit_none_ehdr.e_shnum);
+  const auto explicit_none_data =
+      std::ranges::find_if(explicit_none_shdrs, [](const auto &section) {
+        return (section.sh_flags & SHF_ALLOC) != 0 && (section.sh_flags & SHF_EXECINSTR) == 0;
+      });
+  const auto explicit_none_rela = std::ranges::find_if(
+      explicit_none_shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_RELA; });
+  ASSERT_NE(explicit_none_data, explicit_none_shdrs.end());
+  ASSERT_NE(explicit_none_rela, explicit_none_shdrs.end());
+  explicit_none_rela->sh_info =
+      static_cast<uint32_t>(explicit_none_data - explicit_none_shdrs.begin());
+  write_bytes_for_test(explicit_none, explicit_none_ehdr.e_shoff, explicit_none_shdrs.data(),
+                       explicit_none_shdrs.size() * sizeof(Elf64_Shdr));
+  AmdGpuCodeObject explicit_none_co(explicit_none.data(), explicit_none.size());
+  ASSERT_TRUE(explicit_none_co.is_valid());
+  CodeObjectPatcher explicit_none_patcher(explicit_none_co);
+  EXPECT_FALSE(explicit_none_patcher.has_unsupported_relocation_to_text())
+      << "ROCr skips explicit-target/static relocation sections for supported code objects";
+
   for (const uint32_t relocation_type : kSupportedExplicitSymbolRelocations) {
     for (uint8_t sym_type :
          {kElfSymbolTypeFunc, kElfSymbolTypeObject, kElfSymbolTypeAmdGpuHsaKernel}) {

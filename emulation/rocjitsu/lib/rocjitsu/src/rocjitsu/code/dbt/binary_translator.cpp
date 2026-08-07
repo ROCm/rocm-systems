@@ -671,10 +671,12 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
       const uint32_t relocation_type = elf_reloc_type(relocation.r_info);
       const uint32_t symbol_index = elf_reloc_sym(relocation.r_info);
       const bool rocr_dynamic = is_et_dyn_rocr_dynamic_relocation_section(ehdr, relocs);
-      const bool may_require_executable_entry =
-          symbol_index != 0 && !elf_relocation_is_inert(relocation.r_info) &&
-          (!rocr_dynamic || rocr_dynamic_relocation_uses_symbol_value(relocation_type));
-      if (may_require_executable_entry) {
+      if (!rocr_dynamic && relocation_type == R_AMDGPU_NONE)
+        continue;
+      const bool may_require_text_symbol_classification =
+          symbol_index != 0 && (!rocr_dynamic || relocation_type == R_AMDGPU_NONE ||
+                                rocr_dynamic_relocation_uses_symbol_value(relocation_type));
+      if (may_require_text_symbol_classification) {
         if (relocs.sh_link >= shdrs.size())
           return std::nullopt;
         const Elf64_Shdr &symtab = shdrs[relocs.sh_link];
