@@ -4,8 +4,9 @@
 # Multi-Arch CI ASAN for rocm-systems
 #
 # Presubmit and on-demand ASAN builds. TheRock's configure_multi_arch_ci.py
-# automatically selects host-asan for pull_request events (faster, host-only)
-# and full asan for workflow_dispatch (comprehensive device-side instrumentation).
+# uses host-asan for pull_request events and full asan for workflow_dispatch.
+# Presubmit builds are limited to compiler-runtime and runtime-tests, followed
+# by hip-tests and rocrtst.
 #
 # For scheduled nightly runs, see therock-multi-arch-ci-asan-nightly.yml.
 
@@ -52,15 +53,17 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    uses: sa-faizal/TheRock/.github/workflows/setup_multi_arch.yml@sa-faizal/host-asan-testing
     with:
-      build_variant: "asan"
+      build_variant: ${{ github.event_name == 'pull_request' && 'host-asan' || 'asan' }}
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
-      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
+      linux_test_labels: ${{ github.event_name == 'pull_request' && 'test:hip-tests,test:rocrtst' || inputs.linux_test_labels || '' }}
+      build_pytorch: ${{ github.event_name != 'pull_request' }}
+      run_asan_tests: ${{ github.event_name == 'pull_request' }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
-      repository: ROCm/TheRock
-      ref: "main"
+      repository: sa-faizal/TheRock
+      ref: "sa-faizal/host-asan-testing"
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   linux_build_and_test:
@@ -71,14 +74,16 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
+    uses: sa-faizal/TheRock/.github/workflows/multi_arch_ci_linux.yml@sa-faizal/host-asan-testing
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
-      test_labels: ${{ needs.setup.outputs.linux_test_labels }}
+      build_stages: ${{ github.event_name == 'pull_request' && 'compiler-runtime,runtime-tests' || 'all' }}
+      run_sanity_check: ${{ github.event_name != 'pull_request' }}
+      test_labels: ${{ github.event_name == 'pull_request' && '["test:hip-tests","test:rocrtst"]' || needs.setup.outputs.linux_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      repository: ROCm/TheRock
+      repository: sa-faizal/TheRock
       ref: ${{ needs.setup.outputs.ref }}
     permissions:
       contents: read
@@ -96,7 +101,7 @@ jobs:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: "ROCm/TheRock"
+          repository: "sa-faizal/TheRock"
           ref: ${{ needs.setup.outputs.ref }}
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
