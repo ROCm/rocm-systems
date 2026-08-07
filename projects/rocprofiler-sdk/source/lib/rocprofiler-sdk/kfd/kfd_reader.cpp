@@ -808,7 +808,7 @@ reader_loop()
                 errno);
             break;
         }
-        if(wake.revents & POLLIN)
+        if((wake.revents & POLLIN) != 0)
         {
             uint64_t v = 0;
             while(::read(st.wake_fd, &v, sizeof(v)) == sizeof(v))

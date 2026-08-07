@@ -246,7 +246,7 @@ close_drain_budget_ns()
 {
     static const uint64_t _v = []() {
         auto _ms = common::get_env("ROCPROFILER_KFD_DISPATCH_LOG_CLOSE_DRAIN_MS", 250);
-        if(_ms < 0) _ms = 0;
+        _ms      = std::max(_ms, 0);
         return static_cast<uint64_t>(_ms) * 1'000'000ull;
     }();
     return _v;

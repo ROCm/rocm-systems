@@ -229,9 +229,11 @@ copy_pipes(const uint8_t*           records_base,
            uint32_t                 num_regions,
            uint32_t                 region_record_count,
            const volatile uint64_t* wptr_arr,
-           volatile uint64_t*       rptr_arr,
-           ring_cursors&            cursors,
-           OutT&                    out)
+           // rptr_arr is written via __atomic_store_n, which the const check does not model.
+           // NOLINTNEXTLINE(readability-non-const-parameter)
+           volatile uint64_t* rptr_arr,
+           ring_cursors&      cursors,
+           OutT&              out)
 {
     if(num_regions == 0 || num_regions > kMaxRegions) return 0;
 
