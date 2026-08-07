@@ -25,10 +25,19 @@ extern int64_t ncclParamIbDataDirect();
 
 NCCL_PARAM(RmaProxyDumpSignal, "RMA_PROXY_DUMP_SIGNAL", -1);
 NCCL_PARAM(RmaProxyQueueSize, "RMA_PROXY_QUEUE_SIZE", -1);
-// Internal RMA contexts (network connections) provisioned per NIC for the
-// hierarchical CE collectives' rail step. A single connection often cannot
-// saturate a fast port, so the rail spreads its traffic across several per NIC.
-static constexpr int NCCL_RMA_INT_CTX_PER_NIC = 4;
+// Default total number of internal RMA contexts provisioned for hierarchical CE
+// collectives. The contexts are distributed round-robin across the available
+// physical RMA communicators.
+static constexpr int NCCL_NUM_RMA_INT_CTX_DEFAULT = 4;
+// NCCL_NUM_RMA_INT_CTX overrides the total internal RMA context pool (positive
+// value); -1/unset keeps the built-in total. Must be identical on all ranks.
+NCCL_PARAM(NumRmaIntCtx, "NUM_RMA_INT_CTX", -1);
+
+// Total internal contexts to provision, honoring the NCCL_NUM_RMA_INT_CTX override.
+static int ncclNumRmaIntCtx() {
+  int64_t v = ncclParamNumRmaIntCtx();
+  return v > 0 ? (int)v : NCCL_NUM_RMA_INT_CTX_DEFAULT;
+}
 
 #include <signal.h>
 static ncclRmaProxyState* ncclLastRmaProxyState;
@@ -460,7 +469,7 @@ ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) {
   // internal range is provisioned only when needed (NCCL_RMA_INT_CTX_PER_NIC
   // contexts per physical RMA communicator), so it stays empty on paths that
   // don't use it.
-  rmaProxyState->numIntCtx = ncclRmaWantInternalCtx(comm) ? NCCL_RMA_INT_CTX_PER_NIC * rmaProxyState->rmaCommCount : 0;
+  rmaProxyState->numIntCtx = ncclRmaWantInternalCtx(comm) ? ncclNumRmaIntCtx() : 0;
   rmaProxyState->rmaProxyCtxCount = comm->config.numRmaCtx + rmaProxyState->numIntCtx;
   NCCLCHECK(ncclCalloc(&rmaProxyState->rmaProxyCtxs, rmaProxyState->rmaProxyCtxCount));
   for (int n = 0; n < rmaProxyState->rmaProxyCtxCount; n++) {
