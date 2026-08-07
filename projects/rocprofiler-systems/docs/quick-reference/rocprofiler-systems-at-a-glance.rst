@@ -200,10 +200,6 @@ General-purpose presets suited to most profiling scenarios:
      - ON
      - CPU @ 50 Hz
      - GPU metrics
-   * - ``profile-only``
-     - Quick performance overview with the lowest possible overhead
-     - OFF
-     - ON (flat)
      - OFF
      - —
    * - ``detailed``
@@ -215,7 +211,6 @@ General-purpose presets suited to most profiling scenarios:
 
 GPU
 ~~~
-
 Presets focused on GPU workloads, device metrics, and kernel tracing:
 
 .. list-table::
@@ -229,9 +224,6 @@ Presets focused on GPU workloads, device metrics, and kernel tracing:
      - Sampling
      - Notable domains
    * - ``trace-gpu``
-     - GPU-focused profiling with device metrics and kernel tracing
-     - ON
-     - OFF
      - OFF
      - ROCm, GPU metrics
    * - ``workload-trace``
@@ -240,10 +232,6 @@ Presets focused on GPU workloads, device metrics, and kernel tracing:
      - ON
      - OFF
      - MPI, RCCL, ROCm, GPU, rocpd output
-   * - ``trace-hw-counters``
-     - GPU performance analysis with hardware-level metrics
-     - ON
-     - ON
      - OFF
      - VALUUtilization, Occupancy
 
@@ -308,7 +296,6 @@ Presets focused on full system API tracing:
      - ON
      - OFF
      - HIP runtime (no compiler/HSA internals)
-
 
 For the exact configuration behind a preset, run ``rocprof-sys-run --explain=<name>``. For domain flags, configuration export, and custom presets, see :doc:`../how-to/using-preset-profiles`.
 
