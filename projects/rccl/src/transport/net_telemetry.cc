@@ -216,7 +216,10 @@ static const RcclHwConfig rcclHwConfigAinic = {
   (int)(sizeof(rcclHwcAinic) / sizeof(rcclHwcAinic[0])),
   { "frames_rx_pri_%d",        "frames_tx_pri_%d",
     "rx_pripause_%d_1us_count", "tx_pripause_%d_1us_count" },
-  { HWC_ETHTOOL, "octets_tx_ok", "octets_rx_ok", "frames_tx_ok", "frames_rx_ok" },
+  /* RoCE traffic only: the ethtool frames_*_ok keys are absent on this NIC, and
+   * netdev-level byte counts miss RDMA traffic entirely. */
+  { HWC_IB_SYSFS, "tx_rdma_ucast_bytes", "rx_rdma_ucast_bytes",
+                  "tx_rdma_ucast_pkts",  "rx_rdma_ucast_pkts" },
 };
 
 /* Compile-time check: per-HW counter arrays must fit in RcclDeviceStats::hw_counters */
@@ -294,7 +297,11 @@ static const RcclHwConfig rcclHwConfigMlx5 = {
   /* PFC per-priority pause frames + pause duration, from ethtool -S. */
   { "rx_prio%d_pause",          "tx_prio%d_pause",
     "rx_prio%d_pause_duration", "tx_prio%d_pause_duration" },
-  { HWC_ETHTOOL, "tx_bytes", "rx_bytes", "tx_packets", "rx_packets" },
+  /* RoCE bypasses the kernel netdev stack, so ethtool tx_bytes/rx_bytes miss
+   * almost all of it. The vport RDMA counters track the IB port counters
+   * exactly (port_xmit_data * 4 == tx_vport_rdma_unicast_bytes). */
+  { HWC_ETHTOOL, "tx_vport_rdma_unicast_bytes", "rx_vport_rdma_unicast_bytes",
+                 "tx_vport_rdma_unicast_packets", "rx_vport_rdma_unicast_packets" },
 };
 
 #ifndef __cplusplus
@@ -619,17 +626,19 @@ void rcclTelemetryFlush(void) {
             (int)getpid(), rcclTelemetryNumDevs);
     for (int i = 0; i < rcclTelemetryNumDevs; i++) {
       RcclDeviceStats* d = &rcclTelemetryDevs[i];
-      uint64_t wqe_sent = 0, wqe_rcvd = 0, wqe_comp = 0;
+      uint64_t wqe_sent = 0, recv_wqe = 0, wqe_rcvd = 0, wqe_comp = 0;
       for (int c = 0; c < d->num_channels && c < RCCL_TELEMETRY_MAX_CHANNELS; c++) {
         wqe_sent += d->channels[c].num_wqe_sent;
+        recv_wqe += d->channels[c].num_recv_wqe;
         wqe_rcvd += d->channels[c].num_wqe_rcvd;
         wqe_comp += d->channels[c].num_wqe_completed;
       }
       fprintf(stderr, "RCCL NET_TELEMETRY:   dev[%d] roce=%s eth=%s chans=%d "
-              "tx=%lu rx=%lu wqe_sent=%lu wqe_rcvd=%lu wqe_comp=%lu cq_err=%lu\n",
+              "tx=%lu rx=%lu wqe_sent=%lu recv_wqe=%lu wqe_rcvd=%lu wqe_comp=%lu cq_err=%lu\n",
               i, d->roce_device, d->eth_device, d->num_channels,
               (unsigned long)d->tx_bytes, (unsigned long)d->rx_bytes,
-              (unsigned long)wqe_sent, (unsigned long)wqe_rcvd,
+              (unsigned long)wqe_sent, (unsigned long)recv_wqe,
+              (unsigned long)wqe_rcvd,
               (unsigned long)wqe_comp, (unsigned long)d->num_cq_errors);
     }
   }
@@ -669,7 +678,7 @@ int rcclTelemetrySwCapture(RcclTelemetrySwSnapshot* out, int maxDevs) {
     s->tx_bytes      = __atomic_load_n(&dev->tx_bytes,      __ATOMIC_RELAXED);
     s->rx_bytes      = __atomic_load_n(&dev->rx_bytes,      __ATOMIC_RELAXED);
     s->num_cq_errors = __atomic_load_n(&dev->num_cq_errors, __ATOMIC_RELAXED);
-    s->wqe_sent = s->wqe_rcvd = s->wqe_completed = 0;
+    s->wqe_sent = s->recv_wqe = s->wqe_rcvd = s->wqe_completed = 0;
     s->wqe_completion_ns_min = 0;
     s->wqe_completion_ns_max = 0;
     for (int b = 0; b < RCCL_TELEMETRY_HISTOGRAM_SIZE; b++)
@@ -684,6 +693,7 @@ int rcclTelemetrySwCapture(RcclTelemetrySwSnapshot* out, int maxDevs) {
       for (int q = 0; q < nqp; q++) {
         RcclQpStats* qp = &ch->qp[q];
         s->wqe_sent      += __atomic_load_n(&qp->num_wqe_sent,      __ATOMIC_RELAXED);
+        s->recv_wqe      += __atomic_load_n(&qp->num_recv_wqe,      __ATOMIC_RELAXED);
         s->wqe_rcvd      += __atomic_load_n(&qp->num_wqe_rcvd,      __ATOMIC_RELAXED);
         s->wqe_completed += __atomic_load_n(&qp->num_wqe_completed, __ATOMIC_RELAXED);
 
@@ -710,15 +720,14 @@ int rcclTelemetryRegisterDevice(int device_id, const char* roce_device,
     return -1;
   }
 
-  if (rcclTelemetryNumDevs >= RCCL_TELEMETRY_MAX_DEVS) {
+  /* The slot is the caller's device index, never an allocation counter: every
+   * hot-path entry point addresses rcclTelemetryDevs[] with the transport's own
+   * device index, so registration has to use that same numbering or the labels
+   * and the counters end up describing different NICs. */
+  if (device_id < 0 || device_id >= RCCL_TELEMETRY_MAX_DEVS) {
     return -1;
   }
-
-  int idx = __atomic_fetch_add(&rcclTelemetryNumDevs, 1, __ATOMIC_SEQ_CST);
-  if (idx >= RCCL_TELEMETRY_MAX_DEVS) {
-    __atomic_fetch_sub(&rcclTelemetryNumDevs, 1, __ATOMIC_SEQ_CST);
-    return -1;
-  }
+  int idx = device_id;
 
   if (getenv("RCCL_TELEMETRY_DEBUG") != NULL) {
     fprintf(stderr, "RCCL NET_TELEMETRY: RegisterDevice idx=%d id=%d roce=%s eth=%s transport=%s\n",
@@ -750,6 +759,14 @@ int rcclTelemetryRegisterDevice(int device_id, const char* roce_device,
   dev->hw_config = rcclTelemetryResolveHw(driver_name);
 
   rcclTelemetrySnapshotInit(dev);
+
+  /* Publish the high-water mark last, so a reader that observes the new count
+   * also observes a fully populated slot. */
+  int nd = __atomic_load_n(&rcclTelemetryNumDevs, __ATOMIC_RELAXED);
+  while (nd < idx + 1 &&
+         !__atomic_compare_exchange_n(&rcclTelemetryNumDevs, &nd, idx + 1,
+                                      true, __ATOMIC_RELEASE, __ATOMIC_RELAXED)) {
+  }
 
   return idx;
 }
@@ -1188,7 +1205,8 @@ static void rcclTelemetryWriteJson(FILE* fp) {
     int activeChannels = 0;
     for (int c = 0; c < dev->num_channels; c++) {
       RcclChannelStats* ch = &dev->channels[c];
-      if (ch->num_qps > 0 || ch->num_wqe_sent || ch->num_wqe_rcvd || ch->num_wqe_completed)
+      if (ch->num_qps > 0 || ch->num_wqe_sent || ch->num_recv_wqe || ch->num_wqe_rcvd ||
+          ch->num_wqe_completed)
         activeChannels++;
     }
     if (dev->tx_bytes == 0 && dev->rx_bytes == 0 && dev->num_cq_errors == 0 && activeChannels == 0)
@@ -1233,6 +1251,7 @@ static void rcclTelemetryWriteJson(FILE* fp) {
       fprintf(fp, "        {\n");
       fprintf(fp, "          \"id\": %d,\n", ch->id);
       fprintf(fp, "          \"num_wqe_sent\": %lu,\n", (unsigned long)ch->num_wqe_sent);
+      fprintf(fp, "          \"num_recv_wqe\": %lu,\n", (unsigned long)ch->num_recv_wqe);
       fprintf(fp, "          \"num_wqe_rcvd\": %lu,\n", (unsigned long)ch->num_wqe_rcvd);
       fprintf(fp, "          \"num_wqe_completed\": %lu,\n", (unsigned long)ch->num_wqe_completed);
       fprintf(fp, "          \"num_cts_sent\": %lu,\n", (unsigned long)ch->num_cts_sent);
@@ -1247,6 +1266,7 @@ static void rcclTelemetryWriteJson(FILE* fp) {
         fprintf(fp, "              \"id\": %d,\n", qp->id);
         fprintf(fp, "              \"data_qp\": %s,\n", qp->is_data_qp ? "true" : "false");
         fprintf(fp, "              \"num_wqe_sent\": %lu,\n", (unsigned long)qp->num_wqe_sent);
+        fprintf(fp, "              \"num_recv_wqe\": %lu,\n", (unsigned long)qp->num_recv_wqe);
         fprintf(fp, "              \"num_wqe_rcvd\": %lu,\n", (unsigned long)qp->num_wqe_rcvd);
         fprintf(fp, "              \"num_wqe_completed\": %lu,\n", (unsigned long)qp->num_wqe_completed);
         fprintf(fp, "              \"num_slot_miss\": %lu,\n", (unsigned long)qp->num_slot_miss);

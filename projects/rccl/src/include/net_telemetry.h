@@ -69,8 +69,9 @@ typedef struct {
   uint64_t rx_bytes;
   uint64_t num_cq_errors;
   uint64_t wqe_sent;
-  uint64_t wqe_rcvd;
-  uint64_t wqe_completed;
+  uint64_t recv_wqe;      /* receive WQEs posted */
+  uint64_t wqe_rcvd;      /* completions drained from the CQ */
+  uint64_t wqe_completed; /* completions matched to a tracked posting */
   int64_t  wqe_completion_ns_min;   /* min across QPs (0 = none seen) */
   int64_t  wqe_completion_ns_max;   /* max across QPs */
   uint64_t wqe_completion_histogram[RCCL_TELEMETRY_HISTOGRAM_SIZE]; /* summed across channels/QPs */
@@ -100,10 +101,19 @@ extern RcclTelemetryConfig rcclTelemetryCfg;
 /*
  * Per-QP statistics
  */
+/*
+ * Counter semantics follow the ANP plugin (ROCm/amd-anp, include/anp_state.h):
+ *   num_recv_wqe      receive WQEs posted (incremented after ibv_post_recv)
+ *   num_wqe_rcvd      completions drained from the CQ, send and recv alike
+ *   num_wqe_completed completions matched to a tracked posting, i.e. those for
+ *                     which a post timestamp was recorded and latency is
+ *                     therefore computable
+ */
 typedef struct {
   int      id;
   int      is_data_qp;            /* 1 for data QPs, 0 for CTS QPs */
   uint64_t num_wqe_sent;
+  uint64_t num_recv_wqe;
   uint64_t num_wqe_rcvd;
   uint64_t num_wqe_completed;
   uint64_t num_slot_miss;
@@ -123,6 +133,7 @@ typedef struct {
 typedef struct {
   int         id;
   uint64_t    num_wqe_sent;
+  uint64_t    num_recv_wqe;
   uint64_t    num_wqe_rcvd;
   uint64_t    num_wqe_completed;
   uint64_t    num_cts_sent;
@@ -191,8 +202,14 @@ extern RcclDeviceStats rcclTelemetryDevs[RCCL_TELEMETRY_MAX_DEVS];
 extern int             rcclTelemetryNumDevs;
 
 /*
- * Helper to register a device for telemetry collection
- * Returns the device index or -1 on failure
+ * Helper to register a device for telemetry collection.
+ *
+ * device_id doubles as the slot in rcclTelemetryDevs[], because that is the
+ * index every hot-path helper below is called with. Callers must pass the same
+ * device numbering they later use for devIdx, and must register after any
+ * reordering of their own device list.
+ *
+ * Returns the device index (== device_id) or -1 on failure.
  */
 int rcclTelemetryRegisterDevice(int device_id, const char* roce_device,
                                  const char* eth_device, const char* transport);
@@ -269,19 +286,21 @@ static inline void rcclTelemetryCqError(int devIdx) {
 }
 
 /**
- * Record WQE completion with latency tracking.
+ * Record a completion drained from the CQ, with latency tracking.
  * Call after ibv_poll_cq returns a successful completion.
  *
  * This function:
- * - Increments wqe_completed counter
- * - Computes latency from post_ts to now
+ * - Increments num_wqe_rcvd for every completion, send or recv
+ * - Increments num_wqe_completed only when the completion is matched to a
+ *   tracked posting (postTs > 0), mirroring the ANP wqe_id_tracker lookup
+ * - Computes latency from post_ts to now for matched completions
  * - Updates the latency histogram bucket
  * - Updates min/max latency atomically
  *
  * @param devIdx   Device index in rcclTelemetryDevs array
  * @param chIdx    Channel index
  * @param qpIdx    Queue pair index within channel
- * @param postTs   Timestamp when work request was posted (0 to skip latency)
+ * @param postTs   Timestamp when work request was posted (0 if unmatched)
  */
 static inline void rcclTelemetryWqeComplete(int devIdx, int chIdx, int qpIdx, int64_t postTs) {
   if (!rcclTelemetryEnabled ||
@@ -291,9 +310,10 @@ static inline void rcclTelemetryWqeComplete(int devIdx, int chIdx, int qpIdx, in
     return;
   
   RcclQpStats* qp = &rcclTelemetryDevs[devIdx].channels[chIdx].qp[qpIdx];
-  __atomic_fetch_add(&qp->num_wqe_completed, 1, __ATOMIC_RELAXED);
+  __atomic_fetch_add(&qp->num_wqe_rcvd, 1, __ATOMIC_RELAXED);
   
   if (postTs > 0) {
+    __atomic_fetch_add(&qp->num_wqe_completed, 1, __ATOMIC_RELAXED);
     int64_t latency_ns = rcclTelemetryGetNs() - postTs;
     if (latency_ns > 0) {
       int bucket = (int)(latency_ns / rcclTelemetryCfg.histogram_bucket_interval_ns);
@@ -320,8 +340,8 @@ static inline void rcclTelemetryWqeComplete(int devIdx, int chIdx, int qpIdx, in
 }
 
 /**
- * Increment channel- and QP-level WQE sent (isSend=1) or received (isSend=0)
- * counters. Call after ibv_post_send / ibv_post_recv.
+ * Increment channel- and QP-level posted-WQE counters: num_wqe_sent for sends,
+ * num_recv_wqe for receives. Call after ibv_post_send / ibv_post_recv.
  *
  * @param devIdx   Device index
  * @param chIdx    Channel index
@@ -339,21 +359,26 @@ static inline void rcclTelemetryWqePosted(int devIdx, int chIdx, int qpIdx, int 
     __atomic_fetch_add(&ch->qp[qpIdx].num_wqe_sent, 1, __ATOMIC_RELAXED);
     __atomic_fetch_add(&ch->num_wqe_sent, 1, __ATOMIC_RELAXED);
   } else {
-    __atomic_fetch_add(&ch->qp[qpIdx].num_wqe_rcvd, 1, __ATOMIC_RELAXED);
-    __atomic_fetch_add(&ch->num_wqe_rcvd, 1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&ch->qp[qpIdx].num_recv_wqe, 1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&ch->num_recv_wqe, 1, __ATOMIC_RELAXED);
   }
 }
 
 /**
- * Increment channel-level WQE completed counter.
+ * Channel-level counterpart of rcclTelemetryWqeComplete(): count every drained
+ * completion, and separately those matched to a tracked posting.
  *
  * @param devIdx   Device index
  * @param chIdx    Channel index
+ * @param matched  1 if the completion carried a post timestamp
  */
-static inline void rcclTelemetryChannelCompleted(int devIdx, int chIdx) {
+static inline void rcclTelemetryChannelCompleted(int devIdx, int chIdx, int matched) {
   if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS ||
       chIdx < 0 || chIdx >= RCCL_TELEMETRY_MAX_CHANNELS) return;
-  __atomic_fetch_add(&rcclTelemetryDevs[devIdx].channels[chIdx].num_wqe_completed, 1, __ATOMIC_RELAXED);
+  RcclChannelStats* ch = &rcclTelemetryDevs[devIdx].channels[chIdx];
+  __atomic_fetch_add(&ch->num_wqe_rcvd, 1, __ATOMIC_RELAXED);
+  if (matched)
+    __atomic_fetch_add(&ch->num_wqe_completed, 1, __ATOMIC_RELAXED);
 }
 
 /**
@@ -431,23 +456,27 @@ static inline void rcclTelemetryWqeSize(int devIdx, uint64_t bytes) {
 }
 
 /**
- * Setup a telemetry channel with QP slots.
+ * Reserve a block of telemetry QP slots on a channel.
  * Call during connection setup (connect/accept) to register QPs for tracking.
+ *
+ * This only allocates slots; the data/CTS role is per QP and is assigned
+ * separately via rcclTelemetrySetQpRole().
  *
  * @param devIdx     Device index in rcclTelemetryDevs array
  * @param chIdx      Channel index (typically allocated via atomic counter)
  * @param numQps     Number of QPs to register for this channel on this device
- * @param isDataQp   true for data QPs, false for CTS QPs
  * @return           Starting QP slot index, or -1 on failure
  *
  * Usage (in ncclIbConnect/ncclIbAccept):
- *   int qpSlot = rcclTelemetrySetupChannel(devIdx, chIdx, numQps, true);
+ *   int qpSlot = rcclTelemetrySetupChannel(devIdx, chIdx, numQps);
  *   if (qpSlot >= 0) {
- *     for (int q = 0; q < numQps; q++)
+ *     for (int q = 0; q < numQps; q++) {
  *       comm->base.qps[q].telQpSlot = qpSlot + q;
+ *       rcclTelemetrySetQpRole(devIdx, chIdx, qpSlot + q, comm->base.qps[q].isDataQp);
+ *     }
  *   }
  */
-static inline int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int isDataQp) {
+static inline int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps) {
   if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS ||
       chIdx < 0 || chIdx >= RCCL_TELEMETRY_MAX_CHANNELS) {
     return -1;
@@ -470,14 +499,6 @@ static inline int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, i
   /* Initialize QP slot IDs */
   for (int q = 0; q < numQps && (startSlot + q) < RCCL_TELEMETRY_MAX_QPS; q++) {
     ch->qp[startSlot + q].id = startSlot + q;
-    ch->qp[startSlot + q].is_data_qp = isDataQp ? 1 : 0;
-  }
-  
-  /* Track data QPs vs CTS QPs */
-  if (isDataQp) {
-    __atomic_fetch_add(&ch->num_data_qp, numQps, __ATOMIC_RELAXED);
-  } else {
-    __atomic_fetch_add(&ch->num_cts_qp, numQps, __ATOMIC_RELAXED);
   }
   
   /* Update device's channel count */
@@ -489,6 +510,32 @@ static inline int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, i
   }
   
   return startSlot;
+}
+
+/**
+ * Assign the data/CTS role of a single telemetry QP slot reserved by
+ * rcclTelemetrySetupChannel(), and count it towards the channel's
+ * num_data_qp / num_cts_qp totals.
+ *
+ * Must be called at most once per slot, since it bumps a channel total.
+ *
+ * @param devIdx     Device index
+ * @param chIdx      Channel index
+ * @param qpIdx      QP slot index within the channel
+ * @param isDataQp   nonzero for a data QP, zero for a CTS QP
+ */
+static inline void rcclTelemetrySetQpRole(int devIdx, int chIdx, int qpIdx, int isDataQp) {
+  if (!rcclTelemetryEnabled ||
+      devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS ||
+      chIdx  < 0 || chIdx  >= RCCL_TELEMETRY_MAX_CHANNELS ||
+      qpIdx  < 0 || qpIdx  >= RCCL_TELEMETRY_MAX_QPS)
+    return;
+  RcclChannelStats* ch = &rcclTelemetryDevs[devIdx].channels[chIdx];
+  ch->qp[qpIdx].is_data_qp = isDataQp ? 1 : 0;
+  if (isDataQp)
+    __atomic_fetch_add(&ch->num_data_qp, 1, __ATOMIC_RELAXED);
+  else
+    __atomic_fetch_add(&ch->num_cts_qp, 1, __ATOMIC_RELAXED);
 }
 
 #ifdef __cplusplus
