@@ -500,6 +500,16 @@ public:
       ttmp_[idx] = val;
   }
 
+  /// @brief Cycles this wave still owes an in-flight s_sleep.
+  /// @details S_SLEEP is a delay and nothing else: it has no register result,
+  /// so retiring it in a single step gives it no architectural effect at all.
+  /// A spin loop then runs at full speed and spends its time spread evenly
+  /// over its own instructions rather than parked at the sleep, which changes
+  /// where an asynchronous debugger suspend lands inside it.
+  uint32_t sleep_cycles() const { return sleep_cycles_; }
+  void set_sleep_cycles(uint32_t cycles) { sleep_cycles_ = cycles; }
+  void tick_sleep() { --sleep_cycles_; }
+
   /// @brief Whether the wave is currently fetching from its configured TBA.
   bool in_trap_handler() const { return in_trap_handler_; }
   void set_in_trap_handler(bool value) { in_trap_handler_ = value; }
@@ -645,6 +655,7 @@ public:
     for (auto &t : ttmp_)
       t = 0;
     trapsts_ = 0;
+    sleep_cycles_ = 0;
     in_trap_handler_ = false;
     trap_interrupt_sent_ = false;
     trap_saved_status_ = 0;
@@ -722,6 +733,7 @@ private:
 
   uint32_t ttmp_[16] = {};           ///< Trap temporary registers (TTMP0-15).
   uint32_t trapsts_ = 0;             ///< Trap status register (EXCP flags).
+  uint32_t sleep_cycles_ = 0;        ///< Cycles left on an in-flight S_SLEEP.
   bool in_trap_handler_ = false;     ///< Executing the configured trap-handler shader.
   bool trap_interrupt_sent_ = false; ///< Handler issued MSG_INTERRUPT for this entry.
   uint32_t trap_saved_status_ = 0;   ///< Interrupted STATUS restored after handler completion.

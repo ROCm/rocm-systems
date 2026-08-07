@@ -626,6 +626,16 @@ bool ComputeUnitCore::step() {
 
   for (auto &wf : wfs_) {
     if (wf->state() == WfState::RUNNING && !wf->debug_paused()) {
+      // Burn down an in-flight S_SLEEP before issuing anything else. A
+      // single-step request cancels the remainder instead of spending the
+      // debugger's one step on it, which would look like a hung wave.
+      if (wf->sleep_cycles() != 0) {
+        if (!wf->debug_single_step()) {
+          wf->tick_sleep();
+          continue;
+        }
+        wf->set_sleep_cycles(0);
+      }
       const bool single_step = wf->debug_single_step();
       issue_instruction(wf.get());
       if (single_step && !wf->in_trap_handler() && !wf->debug_halted() && single_step_handler_)

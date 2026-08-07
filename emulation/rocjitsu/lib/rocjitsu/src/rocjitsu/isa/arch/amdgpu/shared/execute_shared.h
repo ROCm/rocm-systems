@@ -2571,13 +2571,28 @@ inline void execute_s_sext_i32_i8_sop1([[maybe_unused]] Inst &inst,
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
 }
 
+// S_SLEEP idles the wave for 64 * SIMM16[6:0] clocks. The delay is the whole
+// instruction -- there is no result register -- so retiring it in one step
+// leaves it with no effect and lets a sleep loop spin at the speed of its own
+// scalar code. That is not just a performance detail for a debugger: an
+// asynchronous suspend then lands uniformly across the loop body instead of
+// overwhelmingly on the sleep, and -O0 loop bodies are full of short windows
+// where the compiler has forced EXEC to all lanes to spill an AGPR. Stopping
+// inside one reports every lane active (gdb.rocm/lane-info.exp checks the
+// stopped lane states against the ones it recorded at a breakpoint).
+constexpr uint32_t kSleepClocksPerUnit = 64;
+
 template <typename Inst>
 inline void execute_s_sleep_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  wf.set_sleep_cycles(kSleepClocksPerUnit *
+                      (static_cast<uint32_t>(inst.simm16.encoding_value_) & 0x7Fu));
   wf.cu().request_functional_yield();
 }
 
 template <typename Inst>
 inline void execute_s_sleep_var_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  wf.set_sleep_cycles(kSleepClocksPerUnit *
+                      (amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0) & 0x7Fu));
   wf.cu().request_functional_yield();
 }
 
