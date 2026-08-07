@@ -268,7 +268,7 @@ class RocProfCompute:
     def generate_machine_specs(self) -> None:
         """Generate MachineSpecs for RocProfCompute"""
         self.__mspec = generate_machine_specs(self.__args)
-        
+
         if self.__mode == "profile":
             compute_partition = self.__mspec.compute_partition
             if compute_partition and compute_partition.strip().lower() != "n/a":
