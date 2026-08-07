@@ -74,10 +74,6 @@ def _figure_class(dtype: str) -> str:
     return "OP" if str(dtype).startswith("I") else "FLOP"
 
 
-def _figure_title(ops_flops: str) -> str:
-    return "Ops" if ops_flops == "OP" else "Flops"
-
-
 def get_color(category: str, backend: str = "html") -> str:
     key = category.removeprefix("ai_").lower()
 
@@ -576,7 +572,10 @@ class Roofline:
             document = build_interactive_document(
                 figure,
                 self.__view_models.get(ops_flops, RooflineViewModel()),
-                title=f"Empirical Roofline Analysis ({_figure_title(ops_flops)})",
+                title=(
+                    f"Empirical Roofline Analysis "
+                    f"({'Ops' if ops_flops == 'OP' else 'Flops'})"
+                ),
             )
             path = f"{prefix}{dt_list}{kernel_list}.html"
             Path(path).write_text(document, encoding="utf-8")
@@ -597,7 +596,8 @@ class Roofline:
                 children=[
                     html.H3(
                         children=(
-                            f"Empirical Roofline Analysis ({_figure_title(ops_flops)})"
+                            f"Empirical Roofline Analysis "
+                            f"({'Ops' if ops_flops == 'OP' else 'Flops'})"
                         )
                     ),
                     dcc.Graph(figure=figure),
