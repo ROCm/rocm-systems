@@ -496,14 +496,14 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                     'matrix data-type selection requires Matrix A/B selector fields'
                 )
             a_type, b_type_hi, b_type_lo = selector_fields
-            L.append(f'  uint32_t matrix_a_type = inst_.{a_type};')
+            L.append(f'  uint32_t matrix_a_fmt = inst_.{a_type};')
             L.append(
-                f'  uint32_t matrix_b_type = '
+                f'  uint32_t matrix_b_fmt = '
                 f'(inst_.{b_type_hi} << 2) | inst_.{b_type_lo};'
             )
             L.append(
                 f'  bool dispatched = amdgpu::dispatch_matrix_fmt_pair('
-                f'matrix_a_type, matrix_b_type,'
+                f'matrix_a_fmt, matrix_b_fmt,'
             )
             L.append(
                 f'      [&](uint32_t a_bits, uint32_t b_bits, auto extract_a, auto extract_b) {{'

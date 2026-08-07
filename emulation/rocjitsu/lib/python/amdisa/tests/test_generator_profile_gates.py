@@ -1187,12 +1187,12 @@ def test_matrix_data_types_use_profile_selector_fields_and_dispatch():
 
     body = _gen_mfma(inst, 'renamed_dynamic_formats', profile)
 
-    assert 'uint32_t matrix_a_type = inst_.a_selector;' in body
+    assert 'uint32_t matrix_a_fmt = inst_.a_selector;' in body
     assert (
-        'uint32_t matrix_b_type = (inst_.b_selector_hi << 2) | '
+        'uint32_t matrix_b_fmt = (inst_.b_selector_hi << 2) | '
         'inst_.b_selector_lo;' in body
     )
-    assert 'dispatch_matrix_fmt_pair(matrix_a_type, matrix_b_type,' in body
+    assert 'dispatch_matrix_fmt_pair(matrix_a_fmt, matrix_b_fmt,' in body
     assert 'amdgpu::exec_wmma_f32_mixed(cu, 16, 16, 128,' in body
 
 
@@ -1214,7 +1214,7 @@ def test_profile_without_matrix_data_type_selectors_uses_mfma_format_fields():
 
     body = _gen_mfma(inst, 'renamed_mfma', _matrix_profile())
 
-    assert 'uint32_t matrix_a_type' not in body
+    assert 'uint32_t matrix_a_fmt' not in body
     assert 'dispatch_matrix_fmt_pair(inst_.cbsz, inst_.blgp,' in body
     assert 'amdgpu::exec_f32_mixed(cu, 16, 16, 128,' in body
 
