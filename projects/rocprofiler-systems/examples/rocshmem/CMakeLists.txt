@@ -33,18 +33,23 @@ endif()
 
 # Fallback for older rocSHMEM packages whose installed cmake config calls a bare
 # find_dependency(NUMA) and cannot locate TheRock's sysdeps numa-config.cmake on
-# its own. Only when the first attempt failed do we point find_package(NUMA) at
-# that resolver via NUMA_DIR and retry. Newer rocSHMEM (rocm-systems#9583)
-# resolves NUMA internally, so the first attempt already succeeds and this whole
-# block — including setting NUMA_DIR — is skipped, deferring entirely to rocSHMEM.
-if(NOT TARGET roc::rocshmem AND NOT NUMA_DIR)
-    foreach(_rocm_root ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm)
-        if(EXISTS "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA/numa-config.cmake")
-            set(NUMA_DIR "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA")
-            find_package(rocshmem HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm QUIET)
-            break()
-        endif()
-    endforeach()
+# its own. Only reached when the first attempt failed; newer rocSHMEM
+# (rocm-systems#9583) resolves NUMA internally, so the first attempt already
+# succeeds and this whole block is skipped, deferring entirely to rocSHMEM.
+if(NOT TARGET roc::rocshmem)
+    # Discover the sysdeps NUMA location only if the user did not provide one.
+    if(NOT NUMA_DIR)
+        foreach(_rocm_root ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm)
+            if(EXISTS "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA/numa-config.cmake")
+                set(NUMA_DIR "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA")
+                break()
+            endif()
+        endforeach()
+    endif()
+    # Retry with whatever NUMA_DIR is now (user-provided or sysdeps-discovered).
+    if(NUMA_DIR)
+        find_package(rocshmem HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm QUIET)
+    endif()
 endif()
 
 if(NOT TARGET roc::rocshmem)
