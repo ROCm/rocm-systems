@@ -556,8 +556,9 @@ process_batch(processor_state& proc, const record_batch& batch)
             auto key = correlation_key{slot, rec.dispatch_id, gen, _gpu};
 
             // Signal-less: this EOP IS the completion event.
-            if(rec.start_known) signal_less_hub().note_start(key, rec.start_ticks);
-            if(auto _proven = signal_less_hub().prove_eop(key, rec.end_ticks, rec.loss_free))
+            if(rec.start_known) signal_less_hub().record_kernel_start(key, rec.start_ticks);
+            auto _proven = signal_less_hub().record_kernel_end(key, rec.end_ticks, rec.loss_free);
+            if(_proven)
             {
                 note_signal_less(signal_less_counter::eop_proven);
                 hand_off_proven(std::move(*_proven));

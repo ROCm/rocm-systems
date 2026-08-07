@@ -154,7 +154,7 @@ TEST(DispatchHub, eop_without_start_still_proves_completion)
     auto key = key_of(4, 8);
     ASSERT_TRUE(register_one(hub, key));
 
-    auto p = hub.prove_eop(key, 2000, true);
+    auto p = hub.record_kernel_end(key, 2000, true);
     ASSERT_TRUE(p.has_value());
     EXPECT_FALSE(p->start_ticks.has_value());  // -> COMPLETED_NO_TIMING, still retires
 }
@@ -167,12 +167,12 @@ TEST(DispatchHub, result_before_register_is_rejected_not_cached)
     auto hub = hub_t{};
     auto key = key_of(4, 9);
 
-    EXPECT_FALSE(hub.prove_eop(key, 2000, true).has_value());
+    EXPECT_FALSE(hub.record_kernel_end(key, 2000, true).has_value());
 
     ASSERT_TRUE(register_one(hub, key));
     // The earlier result was not retained: the new dispatch is still pending.
     EXPECT_EQ(live_entries(hub), 1u);
-    auto p = hub.prove_eop(key, 5000, true);
+    auto p = hub.record_kernel_end(key, 5000, true);
     ASSERT_TRUE(p.has_value());
     EXPECT_EQ(p->end_ticks, 5000u);  // the fresh record, not the stale one
 }
@@ -185,7 +185,7 @@ TEST(DispatchHub, eop_under_lossy_drain_completes_nothing)
     auto key = key_of(4, 10);
     ASSERT_TRUE(register_one(hub, key));
 
-    EXPECT_FALSE(hub.prove_eop(key, 2000, /*drain_loss_free=*/false).has_value());
+    EXPECT_FALSE(hub.record_kernel_end(key, 2000, /*drain_loss_free=*/false).has_value());
     EXPECT_EQ(live_entries(hub), 1u);  // still pending, not consumed
 }
 
@@ -196,10 +196,10 @@ TEST(DispatchHub, start_is_retained_until_terminal)
     auto hub = hub_t{};
     auto key = key_of(4, 11);
     ASSERT_TRUE(register_one(hub, key));
-    EXPECT_TRUE(hub.note_start(key, 42));
+    EXPECT_TRUE(hub.record_kernel_start(key, 42));
 
     // Nothing ages it out; the only thing that clears it is a terminal transition.
-    auto p = hub.prove_eop(key, 99, true);
+    auto p = hub.record_kernel_end(key, 99, true);
     ASSERT_TRUE(p.has_value());
     ASSERT_TRUE(p->start_ticks.has_value());
     EXPECT_EQ(*p->start_ticks, 42u);
@@ -208,7 +208,7 @@ TEST(DispatchHub, start_is_retained_until_terminal)
 TEST(DispatchHub, unmatched_start_is_dropped)
 {
     auto hub = hub_t{};
-    EXPECT_FALSE(hub.note_start(key_of(4, 12), 1));
+    EXPECT_FALSE(hub.record_kernel_start(key_of(4, 12), 1));
     EXPECT_EQ(live_entries(hub), 0u);
 }
 
@@ -231,8 +231,8 @@ TEST(DispatchHub, batch_registers_all_or_none)
     clash.emplace_back(reg_of(key_of(4, 2)));  // already live
     EXPECT_FALSE(hub.register_batch(std::move(clash)));
     EXPECT_EQ(live_entries(hub), 3u);  // unchanged: no partial registration
-    EXPECT_FALSE(hub.prove_eop(key_of(4, 10), 1, true).has_value());
-    EXPECT_FALSE(hub.prove_eop(key_of(4, 11), 1, true).has_value());
+    EXPECT_FALSE(hub.record_kernel_end(key_of(4, 10), 1, true).has_value());
+    EXPECT_FALSE(hub.record_kernel_end(key_of(4, 11), 1, true).has_value());
 }
 
 // Invariant 3: no overwrite semantics -- a duplicate inside one batch is an
@@ -270,7 +270,7 @@ TEST(DispatchHub, concurrent_prove_vs_leak_resolves_each_key_once)
 
     auto prover = std::thread{[&hub, &proven_n]() {
         for(uint32_t i = 0; i < kCount; ++i)
-            if(hub.prove_eop(key_of(4, i), 7, true).has_value()) ++proven_n;
+            if(hub.record_kernel_end(key_of(4, i), 7, true).has_value()) ++proven_n;
     }};
     auto leaker = std::thread{[&hub, &leaked_n]() {
         for(uint32_t i = 0; i < kCount; ++i)
@@ -331,8 +331,8 @@ TEST(DispatchHub, stopping_session_still_completes_an_in_flight_eop)
 
     hub.set_mode(session_mode::stopping);
 
-    EXPECT_TRUE(hub.note_start(key, 1000));
-    auto p = hub.prove_eop(key, 2000, /*drain_loss_free=*/true);
+    EXPECT_TRUE(hub.record_kernel_start(key, 1000));
+    auto p = hub.record_kernel_end(key, 2000, /*drain_loss_free=*/true);
     ASSERT_TRUE(p.has_value());
     ASSERT_TRUE(p->start_ticks.has_value());
     EXPECT_EQ(*p->start_ticks, 1000u);
@@ -376,8 +376,8 @@ TEST(DispatchHub, child_epoch_short_circuits_every_operation)
     hub.abandon_in_child();
 
     EXPECT_FALSE(register_one(hub, key_of(4, 2)));
-    EXPECT_FALSE(hub.note_start(key_of(4, 1), 1));
-    EXPECT_FALSE(hub.prove_eop(key_of(4, 1), 1, true).has_value());
+    EXPECT_FALSE(hub.record_kernel_start(key_of(4, 1), 1));
+    EXPECT_FALSE(hub.record_kernel_end(key_of(4, 1), 1, true).has_value());
     EXPECT_FALSE(hub.is_ledgered(1));
     EXPECT_TRUE(hub.quarantine_slot(0, 4).empty());
     EXPECT_TRUE(hub.drain_for_teardown().first.empty());
@@ -418,8 +418,8 @@ TEST(DispatchHub, shape_ii_proves_completion_without_a_start)
     auto key = key_of(4, 50);
     ASSERT_TRUE(register_one(hub, key));
 
-    // No note_start(): the START record was overwritten before the reader saw it.
-    auto p = hub.prove_eop(key, 900, /*drain_loss_free=*/true);
+    // No record_kernel_start(): the START record was overwritten before the reader saw it.
+    auto p = hub.record_kernel_end(key, 900, /*drain_loss_free=*/true);
     ASSERT_TRUE(p.has_value());
     EXPECT_FALSE(p->start_ticks.has_value());
     EXPECT_EQ(p->end_ticks, 900u);
@@ -434,7 +434,7 @@ TEST(DispatchHub, shape_ii_under_a_lossy_drain_proves_nothing)
     auto key = key_of(4, 51);
     ASSERT_TRUE(register_one(hub, key));
 
-    EXPECT_FALSE(hub.prove_eop(key, 900, /*drain_loss_free=*/false).has_value());
+    EXPECT_FALSE(hub.record_kernel_end(key, 900, /*drain_loss_free=*/false).has_value());
     EXPECT_EQ(live_entries(hub), 1u);  // still pending, still matchable
 }
 
@@ -453,7 +453,7 @@ TEST(DispatchHub, loss_ledger_selects_exactly_the_leaked_ids)
     ASSERT_TRUE(register_one(hub, key_of(4, 2), /*corr_id=*/22));
 
     // 11 completes normally, 22 is leaked by its slot being quarantined.
-    ASSERT_TRUE(hub.prove_eop(key_of(4, 1), 1, true).has_value());
+    ASSERT_TRUE(hub.record_kernel_end(key_of(4, 1), 1, true).has_value());
     ASSERT_EQ(hub.quarantine_slot(0, 4).size(), 1u);
 
     EXPECT_FALSE(hub.is_ledgered(11));  // completed -> retires normally
@@ -658,8 +658,8 @@ TEST(DispatchHub, destroy_closes_the_slot_for_reuse)
     EXPECT_FALSE(register_one(hub, key_of(40, 7), 600));
 
     // A stale late record from queue A completes nothing.
-    EXPECT_FALSE(hub.prove_eop(key_of(40, 1), 999, /*loss_free=*/true).has_value());
-    EXPECT_FALSE(hub.prove_eop(key_of(40, 2), 999, true).has_value());
+    EXPECT_FALSE(hub.record_kernel_end(key_of(40, 1), 999, /*loss_free=*/true).has_value());
+    EXPECT_FALSE(hub.record_kernel_end(key_of(40, 2), 999, true).has_value());
 }
 
 // "Closing" is deliberately an ELIGIBILITY-only gate. A batch that already passed
@@ -677,7 +677,7 @@ TEST(DispatchHub, closing_blocks_new_reservations_but_not_an_in_flight_one)
     // ...but a batch already past that point still registers, and can complete.
     EXPECT_TRUE(hub.can_register_batch({key_of(40, 1)}));
     ASSERT_TRUE(register_one(hub, key_of(40, 1)));
-    EXPECT_TRUE(hub.prove_eop(key_of(40, 1), 5, true).has_value());
+    EXPECT_TRUE(hub.record_kernel_end(key_of(40, 1), 5, true).has_value());
 
     // Quarantine, by contrast, refuses registration outright.
     hub.quarantine_slot(0, 40);
@@ -723,7 +723,7 @@ TEST(DispatchHub, concurrent_destroy_and_registration_stay_consistent)
     auto prover = std::atomic<uint32_t>{0};
     auto reader = std::thread{[&hub, &prover]() {
         for(uint32_t s = 0; s < kSlots; ++s)
-            if(hub.prove_eop(key_of(s, 1), 9, true).has_value()) ++prover;
+            if(hub.record_kernel_end(key_of(s, 1), 9, true).has_value()) ++prover;
     }};
 
     destroyer.join();
@@ -768,8 +768,8 @@ all_entry_points_short_circuit()
     bool ok = true;
 
     ok = ok && !register_one(forked_hub(), key_of(40, 99));
-    ok = ok && !forked_hub().prove_eop(key_of(40, 1), 1, true).has_value();
-    ok = ok && !forked_hub().note_start(key_of(40, 1), 1);
+    ok = ok && !forked_hub().record_kernel_end(key_of(40, 1), 1, true).has_value();
+    ok = ok && !forked_hub().record_kernel_start(key_of(40, 1), 1);
     ok = ok && forked_hub().pending_for_slot(0, 40) == 0;
     ok = ok && !forked_hub().is_closing(0, 40);
     ok = ok && !forked_hub().is_ledgered(500);
@@ -822,7 +822,7 @@ TEST(fork_safety, forked_child_short_circuits_and_survives_normal_exit)
 
     // The parent is untouched by the child's abandonment.
     EXPECT_EQ(live_entries(parent_only), 1u);
-    EXPECT_TRUE(parent_only.prove_eop(key_of(9, 1), 5, true).has_value());
+    EXPECT_TRUE(parent_only.record_kernel_end(key_of(9, 1), 5, true).has_value());
 }
 
 // The child must survive even when the fork happens while another thread is
@@ -837,7 +837,7 @@ TEST(fork_safety, child_survives_a_fork_taken_under_contention)
         for(uint32_t i = 0; !stop.load(); ++i)
         {
             register_one(hub, key_of(1, i % 512));
-            hub.prove_eop(key_of(1, i % 512), 1, true);
+            hub.record_kernel_end(key_of(1, i % 512), 1, true);
             live_entries(hub);
         }
     }};
@@ -852,7 +852,7 @@ TEST(fork_safety, child_survives_a_fork_taken_under_contention)
             // survive; abandoning makes every entry point avoid it entirely.
             hub.abandon_in_child();
             const bool ok = live_entries(hub) == 0 && !register_one(hub, key_of(1, 7)) &&
-                            !hub.prove_eop(key_of(1, 7), 1, true).has_value();
+                            !hub.record_kernel_end(key_of(1, 7), 1, true).has_value();
             // _exit, not exit: this case is about not DEADLOCKING on an inherited
             // locked mutex. The busy thread's allocations are unreachable in the
             // child (its stack is gone), so a normal exit's leak check would report
@@ -1019,7 +1019,7 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
             case 1:  // START
             {
                 auto k = random_key();
-                hub.note_start(to_key(k), 10 + (rng() % 50));
+                hub.record_kernel_start(to_key(k), 10 + (rng() % 50));
                 break;
             }
             case 2:
@@ -1027,12 +1027,13 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
             {
                 auto       k         = random_key();
                 const bool loss_free = (rng() % 4) != 0;
-                // No session-mode term: prove_eop completes an in-flight EOP even
+                // No session-mode term: record_kernel_end completes an in-flight EOP even
                 // once teardown has begun.
                 const bool expect_proven = loss_free && model.at(k) == model_state::pending;
 
-                auto got = hub.prove_eop(to_key(k), 900, loss_free);
-                EXPECT_EQ(got.has_value(), expect_proven) << "prove_eop disagreed with the model";
+                auto got = hub.record_kernel_end(to_key(k), 900, loss_free);
+                EXPECT_EQ(got.has_value(), expect_proven)
+                    << "record_kernel_end disagreed with the model";
                 if(got)
                 {
                     model.state[k] = model_state::proven;
@@ -1128,7 +1129,7 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
                 EXPECT_EQ(model.emitted[k], 0) << "a leaked dispatch emitted a record";
 
                 // No leaked entry is matchable again.
-                EXPECT_FALSE(hub.prove_eop(to_key(k), 1, true).has_value())
+                EXPECT_FALSE(hub.record_kernel_end(to_key(k), 1, true).has_value())
                     << "a leaked entry was still matchable";
                 EXPECT_FALSE(hub.can_register_batch({to_key(k)}))
                     << "a leaked key was re-registerable";
@@ -1177,10 +1178,10 @@ TEST(DispatchHub, pending_for_slot_counts_only_that_slots_live_entries)
 
     // A proven entry leaves the hub, so it stops counting as outstanding -- which
     // is what lets the close drain observe progress and finish early.
-    ASSERT_TRUE(hub.prove_eop(key_of(40, 1), 5, true).has_value());
+    ASSERT_TRUE(hub.record_kernel_end(key_of(40, 1), 5, true).has_value());
     EXPECT_EQ(hub.pending_for_slot(0, 40), 1u);
 
-    ASSERT_TRUE(hub.prove_eop(key_of(40, 2), 5, true).has_value());
+    ASSERT_TRUE(hub.record_kernel_end(key_of(40, 2), 5, true).has_value());
     EXPECT_EQ(hub.pending_for_slot(0, 40), 0u);
     EXPECT_EQ(hub.pending_for_slot(0, 41), 1u);
 }
@@ -1197,8 +1198,8 @@ TEST(DispatchHub, a_clean_drain_strands_nothing_and_ledgers_nothing)
     hub.mark_slot_closing(0, 40);
 
     // The reader pairs both while the close is waiting.
-    EXPECT_TRUE(hub.prove_eop(key_of(40, 1), 5, true).has_value());
-    EXPECT_TRUE(hub.prove_eop(key_of(40, 2), 6, true).has_value());
+    EXPECT_TRUE(hub.record_kernel_end(key_of(40, 1), 5, true).has_value());
+    EXPECT_TRUE(hub.record_kernel_end(key_of(40, 2), 6, true).has_value());
     EXPECT_EQ(hub.pending_for_slot(0, 40), 0u);
 
     // The deadline expires with nothing left, so the strand is a no-op.
@@ -1219,7 +1220,7 @@ TEST(DispatchHub, an_incomplete_drain_strands_only_the_remainder)
     hub.mark_slot_closing(0, 40);
 
     // Only one record makes it before the deadline.
-    EXPECT_TRUE(hub.prove_eop(key_of(40, 2), 5, true).has_value());
+    EXPECT_TRUE(hub.record_kernel_end(key_of(40, 2), 5, true).has_value());
     EXPECT_EQ(hub.pending_for_slot(0, 40), 2u);
 
     auto stranded = hub.quarantine_slot(0, 40);
@@ -1249,7 +1250,7 @@ TEST(DispatchHub, pending_for_slot_observes_concurrent_pairing)
 
     auto reader = std::thread{[&hub]() {
         for(uint32_t i = 0; i < kCount; ++i)
-            hub.prove_eop(key_of(40, i), 7, true);
+            hub.record_kernel_end(key_of(40, i), 7, true);
     }};
 
     // The closing thread polls exactly as drain_close_signal_less_queue does.
@@ -1282,12 +1283,12 @@ TEST(DispatchHub, entries_on_different_gpus_never_collide)
     EXPECT_EQ(live_entries(hub), 2u);
 
     // Proving GPU 0's dispatch leaves GPU 1's untouched.
-    auto p0 = hub.prove_eop(on_gpu0, 500, true);
+    auto p0 = hub.record_kernel_end(on_gpu0, 500, true);
     ASSERT_TRUE(p0.has_value());
     EXPECT_EQ(p0->key.gpu_id, 0u);
     EXPECT_EQ(live_entries(hub), 1u);
 
-    auto p1 = hub.prove_eop(on_gpu1, 600, true);
+    auto p1 = hub.record_kernel_end(on_gpu1, 600, true);
     ASSERT_TRUE(p1.has_value());
     EXPECT_EQ(p1->key.gpu_id, 1u);
     EXPECT_EQ(p1->end_ticks, 600u) << "GPU 1 must get its own record, not GPU 0's";
@@ -1320,8 +1321,8 @@ TEST(DispatchHub, records_arriving_after_hw_completion_still_complete)
 
     // Phase 1 returns: the GPU has finished, so the EOPs now exist and the reader
     // pairs them during phase 2.
-    ASSERT_TRUE(hub.prove_eop(key_of(40, 1), 500, true).has_value());
-    ASSERT_TRUE(hub.prove_eop(key_of(40, 2), 600, true).has_value());
+    ASSERT_TRUE(hub.record_kernel_end(key_of(40, 1), 500, true).has_value());
+    ASSERT_TRUE(hub.record_kernel_end(key_of(40, 2), 600, true).has_value());
     EXPECT_EQ(hub.pending_for_slot(0, 40), 0u);
 
     // Phase 3: nothing left to strand, and no correlation id leaks.

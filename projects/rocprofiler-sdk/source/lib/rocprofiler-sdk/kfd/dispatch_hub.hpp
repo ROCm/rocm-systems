@@ -43,13 +43,13 @@
 // lock:
 //
 //     ABSENT --register_batch--> PENDING(start_ticks: none|present)
-//     PENDING --prove_eop (loss-free drain)--> EOP_PROVEN   (payload handed out)
+//     PENDING --record_kernel_end (loss-free drain)--> EOP_PROVEN (payload handed out)
 //     PENDING --leak/poison/quarantine/close/teardown--> LEAKED (payload handed
 //                                                                out, NOT retired)
 //
-// Once an entry leaves PENDING through prove_eop() it can never become LEAKED,
-// which is why proven entries leave the map entirely -- ownership moves to the
-// caller and the hub cannot hand it out twice.
+// Once an entry leaves PENDING through record_kernel_end() it can never become
+// LEAKED, which is why proven entries leave the map entirely -- ownership moves
+// to the caller and the hub cannot hand it out twice.
 //
 // THREADING: exactly one mutex, and the hub NEVER invokes caller code while
 // holding it -- every operation returns owned values the caller acts on
@@ -167,10 +167,10 @@ public:
 
     // --- reader side ------------------------------------------------------
 
-    // Cleared only by the entry leaving PENDING. No session-mode gate, for the
-    // same reason as prove_eop: a START seen during the teardown drain is what
+    // Cleared only by the entry leaving PENDING. No session-mode gate, for the same
+    // reason as record_kernel_end: a START seen during the teardown drain is what
     // gives that drain's EOP an interval instead of a no-timing completion.
-    bool note_start(const correlation_key& key, uint64_t start_ticks)
+    bool record_kernel_start(const correlation_key& key, uint64_t start_ticks)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
 
@@ -191,9 +191,9 @@ public:
     // overrun proves nothing about WHICH dispatch it belongs to, so it completes
     // nothing. A key with no live entry is REJECTED, never cached -- a result
     // with no pending owner must not be applied to a later same-key dispatch.
-    std::optional<proven> prove_eop(const correlation_key& key,
-                                    uint64_t               end_ticks,
-                                    bool                   drain_loss_free)
+    std::optional<proven> record_kernel_end(const correlation_key& key,
+                                            uint64_t               end_ticks,
+                                            bool                   drain_loss_free)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return std::nullopt;
         if(!drain_loss_free) return std::nullopt;
