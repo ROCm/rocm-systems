@@ -216,8 +216,7 @@ The intended iteration loop for this directory:
 2. Trace what state would have to exist for control flow to reach it.
 3. Add a new `TEST()` that constructs that state.
 4. Rebuild, re-render coverage, confirm the branch is now hit.
-5. Commit, with the coverage delta in the commit message
-   (e.g. "branch coverage 0.97% -> 1.4%").
+5. Commit, noting in the message which branch the new test covers.
 
 
 ## Running and rebuilding
