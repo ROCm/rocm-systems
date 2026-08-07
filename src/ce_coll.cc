@@ -44,6 +44,10 @@ static constexpr size_t HIER_COLL_CHUNK_ALIGN = 8 * 1024;
 NCCL_PARAM(RmaMultiCtxThreshold, "RMA_MULTI_CTX_THRESHOLD", -1);
 static constexpr int64_t HIER_COLL_MULTI_CTX_THRESHOLD_DEFAULT = 4 * 1024 * 1024;
 
+// Number of internal RMA contexts used by hierarchical CE collectives.
+// Values above NCCL_NUM_RMA_INT_CTX are clamped.
+NCCL_PARAM(HierCeCollNumCtx, "HIER_CE_COLL_NUM_CTX", -1);
+
 // Decide multicast vs unicast for CE AllGather: a CE-only tuning mask lets
 // ncclTuningCompute pick the fastest CE method (UC vs MC).
 int ncclCeAllGatherUseMulticast(struct ncclComm* comm, size_t perRankBytes, int captured, int inPlace) {
@@ -913,14 +917,18 @@ static void ncclHierCollFreeChunkPlan(struct ncclHierChunkPlan* plan) {
 }
 
 // Effective number of internal contexts for a hierarchical collective's rail
-// step. Transfers below the multi-context threshold stay on a single context:
-// the per-context launch/progress overhead dominates for small messages. Both
-// gate inputs are identical on all ranks (per-peer bytes by the collective API
-// contract, the threshold by the uniform-env requirement), so sender and
-// receiver always derive the same chunk->context mapping.
 static int ncclHierCollNumCtx(struct ncclRmaProxyState* rmaProxyState, size_t perPeerBytes, bool persistent) {
-  if (persistent) return 1;
   int numCtx = rmaProxyState->numIntCtx;
+  int64_t numCtxOverride = ncclParamHierCeCollNumCtx();
+  if (numCtxOverride > 0) {
+    if (numCtxOverride > numCtx) {
+      WARN("NCCL_HIER_CE_COLL_NUM_CTX=%lld exceeds provisioned contexts; using %d. "
+           "Increase NCCL_NUM_RMA_INT_CTX before init.",
+           (long long)numCtxOverride, numCtx);
+    }
+    return numCtxOverride < numCtx ? (int)numCtxOverride : numCtx;
+  }
+  if (persistent) return 1;
   int64_t threshold = ncclParamRmaMultiCtxThreshold();
   if (threshold < 0) threshold = HIER_COLL_MULTI_CTX_THRESHOLD_DEFAULT;
   if (perPeerBytes < (size_t)threshold) numCtx = 1;
