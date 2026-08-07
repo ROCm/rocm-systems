@@ -74,6 +74,16 @@ rtc:
     # AIRUNTIME-2410
     disabled: [asan]
     tags: [compile]
+  Unit_Rtc_Reduce_Simple:
+    <<: *level_2
+    # AIRUNTIME-2410
+    disabled: [asan]
+    tags: [compile]
+  Unit_Rtc_Simple:
+    <<: *level_2
+    # AIRUNTIME-2410
+    disabled: [asan]
+    tags: [compile]
   Unit_hiprtc_stdheaders:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted

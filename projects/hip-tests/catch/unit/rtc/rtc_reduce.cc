@@ -148,7 +148,7 @@ void runAndCompileTest(const std::tuple<Types...> types) {
 
       for (int i = 0; i < *numReduces; i++) {
         int idx = warpSize * i + laneId;
-        if (masks[i] & (1ul << tid)) {
+        if (masks[i] & (1ull << laneId)) {
           // call the operator only if the lane is mentioned in the mask
           T& result = output[idx];
           result = )" +
@@ -173,4 +173,109 @@ HIP_TEST_CASE(Unit_Rtc_ReduceRandom) {
 
   SECTION("max") { runAndCompileTest<MaxOp>(allTypes); }
 
+}
+
+HIP_TEMPLATE_TEST_CASE(Unit_Rtc_Reduce_Simple, float, __half) {
+  std::string scalarName, intrinsicName, kernelStr;
+  hiprtcProgram prog;
+  unsigned int wavefrontSize = getWarpSize();
+  int numReduces = std::pow(2, getWarpSize() / 8 );
+  LinearAllocGuard<unsigned long long> d_masks(LinearAllocs::hipMalloc, numReduces * sizeof(unsigned long long));
+  LinearAllocGuard<unsigned long long> masks(LinearAllocs::malloc, d_masks.size_bytes());
+  int numReduce = 0;
+  LinearAllocGuard<TestType> d_output(LinearAllocs::hipMalloc, numReduces * wavefrontSize * sizeof(TestType));
+  LinearAllocGuard<TestType> output(LinearAllocs::malloc, numReduces * wavefrontSize * sizeof(TestType));
+  std::plus<TestType> op;
+  LinearAllocGuard<TestType> d_input(LinearAllocs::hipMalloc, wavefrontSize * sizeof(TestType));
+  LinearAllocGuard<TestType> input(LinearAllocs::malloc, d_input.size_bytes());
+  std::string opName = opToString<TestType, std::plus<TestType>>();
+  std::tuple<TestType> types;
+
+  for (int i = 0; i < wavefrontSize; i++) {
+    input.host_ptr()[i] = i;
+  }
+
+  HIP_CHECK(hipMemcpy(d_input.ptr(), input.host_ptr(), d_input.size_bytes(), hipMemcpyHostToDevice));
+  reduceOpToString<int, std::plus>(scalarName, intrinsicName);
+  kernelStr = R"(
+    template <class T, class MaskType>
+    __global__ void reduceRtcKernel(T* output, const T* input, const MaskType* masks, int* numReduces)
+    {
+      int tid = threadIdx.x;
+      int laneId = tid % warpSize;
+
+      for (int i = 0; i < *numReduces; i++) {
+        int idx = warpSize * i + laneId;
+        if (masks[i] & (1ull << laneId)) {
+          // call the operator only if the lane is mentioned in the mask
+          T& result = output[idx];
+          result = )" +
+              intrinsicName + R"((masks[i], input[idx]);
+        }
+      }
+   })";
+
+  HIPRTC_CHECK(
+      hiprtcCreateProgram(&prog, kernelStr.c_str(), "warp_reduce.hip", 0, nullptr, nullptr));
+  compileProgram<std::plus>(prog, types);
+
+
+  for (int i = 0; i < numReduces; i++) {
+    unsigned long long mask = 0ull;
+    unsigned char* maskAsUChar = reinterpret_cast<unsigned char*>(&mask);
+
+    // map each bit of maskCounter to a byte of mask
+    // e.g. 101 --> 0xFF00FF
+    for (int i = 0; i < sizeof(maskCounter) * 8; i++) {
+      if (maskCounter & (1 << i)) {
+        maskAsUChar[i] = 0xFF;
+      }
+    }
+
+    maskCounter++;
+    maskCounter = (maskCounter && (maskCounter < std::pow(2, getWarpSize() / 8 )))? maskCounter : 1;
+    masks.host_ptr()[numReduce] = mask;
+  }
+
+  HIP_CHECK(hipMemcpy(d_masks.ptr(), masks.ptr(), masks.size_bytes(), hipMemcpyHostToDevice));
+  runRtcReduceOp(prog, d_output.ptr(), d_input.ptr(), d_masks.ptr(), numReduces, op);
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost));
+
+  while (numReduce < kNumReduces) {
+    TestType expectedByLane[64];
+    TestType* waveInput = &input.ptr()[numReduce * wavefrontSize];
+    TestType expected = calculateExpected<TestType>(expectedByLane,
+                                      waveInput,
+                                      op,
+                                      masks.ptr()[numReduce],
+                                      AggregationType::Reduce);
+    int lane = 0;
+
+    while (lane < wavefrontSize) {
+      auto result = output.ptr()[numReduce * wavefrontSize + lane];
+      unsigned long long mask = masks.ptr()[numReduce];
+
+      if ((1ull << lane) & mask) {
+        if constexpr (std::is_integral<TestType>::value || std::is_same<std::plus<TestType>, MinOp<TestType>>::value ||
+                      std::is_same<std::plus<TestType>, MaxOp<TestType>>::value) {
+          // for integral types or min/max the result should match exactly
+          if constexpr (std::is_same<TestType, __half>::value)
+            REQUIRE(__half2float(result) == __half2float(expected));
+          else {
+            if (result != expected) {
+              printMismatch(result, expected, waveInput, mask, lane);
+              INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
+              REQUIRE(result == expected);
+            }
+          }
+        } else
+          compareFloatingPoint<std::plus<TestType>>(result, expected, mask, waveInput, lane);
+
+      }
+      lane++;
+    }
+    numReduce++;
+  }
+  HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 }
