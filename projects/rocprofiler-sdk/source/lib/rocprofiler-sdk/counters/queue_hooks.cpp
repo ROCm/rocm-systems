@@ -23,6 +23,8 @@
 #include "lib/rocprofiler-sdk/counters/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 
 namespace rocprofiler
@@ -52,9 +54,17 @@ kernel_dispatch_phase_enter_hook(
     hsa::inst_pkt_t&                                         inst_pkt,
     bool&                                                    is_serialized)
 {
+    const auto agent_id = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
+
     auto active = context::get_active_contexts(counter_contexts_filter());
     for(const auto* ctx : active)
     {
+        // Skip contexts that do not collect on this dispatch's agent. This is what keeps a
+        // GPU-1-only context from serializing GPU-0: queue_cb is what returns serialize=true,
+        // including on its disabled path, so filtering has to happen before the call rather
+        // than inside it.
+        if(!ctx->dispatch_counter_collection->collects_on(agent_id)) continue;
+
         for(auto& cb : ctx->dispatch_counter_collection->callbacks)
         {
             auto [packet, bSerial] = queue_cb(ctx,

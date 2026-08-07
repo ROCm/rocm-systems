@@ -25,6 +25,7 @@
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
@@ -101,8 +102,7 @@ counter_callback_info::setup_counter_config(std::shared_ptr<counter_config>& pro
             config.asts.back().set_dimensions(config.agent->id);
         } catch(std::runtime_error& e)
         {
-            ROCP_ERROR << metric.name() << " has improper dimensions"
-                       << " " << e.what();
+            ROCP_ERROR << metric.name() << " has improper dimensions" << " " << e.what();
             return ROCPROFILER_STATUS_ERROR_AST_NOT_FOUND;
         }
     }
@@ -152,7 +152,9 @@ start_context(const context::context* ctx)
     auto* controller = hsa::get_queue_controller();
 
     bool already_enabled = true;
-    CHECK_NOTNULL(controller)->enable_serialization();
+    // Scope serialization to the agents this context collects on. An empty set still means
+    // every agent, so an unrestricted context serializes the whole machine as before.
+    CHECK_NOTNULL(controller)->enable_serialization(ctx->dispatch_counter_collection->agents);
     ctx->dispatch_counter_collection->enabled.wlock([&](auto& enabled) {
         if(enabled) return;
         already_enabled = false;
@@ -194,7 +196,7 @@ stop_context(const context::context* ctx)
         // below. That ordering is why no separate "draining" flag is needed -- but it only works
         // because the drain happens here, before the slot is cleared.
         hsa::queue_controller_sync();
-        controller->disable_serialization();
+        controller->disable_serialization(ctx->dispatch_counter_collection->agents);
         // No per-queue callback to remove; counters::kernel_dispatch_phase_enter_hook no-ops once
         // dispatch_counter_collection is disabled above.
     }
@@ -203,6 +205,40 @@ stop_context(const context::context* ctx)
     // joining, and add() consumes inline once the thread is gone, so a late completion is still
     // processed -- but that is a backstop, not the guarantee the review asked for.
     callback_thread_stop();
+}
+
+rocprofiler_status_t
+set_dispatch_agents(rocprofiler_context_id_t      context_id,
+                    const rocprofiler_agent_id_t* agents,
+                    size_t                        num_agents)
+{
+    if(num_agents > 0 && agents == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    auto* ctx_p = context::get_mutable_registered_context(context_id);
+    if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
+    if(!ctx_p->dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+
+    // The agent set is read without a lock on the dispatch path and is what scopes
+    // serialization at start, so it may only change while the context is stopped.
+    for(const auto* itr : context::get_active_contexts())
+    {
+        if(itr && itr->context_idx == ctx_p->context_idx)
+            return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+    }
+
+    auto selected = std::unordered_set<uint64_t>{};
+    selected.reserve(num_agents);
+    for(size_t i = 0; i < num_agents; ++i)
+    {
+        const auto* agent = rocprofiler::agent::get_agent(agents[i]);
+        if(!agent || agent->type != ROCPROFILER_AGENT_TYPE_GPU)
+            return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+        selected.emplace(agents[i].handle);
+    }
+
+    ctx_p->dispatch_counter_collection->agents = std::move(selected);
+
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 rocprofiler_status_t

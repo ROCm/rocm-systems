@@ -159,6 +159,45 @@ rocprofiler_configure_callback_dispatch_counting_service(
     rocprofiler_dispatch_counting_record_cb_t  record_callback,
     void*                                      record_callback_args) ROCPROFILER_API;
 
+/**
+ * @brief (experimental) Restrict a dispatch counting service to a set of GPU agents.
+ *
+ *        By default a dispatch counting service applies to every GPU agent: the dispatch
+ *        callback is invoked for kernels on all agents, and kernel dispatches are serialized
+ *        on all agents for as long as the context is active. A tool can already decline to
+ *        profile a dispatch by leaving the ::rocprofiler_counter_config_id_t output of
+ *        ::rocprofiler_dispatch_counting_service_cb_t set to zero, but that only suppresses
+ *        counter collection -- the dispatch is still serialized. This function narrows the
+ *        service so that agents outside @p agents are neither instrumented nor serialized.
+ *
+ *        Restricting the agent set also relaxes the counter-collection context conflict:
+ *        two contexts may each configure a dispatch counting service and be active at the
+ *        same time provided their agent sets are disjoint. Contexts that leave the agent set
+ *        unrestricted claim every agent and therefore still conflict with each other.
+ *
+ *        Must be called after a dispatch counting service has been configured on
+ *        @p context_id and before the context is started. Calling it more than once replaces
+ *        the previous set. Passing @p num_agents of zero restores the default of all agents.
+ *
+ * @param [in] context_id context id with a configured dispatch counting service
+ * @param [in] agents array of GPU agent ids to restrict collection to
+ * @param [in] num_agents number of entries in @p agents
+ * @retval ::ROCPROFILER_STATUS_SUCCESS agent set was applied
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID @p context_id is not a valid context
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND no dispatch counting service has been
+ *         configured on @p context_id
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT @p agents is null with a non-zero
+ *         @p num_agents
+ * @retval ::ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND an entry in @p agents is not a GPU agent
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED the context is currently active
+ * @return ::rocprofiler_status_t
+ */
+ROCPROFILER_SDK_EXPERIMENTAL
+rocprofiler_status_t
+rocprofiler_dispatch_counting_service_set_agents(rocprofiler_context_id_t      context_id,
+                                                 const rocprofiler_agent_id_t* agents,
+                                                 size_t num_agents) ROCPROFILER_API;
+
 /** @} */
 
 ROCPROFILER_EXTERN_C_FINI

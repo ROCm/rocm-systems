@@ -288,9 +288,14 @@ start_context(rocprofiler_context_id_t context_id)
         {
             return ROCPROFILER_STATUS_SUCCESS;
         }
-        else if(cfg->dispatch_counter_collection && itr->dispatch_counter_collection)
+        else if(cfg->dispatch_counter_collection && itr->dispatch_counter_collection &&
+                cfg->dispatch_counter_collection->intersects(*itr->dispatch_counter_collection))
         {
-            // conflicting context
+            // Conflicting context. Two counter-collection contexts can run concurrently as
+            // long as they target disjoint sets of GPU agents -- the hardware counters they
+            // program are per-agent, so contexts that never touch the same agent cannot
+            // contend. A context with no agent restriction claims every agent and therefore
+            // still conflicts with any other counter-collection context.
             return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
         }
     }
