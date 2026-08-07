@@ -29,9 +29,10 @@
 //     whether the plugin build exposes GPU-based kernel timing (otherwise
 //     events with CPU-measured timing are discarded and nothing is recorded).
 //
-// The Inspector plugin is a separate .so and is not built as part of librccl,
-// so these tests SKIP unless its path is provided via NCCL_INSPECTOR_PLUGIN_SO
-// (or an inspector NCCL_PROFILER_PLUGIN).
+// The Inspector plugin is a separate .so loaded at runtime. BUILD_PROFILER_INSPECTOR
+// (on by default with BUILD_TESTS) builds it in-tree and CMake hands this binary its
+// path, so no setup is needed; NCCL_INSPECTOR_PLUGIN_SO or an inspector-named
+// NCCL_PROFILER_PLUGIN override it. These tests SKIP if none of those resolves.
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -84,12 +85,19 @@ protected:
     std::string dump_dir_;
     std::string plugin_so_;
 
-    // Resolve the Inspector plugin .so from the environment. Returns "" if not
-    // found, in which case the test skips.
+    // Resolve the Inspector plugin .so, preferring an explicit override from the
+    // environment over the copy built alongside this binary. Returns "" if none
+    // is usable, in which case the test skips.
     static std::string resolvePluginSo()
     {
         const char* candidates[] = {getenv("NCCL_INSPECTOR_PLUGIN_SO"),
-                                     getenv("NCCL_PROFILER_PLUGIN")};
+                                     getenv("NCCL_PROFILER_PLUGIN"),
+#ifdef RCCL_INSPECTOR_PLUGIN_SO
+                                     RCCL_INSPECTOR_PLUGIN_SO
+#else
+                                     nullptr
+#endif
+        };
         for(const char* c : candidates)
         {
             if(c && c[0] != '\0' && access(c, R_OK) == 0)
@@ -165,11 +173,28 @@ protected:
         auto recv_guard = makeScopeGuard([&]() { (void)hipFree(recv_buf); });
         HIP_CHECK(hipMemset(send_buf, 1, kMsgElems * sizeof(float)));
 
+        // The stop decision must be COLLECTIVE: every rank has to execute the
+        // exact same number of ring iterations. If each rank timed the loop with
+        // its own clock, differing per-iteration latencies (especially across
+        // nodes) would let some ranks exit while others enter one more
+        // ncclSend/ncclRecv + MPI_Barrier, deadlocking the survivors on the
+        // collective. So rank 0 owns the clock and broadcasts a keep-going flag
+        // that all ranks branch on identically.
         auto      start = std::chrono::steady_clock::now();
         long long iters = 0;
-        while(std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count()
-              < kWorkloadSeconds)
+        while(true)
         {
+            int keep_going = 0;
+            if(world_rank == 0)
+            {
+                const double elapsed =
+                    std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+                keep_going = (elapsed < kWorkloadSeconds) ? 1 : 0;
+            }
+            MPI_Bcast(&keep_going, 1, MPI_INT, 0, MPI_COMM_WORLD);
+            if(!keep_going)
+                break;
+
             RCCL_TEST_CHECK_GTEST_FAIL(ncclGroupStart());
             RCCL_TEST_CHECK_GTEST_FAIL(ncclSend(send_buf, kMsgElems, ncclFloat, next, comm, stream));
             RCCL_TEST_CHECK_GTEST_FAIL(ncclRecv(recv_buf, kMsgElems, ncclFloat, prev, comm, stream));

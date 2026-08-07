@@ -156,8 +156,11 @@ void MPIEnvironment::initialize_devices()
         return;
     }
 
-    // Complete HIP context reset and isolation
-    HIP_TEST_CHECK_GTEST_FAIL(hipDeviceReset());
+    // Bind this rank to its device. Deliberately no hipDeviceReset() here: MPI
+    // is already initialized, and Open MPI's ROCm accelerator component owns HIP
+    // resources on the current device by this point. Resetting tears them down
+    // behind its back, so MPI_Finalize later segfaults destroying a dangling
+    // stream in mca_accelerator_rocm_stream_destruct().
     HIP_TEST_CHECK_GTEST_FAIL(hipSetDevice(assigned_device));
 
     // Force HIP context creation and synchronization
