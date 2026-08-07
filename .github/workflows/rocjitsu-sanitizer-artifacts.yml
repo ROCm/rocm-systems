@@ -5,6 +5,10 @@
 # HSA-tools hook without building the project. The build needs no ROCm SDK:
 # the HSA/KFD headers are vendored under lib/rocjitsu/external_headers.
 #
+# The build itself lives in emulation/rocjitsu/scripts/build_sanitizer_artifacts.sh
+# so it can be run and debugged outside Actions; keep it that way and leave
+# only the container, the checkout, and the upload here.
+#
 # Download a bundle with emulation/rocjitsu/scripts/download_sanitizer_artifacts.py.
 name: "rocjitsu-sanitizer-artifacts"
 
@@ -38,19 +42,10 @@ permissions:
 
 env:
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/emulation/rocjitsu
-  ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
-  ROCJITSU_STAGE_DIR: ${{ github.workspace }}/stage
-  ZSTD_PREFIX: ${{ github.workspace }}/zstd-prefix
-  ZSTD_VERSION: "1.5.7"
-  ZSTD_SHA256: eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
+  ROCJITSU_BUILD_TYPE: ${{ inputs.build_type || 'Release' }}
+  ROCJITSU_RETENTION_DAYS: ${{ inputs.retention_days || '30' }}
   # Keep in sync with the job's container image; Actions has no YAML anchors.
-  BUILD_IMAGE: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:a382085df3ba2419b58aa9051350883a0d0b732a4bc0a4ef60458f8161bb08c6
-  BUILD_TYPE: ${{ inputs.build_type || 'Release' }}
-  RETENTION_DAYS: ${{ inputs.retention_days || '30' }}
-  # Everything the binaries may still load from the host. Anything outside this
-  # set means a dependency escaped static linking, which the smoke test treats
-  # as a build failure.
-  ALLOWED_NEEDED: ^(libc|libm|libdl|libpthread|librt)\.so\.[0-9]+$|^ld-linux-x86-64\.so\.2$
+  ROCJITSU_BUILD_IMAGE: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:a382085df3ba2419b58aa9051350883a0d0b732a4bc0a4ef60458f8161bb08c6
 
 jobs:
   build:
@@ -63,13 +58,6 @@ jobs:
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:a382085df3ba2419b58aa9051350883a0d0b732a4bc0a4ef60458f8161bb08c6 # 2026-06-11
     steps:
-      - name: Install build dependencies
-        run: |
-          # The image already carries CMake, Ninja, and gcc-toolset-13.
-          # zlib-static supplies the PIC libz.a the published binaries link in;
-          # zstd has no static package on AlmaLinux 8 and is built below.
-          dnf install -y -q zlib-devel zlib-static jq
-
       - name: Checkout rocm-systems
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -79,215 +67,32 @@ jobs:
             emulation/rocjitsu
             .github
 
-      - name: Build a static zstd
-        run: |
-          set -euo pipefail
-          # AlmaLinux 8 ships libzstd-devel without a static archive or any of
-          # upstream's CMake package files, so a system zstd could only ever be
-          # linked dynamically. Build upstream's own release as a PIC static
-          # library instead: its install tree exports zstd::libzstd_static, so
-          # the project's find_package(zstd) consumes it unmodified.
-          #
-          # The tarball is pinned by digest: the checksum upstream publishes
-          # with the release asset, cross-checked against an independent
-          # distribution manifest.
-          mkdir -p "${RUNNER_TEMP}/zstd-src"
-          curl -sSfL -o "${RUNNER_TEMP}/zstd.tar.gz" \
-            "https://github.com/facebook/zstd/releases/download/v${ZSTD_VERSION}/zstd-${ZSTD_VERSION}.tar.gz"
-          echo "${ZSTD_SHA256}  ${RUNNER_TEMP}/zstd.tar.gz" | sha256sum --check --quiet
-          tar -xzf "${RUNNER_TEMP}/zstd.tar.gz" \
-            -C "${RUNNER_TEMP}/zstd-src" --strip-components=1
+      - name: Install build dependencies
+        run: emulation/rocjitsu/scripts/build_sanitizer_artifacts.sh deps
 
-          cmake -S "${RUNNER_TEMP}/zstd-src/build/cmake" -B "${RUNNER_TEMP}/zstd-build" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="${ZSTD_PREFIX}" \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DZSTD_BUILD_SHARED=OFF \
-            -DZSTD_BUILD_STATIC=ON \
-            -DZSTD_BUILD_PROGRAMS=OFF \
-            -DZSTD_BUILD_TESTS=OFF
-          cmake --build "${RUNNER_TEMP}/zstd-build" -j "$(nproc)"
-          cmake --install "${RUNNER_TEMP}/zstd-build"
+      - name: Build a static zstd
+        run: emulation/rocjitsu/scripts/build_sanitizer_artifacts.sh zstd
 
       - name: Configure
-        working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
-        run: |
-          # Link every non-glibc dependency statically -- libstdc++ and libgcc
-          # from the toolchain, zlib and zstd from the packages above -- so the
-          # published binaries need nothing from the host but glibc itself. The
-          # libstdc++ half matches scripts/rocjitsu-docker-build.sh. Symbols
-          # stay hidden: both targets already link with --exclude-libs,ALL, so
-          # the absorbed libraries cannot collide with a host copy loaded into
-          # the same process.
-          #
-          # Keep FetchContent out of the source tree so the checkout stays clean.
-          cmake -S . -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
-            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-            -DFETCHCONTENT_BASE_DIR="${RUNNER_TEMP}/deps" \
-            -Dzstd_DIR="${ZSTD_PREFIX}/lib64/cmake/zstd" \
-            -DZLIB_USE_STATIC_LIBS=ON \
-            -DCMAKE_SHARED_LINKER_FLAGS="-static-libstdc++ -static-libgcc" \
-            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" \
-            -DBUILD_TESTING=OFF
+        run: emulation/rocjitsu/scripts/build_sanitizer_artifacts.sh configure
 
       - name: Build
-        run: |
-          # Halve the worker count to avoid OOM and excessive system load on the
-          # shared scale set, matching rocjitsu-corpus-tests.yml.
-          cmake --build "${ROCJITSU_BUILD_DIR}" \
-            --target rocjitsu_dbi_hooks rj_waitcheck \
-            -j "$(( ($(nproc) + 1) / 2 ))"
+        run: emulation/rocjitsu/scripts/build_sanitizer_artifacts.sh build
 
       - name: Stage bundle
         id: stage
-        run: |
-          set -euo pipefail
-          HOOK="${ROCJITSU_BUILD_DIR}/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
-          WAITCHECK="${ROCJITSU_BUILD_DIR}/tools/rj_waitcheck"
-          test -f "${HOOK}"
-          test -f "${WAITCHECK}"
-
-          mkdir -p "${ROCJITSU_STAGE_DIR}/lib" "${ROCJITSU_STAGE_DIR}/bin"
-          cp "${HOOK}" "${ROCJITSU_STAGE_DIR}/lib/"
-          cp "${WAITCHECK}" "${ROCJITSU_STAGE_DIR}/bin/"
-
-          # Record enough provenance to tie a downloaded bundle back to a commit
-          # and to the toolchain baseline the binaries were linked against.
-          #
-          # Report the highest versioned glibc symbol the binaries actually
-          # reference rather than the image's own glibc: the build image is
-          # newer than what the artifacts require, and the difference decides
-          # whether a given host can run them.
-          GLIBC_VERSION="$(
-            objdump -T "${HOOK}" "${WAITCHECK}" \
-              | grep -o 'GLIBC_[0-9.]*' \
-              | sed 's/^GLIBC_//' \
-              | sort -V \
-              | tail -1
-          )"
-          IMAGE_GLIBC="$(ldd --version | head -1 | awk '{print $NF}')"
-          # The rest of the runtime contract: every library the loader will go
-          # looking for on the host. Static linking should leave only glibc
-          # here, and the smoke test enforces that, but record it either way so
-          # the bundle documents itself.
-          NEEDED="$(
-            objdump -p "${HOOK}" "${WAITCHECK}" \
-              | awk '/NEEDED/ {print $2}' \
-              | sort -u \
-              | jq -Rn '[inputs]'
-          )"
-          COMPILER_VERSION="$(g++ --version | head -1)"
-          jq -n \
-            --arg repository "${GITHUB_REPOSITORY}" \
-            --arg ref "${GITHUB_REF_NAME}" \
-            --arg commit "${GITHUB_SHA}" \
-            --arg run_id "${GITHUB_RUN_ID}" \
-            --arg run_number "${GITHUB_RUN_NUMBER}" \
-            --arg run_attempt "${GITHUB_RUN_ATTEMPT}" \
-            --arg build_type "${BUILD_TYPE}" \
-            --arg compiler "${COMPILER_VERSION}" \
-            --arg glibc "${GLIBC_VERSION}" \
-            --arg image_glibc "${IMAGE_GLIBC}" \
-            --arg image "${BUILD_IMAGE}" \
-            --argjson needed "${NEEDED}" \
-            '{
-              repository: $repository,
-              branch: $ref,
-              commit: $commit,
-              run_id: $run_id,
-              run_number: $run_number,
-              run_attempt: $run_attempt,
-              build_type: $build_type,
-              compiler: $compiler,
-              minimum_glibc: $glibc,
-              shared_library_dependencies: $needed,
-              build_image: $image,
-              build_image_glibc: $image_glibc,
-              run_url: "https://github.com/\($repository)/actions/runs/\($run_id)"
-            }' > "${ROCJITSU_STAGE_DIR}/MANIFEST.json"
-
-          cd "${ROCJITSU_STAGE_DIR}"
-          # Digests are relative to the bundle root so the download script can
-          # verify them after extraction.
-          find bin lib -type f -print0 \
-            | sort -z \
-            | xargs -0 sha256sum > sha256sums.txt
-
-          echo "artifact_name=rocjitsu-sanitizers-${BUILD_TYPE}-${GITHUB_SHA::12}" >> "${GITHUB_OUTPUT}"
+        run: emulation/rocjitsu/scripts/build_sanitizer_artifacts.sh stage
 
       - name: Smoke test staged binaries
-        working-directory: ${{ env.ROCJITSU_STAGE_DIR }}
-        run: |
-          set -euo pipefail
-          # Confirm the tool starts and the hook resolves every symbol it needs
-          # before publishing binaries that users download unbuilt.
-          ./bin/rj_waitcheck --help > /dev/null
-
-          # `ldd -r` reports unresolved symbols on stdout but still exits 0,
-          # so inspect its output rather than trusting the status.
-          ldd -r ./lib/librocjitsu_dbi_hooks.so > ldd.txt 2>&1
-          cat ldd.txt
-          if grep -q "undefined symbol" ldd.txt; then
-            echo "::error::librocjitsu_dbi_hooks.so has unresolved symbols"
-            exit 1
-          fi
-          rm -f ldd.txt
-
-          # Hold the documented runtime contract: glibc and nothing else. A new
-          # dependency that slips past static linking would otherwise surface
-          # only as a load failure on a user's minimal host.
-          UNEXPECTED="$(
-            objdump -p ./bin/rj_waitcheck ./lib/librocjitsu_dbi_hooks.so \
-              | awk '/NEEDED/ {print $2}' \
-              | sort -u \
-              | grep -Ev "${ALLOWED_NEEDED}" || true
-          )"
-          if [ -n "${UNEXPECTED}" ]; then
-            echo "::error::binaries depend on host libraries beyond glibc: ${UNEXPECTED//$'\n'/ }"
-            exit 1
-          fi
-
-          # Absorbing zlib and zstd only stays safe while their symbols remain
-          # local. The hook is loaded into someone else's process, so an
-          # exported inflate() would interpose that process's own zlib.
-          EXPORTED="$(
-            nm -D --defined-only ./lib/librocjitsu_dbi_hooks.so \
-              | awk '{print $NF}' \
-              | grep -E '^(ZSTD_|ZDICT_|inflate|deflate|compress|uncompress|gz|crc32|adler32)' \
-              || true
-          )"
-          if [ -n "${EXPORTED}" ]; then
-            echo "::error::the hook exports absorbed compression symbols: ${EXPORTED//$'\n'/ }"
-            exit 1
-          fi
-
-          sha256sum --check --quiet sha256sums.txt
-          echo "--- MANIFEST.json ---"
-          cat MANIFEST.json
+        run: emulation/rocjitsu/scripts/build_sanitizer_artifacts.sh smoke-test
 
       - name: Upload sanitizer artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.stage.outputs.artifact_name }}
-          path: ${{ env.ROCJITSU_STAGE_DIR }}
+          path: ${{ steps.stage.outputs.stage_dir }}
           if-no-files-found: error
-          retention-days: ${{ env.RETENTION_DAYS }}
+          retention-days: ${{ env.ROCJITSU_RETENTION_DAYS }}
 
       - name: Summarize
-        run: |
-          {
-            echo "### rocjitsu sanitizer artifacts"
-            echo
-            echo "| Field | Value |"
-            echo "| --- | --- |"
-            echo "| Artifact | \`${{ steps.stage.outputs.artifact_name }}\` |"
-            echo "| Build type | \`${BUILD_TYPE}\` |"
-            echo "| Commit | \`${GITHUB_SHA}\` |"
-            echo "| Retention | ${RETENTION_DAYS} days |"
-            echo
-            echo "Download with:"
-            echo
-            echo '```sh'
-            echo "python3 emulation/rocjitsu/scripts/download_sanitizer_artifacts.py --run ${GITHUB_RUN_ID}"
-            echo '```'
-          } >> "${GITHUB_STEP_SUMMARY}"
+        run: emulation/rocjitsu/scripts/build_sanitizer_artifacts.sh summary
