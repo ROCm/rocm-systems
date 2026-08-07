@@ -103,7 +103,8 @@ test:
    defaulted hook as an unexpected call. Add or override the seam as needed
    (see "Adding more controllable seams" below).
 5. **Build and run** `rccl-UnitTestsMicro` (or `ctest -R rccl-UnitTestsMicro`),
-   then re-run `coverage.sh` to confirm the new branch is covered.
+   then re-render coverage (see the Coverage section) to confirm the new branch
+   is covered.
 
 ## Adding more controllable seams
 
@@ -167,47 +168,56 @@ triage it into the right bucket:
 
 ## Coverage
 
-`rccl-UnitTestsMicro` always builds with llvm source-based coverage.
-
-Render a report:
-
-```bash
-# File totals only (whole p2p.cc):
-./test/host/coverage.sh
-
-# File totals + annotated source for one function, with inline branch counts:
-FUNC=ipcRegisterBuffer ./test/host/coverage.sh
-
-# Same, plus an HTML report:
-FUNC=ipcRegisterBuffer ./test/host/coverage.sh --html build/release/test/host/coverage/html
-# Then open: build/release/test/host/coverage/html/index.html
-```
-
-The annotated text output puts a block under every conditional:
-
-```
-|  Branch (897:21): [True: 2, False: 2]
-```
-
-To find branches that are still uncovered, grep:
+`rccl-UnitTestsMicro` always builds with llvm source-based coverage
+(`-fprofile-instr-generate -fcoverage-mapping`). Render a report with ROCm's
+llvm tooling directly. Scope it to the unit under test -- the file compiled in
+via `P2P_CC_PATH`, i.e. the unroll-transformed
+`hipify/src/transport/p2p_tmp.cc` (there is no plain `p2p.cc` in the hipify
+tree; scoping to a non-existent file makes `llvm-cov` silently fall back to
+whole-binary totals).
 
 ```bash
-FUNC=ipcRegisterBuffer ./test/host/coverage.sh | grep -E "True: 0|False: 0"
+BD=build/release                        # or build/debug, or a standalone build dir
+BIN=$BD/test/host/rccl-UnitTestsMicro
+SRC=$BD/hipify/src/transport/p2p_tmp.cc
+LLVM=/opt/rocm/llvm/bin                 # ROCm's llvm-cov matches the build clang
+
+# 1. Run the instrumented binary, capturing a raw profile.
+LLVM_PROFILE_FILE=micro.profraw "$BIN"
+
+# 2. Index it.
+"$LLVM/llvm-profdata" merge -sparse micro.profraw -o micro.profdata
+
+# 3a. File/branch totals for the unit under test:
+"$LLVM/llvm-cov" report "$BIN" -instr-profile=micro.profdata \
+    --show-branch-summary --show-region-summary "$SRC"
+
+# 3b. Annotated source for one function, with inline branch counts
+#     (each conditional prints e.g. `Branch (897:21): [True: 2, False: 2]`;
+#      grep the output for `True: 0|False: 0` to find uncovered branches):
+"$LLVM/llvm-cov" show "$BIN" -instr-profile=micro.profdata \
+    --name=ipcRegisterBuffer --show-branches=count "$SRC"
+
+# 3c. HTML report (open cov-html/index.html):
+"$LLVM/llvm-cov" show "$BIN" -instr-profile=micro.profdata \
+    -format=html -output-dir=cov-html --show-branches=count "$SRC"
 ```
 
-Each match is a candidate for the next test.
+On OCI compute nodes `llvm-cov`/`llvm-profdata` are unavailable: run step 1
+there to produce `micro.profraw`, copy it plus the binary to a host that has
+`llvm-cov` (matching the build clang's major version), and render there.
 
 ### Coverage-driven workflow
 
 The intended iteration loop for this directory:
 
-1. Run `FUNC=<name> ./test/host/coverage.sh` and find an uncovered
-   branch.
+1. Render the annotated source (step 3b) and find an uncovered branch
+   (`True: 0` / `False: 0`).
 2. Trace what state would have to exist for control flow to reach it.
 3. Add a new `TEST()` that constructs that state.
-4. Rebuild, re-run coverage, confirm the branch is now hit.
+4. Rebuild, re-render coverage, confirm the branch is now hit.
 5. Commit, with the coverage delta in the commit message
-   (e.g. "branch coverage 0.97% → 1.4%").
+   (e.g. "branch coverage 0.97% -> 1.4%").
 
 
 ## Running and rebuilding
@@ -243,8 +253,7 @@ make -j $(nproc) rccl-UnitTestsMicro
 ./build/release/test/host/rccl-UnitTestsMicro \
     --gtest_filter='IpcRegisterBuffer.NullRegRecordIsNoOp'
 
-# Coverage (see Coverage section for FUNC/--html options):
-./test/host/coverage.sh
+# Coverage: see the Coverage section (run under LLVM_PROFILE_FILE, then llvm-cov).
 ```
 
 ## Standalone host-only build (no full librccl build)

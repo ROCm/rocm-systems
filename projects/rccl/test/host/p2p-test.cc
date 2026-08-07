@@ -2487,7 +2487,8 @@ TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureDirectModeShortCircuits)
 
 // ===========================================================================
 // Remaining-coverage tests: each one drives a single previously-unhit
-// branch identified by `FUNC=ipcRegisterBuffer ./coverage.sh`. The branches
+// branch identified via llvm-cov (see the Coverage section in the README, using
+// --name=ipcRegisterBuffer --show-branches=count). The branches
 // 961:35, 975:13, 981:11 and 1018:9 in ipcRegisterBuffer are intentionally
 // not covered: 961:35 is dead under our build (its precondition requires
 // `legacyIpcCap` to be true while ForceLegacyCudaRegister is *off*, which
