@@ -1230,8 +1230,7 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 // ================================================================================================
 void VirtualGPU::SetGpuQueue(hsa_queue_t* queue) {
   gpu_queue_ = queue;
-  // Bind the per-ring allocation/publish state owned by the queue pool. Null for
-  // unshared queues, which keep the fused single-producer path.
+  // Cache the publish state for this queue (null for unshared queues).
   ring_publish_ = roc_device_.GetRingPublishState(queue);
 
   cached_read_dispatch_id_ = 0;
@@ -1421,9 +1420,8 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   const uint32_t queueMask = queueSize - 1;
   const uint32_t sw_queue_size = queueMask;
 
-  // Split allocation from the GPU write-pointer bump. Reserve a slot from the
-  // CLR-private allocation counter. The GPU-visible write_dispatch_id is advanced
-  // later, in MarkReadyAndCommit, only over contiguously-published slots.
+  // Reserve a slot. On a shared ring this only bumps the allocation counter; the
+  // write_dispatch_id is advanced later in MarkReadyAndCommit.
   RingPublishState* ring = ring_publish_;
   uint64_t index = (ring != nullptr) ? ring->Reserve(1)
                                      : Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
@@ -1486,10 +1484,7 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   bool ring_doorbell = IS_LINUX || dev().IsPm4Emulation() || blocking ||
                        (skippedDispatches_ >= skip_limit) || ring_for_non_profiler_signal;
   if (ring != nullptr) {
-    // Publish this slot, advance the frontier over any contiguously-published slots
-    // (the frontier store is done under the commit lock via the callback), then ring
-    // the doorbell to the frontier. Note: never ring to our own index, which may sit
-    // above an earlier producer's still-unpublished slot.
+    // Publish this slot and ring the doorbell to the frontier, not to our own index.
     hsa_queue_t* q = gpu_queue_;
     RingPublishState::CommitResult r = ring->MarkReadyAndCommit(
         index, 1,
@@ -1705,8 +1700,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   // Per-chunk: yield if the queue is full (handles graphs larger than the queue), then
   // memcpy + per-packet fixups + headers + doorbell.  For graphs that fit in the queue
   // the yield never fires.
-  // Reserve the whole block from the CLR-private allocation counter (see
-  // dispatchGenericAqlPacket). Each chunk publishes and advances the frontier below.
+  // Reserve the whole block; each chunk publishes and advances the frontier below.
   RingPublishState* ring = ring_publish_;
   uint64_t startIndex = (ring != nullptr) ? ring->Reserve(numPackets)
                                           : Hsa::queue_add_write_index_screlease(gpu_queue_, numPackets);
@@ -1956,9 +1950,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     }
 
     if (ring != nullptr) {
-      // This chunk's slots [chunkStart, chunkEnd) are now published. Mark them ready
-      // and advance the frontier over any contiguously-published slots, then ring to
-      // the frontier. Note: never ring to this chunk's own end index.
+      // Publish this chunk's slots and ring the doorbell to the frontier.
       hsa_queue_t* q = gpu_queue_;
       RingPublishState::CommitResult r = ring->MarkReadyAndCommit(
           startIndex + chunkStart, chunkEnd - chunkStart,
@@ -2048,7 +2040,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
     }
   }
 
-  // Allocation-pointer reserve (see dispatchGenericAqlPacket).
+  // Reserve a slot (allocation counter on a shared ring; see dispatchGenericAqlPacket).
   RingPublishState* ring = ring_publish_;
   uint64_t index = (ring != nullptr) ? ring->Reserve(1)
                                      : Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
@@ -2160,7 +2152,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
     setFenceDirty(false);
   }
 
-  // Allocation-pointer reserve (see dispatchGenericAqlPacket).
+  // Reserve a slot (allocation counter on a shared ring; see dispatchGenericAqlPacket).
   RingPublishState* ring = ring_publish_;
   uint64_t index = (ring != nullptr) ? ring->Reserve(1)
                                      : Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
