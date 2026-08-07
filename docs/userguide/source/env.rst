@@ -788,8 +788,10 @@ multiple ranks per GPU are detected. If ``NCCL_NVLS_ENABLE`` is set to 2 (the de
 be silently disabled.
 
 Disclaimer: This is currently an experimental feature, and is still being tuned. It is not
-compatible with all configurations. It may exhaust resources and lock NCCL. If erroring or hanging,
-NCCL may benefit from lower limits on NCCL_MAX_CTAS and NCCL_NET_GDR_LEVEL=LOC.
+compatible with all configurations. It may exhaust resources and lock NCCL.
+Multiple threads in the same process controlling different ranks of the same communicator which
+are on the same device is not currently supported.
+If erroring or hanging, NCCL may benefit from lower limits on NCCL_MAX_CTAS and NCCL_NET_GDR_LEVEL=LOC.
 
 Values accepted
 ^^^^^^^^^^^^^^^
