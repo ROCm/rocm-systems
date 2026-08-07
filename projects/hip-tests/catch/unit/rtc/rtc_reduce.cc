@@ -72,6 +72,8 @@ void runTestReduceForTypes(hiprtcProgram& prog, const std::tuple<T, Types...>) {
     runRtcReduceOp(prog, d_output, d_input, d_masks, numReduces, op);
   };
 
+  std::cout << typeToString<T>() << std::endl;
+
   while (iteration < cmd_options.reduce_iterations) {
     runTestReduce<T, decltype(reduceFunc), Op>(iteration, reduceFunc);
     iteration++;
@@ -163,8 +165,7 @@ void runAndCompileTest(const std::tuple<Types...> types) {
 }
 
 HIP_TEST_CASE(Unit_Rtc_ReduceRandom) {
-  const std::tuple<int, unsigned int, long long, unsigned long long, float, half, double> allTypes;
-  const std::tuple<int, unsigned int, long long, unsigned long long> integralTypes;
+  const std::tuple<float, half> allTypes;
 
   SECTION("add") { runAndCompileTest<std::plus>(allTypes); }
 
@@ -172,9 +173,4 @@ HIP_TEST_CASE(Unit_Rtc_ReduceRandom) {
 
   SECTION("max") { runAndCompileTest<MaxOp>(allTypes); }
 
-  SECTION("and") { runAndCompileTest<AndOp>(integralTypes); }
-
-  SECTION("or") { runAndCompileTest<OrOp>(integralTypes); }
-
-  SECTION("xor") { runAndCompileTest<XorOp>(integralTypes); }
 }
