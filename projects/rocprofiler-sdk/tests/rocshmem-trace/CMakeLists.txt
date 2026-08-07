@@ -84,10 +84,6 @@ if(TARGET rocshmem-demo)
         ENVIRONMENT ${MPI_ENV_VARS}
         PRELOAD "${PRELOAD_ENV}"
         PASS_REGULAR_EXPRESSION "Finalization complete"
-        # rocshmem-demo prints this and exits 0 when it cannot run (no launcher-provided
-        # local rank, or no visible GPU). The tool still reports "Finalization complete" in
-        # that case, so without this the run would satisfy PASS_REGULAR_EXPRESSION despite
-        # tracing nothing at all.
         SKIP_REGULAR_EXPRESSION "rocSHMEM demo unavailable"
         FIXTURES_SETUP rocshmem-tracing
         DISABLED "${IS_DISABLED}")
@@ -101,9 +97,6 @@ if(TARGET rocshmem-demo)
         TIMEOUT 45
         ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-tracing-test.rank-0.json
         FIXTURES_REQUIRED rocshmem-tracing
-        # conftest.py skips when the trace file is absent, which happens whenever the
-        # execute test above was skipped. Surface that as a ctest skip so validating nothing
-        # is not reported as a pass.
         SKIP_REGULAR_EXPRESSION "SKIPPED"
         DISABLED "${IS_DISABLED}")
 endif()
