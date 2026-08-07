@@ -18,6 +18,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"
@@ -51,8 +52,11 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
@@ -2072,57 +2076,64 @@ TEST(DppPermuteTest, Dpp8SelectsWithinGroupsOfEight) {
   EXPECT_EQ(dpp8_src_lane(15, lane_sel), 14u);
 }
 
-TEST(DppPermuteTest, DppRead) {
+TEST(DppPermuteTest, True16SourceByteMaskFollowsOpSel) {
   using namespace amdgpu::dpp;
-  constexpr uint32_t kFetchInactive = 1;
+
+  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0000, /*source_index=*/0),
+            ExecutionPlugin::kLowHalfByteMask);
+  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0001, /*source_index=*/0),
+            ExecutionPlugin::kHighHalfByteMask);
+  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0000, /*source_index=*/1),
+            ExecutionPlugin::kLowHalfByteMask);
+  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0010, /*source_index=*/1),
+            ExecutionPlugin::kHighHalfByteMask);
+}
+
+TEST(DppPermuteTest, AccessPlanTracksSelectedSources) {
+  using namespace amdgpu::dpp;
   constexpr uint64_t kAllLanesActive = ~0ULL;
-  // Set up 64 source values: src[i] = i * 10.
-  uint32_t src[64];
-  for (int i = 0; i < 64; ++i)
-    src[i] = i * 10;
+  const auto plan =
+      make_dpp_access_plan(64, ROW_SHR1, 0xF, 0xF, /*bound_ctrl=*/1, /*fi=*/1, kAllLanesActive);
 
-  // row_shr 1: lane 1 reads from lane 0.
-  uint32_t val = dpp_read(src, 1, 64, 0x111, 0xF, 0xF, 1, kFetchInactive, 999, kAllLanesActive);
-  EXPECT_EQ(val, 0u); // src[0] = 0
+  EXPECT_EQ(plan.source_lane_for_destination[0], DppAccessPlan::kNoSourceLane);
+  EXPECT_EQ(plan.source_lane_for_destination[1], 0);
+  EXPECT_EQ(plan.source_lane_for_destination[5], 4);
+  EXPECT_EQ(plan.source_lane_for_destination[17], 16);
+  EXPECT_TRUE(plan.source_lane_mask & (uint64_t{1} << 0));
+  EXPECT_TRUE(plan.source_lane_mask & (uint64_t{1} << 4));
+  EXPECT_TRUE(plan.source_lane_mask & (uint64_t{1} << 16));
 
-  // Lane 5 reads from lane 4 (src[4] = 40).
-  val = dpp_read(src, 5, 64, 0x111, 0xF, 0xF, 1, kFetchInactive, 999, kAllLanesActive);
-  EXPECT_EQ(val, 40u);
+  const auto row_masked =
+      make_dpp_access_plan(64, ROW_SHR1, 0xE, 0xF, /*bound_ctrl=*/1, /*fi=*/1, kAllLanesActive);
+  EXPECT_EQ(row_masked.source_lane_for_destination[5], DppAccessPlan::kNoSourceLane);
 
-  // Lane 0 goes OOB, bound_ctrl=1 -> returns 0.
-  val = dpp_read(src, 0, 64, 0x111, 0xF, 0xF, 1, kFetchInactive, 999, kAllLanesActive);
-  EXPECT_EQ(val, 0u);
-
-  // Lane 0 goes OOB, bound_ctrl=0 -> returns old_val.
-  val = dpp_read(src, 0, 64, 0x111, 0xF, 0xF, 0, kFetchInactive, 999, kAllLanesActive);
-  EXPECT_EQ(val, 999u);
-
-  // Row mask disables row 0 (bits [3:0], row0 = lanes 0-15).
-  val = dpp_read(src, 5, 64, 0x111, 0xE, 0xF, 1, kFetchInactive, 999, kAllLanesActive);
-  EXPECT_EQ(val, 999u); // row 0 masked -> old_val
-
-  // Bank mask disables bank 1 (lanes 4-7 within each row).
-  val = dpp_read(src, 5, 64, 0x111, 0xF, 0xD, 1, kFetchInactive, 999, kAllLanesActive);
-  EXPECT_EQ(val, 999u); // bank 1 disabled -> old_val
-
-  // Unmasked lane in row 1: lane 17 reads from lane 16.
-  val = dpp_read(src, 17, 64, 0x111, 0xF, 0xF, 1, kFetchInactive, 999, kAllLanesActive);
-  EXPECT_EQ(val, 160u); // src[16] = 160
+  const auto bank_masked =
+      make_dpp_access_plan(64, ROW_SHR1, 0xF, 0xD, /*bound_ctrl=*/1, /*fi=*/1, kAllLanesActive);
+  EXPECT_EQ(bank_masked.source_lane_for_destination[5], DppAccessPlan::kNoSourceLane);
 }
 
 TEST(DppPermuteTest, FetchInactiveControlsInactiveSourceReads) {
   using namespace amdgpu::dpp;
-  constexpr uint32_t kOldVal = 0xDEADBEEFu;
   constexpr uint64_t kLane0Inactive = ~1ULL;
-  uint32_t src[64] = {};
-  src[0] = 0xA5A50000u;
 
-  EXPECT_EQ(dpp_read(src, 1, 64, ROW_SHR1, 0xF, 0xF, 1, 0, kOldVal, kLane0Inactive), 0u);
-  EXPECT_EQ(dpp_read(src, 1, 64, ROW_SHR1, 0xF, 0xF, 1, 1, kOldVal, kLane0Inactive), 0xA5A50000u);
+  const auto dpp_fi0 =
+      make_dpp_access_plan(64, ROW_SHR1, 0xF, 0xF, /*bound_ctrl=*/1, /*fi=*/0, kLane0Inactive);
+  EXPECT_EQ(dpp_fi0.source_lane_for_destination[1], DppAccessPlan::kNoSourceLane);
+  EXPECT_EQ(dpp_fi0.source_lane_mask & 1u, 0u);
+
+  const auto dpp_fi1 =
+      make_dpp_access_plan(64, ROW_SHR1, 0xF, 0xF, /*bound_ctrl=*/1, /*fi=*/1, kLane0Inactive);
+  EXPECT_EQ(dpp_fi1.source_lane_for_destination[1], 0);
+  EXPECT_EQ(dpp_fi1.source_lane_mask & 1u, 1u);
 
   constexpr uint32_t kAllLanesSelectLane0 = 0;
-  EXPECT_EQ(dpp8_read(src, 1, 32, kAllLanesSelectLane0, 0, kLane0Inactive), 0u);
-  EXPECT_EQ(dpp8_read(src, 1, 32, kAllLanesSelectLane0, 1, kLane0Inactive), 0xA5A50000u);
+  const auto dpp8_fi0 = make_dpp8_access_plan(32, kAllLanesSelectLane0, /*fi=*/0, kLane0Inactive);
+  EXPECT_EQ(dpp8_fi0.source_lane_for_destination[1], DppAccessPlan::kNoSourceLane);
+  EXPECT_EQ(dpp8_fi0.source_lane_mask & 1u, 0u);
+
+  const auto dpp8_fi1 = make_dpp8_access_plan(32, kAllLanesSelectLane0, /*fi=*/1, kLane0Inactive);
+  EXPECT_EQ(dpp8_fi1.source_lane_for_destination[1], 0);
+  EXPECT_EQ(dpp8_fi1.source_lane_mask & 1u, 1u);
 
   EXPECT_EQ(src_dpp8_fi(amdgpu::SRC_DPP8_FI_0), 0u);
   EXPECT_EQ(src_dpp8_fi(amdgpu::SRC_DPP8_FI_1), 1u);
@@ -2167,9 +2178,12 @@ struct Cdna1DppTraits {
 struct Cdna2DppTraits {
   static constexpr const char *name = "cdna2";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA2;
+  static constexpr uint32_t wf_size = 64;
   using MachineInst = cdna2::MachineInst;
   using Vop1VopDppMachineInst = cdna2::Vop1VopDppMachineInst;
+  using Vop1F64DppMachineInst = cdna2::Vop1VopDppMachineInst;
   using VMovB32Vop1 = cdna2::VMovB32Vop1;
+  using VCvtF64I32Vop1 = cdna2::VCvtF64I32Vop1;
   using VCmpEqU32Vopc = cdna2::VCmpEqU32Vopc;
   using VCmpxEqU32Vopc = cdna2::VCmpxEqU32Vopc;
 };
@@ -2177,9 +2191,12 @@ struct Cdna2DppTraits {
 struct Cdna3DppTraits {
   static constexpr const char *name = "cdna3";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA3;
+  static constexpr uint32_t wf_size = 64;
   using MachineInst = cdna3::MachineInst;
   using Vop1VopDppMachineInst = cdna3::Vop1VopDppMachineInst;
+  using Vop1F64DppMachineInst = cdna3::Vop1VopDppMachineInst;
   using VMovB32Vop1 = cdna3::VMovB32Vop1;
+  using VCvtF64I32Vop1 = cdna3::VCvtF64I32Vop1;
   using VCmpEqU32Vopc = cdna3::VCmpEqU32Vopc;
   using VCmpxEqU32Vopc = cdna3::VCmpxEqU32Vopc;
 };
@@ -2224,7 +2241,6 @@ struct Rdna2DppTraits {
 struct Rdna4DppTraits {
   static constexpr const char *name = "rdna4";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
-  static constexpr uint32_t wf_size = 32;
   using MachineInst = rdna4::MachineInst;
   using VopcMachineInst = rdna4::VopcMachineInst;
   using Vop1VopDpp16MachineInst = rdna4::Vop1VopDpp16MachineInst;
@@ -2266,7 +2282,6 @@ struct Rdna3_5DppTraits {
 struct Gfx1250DppTraits {
   static constexpr const char *name = "gfx1250";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_GFX1250;
-  static constexpr uint32_t wf_size = 32;
   using MachineInst = gfx1250::MachineInst;
   using VopcMachineInst = gfx1250::VopcMachineInst;
   using Vop1VopDpp16MachineInst = gfx1250::Vop1VopDpp16MachineInst;
@@ -2390,120 +2405,6 @@ template <typename Traits> void cdna_generated_vop1_dpp_write_mask_honors_bound_
   EXPECT_EQ(cu->read_vgpr(vbase + kDst, 63), 0x102Fu);
 }
 
-template <typename Traits> void cdna_generated_vopc_dpp_write_mask_honors_bound_ctrl() {
-  SCOPED_TRACE(Traits::name);
-  amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_vopc_write_mask_mem");
-  amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp_vopc_write_mask_l2");
-
-  amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = Traits::arch;
-  cfg.num_wf_slots = 1;
-  cfg.sgprs_per_wf = 104;
-  cfg.vgprs_per_wf = 32;
-  cfg.lds_size_kb = 64;
-
-  auto cu = amdgpu::ComputeUnitCore::create(std::string(Traits::name) + "_dpp_vopc_write_mask_cu",
-                                            cfg, &mem, &l2);
-  ASSERT_NE(cu, nullptr);
-
-  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-  ASSERT_NE(wf, nullptr);
-  ASSERT_EQ(wf->wf_size(), 64u);
-  wf->set_exec(~0ULL);
-  wf->set_vcc(0);
-
-  constexpr uint32_t kSrc0 = 4;
-  constexpr uint32_t kSrc1 = 8;
-  uint32_t vbase = wf->vgpr_alloc().base;
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    uint32_t src = 0x1000u + lane;
-    uint32_t cmp = src;
-    if (lane >= 16 && lane < 32)
-      cmp = 0x100Fu;
-    else if (lane >= 32 && lane < 48)
-      cmp = 0x101Fu;
-    else if (lane >= 48)
-      cmp = 0x102Fu;
-    cu->write_vgpr(vbase + kSrc0, lane, src);
-    cu->write_vgpr(vbase + kSrc1, lane, cmp);
-  }
-
-  typename Traits::Vop1VopDppMachineInst raw{};
-  raw.src0 = amdgpu::SRC_DPP;
-  raw.vsrc0 = kSrc0;
-  // VOPC reads bits [16:9] as vsrc1; those overlap the VOP_DPP op field.
-  raw.op = kSrc1;
-  raw.dpp_ctrl = amdgpu::dpp::ROW_BCAST15;
-  raw.bound_ctrl = 0;
-  raw.bank_mask = 0xF;
-  raw.row_mask = 0xF;
-
-  typename Traits::VCmpEqU32Vopc inst(reinterpret_cast<const typename Traits::MachineInst *>(&raw));
-  inst.execute_impl(*wf);
-
-  EXPECT_EQ(wf->vcc(), 0xFFFFFFFFFFFF0000ULL);
-}
-
-template <typename Traits> void cdna_generated_vcmpx_dpp_write_mask_preserves_exec() {
-  SCOPED_TRACE(Traits::name);
-  amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_vcmpx_exec_mask_mem");
-  amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp_vcmpx_exec_mask_l2");
-
-  amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = Traits::arch;
-  cfg.num_wf_slots = 1;
-  cfg.sgprs_per_wf = 104;
-  cfg.vgprs_per_wf = 32;
-  cfg.lds_size_kb = 64;
-
-  auto cu = amdgpu::ComputeUnitCore::create(std::string(Traits::name) + "_dpp_vcmpx_exec_mask_cu",
-                                            cfg, &mem, &l2);
-  ASSERT_NE(cu, nullptr);
-
-  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-  ASSERT_NE(wf, nullptr);
-  ASSERT_EQ(wf->wf_size(), 64u);
-
-  constexpr uint64_t kOldExec = 0xFFFFFFFFFFFF005AULL;
-  constexpr uint64_t kOldVcc = 0x00000000000000A5ULL;
-  wf->set_exec(kOldExec);
-  wf->set_vcc(kOldVcc);
-
-  constexpr uint32_t kSrc0 = 4;
-  constexpr uint32_t kSrc1 = 8;
-  uint32_t vbase = wf->vgpr_alloc().base;
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    uint32_t src = 0x1000u + lane;
-    uint32_t cmp = 0xDEAD0000u + lane;
-    if (lane >= 16 && lane < 32)
-      cmp = 0x100Fu;
-    else if (lane >= 32 && lane < 48)
-      cmp = 0x101Fu;
-    else if (lane >= 48)
-      cmp = 0x102Fu;
-    if (lane == 20)
-      cmp = 0xDEAD0020u;
-    cu->write_vgpr(vbase + kSrc0, lane, src);
-    cu->write_vgpr(vbase + kSrc1, lane, cmp);
-  }
-
-  typename Traits::Vop1VopDppMachineInst raw{};
-  raw.src0 = amdgpu::SRC_DPP;
-  raw.vsrc0 = kSrc0;
-  raw.op = kSrc1;
-  raw.dpp_ctrl = amdgpu::dpp::ROW_BCAST15;
-  raw.bound_ctrl = 0;
-  raw.bank_mask = 0xF;
-  raw.row_mask = 0xF;
-
-  typename Traits::VCmpxEqU32Vopc inst(
-      reinterpret_cast<const typename Traits::MachineInst *>(&raw));
-  inst.execute_impl(*wf);
-
-  EXPECT_EQ(wf->vcc(), 0xFFFFFFFFFFEF00A5ULL);
-  EXPECT_EQ(wf->exec(), 0xFFFFFFFFFFEF005AULL);
-}
-
 template <typename Traits> void wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl() {
   SCOPED_TRACE(Traits::name);
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_vop1_wave32_write_mask_mem");
@@ -2587,7 +2488,7 @@ template <typename Traits> void generated_vop1_dpp64_preserves_masked_destinatio
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
-  raw.dpp_ctrl = 0xB1; // quad_perm:[1,0,3,2]
+  raw.dpp_ctrl = amdgpu::dpp::ROW_SHARE_BASE + 1; // row_newbcast:1
   raw.bound_ctrl = 1;
   raw.bank_mask = 0xF;
   raw.row_mask = 0x1;
@@ -2599,10 +2500,58 @@ template <typename Traits> void generated_vop1_dpp64_preserves_masked_destinatio
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     const uint64_t actual = static_cast<uint64_t>(cu->read_vgpr(vbase + kDst, lane)) |
                             (static_cast<uint64_t>(cu->read_vgpr(vbase + kDst + 1, lane)) << 32);
-    const uint64_t expected = lane < 16
-                                  ? std::bit_cast<uint64_t>(static_cast<double>(100u + (lane ^ 1u)))
-                                  : kOldDstBase + lane;
+    const uint64_t expected =
+        lane < 16 ? std::bit_cast<uint64_t>(static_cast<double>(101u)) : kOldDstBase + lane;
     EXPECT_EQ(actual, expected) << "lane " << lane;
+  }
+}
+
+void rdna4_generated_vop1_64_preserves_inactive_destination() {
+  amdgpu::GpuMemory mem("rdna4_vop1_f64_exec_mask_mem");
+  amdgpu::L2Cache l2("rdna4_vop1_f64_exec_mask_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_vop1_f64_exec_mask_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  constexpr uint64_t kExec = 0x55555555ULL;
+  wf->set_exec(kExec);
+
+  constexpr uint32_t kSrc = 4;
+  constexpr uint32_t kDst = 8;
+  constexpr uint64_t kOldDstBase = 0xA5A500005A5A0000ULL;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    const uint64_t old_dst = kOldDstBase + lane;
+    cu->write_vgpr(vbase + kSrc, lane, 100u + lane);
+    cu->write_vgpr(vbase + kDst, lane, static_cast<uint32_t>(old_dst));
+    cu->write_vgpr(vbase + kDst + 1, lane, static_cast<uint32_t>(old_dst >> 32));
+  }
+
+  rdna4::Vop1MachineInst raw{};
+  raw.src0 = 256 + kSrc;
+  raw.vdst = kDst;
+
+  rdna4::VCvtF64I32Vop1 inst(reinterpret_cast<const rdna4::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    const uint64_t expected = (kExec & (1ULL << lane))
+                                  ? std::bit_cast<uint64_t>(static_cast<double>(100u + lane))
+                                  : kOldDstBase + lane;
+    EXPECT_EQ(cu->read_vgpr(vbase + kDst, lane), static_cast<uint32_t>(expected))
+        << "low dword, lane " << lane;
+    EXPECT_EQ(cu->read_vgpr(vbase + kDst + 1, lane), static_cast<uint32_t>(expected >> 32))
+        << "high dword, lane " << lane;
   }
 }
 
@@ -3040,19 +2989,117 @@ template <typename Traits> void unsupported_rdna_vopc_dpp_throws() {
   SCOPED_TRACE(Traits::name);
 
   auto expect_throws = [](uint32_t src0) {
-    typename Traits::VopcMachineInst raw{};
+    typename Traits::Vop1VopDpp16MachineInst raw{};
     raw.src0 = src0;
-    raw.vsrc1 = 8;
-    raw.op = 8;
 
     EXPECT_THROW(typename Traits::VCmpEqU32Vopc(
                      reinterpret_cast<const typename Traits::MachineInst *>(&raw)),
-                 util::UnimplementedInst);
+                 util::InvalidInst);
   };
 
   expect_throws(amdgpu::SRC_DPP);
   expect_throws(amdgpu::SRC_DPP8_FI_0);
   expect_throws(amdgpu::SRC_DPP8_FI_1);
+}
+
+template <typename Traits> void unsupported_cdna_vopc_dpp_throws() {
+  SCOPED_TRACE(Traits::name);
+
+  typename Traits::Vop1VopDppMachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+
+  EXPECT_THROW(
+      typename Traits::VCmpEqU32Vopc(reinterpret_cast<const typename Traits::MachineInst *>(&raw)),
+      util::InvalidInst);
+}
+
+void cdna4_vop1_sdwa_availability_is_instruction_specific() {
+  cdna4::Vop1VopSdwaMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.vsrc0 = 4;
+  raw.vdst = 8;
+  raw.src0_sel = amdgpu::sdwa::DWORD;
+  raw.dst_sel = amdgpu::sdwa::DWORD;
+  raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
+
+  EXPECT_NO_THROW(cdna4::VMovB32Vop1(reinterpret_cast<const cdna4::MachineInst *>(&raw)));
+  EXPECT_THROW(cdna4::VCvtF64I32Vop1(reinterpret_cast<const cdna4::MachineInst *>(&raw)),
+               util::InvalidInst);
+}
+
+void cdna4_unsupported_sdwa_decode_halts_wave() {
+  cdna4::Vop1VopSdwaMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.op = cdna4::kVCvtF64I32Vop1;
+  raw.vsrc0 = 4;
+  raw.vdst = 8;
+  raw.encoding = cdna4::encoding::kVop1 >> 2;
+  raw.src0_sel = amdgpu::sdwa::DWORD;
+  raw.dst_sel = amdgpu::sdwa::DWORD;
+  raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
+
+  static_assert(sizeof(raw) == 2 * sizeof(uint32_t));
+  const auto encoded = std::bit_cast<std::array<uint32_t, 2>>(raw);
+  const std::array<uint32_t, 4> words{encoded[0], encoded[1], 0, 0};
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(
+      { std::unique_ptr<Instruction> inst(decoder->decode(words.data())); }, util::InvalidInst);
+
+  amdgpu::GpuMemory mem("cdna4_unsupported_sdwa_mem");
+  amdgpu::L2Cache l2("cdna4_unsupported_sdwa_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_unsupported_sdwa_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  for (uint32_t index = 0; index < words.size(); ++index)
+    mem.write32(index * sizeof(uint32_t), words[index]);
+
+  EXPECT_NO_THROW(static_cast<void>(cu->step()));
+  EXPECT_TRUE(wf->is_halted());
+}
+
+template <typename Raw> void rdna4_vop3_dpp_marker_is_instruction_specific(uint32_t marker) {
+  Raw raw{};
+  raw.src0 = marker;
+  raw.op = rdna4::kVAddF32Vop3;
+  raw.encoding = rdna4::encoding::kVop3 >> 3;
+  raw.vsrc0 = 4;
+  raw.src1 = 5;
+  raw.vdst = 8;
+
+  EXPECT_NO_THROW(rdna4::VAddF32Vop3(reinterpret_cast<const rdna4::MachineInst *>(&raw)));
+  raw.op = rdna4::kVAddF64Vop3;
+  EXPECT_THROW(rdna4::VAddF64Vop3(reinterpret_cast<const rdna4::MachineInst *>(&raw)),
+               util::InvalidInst);
+}
+
+template <typename Raw> void rdna4_vop3p_dpp_marker_is_unsupported(uint32_t marker) {
+  Raw raw{};
+  raw.src0 = marker;
+  raw.op = rdna4::kVPkAddF16Vop3p;
+  raw.encoding = rdna4::encoding::kVop3p >> 1;
+  raw.vsrc0 = 4;
+  raw.src1 = 5;
+  raw.vdst = 8;
+  EXPECT_THROW(rdna4::VPkAddF16Vop3p(reinterpret_cast<const rdna4::MachineInst *>(&raw)),
+               util::InvalidInst);
+}
+
+void rdna4_vop3_dpp_availability_is_instruction_specific() {
+  rdna4_vop3_dpp_marker_is_instruction_specific<rdna4::Vop3VopDpp16MachineInst>(amdgpu::SRC_DPP);
+  rdna4_vop3_dpp_marker_is_instruction_specific<rdna4::Vop3VopDpp8MachineInst>(
+      amdgpu::SRC_DPP8_FI_0);
+  rdna4_vop3p_dpp_marker_is_unsupported<rdna4::Vop3pVopDpp16MachineInst>(amdgpu::SRC_DPP);
+  rdna4_vop3p_dpp_marker_is_unsupported<rdna4::Vop3pVopDpp8MachineInst>(amdgpu::SRC_DPP8_FI_0);
 }
 
 TEST(DppPermuteTest, CdnaGeneratedVop1UsesSharedRowBroadcast) {
@@ -3069,18 +3116,23 @@ TEST(DppPermuteTest, CdnaGeneratedVop1DppWriteMaskHonorsBoundCtrl) {
   cdna_generated_vop1_dpp_write_mask_honors_bound_ctrl<Cdna4DppTraits>();
 }
 
-TEST(DppPermuteTest, CdnaGeneratedVopcDppWriteMaskHonorsBoundCtrl) {
-  cdna_generated_vopc_dpp_write_mask_honors_bound_ctrl<Cdna1DppTraits>();
-  cdna_generated_vopc_dpp_write_mask_honors_bound_ctrl<Cdna2DppTraits>();
-  cdna_generated_vopc_dpp_write_mask_honors_bound_ctrl<Cdna3DppTraits>();
-  cdna_generated_vopc_dpp_write_mask_honors_bound_ctrl<Cdna4DppTraits>();
+TEST(DppPermuteTest, CdnaVopcDppThrowsUnsupported) {
+  unsupported_cdna_vopc_dpp_throws<Cdna1DppTraits>();
+  unsupported_cdna_vopc_dpp_throws<Cdna2DppTraits>();
+  unsupported_cdna_vopc_dpp_throws<Cdna3DppTraits>();
+  unsupported_cdna_vopc_dpp_throws<Cdna4DppTraits>();
 }
 
-TEST(DppPermuteTest, CdnaGeneratedVcmpxDppWriteMaskPreservesExec) {
-  cdna_generated_vcmpx_dpp_write_mask_preserves_exec<Cdna1DppTraits>();
-  cdna_generated_vcmpx_dpp_write_mask_preserves_exec<Cdna2DppTraits>();
-  cdna_generated_vcmpx_dpp_write_mask_preserves_exec<Cdna3DppTraits>();
-  cdna_generated_vcmpx_dpp_write_mask_preserves_exec<Cdna4DppTraits>();
+TEST(DppPermuteTest, Cdna4Vop1SdwaAvailabilityIsInstructionSpecific) {
+  cdna4_vop1_sdwa_availability_is_instruction_specific();
+}
+
+TEST(DppPermuteTest, Cdna4UnsupportedSdwaDecodeHaltsWave) {
+  cdna4_unsupported_sdwa_decode_halts_wave();
+}
+
+TEST(DppPermuteTest, Rdna4Vop3DppAvailabilityIsInstructionSpecific) {
+  rdna4_vop3_dpp_availability_is_instruction_specific();
 }
 
 TEST(DppPermuteTest, RdnaGeneratedVop1DppWriteMaskHonorsBoundCtrl) {
@@ -3091,22 +3143,19 @@ TEST(DppPermuteTest, RdnaGeneratedVop1DppWriteMaskHonorsBoundCtrl) {
   wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl<Rdna4DppTraits>();
 }
 
-TEST(DppPermuteTest, Rdna4GeneratedVop1Dpp64PreservesMaskedDestination) {
-  generated_vop1_dpp64_preserves_masked_destination<Rdna4DppTraits>();
+TEST(DppPermuteTest, CdnaGeneratedVop1Dpp64PreservesMaskedDestination) {
+  generated_vop1_dpp64_preserves_masked_destination<Cdna2DppTraits>();
+  generated_vop1_dpp64_preserves_masked_destination<Cdna3DppTraits>();
+  generated_vop1_dpp64_preserves_masked_destination<Cdna4DppTraits>();
 }
 
-TEST(DppPermuteTest, Cdna4GeneratedVop1Dpp64PreservesMaskedDestination) {
-  generated_vop1_dpp64_preserves_masked_destination<Cdna4DppTraits>();
+TEST(DppPermuteTest, Rdna4GeneratedVop1F64PreservesInactiveDestination) {
+  rdna4_generated_vop1_64_preserves_inactive_destination();
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVop1DppWriteMaskHonorsBoundCtrl) {
   ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
   wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl<Gfx1250DppTraits>();
-}
-
-TEST(DppPermuteTest, Gfx1250GeneratedVop1Dpp64PreservesMaskedDestination) {
-  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
-  generated_vop1_dpp64_preserves_masked_destination<Gfx1250DppTraits>();
 }
 
 TEST(DppPermuteTest, RdnaGeneratedVop1Dpp16FetchInactiveUsesFi) {
@@ -3200,6 +3249,9 @@ TEST(DppPermuteTest, Rdna2VopcDppThrowsUnsupported) {
 // SDWA tests
 // ---------------------------------------------------------------------------
 
+// These helper tests pin byte placement independently of instruction decode.
+// End-to-end callback tests can then distinguish a selector/merge bug here
+// from a generated wrapper passing the wrong read or write mask.
 TEST(SdwaTest, SrcSelect) {
   using namespace amdgpu::sdwa;
   uint32_t val = 0xDEADBEEF;
@@ -3231,6 +3283,31 @@ TEST(SdwaTest, DstMerge) {
   // Full dword: just return result.
   merged = sdwa_dst_merge(0x12345678, 0xAAAAAAAA, DWORD, UNUSED_PAD);
   EXPECT_EQ(merged, 0x12345678u);
+
+  // Sign-extension fills bytes above the selected byte/word and zeroes bytes
+  // below it.
+  merged = sdwa_dst_merge(0x80, 0xAABBCCDD, BYTE_1, UNUSED_SEXT);
+  EXPECT_EQ(merged, 0xFFFF8000u);
+  merged = sdwa_dst_merge(0x7F, 0xAABBCCDD, BYTE_3, UNUSED_SEXT);
+  EXPECT_EQ(merged, 0x7F000000u);
+
+  // Word destinations exercise both preservation and sign-extension.
+  merged = sdwa_dst_merge(0x12345678, 0xAABBCCDD, WORD_0, UNUSED_PRESERVE);
+  EXPECT_EQ(merged, 0xAABB5678u);
+  merged = sdwa_dst_merge(0x00008000, 0xAABBCCDD, WORD_1, UNUSED_SEXT);
+  EXPECT_EQ(merged, 0x80000000u);
+
+  // The source selector and preserve destination mask use the same byte
+  // windows; pad/sext destinations are full-dword writes.
+  EXPECT_EQ(sdwa_src_byte_mask(BYTE_0), 0b0001);
+  EXPECT_EQ(sdwa_src_byte_mask(BYTE_3), 0b1000);
+  EXPECT_EQ(sdwa_src_byte_mask(WORD_0), 0b0011);
+  EXPECT_EQ(sdwa_src_byte_mask(WORD_1), 0b1100);
+  EXPECT_EQ(sdwa_src_byte_mask(DWORD), 0b1111);
+  EXPECT_EQ(sdwa_dst_byte_mask(BYTE_1, UNUSED_PRESERVE), 0b0010);
+  EXPECT_EQ(sdwa_dst_byte_mask(WORD_1, UNUSED_PRESERVE), 0b1100);
+  EXPECT_EQ(sdwa_dst_byte_mask(BYTE_1, UNUSED_PAD), 0b1111);
+  EXPECT_EQ(sdwa_dst_byte_mask(BYTE_1, UNUSED_SEXT), 0b1111);
 }
 
 // ---------------------------------------------------------------------------

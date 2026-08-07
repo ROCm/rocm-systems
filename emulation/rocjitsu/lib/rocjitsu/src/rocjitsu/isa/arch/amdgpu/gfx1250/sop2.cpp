@@ -902,6 +902,7 @@ SOrB32Sop2::SOrB32Sop2(const MachineInst *inst)
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= RESULT_OR;
 }
 
 SOrB64Sop2::SOrB64Sop2(const MachineInst *inst)
@@ -939,6 +940,7 @@ SOrB64Sop2::SOrB64Sop2(const MachineInst *inst)
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= RESULT_OR;
 }
 
 SXorB32Sop2::SXorB32Sop2(const MachineInst *inst)

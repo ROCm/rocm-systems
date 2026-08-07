@@ -3,6 +3,7 @@
 
 #include "libpyrocprofsys.hpp"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "dl/dl.hpp"
 #include "library/coverage.hpp"
 #include "library/coverage/impl.hpp"
@@ -454,9 +455,7 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     auto& _incl_files = _config.include_filenames;
     auto& _skip_files = _config.exclude_filenames;
     auto  _full       = py::cast<std::string>(get_frame_code(frame)->co_filename);
-    auto  _file       = (_full.find('/') != std::string::npos)
-                            ? _full.substr(_full.find_last_of('/') + 1)
-                            : _full;
+    auto  _file       = rocprofsys::path::filename(_full);
 
     if(!_config.include_internal &&
        strncmp(_full.c_str(), _rocprofsys_path.c_str(), _rocprofsys_path.length()) == 0)

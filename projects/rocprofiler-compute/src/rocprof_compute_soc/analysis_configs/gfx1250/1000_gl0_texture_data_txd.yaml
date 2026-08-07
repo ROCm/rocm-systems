@@ -1,0 +1,87 @@
+# =============================================================================
+# gfx1250 GL0 Texture Data (TXD) Metrics
+# =============================================================================
+#
+# The GL0 Texture Data (TXD) unit handles data return paths from the GL0 cache
+# and LDS back to shader cores (VGPRs). It manages the data formatting and
+# routing for memory operation results.
+#
+# =============================================================================
+
+Panel Config:
+  id: 1000
+  title: GL0 Texture Data (TXD)
+  description: |-
+    GL0 Texture Data (TXD) metrics for gfx1250. The TXD unit handles data return
+    paths from GL0 cache and LDS back to shader VGPRs. This panel covers TXD
+    utilization, stall analysis, and bus utilization metrics.
+
+  data source:
+
+  - metric_table:
+      id: 1001
+      title: "TXD Utilization"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Utilization:
+          avg: AVG((100 * TX_VCD_TD_BUSY_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          min: MIN((100 * TX_VCD_TD_BUSY_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          max: MAX((100 * TX_VCD_TD_BUSY_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          unit: Percent
+        TXD Stalled by GL0 Cache / LDS:
+          avg: AVG((100 * TX_VCD_VMW_DATA_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          min: MIN((100 * TX_VCD_VMW_DATA_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          max: MAX((100 * TX_VCD_VMW_DATA_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          unit: Percent
+        TXD Output Stalled by Shader:
+          avg: AVG((100 * TX_VCD_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          min: MIN((100 * TX_VCD_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          max: MAX((100 * TX_VCD_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          unit: Percent
+        TXD Output Stalled by SPI Write to Shader:
+          avg: AVG((100 * TX_VCD_LDS_SPI_VGPR_WRITE_STALL_TD_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          min: MIN((100 * TX_VCD_LDS_SPI_VGPR_WRITE_STALL_TD_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          max: MAX((100 * TX_VCD_LDS_SPI_VGPR_WRITE_STALL_TD_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          unit: Percent
+        TXD-Shader Bus Util - LDS Return:
+          avg: AVG((100 * TX_VCD_LDS_VGPRS_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          min: MIN((100 * TX_VCD_LDS_VGPRS_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          max: MAX((100 * TX_VCD_LDS_VGPRS_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          unit: Percent
+        TXD-Shader Bus Util - GL0 Return:
+          avg: AVG((100 * TX_VCD_VC_VGPRS_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          min: MIN((100 * TX_VCD_VC_VGPRS_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          max: MAX((100 * TX_VCD_VC_VGPRS_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          unit: Percent
+        Cache Return Stalled by TXD:
+          avg: AVG((100 * TX_VCD_VC_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          min: MIN((100 * TX_VCD_VC_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          max: MAX((100 * TX_VCD_VC_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          unit: Percent
+
+  metrics_description:
+    Utilization: >-
+      Percentage of VMW-busy cycles the TXD unit is busy returning data to shader VGPRs.
+
+    TXD Stalled by GL0 Cache / LDS: >-
+      Percentage of VMW-busy cycles the TXD is stalled waiting for GL0 or LDS data.
+
+    TXD Output Stalled by Shader: >-
+      Percentage of VMW-busy cycles the TXD has data ready but the shader VGPR port is busy.
+
+    TXD Output Stalled by SPI Write to Shader: >-
+      Percentage of VMW-busy cycles the TXD is stalled because SPI is writing to the same shader VGPR bank.
+
+    TXD-Shader Bus Util - LDS Return: >-
+      Percentage of VMW-busy cycles the TXD-to-shader bus is carrying LDS results to VGPRs.
+
+    TXD-Shader Bus Util - GL0 Return: >-
+      Percentage of VMW-busy cycles the TXD-to-shader bus is carrying GL0 cache results to VGPRs.
+
+    Cache Return Stalled by TXD: >-
+      Percentage of VMW-busy cycles GL0 cache return to VGPRs is stalled by TXD.

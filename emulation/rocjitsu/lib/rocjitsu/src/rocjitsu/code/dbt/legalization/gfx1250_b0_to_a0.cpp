@@ -6,9 +6,14 @@
 
 #include "rocjitsu/code/dbt/legalization/gfx1250_b0_to_a0.h"
 
+#include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
+#include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include "util/log.h"
@@ -16,6 +21,8 @@
 #include <array>
 #include <cstring>
 #include <string_view>
+#include <unordered_map>
+#include <vector>
 
 namespace rocjitsu {
 namespace {
@@ -29,20 +36,18 @@ namespace {
 /// NOT-YET-SUPPORTED (classified as needing an expansion but with no semantic
 /// expander, so translating a kernel that uses them fails closed rather than
 /// passing the instruction through unchanged):
-///   * s_barrier_signal_isfirst,
 ///   * v_cvt_pk_fp8_f32, v_cvt_sr_fp8_f32 (only when CLAMP selects the B0-only
 ///     mode; the ordinary form stays on the copy path),
 ///   * v_wmma_scale / v_wmma_scale16 forms without an implemented rule,
 ///   * integer IU4 and IU8 WMMA/SWMMAC forms without an implemented spacing
 ///     rule.
-/// Separately, a 64-bit source using FLAT_SCRATCH_BASE_HI is classified via
-/// operand inspection (see uses_flat_scratch_base_hi_64bit_source), and the
+/// Separately, a 64-bit source reading FLAT_SCRATCH_BASE is classified via
+/// operand inspection (see gfx1250_reads_flat_scratch_base_64bit), and the
 /// barrier-state and sleep/monitor families are DEFERRED with a pass-through
 /// warning rather than fail-closed (see is_deferred_gfx1250_family).
 /// Classifying the fail-closed cases keeps the failure explicit and located; add
 /// the semantic rule (and update this note) once each expansion is implemented.
-inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemonics = {
-    "s_barrier_signal_isfirst",
+inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemonics = {
     "ds_load_2addr_b32",
     "ds_load_2addr_b64",
     "ds_load_2addr_stride64_b32",
@@ -91,7 +96,8 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
   // but not A0, so they require semantic expansion. The common f32 K=128 forms
   // use one neutral regular-Scale mixed-format operation. Source fields with no
   // meaning for these opcodes are discarded while constructing the target.
-  // The f16 and standalone 32x16 FP4 forms still fail closed.
+  // The standalone 32x16 FP4 form splits into two scaled M=16 halves; the f16
+  // K=128 forms still fail closed in their semantic rule.
   const bool is_k128_fp8_bf8 = (mnemonic.starts_with("v_wmma_f16_16x16x128_") ||
                                 mnemonic.starts_with("v_wmma_f32_16x16x128_")) &&
                                (mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||
@@ -150,25 +156,6 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
   return encoding.clamp != 0;
 }
 
-/// @brief True when any source operand uses the special FLAT_SCRATCH_BASE_HI
-/// value in a 64-bit source position.
-/// @details This special scalar source is not usable in a 64-bit source position
-/// on this target, but the restriction is operand-sensitive rather than tied to a
-/// mnemonic family, so it needs per-operand inspection. A 32-bit use of the same
-/// value is unaffected. Encoding value 231 identifies the special source (see
-/// gfx1250/operand_types.h).
-[[nodiscard]] bool uses_flat_scratch_base_hi_64bit_source(const Instruction &inst) {
-  constexpr int kFlatScratchBaseHiEncoding = 231;
-  constexpr int k64BitOperand = 64;
-  for (int i = 0; i < inst.num_src_operands(); ++i) {
-    const Operand *op = inst.src_operand(i);
-    if (op != nullptr && op->size_bits() == k64BitOperand &&
-        op->encoding_value() == kFlatScratchBaseHiEncoding)
-      return true;
-  }
-  return false;
-}
-
 /// @brief True for instruction families whose A0 handling is deferred pending
 /// confirmation of the exact translated set.
 /// @details The barrier-state query and the sleep/monitor families may need
@@ -183,7 +170,90 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
          mnemonic == "s_monitor_sleep";
 }
 
+[[nodiscard]] bool is_wmma_completion_wait(const Instruction &inst) {
+  if (inst.size() != static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr ||
+      inst.mnemonic() != "s_wait_alu")
+    return false;
+
+  // S_WAIT_ALU SIMM16[15:12] is VA_VDST. Zero waits for all outstanding
+  // destination writes, regardless of any additional counters the source
+  // instruction also drains.
+  constexpr uint32_t kVaVdstMask = 0xf000u;
+  return (inst.raw_encoding()[0] & kVaVdstMask) == 0;
+}
+
+[[nodiscard]] bool has_wmma_completion_wait_ahead(
+    const Instruction &inst,
+    const std::unordered_map<uint64_t, const Instruction *> &source_instruction_by_offset,
+    const Gfx1250VgprMsbAnalysis &vgpr_msb) {
+  RegisterSet pending_defs = InstDefUse(inst, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll).defs;
+  uint64_t next_offset = inst.src_loc() + inst.size();
+  while (true) {
+    const auto next_it = source_instruction_by_offset.find(next_offset);
+    if (next_it == source_instruction_by_offset.end())
+      return false;
+
+    const Instruction &next = *next_it->second;
+    constexpr uint64_t kControlTransferOrTerminator =
+        BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR;
+    if ((next.flags() & kControlTransferOrTerminator) != 0)
+      return false;
+    if (is_wmma_completion_wait(next))
+      return true;
+
+    // Bound the scan to affected WMMA and the exact scalar instructions that
+    // generated split forms may place before their trailing completion wait.
+    // The def/use check below independently verifies VGPR transparency for
+    // both generated and hand-written source streams.
+    const std::string_view mnemonic = next.mnemonic();
+    const bool canonical_split_scaffolding =
+        mnemonic == "s_wait_xcnt" || mnemonic == "s_set_vgpr_msb";
+    if (!canonical_split_scaffolding && !gfx1250_b0_to_a0_requires_wmma_completion_wait(next))
+      return false;
+
+    const InstDefUse access(next, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll);
+    if (access.uses.intersects(pending_defs))
+      return false;
+    pending_defs |= access.defs;
+
+    if (next.size() <= 0)
+      return false;
+    next_offset += static_cast<uint64_t>(next.size());
+  }
+}
+
 } // namespace
+
+bool gfx1250_b0_to_a0_requires_wmma_completion_wait(const Instruction &inst) {
+  const std::string_view mnemonic = inst.mnemonic();
+  if (!mnemonic.starts_with("v_wmma_"))
+    return false;
+
+  return mnemonic.find("_fp8") != std::string_view::npos ||
+         mnemonic.find("_bf8") != std::string_view::npos ||
+         mnemonic.find("_f8f6f4") != std::string_view::npos || mnemonic.ends_with("_f4");
+}
+
+void gfx1250_b0_to_a0_append_wmma_completion_wait_if_needed(
+    const Instruction &inst,
+    const std::unordered_map<uint64_t, const Instruction *> &source_instruction_by_offset,
+    const Gfx1250VgprMsbAnalysis &vgpr_msb, std::vector<uint32_t> &words) {
+  if (!gfx1250_b0_to_a0_requires_wmma_completion_wait(inst) ||
+      has_wmma_completion_wait_ahead(inst, source_instruction_by_offset, vgpr_msb)) {
+    return;
+  }
+
+  // TODO: Replace this conservative producer-side drain with block-local
+  // S_WAIT_ALU analysis over the final translated instruction stream. It should
+  // track VA_VDST/VM_VSRC dependencies and wait only before a dependent use.
+  // B0 code may schedule scaled WMMA consumers under SCHED_MODE 2 using B0
+  // completion timing. A0 has a lower FP8/FP4 WMMA issue rate, and mode 2 makes
+  // software responsible for VA_VDST dependencies. Wait for pending VALU
+  // destinations without draining unrelated ALU dependency counters.
+  // The no-wait default is 0xff9f; clearing only VA_VDST[15:12] gives 0x0f9f.
+  constexpr uint16_t kWaitVaVdstZero = 0x0f9f;
+  words.push_back(gfx1250::build_sopp(gfx1250::kSWaitAluSopp, {.simm16 = kWaitVaVdstZero})[0]);
+}
 
 const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &inst) {
   // CLAMP=0 is the common E4M3 operation on both steppings. CLAMP=1 selects
@@ -194,8 +264,10 @@ const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &
   if (fp8_clamp_family && !requires_fp8_clamp_emulation(inst))
     return nullptr;
 
+  // Reading FLAT_SCRATCH_BASE through a 64-bit source position is a property of
+  // the operand rather than the mnemonic, so it is classified separately.
   if (!requires_b0_to_a0_expansion(inst.mnemonic()) &&
-      !uses_flat_scratch_base_hi_64bit_source(inst)) {
+      !gfx1250_reads_flat_scratch_base_64bit(inst)) {
     // Deferred families pass through unchanged but warn, so the not-yet-handled
     // case is visible rather than silent. See is_deferred_gfx1250_family.
     if (is_deferred_gfx1250_family(mnemonic))

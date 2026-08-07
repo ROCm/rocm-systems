@@ -24,6 +24,7 @@ struct TestResults
     int warp_reduce_passed;
 
     int fp8_convert_passed;
+    int fp8_e5m3_convert_passed;
     int bf8_convert_passed;
     int fp16_convert_passed;
     int bf16_convert_passed;
@@ -75,9 +76,19 @@ struct TestResults
     int async_lds_load_passed;
     int async_lds_store_passed;
 
+    int tdm_load_passed;
+    int tdm_store_passed;
+
+    int cluster_barrier_passed;
+    int cluster_info_passed;
+    int cluster_load_passed;
+
     int wmma_f16_passed;
     int wmma_bf16_passed;
     int wmma_i8_passed;
+
+    int coop_atomic_load_passed;
+    int coop_atomic_store_passed;
 
     int vmem_flat_passed;
     int vmem_global_passed;
@@ -97,10 +108,17 @@ struct TestResults
     int atomic_pk_f16_passed;
     int atomic_pk_bf16_passed;
     int atomic_cas_passed;
+
+    int buffer_load_passed;
+    int buffer_store_passed;
+    int multicast_load_passed;
+
+    int total_passed;
+    int total_failed;
 };
 
 extern "C" __global__ void mega_kernel(
     TestResults* results, float* global_float, double* global_double, int* global_int,
     float* input_buffer, float* output_buffer, float* async_lds_src, float* async_lds_dst,
-    int buffer_size, int mfma_mode, hipTextureObject_t tex_obj,
+    int* tdm_src, int* tdm_dst, int buffer_size, int mfma_mode, hipTextureObject_t tex_obj,
     hipSurfaceObject_t surf_obj);

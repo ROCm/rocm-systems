@@ -68,7 +68,9 @@ table KfdDeviceInfo {
   // Compute organization (from kfd_topology.c kfd_fill_gpu_properties)
   simd_count: uint32;             // Total SIMD units (CUs * SIMDs/CU).
   max_waves_per_simd: uint32 = 10;
-  num_shader_engines: uint32;    // KFD array_count: total shader arrays, not libdrm SE count.
+  num_shader_engines: uint32;    // Shader engines per XCC, matching the SoC's se[] count.
+                                 // KFD array_count is derived (times arrays/SE, and times
+                                 // num_xcc for the sysfs node property).
   num_shader_arrays_per_engine: uint32 = 1;
   num_cu_per_sh: uint32;
   simd_per_cu: uint32 = 4;       // 4 for CDNA, 2 for RDNA.
@@ -234,7 +236,7 @@ table TopologyDef {
 /// Top-level simulation configuration.
 table SimulationConfig {
   max_ticks: uint64;             // Maximum simulation ticks before halting.
-  num_threads: uint32;           // Number of simulation threads (partitions).
+  num_threads: uint32;           // Number of simulation engine partitions (one per XCD when partitioned).
   exec_mode: string;             // Execution mode: "functional" (default) or "clocked".
   vm: VirtualMachineConfig;      // Virtual machine hardware model. Omit for dbt_guest-only configs.
   topology: TopologyDef;         // Declarative topology. Omit for dbt_guest-only configs.
