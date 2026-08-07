@@ -71,6 +71,7 @@ add_executable(
     rocm-debug-agent-unit-tests
     test_uri.cpp
     test_formatting.cpp
+    test_options.cpp
 )
 
 # Link directly to source files (not the .so).
