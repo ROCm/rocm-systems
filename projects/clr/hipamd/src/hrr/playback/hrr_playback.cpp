@@ -167,12 +167,15 @@ static uint64_t derive_owner_pid(const std::vector<std::pair<fs::path, ProcessIn
   return processes.front().second.pid;
 }
 
-static bool print_root_info(const std::string& archive_path) {
-  fs::path root(archive_path);
-  if (fs::exists(root / "events.bin") || !fs::exists(root) || !fs::is_directory(root))
-    return false;
-
+// Scan an archive root for pid-<pid>/ sub-archives, sorted by directory name.
+// Each is paired with whatever its per-process manifest holds; a process killed
+// before it could finalize has no manifest, so its pid is derived from the
+// directory name and it stays marked incomplete.
+static std::vector<std::pair<fs::path, ProcessInfo>> collect_process_dirs(
+    const fs::path& root) {
   std::vector<std::pair<fs::path, ProcessInfo>> processes;
+  if (!fs::exists(root) || !fs::is_directory(root)) return processes;
+
   for (const auto& ent : fs::directory_iterator(root)) {
     if (!ent.is_directory()) continue;
     const std::string name = ent.path().filename().string();
@@ -187,12 +190,20 @@ static bool print_root_info(const std::string& archive_path) {
     }
     processes.emplace_back(ent.path(), info);
   }
-  if (processes.empty()) return false;
 
   std::sort(processes.begin(), processes.end(),
             [](const auto& a, const auto& b) {
               return a.first.filename().string() < b.first.filename().string();
             });
+  return processes;
+}
+
+static bool print_root_info(const std::string& archive_path) {
+  fs::path root(archive_path);
+  if (fs::exists(root / "events.bin")) return false;
+
+  std::vector<std::pair<fs::path, ProcessInfo>> processes = collect_process_dirs(root);
+  if (processes.empty()) return false;
 
   uint64_t owner_pid = 0;
   if (!read_root_owner_pid(root, owner_pid))
@@ -800,6 +811,9 @@ static bool run_pass(PlaybackContext& ctx,
 // clean-shutdown trailer, and writes a complete manifest.json. After repair the
 // archive looks exactly like one produced by a normal process exit. Replay
 // works on truncated archives without repair too; this just "blesses" them.
+//
+// repair_archive() below handles one process; repair_root() fans it out across
+// every pid-<pid>/ directory when the tool is pointed at an archive root.
 // ---------------------------------------------------------------------------
 
 static bool write_u(FILE* f, const void* p, size_t n) {
@@ -908,13 +922,142 @@ static int repair_archive(const hrr::Archive& archive) {
   return 0;
 }
 
+// Cheap completeness probe: a cleanly finalized events.bin ends with the
+// trailer record, so checking the last 44 bytes answers the question without
+// parsing the file. Used only to skip work when repairing a root that is
+// already clean — a false negative just costs a full load that repair_archive
+// then no-ops on, so this can never turn a good archive into a rewritten one.
+static bool has_clean_trailer(const fs::path& archive_dir) {
+  const fs::path events_path = archive_dir / "events.bin";
+  std::error_code ec;
+  const auto size = fs::file_size(events_path, ec);
+  if (ec || size < sizeof(hrr_file_header) + sizeof(hrr_eof_record)) return false;
+
+  FILE* f = fopen(events_path.string().c_str(), "rb");
+  if (!f) return false;
+  hrr_eof_record rec{};
+  const bool read_ok = fseek(f, -static_cast<long>(sizeof(rec)), SEEK_END) == 0 &&
+                       fread(&rec, sizeof(rec), 1, f) == 1;
+  fclose(f);
+
+  return read_ok && rec.hdr.event_type == HRR_EOF_MARKER &&
+         rec.hdr.payload_length == static_cast<uint16_t>(sizeof(hrr_eof_record)) &&
+         rec.eof_magic == HRR_EOF_MAGIC;
+}
+
+// Rebuild the root index from the per-process manifests. Mirrors the schema the
+// capture writer emits (hip_capture_writer.cpp, write_root_manifest) so a
+// repaired archive is indistinguishable from a cleanly finalized one.
+static bool write_root_manifest(const fs::path& root,
+                                std::vector<std::pair<fs::path, ProcessInfo>> processes) {
+  std::sort(processes.begin(), processes.end(),
+            [](const auto& a, const auto& b) { return a.second.pid < b.second.pid; });
+
+  // Prefer the owner recorded by the capture; only derive it when the root
+  // manifest is missing or unreadable.
+  uint64_t owner_pid = 0;
+  if (!read_root_owner_pid(root, owner_pid))
+    owner_pid = derive_owner_pid(processes);
+
+  FILE* f = fopen((root / "manifest.json").string().c_str(), "w");
+  if (!f) return false;
+
+  fprintf(f,
+          "{\n"
+          "  \"version\": 1,\n"
+          "  \"capture_mode\": \"in-tree\",\n"
+          "  \"owner_pid\": %llu,\n"
+          "  \"processes\": [\n",
+          static_cast<unsigned long long>(owner_pid));
+  for (size_t i = 0; i < processes.size(); ++i) {
+    const ProcessInfo& p = processes[i].second;
+    fprintf(f,
+            "    { \"pid\": %llu, \"parent_pid\": %llu, \"complete\": %s, "
+            "\"event_count\": %llu, \"blob_count\": %llu }%s\n",
+            static_cast<unsigned long long>(p.pid),
+            static_cast<unsigned long long>(p.parent_pid),
+            p.complete ? "true" : "false",
+            static_cast<unsigned long long>(p.event_count),
+            static_cast<unsigned long long>(p.blob_count),
+            (i + 1 == processes.size()) ? "" : ",");
+  }
+  fprintf(f, "  ]\n}\n");
+  fclose(f);
+  return true;
+}
+
+// --repair on an archive root: repair every pid-<pid>/ sub-archive in turn,
+// then rebuild the root index from the manifests that produces.
+//
+// The processes worth repairing are usually exactly the ones that could not
+// finalize themselves. A serving stack force-kills its workers at shutdown, so
+// the tensor-parallel ranks holding all the GPU work are the ones left without
+// a trailer and missing from the root manifest, while the parent that exited
+// cleanly is already fine. Repairing them one directory at a time is purely
+// mechanical, so do the whole root in one pass.
+//
+// Returns false if this is not a multi-process root, leaving the caller to
+// handle the path as a single archive. Sets exit_code only when it returns true.
+static bool repair_root(const std::string& archive_path, int& exit_code) {
+  fs::path root(archive_path);
+  if (fs::exists(root / "events.bin")) return false;
+
+  std::vector<std::pair<fs::path, ProcessInfo>> processes = collect_process_dirs(root);
+  // Nothing to fan out to: a root holding a single sub-archive is auto-resolved
+  // by the reader, and an empty one is not an archive at all.
+  if (processes.size() < 2) return false;
+
+  printf("[HRR] Repairing %zu process captures under %s\n",
+         processes.size(), archive_path.c_str());
+
+  size_t repaired = 0, already_clean = 0, failed = 0;
+  for (const auto& entry : processes) {
+    const fs::path& dir = entry.first;
+    printf("[HRR] --- %s ---\n", dir.filename().string().c_str());
+    // The reader reports recovery diagnostics on stderr. Flush stdout first so
+    // those land under the process they belong to instead of being reordered
+    // ahead of the whole run by block buffering when output is piped.
+    fflush(stdout);
+
+    if (has_clean_trailer(dir)) {
+      printf("[HRR] Archive already complete; nothing to repair\n");
+      already_clean++;
+      continue;
+    }
+
+    // Scoped per iteration so each archive's events are released before the
+    // next is read — these run to gigabytes apiece.
+    hrr::Archive archive;
+    if (!hrr::load_archive(dir.string(), archive)) {
+      fprintf(stderr, "[HRR] repair: cannot load %s; skipping\n", dir.string().c_str());
+      failed++;
+      continue;
+    }
+    if (repair_archive(archive) != 0) failed++;
+    else if (archive.complete) already_clean++;
+    else repaired++;
+  }
+
+  // Re-scan so the root index reflects the manifests just written.
+  if (!write_root_manifest(root, collect_process_dirs(root)))
+    fprintf(stderr, "[HRR] repair: cannot write %s\n",
+            (root / "manifest.json").string().c_str());
+
+  printf("\n[HRR] Repair summary: %zu repaired, %zu already complete, %zu failed\n",
+         repaired, already_clean, failed);
+  exit_code = failed ? 1 : 0;
+  return true;
+}
+
 static void print_usage(const char* argv0) {
   fprintf(stderr,
     "Usage: %s <capture.hrr> [options]\n"
     "\n"
     "Options:\n"
     "  --info                Print archive summary and exit (no GPU required)\n"
-    "  --repair              Rewrite a crash-truncated archive as a clean one and exit\n"
+    "  --repair              Rewrite a crash-truncated archive as a clean one and exit.\n"
+    "                        Given an archive root, repairs every process capture\n"
+    "                        under it and rebuilds the root index.\n"
     "  --events              With --info: also print the full event log\n"
     "  --verbose             Print each event as it is processed\n"
     "  --skip-device-sync    Skip device/stream synchronize events\n"
@@ -1053,6 +1196,13 @@ int main(int argc, char** argv) {
   // pid-<pid> paths continue through load_archive for detailed event info.
   if (show_info && print_root_info(archive_path))
     return 0;
+
+  // --repair on an archive root repairs every process capture underneath it.
+  // Direct pid-<pid> paths fall through to the single-archive path below.
+  if (do_repair) {
+    int repair_exit = 0;
+    if (repair_root(archive_path, repair_exit)) return repair_exit;
+  }
 
   hrr::Archive archive;
   if (!hrr::load_archive(archive_path, archive)) return 1;
