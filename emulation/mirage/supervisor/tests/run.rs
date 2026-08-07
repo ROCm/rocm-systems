@@ -401,6 +401,127 @@ async fn a_concurrent_destroy_waits_for_the_one_already_running() {
     let _ = drain.await;
 }
 
+// ---------------------------------------------------------------------
+// Borrowers
+// ---------------------------------------------------------------------
+//
+// `mirage exec` runs its workload in its own process, in its own
+// terminal, as its own child — the run that owns the session cannot see
+// it, wait on it or signal it. The lease is the only thing that stops the
+// run from stopping the emulator daemon, removing the containers and
+// deleting the scratch directory while that workload is mid-job.
+
+#[tokio::test]
+async fn a_session_with_no_borrowers_does_not_wait_for_any() {
+    let run = start(1).await;
+    assert_eq!(run.borrowers(), 0);
+    tokio::time::timeout(Duration::from_secs(5), run.wait_for_borrowers())
+        .await
+        .expect("waiting on nobody must return immediately");
+    run.destroy().await;
+}
+
+#[tokio::test]
+async fn a_lease_is_counted_until_it_is_dropped() {
+    let run = start(1).await;
+
+    let first = run.attach().expect("a healthy session accepts a borrower");
+    assert_eq!(run.borrowers(), 1);
+    let second = run.attach().expect("several terminals may borrow at once");
+    assert_eq!(run.borrowers(), 2);
+
+    drop(second);
+    assert_eq!(run.borrowers(), 1);
+    drop(first);
+    assert_eq!(run.borrowers(), 0);
+
+    run.destroy().await;
+}
+
+#[tokio::test]
+async fn teardown_does_not_begin_while_a_borrower_holds_a_lease() {
+    // The ordering invariant `Session::teardown` documents for itself,
+    // from the outside: a borrowed session stays whole until the borrower
+    // lets go. Before leases existed, a `mirage run -- sleep 5` finishing
+    // while another terminal was mid-job removed that job's emulator
+    // socket and scratch directory underneath it.
+    let run = start(1).await;
+    let lease = run.attach().expect("a healthy session accepts a borrower");
+
+    let destroying = tokio::spawn({
+        let run = Arc::clone(&run);
+        async move {
+            run.wait_for_borrowers().await;
+            run.destroy().await;
+        }
+    });
+
+    // Long enough that a teardown which ignored the lease would have
+    // finished: this session has no workload to wait out.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !destroying.is_finished(),
+        "the session was torn down while a borrower still held it"
+    );
+    assert_ne!(
+        run.health().state.as_deref(),
+        Some("stopped"),
+        "teardown began with a borrower attached"
+    );
+
+    drop(lease);
+    tokio::time::timeout(Duration::from_secs(30), destroying)
+        .await
+        .expect("teardown must proceed once the last borrower lets go")
+        .unwrap();
+    assert_eq!(run.health().state.as_deref(), Some("stopped"));
+}
+
+#[tokio::test]
+async fn a_session_that_is_tearing_down_refuses_new_borrowers() {
+    // Same guard, and the same reason, as `start_exec`: a borrower
+    // admitted now would build its process grid from a description of
+    // containers that are being removed.
+    let run = start(1).await;
+    run.destroy().await;
+    assert!(
+        run.attach().is_none(),
+        "a destroyed session handed out a lease on itself"
+    );
+}
+
+#[tokio::test]
+async fn teardown_tells_the_borrowers_it_is_not_waiting() {
+    // The Ctrl-C path. The run has decided not to wait, so the borrower
+    // has to be told — otherwise it discovers the session is gone by
+    // having its container removed or its emulator socket deleted
+    // mid-syscall.
+    let run = start(1).await;
+    let _lease = run.attach().unwrap();
+
+    let told = tokio::spawn({
+        let run = Arc::clone(&run);
+        async move { run.wait_closing().await }
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!told.is_finished(), "a healthy session is not closing");
+
+    // Teardown with the lease still held, exactly as the interrupt path
+    // does it.
+    let destroying = tokio::spawn({
+        let run = Arc::clone(&run);
+        async move { run.destroy().await }
+    });
+    tokio::time::timeout(Duration::from_secs(10), told)
+        .await
+        .expect("a borrower must be told the session is going away")
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(30), destroying)
+        .await
+        .expect("teardown must not wait for a lease it has already disowned")
+        .unwrap();
+}
+
 #[tokio::test]
 async fn an_exec_cannot_start_in_a_destroyed_session() {
     // Otherwise a process could be spawned after teardown collected the

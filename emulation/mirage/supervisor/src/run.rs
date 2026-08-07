@@ -88,6 +88,30 @@ impl Run {
         self.session.health()
     }
 
+    /// Take a borrower's lease on this session, unless it is tearing down.
+    ///
+    /// See [`Session::attach`](crate::session::Session::attach).
+    #[must_use]
+    pub fn attach(&self) -> Option<crate::session::SessionLease> {
+        self.session.attach()
+    }
+
+    /// How many `mirage exec` clients are borrowing this session.
+    #[must_use]
+    pub fn borrowers(&self) -> usize {
+        self.session.borrowers()
+    }
+
+    /// Resolve once no borrower is left.
+    pub async fn wait_for_borrowers(&self) {
+        self.session.wait_for_borrowers().await;
+    }
+
+    /// Resolve once teardown has asked borrowers to let go.
+    pub async fn wait_closing(&self) {
+        self.session.wait_closing().await;
+    }
+
     /// Definition, health and container record together.
     #[must_use]
     pub fn state(&self) -> SessionState {

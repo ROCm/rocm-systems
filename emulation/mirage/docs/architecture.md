@@ -55,10 +55,11 @@ are the only optional things left in the build: there is no `daemon`,
 │  • owns the Tokio runtime          │    │    or takes -s <session>       │
 │  • Run::start → the session lives  │    │                                │
 │    in *this* process               │    │                                │
-│  • binds the run socket first,     │◄───┤  Request::Describe             │
+│  • binds the run socket first,     │◄───┤  Request::Attach               │
 │    answers once session is healthy │───►│  SessionDescription (JSON)     │
 │  • build_specs → spawn → wait      │    │  • build_specs, locally        │
-│  • destroy() on every exit path    │    │  • spawn → wait                │
+│  • waits for borrowers, then       │    │  • spawn → wait, holding the   │
+│    destroy() on every exit path    │    │    connection open as a lease  │
 └──────────────┬─────────────────────┘    └──────────────┬─────────────────┘
                │ tokio::process                          │ tokio::process
                │ own process group, always waited on     │
@@ -168,15 +169,31 @@ whole reason `mirage exec -- bash` is an interactive shell *in the window
 you ran it from*, with no pseudo-terminal, no output forwarding and no
 stdin relay.
 
-That leaves the run process with exactly one thing to do for an exec:
-describe the session. The protocol is one request (`Request::Describe`)
-and one response (`SessionDescription`) — which containers exist, what
-environment the emulator needs, where the rendezvous is. The description
-is *data*, not a handle, so the client needs no further round trips.
-Everything else — spawning, signalling, reaping, printing — belongs to the
-process that owns the terminal it is happening in. The previous protocol
-carried attach streams, stdin frames, terminal resizes, exec lifecycle and
-a daemon handshake; none of it survives the change of ownership.
+That leaves the run process with two things to do for an exec, and the
+first is to describe the session. The protocol is one request
+(`Request::Attach`, or `Request::Describe` for a caller that only wants to
+look) and one response (`SessionDescription`) — which containers exist,
+what environment the emulator needs, where the rendezvous is. The
+description is *data*, not a handle, so the client needs no further round
+trips. Everything else — spawning, signalling, reaping, printing —
+belongs to the process that owns the terminal it is happening in. The
+previous protocol carried attach streams, stdin frames, terminal resizes,
+exec lifecycle and a daemon handshake; none of it survives the change of
+ownership.
+
+The second is to *not go away*. Client-side spawning has a consequence:
+the run cannot see the borrowed workload, so nothing stops it from
+stopping the emulator daemon, removing the node containers and deleting
+the scratch directory while that workload is mid-job. `Attach` closes
+that by not closing — the run keeps the connection open and counts it as
+a borrower, and `Session::teardown` does not begin while any borrower is
+left. The lease is the connection rather than a message because a
+borrower that crashes must release it just as reliably as one that exits:
+an explicit release is exactly the thing a crash skips, while the kernel
+closes the socket either way. A run whose own command finishes first
+waits, saying so, with Ctrl-C to override — and overriding closes the
+lease connections, so the borrowers are told rather than left to discover
+it as an I/O error.
 
 Both sides then build their process grid with the same
 `mirage_supervisor::build_specs`, from the same description. That is not

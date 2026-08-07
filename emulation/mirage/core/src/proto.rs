@@ -12,6 +12,32 @@
 //! closes. Frames are length-delimited (4-byte big-endian prefix) and
 //! carry JSON.
 //!
+//! # The connection is the lease
+//!
+//! There is one wrinkle on "sends one request, reads one response, and
+//! closes", and it is [`Request::Attach`]: the client does not close.
+//!
+//! `mirage exec` borrows a session it does not own, and the run that does
+//! own it must not tear the emulator daemon, the containers and the
+//! scratch directory down while a borrower's workload is still using
+//! them. Something therefore has to tell the run that a borrower exists,
+//! and — much harder — that it has stopped existing, including when it
+//! stopped by crashing.
+//!
+//! An explicit release message cannot do that: a borrower killed between
+//! attaching and releasing would hold the session open forever. The open
+//! socket can, because the kernel closes it however the client ends. So
+//! the lease *is* the connection: holding it is the claim, and dropping
+//! it — deliberately, or by dying — is the release. The run counts open
+//! `Attach` connections and waits for the count to reach zero before
+//! tearing down.
+//!
+//! It carries the other direction too. When the run tears down anyway —
+//! the user pressed Ctrl-C rather than waiting — it closes the
+//! connection, and the borrower reads that as "the session is going away"
+//! and stops its own workload cleanly, instead of discovering it when the
+//! container is removed out from under it.
+//!
 //! # Why the protocol is this small
 //!
 //! Because the exec'd process is not the run's child. `mirage exec` runs
@@ -55,8 +81,23 @@ pub fn codec() -> LengthDelimitedCodec {
 /// A single client-to-run message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Request {
-    /// Ask for everything needed to start a process in this session.
+    /// Ask for everything needed to start a process in this session, and
+    /// then let go of it.
+    ///
+    /// A one-shot question with a one-shot answer, for anything that only
+    /// wants to *look* at a session. A caller that is about to start
+    /// processes wants [`Request::Attach`] instead: the answer is
+    /// identical, but this one claims nothing, so the run may tear the
+    /// session down the instant after replying.
     Describe,
+
+    /// Take a lease on the session and describe it.
+    ///
+    /// Answered exactly like [`Request::Describe`], but the run then
+    /// holds the connection open and counts it as a borrower until the
+    /// client goes away. Refused with [`Response::Error`] if the session
+    /// is already tearing down. See the module documentation.
+    Attach,
 }
 
 /// The run process's answer.

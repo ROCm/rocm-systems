@@ -284,8 +284,8 @@ $ mirage exec -- bash            # an interactive shell, in *this* window
 ```
 
 `exec` asks the run process exactly one question over that run's Unix
-socket (`Request::Describe`, answered with a `SessionDescription`) and
-then builds the process grid locally with the same
+socket (`Request::Attach`, answered with a `SessionDescription`) and then
+builds the process grid locally with the same
 `mirage_supervisor::build_specs` the run itself uses — so a command
 behaves identically whichever way it was started. The processes are
 spawned **by this command, as its own children, in its own terminal**.
@@ -322,6 +322,34 @@ and no stdin relay.
 * The exec's processes die with this command, and this command exits with
   the workload's exit code. Ctrl-C is forwarded, then escalates, exactly
   as in `run`.
+
+### Borrowing keeps the session alive
+
+That socket connection stays open for as long as the exec runs, and it is
+a *lease*: while it is held, the run that owns the session will not tear
+it down. A run whose own command finishes first waits, and says so:
+
+```text
+mirage: this command has finished, but 1 `mirage exec` borrower(s) are
+mirage: still using session s-20260730-191636-1f4a-0
+mirage: waiting for them; Ctrl-C to tear the session down anyway
+```
+
+This is not politeness. `exec` runs its workload in its own process, so
+the run cannot see it, wait on it, or signal it — and teardown stops the
+emulator daemon, removes the node containers and deletes the scratch
+directory holding the emulator's config and socket. Without the lease, a
+`mirage run -- sleep 5` beside a longer `mirage exec` pulled all of that
+out from under a live job.
+
+The wait is unbounded, because no timeout mirage could pick would be
+right for somebody else's job. Ctrl-C is how you say you have waited
+enough; the borrowers are then told the session is going away — their
+connection is closed — and stop their own workloads rather than
+discovering it as an I/O error.
+
+The lease is the connection rather than a message, so it is released
+however the borrower ends, including by crashing.
 
 If no run is serving the session, `exec` says so:
 

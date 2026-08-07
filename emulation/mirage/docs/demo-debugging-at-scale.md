@@ -145,7 +145,7 @@ flowchart TB
 
     CFG --> RUN
     RUN -->|"serves once ready"| SOCK
-    EX -->|"Request::Describe"| SOCK
+    EX -->|"Request::Attach"| SOCK
     SOCK -->|"SessionDescription"| EX
     EX -->|"spawns its own children"| W["your command,<br/>in the exec's terminal"]
 ```
@@ -535,8 +535,10 @@ ROCJITSU_RUNTIME_DIR=/run/user/1000/mirage/session/s-20260616-191636-3b41-0
 $ mirage exec -- python3 probe_gpu.py       # runs in *this* terminal
 ```
 
-`mirage exec` asks the run one question (`Describe`), then spawns the process
-itself, as its own child. Use `-s/--session <ID>` when several runs are up.
+`mirage exec` asks the run one question (`Attach`), then spawns the process
+itself, as its own child, holding the socket open as a lease so the run does
+not tear the session down underneath it. Use `-s/--session <ID>` when several
+runs are up.
 
 ---
 

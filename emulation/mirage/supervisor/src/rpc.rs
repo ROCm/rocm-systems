@@ -1,9 +1,15 @@
 //! The socket a `mirage run` serves so other terminals can find it.
 //!
 //! One socket per run, named after its session, living for exactly as
-//! long as the run does. It answers [`Request::Describe`] with a
-//! [`SessionDescription`] and nothing else — see [`mirage_core::proto`]
-//! for why that is the whole protocol.
+//! long as the run does. It answers [`Request::Describe`] and
+//! [`Request::Attach`] with a [`SessionDescription`] and nothing else —
+//! see [`mirage_core::proto`] for why that is the whole protocol.
+//!
+//! The two differ only in what happens next. `Describe` closes; `Attach`
+//! keeps the connection, and the connection *is* the borrower's lease on
+//! the session. Each is held by the task serving it, so a lease is
+//! released exactly when its client goes away — which is the one thing an
+//! explicit release message could not promise for a client that crashed.
 //!
 //! # Staleness
 //!
@@ -143,27 +149,78 @@ impl Drop for ControlSocket {
     }
 }
 
-/// Answer one client's single request.
+/// Answer one client's request, and hold its lease if it took one.
 async fn handle(stream: UnixStream, run: Arc<Run>) {
     let mut framed = Framed::new(stream, codec());
 
     let Some(Ok(frame)) = framed.next().await else {
         return;
     };
+
+    // The lease, for an `Attach`. It lives in this task and nowhere else,
+    // so the claim is released by this function returning — which happens
+    // when the client disconnects, however it disconnects. That is the
+    // whole mechanism: there is no release message to be lost, and a
+    // borrower that segfaults releases its lease as reliably as one that
+    // exits cleanly.
+    let mut lease = None;
+
     let response = match serde_json::from_slice::<Request>(&frame) {
         Ok(Request::Describe) => match run.describe() {
             Ok(desc) => Response::Description(Box::new(desc)),
             Err(e) => Response::Error(e.to_string()),
+        },
+        Ok(Request::Attach) => match run.attach() {
+            // The lease is taken *before* the description is built, not
+            // after. Between the two the session could begin tearing
+            // down, and a borrower handed a description of containers
+            // that are being removed would start its workload into them.
+            Some(claim) => match run.describe() {
+                Ok(desc) => {
+                    lease = Some(claim);
+                    Response::Description(Box::new(desc))
+                }
+                Err(e) => Response::Error(e.to_string()),
+            },
+            None => Response::Error(format!(
+                "session {} is shutting down and cannot be attached to",
+                run.id()
+            )),
         },
         Err(e) => Response::Error(format!("malformed request: {e}")),
     };
 
     match serde_json::to_vec(&response) {
         Ok(bytes) => {
-            let _ = framed.send(bytes.into()).await;
+            if framed.send(bytes.into()).await.is_err() {
+                return;
+            }
         }
-        Err(e) => tracing::warn!("could not encode response: {e}"),
+        Err(e) => {
+            tracing::warn!("could not encode response: {e}");
+            return;
+        }
     }
+
+    let Some(lease) = lease else {
+        return;
+    };
+
+    // Hold the connection open for as long as the borrower wants it.
+    //
+    // `framed.next()` is not reading a request — the protocol has none
+    // after this — it is waiting for the stream to end, which is how a
+    // disconnect is observed. The other arm is teardown deciding not to
+    // wait any longer: dropping the connection is what tells the borrower
+    // to stop, and it must not be left to the client to notice by other
+    // means.
+    tokio::select! {
+        _ = framed.next() => {}
+        () = run.wait_closing() => {
+            tracing::debug!(session = %run.id(), "closing a borrower's lease: session is tearing down");
+        }
+    }
+    drop(lease);
 }
 
 #[cfg(test)]

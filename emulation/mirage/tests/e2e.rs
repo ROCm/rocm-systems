@@ -21,6 +21,7 @@ use std::time::Duration;
 use harness::{
     Env, TEST_EMULATOR, assert_no_leaks, marker, skip_without_emulator, tagged_sleep, wait_for,
 };
+use nix::sys::signal::Signal;
 
 #[test]
 fn paths_reports_the_overridden_directories() {
@@ -225,7 +226,7 @@ fn a_run_serves_a_socket_only_while_it_is_alive() {
     // session has, so leaving one behind would mean `mirage exec` offers
     // a session that no longer exists — and, with no argument, silently
     // picks it.
-    run.signal(nix::sys::signal::Signal::SIGINT);
+    run.signal(Signal::SIGINT);
     run.wait(Duration::from_secs(30));
 
     assert!(
@@ -257,7 +258,7 @@ fn interrupting_a_run_takes_its_workload_with_it() {
     // never reaches it: mirage catches the signal and forwards it. Losing
     // that forwarding leaves the workload running with nothing supervising
     // it, still holding the emulated device.
-    run.signal(nix::sys::signal::Signal::SIGINT);
+    run.signal(Signal::SIGINT);
     run.wait(Duration::from_secs(30));
     assert_no_leaks(&tag);
 }
@@ -300,6 +301,140 @@ fn exec_picks_the_only_live_run_when_no_session_is_named() {
 
     let out = env.ok(&["exec", "--", "/bin/echo", "guessed"]);
     assert!(out.contains("guessed"), "{out}");
+}
+
+#[test]
+fn a_run_waits_for_a_borrower_before_tearing_its_session_down() {
+    // The ordering invariant `Session::teardown` documents for itself,
+    // observed from outside. `mirage exec` starts its workload in its own
+    // process, so the run cannot see it — and teardown stops the emulator
+    // daemon, runs the backend's shutdown hook and deletes the scratch
+    // directory that workload is reading. Before the lease, a
+    // `mirage run -- sleep 1` beside a longer exec did exactly that.
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+    let tag = marker("borrower");
+
+    // The run's own command is short; the borrowed one is not.
+    let mut run = env.spawn_run(&["--profile", "p"], &["/bin/sh", "-c", "sleep 1"]);
+    let id = run.await_ready(Duration::from_secs(90));
+
+    let mut borrower = std::process::Command::new(env.bin())
+        .args(["exec", "--session", &id, "--", "/bin/sh", "-c", &tagged_sleep(&tag)])
+        .envs(env.child_env())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for("the borrowed workload to start", Duration::from_secs(30), || {
+        harness::count_processes(&tag) > 0
+    });
+
+    // Well past the run's own one-second command. The session has to
+    // still be whole: the run is waiting, not tearing down.
+    std::thread::sleep(Duration::from_secs(4));
+    assert!(
+        env.session_scratch(&id).exists(),
+        "the run removed its scratch directory while a borrower was using it"
+    );
+    assert_eq!(
+        env.live_runs(),
+        vec![id.clone()],
+        "the run stopped serving while a borrower was still attached"
+    );
+    assert!(
+        harness::pid_alive(run.pid().expect("the run is still up")),
+        "the run exited while a borrower was still attached"
+    );
+
+    // The borrower finishing is what releases the session. Asked to stop
+    // rather than `SIGKILL`ed: a killed client cannot tear its own
+    // workload down, which is a real property but a different test's.
+    let _ = nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(borrower.id() as i32),
+        Signal::SIGTERM,
+    );
+    assert!(
+        wait_for_exit(&mut borrower, Duration::from_secs(60)),
+        "the borrower did not stop when asked"
+    );
+    run.wait(Duration::from_secs(60));
+
+    assert_no_leaks(&tag);
+    assert!(
+        !env.session_scratch(&id).exists(),
+        "the session was never torn down after its last borrower left"
+    );
+}
+
+#[test]
+fn interrupting_a_waiting_run_tears_down_and_tells_the_borrower() {
+    // The override. Waiting is unbounded, so there has to be a way out —
+    // and taking it must still tell the borrower, rather than removing
+    // the session out from under it and leaving it to find out by I/O
+    // error.
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+    let tag = marker("borrower-interrupt");
+
+    let mut run = env.spawn_run(&["--profile", "p"], &["/bin/sh", "-c", "sleep 1"]);
+    let id = run.await_ready(Duration::from_secs(90));
+
+    let mut borrower = std::process::Command::new(env.bin())
+        .args(["exec", "--session", &id, "--", "/bin/sh", "-c", &tagged_sleep(&tag)])
+        .envs(env.child_env())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for("the borrowed workload to start", Duration::from_secs(30), || {
+        harness::count_processes(&tag) > 0
+    });
+
+    // Let the run reach its wait, then decline to wait any longer.
+    std::thread::sleep(Duration::from_secs(3));
+    run.signal(Signal::SIGINT);
+    let out = run.wait(Duration::from_secs(60));
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        text.contains("borrower"),
+        "a run that waited must say what it was waiting for:\n{text}"
+    );
+
+    // The borrower is told, stops its own workload, and exits — rather
+    // than being left running against a session that no longer exists.
+    let done = wait_for_exit(&mut borrower, Duration::from_secs(60));
+    assert!(
+        done,
+        "the borrower was never told its session had gone and is still running"
+    );
+    assert_no_leaks(&tag);
+}
+
+/// Wait for a child to exit, returning whether it did.
+fn wait_for_exit(child: &mut std::process::Child, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
 }
 
 #[test]

@@ -155,9 +155,64 @@ async fn run_owned(
     // Keep serving for as long as the workload runs. `select!` rather
     // than a spawned task so the server stops when the workload does,
     // without a second thing to cancel.
-    tokio::select! {
+    let code = tokio::select! {
         code = supervise_locally(exec, output, interrupts) => code,
         () = &mut serving => unreachable!("the control socket serves until dropped"),
+    };
+
+    // This run's own command is finished; the session it owns may not be.
+    //
+    // A `mirage exec` in another terminal borrows this session, and its
+    // workload is that process's child, not ours — we cannot see it, wait
+    // on it, or signal it. What we can do is not pull the session out
+    // from under it: returning here takes us into `Run::destroy`, which
+    // stops the emulator daemon, runs the backend's shutdown hook,
+    // removes the containers and deletes the scratch directory holding
+    // the emulator's config and socket. A borrower mid-job gets an I/O
+    // error, or a SIGKILL with no grace period, depending on where it is.
+    //
+    // So the run stays up while anyone is still borrowing it. Not
+    // silently — a `mirage run -- sleep 5` that does not return after
+    // five seconds needs to say why — and not unconditionally: the wait
+    // is unbounded, because no timeout would be right for somebody else's
+    // job, and an interrupt is how the user says they have waited enough.
+    wait_for_borrowers(run, interrupts, &mut serving).await;
+
+    code
+}
+
+
+/// Hold the session open while other terminals are still using it.
+async fn wait_for_borrowers(
+    run: &Arc<Run>,
+    interrupts: &mut Interrupts,
+    serving: &mut std::pin::Pin<&mut impl Future<Output = ()>>,
+) {
+    let borrowers = run.borrowers();
+    if borrowers == 0 {
+        return;
+    }
+    eprintln!(
+        "mirage: this command has finished, but {borrowers} `mirage exec` \
+         borrower(s) are still using session {}",
+        run.id()
+    );
+    eprintln!("mirage: waiting for them; Ctrl-C to tear the session down anyway");
+
+    tokio::select! {
+        () = run.wait_for_borrowers() => {}
+        _ = interrupts.next() => {
+            // Teardown publishes the closing signal, which drops every
+            // lease connection, so the borrowers are told rather than
+            // simply having their session removed. They still have to
+            // stop their own processes; those are their children.
+            eprintln!(
+                "mirage: tearing down session {} with {} borrower(s) still attached",
+                run.id(),
+                run.borrowers()
+            );
+        }
+        () = &mut *serving => unreachable!("the control socket serves until dropped"),
     }
 }
 
@@ -169,25 +224,21 @@ pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
         Some(id) => id,
         None => sole_live_run()?,
     };
-    let desc = describe(&session).await?;
+    // Attach rather than merely describe: the lease is held for the whole
+    // exec, so the run that owns this session waits for us instead of
+    // tearing the emulator and the scratch directory down underneath a
+    // live workload.
+    let (desc, mut lease) = attach(&session).await?;
 
-    let (cmd, args) = split_argv(&a.argv);
-    let def = ExecDef {
-        timestamp: chrono::Utc::now(),
-        session: session.clone(),
-        exec: ExecArgs {
-            command: cmd,
-            args,
-            env: parse_envs(&a.envs)?,
-            workdir: a.workdir.clone(),
-        },
-        worker_exec: None,
-        nproc_per_node: a.nproc_per_node.unwrap_or(1).max(1),
-        // `run` starts the whole job; `exec --node N` is how you reach
-        // one node of it.
-        node: None,
-        clear_env: a.clear_env_vars,
-    };
+    let def = exec_def(
+        session.clone(),
+        &a.argv,
+        &a.envs,
+        a.workdir.clone(),
+        a.nproc_per_node,
+        a.node,
+        a.clear_env_vars,
+    )?;
 
     // A client-side exec id, distinct from anything the run process is
     // using. It only names this command's pid files, and two execs in
@@ -205,7 +256,28 @@ pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
     let specs = mirage_supervisor::build_specs(&desc, &def, &id)?;
     let (exec, output) = Exec::start(id, def, specs);
 
-    supervise_locally(exec, output, &mut interrupts).await
+    // Normally the run waits for us and the lease outlives the workload.
+    // The other case is the user declining to wait: the run closes the
+    // lease, and the workload has to be stopped here rather than left to
+    // find out when its container is removed or its emulator socket
+    // vanishes. Racing the two is what turns that into a clean SIGTERM.
+    let closing = async {
+        lease.closed().await;
+        eprintln!("mirage: the run owning session {session} is shutting down");
+    };
+    let supervised = supervise_locally(exec.clone(), output, &mut interrupts);
+    tokio::pin!(supervised);
+
+    tokio::select! {
+        code = &mut supervised => code,
+        () = closing => {
+            exec.terminate().await;
+            // Still through `supervise_locally`, so the printer is
+            // drained and the exit code is the workload's own rather
+            // than an invented one.
+            supervised.await
+        }
+    }
 }
 
 /// Build the [`ExecDef`] for one command invocation.
@@ -367,8 +439,71 @@ impl Interrupts {
     }
 }
 
-/// Ask the run that owns `session` to describe it.
-async fn describe(session: &SessionId) -> anyhow::Result<SessionDescription> {
+/// How long to wait for a run to answer.
+///
+/// Bounded because connecting proves less than it looks like it does. A
+/// bound listener accepts into the kernel backlog whether or not anything
+/// is calling `accept`, and there are two windows where nothing is: a run
+/// binds its socket before bring-up and only serves once the session is
+/// healthy, and it stops serving the moment its workload ends — while
+/// `Run::destroy` removes containers and a network, which takes as long
+/// as it takes. Unbounded, `mirage exec` in the other terminal simply
+/// hangs there, silently, and then reports that the connection closed
+/// without answering. A deadline turns both into a message that names
+/// what happened.
+///
+/// It bounds the request and its answer only. An [`Attached`] lease is
+/// held for as long as the borrowed workload runs, which is unbounded by
+/// construction.
+const DESCRIBE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// A live borrow of somebody else's session.
+///
+/// The value is the open socket, and holding it is the claim: the run
+/// counts this connection as a borrower and will not tear the session
+/// down while it is open. Dropping it releases the claim, and so does
+/// this process dying, which is the reason the lease is a connection
+/// rather than a message.
+///
+/// [`Attached::closed`] resolves when the run has decided to tear down
+/// anyway — the user pressed Ctrl-C rather than waiting — so the borrowed
+/// workload can be stopped rather than left to discover it when its
+/// container is removed.
+struct Attached {
+    framed: tokio_util::codec::Framed<tokio::net::UnixStream, tokio_util::codec::LengthDelimitedCodec>,
+}
+
+impl Attached {
+    /// Resolve when the run closes the lease.
+    async fn closed(&mut self) {
+        use futures::StreamExt as _;
+        // Nothing is expected on this stream: the protocol has no message
+        // after the description. Reading it is how the end of the
+        // connection is observed.
+        while self.framed.next().await.is_some() {}
+    }
+}
+
+/// Ask the run that owns `session` to describe it, and hold a lease on it.
+///
+/// The lease is what stops the owning run from tearing the session down
+/// while this process is still using it. `mirage exec` starts its
+/// processes itself, in its own terminal, so the run has no other way to
+/// know they exist — and teardown stops the emulator daemon, runs the
+/// backend's shutdown hook and deletes the scratch directory those
+/// processes are actively reading.
+async fn attach(session: &SessionId) -> anyhow::Result<(SessionDescription, Attached)> {
+    tokio::time::timeout(DESCRIBE_TIMEOUT, attach_inner(session))
+        .await
+        .unwrap_or_else(|_| {
+            anyhow::bail!(
+                "the run serving session {session} did not answer within {DESCRIBE_TIMEOUT:?}. \
+                 It is either still starting up, or shutting down."
+            )
+        })
+}
+
+async fn attach_inner(session: &SessionId) -> anyhow::Result<(SessionDescription, Attached)> {
     use futures::{SinkExt as _, StreamExt as _};
     use mirage_core::proto::{Request, Response, codec};
 
@@ -382,14 +517,14 @@ async fn describe(session: &SessionId) -> anyhow::Result<SessionDescription> {
     })?;
     let mut framed = tokio_util::codec::Framed::new(stream, codec());
 
-    let request = serde_json::to_vec(&Request::Describe)?;
+    let request = serde_json::to_vec(&Request::Attach)?;
     framed.send(request.into()).await?;
 
     let Some(frame) = framed.next().await else {
         anyhow::bail!("the run serving session {session} closed the connection without answering");
     };
     match serde_json::from_slice::<Response>(&frame?)? {
-        Response::Description(desc) => Ok(*desc),
+        Response::Description(desc) => Ok((*desc, Attached { framed })),
         Response::Error(message) => anyhow::bail!("{message}"),
     }
 }

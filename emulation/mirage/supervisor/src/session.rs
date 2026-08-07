@@ -89,6 +89,39 @@ pub struct Session {
     /// `tearing_down` flag: see the head of `teardown` for what returning
     /// early costs.
     torn_down: watch::Sender<bool>,
+    /// How many `mirage exec` clients are currently borrowing this
+    /// session. See [`Session::attach`].
+    ///
+    /// A `watch` so a waiter can be woken rather than poll, and so
+    /// [`Session::borrowers`] can be read without taking `inner` — it is
+    /// consulted from the control socket's accept path, which must not
+    /// contend with process bookkeeping.
+    leases: watch::Sender<usize>,
+    /// Set when teardown wants its borrowers to let go.
+    ///
+    /// Published rather than inferred from `tearing_down` because the
+    /// party that needs it is a per-connection task on the control
+    /// socket, which has no other reason to look at `inner` at all.
+    closing: watch::Sender<bool>,
+}
+
+/// A `mirage exec` client's claim on a session.
+///
+/// Held for as long as the borrowed workload runs, and released by being
+/// dropped — which is what makes it survive the borrower crashing: on the
+/// server side the lease is owned by the task serving that client's
+/// socket, and the kernel ends that connection however the client ends.
+///
+/// Deliberately not `Clone`: one connection, one claim.
+#[derive(Debug)]
+pub struct SessionLease {
+    leases: watch::Sender<usize>,
+}
+
+impl Drop for SessionLease {
+    fn drop(&mut self) {
+        self.leases.send_modify(|n| *n = n.saturating_sub(1));
+    }
 }
 
 #[derive(Debug, Default)]
@@ -153,6 +186,8 @@ impl Session {
             inner: Mutex::new(Inner::default()),
             quiescent: watch::channel(true).0,
             torn_down: watch::channel(false).0,
+            leases: watch::channel(0).0,
+            closing: watch::channel(false).0,
         }))
     }
 
@@ -302,6 +337,64 @@ impl Session {
     #[must_use]
     pub fn is_tearing_down(&self) -> bool {
         self.lock().tearing_down
+    }
+
+    /// Take a borrower's lease on this session.
+    ///
+    /// Returns `None` once teardown has begun — the same answer, and for
+    /// the same reason, that [`Session::start_exec`] gives: a borrower
+    /// admitted now would build its process grid from a description of
+    /// containers that are being removed.
+    ///
+    /// While any lease is held, [`Session::teardown`] will not begin. That
+    /// is the point: a `mirage exec` starts its processes in *its own*
+    /// terminal, in its own process, so the session has no other way to
+    /// know they exist — and tearing down under them stops the emulator
+    /// daemon, runs the backend's shutdown hook and deletes the scratch
+    /// directory those processes are actively using.
+    #[must_use]
+    pub fn attach(&self) -> Option<SessionLease> {
+        let inner = self.lock();
+        if inner.tearing_down {
+            return None;
+        }
+        // Under the lock, so the increment cannot land between another
+        // thread setting `tearing_down` and teardown reading the count.
+        self.leases.send_modify(|n| *n += 1);
+        drop(inner);
+        Some(SessionLease {
+            leases: self.leases.clone(),
+        })
+    }
+
+    /// How many `mirage exec` clients are borrowing this session.
+    #[must_use]
+    pub fn borrowers(&self) -> usize {
+        *self.leases.borrow()
+    }
+
+    /// Resolve once no borrower is left.
+    ///
+    /// Unbounded on purpose. A borrowed workload is a job the user
+    /// started and is watching in another terminal, and no timeout mirage
+    /// could pick would be right for it. `mirage run` races this against
+    /// an interrupt instead, so the user decides when they have waited
+    /// long enough.
+    pub async fn wait_for_borrowers(&self) {
+        let mut rx = self.leases.subscribe();
+        // `wait_for` inspects the current value before suspending, so the
+        // common case — nobody attached — returns without yielding.
+        let _ = rx.wait_for(|n| *n == 0).await;
+    }
+
+    /// Resolve once teardown has asked borrowers to let go.
+    ///
+    /// Awaited by the control socket's per-connection task, which then
+    /// closes the connection so the borrower learns the session is going
+    /// away rather than finding out when its container disappears.
+    pub async fn wait_closing(&self) {
+        let mut rx = self.closing.subscribe();
+        let _ = rx.wait_for(|closing| *closing).await;
     }
 
     /// Ids of every exec, sorted.
@@ -595,7 +688,9 @@ impl Session {
     /// Ordering matters and is the whole point of doing it here rather
     /// than letting `Drop` handle pieces of it:
     ///
-    /// 1. mark the session as tearing down, so no new exec can start;
+    /// 1. mark the session as tearing down, so no new exec can start and
+    ///    no new borrower can attach, and tell any borrower still holding
+    ///    a lease that the session is going away;
     /// 2. terminate and reap every workload process;
     /// 3. only then stop the emulator daemon — the simulated device has
     ///    to outlive every process that might still be talking to it, or
@@ -636,6 +731,15 @@ impl Session {
         }
 
         self.set_phase(false, state::STOPPING, None);
+
+        // Tell the borrowers. `mirage run` normally waits for them to
+        // finish before getting here, so usually there are none — but
+        // teardown also runs when the user declines to wait, and when
+        // bring-up fails, and a borrower that only found out by having
+        // its container removed underneath it gets no chance to stop
+        // cleanly. Each one's connection is closed on the way out; see
+        // [`Session::wait_closing`].
+        self.closing.send_replace(true);
 
         // Let any `start_exec` that is mid-spawn finish registering.
         //
