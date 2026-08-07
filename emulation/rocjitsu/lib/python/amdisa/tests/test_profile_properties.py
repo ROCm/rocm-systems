@@ -22,6 +22,8 @@ from amdisa.isa_profile import (
     Gfx1250Profile,
     MemoryCoherencyModel,
     Rdna1Profile,
+    Rdna2Profile,
+    Rdna3_5Profile,
     Rdna3Profile,
     Rdna4Profile,
 )
@@ -78,6 +80,24 @@ def test_descriptor_sgpr_count_encoded(profile, expected):
 )
 def test_max_addressable_vgprs_per_wf(profile, expected):
     assert profile.max_addressable_vgprs_per_wf == expected
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (Cdna1Profile(), False),
+        (Cdna2Profile(), False),
+        (CdnaProfile(), False),
+        (Rdna1Profile(), False),
+        (Rdna2Profile(), False),
+        (Rdna3Profile(), False),
+        (Rdna3_5Profile(), False),
+        (Rdna4Profile(), False),
+        (Gfx1250Profile(), True),
+    ],
+)
+def test_uses_vgpr_msb_indexing(profile, expected):
+    assert profile.uses_vgpr_msb_indexing is expected
 
 
 def test_only_gfx1250_splits_execution_sources():

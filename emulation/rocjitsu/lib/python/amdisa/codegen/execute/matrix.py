@@ -9,8 +9,12 @@ instructions: MFMA (matrix fused multiply-add), AccVGPR read/write.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from amdisa.codegen.execute.fp8_formats import FNUZ_FP8_ARCHES, fp8_helper_name
-from amdisa.gpuisa import Instruction
+
+if TYPE_CHECKING:
+    from amdisa.codegen.execute import ExecuteContext
 
 # Input families that have specialized (compile-time M/N/K) MFMA kernels in the
 # hand-maintained mma_exec.h. CDNA MFMA and RDNA WMMA both flow through the
@@ -97,9 +101,7 @@ def gen_accvgpr_write(dst: list[str], src: list[str]) -> str:
     )
 
 
-def gen_mfma(
-    inst: Instruction, dst: list[str], src: list[str], arch_name: str = ""
-) -> str:
+def gen_mfma(ctx: ExecuteContext) -> str:
     """Generate MFMA / SMFMAC matrix multiply-accumulate.
 
     Uses the mma_exec.h helpers which implement the exact GFX9 register
@@ -107,6 +109,8 @@ def gen_mfma(
     hazard avoidance (buffered writes), and inline constant accumulator
     initialization without clobbering overlapping source operands.
     """
+    inst, dst, src = ctx.inst, ctx.dst_ops, ctx.src_ops
+    arch_name = ctx.arch_name
     name = inst.name
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
 
@@ -265,7 +269,7 @@ def gen_mfma(
     uses_gfx11_wmma_layout = arch in ('rdna3', 'rdna3_5') and is_dense_wmma
     uses_gfx12_wmma_layout = arch == 'rdna4' and is_dense_wmma
     swmmac_index_entries = 32 if is_swmmac and K >= 128 and in_bits <= 8 else 16
-    if arch == 'gfx1250':
+    if ctx.profile.uses_vgpr_msb_indexing:
         L.append(
             f'  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, {d}.opr_type_, '
             f'{d}.encoding_value_, {d}.vgpr_msb_role());'
