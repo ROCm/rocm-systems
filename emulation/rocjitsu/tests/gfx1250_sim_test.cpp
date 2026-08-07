@@ -3711,6 +3711,19 @@ TEST(Gfx1250DecodeTest, WmmaScaleF4_32x16x128ConsumesVop3px2Pair) {
             "v_wmma_scale_f32_32x16x128_f4 v[0:15], v[16:31], v[32:39], 0, v40, v41");
 }
 
+TEST(Gfx1250DecodeTest, WmmaScalePrefixRejectsNonWmmaSuffix) {
+  const uint32_t words[] = {
+      0xCC350000u,
+      0x02020900u,
+      0xCC340006u,
+      0x02026912u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(static_cast<void>(decoder->decode(words)), util::InvalidInst);
+}
+
 TEST(Gfx1250ExecutionTest, WmmaRegularScaleInlineZeroMatchesNeutralScalarSources) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
