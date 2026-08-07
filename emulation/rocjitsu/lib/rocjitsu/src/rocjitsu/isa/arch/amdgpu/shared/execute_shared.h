@@ -2391,8 +2391,6 @@ inline void execute_s_rfe_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0);
   constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
   wf.pc = (saved_pc & kPcAddressMask) - inst.size();
-  const bool was_in_handler = wf.in_trap_handler();
-  wf.set_in_trap_handler(false);
 
   // Returning from the handler puts the interrupted EXEC back. The handler runs
   // under its own mask -- it parks a doorbell id in EXEC_LO on the way to
@@ -2402,8 +2400,9 @@ inline void execute_s_rfe_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   // active. That silently un-diverges a branch (gdb.rocm/lane-info.exp sees
   // lanes that converged out of a branch reported active again) and is
   // permanent, because nothing later puts the application's mask back.
-  if (was_in_handler)
+  if (wf.in_trap_handler())
     wf.set_exec(wf.trap_saved_exec());
+  wf.set_in_trap_handler(false);
 
   // The handler sets STATUS.HALT when it wants the wave to stay
   // stopped for the debugger; honour that on the way out.

@@ -2419,9 +2419,14 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
   // Whether the application was already halted when it trapped outlives the
   // handler: trap_saved_status_ still describes the interrupted wave after
   // s_rfe, and trap_interrupt_sent() is the flag that says a handler produced
-  // this stop.
-  state.saved_status_halt =
-      ((wf.trap_interrupt_sent() ? wf.trap_saved_status() : raw_status) >> 13) & 1u;
+  // this stop. in_trap_handler() has to be part of the predicate too, or the
+  // two halves of the published STATUS come from different registers between
+  // trap entry and MSG_INTERRUPT -- the body from trap_saved_status_ and the
+  // HALT bit from the handler's live one. apply_cwsr_to_wave() recombines them
+  // into a word that never existed on the wave, so an identity round-trip in
+  // that window rewrites the application's saved HALT with the handler's.
+  const bool handler_context = wf.in_trap_handler() || wf.trap_interrupt_sent();
+  state.saved_status_halt = ((handler_context ? wf.trap_saved_status() : raw_status) >> 13) & 1u;
   state.wave_stopped = wf.debug_halted();
   // The published STATUS shadows on the narrower predicate, the same one EXEC
   // uses: only while the handler is actually running is the live register the

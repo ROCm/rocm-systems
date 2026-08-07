@@ -193,6 +193,11 @@ TEST(WaveDebugTest, TrapHandlerRestoresInterruptedExecWhenReturningWithoutStoppi
 
   for (int i = 0; i < 6 && wf->pc == kKernelAddr; ++i)
     fx.cu->step();
+  // Every assertion below is satisfied by a wave that never entered the handler
+  // at all -- EXEC is unmodified, nothing halts it for the debugger, and
+  // s_endpgm ends it. Anchor on the handler actually running, or a regression
+  // that stops dispatching into it passes this test.
+  ASSERT_TRUE(wf->in_trap_handler());
   for (int i = 0; i < 6 && wf->in_trap_handler(); ++i)
     fx.cu->step();
 
