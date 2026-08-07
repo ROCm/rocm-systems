@@ -125,13 +125,13 @@ resolve_finalize(const std::optional<uint64_t>& start_ticks,
 template <typename ConvertFn, typename EmitFn, typename RetireFn>
 finalize_outcome
 run_complete_signal_less_dispatch(const std::optional<uint64_t>& start_ticks,
-                        uint64_t                       end_ticks,
-                        uint64_t                       enqueue_ts,
-                        uint64_t                       now_ns,
-                        ConvertFn&&                    convert,
-                        EmitFn&&                       emit,
-                        RetireFn&&                     retire,
-                        finalize_detail*               detail = nullptr)
+                                  uint64_t                       end_ticks,
+                                  uint64_t                       enqueue_ts,
+                                  uint64_t                       now_ns,
+                                  ConvertFn&&                    convert,
+                                  EmitFn&&                       emit,
+                                  RetireFn&&                     retire,
+                                  finalize_detail*               detail = nullptr)
 {
     auto _cleanup = common::scope_destructor{[&retire]() { retire(); }};
 

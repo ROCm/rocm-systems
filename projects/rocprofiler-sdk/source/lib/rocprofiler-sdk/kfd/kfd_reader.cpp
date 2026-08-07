@@ -499,7 +499,7 @@ copy_records(reader_state& st)
 
         // Only take a slot when nothing is queued ahead of this batch, or it would
         // reach the processor before the older ones.
-        record_batch* _batch = _s.overflow.empty() ? st.pipe.acquire() : nullptr;
+        record_batch* _batch  = _s.overflow.empty() ? st.pipe.acquire() : nullptr;
         const bool    _direct = (_batch != nullptr);
         if(!_direct) _batch = &_s.overflow.emplace_back();
 
@@ -546,29 +546,30 @@ process_batch(processor_state& proc, const record_batch& batch)
     const uint32_t _gpu     = batch.gpu_id;
     auto&          _pairing = proc.for_gpu(_gpu);
 
-    return pair_records(
-        batch.records.data(),
-        batch.records.size(),
-        _pairing,
-        batch.now_ns,
-        [_gpu](const drained_record& rec) {
-            uint32_t slot = doorbell_off_to_page_slot(rec.doorbell_off);
-            uint32_t gen  = doorbell_map().get_generation(_gpu, slot);
-            // gpu_id stamped from the ring this record came from: a record can
-            // only ever match a dispatch enqueued on the same GPU.
-            auto key = correlation_key{slot, rec.dispatch_id, gen, _gpu};
+    return pair_records(batch.records.data(),
+                        batch.records.size(),
+                        _pairing,
+                        batch.now_ns,
+                        [_gpu](const drained_record& rec) {
+                            uint32_t slot = doorbell_off_to_page_slot(rec.doorbell_off);
+                            uint32_t gen  = doorbell_map().get_generation(_gpu, slot);
+                            // gpu_id stamped from the ring this record came from: a record can
+                            // only ever match a dispatch enqueued on the same GPU.
+                            auto key = correlation_key{slot, rec.dispatch_id, gen, _gpu};
 
-            // Signal-less: this EOP IS the completion event.
-            if(rec.start_known) signal_less_hub().record_kernel_start(key, rec.start_ticks);
-            auto _proven = signal_less_hub().record_kernel_end(key, rec.end_ticks, rec.loss_free);
-            if(_proven)
-            {
-                note_signal_less(signal_less_counter::eop_proven);
-                hand_off_proven(std::move(*_proven));
-                return;
-            }
-            note_signal_less(signal_less_counter::eop_unmatched);
-        });
+                            // Signal-less: this EOP IS the completion event.
+                            if(rec.start_known)
+                                signal_less_hub().record_kernel_start(key, rec.start_ticks);
+                            auto _proven = signal_less_hub().record_kernel_end(
+                                key, rec.end_ticks, rec.loss_free);
+                            if(_proven)
+                            {
+                                note_signal_less(signal_less_counter::eop_proven);
+                                hand_off_proven(std::move(*_proven));
+                                return;
+                            }
+                            note_signal_less(signal_less_counter::eop_unmatched);
+                        });
 }
 
 // The ring lapped us, so those records are gone -- but what we DID copy is still

@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/kfd/dispatch_hub.hpp"
 #include "lib/rocprofiler-sdk/kfd/complete_signal_less_dispatch.hpp"
+#include "lib/rocprofiler-sdk/kfd/dispatch_hub.hpp"
 #include "lib/rocprofiler-sdk/kfd/owner_registry.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"

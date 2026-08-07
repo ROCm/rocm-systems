@@ -92,12 +92,12 @@ TEST(complete_signal_less_dispatch, result_ready_emits_once_and_retires_once)
     auto conv = converter{};
 
     auto outcome = run_complete_signal_less_dispatch(std::optional<uint64_t>{500},
-                                           /*end_ticks=*/900,
-                                           /*enqueue_ts=*/0,
-                                           /*now_ns=*/10'000'000,
-                                           conv.fn(),
-                                           obs.emit_fn(),
-                                           obs.retire_fn());
+                                                     /*end_ticks=*/900,
+                                                     /*enqueue_ts=*/0,
+                                                     /*now_ns=*/10'000'000,
+                                                     conv.fn(),
+                                                     obs.emit_fn(),
+                                                     obs.retire_fn());
 
     EXPECT_EQ(outcome, finalize_outcome::result_ready);
     EXPECT_EQ(obs.emits, 1);
@@ -130,12 +130,12 @@ TEST(complete_signal_less_dispatch, convert_failure_is_completed_no_timing)
     conv.ok   = false;
 
     auto outcome = run_complete_signal_less_dispatch(std::optional<uint64_t>{500},
-                                           900,
-                                           0,
-                                           10'000'000,
-                                           conv.fn(),
-                                           obs.emit_fn(),
-                                           obs.retire_fn());
+                                                     900,
+                                                     0,
+                                                     10'000'000,
+                                                     conv.fn(),
+                                                     obs.emit_fn(),
+                                                     obs.retire_fn());
 
     EXPECT_EQ(outcome, finalize_outcome::completed_no_timing);
     EXPECT_EQ(obs.emits, 0);
@@ -155,12 +155,12 @@ TEST(complete_signal_less_dispatch, sanity_failure_is_completed_no_timing)
         auto obs      = observer{};
         auto passthru = converter{true, /*epoch=*/0};
         auto outcome  = run_complete_signal_less_dispatch(std::optional<uint64_t>{1},
-                                               /*end_ticks=*/1000 + kKfdFutureSlackNs + 1,
-                                               /*enqueue_ts=*/0,
-                                               /*now_ns=*/1000,
-                                               passthru.fn(),
-                                               obs.emit_fn(),
-                                               obs.retire_fn());
+                                                         /*end_ticks=*/1000 + kKfdFutureSlackNs + 1,
+                                                         /*enqueue_ts=*/0,
+                                                         /*now_ns=*/1000,
+                                                         passthru.fn(),
+                                                         obs.emit_fn(),
+                                                         obs.retire_fn());
         EXPECT_EQ(outcome, finalize_outcome::completed_no_timing);
         EXPECT_EQ(obs.emits, 0);
         EXPECT_EQ(obs.retires, 1);
@@ -170,12 +170,12 @@ TEST(complete_signal_less_dispatch, sanity_failure_is_completed_no_timing)
     {
         auto obs     = observer{};
         auto outcome = run_complete_signal_less_dispatch(std::optional<uint64_t>{500},
-                                               900,
-                                               /*enqueue_ts=*/9'000'000,
-                                               /*now_ns=*/10'000'000,
-                                               conv.fn(),
-                                               obs.emit_fn(),
-                                               obs.retire_fn());
+                                                         900,
+                                                         /*enqueue_ts=*/9'000'000,
+                                                         /*now_ns=*/10'000'000,
+                                                         conv.fn(),
+                                                         obs.emit_fn(),
+                                                         obs.retire_fn());
         EXPECT_EQ(outcome, finalize_outcome::completed_no_timing);
         EXPECT_EQ(obs.emits, 0);
         EXPECT_EQ(obs.retires, 1);
@@ -185,12 +185,12 @@ TEST(complete_signal_less_dispatch, sanity_failure_is_completed_no_timing)
     {
         auto obs     = observer{};
         auto outcome = run_complete_signal_less_dispatch(std::optional<uint64_t>{900},
-                                               900,
-                                               0,
-                                               10'000'000,
-                                               conv.fn(),
-                                               obs.emit_fn(),
-                                               obs.retire_fn());
+                                                         900,
+                                                         0,
+                                                         10'000'000,
+                                                         conv.fn(),
+                                                         obs.emit_fn(),
+                                                         obs.retire_fn());
         EXPECT_EQ(outcome, finalize_outcome::completed_no_timing);
         EXPECT_EQ(obs.emits, 0);
         EXPECT_EQ(obs.retires, 1);
@@ -210,12 +210,12 @@ TEST(complete_signal_less_dispatch, accepts_a_converted_end_slightly_past_now)
     auto conv = converter{true, /*epoch=*/0};
 
     auto outcome = run_complete_signal_less_dispatch(std::optional<uint64_t>{now - 5'000'000},
-                                           now + skew,
-                                           /*enqueue_ts=*/0,
-                                           now,
-                                           conv.fn(),
-                                           obs.emit_fn(),
-                                           obs.retire_fn());
+                                                     now + skew,
+                                                     /*enqueue_ts=*/0,
+                                                     now,
+                                                     conv.fn(),
+                                                     obs.emit_fn(),
+                                                     obs.retire_fn());
 
     EXPECT_EQ(outcome, finalize_outcome::result_ready);
     EXPECT_EQ(obs.emits, 1);
@@ -263,13 +263,13 @@ TEST(complete_signal_less_dispatch, reports_the_exact_rejection_cause)
         auto conv    = converter{convert_ok, /*epoch=*/0};
         auto detail  = finalize_detail{};
         auto outcome = run_complete_signal_less_dispatch(start_ticks,
-                                               end_ticks,
-                                               enqueue_ts,
-                                               now,
-                                               conv.fn(),
-                                               obs.emit_fn(),
-                                               obs.retire_fn(),
-                                               &detail);
+                                                         end_ticks,
+                                                         enqueue_ts,
+                                                         now,
+                                                         conv.fn(),
+                                                         obs.emit_fn(),
+                                                         obs.retire_fn(),
+                                                         &detail);
         // Whatever the cause, the correlation id retires exactly once.
         EXPECT_EQ(obs.retires, 1);
         return std::make_pair(outcome, detail.reason);
@@ -329,13 +329,13 @@ TEST(complete_signal_less_dispatch, conversion_skew_is_not_counted_as_a_rejectio
     auto               det  = finalize_detail{};
 
     auto outcome = run_complete_signal_less_dispatch(std::optional<uint64_t>{now - 5'000'000},
-                                           now + 2'700'000,
-                                           0,
-                                           now,
-                                           conv.fn(),
-                                           obs.emit_fn(),
-                                           obs.retire_fn(),
-                                           &det);
+                                                     now + 2'700'000,
+                                                     0,
+                                                     now,
+                                                     conv.fn(),
+                                                     obs.emit_fn(),
+                                                     obs.retire_fn(),
+                                                     &det);
 
     EXPECT_EQ(outcome, finalize_outcome::result_ready);
     EXPECT_EQ(det.reason, finalize_reason::ready);

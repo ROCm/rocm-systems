@@ -557,13 +557,13 @@ complete_signal_less_dispatch(kfd::signal_less_hub_t::proven&& proven)
 
     auto       _detail  = kfd::finalize_detail{};
     const auto _outcome = kfd::run_complete_signal_less_dispatch(proven.start_ticks,
-                                                       proven.end_ticks,
-                                                       _payload.enqueue_ts,
-                                                       _now,
-                                                       _convert,
-                                                       _emit,
-                                                       _retire,
-                                                       &_detail);
+                                                                 proven.end_ticks,
+                                                                 _payload.enqueue_ts,
+                                                                 _now,
+                                                                 _convert,
+                                                                 _emit,
+                                                                 _retire,
+                                                                 &_detail);
 
     if(_outcome == kfd::finalize_outcome::result_ready)
     {

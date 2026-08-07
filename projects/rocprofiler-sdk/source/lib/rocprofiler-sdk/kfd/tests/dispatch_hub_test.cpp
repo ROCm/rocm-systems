@@ -531,8 +531,8 @@ TEST(OwnerRegistry, quarantine_persists_after_the_collision_clears)
     hub.quarantine_slot(0, 40);
 
     reg.remove_queue(2);
-    EXPECT_TRUE(reg.slot_uniquely_owned(0, 40));       // ownership looks clean again...
-    EXPECT_TRUE(slot_quarantined(hub, 0, 40));  // ...but the slot stays unusable
+    EXPECT_TRUE(reg.slot_uniquely_owned(0, 40));  // ownership looks clean again...
+    EXPECT_TRUE(slot_quarantined(hub, 0, 40));    // ...but the slot stays unusable
     EXPECT_FALSE(hub.can_register_batch({key_of(40, 9)}));
 }
 
