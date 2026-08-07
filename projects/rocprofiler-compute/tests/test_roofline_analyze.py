@@ -21,9 +21,7 @@ config["cleanup"] = True
 roofline_dir = "tests/workloads/mem_levels_HBM/MI200"
 
 
-# =============================================================================
 # Roofline HTML generation
-# =============================================================================
 
 
 def test_analyze_generates_roofline_html(
@@ -268,9 +266,7 @@ def test_roof_mem_levels(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-# =============================================================================
 # Per-datatype HTML output validation
-# =============================================================================
 
 # Each datatype must take the correct roofline branch:
 DATATYPE_LEGEND_CASES = {

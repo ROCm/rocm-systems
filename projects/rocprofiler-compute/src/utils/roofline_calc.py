@@ -16,7 +16,7 @@ from utils.metrics.evaluation_pipeline import eval_metric
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
 
-# Log-axis extent used by the ceiling math.
+# Log-axis extent for ceiling math.
 XMIN = 0.01
 XMAX_DEFAULT = 1000.0
 
@@ -461,7 +461,7 @@ def _evaluate_kernel_tables(
         if table_id in arch_config.dfs:
             kernel_dfs[table_id] = arch_config.dfs[table_id].copy()
             kernel_dfs_type[table_id] = arch_config.dfs_type[table_id]
-    # eval_metric keys off kernel_dfs; extra dfs_expressions entries are ignored.
+    # eval_metric keys off kernel_dfs only.
     eval_metric(
         kernel_dfs,
         kernel_dfs_type,
@@ -515,8 +515,7 @@ def calc_ai_analyze(
 
     workload.roofline_metrics = {}
 
-    # The top-kernels aggregate-time column is named for the --time-unit it was
-    # built with, e.g. "Sum(ns)", so the unit is only recoverable from the name.
+    # Aggregate-time column name encodes the time unit, e.g. "Sum(ns)".
     sum_column: Optional[str] = None
     top_df = workload.dfs.get(_KERNEL_TOP_TABLE_ID)
     if top_df is not None:

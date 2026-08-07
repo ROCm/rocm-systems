@@ -1,14 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Assemble the interactive standalone roofline HTML document.
-
-Wraps the roofline plotly figure in a self-contained page whose controls are
-all driven by a single embedded JSON model:
-* a memory-peak dropdown,
-* a click-to-isolate kernel panel with a cumulative-runtime filter, and
-* a bandwidth-roofline panel with click-to-isolate roofs.
-"""
+"""Assemble the interactive standalone roofline HTML document."""
 
 import functools
 import html
@@ -27,30 +20,24 @@ from roofline.roofline_frame import (
     FRAME_SLOPE_SKEW,
 )
 
-KERNEL_NAME_FONT_FAMILY = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+from roofline.roofline_hover import KERNEL_NAME_FONT_FAMILY
 
 ALL_PEAKS_VALUE = "all"
 
+ROOF_EXTRAP_MIN_AI = 1e-150
 ROOF_EXTRAP_MAX_AI = 1e150
 
-# Id Plotly renders the graph div under and the controller finds it by.
 _PLOT_DIV_ID = "roofline-plot"
 
 
 @functools.lru_cache(maxsize=None)
 def _read_asset(name: str) -> str:
-    """Read a bundled asset (HTML/CSS/JS) inlined into the document.
-
-    Cached because both the Ops and Flops documents are written in one run and
-    the assets never change at runtime.
-    """
+    """Read a bundled asset file, cached for repeated calls in one run."""
     return (Path(__file__).parent / "assets" / name).read_text(encoding="utf-8")
 
 
 def _json_safe(value: object) -> object:
-    """Recursively replace non-finite floats with None.
-    This is to ensure that the browser can parse the embedded model.
-    """
+    """Replace non-finite floats with None for browser-safe JSON."""
     if isinstance(value, float):
         return value if math.isfinite(value) else None
     if isinstance(value, dict):
@@ -62,42 +49,7 @@ def _json_safe(value: object) -> object:
 
 @dataclass
 class RooflineViewModel:
-    """Client-facing description of the interactive roofline.
-
-    Attributes:
-        peaks: Ordered memory levels that have at least one point (e.g.
-            ["L1", "L2", "HBM", "LDS"]). Empty on a roofs-only figure.
-        peak_colors: Map from memory level to its roof color, used to color an
-            isolated kernel's dots and every roofline panel row by memory level.
-            Covers every level drawn, whether or not a kernel reaches it.
-        default_peak: Memory level shown on load, or ALL_PEAKS_VALUE for every
-            level at once.
-        kernels: One entry per plotted kernel, in the same order as
-            kernel_trace_indices:
-            {"name", "color", "pctRuntime",
-            "points": [{"peak", "ai", "perf", "hoverCells"}]}.
-            This carries only what the client itself needs: pctRuntime (percent
-            of total runtime) orders the kernel panel and drives the runtime
-            filter, and hoverCells holds the two per-point tooltip values
-            (peak throughput and percent of roofline, preformatted). Everything
-            else a tooltip shows is constant across a kernel's points and so is
-            baked into that trace's hover template instead of restated here.
-            pctRuntime is None when the underlying data is missing.
-        kernel_trace_indices: Indices into figure.data of the per-kernel
-            scatter traces, in the same order as kernels.
-        roofline_traces: Bandwidth-roof (memory-level) line traces, each
-            {"level", "traceIndex", "bandwidth", "kneeAi", "kneePerf"}. Clicking
-            a roofline panel row isolates the matching trace. The knee is where
-            the diagonal turns over into the compute ceiling capping it, carried
-            here because the client frames on it; it is None when the figure has
-            no compute roof and the diagonal is drawn open-ended.
-        compute_traces: Horizontal compute-ceiling traces (VALU/matrix), each
-            {"traceIndex", "label", "peakPerf"}.
-        compute_overlay_traces: One hidden highlight trace per compute ceiling,
-            each {"traceIndex", "peakPerf"}. While roofs are isolated the base
-            ceiling dims and its overlay carries the bright cap from the
-            isolated slope rightward.
-    """
+    """JSON model embedded in the page for the client-side controller."""
 
     peaks: List[str] = field(default_factory=list)
     peak_colors: Dict[str, str] = field(default_factory=dict)
@@ -157,8 +109,6 @@ def build_interactive_document(
             "matching the (AI axis) marker in the Bandwidth rooflines panel. "
             "All peaks plots every level at once."
         ),
-        # The stops are the kernels' own cumulative percentages, so the last one
-        # is whatever they add up to rather than a flat 100%.
         RUNTIME_TITLE=html.escape(
             "Show only the heaviest kernels whose combined percent of GPU "
             "resident time reaches this cutoff. The rightmost stop shows every "

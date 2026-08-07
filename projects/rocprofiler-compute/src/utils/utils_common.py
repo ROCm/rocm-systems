@@ -1157,14 +1157,11 @@ def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, s
                is_valid=True if CSV is valid, False otherwise
                error_message contains description if invalid
     """
-    if isinstance(workload_dir, list):
-        base_dir = (
-            workload_dir[0][0]
-            if isinstance(workload_dir[0], (list, tuple))
-            else workload_dir[0]
-        )
-    else:
-        base_dir = workload_dir
+    from utils.roofline_calc import _workload_base_dir
+
+    base_dir = _workload_base_dir(workload_dir)
+    if base_dir is None:
+        return False, "Workload directory is not set"
 
     benchmark_results = Path(base_dir) / "roofline.csv"
 

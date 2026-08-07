@@ -6,9 +6,8 @@
 import html
 from typing import Optional
 
-from roofline.roofline_html import KERNEL_NAME_FONT_FAMILY
+KERNEL_NAME_FONT_FAMILY = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 
-# Kernel names wrap at this width so a long name stays readable in the tooltip.
 _HOVER_WRAP_WIDTH = 44
 
 
@@ -36,13 +35,7 @@ def build_kernel_hover_template(
     pct_runtime: Optional[float],
     ops_flops: str,
 ) -> str:
-    """One kernel's hover template: the name, then AI, achieved/peak
-    throughput, percent of roofline, limiter, dispatches, and runtime.
-
-    Everything here is constant across a kernel's points, so it is emitted once
-    per trace. The two values that vary per point are read from that point's
-    ``customdata`` and the coordinates come straight from the marker.
-    """
+    """Kernel hover template; per-point values come from customdata."""
     unit = f"G{ops_flops}s/s"
     time_txt = (
         f"{format_hover_number(total_time, ',.2f')} {time_unit}".strip()

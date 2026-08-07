@@ -162,7 +162,6 @@ def test_calc_ai_analyze_reports_an_unusable_ai_as_zero(
         assert result[level][0] == [0], f"{level} should report an unusable AI as 0"
         assert result[level][1] == [100.0], f"{level} performance list desynced"
     assert result["ai_l1"][0] == [2.0], "a usable AI alongside must pass through"
-    # allow_nan=False is what the browser's JSON.parse effectively enforces.
     json.dumps(result, allow_nan=False)
 
 

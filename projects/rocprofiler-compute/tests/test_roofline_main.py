@@ -74,11 +74,6 @@ def benchmarked_roofline(tmp_path: Path):
     return build
 
 
-# =============================================================================
-# What gets drawn
-# =============================================================================
-
-
 @pytest.mark.parametrize("dtype", ["FP32", "INVALID_DATATYPE"])
 def test_cli_generate_plot_returns_nothing_without_usable_input(dtype: str) -> None:
     """A datatype this arch cannot be profiled for, and a datatype with no AI
@@ -99,7 +94,6 @@ def test_generate_plot_draws_the_roofs_the_datatype_reaches(
     """Each datatype gets one compute roof per op class it reaches on this arch:
     BF16 is matrix-only where FP64 is dual-path. On CDNA the matrix roofs are
     labeled MFMA, never WMMA."""
-    # Passing an existing figure skips the AI overlay, leaving the roofs alone.
     fig = benchmarked_roofline(["FP64", "BF16"]).generate_plot(dtype, fig=go.Figure())
 
     names = {trace.name for trace in fig.data}
@@ -107,11 +101,6 @@ def test_generate_plot_draws_the_roofs_the_datatype_reaches(
     assert names.isdisjoint(not_drawn)
 
 
-# =============================================================================
-# Kernel traces: which roof a kernel is scored against, and what it says
-# =============================================================================
-
-# One bandwidth ceiling, and compute peaks a stacked figure would draw.
 CEILING = {"hbm": [[0.01, 1.0], [1.0, 1500.0], 1500.0]}
 COMPUTE_PEAKS = [("FP32 VALU", 9000.0), ("FP32 MFMA", 90000.0)]
 
@@ -140,8 +129,6 @@ def test_kernel_traces_score_against_the_tallest_drawn_ceiling() -> None:
     """A stacked figure caps points at the tallest compute roof drawn, so the
     reported peak and limiter do not depend on the order datatypes were
     stacked."""
-    # AI 100 at 1500 GB/s puts the roof above the 9000 VALU peak, so the cap is
-    # what decides the reported peak.
     ai_data = {"ai_hbm": [[100.0], [50000.0]], "kernelNames": ["kA"]}
 
     matrix_traces, matrix_capped = kernel_traces(make_roofline(["FP32"]), ai_data)
@@ -151,8 +138,6 @@ def test_kernel_traces_score_against_the_tallest_drawn_ceiling() -> None:
 
     assert pct_roof(matrix_capped[0]) < 100.0
     assert pct_roof(valu_capped[0]) > 100.0
-    # The limiter is constant across a kernel's points, so it ships in the
-    # trace's hover template rather than in the client model.
     assert "Performance limiter: FP32 MFMA" in matrix_traces[0].hovertemplate
     assert "Performance limiter: FP32 VALU" in valu_traces[0].hovertemplate
 
@@ -161,9 +146,6 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
     """A kernel whose bandwidth roof sits under the compute cap is limited by its
     memory level, and falls back to Unknown when the ceiling data holds no roof
     for that level at all. Levels with no positive AI are not plotted."""
-    # kA is at AI 1, where HBM tops out at 1500 -- far below either compute peak
-    # -- so HBM binds. Its L2 entry is zeroed and must be dropped, and kB has no
-    # entry at either level.
     traces, model = kernel_traces(
         make_roofline(["FP32"]),
         {
@@ -184,7 +166,6 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
         compute_peaks=[],
     )
     assert "Performance limiter: Unknown" in unroofed_traces[0].hovertemplate
-    # With no roof to score against, both per-point tooltip values read N/A.
     assert unroofed[0]["points"][0]["hoverCells"] == ["N/A", "N/A"]
 
 
@@ -202,30 +183,17 @@ def test_kernel_hover_carries_the_whole_name() -> None:
 
     wrapped = wrap_hover_name(name)
     assert wrapped in traces[0].hovertemplate
-    # Undo the wrapping: what the tooltip shows is exactly the name.
     lines = wrapped.split(">", 1)[1].removesuffix("</span>")
     assert lines.replace("<br>", "") == name
 
-
-# =============================================================================
-# The framing rule: what a roofline opens on
-#
-# One memory roof at 500 GB/s capped by a 5000 GFLOP/s ceiling, so its knee sits
-# at AI 10, with kernels an order of magnitude under the ceiling.
-# =============================================================================
 
 BANDWIDTH = 500.0
 PEAK_PERF = 5000.0
 KNEE_AI = PEAK_PERF / BANDWIDTH
 KERNELS = [(20.0, 1000.0), (40.0, 2000.0)]
 
-# Padding both axes by the same factor lands the frame's bottom-left corner
-# exactly on the steepest roof, so comparisons against that corner sit on a
-# knife edge in floating point.
 FLOAT_SLACK = 1e-9
 
-# The rule holds in any window, so the clauses that shaping could break are
-# stated across the range of viewports a reader might open the page in.
 any_viewport = pytest.mark.parametrize("aspect", [0.4, 1.0, FRAME_NOMINAL_ASPECT, 4.0])
 
 
@@ -288,9 +256,6 @@ def test_frame_follows_the_slopes_when_stacking_lifts_the_knees() -> None:
     bounds = frame_bounds(stacked)
 
     assert_roofs_enter_through_the_bottom(bounds, [BANDWIDTH])
-    # The visible diagonal spans the throughput range of everything drawn, which
-    # is what framing the entry buys: a kernel can be read against the roof above
-    # it however far above the ceiling sits.
     _, _, y_lo, _ = bounds
     assert math.log10(tall_peak / y_lo) >= math.log10(
         tall_peak / min(perf for _, perf in KERNELS)
@@ -343,13 +308,6 @@ def test_frame_bounds_without_anchors() -> None:
     assert frame_bounds(FrameAnchors(points=[(0.0, PEAK_PERF)])) is None
 
 
-# =============================================================================
-# The frame a real figure opens on: the anchors read off the drawn geometry
-# =============================================================================
-
-# Widest a frame may open on before it is showing empty corners rather than a
-# roofline. The roofs themselves are drawn across ~300 decades so they survive
-# any pan, which is what a frame built from drawn endpoints would inherit.
 FRAME_MAX_DECADES = 6.0
 
 
@@ -409,15 +367,10 @@ def test_view_model_carries_the_drawn_knee(benchmarked_roofline) -> None:
     assert view_model.roofline_traces, "expected bandwidth roofs in the model"
     for roof in view_model.roofline_traces:
         drawn_ai, drawn_perf = knees[roof["level"]]
-        # The model carries the knee itself; the line is drawn to a sampled
-        # approximation of it.
         assert roof["kneeAi"] == pytest.approx(drawn_ai)
         assert roof["kneePerf"] == pytest.approx(drawn_perf)
 
 
-# =============================================================================
-# The page: the model it embeds and the assets it wires together
-# =============================================================================
 
 
 def test_view_model_to_json_escapes_script_close() -> None:
@@ -426,7 +379,6 @@ def test_view_model_to_json_escapes_script_close() -> None:
     serialized = model.to_json()
 
     assert "</script>" not in serialized, "must not allow a script element to close"
-    # Still valid JSON that decodes back to the original kernel name.
     assert json.loads(serialized)["kernels"][0]["name"] == "evil</script>"
 
 

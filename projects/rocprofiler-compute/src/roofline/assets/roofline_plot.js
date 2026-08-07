@@ -1,8 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
-//
-// Client-side controller for the interactive roofline.
-
 (function () {
   "use strict";
 
@@ -49,7 +46,6 @@
   var EXPORT_MAX_RASTER_DIMENSION = 30000;
   var EXPORT_MAX_RASTER_AREA = 16.7e6;
   var EXPORT_MAX_SCALE = 4;
-  // Poll for Plotly to finish its initial paint before wiring interactivity.
   var PLOT_READY_POLL_MS = 50;
   var PLOT_READY_MAX_ATTEMPTS = 40;
 
@@ -78,11 +74,9 @@
   var applyingFrame = false;
   var themeIsReaderChoice = false;
 
-  // ---- Model data ---------------------------------------------------------
+  // ---- Data initialized from the model -------------------------------------
   var kernels = model.kernels;
-  // Each kernel's array position is its stable identity for selection,
-  // scrolling, and runtime lookup. Names are not unique: two dispatches of the
-  // same kernel signature would collapse into one row.
+  // Array position is the stable kernel identity; names are not unique.
   kernels.forEach(function (kernel, index) {
     kernel.index = index;
   });
@@ -97,12 +91,8 @@
     return kernel.pctRuntime != null && isFinite(kernel.pctRuntime);
   }
 
-  // Whether any kernel carries a percent-of-runtime, which gates the filter.
   var hasRuntimeData = kernels.some(kernelHasRuntime);
 
-  // Data-driven runtime filter: each kernel's cumulative percent of runtime
-  // and the sorted set of those values used as the slider's stops.
-  // Filled by computeRuntimeBreakpoints().
   var kernelCumulativePct = {};
   var runtimeBreakpoints = [];
 
@@ -114,19 +104,11 @@
   });
 
   var state = {
-    // The memory region shown in the aggregate view. A single
-    // isolated kernel ignores this and shows every level.
     peak: model.defaultPeak || ALL_PEAKS_VALUE,
-    // Indices (kernel.index) of the currently isolated kernels.
     selected: new Set(),
-    // Trace indices of the memory roofs currently isolated in the legend.
     isolatedRoofs: new Set(),
-    // Cumulative-runtime-percent cutoff; a kernel shows when its cumulative
-    // percent is within this. Infinity shows every kernel until init sets it.
     runtimeThreshold: Infinity,
   };
-
-  // ===== Small shared helpers ==============================================
 
   function isMultiSelectEvent(event) {
     return !!(event && (event.ctrlKey || event.metaKey));
@@ -172,7 +154,6 @@
     item.classList.toggle("dimmed", dimmed);
   }
 
-  // Shared count shown next to each panel title.
   function formatCount(shown, total) {
     return "(" + shown + " / " + total + ")";
   }
@@ -189,21 +170,13 @@
     });
   }
 
-  // ===== The one isolated kernel rule ======================================
-
-  // A single isolated kernel is plotted at every memory level at once, so no
-  // single level owns the AI axis.
   function isSingleKernelIsolated() {
     return state.selected.size === 1;
   }
 
-  // The memory level that currently owns the AI axis, or ALL_PEAKS_VALUE when
-  // no single level does.
   function effectivePeak() {
     return isSingleKernelIsolated() ? ALL_PEAKS_VALUE : state.peak;
   }
-
-  // ===== Runtime-percent filter ============================================
 
   function computeRuntimeBreakpoints() {
     kernelCumulativePct = {};
@@ -263,12 +236,8 @@
     });
   }
 
-  // ===== Compute ceilings / roof isolation =================================
-
-  // Compute ceilings meet the diagonal at the leftmost bandwidth among the
-  // isolated roofs, falling back to every roof when none of them has a
-  // bandwidth to offer.
   function referenceBandwidth() {
+    // Leftmost isolated-roof bandwidth caps compute overlays.
     var bws = bandwidthsOf(
       rooflineTraces.filter(function (roof) {
         return state.isolatedRoofs.has(roof.traceIndex);
@@ -290,7 +259,6 @@
       });
   }
 
-  // Highlight overlays are shown only while isolating.
   function updateCeilings() {
     if (!plotlyReady() || !computeOverlayTraces.length) {
       return;
@@ -304,8 +272,6 @@
     computeOverlayTraces.forEach(function (overlay) {
       indices.push(overlay.traceIndex);
       if (isolating && refBw) {
-        // The overlay is a horizontal line with hover disabled, so its two
-        // endpoints draw the same stroke that intermediate vertices would.
         var left = overlay.peakPerf / refBw;
         xs.push([left, ROOF_EXTREME_MAX_AI]);
         ys.push([overlay.peakPerf, overlay.peakPerf]);
@@ -319,7 +285,6 @@
     Plotly.restyle(gd, { x: xs, y: ys, visible: visibility }, indices);
   }
 
-  // Isolate the clicked memory roof(s) by dimming the others.
   function applyRoofIsolation() {
     if (!plotlyReady()) {
       return;
@@ -344,17 +309,14 @@
     updateCeilings();
   }
 
-  // Undefined until the first call: emphasized is only ever a level or null.
   var lastEmphasizedLevel;
 
   function applyRoofEmphasis() {
     if (!plotlyReady() || !memoryRoofIndices.length) {
       return;
     }
-    // While roofs are isolated no level owns the AI axis, so none is thickened.
     var emphasized = state.isolatedRoofs.size > 0 ? null : effectivePeak();
-    // A restyle here redraws the whole chart, and render() calls this on every
-    // frame of a slider drag, so skip the ones that would change nothing.
+    // Skip redundant roof-emphasis restyles during slider drags.
     if (emphasized === lastEmphasizedLevel) {
       return;
     }
@@ -365,8 +327,6 @@
     Plotly.restyle(gd, { "line.width": widths }, memoryRoofIndices);
   }
 
-  // Isolate a memory roof, shared by the roofline panel rows and by clicking a
-  // slope in the plot.
   function isolateRoof(traceIndex, multi) {
     if (memoryRoofIndices.indexOf(traceIndex) < 0) {
       return;
@@ -375,8 +335,6 @@
     applyRoofIsolation();
     updateRoofPanel();
   }
-
-  // ===== Theme =============================================================
 
   function themeColor(name) {
     return getComputedStyle(document.documentElement)
@@ -390,16 +348,12 @@
       area: themeColor("--roofline-plot-area"),
       grid: themeColor("--roofline-plot-grid"),
       text: themeColor("--roofline-text"),
-      // Hover cards and the exported legend float above the chart the way the
-      // side panels sit beside it, so they borrow the panels' colors.
       overlay: themeColor("--roofline-bg-soft"),
       overlayBorder: themeColor("--roofline-border"),
       markerOutline: themeColor("--roofline-marker-outline"),
     };
   }
 
-  // Repaint the chart in the active theme. Tick labels, axis titles, and the
-  // chart title all inherit layout.font, so one color covers every label.
   function applyPlotTheme() {
     if (!plotlyReady()) {
       return;
@@ -416,8 +370,6 @@
       "hoverlabel.font.color": theme.text,
     });
     if (kernelTraceIndices.length) {
-      // Kernel dots carry an outline so a kernel whose palette color lands near
-      // the background is still legible against it.
       Plotly.restyle(
         gd,
         { "marker.line.color": theme.markerOutline },
@@ -430,8 +382,6 @@
     return document.documentElement.classList.contains("roofline-theme-dark");
   }
 
-  // The button names the theme it switches to, the way a light switch is
-  // labeled by what it does rather than by where it is.
   function syncThemeToggle() {
     if (!themeToggleBtn) {
       return;
@@ -467,7 +417,6 @@
     }
   }
 
-  // ===== View framing ======================================================
   function frameAnchors() {
     var xs = [];
     var ys = [];
@@ -521,7 +470,6 @@
     return [mid - 0.5 * decades, mid + 0.5 * decades];
   }
 
-  // Pixel size of the plotting area
   function plotAreaPixels() {
     var margin = (gd.layout && gd.layout.margin) || {};
     var width = gd.clientWidth - (margin.l || 0) - (margin.r || 0);
@@ -588,8 +536,6 @@
     return { x: [xLo, frame.x[1]], y: y };
   }
 
-  // Log-axis frame for what is drawn right now. Null when nothing is drawn, so
-  // the caller can fall back to the range the figure was built with.
   function currentFrame() {
     var anchors = frameAnchors();
     if (!anchors) {
@@ -609,7 +555,6 @@
     return pinToSlopes(shapeToPlotArea(frame));
   }
 
-  // Pin the axes to a computed frame
   function applyFrame(frame) {
     applyingFrame = true;
     autoFramed = true;
@@ -627,9 +572,6 @@
     }
   }
 
-  // Reset (button, double-click, and the opening view): re-frame on whatever
-  // kernels are currently shown, so it follows the active filter and selection
-  // instead of a fixed spot.
   function resetView() {
     if (!plotlyReady()) {
       return;
@@ -641,15 +583,11 @@
     applyFrame(frame);
   }
 
-  // ===== PNG export ========================================================
-
   function exportTextWidth(text) {
     if (!exportTextMeasureContext) {
       exportTextMeasureContext = document
         .createElement("canvas")
         .getContext("2d");
-      // Only kernel-legend labels/title are measured here, and the kernel
-      // legend is monospace, so measure with the kernel-name font.
       exportTextMeasureContext.font =
         EXPORT_LEGEND_FONT_SIZE + "px " + KERNEL_NAME_FONT_FAMILY;
     }
@@ -781,10 +719,7 @@
     );
   }
 
-  // Legend rows the figure can hold without growing past
-  // EXPORT_LEGEND_MAX_HEIGHT_RATIO times the plot. This is what actually bounds
-  // the exported canvas: without it the figure grows one row per kernel until
-  // the browser silently hands back a blank image.
+  // Cap legend rows or the browser returns a blank PNG.
   function exportLegendRowCapacity(plotHeight) {
     return Math.max(
       1,
@@ -825,8 +760,6 @@
       visibleKernels.length,
       plotHeight
     );
-    // Kernels past the capacity are summarized in one final row instead of
-    // being clipped away without a trace.
     var kernelLegendLimit = Math.max(
       1,
       Math.floor(exportLegendRowCapacity(plotHeight) / kernelLabelLines)
@@ -854,8 +787,6 @@
     };
   }
 
-  // Raster resolution for the download, reduced from the display-matching scale
-  // only as far as the canvas limits demand.
   function exportRasterScale(width, height) {
     var requested = clamp(window.devicePixelRatio || 2, 2, EXPORT_MAX_SCALE);
     var longestSide = Math.max(width, height, 1);
@@ -870,8 +801,6 @@
     );
   }
 
-  // Turn traces the interactive page keeps out of the legend into the rows of
-  // one export legend, titled on its first row the way Plotly groups them.
   function listInExportLegend(data, entries, spec) {
     entries.forEach(function (entry, row) {
       var trace = data[entry.traceIndex];
@@ -886,7 +815,6 @@
     });
   }
 
-  // Build an export-only Plotly figure
   function buildExportFigure() {
     var data = JSON.parse(JSON.stringify(gd.data));
     var layout = JSON.parse(JSON.stringify(gd.layout));
@@ -895,7 +823,6 @@
       trace.showlegend = false;
     });
 
-    // Heaviest kernel first
     var visibleKernels = [];
     kernelIndicesByRuntime().forEach(function (position) {
       var kernel = kernels[position];
@@ -930,8 +857,6 @@
       legend: "legend2",
       group: "export-roofs",
       title: "Rooflines",
-      // Ranked below every kernel, so the two legends stack in a fixed order
-      // however many kernels are listed.
       rankFrom: EXPORT_ROOF_LEGEND_RANK,
       label: function (entry) {
         return entry.label;
@@ -939,8 +864,6 @@
     });
 
     if (legendKernels.length < visibleKernels.length) {
-      // A legend-only trace standing in for the kernels that did not fit, so a
-      // truncated legend never reads as the complete set.
       data.push({
         type: "scatter",
         x: [null],
@@ -970,7 +893,6 @@
       layout.margin.r =
         (layout.margin.r || 0) + dimensions.legendWidth;
     }
-    // The PNG is the shareable artifact, so it has to say which view it is.
     layout.margin.t = (layout.margin.t || 0) + EXPORT_SUBTITLE_HEIGHT;
     applyExportSubtitle(layout);
     layout.legend = exportLegendLayout(
@@ -997,7 +919,6 @@
     };
   }
 
-  // Freeze the live view
   function pinExportAxisRanges(layout) {
     ["xaxis", "yaxis"].forEach(function (axisName) {
       var axis = layout[axisName];
@@ -1009,8 +930,6 @@
     });
   }
 
-  // Every roof drawn, memory slopes then compute ceilings, so the exported
-  // horizontal lines are labeled instead of anonymous.
   function exportRoofLegendEntries() {
     var entries = rooflineTraces.map(function (roof) {
       return { traceIndex: roof.traceIndex, label: roof.level };
@@ -1057,7 +976,6 @@
     };
   }
 
-  // Rasterize the export-only figure at high resolution
   function exportPng() {
     if (
       !plotlyReady() ||
@@ -1119,8 +1037,6 @@
     }
   }
 
-  // ===== Kernel rendering ==================================================
-
   function syncPeakControl() {
     if (!peakSelect) {
       return;
@@ -1144,7 +1060,6 @@
     });
   }
 
-  // Build the per-kernel Plotly restyle payload for the current peak/selection.
   function buildKernelRestylePayload() {
     var xs = [];
     var ys = [];
@@ -1166,8 +1081,6 @@
         })
       );
       markerColors.push(kernelPointColors(kernel, points));
-      // Each trace's hovertemplate holds the kernel-level text; these are the
-      // two values that vary per point, already formatted server-side.
       customdata.push(
         points.map(function (point) {
           return point.hoverCells;
@@ -1206,7 +1119,6 @@
     updateRoofPanel();
   }
 
-  // Coalesce repaints driven by a continuous control onto one animation frame.
   function scheduleRender() {
     if (renderFrame != null) {
       return;
@@ -1228,13 +1140,11 @@
       toggleSelection(state.selected, index, multi);
     }
     render();
-    // Isolating a single kernel brings its row into view in the kernel table.
     if (isSingleKernelIsolated()) {
       scrollKernelIntoView(index);
     }
   }
 
-  // Scroll a kernel's row into view within the kernel list.
   function scrollKernelIntoView(index) {
     eachKernelRow(function (item, kernel) {
       if (kernel.index === index) {
@@ -1243,10 +1153,6 @@
     });
   }
 
-  // ===== Panels ============================================================
-
-  // Build one panel with a color swatch, a label, and optional trailing
-  // nodes. Shared by the kernel and roofline panels.
   function createPanelRow(opts) {
     var item = document.createElement("li");
     item.className = "roofline-panel-item";
@@ -1300,7 +1206,6 @@
     if (!kernelList) {
       return;
     }
-    // Show the heaviest kernels first.
     kernelIndicesByRuntime().forEach(function (index) {
       var kernel = kernels[index];
       var extras = [];
@@ -1348,8 +1253,6 @@
     });
   }
 
-  // Reflect isolation state and the active region in the roofline
-  // panel rows, plus the "(shown / total)" count and the reset button.
   function updateRoofPanel() {
     var isolating = state.isolatedRoofs.size > 0;
     var axisPeak = effectivePeak();
@@ -1374,7 +1277,7 @@
     }
   }
 
-  // Hard-stop linear gradient so each memory-level color shows as its own band.
+  // Hard-stop gradient so each memory level is its own band.
   function swatchGradient(colors) {
     var count = colors.length;
     var stops = colors.map(function (color, i) {
@@ -1413,12 +1316,9 @@
     }
   }
 
-  // ===== Wiring / lifecycle ================================================
-
   function wireEvents() {
     if (peakSelect) {
       peakSelect.addEventListener("change", function () {
-        // "all" is a valid, user-selectable region (every memory level).
         state.peak = peakSelect.value;
         render();
       });
@@ -1473,7 +1373,6 @@
           return;
         }
         var traceIndex = data.points[0].curveNumber;
-        // Clicking a roof slope isolates it, same as its panel row.
         if (memoryRoofIndices.indexOf(traceIndex) >= 0) {
           isolateRoof(traceIndex, isMultiSelectEvent(data.event));
           return;
@@ -1526,7 +1425,6 @@
     }
   }
 
-  // Remember the baked initial log-axis range
   function captureInitialRange() {
     if (!gd || !gd.layout || !gd.layout.xaxis || !gd.layout.yaxis) {
       return;
@@ -1538,15 +1436,12 @@
     }
   }
 
-  // Show the true cumulative percent of runtime covered at the current stop.
   function updateRuntimeLabel() {
     if (runtimeValueEl) {
       runtimeValueEl.textContent = state.runtimeThreshold.toFixed(3) + "%";
     }
   }
 
-  // Point the slider at the data-driven breakpoints: one stop per kernel
-  // boundary, defaulting to the last.
   function initRuntimeSlider() {
     if (!runtimeSlider || !runtimeBreakpoints.length) {
       return;
@@ -1561,7 +1456,6 @@
   }
 
   function init() {
-    // Seed the kernel-name font so the CSS picks it up for the panel labels.
     document.documentElement.style.setProperty(
       "--roofline-kernel-font",
       KERNEL_NAME_FONT_FAMILY
@@ -1570,7 +1464,6 @@
     buildKernelPanel();
     buildRoofPanel();
     computeRuntimeBreakpoints();
-    // The runtime filter is meaningless without per-kernel runtime data.
     if (runtimeFilterEl && !hasRuntimeData) {
       runtimeFilterEl.style.display = "none";
     }

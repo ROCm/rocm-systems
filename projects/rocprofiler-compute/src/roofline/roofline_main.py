@@ -12,6 +12,7 @@ import plotly.colors as pcolors
 import plotly.graph_objects as go
 from dash import dcc, html
 
+from roofline.run_benchmark import BENCHMARKING_SUPPORTED as ROOFLINE_SUPPORTED
 from roofline.roofline_frame import FrameAnchors, frame_bounds
 from roofline.roofline_hover import (
     build_compute_peak_hover,
@@ -23,6 +24,7 @@ from roofline.roofline_hover import (
 from roofline.roofline_html import (
     ALL_PEAKS_VALUE,
     ROOF_EXTRAP_MAX_AI,
+    ROOF_EXTRAP_MIN_AI,
     RooflineViewModel,
     build_interactive_document,
 )
@@ -37,45 +39,18 @@ from utils.roofline_calc import (
     CACHE_LEVELS,
     SUPPORTED_DATATYPES,
     OpsSupport,
+    XMIN,
+    XMAX_DEFAULT,
     construct_roof,
     sanitize_mem_level,
 )
 from utils.specs import MachineSpecs
 from utils.utils_analysis import get_matrix_ops_type
 
-# ROOFLINE_SUPPORTED lists the supported gfx architectures, check against this list
-# before doing any roofline-related work
-ROOFLINE_SUPPORTED = [
-    "gfx90a",
-    "gfx940",
-    "gfx941",
-    "gfx942",
-    "gfx950",
-    "gfx1150",
-    "gfx1151",
-    "gfx1152",
-    "gfx1153",
-]
-
-# One color per kernel from a high-contrast qualitative palette.
 _KERNEL_PALETTE: list[str] = pcolors.qualitative.Dark24 + pcolors.qualitative.Light24
-
-# Shared by both axes of the interactive figure.
-_PLOT_GRID_COLOR = "rgba(0, 0, 0, 0.08)"
-
-# Memory region the roofline opens on when it is present.
 DEFAULT_PEAK = "HBM"
-
-# Log-axis fallback frame when there is no data.
-DEFAULT_AXIS_BOUNDS = (0.01, 1000.0, 1.0, 100000.0)
-
-# Roofs are extrapolated down to this AI so they still span a panned view.
-ROOF_EXTRAP_MIN_AI = 1e-150
-
-# Decades beyond the data extremes the roofs stay densely sampled (each side).
+DEFAULT_AXIS_BOUNDS = (XMIN, XMAX_DEFAULT, 1.0, 100000.0)
 ROOF_DENSE_PAD_FACTOR = 1e3
-
-# Per memory-level / compute-roof trace colors for the HTML and CLI backends.
 TRACE_COLORS: dict[str, dict[str, str]] = {
     "l0": {"html": "#F0E442", "cli": "brown+"},
     "l1": {"html": "#0072B2", "cli": "red+"},
@@ -86,23 +61,15 @@ TRACE_COLORS: dict[str, dict[str, str]] = {
     "matrix_ops": {"html": "#56B4E9", "cli": "magenta+"},
 }
 
-# Roofs are sampled so that hover snaps to a vertex anywhere along the line
+# Dense roof sampling so hover hits a vertex anywhere on the line.
 _ROOF_SAMPLES_PER_DECADE = 48
 _ROOF_SAMPLES_MIN = 64
 _ROOF_SAMPLES_MAX = 800
 
 
 def _figure_class(dtype: str) -> str:
-    """Which of the two figures a datatype belongs on. Integer datatypes count
-    operations and everything else counts floating-point operations, so the two
-    never share an axis. Doubles as the unit in every label the figure carries.
-    """
+    """Return OP or FLOP; integer datatypes use the ops figure."""
     return "OP" if str(dtype).startswith("I") else "FLOP"
-
-
-def _figure_title(ops_flops: str) -> str:
-    """How a figure class is named to the reader."""
-    return "Ops" if ops_flops == "OP" else "Flops"
 
 
 def get_color(category: str, backend: str = "html") -> str:
@@ -114,12 +81,6 @@ def get_color(category: str, backend: str = "html") -> str:
         raise RuntimeError(f"Invalid backend passed to get_color(): {backend}")
 
     return TRACE_COLORS[key][backend]
-
-
-def build_kernel_colors(num_kernels: int) -> list[str]:
-    """Assign one color per kernel, cycling the palette once it runs out."""
-    palette_size = len(_KERNEL_PALETTE)
-    return [_KERNEL_PALETTE[index % palette_size] for index in range(num_kernels)]
 
 
 def _roof_sample_count(low_ai: float, high_ai: float) -> int:
@@ -144,10 +105,18 @@ class Roofline:
         self.__ai_data: Optional[dict[str, Any]] = None
         self.__ceiling_data: Optional[dict[str, Any]] = None
         self.__view_models: dict[str, RooflineViewModel] = {}
-        # Compute peaks per figure class ("OP"/"FLOP"). Each entry costs one
-        # roofline.csv read per requested datatype, and every datatype's pass
-        # over a figure needs the same answer.
         self.__compute_peaks: dict[str, list[tuple[str, float]]] = {}
+        self.__ceiling_by_dtype: dict[str, dict[str, Any]] = {}
+
+    def _ceiling_for_dtype(self, dtype: str) -> dict[str, Any]:
+        if dtype not in self.__ceiling_by_dtype:
+            self.__ceiling_by_dtype[dtype] = construct_roof(
+                roofline_parameters=self.__run_parameters,
+                dtype=dtype,
+                mspec=self.__mspec,
+                ai_data=self.__ai_data,
+            )
+        return self.__ceiling_by_dtype[dtype]
 
     def roof_setup(self) -> None:
         workload_dir_val = self.__run_parameters.get("workload_dir")
@@ -166,25 +135,20 @@ class Roofline:
             app_name = getattr(self.__args, "name", "default_app_name")
             gpu_model_name = getattr(self.__mspec, "gpu_model", "default_gpu_model")
 
-            # Create the new path
             new_path = base_path / app_name / gpu_model_name
 
-            # Update workload_dir with the new path, maintaining original data structure
             if isinstance(workload_dir_val, list):
-                # Update the nested list structure
                 if isinstance(workload_dir_val[0], (list, tuple)):
                     self.__run_parameters["workload_dir"][0][0] = str(new_path)
                 else:
                     self.__run_parameters["workload_dir"][0] = str(new_path)
             else:
-                # Update string value
                 self.__run_parameters["workload_dir"] = str(new_path)
 
             final_dir = str(new_path)
         else:
             final_dir = base_dir
 
-        # Create the directory
         Path(final_dir).mkdir(parents=True, exist_ok=True)
 
     @staticmethod
@@ -323,7 +287,6 @@ class Roofline:
                 mode="lines",
                 showlegend=False,
                 visible=False,
-                # Thicker than the base ceiling it highlights.
                 line=dict(color=get_color(key), width=3),
                 hoverinfo="skip",
             )
@@ -348,12 +311,7 @@ class Roofline:
             dt = str(dt)
             if _figure_class(dt) != ops_flops or not self._datatype_supported(dt):
                 continue
-            ceiling = construct_roof(
-                roofline_parameters=self.__run_parameters,
-                dtype=dt,
-                mspec=self.__mspec,
-                ai_data=self.__ai_data,
-            )
+            ceiling = self._ceiling_for_dtype(dt)
             for key, label in self._compute_paths(dt):
                 peak = self._peak_value(ceiling, key)
                 if peak and peak > 0:
@@ -415,13 +373,10 @@ class Roofline:
         traces: list[go.Scatter] = []
         kernels_model: list[dict[str, Any]] = []
 
-        # Per-kernel stats joined, aligned index-for-index with kernel_names.
         counts = self.__ai_data.get("counts", [])
         total_time = self.__ai_data.get("totalTime", [])
         pct_runtime = self.__ai_data.get("pctRuntime", [])
         time_unit = self.__ai_data.get("timeUnit", "")
-        # Every kernel is scored against the same envelope cap, so resolve the
-        # cap the diagonals are drawn to once.
         compute_cap, compute_cap_label = self._envelope_compute_cap(compute_peaks)
 
         for kernel_index, kernel_name in enumerate(kernel_names):
@@ -434,8 +389,6 @@ class Roofline:
             if not points:
                 continue
 
-            # A list too short to reach this kernel means the stat is missing
-            # rather than zero, since the stats are joined from separate tables.
             color, count_val, time_val, pct_val = (
                 values[kernel_index] if kernel_index < len(values) else None
                 for values in (kernel_colors, counts, total_time, pct_runtime)
@@ -448,8 +401,6 @@ class Roofline:
                 go.Scatter(
                     x=[point["ai"] for point in points],
                     y=[point["perf"] for point in points],
-                    # Kept whole: the template arguments are what tell two
-                    # instantiations of the same function apart.
                     name=kernel_name,
                     mode="markers",
                     showlegend=False,
@@ -470,10 +421,6 @@ class Roofline:
                     ),
                 )
             )
-            # Only what the client reads back: the dispatch count, aggregate
-            # time, and limiter are already rendered into the hover template
-            # above, so restating them here would ship them to the browser
-            # twice.
             kernels_model.append({
                 "name": kernel_name,
                 "color": color,
@@ -544,6 +491,7 @@ class Roofline:
         self.roof_setup()
         self.__view_models = {}
         self.__compute_peaks = {}
+        self.__ceiling_by_dtype = {}
 
         console_debug("roofline", f"Path: {self.__run_parameters.get('workload_dir')}")
 
@@ -556,7 +504,6 @@ class Roofline:
 
         has_kernel_names = bool(self.__ai_data and self.__ai_data.get("kernelNames"))
 
-        # One figure per op class, each stacking every datatype of that class.
         figures: dict[str, Optional[go.Figure]] = {"OP": None, "FLOP": None}
         datatype_lists: dict[str, str] = {"OP": "", "FLOP": ""}
 
@@ -577,9 +524,6 @@ class Roofline:
                 fig=figures[ops_flops],
                 include_kernels=has_kernel_names,
             )
-            # A datatype with no usable benchmark data contributes nothing, so
-            # it must not claim the figure: the next datatype would then be
-            # treated as a stacked pass and skip the axes and the view model.
             if figure is None:
                 continue
             figures[ops_flops] = figure
@@ -626,7 +570,7 @@ class Roofline:
             document = build_interactive_document(
                 figure,
                 self.__view_models.get(ops_flops, RooflineViewModel()),
-                title=f"Empirical Roofline Analysis ({_figure_title(ops_flops)})",
+                title=f"Empirical Roofline Analysis ({'Ops' if ops_flops == 'OP' else 'Flops'})",
             )
             path = f"{prefix}{dt_list}{kernel_list}.html"
             Path(path).write_text(document, encoding="utf-8")
@@ -647,7 +591,7 @@ class Roofline:
                 children=[
                     html.H3(
                         children=(
-                            f"Empirical Roofline Analysis ({_figure_title(ops_flops)})"
+                            f"Empirical Roofline Analysis ({'Ops' if ops_flops == 'OP' else 'Flops'})"
                         )
                     ),
                     dcc.Graph(figure=figure),
@@ -685,12 +629,7 @@ class Roofline:
             self.__run_parameters["mem_level"], self.__mspec.gpu_model
         )
 
-        self.__ceiling_data = construct_roof(
-            roofline_parameters=self.__run_parameters,
-            dtype=dtype,
-            mspec=self.__mspec,
-            ai_data=self.__ai_data,
-        )
+        self.__ceiling_data = self._ceiling_for_dtype(dtype)
         console_debug("roofline", f"Ceiling data:\n{self.__ceiling_data}")
 
         if all(
@@ -771,7 +710,10 @@ class Roofline:
         kernel_names = self.__ai_data.get("kernelNames", [])
         kernel_traces, kernels_model = self._build_kernel_traces(
             kernel_names=kernel_names,
-            kernel_colors=build_kernel_colors(len(kernel_names)),
+            kernel_colors=[
+                _KERNEL_PALETTE[i % len(_KERNEL_PALETTE)]
+                for i in range(len(kernel_names))
+            ],
             sanitized_cache_hierarchy=sanitized_cache_hierarchy,
             ceiling_data=self.__ceiling_data,
             ops_flops=ops_flops,
@@ -868,8 +810,6 @@ class Roofline:
                 continue
             max_bw = max(max_bw, peak_bw_val)
             level_key = level.upper()
-            # Bandwidth is datatype-independent, so a roof for this memory level
-            # may already be drawn from a prior datatype's pass; keep one entry.
             if any(trace.name == level_key for trace in fig.data):
                 continue
             knee = self._roof_knee(peak_bw_val, cap)
@@ -962,13 +902,11 @@ class Roofline:
             type="log",
             range=[float(np.log10(view_x_lo)), float(np.log10(view_x_hi))],
             title_text=f"Arithmetic Intensity ({ops_flops}s/Byte)",
-            gridcolor=_PLOT_GRID_COLOR,
         )
         fig.update_yaxes(
             type="log",
             range=[float(np.log10(view_y_lo)), float(np.log10(view_y_hi))],
             title_text=f"Performance (G{ops_flops}/sec)",
-            gridcolor=_PLOT_GRID_COLOR,
         )
         fig.update_layout(
             template="plotly_white",
@@ -982,9 +920,6 @@ class Roofline:
             dragmode="pan",
             hovermode="closest",
             margin=dict(l=82, r=40, b=62, t=62, pad=4, autoexpand=False),
-            # Kept on for the surfaces that embed this figure bare (the Dash
-            # WebUI); the standalone document hides it because its side panels
-            # replace the legend.
             showlegend=True,
             hoverlabel=dict(
                 bgcolor="white",
