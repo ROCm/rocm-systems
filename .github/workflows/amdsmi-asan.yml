@@ -79,7 +79,7 @@ jobs:
           set -euo pipefail
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config python3 \
+            build-essential clang cmake ninja-build pkg-config python3 \
             libdrm-dev libnl-3-dev libnl-genl-3-dev libmnl-dev libgtest-dev
 
       - name: Configure
@@ -149,7 +149,7 @@ jobs:
           set -euo pipefail
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config python3 \
+            build-essential clang cmake ninja-build pkg-config python3 \
             libdrm-dev libnl-3-dev libnl-genl-3-dev libmnl-dev libgtest-dev
 
       - name: Configure
