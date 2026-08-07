@@ -19,7 +19,7 @@ project(rccl-tests LANGUAGES CXX)
 #==================================================================================================
 option(USE_MPI                     "Build RCCL-tests with MPI support."           OFF)
 option(ENABLE_DEVICE_API           "Build with NCCL Device API support (GIN)."    OFF)
-option(ENABLE_ROCSHMEM             "Build with rocshmem GIN backend support."     OFF)
+option(ENABLE_ROCSHMEM_GIN         "Build with rocshmem GIN backend support."     OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -161,8 +161,13 @@ set(EXPLICIT_ROCM_VERSION "" CACHE STRING "Explicit ROCM version to compile to (
 if(EXPLICIT_ROCM_VERSION)
   set(rocm_version_string "${EXPLICIT_ROCM_VERSION}")
 elseif(ROCM_PATH)
-  message(STATUS "Reading ROCM version from ${ROCM_PATH}/.info/version")
-  file(READ "${ROCM_PATH}/.info/version" rocm_version_string)
+  find_file(_rocm_version_file "version" PATH_SUFFIXES ".info" "core/.info"
+    HINTS ${ROCM_PATH} PATHS /opt/rocm NO_DEFAULT_PATH)
+  if(NOT _rocm_version_file)
+    message(FATAL_ERROR "Could not find ROCm version file under ${ROCM_PATH}")
+  endif()
+  message(STATUS "Reading ROCM version from ${_rocm_version_file}")
+  file(READ "${_rocm_version_file}" rocm_version_string)
 else()
   message(FATAL_ERROR "Could not determine ROCM version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
 endif()
@@ -208,15 +213,25 @@ if (ENABLE_DEVICE_API)
     add_definitions(-DENABLE_DEVICE_API)
 endif()
 
-if (ENABLE_ROCSHMEM)
+if (ENABLE_ROCSHMEM_GIN)
     message(STATUS "rocshmem GIN backend support enabled")
     add_definitions(-DENABLE_ROCSHMEM)
     add_definitions(-DENABLE_ROCSHMEM_GIN)
     if (NOT ROCSHMEM_INSTALL_DIR)
-        message(FATAL_ERROR "ENABLE_ROCSHMEM is ON but ROCSHMEM_INSTALL_DIR is not set")
+        # Try ext/rocshmem under RCCL source (created by install.sh --rocshmem-gin)
+        get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
+        if(EXISTS "${_mono_root}/projects/rccl/ext/rocshmem/lib/librocshmem.a")
+            set(ROCSHMEM_INSTALL_DIR "${_mono_root}/projects/rccl/ext/rocshmem")
+            message(STATUS "rccl-tests: found rocshmem install at ${ROCSHMEM_INSTALL_DIR}")
+        else()
+            message(FATAL_ERROR "ENABLE_ROCSHMEM_GIN is ON but ROCSHMEM_INSTALL_DIR is not set "
+                    "and no install found at ${_mono_root}/projects/rccl/ext/rocshmem")
+        endif()
     endif()
-    # Device headers include <rocshmem/rocshmem.hpp> when ENABLE_ROCSHMEM is set
-    include_directories(${ROCSHMEM_INSTALL_DIR}/include)
+    # Device headers include <rocshmem/rocshmem.hpp> when ENABLE_ROCSHMEM_GIN is set.
+    # The installed copy has rocshmem_config.h alongside rocshmem.hpp;
+    # must come before source includes so the generated config is found.
+    include_directories(BEFORE ${ROCSHMEM_INSTALL_DIR}/include)
     # Auto-detect RCCL_SOURCE_DIR from mono-repo layout if not provided
     if (NOT RCCL_SOURCE_DIR)
         get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
@@ -233,29 +248,43 @@ if (ENABLE_ROCSHMEM)
             message(STATUS "rccl-tests: found rocshmem source at ${ROCSHMEM_SOURCE_DIR}")
         endif()
     endif()
+    # Source src/ is needed globally for internal headers (sdma/anvil_device.hpp)
+    # pulled in via gin_anvil_sdma.h. But NOT include/ — that would shadow
+    # the installed rocshmem.hpp which has the generated rocshmem_config.h.
     if (ROCSHMEM_SOURCE_DIR)
         include_directories(${ROCSHMEM_SOURCE_DIR}/src)
-        include_directories(${ROCSHMEM_SOURCE_DIR}/include)
-        if (ROCSHMEM_BUILD_DIR)
-            include_directories(${ROCSHMEM_BUILD_DIR})
-        else()
-            include_directories(${ROCSHMEM_SOURCE_DIR}/build/include)
+    endif()
+    # rocshmem-config.cmake's transitive deps need NUMA and hsakmt targets
+    # but only calls find_dependency(NUMA). Ensure both are found.
+    list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}/lib/rocm_sysdeps")
+    find_package(hsakmt QUIET)
+    find_package(rocprofiler-register QUIET)
+    # Workaround: ROCm 7.13/14 hsakmtTargets.cmake has hardcoded RHEL CI paths
+    if(TARGET hsakmt::hsakmt)
+        get_target_property(_hsakmt_iface_libs hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)
+        if(_hsakmt_iface_libs)
+            list(FILTER _hsakmt_iface_libs EXCLUDE REGEX "(/libc\\.so|/__w/)")
+            find_library(_DRM_LIB drm HINTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+            if(_DRM_LIB)
+                get_filename_component(_drm_dir "${_DRM_LIB}" DIRECTORY)
+                list(PREPEND _hsakmt_iface_libs "-L${_drm_dir}")
+                unset(_drm_dir)
+            endif()
+            set_target_properties(hsakmt::hsakmt PROPERTIES INTERFACE_LINK_LIBRARIES "${_hsakmt_iface_libs}")
+            unset(_hsakmt_iface_libs)
         endif()
     endif()
-    # rccl-tests device code calls rocshmem device functions via GIN template
-    # specializations. librocshmem.a is compiled with -fgpu-rdc, so tests that
-    # use GIN must also use -fgpu-rdc and device-link with it.
-    find_library(ROCSHMEM_LIBRARY rocshmem HINTS ${ROCSHMEM_INSTALL_DIR}/lib)
-    if (NOT ROCSHMEM_LIBRARY)
-        message(FATAL_ERROR "librocshmem not found in ${ROCSHMEM_INSTALL_DIR}/lib")
-    endif()
+    # Use the rocshmem cmake config to get the imported target with all
+    # transitive dependencies (hsa-runtime64, rocprofiler-register, etc.)
+    find_package(rocshmem REQUIRED CONFIG
+        PATHS ${ROCSHMEM_INSTALL_DIR}/lib/cmake/rocshmem NO_DEFAULT_PATH)
     set(_rocshmem_offload_arch_flags "")
     foreach(_gpu_raw ${GPU_TARGETS})
         string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
         list(APPEND _rocshmem_offload_arch_flags "--offload-arch=${_gpu}")
     endforeach()
     list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
-    message(STATUS "rocshmem: ${ROCSHMEM_LIBRARY}, arches: ${_rocshmem_offload_arch_flags}")
+    message(STATUS "rocshmem: roc::rocshmem from ${ROCSHMEM_INSTALL_DIR}, arches: ${_rocshmem_offload_arch_flags}")
 endif()
 
 set(ROCM_USE_DEV_COMPONENT OFF)  # This repo doesn't have a dev component

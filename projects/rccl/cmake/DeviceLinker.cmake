@@ -291,7 +291,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
 
   add_dependencies(${_dev_target} hipify_all copy_nccl_device_headers)
-  if(ENABLE_ROCSHMEM AND TARGET rocshmem_static)
+  if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND TARGET rocshmem_static)
     # rocSHMEM headers land in ext/rocshmem/include only after ExternalProject
     # completes; ensure they are installed before device kernels start compiling.
     add_dependencies(${_dev_target} rocshmem_static)
@@ -996,6 +996,11 @@ add_custom_target(device_linker_build ALL
   DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJS} ${SYM_FAT_OBJS}
 )
 add_dependencies(device_linker_build hipify_all copy_nccl_device_headers)
+if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND TARGET rocshmem_static)
+  # The fat objects above include GIN device headers, which pull in rocSHMEM
+  # headers installed to ext/rocshmem/include by the ExternalProject.
+  add_dependencies(device_linker_build rocshmem_static)
+endif()
 
 set(DEVICE_LINKER_OBJECTS
   ${COMMON_FAT_OBJ}

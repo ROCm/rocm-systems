@@ -1255,10 +1255,10 @@ if(ENABLE_ROCSHMEM)
   list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
 elseif(ENABLE_ROCSHMEM_GIN)
-  # GIN-only: rocshmem device symbols (QueuePair methods for GDA backend)
-  # are left unresolved in librccl.so and resolved from the executable
-  # that links librocshmem.a. This avoids duplicating rocshmem device state
-  # (__constant__ memory) across librccl.so and the executable.
+  # Only the SDMA backend is enabled here (see gin_device_common.h), and its
+  # device code is header-only, so no rocshmem device bitcode is needed.
+  # The SDMA host symbols are resolved at runtime from the executable that
+  # links librocshmem.a, so leave them unresolved in librccl.so.
   target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
 endif()
 

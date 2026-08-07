@@ -54,8 +54,14 @@ ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool i
     } else {
       // Check for a Sysmem segment is only valid with cuMem based allocators, so a IS_LEGACY_CUDA_IPC check is required to ensure
       // that we're calling ncclCuMemGetAddressRange only when necessary.
-      CUCHECK(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE,
-                                    (CUdeviceptr)base));
+      // CUCHECK(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE,
+      //                               (CUdeviceptr)base));
+
+      // CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE is pending backport. AIRUNTIME-2593 is in progress.
+      // Assigning 0 since it returns 0 for VMM memory (CLR Develop Branch - https://github.com/ROCm/rocm-systems/blob/develop/projects/clr/hipamd/src/hip_memory.cpp#L4178 )
+      // Note: transport/p2p.cc has the same query behind #if HIP_VERSION >= 71260540, which is
+      // compiled out on ROCm 7.0.2.2; it needs the same treatment once that guard goes live.
+      legacyIpcCap = 0;
       if (!legacyIpcCap) {
         NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)data, size, (CUdeviceptr*)&base, &baseSize, &numSegments,
                                            &hasSysmemSegment));
