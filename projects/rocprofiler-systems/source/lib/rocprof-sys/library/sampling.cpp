@@ -373,7 +373,7 @@ configure_sampler_allocator(std::shared_ptr<sampler_allocator_t>& _v)
     if(_v) return;
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     _v = std::make_shared<sampler_allocator_t>();
     _v->reserve(config::get_sampling_allocator_size());
@@ -404,7 +404,7 @@ get_sampler_allocator()
 
     auto& _allocators = get_sampler_allocators();
 
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     auto_lock_t _lk{ type_mutex<sampler_allocator_t>() };
 
@@ -560,7 +560,7 @@ start_duration_thread()
                 if(!_lk.owns_lock()) _lk.lock();
                 get_duration_cv().wait_until(_lk, _end);
                 auto _premature = (std::chrono::steady_clock::now() < _end);
-                auto _finalized = (get_state() >= State::Finalized);
+                auto _finalized = (state::process::get() >= state::process::Finalized);
                 if(_premature && !_finalized)
                 {
                     // protect against spurious wakeups
@@ -616,7 +616,8 @@ get_offload_file()
             {
                 LOG_CRITICAL("Error opening sampling offload temporary file '{}'",
                              _tmp_v->filename);
-                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                ::rocprofsys::state::process::set(
+                    ::rocprofsys::state::process::Finalized);
                 std::abort();
             }
         }
@@ -645,7 +646,7 @@ offload_buffer(std::int64_t _seq, sampler_buffer_t&& _buf)
     {
         LOG_CRITICAL("sampling allocator tries to offload buffer of samples but "
                      "rocprof-sys was configured to not use temporary files");
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         std::exit(1);
     }
 
@@ -659,7 +660,7 @@ offload_buffer(std::int64_t _seq, sampler_buffer_t&& _buf)
         LOG_CRITICAL("sampling allocator tried to offload buffer of samples for "
                      "thread {} but the offload file does not exist",
                      _seq);
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         std::exit(1);
     }
 
@@ -672,7 +673,7 @@ offload_buffer(std::int64_t _seq, sampler_buffer_t&& _buf)
         LOG_CRITICAL("temporary file for offloading buffer is in an invalid state "
                      "during offload for thread {}",
                      _seq);
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         std::exit(1);
     }
 
@@ -765,7 +766,7 @@ configure(bool _setup, std::int64_t _tid)
     }
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     auto&& _cputime_tids  = get_sampling_cputime_tids();
     auto&& _realtime_tids = get_sampling_realtime_tids();
@@ -796,7 +797,7 @@ configure(bool _setup, std::int64_t _tid)
         if(_tid > 0 && _info && _info->is_offset) return std::set<int>{};
         // if the thread state is disabled or completed, return
         if(_info && _info->index_data->sequent_value == _tid &&
-           get_thread_state() == ThreadState::Disabled)
+           state::thread::get() == state::thread::Disabled)
             return std::set<int>{};
 
         (void) get_debug_sampling();  // make sure query in sampler does not allocate
@@ -877,7 +878,8 @@ configure(bool _setup, std::int64_t _tid)
             {
                 LOG_CRITICAL("perf backend for overflow failed to activate: {}",
                              *_perf_open_error);
-                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                ::rocprofsys::state::process::set(
+                    ::rocprofsys::state::process::Finalized);
                 std::exit(1);
             }
 
@@ -1151,7 +1153,7 @@ unblock_signals(std::set<int> _signals)
 void
 post_process()
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     size_t _total_data       = 0;
     size_t _total_threads    = 0;
