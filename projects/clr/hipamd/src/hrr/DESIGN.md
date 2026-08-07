@@ -121,7 +121,15 @@ re-opens its own writer and finds an existing `pid-<pid>/events.bin`.
 Point `hrr-playback` at a specific `<base>/pid-<pid>/` for detailed event info or
 replay. If a root contains exactly one `pid-<pid>/` sub-archive, the reader
 auto-resolves it for compatibility with simple single-process captures; a root
-with multiple process captures must be disambiguated.
+with multiple process captures must be disambiguated for replay.
+
+`--repair` is the exception: given a root it repairs every `pid-<pid>/`
+sub-archive in turn and then rebuilds the root `manifest.json` from the results.
+This is the normal case for a multi-process serving stack, where the framework
+force-kills its workers at shutdown — the ranks that did all the GPU work are
+precisely the ones left without a trailer and absent from the root index, while
+the parent that exited cleanly needs no repair. Sub-archives that already carry
+a clean trailer are skipped without being read.
 
 ### Archive Format (v3)
 ```
