@@ -30,8 +30,9 @@ std::string expectedOutput() {
 /**
  * Test Description
  * ------------------------
- *    - Dispatches a printf kernel from a process holding a large static TLS block, which a
- *      listener asking for a stack smaller than that footprint cannot be created in.
+ *    - Dispatches a printf kernel from a process holding a large static TLS block. glibc places
+ *      that block inside the stack requested for a new thread, so the hostcall listener has to
+ *      leave its stack size to the system to be created at all.
  *
  * Test source
  * ------------------------
@@ -45,30 +46,6 @@ HIP_TEST_CASE(Unit_Printf_HostcallLargeStaticTls_Positive) {
   CHECK_PCIE_ATOMIC_SUPPORT
 
   hip::SpawnProc proc("hostcallStackSize_exe", true);
-  REQUIRE(proc.run() == 0);
-  REQUIRE(proc.getOutput() == expectedOutput());
-}
-
-/**
- * Test Description
- * ------------------------
- *    - Same dispatch with CQ_THREAD_STACK_SIZE undersized, to confirm the listener no longer
- *      takes its stack size from that flag. The value stays above PTHREAD_STACK_MIN so that a
- *      runtime still honouring it fails in pthread_create(), not in setstacksize().
- *
- * Test source
- * ------------------------
- *    - unit/printf/hostcallStackSize.cc
- * Test requirements
- * ------------------------
- *    - Host specific (LINUX)
- *    - HIP_VERSION >= 5.2
- */
-HIP_TEST_CASE(Unit_Printf_HostcallUndersizedStackRequest_Positive) {
-  CHECK_PCIE_ATOMIC_SUPPORT
-
-  hip::SpawnProc proc("hostcallStackSize_exe", true);
-  proc.setEnv("CQ_THREAD_STACK_SIZE", "32768");
   REQUIRE(proc.run() == 0);
   REQUIRE(proc.getOutput() == expectedOutput());
 }

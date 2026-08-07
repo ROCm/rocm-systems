@@ -13,7 +13,7 @@
 #include <cstdio>
 
 namespace {
-// Comfortably above the 256 KiB (CQ_THREAD_STACK_SIZE) stack the listener used to request.
+// Comfortably above the 256 KiB stack the hostcall listener used to request.
 constexpr size_t kTlsPadBytes = 512 * 1024;
 constexpr int kThreads = 4;
 }  // namespace

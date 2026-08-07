@@ -334,16 +334,10 @@ class HostcallListener {
 #endif
   class Thread : public amd::Thread {
    public:
-    // CQ_THREAD_STACK_SIZE bounds the stacks of the command queue threads, which are only spawned
-    // while direct dispatch is off. That is a Windows scenario: ROCr forces direct dispatch on
-    // (see device.cpp), leaving this singleton listener as the flag's only consumer elsewhere.
-    // CreateThread() also reserves the requested size as-is, whereas glibc allocates a thread's
-    // static TLS block inside it and refuses the request when the two do not fit.
-#if defined(_WIN32)
-    Thread() : amd::Thread("Hostcall Listener Thread", CQ_THREAD_STACK_SIZE) {}
-#else
+    // Take the system default stack: glibc allocates a thread's static TLS block inside the stack
+    // requested through pthread_attr_setstacksize() and refuses the request when the two do not
+    // fit, which is easy to hit from a process that links libraries with large PT_TLS segments.
     Thread() : amd::Thread("Hostcall Listener Thread") {}
-#endif
 
     //! The hostcall listener thread entry point.
     void run(void* data) {
