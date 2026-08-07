@@ -651,6 +651,16 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
   return build_sopp_encoding(arch, sopp_op_delay_alu(arch), simm16);
 }
 
+/// @brief Encode `s_wait_xcnt 0` for the given target ISA.
+///
+/// @returns std::nullopt on an ISA that has no XCNT counter, where nothing can
+/// have required the drain in the first place.
+[[nodiscard]] inline constexpr std::optional<uint32_t> build_s_wait_xcnt(rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250)
+    return std::nullopt;
+  return build_sopp_encoding(arch, gfx1250::kSWaitXcntSopp, 0);
+}
+
 /// @brief Encode s_mov_b32 for the given target ISA.
 [[nodiscard]] inline constexpr uint32_t build_s_mov_b32(uint16_t sdst, uint16_t ssrc0,
                                                         rj_code_arch_t arch) {

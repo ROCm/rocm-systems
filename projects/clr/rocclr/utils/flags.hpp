@@ -265,8 +265,8 @@ release(bool, DEBUG_CLR_SYSMEM_POOL, false,                                   \
 release(uint, DEBUG_HIP_DYNAMIC_QUEUES, 1,                                    \
         "Dynamic queue management: 0=off, 1=Depth heuristic,"                 \
         " 2=1 + dedicated null-stream queue")                                 \
-release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, false,                        \
-        "Ignore priority streams")                                            \
+release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, true,                         \
+        "Treat all streams as normal priority")                               \
 release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
         "Set this to true, to avoid host side abort for GPU errors")          \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \

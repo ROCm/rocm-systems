@@ -3,6 +3,8 @@
 
 #include "rocjitsu/code/patch/instrumentor.h"
 
+#include "rocjitsu/analysis/exec_state.h"
+#include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
@@ -637,6 +639,125 @@ std::vector<uint8_t> make_gfx950_elf_with_two_nops() {
   return image;
 }
 
+// gfx950 ELF holding `text_words` in .text plus a kernel descriptor whose
+// kernel_code_entry_byte_offset points @p entry_byte_offset bytes into that
+// .text. The descriptor lives in an allocated .rodata named by a "kern.kd"
+// symbol so AmdGpuCodeObject::kernel_entry_text_offsets() resolves the entry.
+// .text and .rodata carry nonzero sh_addr because the descriptor lookup skips
+// sections whose vaddr is zero. Sections: [1]=.text, [2]=.rodata, [3]=.strtab,
+// [4]=.symtab, [5]=.shstrtab.
+// TODO: this mirrors make_minimal_amdgpu_elf_with_descriptor_after_text in
+// tests/dbt/translate_test.cpp; fold both into a shared test-fixture header (see
+// the duplication note above) in a follow-up.
+std::vector<uint8_t> make_gfx950_elf_with_kd(const std::vector<uint32_t> &text_words,
+                                             uint64_t entry_byte_offset,
+                                             uint16_t kernarg_preload = 0) {
+  constexpr uint64_t kTextVaddr = 0x1000;
+  constexpr uint64_t kKdVaddr = 0x2000;
+  constexpr uint64_t kKdSize = 64; // sizeof(rocr::llvm::amdhsa::kernel_descriptor_t)
+  const uint64_t text_offset = 0x100;
+  const uint64_t text_size = text_words.size() * sizeof(uint32_t);
+
+  std::vector<uint8_t> shstrtab{'\0'};
+  const uint32_t text_name = add_elf_name(shstrtab, ".text");
+  const uint32_t rodata_name = add_elf_name(shstrtab, ".rodata");
+  const uint32_t strtab_name = add_elf_name(shstrtab, ".strtab");
+  const uint32_t symtab_name = add_elf_name(shstrtab, ".symtab");
+  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
+
+  std::vector<uint8_t> strtab{'\0'};
+  const uint32_t kd_sym_name = add_elf_name(strtab, "kern.kd");
+
+  // Only kernel_code_entry_byte_offset (int64 at offset 16) matters here. It is
+  // descriptor-relative, so bias it back to the .text entry virtual address.
+  std::array<uint8_t, kKdSize> kd{};
+  const int64_t entry_delta =
+      static_cast<int64_t>(kTextVaddr + entry_byte_offset) - static_cast<int64_t>(kKdVaddr);
+  std::memcpy(kd.data() + 16, &entry_delta, sizeof(entry_delta));
+  // kernarg_preload (uint16 at offset 58): its low 7 bits are the preload spec
+  // length, whose nonzero value gives CDNA3/CDNA4 a firmware entry at entry+256.
+  std::memcpy(kd.data() + 58, &kernarg_preload, sizeof(kernarg_preload));
+
+  // Two symbols: the mandatory null entry plus the "kern.kd" descriptor.
+  std::array<Elf64_Sym, 2> syms{};
+  syms[1].st_name = kd_sym_name;
+  syms[1].st_info = static_cast<uint8_t>((1u << 4) | kElfSymbolTypeObject); // global object
+  syms[1].st_shndx = 2;                                                     // .rodata
+  syms[1].st_value = kKdVaddr;
+  syms[1].st_size = kKdSize;
+
+  const uint64_t rodata_offset = text_offset + text_size;
+  const uint64_t strtab_offset = rodata_offset + kKdSize;
+  const uint64_t symtab_offset = align_up_for_test(strtab_offset + strtab.size(), 8);
+  const uint64_t shstrtab_offset = symtab_offset + syms.size() * sizeof(Elf64_Sym);
+  const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
+  constexpr uint16_t section_count = 6;
+
+  std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
+  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  ehdr.e_type = ET_REL;
+  ehdr.e_machine = EM_AMDGPU;
+  ehdr.e_version = 1;
+  ehdr.e_shoff = shoff;
+  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+  ehdr.e_shentsize = sizeof(Elf64_Shdr);
+  ehdr.e_shnum = section_count;
+  ehdr.e_shstrndx = 5;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  std::memcpy(image.data() + text_offset, text_words.data(), text_size);
+  std::memcpy(image.data() + rodata_offset, kd.data(), kd.size());
+  std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
+  std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
+  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
+
+  std::array<Elf64_Shdr, section_count> shdrs{};
+  shdrs[1].sh_name = text_name;
+  shdrs[1].sh_type = SHT_PROGBITS;
+  shdrs[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
+  shdrs[1].sh_addr = kTextVaddr;
+  shdrs[1].sh_offset = text_offset;
+  shdrs[1].sh_size = text_size;
+  shdrs[1].sh_addralign = sizeof(uint32_t);
+
+  shdrs[2].sh_name = rodata_name;
+  shdrs[2].sh_type = SHT_PROGBITS;
+  shdrs[2].sh_flags = SHF_ALLOC;
+  shdrs[2].sh_addr = kKdVaddr;
+  shdrs[2].sh_offset = rodata_offset;
+  shdrs[2].sh_size = kKdSize;
+  shdrs[2].sh_addralign = sizeof(uint32_t);
+
+  shdrs[3].sh_name = strtab_name;
+  shdrs[3].sh_type = SHT_STRTAB;
+  shdrs[3].sh_offset = strtab_offset;
+  shdrs[3].sh_size = strtab.size();
+  shdrs[3].sh_addralign = 1;
+
+  shdrs[4].sh_name = symtab_name;
+  shdrs[4].sh_type = SHT_SYMTAB;
+  shdrs[4].sh_offset = symtab_offset;
+  shdrs[4].sh_size = syms.size() * sizeof(Elf64_Sym);
+  shdrs[4].sh_link = 3; // .strtab
+  shdrs[4].sh_info = 1; // index of first global symbol
+  shdrs[4].sh_entsize = sizeof(Elf64_Sym);
+  shdrs[4].sh_addralign = 8;
+
+  shdrs[5].sh_name = shstrtab_name;
+  shdrs[5].sh_type = SHT_STRTAB;
+  shdrs[5].sh_offset = shstrtab_offset;
+  shdrs[5].sh_size = shstrtab.size();
+  shdrs[5].sh_addralign = 1;
+
+  std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+  return image;
+}
+
 TEST(Instrumentor, AddPointByOffsetResolvesValidatedSite) {
   auto image = make_gfx950_elf_with_two_nops();
   AmdGpuCodeObject obj(image.data(), image.size());
@@ -835,6 +956,137 @@ TEST(Instrumentor, UnsupportedArchReportsErrorInsteadOfCrashing) {
   ASSERT_FALSE(patched.errors.empty());
   EXPECT_NE(patched.errors.front().find("does not support RISC-V"), std::string::npos)
       << "error was: " << patched.errors.front();
+}
+
+TEST(Instrumentor, KernelEntryInteriorToFallthroughBlockIsInstrumentable) {
+  // The kernel entry lands at .text offset 8, interior to a single straight-line
+  // block ending in s_endpgm. The leading ops stand in for a preceding EXEC
+  // write (e.g. s_mov exec, -1): unless the entry begins its own block and is
+  // seeded, EXEC would flow into it as Full even though hardware may enter with
+  // unknown EXEC. ensure_blocks_built passes the entry as an extra leader, so a
+  // block starts there and instrumentation succeeds rather than failing closed.
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::vector<uint32_t> text = {build_s_nop(0, kArch), build_s_nop(0, kArch),
+                                      build_s_nop(0, kArch), build_s_endpgm(kArch)};
+  auto image = make_gfx950_elf_with_kd(text, /*entry_byte_offset=*/8);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  const auto entries = obj.kernel_entry_text_offsets(kArch);
+  ASSERT_EQ(entries.size(), 1u);
+  ASSERT_EQ(entries.front(), 8u);
+
+  Instrumentor instr(obj, kArch);
+  instr.add_point_by_offset(/*anchor_offset=*/8);
+  auto result = instr.validate_points();
+  EXPECT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  EXPECT_EQ(result.sites.size(), 1u);
+}
+
+TEST(Instrumentor, ReadableKernelEntryWithNoExactBlockFailsClosed) {
+  // The kernel entry points at .text offset 8, the second word of the 8-byte
+  // s_mov_b32 s0, <literal> at offset 4. No decoded instruction begins there, so
+  // even after the entry is added as an extra leader no block starts at the
+  // offset and block construction must fail closed rather than silently drop it.
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kSMovLitWord0 = 0xBE8000FFu; // s_mov_b32 s0, <literal>
+  constexpr uint32_t kSMovLitWord1 = 0xDEADBEEFu; // the 32-bit literal
+  const std::vector<uint32_t> text = {build_s_nop(0, kArch), kSMovLitWord0, kSMovLitWord1,
+                                      build_s_endpgm(kArch)};
+  auto image = make_gfx950_elf_with_kd(text, /*entry_byte_offset=*/8);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  const auto entries = obj.kernel_entry_text_offsets(kArch);
+  ASSERT_EQ(entries.size(), 1u);
+  ASSERT_EQ(entries.front(), 8u);
+
+  Instrumentor instr(obj, kArch);
+  instr.add_point_by_offset(/*anchor_offset=*/0);
+  auto result = instr.validate_points();
+  EXPECT_TRUE(result.sites.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("no basic block"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
+TEST(Instrumentor, KernargPreloadFirmwareEntryEnumeratedAndPinnedUnknown) {
+  // A CDNA4 descriptor with a nonzero KERNARG_PRELOAD_SPEC_LENGTH has two hardware
+  // entries: the descriptor entry at .text[0] and the firmware kernarg-preload
+  // window at .text[256]. The descriptor entry writes EXEC all-ones and falls
+  // through to +256, so the ordinary path reaches the firmware entry with EXEC
+  // Full -- but firmware may jump straight to +256 with unknown EXEC, so once
+  // kernel_entry_text_offsets() enumerates it, that entry must stay Unknown.
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kSMovExecAllOnes = 0xBEFE01C1u; // s_mov_b64 exec, -1
+  constexpr uint32_t kVMovV0S0 = 0x7E000200u;        // v_mov_b32 v0, s0
+  std::vector<uint32_t> text{kSMovExecAllOnes};      // .text[0]: descriptor entry
+  while (text.size() < 64)                           // pad the ordinary path to +256
+    text.push_back(build_s_nop(0, kArch));
+  text.push_back(kVMovV0S0); // .text[256]: firmware entry def
+  text.push_back(build_s_endpgm(kArch));
+
+  auto image = make_gfx950_elf_with_kd(text, /*entry_byte_offset=*/0, /*kernarg_preload=*/1);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  // Both hardware entries are enumerated: the descriptor entry plus +256.
+  const auto entries = obj.kernel_entry_text_offsets(kArch);
+  ASSERT_EQ(entries.size(), 2u);
+  EXPECT_NE(std::ranges::find(entries, 0u), entries.end());
+  EXPECT_NE(std::ranges::find(entries, 256u), entries.end());
+
+  // Build blocks with the enumerated entries as leaders, as the instrumentor
+  // does, so a block starts at +256.
+  auto decoder = Decoder::create(kArch);
+  const auto blocks = BasicBlock::build(obj, *decoder, kArch, entries);
+  std::vector<BasicBlock *> scope;
+  scope.reserve(blocks.size());
+  for (const auto &block : blocks)
+    scope.push_back(block.get());
+
+  std::vector<const BasicBlock *> entry_blocks;
+  BasicBlock *entry_block = nullptr;
+  BasicBlock *firmware_block = nullptr;
+  for (BasicBlock *block : scope) {
+    if (block == nullptr)
+      continue;
+    if (std::ranges::find(entries, block->start_offset()) != entries.end())
+      entry_blocks.push_back(block);
+    if (block->start_offset() == 0u)
+      entry_block = block;
+    if (block->start_offset() == 256u)
+      firmware_block = block;
+  }
+  ASSERT_NE(entry_block, nullptr);
+  ASSERT_NE(firmware_block, nullptr);
+
+  const Instruction *s_mov = nullptr;
+  for (const Instruction &inst : entry_block->instructions()) {
+    s_mov = &inst;
+    break;
+  }
+  ASSERT_NE(s_mov, nullptr);
+  EXPECT_EQ(s_mov->mnemonic(), "s_mov_b64");
+  const Instruction *firmware_entry = nullptr;
+  for (const Instruction &inst : firmware_block->instructions()) {
+    firmware_entry = &inst;
+    break;
+  }
+  ASSERT_NE(firmware_entry, nullptr);
+  EXPECT_TRUE(firmware_entry->mnemonic().starts_with("v_mov_b32"));
+
+  // Establishing Full on the ordinary path needs the s_mov to carry RESULT_COPY.
+  ASSERT_TRUE(s_mov->flags() & RESULT_COPY)
+      << "s_mov lacks RESULT_COPY; regenerate ISA to enable EXEC-Full tracking";
+
+  const uint8_t wave_size = obj.kernel_wavefront_size(kArch);
+  // Without pinning, the ordinary fallthrough carries Full into +256; enumerating
+  // and pinning the firmware entry keeps it Unknown despite that Full predecessor.
+  const ExecMaskAnalysis unpinned{KernelBlockScope(scope), wave_size};
+  EXPECT_EQ(unpinned.before(*firmware_entry), ExecState::Full);
+  const ExecMaskAnalysis pinned{KernelBlockScope(scope), wave_size, /*extra_edges=*/{},
+                                entry_blocks};
+  EXPECT_EQ(pinned.before(*firmware_entry), ExecState::Unknown);
 }
 
 //==============================================================================
