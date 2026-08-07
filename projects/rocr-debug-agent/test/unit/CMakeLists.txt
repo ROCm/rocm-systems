@@ -70,6 +70,7 @@ find_package(
 add_executable(
     rocm-debug-agent-unit-tests
     test_uri.cpp
+    test_formatting.cpp
 )
 
 # Link directly to source files (not the .so).
