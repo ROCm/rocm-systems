@@ -54,13 +54,18 @@ std::unique_ptr<LogBuffer> LogBuffer::create_for_host_tests(uint32_t slot_count,
   const size_t total_bytes =
       sizeof(RjLogBufferHeader) + static_cast<size_t>(slot_count) * sizeof(RjLogRecord);
 
-  void *storage = ::operator new(total_bytes, std::align_val_t{kBufferAlignment}, std::nothrow);
+  // Own the backing allocation via RAII immediately: the wrapper allocation
+  // below is a throwing new, and until ownership transfers into the LogBuffer a
+  // bare pointer would leak (and std::bad_alloc would escape) the factory's
+  // nullptr-on-failure contract if that throw fired.
+  std::unique_ptr<void, AlignedStorageDeleter> storage(
+      ::operator new(total_bytes, std::align_val_t{kBufferAlignment}, std::nothrow));
   if (storage == nullptr) {
     report(error_out, "failed to allocate logging buffer");
     return nullptr;
   }
 
-  std::memset(storage, 0, total_bytes);
+  std::memset(storage.get(), 0, total_bytes);
 
   // RjLogBufferHeader and RjLogRecord are implicit-lifetime types. The
   // operator new above implicitly creates such objects in the returned storage,
@@ -69,7 +74,16 @@ std::unique_ptr<LogBuffer> LogBuffer::create_for_host_tests(uint32_t slot_count,
   // to these structs or this guarantee no longer holds.
 
   // std::unique_ptr private-ctor dance: construct, then initialize the header.
-  auto buffer = std::unique_ptr<LogBuffer>(new LogBuffer(storage, slot_count, total_bytes));
+  // Non-throwing new so a wrapper allocation failure returns nullptr (freeing
+  // storage) rather than throwing; ownership of storage transfers only after the
+  // LogBuffer is live.
+  auto buffer = std::unique_ptr<LogBuffer>(new (std::nothrow)
+                                               LogBuffer(storage.get(), slot_count, total_bytes));
+  if (buffer == nullptr) {
+    report(error_out, "failed to allocate logging buffer");
+    return nullptr;
+  }
+  storage.release();
   init_header(buffer->header(), slot_count);
   return buffer;
 }
@@ -131,12 +145,18 @@ DrainStats LogBuffer::drain(const LogRecordCallback &callback) {
   const uint64_t read_ptr = hdr->read_ptr;
   uint64_t pending = write_ptr - read_ptr;
 
-  // Producer contract: a full ring bumps overflow_count without advancing
-  // write_ptr, so pending should never exceed slot_count. These counters are
-  // written by an untrusted producer (a device), though, so we clamp in all
-  // builds rather than trusting the contract: an overrun would make
-  // (read_ptr + n) & mask alias earlier slots and deliver the same record more
-  // than once. Report the dropped excess instead of aborting the host.
+  // Producer contract is drop-newest: a full ring drops the incoming record and
+  // bumps overflow_count WITHOUT advancing write_ptr, so a well-behaved producer
+  // never lets pending exceed slot_count. The clamp below is therefore not a
+  // recovery path -- it is a safety guard for the untrusted cross-agent
+  // boundary. If a buggy device advances write_ptr past read_ptr + slot_count
+  // anyway, an unclamped walk would let (read_ptr + n) & mask alias earlier
+  // slots and hand the same record to the callback more than once (silent
+  // duplicate instrumentation data); clamping the walk to the physical slots
+  // prevents that. dropped_overrun records the clamped excess purely as a debug
+  // signal that a producer broke contract -- we do NOT try to reconstruct which
+  // records survived or in what order, because once the contract is violated
+  // that ordering is undefined.
   if (pending > slot_count_) {
     stats.dropped_overrun = pending - slot_count_;
     pending = slot_count_;
@@ -146,16 +166,26 @@ DrainStats LogBuffer::drain(const LogRecordCallback &callback) {
   // walk stays correct even if the counters roll over.
   for (uint64_t n = 0; n < pending; ++n) {
     RjLogRecord &record = recs[(read_ptr + n) & mask];
-    if (record.valid == 1) {
-      if (callback)
-        callback(record);
-      record.valid = 0;
-      ++stats.records_drained;
-    } else {
+    if (record.valid != 1) {
       // Advertised by write_ptr but not published: a protocol error after
       // completion, not a race to spin on.
       ++stats.invalid_slots;
+      continue;
     }
+    // The header passing validate() does not vouch for individual records: the
+    // host writes the header while the embedded probe writes each record, so a
+    // probe built against a different layout can publish a mismatched record
+    // under a valid header. Decoding it with our offsets would be silently
+    // wrong, so drop it rather than hand it to the callback.
+    if (record.abi_version != kRjLogAbiVersion || record.record_size != kRjLogRecordSize) {
+      record.valid = 0;
+      ++stats.incompatible_records;
+      continue;
+    }
+    if (callback)
+      callback(record);
+    record.valid = 0;
+    ++stats.records_drained;
   }
 
   hdr->read_ptr = write_ptr;

@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -245,6 +246,8 @@ TEST(LogBufferTest, InvalidThenValidSlotBothHandled) {
   // Leave index 0 unpublished (valid == 0), publish a real record at index 1.
   buf->records()[0].valid = 0;
   buf->records()[1] = RjLogRecord{};
+  buf->records()[1].abi_version = kRjLogAbiVersion;
+  buf->records()[1].record_size = kRjLogRecordSize;
   buf->records()[1].record_type = 7;
   buf->records()[1].site = 0x55;
   buf->records()[1].valid = 1;
@@ -366,9 +369,12 @@ TEST(LogBufferTest, DrainClampsProducerOverrun) {
   ASSERT_NE(buf, nullptr);
   for (uint32_t i = 0; i < 4; ++i)
     publish_record(*buf, 1, 0x10 + i, i);
-  // Simulate a buggy/untrusted producer that advanced write_ptr past
-  // read_ptr + slot_count. Without clamping, indices 4 and 5 would alias slots
-  // 0 and 1 and deliver those records a second time.
+  // Simulate a buggy/untrusted producer that broke the drop-newest contract and
+  // advanced write_ptr past read_ptr + slot_count. Without clamping, indices 4
+  // and 5 would alias slots 0 and 1 and deliver those records a second time.
+  // This checks only the clamp's guarantees -- no double-delivery and the excess
+  // reported in dropped_overrun. Survivor ordering after a contract violation is
+  // undefined by design and deliberately not asserted here.
   buf->header()->write_ptr = 6; // pending = 6 > slot_count (4)
 
   DrainStats stats;
@@ -376,9 +382,49 @@ TEST(LogBufferTest, DrainClampsProducerOverrun) {
   EXPECT_EQ(stats.dropped_overrun, 2u);
   EXPECT_EQ(stats.records_drained, 4u);
   EXPECT_EQ(stats.invalid_slots, 0u);
-  ASSERT_EQ(drained.size(), 4u); // no record delivered more than once
-  for (uint32_t i = 0; i < 4; ++i)
-    EXPECT_EQ(drained[i].site, 0x10u + i);
+  ASSERT_EQ(drained.size(), 4u);
+  // Assert contents order-independently
+  std::set<uint32_t> sites;
+  for (const RjLogRecord &record : drained)
+    sites.insert(record.site);
+  EXPECT_EQ(sites.size(), 4u);
+  EXPECT_EQ(sites, (std::set<uint32_t>{0x10u, 0x11u, 0x12u, 0x13u}));
+}
+
+TEST(LogBufferTest, DrainSkipsIncompatibleAbiVersion) {
+  auto buf = LogBuffer::create_for_host_tests(4);
+  ASSERT_NE(buf, nullptr);
+  publish_record(*buf, 1, 0x10, 1);
+  publish_record(*buf, 2, 0x20, 2);
+  // A probe built against a newer ABI publishes a record the host cannot decode.
+  buf->records()[1].abi_version = kRjLogAbiVersion + 1;
+
+  DrainStats stats;
+  auto drained = drain_all(*buf, &stats);
+  ASSERT_EQ(drained.size(), 1u);
+  EXPECT_EQ(drained[0].site, 0x10u);
+  EXPECT_EQ(stats.records_drained, 1u);
+  EXPECT_EQ(stats.incompatible_records, 1u);
+  EXPECT_EQ(stats.invalid_slots, 0u);
+  // Incompatible slots are cleared so a reused ring does not re-see them.
+  EXPECT_EQ(buf->records()[1].valid, 0u);
+}
+
+TEST(LogBufferTest, DrainSkipsIncompatibleRecordSize) {
+  auto buf = LogBuffer::create_for_host_tests(4);
+  ASSERT_NE(buf, nullptr);
+  publish_record(*buf, 1, 0x10, 1);
+  publish_record(*buf, 2, 0x20, 2);
+  buf->records()[1].record_size = kRjLogRecordSize * 2;
+
+  DrainStats stats;
+  auto drained = drain_all(*buf, &stats);
+  ASSERT_EQ(drained.size(), 1u);
+  EXPECT_EQ(drained[0].site, 0x10u);
+  EXPECT_EQ(stats.records_drained, 1u);
+  EXPECT_EQ(stats.incompatible_records, 1u);
+  EXPECT_EQ(stats.invalid_slots, 0u);
+  EXPECT_EQ(buf->records()[1].valid, 0u);
 }
 
 } // namespace

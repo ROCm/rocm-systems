@@ -24,14 +24,27 @@ namespace rocjitsu {
 using LogRecordCallback = std::function<void(const RjLogRecord &)>;
 
 /// @brief Result of a single drain() pass.
+///
+/// TODO: the diagnostic counters below (dropped_overrun, invalid_slots,
+/// incompatible_records) are returned but not yet acted on -- the drain caller
+/// that wires up post-dispatch logging does not exist. When it lands, log these
+/// via Logger when nonzero so a misbehaving producer is visible instead of
+/// silently discarded.
 struct DrainStats {
-  uint64_t records_drained = 0; ///< Valid records passed to the callback.
-  uint64_t invalid_slots = 0;   ///< Slots advertised by write_ptr but whose
-                                ///< valid flag was 0 (a post-completion
-                                ///< protocol error, not an expected race).
-  uint64_t overflow_count = 0;  ///< Snapshot of header.overflow_count.
-  uint64_t dropped_overrun = 0; ///< Advertised records dropped because the
-                                ///< producer overran the ring (see drain()).
+  uint64_t records_drained = 0;      ///< Valid records passed to the callback.
+  uint64_t invalid_slots = 0;        ///< Slots advertised by write_ptr but whose
+                                     ///< valid flag was 0 (a post-completion
+                                     ///< protocol error, not an expected race).
+  uint64_t overflow_count = 0;       ///< Snapshot of header.overflow_count.
+  uint64_t dropped_overrun = 0;      ///< Debug signal: nonzero only when a
+                                     ///< producer broke the drop-newest contract
+                                     ///< and advanced write_ptr past
+                                     ///< read_ptr + slot_count. Counts the
+                                     ///< clamped excess; not a recovery path
+                                     ///< (see drain()).
+  uint64_t incompatible_records = 0; ///< Valid records skipped because their
+                                     ///< abi_version/record_size did not match
+                                     ///< the compiled ABI (see drain()).
 };
 
 /// @brief Owns and drains a single logging ring buffer in host memory.
@@ -89,11 +102,21 @@ public:
   /// counted in invalid_slots and skipped. On return, read_ptr is advanced to
   /// write_ptr.
   ///
-  /// The number of advertised records (write_ptr - read_ptr) is clamped to
-  /// slot_count in all builds: the counters are written by an untrusted producer
-  /// (a device), and an overrun would otherwise alias physical slots and deliver
-  /// the same record more than once. Any excess is reported in
-  /// DrainStats::dropped_overrun.
+  /// A valid record whose per-record abi_version or record_size disagrees with
+  /// the compiled ABI was written by a probe built against a different layout;
+  /// decoding it with our offsets would be silently wrong. Such a record is
+  /// cleared, counted in incompatible_records, and not delivered to @p callback.
+  /// The header's own discriminants are separately checkable via validate().
+  ///
+  /// The producer contract is drop-newest: a full ring drops the incoming record
+  /// and bumps overflow_count without advancing write_ptr, so a well-behaved
+  /// producer keeps (write_ptr - read_ptr) <= slot_count. Because the counters
+  /// come from an untrusted producer, drain still clamps the walk to slot_count
+  /// in all builds: a contract-violating producer that overran the ring would
+  /// otherwise alias physical slots and deliver the same record more than once.
+  /// The clamp only prevents that double-delivery -- it does not recover the
+  /// dropped records or define their order. The clamped excess is surfaced in
+  /// DrainStats::dropped_overrun as a debug signal that the contract was broken.
   ///
   /// @note For now this is single-threaded and intended to run only after the
   ///       producing dispatch has completed. The invalid_slots hole-skip
