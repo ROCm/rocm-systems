@@ -328,11 +328,9 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     else:
         src0_base_expr = f'amdgpu::src_base(vb, {s0}.encoding_value_)'
         src1_base_expr = f'amdgpu::src_base(vb, {s1}.encoding_value_)'
-        # acc_cd field exists in CDNA2/3/4 VOP3P_MFMA encoding (controls
-        # AccVGPR bank selection). CDNA1 and RDNA lack this field — default
-        # to 1 (always use AccVGPR bank, the CDNA1 behavior).
-        has_acc_cd = arch in ('cdna2', 'cdna3', 'cdna4')
-        if has_acc_cd:
+        # ACC_CD selects VGPRs or AccVGPRs for the C and D matrices. Encodings
+        # without the field always use AccVGPRs.
+        if 'acc_cd' in ctx.enc_field_names:
             L.append(
                 f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, inst_.acc_cd);'
             )

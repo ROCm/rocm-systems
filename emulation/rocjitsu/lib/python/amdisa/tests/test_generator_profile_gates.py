@@ -1165,6 +1165,19 @@ def test_matrix_mfma_layout_uses_accumulator_bank_destination():
     assert 'resolved_vgpr_offset(wf, vdst.opr_type_' not in body
 
 
+def test_dense_mfma_acc_cd_destination_uses_encoding_field_presence():
+    inst = Instruction('V_MFMA_F32_16X16X16_F16', 'ENC_VOP3P_MFMA', 0, [])
+    profile = _matrix_profile()
+
+    with_acc_cd = _gen_mfma(inst, 'renamed_dense_mfma', profile, {'acc_cd'})
+    without_acc_cd = _gen_mfma(inst, 'renamed_dense_mfma', profile, set())
+
+    assert 'amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd)' in with_acc_cd
+    assert 'amdgpu::dst_base(vb, vdst.encoding_value_, 1)' not in with_acc_cd
+    assert 'amdgpu::dst_base(vb, vdst.encoding_value_, 1)' in without_acc_cd
+    assert 'inst_.acc_cd' not in without_acc_cd
+
+
 def test_matrix_vgpr_msb_indexing_uses_resolved_vgpr_destination():
     inst = Instruction('V_WMMA_F32_16X16X16_F16', 'ENC_VOP3P', 0, [])
     profile = _matrix_profile(
