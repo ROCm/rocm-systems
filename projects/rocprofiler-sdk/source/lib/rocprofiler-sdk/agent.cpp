@@ -28,6 +28,7 @@
 #include "lib/common/static_object.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent_mapping.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/platform/agent.hpp"
 #ifdef _WIN32
@@ -687,131 +688,133 @@ construct_agent_cache(::HsaApiTable* table)
 
     ROCP_CI_LOG_IF(ERROR, hsa_agents.empty()) << fmt::format("Did not detect any HSA agents");
 
-    // On WSL the agent records come from librocdxg, and the HSA runtime loads
-    // the very same library. A thunk too old to export the topology ABI leaves
-    // rocprofiler with no GPU agents while HSA still reports them, which the
-    // consistency checks below read as a fatal internal inconsistency. It is
-    // not: it is an unsupported environment, and aborting the application the
-    // user asked us to profile is the wrong response. Report what to install
-    // and leave the agent cache empty so GPU profiling is simply unavailable.
-    //
-    // Deliberately confined to WSL. On bare metal a rocprofiler/HSA mismatch
-    // really is an internal inconsistency and still aborts.
-#ifndef _WIN32
-    if(select_platform() == platform_kind::wsl)
-    {
-        auto count_gpus = [](const auto& agents) {
-            return std::count_if(agents.begin(), agents.end(), [](const auto* itr) {
-                return itr->type == ROCPROFILER_AGENT_TYPE_GPU;
-            });
-        };
+    // rocprofiler and the HSA runtime enumerate the topology independently, so
+    // the two agent lists have to be paired before anything can be profiled.
+    // Both the key to pair on and the meaning of an unpaired HSA agent are
+    // platform-specific; compute_agent_mapping() holds those rules and the code
+    // below only acts on its verdict. The platform is re-derived rather than
+    // recorded because select_platform() reads nothing but the environment,
+    // which cannot have changed since enumerate_platform_agents() asked.
+    const auto mapping_policy = (select_platform() == platform_kind::wsl)
+                                    ? agent::mapping_policy::wsl
+                                    : agent::mapping_policy::strict;
 
-        if(count_gpus(rocp_agents) == 0 && hsa_agents.size() > rocp_agents.size())
+    auto rocp_views = std::vector<agent::mapping_agent_view>{};
+    rocp_views.reserve(rocp_agents.size());
+    for(const auto* ritr : rocp_agents)
+    {
+        rocp_views.emplace_back(agent::mapping_agent_view{
+            ritr->logical_node_id, ritr->node_id, ritr->type == ROCPROFILER_AGENT_TYPE_GPU});
+    }
+
+    auto hsa_views = std::vector<agent::mapping_hsa_view>{};
+    hsa_views.reserve(hsa_agents.size());
+    for(auto hitr : hsa_agents)
+    {
+        auto view    = agent::mapping_hsa_view{};
+        auto node_id = uint32_t{0};
+        auto ret     = table->core_->hsa_agent_get_info_fn(
+            hitr, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &node_id);
+
+        ROCP_ERROR_IF(ret != HSA_STATUS_SUCCESS)
+            << "hsa_agent_get_info(hsa_agent_t=" << hitr.handle
+            << ", HSA_AMD_AGENT_INFO_DRIVER_NODE_ID, ...) returned " << ret
+            << " :: " << get_hsa_status_string(ret);
+
+        if(ret == HSA_STATUS_SUCCESS)
+        {
+            view.has_node_id    = true;
+            view.driver_node_id = node_id;
+        }
+
+        if(auto agent_type = hsa_device_type_t{};
+           table->core_->hsa_agent_get_info_fn(
+               hitr, hsa_agent_info_t{HSA_AGENT_INFO_DEVICE}, &agent_type) == HSA_STATUS_SUCCESS)
+        {
+            view.is_gpu = (agent_type == HSA_DEVICE_TYPE_GPU);
+        }
+
+        hsa_views.emplace_back(view);
+    }
+
+    const auto mapping = agent::compute_agent_mapping(rocp_views, hsa_views, mapping_policy);
+
+    if(!mapping.complete())
+    {
+        auto unmatched = std::vector<uint32_t>{};
+        unmatched.insert(unmatched.end(),
+                         mapping.unmatched_gpu_node_ids.begin(),
+                         mapping.unmatched_gpu_node_ids.end());
+        unmatched.insert(unmatched.end(),
+                         mapping.unmatched_other_node_ids.begin(),
+                         mapping.unmatched_other_node_ids.end());
+
+        // Bare metal: rocprofiler and HSA read the same KFD sysfs tree, so a
+        // disagreement is an internal inconsistency and still aborts.
+        ROCP_FATAL_IF(mapping_policy == agent::mapping_policy::strict)
+            << "Found " << rocp_agents.size() << " rocprofiler agents and " << hsa_agents.size()
+            << " HSA agents. HSA agents contained " << unmatched.size()
+            << " internal node ids not found by rocprofiler: "
+            << fmt::format("{}", fmt::join(unmatched.begin(), unmatched.end(), ", "))
+            << (mapping.unqueryable_count > 0
+                    ? fmt::format(" ({} HSA agents did not report a driver node id at all)",
+                                  mapping.unqueryable_count)
+                    : std::string{});
+
+        // WSL: rocprofiler drops adapters the DXG thunk cannot fully describe
+        // while HSA keeps reporting them. Profiling those GPUs is unsupported;
+        // aborting the application the user asked us to profile is not the
+        // right response, and the GPUs that did pair stay usable.
+        if(mapping_policy == agent::mapping_policy::wsl && !mapping.unmatched_gpu_node_ids.empty())
         {
             ROCP_ERROR << fmt::format(
-                "rocprofiler-sdk could not read the WSL GPU topology: {} HSA agents are present "
-                "but no GPU agent could be built. This build requires a librocdxg that exports "
-                "the DxgAbiCheck/DxgGetNodeTopology topology ABI (see the earlier 'wsl topology:' "
-                "diagnostics for the exact symbol or ABI version that was rejected). Update the "
-                "WSL ROCm runtime package to a version matching this rocprofiler-sdk. GPU "
-                "profiling is disabled for this process; the application continues unprofiled.",
-                hsa_agents.size());
-            return;
+                "rocprofiler-sdk could not read the WSL topology for {} of the {} GPUs the HSA "
+                "runtime reports (KMT node ids: {}). Profiling is unavailable on those GPUs; the "
+                "application continues and the {} GPU(s) that were mapped remain profilable. This "
+                "build requires a librocdxg exporting the DxgAbiCheck/DxgGetNodeTopology topology "
+                "ABI - see the earlier 'wsl topology:' diagnostics for the exact symbol, ABI "
+                "version or adapter that was rejected, and update the WSL ROCm runtime package to "
+                "a version matching this rocprofiler-sdk.",
+                mapping.unmatched_gpu_node_ids.size(),
+                std::count_if(
+                    hsa_views.begin(), hsa_views.end(), [](const auto& itr) { return itr.is_gpu; }),
+                fmt::format("{}",
+                            fmt::join(mapping.unmatched_gpu_node_ids.begin(),
+                                      mapping.unmatched_gpu_node_ids.end(),
+                                      ", ")),
+                std::count_if(mapping.pairs.begin(), mapping.pairs.end(), [&](const auto& itr) {
+                    return rocp_views.at(itr.rocp_index).is_gpu;
+                }));
         }
+
+        ROCP_WARNING_IF(!mapping.unmatched_other_node_ids.empty())
+            << fmt::format("rocprofiler-sdk has no agent record for {} non-GPU HSA agent(s) (KMT "
+                           "node ids: {})",
+                           mapping.unmatched_other_node_ids.size(),
+                           fmt::join(mapping.unmatched_other_node_ids.begin(),
+                                     mapping.unmatched_other_node_ids.end(),
+                                     ", "));
+
+        ROCP_WARNING_IF(mapping.unqueryable_count > 0)
+            << mapping.unqueryable_count
+            << " HSA agents did not report a driver node id and cannot be mapped";
     }
-#endif
-
-    auto rocp_hsa_agent_node_ids = std::set<uint32_t>{};
-    if(rocp_agents.size() != hsa_agents.size())
-    {
-        for(auto hitr : hsa_agents)
-        {
-            auto internal_node_id = std::numeric_limits<uint32_t>::max();
-            auto ret              = table->core_->hsa_agent_get_info_fn(
-                hitr,
-                static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
-                &internal_node_id);
-
-            ROCP_ERROR_IF(ret != HSA_STATUS_SUCCESS)
-                << "hsa_agent_get_info(hsa_agent_t=" << hitr.handle
-                << ", HSA_AMD_AGENT_INFO_DRIVER_NODE_ID, ...) returned " << ret
-                << " :: " << get_hsa_status_string(ret);
-
-            if(ret == HSA_STATUS_SUCCESS)
-            {
-                {
-                    auto ret_emplace = rocp_hsa_agent_node_ids.emplace(internal_node_id).second;
-                    ROCP_WARNING_IF(!ret_emplace)
-                        << "duplicate internal node id " << internal_node_id;
-                }
-
-                for(const auto* ritr : rocp_agents)
-                {
-                    // TODO(aelwazir): To be changed back to use node id once ROCR fixes
-                    // the hsa_agents to use the real node id
-                    if(ritr->logical_node_id == static_cast<int64_t>(internal_node_id))
-                    {
-                        rocp_hsa_agent_node_ids.erase(internal_node_id);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    ROCP_FATAL_IF(!rocp_hsa_agent_node_ids.empty())
-        << "Found " << rocp_agents.size() << " rocprofiler agents and " << hsa_agents.size()
-        << " HSA agents. HSA agents contained " << rocp_hsa_agent_node_ids.size()
-        << " internal node ids not found by rocprofiler: "
-        << fmt::format(
-               "{}",
-               fmt::join(rocp_hsa_agent_node_ids.begin(), rocp_hsa_agent_node_ids.end(), ", "));
 
     get_agent_caches().clear();
     get_agent_mapping().clear();
     get_agent_mapping().reserve(get_agent_mapping().size() + rocp_agents.size());
 
-    auto hsa_agent_node_map = std::unordered_map<uint32_t, hsa_agent_t>{};
-    for(const auto& itr : hsa_agents)
-    {
-        if(uint32_t node_id = 0;
-           table->core_->hsa_agent_get_info_fn(
-               itr, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &node_id) ==
-           HSA_STATUS_SUCCESS)
-        {
-            hsa_agent_node_map[node_id] = itr;
-        }
-    }
-
     auto agent_map =
         std::unordered_map<uint32_t, std::tuple<const rocprofiler_agent_t*, hsa_agent_t>>{};
-    for(const auto* ritr : rocp_agents)
+    for(const auto& itr : mapping.pairs)
     {
-        for(auto hitr : hsa_agents)
-        {
-            if(uint32_t node_id = 0;
-               table->core_->hsa_agent_get_info_fn(
-                   hitr,
-                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
-                   &node_id) == HSA_STATUS_SUCCESS)
-            {
-                // TODO(aelwazir): To be changed back to use node id once ROCR fixes
-                // the hsa_agents to use the real node id
-                if(ritr->logical_node_id == static_cast<int64_t>(node_id))
-                {
-                    agent_map.emplace(ritr->logical_node_id, std::make_tuple(ritr, hitr));
-                    get_agent_mapping().emplace_back(agent_pair{ritr, hitr});
-                    break;
-                }
-            }
-        }
+        const auto* rocp_agent = rocp_agents.at(itr.rocp_index);
+        auto        hsa_agent  = hsa_agents.at(itr.hsa_index);
+        agent_map.emplace(itr.key, std::make_tuple(rocp_agent, hsa_agent));
+        get_agent_mapping().emplace_back(agent_pair{rocp_agent, hsa_agent});
     }
 
-    ROCP_INFO << "# agent node maps: " << hsa_agent_node_map.size();
-
-    ROCP_FATAL_IF(agent_map.size() != hsa_agents.size())
-        << "rocprofiler was only able to map " << agent_map.size()
-        << " rocprofiler agents to HSA agents, expected " << hsa_agents.size();
+    ROCP_INFO << "# agent node maps: " << agent_map.size();
 
 // For Pre-ROCm 6.0 releases
 #if ROCPROFILER_HSA_RUNTIME_VERSION <= 100900

@@ -85,12 +85,25 @@ mismatch ``DxgAbiCheck`` exists to prevent.
 A ``librocdxg`` that predates this ABI, or one that rejects the handshake,
 therefore yields **no GPU agents at all**. That is not harmless: the HSA runtime
 loads the same thunk and still reports its GPUs, so rocprofiler-SDK and HSA
-disagree about which agents exist. On WSL that disagreement is reported as an
-unsupported environment and GPU profiling is disabled, and the application under
-test keeps running unprofiled — it is not treated as the fatal internal
-inconsistency the equivalent mismatch means on bare metal. The log names the
-symbol or ABI version that was rejected; the fix is to update the WSL ROCm
-runtime package to one matching this rocprofiler-SDK.
+disagree about which agents exist.
+
+Partially described topologies land in the same place. If one of two adapters
+reports no LUID, is ambiguous against its node, or describes an incomplete
+topology, rocprofiler-SDK publishes the GPU it could describe and omits the
+other, while HSA keeps reporting both.
+
+On WSL, agent records are paired with HSA agents by the real KMT node id the
+thunk reported, so the GPUs that were published stay correctly paired no matter
+which ones were omitted — the mapping never falls back to a dense ordinal that
+would silently pair a published GPU with the wrong HSA agent. HSA GPUs left
+without a counterpart are reported as an unsupported-profiling condition naming
+their KMT node ids: profiling is unavailable on those GPUs, the ones that did
+pair remain fully profilable, and the application under test keeps running. It
+is not treated as the fatal internal inconsistency the equivalent mismatch means
+on bare metal, where rocprofiler-SDK and HSA read the same KFD sysfs tree and
+cannot legitimately disagree. The log names the symbol, ABI version or adapter
+that was rejected; the fix is to update the WSL ROCm runtime package to one
+matching this rocprofiler-SDK.
 
 Environment variables
 ======================
