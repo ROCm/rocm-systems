@@ -12,7 +12,6 @@ import plotly.colors as pcolors
 import plotly.graph_objects as go
 from dash import dcc, html
 
-from roofline.run_benchmark import BENCHMARKING_SUPPORTED as ROOFLINE_SUPPORTED
 from roofline.roofline_frame import FrameAnchors, frame_bounds
 from roofline.roofline_hover import (
     build_compute_peak_hover,
@@ -28,6 +27,9 @@ from roofline.roofline_html import (
     RooflineViewModel,
     build_interactive_document,
 )
+from roofline.run_benchmark import (
+    BENCHMARKING_SUPPORTED as ROOFLINE_SUPPORTED,  # noqa: F401
+)
 from utils.logger import (
     console_debug,
     console_error,
@@ -38,9 +40,9 @@ from utils.logger import (
 from utils.roofline_calc import (
     CACHE_LEVELS,
     SUPPORTED_DATATYPES,
-    OpsSupport,
-    XMIN,
     XMAX_DEFAULT,
+    XMIN,
+    OpsSupport,
     construct_roof,
     sanitize_mem_level,
 )
@@ -70,6 +72,10 @@ _ROOF_SAMPLES_MAX = 800
 def _figure_class(dtype: str) -> str:
     """Return OP or FLOP; integer datatypes use the ops figure."""
     return "OP" if str(dtype).startswith("I") else "FLOP"
+
+
+def _figure_title(ops_flops: str) -> str:
+    return "Ops" if ops_flops == "OP" else "Flops"
 
 
 def get_color(category: str, backend: str = "html") -> str:
@@ -570,7 +576,7 @@ class Roofline:
             document = build_interactive_document(
                 figure,
                 self.__view_models.get(ops_flops, RooflineViewModel()),
-                title=f"Empirical Roofline Analysis ({'Ops' if ops_flops == 'OP' else 'Flops'})",
+                title=f"Empirical Roofline Analysis ({_figure_title(ops_flops)})",
             )
             path = f"{prefix}{dt_list}{kernel_list}.html"
             Path(path).write_text(document, encoding="utf-8")
@@ -591,7 +597,7 @@ class Roofline:
                 children=[
                     html.H3(
                         children=(
-                            f"Empirical Roofline Analysis ({'Ops' if ops_flops == 'OP' else 'Flops'})"
+                            f"Empirical Roofline Analysis ({_figure_title(ops_flops)})"
                         )
                     ),
                     dcc.Graph(figure=figure),

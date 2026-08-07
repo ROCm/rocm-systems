@@ -15,6 +15,7 @@ from utils.logger import console_debug, console_error, console_warning
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
+from utils.utils_common import _workload_base_dir
 
 # Log-axis extent for ceiling math.
 XMIN = 0.01
@@ -592,17 +593,6 @@ def calc_ai_analyze(
 
     console_debug("roofline", f"Generated {len(plot_points.kernelNames)} plot points")
     return plot_points.__dict__
-
-
-def _workload_base_dir(workload_dir: Union[str, list, None]) -> Optional[str]:
-    """Extract the base workload directory from the (possibly nested) value."""
-    if isinstance(workload_dir, list):
-        return (
-            workload_dir[0][0]
-            if isinstance(workload_dir[0], (list, tuple))
-            else workload_dir[0]
-        )
-    return workload_dir
 
 
 def _read_benchmark_csv(benchmark_results: Path) -> dict[str, list[str]]:

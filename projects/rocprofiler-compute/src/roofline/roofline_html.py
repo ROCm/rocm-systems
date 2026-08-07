@@ -19,7 +19,6 @@ from roofline.roofline_frame import (
     FRAME_PAD,
     FRAME_SLOPE_SKEW,
 )
-
 from roofline.roofline_hover import KERNEL_NAME_FONT_FAMILY
 
 ALL_PEAKS_VALUE = "all"
