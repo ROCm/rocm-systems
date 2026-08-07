@@ -20,8 +20,11 @@
 
 #include <array>
 #include <cstring>
+#include <mutex>
+#include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -170,6 +173,23 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
          mnemonic == "s_monitor_sleep";
 }
 
+/// @brief True the first time each deferred mnemonic is seen in this process.
+///
+/// @details The warning reports a gap in the translator, which is a property of
+/// the mnemonic and not of any one instruction. Emitting it per instruction says
+/// nothing extra and drowns the log: one RCCL all_reduce run produced 104,831
+/// copies, which is itself a usability problem and buries the diagnostics that
+/// do identify a specific site.
+///
+/// The set is process-wide and never pruned. It is bounded by the small list in
+/// is_deferred_gfx1250_family(), so it cannot grow with workload size.
+[[nodiscard]] bool first_report_of_deferred_family(std::string_view mnemonic) {
+  static std::mutex reported_mutex;
+  static std::unordered_set<std::string> reported;
+  const std::lock_guard<std::mutex> lock(reported_mutex);
+  return reported.emplace(mnemonic).second;
+}
+
 [[nodiscard]] bool is_wmma_completion_wait(const Instruction &inst) {
   if (inst.size() != static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr ||
       inst.mnemonic() != "s_wait_alu")
@@ -269,8 +289,9 @@ const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &
   if (!requires_b0_to_a0_expansion(inst.mnemonic()) &&
       !gfx1250_reads_flat_scratch_base_64bit(inst)) {
     // Deferred families pass through unchanged but warn, so the not-yet-handled
-    // case is visible rather than silent. See is_deferred_gfx1250_family.
-    if (is_deferred_gfx1250_family(mnemonic))
+    // case is visible rather than silent. Once per mnemonic: see
+    // is_deferred_gfx1250_family and first_report_of_deferred_family.
+    if (is_deferred_gfx1250_family(mnemonic) && first_report_of_deferred_family(mnemonic))
       util::Logger::warn("gfx1250 translation passes through '", mnemonic,
                          "' unchanged; target-specific handling is not yet implemented");
     return nullptr;

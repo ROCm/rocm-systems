@@ -15574,6 +15574,59 @@ TEST(BinaryTranslatorE2E, Gfx1250LeavesCompactVgprMatchingSelectorNumberUnchange
   }
 }
 
+// A literal source reports the literal's own value as its encoding value, so
+// the constants 230 and 231 collide numerically with the two selectors. Reading
+// the operand instead of the encoding field mistakes such a constant for the
+// base, and rewriting the field then erases the marker that says a literal
+// follows -- stranding its dword as a standalone illegal instruction.
+//
+// The first VOP2 case is the RCCL all_reduce_perf kernel that first exposed
+// this: `v_mul_u64_e32 v[10:11], 0xe7, v[0:1]`, words 0x541400ff 0x000000e7.
+TEST(BinaryTranslatorE2E, Gfx1250LeavesLiteralMatchingSelectorNumberUnchangedForA0) {
+  struct LiteralCase {
+    const char *name;
+    std::vector<uint32_t> words;
+  };
+  constexpr uint32_t kLiteralSelector = 255;
+  constexpr uint32_t kLiteral64Selector = 254;
+  const std::vector<LiteralCase> cases = {
+      // The reported reproducer, and its twin on the other colliding constant.
+      {"vop2 literal 0xe7",
+       {gfx1250::build_vop2(gfx1250::kVMulU64Vop2,
+                            {.src0 = kLiteralSelector, .vsrc1 = 0, .vdst = 10})[0],
+        kFlatScratchBaseHiSelector}},
+      {"vop2 literal 0xe6",
+       {gfx1250::build_vop2(gfx1250::kVMulU64Vop2,
+                            {.src0 = kLiteralSelector, .vsrc1 = 0, .vdst = 10})[0],
+        kFlatScratchBaseLoSelector}},
+      // The scalar path rewrites the selector in place, so a stale literal there
+      // keeps the instruction's size and changes only what it reads: a silent
+      // wrong answer alongside the orphaned dword.
+      {"sop1 literal 0xe7",
+       {gfx1250::build_sop1(gfx1250::kSMovB64Sop1,
+                            {.ssrc0 = static_cast<uint8_t>(kLiteralSelector), .sdst = 0})[0],
+        kFlatScratchBaseHiSelector}},
+      // A 64-bit literal reports only its low dword as the encoding value, so it
+      // collides the same way while stranding two dwords rather than one.
+      {"vop2 literal64 low dword 0xe7",
+       {gfx1250::build_vop2(gfx1250::kVMulU64Vop2,
+                            {.src0 = kLiteral64Selector, .vsrc1 = 0, .vdst = 10})[0],
+        kFlatScratchBaseHiSelector, 1u}},
+  };
+  for (const LiteralCase &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const auto out = translate_gfx1250_b0_to_a0_words(test_case.words);
+    ASSERT_GE(out.size(), test_case.words.size() + 1u);
+
+    for (size_t i = 0; i < test_case.words.size(); ++i) {
+      EXPECT_EQ(out[i], test_case.words[i])
+          << "word " << i << " of a literal-source instruction must be copied verbatim";
+    }
+    EXPECT_EQ(out.size(), test_case.words.size() + 1u)
+        << "no prologue may be prepended for a literal that is not the selector";
+  }
+}
+
 // A vector 64-bit read cannot name the selector on A0, so the base is moved
 // into a dead SGPR pair and the source position is repointed at that pair.
 TEST(BinaryTranslatorE2E, Gfx1250MovesVectorFlatScratchBase64BitSourceToSgprPairForA0) {
