@@ -2391,6 +2391,13 @@ class CodeGenerator:
                     )
                 else:
                     modifier_lines += f'if ({field_ref}) modifiers_ += "{mod.display}";'
+            dpp8_modifier_line = ''
+            if dpp8_struct is not None:
+                dpp8_modifier_line = (
+                    'if (amdgpu::dpp::is_src_dpp8(inst_.src0)) '
+                    'amdgpu::dpp::append_dpp8_disassembly('
+                    'out, dpp8_lane_sel_, dpp_fi_);'
+                )
 
             has_op = any(f.name == 'op' for f in inst_enc.ucode_fields)
             size_line = (
@@ -2400,6 +2407,15 @@ class CodeGenerator:
             )
             if has_op:
                 size_line += '\n  opcode_ = inst_.op;'
+            if dpp8_struct is not None:
+                compact_encoding = str(
+                    inst_enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC')
+                ).lower()
+                size_line += (
+                    ' if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {'
+                    ' owned_mnemonic_ = amdgpu::dpp::dpp8_mnemonic('
+                    f'mnemonic, {compact_encoding}); mnemonic_ = owned_mnemonic_; }}'
+                )
             literal64_conds = [
                 name for name, _ in inst_enc.enc_conds if name.startswith('has_lit64')
             ]
@@ -2548,14 +2564,16 @@ class CodeGenerator:
             # that have modifier flags (memory instructions). This is
             # called lazily by disassemble() instead of eagerly in the
             # constructor, avoiding string allocation on the hot path.
-            if modifier_lines:
+            if modifier_lines or dpp8_modifier_line:
                 public_members.append(
                     cgen.Line('void build_modifiers(std::string &out) const override;'),
                 )
                 # The modifier_lines were written for the constructor where
                 # they appended to modifiers_ and accessed inst->field.
                 # Rewrite to append to 'out' and access via local pointer.
-                mod_impl = modifier_lines.replace('modifiers_', 'out')
+                mod_impl = (
+                    modifier_lines.replace('modifiers_', 'out') + dpp8_modifier_line
+                )
                 class_func_impls.append(
                     cgen.Line(
                         f'void {inst_enc.fmt_enc_name}::build_modifiers'
@@ -2706,7 +2724,7 @@ class CodeGenerator:
             if inst_enc.has_implied_literal_ops:
                 class_members.append(cgen.Statement('uint32_t literal_ = 0'))
             # FLAT encoding bases need an owned string for the dynamic mnemonic.
-            if rule.use_flat_mnemonic:
+            if rule.use_flat_mnemonic or dpp8_struct is not None:
                 class_members.append(cgen.Statement('std::string owned_mnemonic_'))
             # VOP encoding bases store DPP control fields.
             # apply_dpp() is a free function in dpp_sdwa_ops.h.

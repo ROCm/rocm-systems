@@ -435,12 +435,14 @@ public:
 class Vop1 : public IsaInstruction<Isa> {
 public:
   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
   using OpEncoding = Vop1MachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
+  std::string owned_mnemonic_;
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
@@ -465,11 +467,13 @@ public:
 class Vopc : public IsaInstruction<Isa> {
 public:
   Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
   using OpEncoding = VopcMachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
+  std::string owned_mnemonic_;
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
@@ -493,6 +497,7 @@ public:
 class Vop2 : public IsaInstruction<Isa> {
 public:
   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
@@ -501,6 +506,7 @@ public:
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
   uint32_t literal_ = 0;
+  std::string owned_mnemonic_;
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
@@ -525,6 +531,7 @@ public:
 class Vop3 : public IsaInstruction<Isa> {
 public:
   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
@@ -536,6 +543,7 @@ public:
   using OpEncoding = Vop3MachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 3> raw_words_{};
+  std::string owned_mnemonic_;
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
@@ -549,6 +557,7 @@ public:
 class Vop3p : public IsaInstruction<Isa> {
 public:
   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
@@ -560,6 +569,7 @@ public:
   using OpEncoding = Vop3pMachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 3> raw_words_{};
+  std::string owned_mnemonic_;
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
@@ -648,6 +658,7 @@ public:
 class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
   Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
@@ -659,6 +670,7 @@ public:
   using OpEncoding = Vop3SdstEncMachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 3> raw_words_{};
+  std::string owned_mnemonic_;
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;

@@ -177,12 +177,23 @@ Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exe
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    owned_mnemonic_ = amdgpu::dpp::dpp8_mnemonic(mnemonic, true);
+    mnemonic_ = owned_mnemonic_;
+  }
   if (has_lit64())
     size_ += 2 * sizeof(MachineInst);
   else if (!default_encoding())
     size_ += sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+}
+
+void Vop1::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+    amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
 }
 
 void Vop1::implicit_uses(RegisterSet &uses) const {
@@ -232,12 +243,23 @@ Vopc::Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exe
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    owned_mnemonic_ = amdgpu::dpp::dpp8_mnemonic(mnemonic, true);
+    mnemonic_ = owned_mnemonic_;
+  }
   if (has_lit64())
     size_ += 2 * sizeof(MachineInst);
   else if (!default_encoding())
     size_ += sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+}
+
+void Vopc::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+    amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
 }
 
 bool Vopc::default_encoding() {
@@ -259,6 +281,10 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    owned_mnemonic_ = amdgpu::dpp::dpp8_mnemonic(mnemonic, true);
+    mnemonic_ = owned_mnemonic_;
+  }
   if (hasImpliedLiteral())
     size_ += impliedLiteralWordCount() * sizeof(MachineInst);
   else if (has_lit64() || hasImpliedLiteral64())
@@ -269,6 +295,13 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+}
+
+void Vop2::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+    amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
 }
 
 void Vop2::implicit_uses(RegisterSet &uses) const {
@@ -335,6 +368,10 @@ Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exe
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    owned_mnemonic_ = amdgpu::dpp::dpp8_mnemonic(mnemonic, false);
+    mnemonic_ = owned_mnemonic_;
+  }
   if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
       (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255))
     throw util::InvalidInst("DPP and literal operands cannot be combined", "");
@@ -346,6 +383,13 @@ Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+}
+
+void Vop3::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+    amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
 }
 
 void Vop3::implicit_uses(RegisterSet &uses) const {
@@ -421,6 +465,10 @@ Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn 
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    owned_mnemonic_ = amdgpu::dpp::dpp8_mnemonic(mnemonic, false);
+    mnemonic_ = owned_mnemonic_;
+  }
   if (decode_extensions) {
     if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
         (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255))
@@ -434,6 +482,13 @@ Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn 
     std::memcpy(raw_words_.data(), inst, size_);
     raw_encoding_ = raw_words_.data();
   }
+}
+
+void Vop3p::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+    amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
 }
 
 void Vop3p::implicit_uses(RegisterSet &uses) const {
@@ -591,6 +646,10 @@ Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    owned_mnemonic_ = amdgpu::dpp::dpp8_mnemonic(mnemonic, false);
+    mnemonic_ = owned_mnemonic_;
+  }
   if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
       (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255))
     throw util::InvalidInst("DPP and literal operands cannot be combined", "");
@@ -602,6 +661,13 @@ Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst
     size_ += sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+}
+
+void Vop3SdstEnc::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+    amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
 }
 
 void Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {

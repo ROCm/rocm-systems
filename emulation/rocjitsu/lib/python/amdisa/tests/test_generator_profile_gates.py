@@ -2104,6 +2104,15 @@ def test_generated_sendmsg_return_selectors_are_not_literals(
         assert 'OperandType::OPR_SIMM64' not in sendmsg_ctor
 
 
+def test_generated_dpp8_disassembly_uses_encoding_state(
+    amdgpu_generated_root: Path,
+) -> None:
+    for arch in ('rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4', 'gfx1250'):
+        encodings_cpp = (amdgpu_generated_root / arch / 'encodings.cpp').read_text()
+        assert 'dpp8_mnemonic' in encodings_cpp
+        assert 'append_dpp8_disassembly' in encodings_cpp
+
+
 def test_generated_sdwa_uses_shared_source_staging(
     amdgpu_generated_root: Path,
 ) -> None:

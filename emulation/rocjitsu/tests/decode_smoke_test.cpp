@@ -101,6 +101,21 @@ TEST_P(DecoderSmokeTest, DecodesCorrectly) {
   EXPECT_EQ(inst->size(), tc.expected_size_bytes) << "Wrong size for arch=" << tc.arch_name;
 }
 
+TEST(Gfx1250DecodeTest, DisassemblesDpp8Selectors) {
+  const uint32_t words[] = {
+      0x7E0040EAu, // v_fract_f32 with the DPP8FI source selector.
+      0x000040CCu, // v204, dpp8:[0,0,1,0,0,0,0,0].
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->size(), 8);
+  EXPECT_EQ(inst->mnemonic(), "v_fract_f32_dpp");
+  EXPECT_EQ(inst->disassemble(), "v_fract_f32_dpp v0, v204 dpp8:[0,0,1,0,0,0,0,0] fi:1");
+}
+
 // AMDGPU ISAs × 2 instructions.
 // CDNA1/2/3/4 and RDNA1/2 share the GFX9/GFX10 s_endpgm encoding (op=1).
 // RDNA3/3.5/4 use the GFX11/GFX12 encoding where s_endpgm moved to op=48.
