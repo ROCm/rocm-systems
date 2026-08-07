@@ -150,7 +150,7 @@ TEST_F(SparseSendRecv, StarTopology)
                      << " — set these in the test-runner config or mpirun -x flags.";
     }
 
-    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
     ncclComm_t  comm   = getActiveCommunicator();
     hipStream_t stream = getActiveStream();
@@ -161,8 +161,8 @@ TEST_F(SparseSendRecv, StarTopology)
     const float        rank_val = static_cast<float>(rank);
     std::vector<float> rank_vals(NUM_ELEMS, rank_val);
 
-    ASSERT_EQ(hipSuccess, hipMalloc(&send_buf, buf_bytes));
-    ASSERT_EQ(hipSuccess,
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&send_buf, buf_bytes));
+    ASSERT_MPI_EQ(hipSuccess,
               hipMemcpy(send_buf, rank_vals.data(), buf_bytes, hipMemcpyHostToDevice));
 
     // Allocate per-repetition recv buffers to avoid aliasing within a group call.
@@ -188,7 +188,7 @@ TEST_F(SparseSendRecv, StarTopology)
     // Corrupted resources->step state accumulates across calls; the hang
     // typically surfaces on the 2nd or 3rd iteration.
     for (int iter = 0; iter < ITERS; ++iter) {
-        ASSERT_EQ(ncclSuccess, ncclGroupStart());
+        ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
 
         if (rank == 0) {
             // Hub: REPS full sweeps over all leaf peers within one group call.
@@ -217,11 +217,11 @@ TEST_F(SparseSendRecv, StarTopology)
             }
         }
 
-        ASSERT_EQ(ncclSuccess, ncclGroupEnd());
+        ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
         // Bail out if any ncclSend/ncclRecv failed — the stream state is undefined.
         if (HasFailure()) break;
 
-        ASSERT_EQ(hipSuccess, hipStreamSynchronize(stream));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
         // Spot-check first repetition's recv buffers each iteration.
         // Reps 1-(REPS-1) are not verified; the primary signal is whether
