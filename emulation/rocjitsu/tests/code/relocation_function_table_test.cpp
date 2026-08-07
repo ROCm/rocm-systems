@@ -489,7 +489,7 @@ TEST(RelocationFunctionTable, ResolvesDynamicDispatchThroughGotAndTableLoads) {
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{40};
   const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
-  const auto dispatches = discover_relocation_table_dispatches(blocks, tables, 0x1000);
+  const auto dispatches = analyze_relocation_pairs(blocks, tables, 0x1000).dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
   EXPECT_EQ(dispatches[0].table_index, 0u);
   EXPECT_EQ(dispatches[0].source_call_offset, 32u);
@@ -514,7 +514,8 @@ TEST(RelocationFunctionTable, ResolvesRcclDirectIndexedTableDispatch) {
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{32};
   const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
-  const auto dispatches = discover_relocation_table_dispatches(blocks, tables, 0x1000);
+  const auto analysis = analyze_relocation_pairs(blocks, tables, 0x1000);
+  const auto &dispatches = analysis.dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
   EXPECT_EQ(dispatches[0].table_index, 0u);
   EXPECT_EQ(dispatches[0].source_call_offset, 24u);
@@ -522,6 +523,20 @@ TEST(RelocationFunctionTable, ResolvesRcclDirectIndexedTableDispatch) {
   EXPECT_EQ(dispatches[0].source_getpc_offset, 0u);
   EXPECT_EQ(dispatches[0].source_address_add_offset, 4u);
   EXPECT_EQ(dispatches[0].source_table_address_vaddr, 0x2000u);
+
+  ASSERT_EQ(analysis.address_builders.size(), 1u);
+  EXPECT_EQ(analysis.address_builders[0].source_getpc_offset, 0u);
+  EXPECT_EQ(analysis.address_builders[0].source_address_add_offset, 4u);
+  EXPECT_EQ(analysis.address_builders[0].target_vaddr, 0x2000u);
+
+  const auto table_free_analysis = analyze_relocation_pairs(blocks, {}, 0x1000);
+  ASSERT_EQ(table_free_analysis.address_builders.size(), 1u);
+  EXPECT_EQ(table_free_analysis.address_builders[0].source_getpc_offset,
+            analysis.address_builders[0].source_getpc_offset);
+  EXPECT_EQ(table_free_analysis.address_builders[0].source_address_add_offset,
+            analysis.address_builders[0].source_address_add_offset);
+  EXPECT_EQ(table_free_analysis.address_builders[0].target_vaddr,
+            analysis.address_builders[0].target_vaddr);
 }
 
 TEST(RelocationFunctionTable, RejectsChainedAddressAddDispatch) {
@@ -538,7 +553,7 @@ TEST(RelocationFunctionTable, RejectsChainedAddressAddDispatch) {
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{44};
   const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
-  const auto dispatches = discover_relocation_table_dispatches(blocks, tables, 0x1000);
+  const auto dispatches = analyze_relocation_pairs(blocks, tables, 0x1000).dispatches;
   // The base is built with two literal adds; only one add offset can be relocated,
   // so the dispatch must fail closed rather than resolve to a value whose first
   // addend would still execute.
@@ -567,7 +582,7 @@ TEST(RelocationFunctionTable, ResolvesBackwardTableAddress) {
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{32};
   const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
-  const auto dispatches = discover_relocation_table_dispatches(blocks, tables, kAssumedTextVaddr);
+  const auto dispatches = analyze_relocation_pairs(blocks, tables, kAssumedTextVaddr).dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
   EXPECT_EQ(dispatches[0].table_index, 0u);
   EXPECT_EQ(dispatches[0].source_table_address_vaddr, 0x2000u);

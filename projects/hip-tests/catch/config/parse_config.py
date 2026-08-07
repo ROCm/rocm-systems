@@ -66,8 +66,13 @@ def create_test_definition(
         or arch in disabled
         or (asan and "asan" in disabled)
     ):
-        # skip case
-        tags_str = "[.]"
+        # Disabled on this platform (e.g. amd_linux) or arch (e.g. gfx1260).
+        # Use the [disabled] tag (no leading dot) so it is visible in --list-tests
+        # and included in a bare ./exe run.
+        # CTest registers these as DISABLED TRUE (skipped by default).
+        tags_str += f"[disabled][{arch}]"
+    else:
+        tags_str += f"[{arch}]"
 
     return f'#define {case_name} "{case_name}", "{tags_str}"'
 

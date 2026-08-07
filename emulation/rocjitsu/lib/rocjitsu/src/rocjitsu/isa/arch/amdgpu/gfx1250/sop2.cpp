@@ -2277,6 +2277,12 @@ void SAddF16Sop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void SAddF16Sop2::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Sop2::implicit_use_operands(operands);
+  if (sdst.to_register_ref())
+    operands.push_back(&sdst);
+}
+
 SSubF16Sop2::SSubF16Sop2(const MachineInst *inst)
     : Sop2("s_sub_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(251)),
       sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -2317,6 +2323,12 @@ void SSubF16Sop2::implicit_uses(RegisterSet &uses) const {
   Sop2::implicit_uses(uses);
   if (auto r = sdst.to_register_ref())
     uses.expand(*r);
+}
+
+void SSubF16Sop2::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Sop2::implicit_use_operands(operands);
+  if (sdst.to_register_ref())
+    operands.push_back(&sdst);
 }
 
 SMinNumF16Sop2::SMinNumF16Sop2(const MachineInst *inst)
@@ -2361,6 +2373,13 @@ void SMinNumF16Sop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void SMinNumF16Sop2::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Sop2::implicit_use_operands(operands);
+  if (sdst.to_register_ref())
+    operands.push_back(&sdst);
+}
+
 SMaxNumF16Sop2::SMaxNumF16Sop2(const MachineInst *inst)
     : Sop2("s_max_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(253)),
       sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -2401,6 +2420,13 @@ void SMaxNumF16Sop2::implicit_uses(RegisterSet &uses) const {
   Sop2::implicit_uses(uses);
   if (auto r = sdst.to_register_ref())
     uses.expand(*r);
+}
+
+void SMaxNumF16Sop2::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Sop2::implicit_use_operands(operands);
+  if (sdst.to_register_ref())
+    operands.push_back(&sdst);
 }
 
 SMulF16Sop2::SMulF16Sop2(const MachineInst *inst)
@@ -2445,6 +2471,12 @@ void SMulF16Sop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void SMulF16Sop2::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Sop2::implicit_use_operands(operands);
+  if (sdst.to_register_ref())
+    operands.push_back(&sdst);
+}
+
 SFmacF16Sop2::SFmacF16Sop2(const MachineInst *inst)
     : Sop2("s_fmac_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(255)),
       sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -2486,6 +2518,12 @@ void SFmacF16Sop2::implicit_uses(RegisterSet &uses) const {
   Sop2::implicit_uses(uses);
   if (auto r = sdst.to_register_ref())
     uses.expand(*r);
+}
+
+void SFmacF16Sop2::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Sop2::implicit_use_operands(operands);
+  if (sdst.to_register_ref())
+    operands.push_back(&sdst);
 }
 
 SMinimumF32Sop2::SMinimumF32Sop2(const MachineInst *inst)
@@ -2598,6 +2636,13 @@ void SMinimumF16Sop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void SMinimumF16Sop2::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Sop2::implicit_use_operands(operands);
+  if (sdst.to_register_ref())
+    operands.push_back(&sdst);
+}
+
 SMaximumF16Sop2::SMaximumF16Sop2(const MachineInst *inst)
     : Sop2("s_maximum_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(259)),
       sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -2638,6 +2683,13 @@ void SMaximumF16Sop2::implicit_uses(RegisterSet &uses) const {
   Sop2::implicit_uses(uses);
   if (auto r = sdst.to_register_ref())
     uses.expand(*r);
+}
+
+void SMaximumF16Sop2::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Sop2::implicit_use_operands(operands);
+  if (sdst.to_register_ref())
+    operands.push_back(&sdst);
 }
 
 SAddNcU64Sop2::SAddNcU64Sop2(const MachineInst *inst)

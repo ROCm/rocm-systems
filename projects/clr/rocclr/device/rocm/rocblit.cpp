@@ -615,43 +615,6 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
 
 
 // ================================================================================================
-// Resolves the real HSA agents for a src/dst memory pair using pointer_info
-inline void DmaBlitManager::resolveAgents(const Memory& srcMem, const Memory& dstMem,
-                                          address srcAddr, address dstAddr,
-                                          hsa_agent_t& srcAgent, hsa_agent_t& dstAgent) const {
-  // Use agents stored in memory objects during creation
-  srcAgent = srcMem.getOwningAgent();
-  dstAgent = dstMem.getOwningAgent();
-
-  // Handle invalid agent (shouldn't happen if create() properly initialized)
-  if (srcAgent.handle == 0) {
-    srcAgent = srcMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
-    if (static_cast<const amd::Memory*>(srcMem.owner())->ipcShared() ||
-        static_cast<const amd::Memory*>(srcMem.owner())->vmmImported()) {
-      hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
-      if (HSA_STATUS_SUCCESS ==
-          Hsa::pointer_info(const_cast<address>(srcAddr), &info, nullptr, nullptr, nullptr)) {
-        srcAgent = info.agentOwner;
-      }
-    } else {
-        srcAgent = srcMem.isHostMemDirectAccess() ? srcMem.dev().getCpuAgent() : srcMem.dev().getBackendDevice();
-    }
-  }
-  if (dstAgent.handle == 0) {
-    dstAgent = dstMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
-    if (static_cast<const amd::Memory*>(dstMem.owner())->ipcShared() ||
-        static_cast<const amd::Memory*>(dstMem.owner())->vmmImported()) {
-      hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
-      if (HSA_STATUS_SUCCESS == Hsa::pointer_info(dstAddr, &info, nullptr, nullptr, nullptr)) {
-        dstAgent = info.agentOwner;
-      }
-    } else {
-        dstAgent = dstMem.isHostMemDirectAccess() ? dstMem.dev().getCpuAgent() : dstMem.dev().getBackendDevice();
-    }
-  }
-}
-
-// ================================================================================================
 bool DmaBlitManager::hsaCopy(const Memory& srcMemory, const Memory& dstMemory,
                              const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,
                              const amd::Coord3D& size, amd::CopyMetadata& copyMetadata) const {
@@ -663,9 +626,10 @@ bool DmaBlitManager::hsaCopy(const Memory& srcMemory, const Memory& dstMemory,
   src += srcOrigin[0];
   dst += dstOrigin[0];
 
-  hsa_agent_t srcAgent;
-  hsa_agent_t dstAgent;
-  resolveAgents(srcMemory, dstMemory, src, dst, srcAgent, dstAgent);
+  // Owning agents are computed when the memory is created, including IPC/VMM-imported
+  // memory, so no per-copy pointer_info query is needed.
+  hsa_agent_t srcAgent = srcMemory.getOwningAgent();
+  hsa_agent_t dstAgent = dstMemory.getOwningAgent();
 
   // Blocking D2H copies need a wait anyways so better wait here
   // than having to wait on the device for dependent signals for SDMA which is slow
@@ -703,9 +667,9 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
     address src = reinterpret_cast<address>(srcMem.getDeviceMemory()) + op.srcOffset;
     address dst = reinterpret_cast<address>(dstMem.getDeviceMemory()) + op.dstOffset;
 
-    hsa_agent_t srcAgent;
-    hsa_agent_t dstAgent;
-    resolveAgents(srcMem, dstMem, src, dst, srcAgent, dstAgent);
+    // Owning agents are cached at memory creation time.
+    hsa_agent_t srcAgent = srcMem.getOwningAgent();
+    hsa_agent_t dstAgent = dstMem.getOwningAgent();
 
     // Normalize agents to ensure the calling device's SDMA engines are used,
     // matching the rocrCopyBuffer agent selection logic.
@@ -2948,6 +2912,12 @@ bool KernelBlitManager::WriteBufferBatch(
 
   for (const amd::BatchWriteMemoryOp& op : write_ops) {
     Memory* dst_memory = dev().getRocMemory(op.dst_memory);
+    if (dst_memory == nullptr) {
+      LogError("KernelBlitManager::WriteBufferBatch: Invalid destination memory!");
+      gpu().releaseGpuMemoryFence();
+      gpu().command()->ReleasePinnedMemory();
+      return false;
+    }
 
     const_address src_addr = reinterpret_cast<const_address>(op.src_host);
     size_t copy_offset = 0;
@@ -3006,9 +2976,20 @@ bool KernelBlitManager::WriteBufferBatch(
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
     if (!hsaCopyBatch(pinned_copy_ops)) {
-      gpu().releaseGpuMemoryFence();
-      gpu().command()->ReleasePinnedMemory();
-      return false;
+      LogWarning(
+          "KernelBlitManager::WriteBufferBatch: SDMA batch copy failed, falling back to shader "
+          "copy");
+      // System scope so the dispatch observes the application's writes
+      // to the pinned source.
+      constexpr bool kNeedsSystemScope = true;
+      constexpr bool kAttachSignal = false;
+      for (const amd::BatchCopyOp& op : pinned_copy_ops) {
+        Memory* src_memory = dev().getRocMemory(op.srcMemory);
+        Memory* dst_memory = dev().getRocMemory(op.dstMemory);
+        staging_copy_ops.push_back({src_memory->getDeviceMemory() + op.srcOffset,
+                                    dst_memory->getDeviceMemory() + op.dstOffset, op.size,
+                                    op.metadata, kNeedsSystemScope, kAttachSignal});
+      }
     }
     pinned_copy_ops.clear();
   }
@@ -3103,9 +3084,20 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
     if (!hsaCopyBatch(pinned_copy_ops)) {
-      gpu().releaseGpuMemoryFence();
-      gpu().command()->ReleasePinnedMemory();
-      return false;
+      LogWarning(
+          "KernelBlitManager::ReadBufferBatch: SDMA batch copy failed, falling back to shader "
+          "copy");
+      // The shader writes to pinned application memory that the host
+      // reads once this command completes, so it needs a system scope release.
+      constexpr bool kNeedsSystemScope = true;
+      constexpr bool kAttachSignal = true;
+      for (const amd::BatchCopyOp& op : pinned_copy_ops) {
+        Memory* src_memory = dev().getRocMemory(op.srcMemory);
+        Memory* dst_memory = dev().getRocMemory(op.dstMemory);
+        staging_copy_ops.push_back({src_memory->getDeviceMemory() + op.srcOffset,
+                                    dst_memory->getDeviceMemory() + op.dstOffset, op.size,
+                                    op.metadata, kNeedsSystemScope, kAttachSignal});
+      }
     }
     pinned_copy_ops.clear();
   }
@@ -3116,9 +3108,14 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
       gpu().command()->ReleasePinnedMemory();
       return false;
     }
-    gpu().Barriers().WaitCurrent();
-    for (const StagingReadBack& read_back : staging_read_backs) {
-      memcpy(read_back.dst, read_back.staging, read_back.size);
+    // Only staged ops need the host read-back; a pinned op writes straight into
+    // the caller's buffer, so keep the copy asynchronous when the batch is all
+    // pinned fallback ops.
+    if (!staging_read_backs.empty()) {
+      gpu().Barriers().WaitCurrent();
+      for (const StagingReadBack& read_back : staging_read_backs) {
+        memcpy(read_back.dst, read_back.staging, read_back.size);
+      }
     }
   }
 

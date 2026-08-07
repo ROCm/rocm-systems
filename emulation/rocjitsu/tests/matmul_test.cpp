@@ -12,6 +12,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -31,7 +32,6 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #ifdef HAS_DEVICE_KERNELS
@@ -120,10 +120,10 @@ struct KernelExecFixture {
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
     loaded.wire_links(engine->topology());
-    if (num_threads > 1)
-      partition_by_xcd(num_threads);
-    else
-      engine->create();
+    if (num_threads > 1) {
+      ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads));
+    }
+    engine->create();
 
     Executable exec(kernel_path(kernel_name));
     ASSERT_TRUE(exec.is_valid());
@@ -135,28 +135,6 @@ struct KernelExecFixture {
     co->load_to_memory(mem(), KD_ADDR);
     kernel_object = KD_ADDR + co->kernel_descriptor_offset(kernel_name);
     ASSERT_NE(kernel_object, KD_ADDR) << "Kernel descriptor symbol not found";
-  }
-
-  /// Partition so that each XCD's components stay in the same partition.
-  /// Components not under any XCD (SoC, VM, IODs) go to partition 0.
-  void partition_by_xcd(uint32_t num_partitions) {
-    // Build a map from Xcd pointer to partition ID.
-    std::unordered_map<simdojo::Component *, simdojo::PartitionID> xcd_map;
-    for (uint32_t i = 0; i < soc->num_xcds(); ++i)
-      xcd_map[soc->xcd(i)] = i % num_partitions;
-
-    engine->topology().partition_manual(
-        num_partitions, [&](simdojo::Component *c) -> simdojo::PartitionID {
-          // Walk up the parent chain looking for an XCD ancestor.
-          for (auto *p = static_cast<simdojo::Component *>(c); p != nullptr;
-               p = static_cast<simdojo::Component *>(p->parent())) {
-            auto it = xcd_map.find(p);
-            if (it != xcd_map.end())
-              return it->second;
-          }
-          return 0; // Top-level components → partition 0.
-        });
-    engine->create();
   }
 
   amdgpu::GpuMemory *mem() { return gpu_mem; }
@@ -445,20 +423,7 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
 
-  // Partition by XCD so each XCD's components stay on one thread.
-  std::unordered_map<simdojo::Component *, simdojo::PartitionID> xcd_map;
-  for (uint32_t i = 0; i < soc->num_xcds(); ++i)
-    xcd_map[soc->xcd(i)] = i;
-  engine->topology().partition_manual(
-      TOTAL_XCDS, [&](simdojo::Component *c) -> simdojo::PartitionID {
-        for (auto *p = static_cast<simdojo::Component *>(c); p != nullptr;
-             p = static_cast<simdojo::Component *>(p->parent())) {
-          auto it = xcd_map.find(p);
-          if (it != xcd_map.end())
-            return it->second;
-        }
-        return 0;
-      });
+  ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, TOTAL_XCDS));
   engine->create();
 
   using namespace rocr::llvm::amdhsa;
