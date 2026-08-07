@@ -106,6 +106,21 @@ pub fn build_specs(
     // [`StdioMode::for_exec`].
     let stdio = StdioMode::for_exec(nodes.len() * nproc as usize);
 
+    // And, for a containerised exec, whether to ask the provider for a
+    // pseudo-terminal inside the container. Probed here rather than
+    // deeper down because this is the process the user is sitting in
+    // front of: both callers of `build_specs` — `mirage run` and
+    // `mirage exec` — own the terminal their workload will run on.
+    let tty = {
+        use std::io::IsTerminal as _;
+        wants_tty(
+            stdio,
+            std::io::stdin().is_terminal()
+                && std::io::stdout().is_terminal()
+                && std::io::stderr().is_terminal(),
+        )
+    };
+
     let mut specs = Vec::with_capacity(nodes.len() * nproc as usize);
     for node in nodes {
         for local in 0..nproc {
@@ -155,6 +170,7 @@ pub fn build_specs(
                         &env_pairs,
                         &command,
                         &rest,
+                        tty,
                     );
                     let (command, rest) = argv
                         .split_first()
@@ -209,6 +225,31 @@ pub fn build_specs(
         }
     }
     Ok(specs)
+}
+
+/// Whether a containerised exec should be given a pseudo-terminal.
+///
+/// Two conditions, and both are load-bearing.
+///
+/// The exec has to be the interactive *shape*: one process, holding the
+/// caller's stdin. A grid is captured, nobody's stdin is connected, and a
+/// pty per rank would only give mirage's output labeller a second stream
+/// to untangle.
+///
+/// And every one of the caller's three streams has to be a terminal, not
+/// just stdin. `-t` merges stderr into stdout, because a pseudo-terminal
+/// is one stream. When all three are the same terminal that merge is
+/// unobservable — the bytes were going to the same place regardless. When
+/// they are not, it is destructive: `mirage run --image X -- job > out
+/// 2> err` would put the diagnostics in `out`, which is precisely the
+/// redirection this module's predecessor gave up its pty to preserve.
+///
+/// So a redirected interactive-shaped exec keeps pipes and loses
+/// `isatty`, which is the same bargain it gets on the host path, where a
+/// redirected stdout is not a terminal either.
+#[must_use]
+fn wants_tty(stdio: StdioMode, all_streams_are_terminals: bool) -> bool {
+    stdio.owns_terminal() && all_streams_are_terminals
 }
 
 /// The environment one workload process runs with.
@@ -550,6 +591,23 @@ mod tests {
             "{:?}",
             specs[0].args
         );
+    }
+
+    #[test]
+    fn only_a_fully_interactive_exec_asks_for_a_container_terminal() {
+        // A grid has nobody's stdin connected, so a pty per rank would
+        // buy nothing and give the output labeller a merged stream.
+        assert!(!wants_tty(StdioMode::Capture, true));
+        // A rank that inherits the streams but not stdin is not the
+        // interactive one.
+        assert!(!wants_tty(StdioMode::Inherit { stdin: false }, true));
+        // The interactive shape, on a real terminal.
+        assert!(wants_tty(StdioMode::Inherit { stdin: true }, true));
+        // The interactive shape with something redirected: `-t` merges
+        // stderr into stdout, so `-- job > out 2> err` would lose the
+        // distinction. Pipes and no `isatty` is the same bargain the host
+        // path makes for a redirected stream.
+        assert!(!wants_tty(StdioMode::Inherit { stdin: true }, false));
     }
 
     #[test]

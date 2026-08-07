@@ -423,19 +423,39 @@ impl Engine {
     /// would for a non-containerised exec. Environment is injected
     /// explicitly with `-e` rather than inherited from the host.
     ///
-    /// There is deliberately no `-t`. Mirage allocates no
-    /// pseudo-terminal: the provider client inherits the caller's real
-    /// stdin, stdout and stderr, so if the caller is on a terminal the
-    /// workload already is too, and if it is not, asking the provider for
-    /// one would merge stderr into stdout and break redirection.
+    /// `tty` adds `-t`, asking the provider to allocate a pseudo-terminal
+    /// inside the container. Mirage still allocates none of its own, and
+    /// for a workload running *on the host* it does not need to: the
+    /// child inherits the caller's real file descriptors, so if the
+    /// caller is on a terminal then so is the workload.
+    ///
+    /// That reasoning does not survive the container boundary, and
+    /// assuming it did is why no interactive program worked in a
+    /// containerised session. `provider exec` does not hand the caller's
+    /// descriptors to the in-container process — it cannot, they are in
+    /// different namespaces — it proxies the streams over its own socket
+    /// and gives the process pipes. `isatty(0)` is then false however
+    /// good the caller's terminal is: `bash` prints no prompt and runs no
+    /// job control, and anything ncurses refuses to start.
+    ///
+    /// The flag is not unconditional because `-t` merges stderr into
+    /// stdout — a pseudo-terminal has one stream. That is invisible when
+    /// every stream is the same terminal anyway, and destroys
+    /// `… -- job > out 2> err` when they are not, so the caller decides
+    /// from the shape of the exec and the state of its own streams; see
+    /// `mirage_supervisor::spec`.
     pub fn exec_argv(
         container: &str,
         workdir: Option<&str>,
         env: &[(String, String)],
         command: &str,
         args: &[String],
+        tty: bool,
     ) -> Vec<String> {
         let mut argv = vec!["exec".to_string(), "-i".to_string()];
+        if tty {
+            argv.push("-t".to_string());
+        }
         if let Some(wd) = workdir {
             argv.push("-w".to_string());
             argv.push(wd.to_string());
@@ -460,9 +480,10 @@ impl Engine {
         env: &[(String, String)],
         command: &str,
         args: &[String],
+        tty: bool,
     ) -> Vec<String> {
         let mut full = vec![self.provider.clone()];
-        full.extend(Self::exec_argv(container, workdir, env, command, args));
+        full.extend(Self::exec_argv(container, workdir, env, command, args, tty));
         full
     }
 
@@ -1197,6 +1218,7 @@ mod tests {
             &env,
             "/bin/echo",
             &["hi".to_string(), "there".to_string()],
+            false,
         );
         assert_eq!(
             argv,
@@ -1216,11 +1238,20 @@ mod tests {
     }
 
     #[test]
-    fn exec_argv_never_requests_a_terminal() {
-        // Mirage allocates no pty and asks the provider for none either:
-        // the client inherits the caller's real terminal, so `-t` would
-        // only add a second one and merge stderr into stdout.
-        let argv = Engine::exec_argv("c", None, &[], "bash", &[]);
+    fn an_interactive_exec_asks_the_provider_for_a_terminal() {
+        // `provider exec` gives the in-container process pipes, not the
+        // caller's descriptors — they are in different namespaces — so
+        // without `-t` `isatty(0)` is false however good the caller's
+        // terminal is, and `bash` prints no prompt at all.
+        let argv = Engine::exec_argv("c", None, &[], "bash", &[], true);
+        assert_eq!(argv, vec!["exec", "-i", "-t", "c", "bash"]);
+    }
+
+    #[test]
+    fn a_non_interactive_exec_gets_no_terminal() {
+        // `-t` merges stderr into stdout, so it may only be asked for
+        // when every stream was going to the same terminal anyway.
+        let argv = Engine::exec_argv("c", None, &[], "bash", &[], false);
         assert_eq!(argv, vec!["exec", "-i", "c", "bash"]);
         assert!(!argv.contains(&"-t".to_string()), "{argv:?}");
     }
@@ -1228,8 +1259,10 @@ mod tests {
     #[test]
     fn exec_command_line_prefixes_provider() {
         let engine = Engine::with_provider("podman");
-        let line = engine.exec_command_line("c", None, &[], "ls", &[]);
+        let line = engine.exec_command_line("c", None, &[], "ls", &[], false);
         assert_eq!(line, vec!["podman", "exec", "-i", "c", "ls"]);
+        let line = engine.exec_command_line("c", None, &[], "ls", &[], true);
+        assert_eq!(line, vec!["podman", "exec", "-i", "-t", "c", "ls"]);
     }
 
     #[test]

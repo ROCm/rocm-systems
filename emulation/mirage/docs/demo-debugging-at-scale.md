@@ -398,7 +398,9 @@ flowchart TB
 - Containers are **not detached**. Each provider client is a child process mirage
   owns: kill it and the container stops, and `--rm` removes it.
 - The container's foreground process is `sleep infinity`; workloads go in via
-  `provider exec -i`.
+  `provider exec -i` — plus `-t` for an interactive one-process exec on a real
+  terminal, since `provider exec` gives the in-container process pipes rather
+  than your descriptors.
 - podman gets `--group-add keep-groups`; docker gets explicit `/dev/kfd` + render
   nodes and the named GPU groups.
 

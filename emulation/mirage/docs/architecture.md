@@ -277,15 +277,36 @@ Two consequences are worth knowing:
   re-establishes that guarantee explicitly by polling for "running" —
   otherwise the first exec races bring-up and fails with "no such
   container".
-* The client's own streams go to `/dev/null`. The container's foreground
-  process is an idle placeholder (`sleep infinity`); workloads arrive
-  later via `provider exec`, so it has nothing to say, and letting it
-  write to mirage's terminal would interleave provider chatter with the
-  output the user asked for.
+* The client's stdin and stdout go to `/dev/null`. The container's
+  foreground process is an idle placeholder (`sleep infinity`); workloads
+  arrive later via `provider exec`, so it has nothing to say, and letting
+  it write to mirage's terminal would interleave provider chatter with
+  the output the user asked for. Its **stderr** is captured, because a
+  `podman run` that refuses says why on it — a bound port, a missing
+  device, an entrypoint the image cannot run — and that reason is the
+  most useful part of a failed bring-up. It used to go to `/dev/null`,
+  and the user was told only that the container "did not start".
 
-`provider exec` passes `-i` and deliberately **no** `-t`. Mirage allocates
-no pseudo-terminal anywhere, and asking the provider for one would merge
-stderr into stdout and break redirection — the same trade rejected above.
+`provider exec` passes `-i`, and `-t` when — and only when — the exec is
+the interactive shape *and* all three of the caller's streams are
+terminals.
+
+The `-t` is the one place the "no pseudo-terminal anywhere" rule cannot
+hold, and it took a while to notice. On the host path a child inherits
+the caller's real descriptors, so if the caller is on a terminal the
+workload already is one; nothing needs allocating. `provider exec` cannot
+do that — the caller's descriptors are in another namespace — so it
+proxies the streams over its own socket and hands the process pipes.
+`isatty(0)` is then false however good the caller's terminal is, and no
+interactive program works at all: `bash` prints no prompt, job control is
+absent, ncurses refuses to start.
+
+The second condition is what keeps the rule everywhere else. A
+pseudo-terminal has one stream, so `-t` merges stderr into stdout. That
+is unobservable when every stream is the same terminal, and destructive
+when they are not, so a redirected exec keeps its pipes and loses
+`isatty` — exactly the trade a redirected stream makes on the host path
+too.
 
 Signalling needs one extra step in a container. `podman exec` puts the
 workload in the container's PID namespace and does not forward signals to
