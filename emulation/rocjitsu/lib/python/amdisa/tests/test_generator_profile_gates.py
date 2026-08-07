@@ -1148,9 +1148,9 @@ def test_matrix_f64_direct_sources_use_direct_base_expressions():
     ) in body
 
 
-def test_gfx1250_wmma_f32_passes_c_modifier_to_accumulator_helper():
+def test_fixed_wave32_wmma_f32_passes_c_modifier_to_accumulator_helper():
     inst = Instruction('V_WMMA_F32_16X16X32_F16', 'ENC_VOP3P', 0, [])
-    body = _gen_mfma(inst, 'gfx1250')
+    body = _gen_mfma(inst, 'renamed_split_k', _fixed_wave32_split_k_profile())
 
     assert 'amdgpu::exec_wmma_f32_16x16x32_f16(' in body
     assert 'amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi)' in body
@@ -1306,6 +1306,87 @@ def _fixed_wave32_split_k_profile() -> SimpleNamespace:
         wave_size=32,
         wave_size_max=32,
     )
+
+
+@pytest.mark.parametrize(
+    ('result_type', 'input_type', 'exec_fn'),
+    [
+        ('F32', 'F16', 'exec_swmmac_f32'),
+        ('F16', 'F16', 'exec_swmmac_f16'),
+        ('BF16', 'BF16', 'exec_swmmac_bf16'),
+    ],
+)
+def test_fixed_wave32_split_k_sparse_float_uses_fixed_wave_executor(
+    result_type, input_type, exec_fn
+):
+    inst = Instruction(
+        f'V_SWMMAC_{result_type}_16X16X64_{input_type}', 'ENC_VOP3P', 0, []
+    )
+    body = _gen_mfma(inst, 'renamed_split_k', _fixed_wave32_split_k_profile())
+
+    assert f'amdgpu::{exec_fn}(cu, 16, 16, 64,' in body
+    assert 'src0_base, src1_base, s2, index_base, 16, index_key,' in body
+    assert 'wf.wf_size()' not in body
+
+
+@pytest.mark.parametrize(
+    ('mnemonic', 'executor'),
+    [
+        ('V_WMMA_F32_16X16X32_F16', 'exec_wmma_f32_16x16x32_f16'),
+        ('V_WMMA_F32_16X16X32_BF16', 'exec_wmma_f32_16x16x32_bf16'),
+        ('V_WMMA_F16_16X16X32_F16', 'exec_wmma_f16_spec<16, 16, 32>'),
+        ('V_WMMA_BF16_16X16X32_BF16', 'exec_wmma_bf16_spec<16, 16, 32>'),
+        ('V_WMMA_BF16F32_16X16X32_BF16', 'exec_wmma_bf16f32_16x16x32_bf16'),
+        (
+            'V_WMMA_F32_16X16X64_FP8_BF8',
+            'exec_wmma_f32_f8_spec<16, 16, 64, true, false>',
+        ),
+        (
+            'V_WMMA_F16_16X16X64_BF8_FP8',
+            'exec_wmma_f16_f8_spec<16, 16, 64, false, true>',
+        ),
+        ('V_WMMA_F32_16X16X4_F32', 'exec_wmma_f32_f32_spec<16, 16, 4>'),
+        ('V_WMMA_F32_16X16X4_XF32', 'exec_wmma_f32_f32_spec<16, 16, 4>'),
+    ],
+)
+def test_fixed_wave32_split_k_float_uses_specialized_executors(mnemonic, executor):
+    body = _gen_mfma(
+        Instruction(mnemonic, 'ENC_VOP3P', 0, []),
+        'renamed_split_k',
+        _fixed_wave32_split_k_profile(),
+    )
+
+    assert f'amdgpu::{executor}(' in body
+    assert 'wf.wf_size()' not in body
+
+
+@pytest.mark.parametrize(
+    ('mnemonic', 'exec_fn'),
+    [
+        ('V_WMMA_F32_16X16X16_F16', 'exec_wmma_f32'),
+        ('V_WMMA_F16_16X16X16_F16', 'exec_wmma_f16'),
+        ('V_WMMA_BF16_16X16X16_BF16', 'exec_wmma_bf16'),
+    ],
+)
+def test_fixed_wave32_split_k_float_uses_generic_fallback(mnemonic, exec_fn):
+    body = _gen_mfma(
+        Instruction(mnemonic, 'ENC_VOP3P', 0, []),
+        'renamed_split_k',
+        _fixed_wave32_split_k_profile(),
+    )
+
+    assert f'amdgpu::{exec_fn}(cu, 16, 16, 16,' in body
+    assert '_spec<' not in body
+    assert 'wf.wf_size()' not in body
+
+
+def test_runtime_wave_split_k_float_does_not_use_fixed_wave32_executor():
+    inst = Instruction('V_WMMA_F32_16X16X32_F16', 'ENC_VOP3P', 0, [])
+    body = _gen_mfma(inst, 'rdna4', Rdna4Profile())
+
+    assert 'amdgpu::exec_wmma_f32_16x16x32_f16(' not in body
+    assert 'amdgpu::exec_wmma_f32(cu, 16, 16, 32, 16, dst,' in body
+    assert 'amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi), wf.wf_size());' in body
 
 
 @pytest.mark.parametrize(('input_type', 'suffix'), [('IU4', '4'), ('IU8', '8')])

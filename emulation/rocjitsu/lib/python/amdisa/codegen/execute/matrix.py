@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 # Input families that have specialized (compile-time M/N/K) MFMA kernels in the
 # hand-maintained mma_exec.h. CDNA MFMA and RDNA WMMA both flow through the
 # GFX9 MFMA-layout helpers (exec_f32/exec_i32_i8), so the same spec templates
-# apply to both; gfx1250 WMMA uses its own wave32 spec helpers (handled below).
+# apply to both; fixed-Wave32 WMMA uses its own spec helpers (handled below).
 # The spec templates fall back to the generic runtime path for unsupported
 # shapes / when stdx::simd is unavailable, so emitting them is always safe.
 _MFMA_F32_SPEC = {'F32': 'f32', 'XF32': 'f32', 'F16': 'f16', 'BF16': 'bf16'}
@@ -43,10 +43,10 @@ def _f8_bools(input_type: str) -> tuple[str, str]:
     )
 
 
-def _gfx1250_wmma_spec(
+def _fixed_wave32_wmma_spec(
     result_type: str, input_type: str, M: int, N: int, K: int
 ) -> str | None:
-    """Specialized gfx1250 (wave32) dense-WMMA kernel name for a given shape,
+    """Specialized fixed-Wave32 dense-WMMA kernel name for a given shape,
     or None to use the generic runtime path. Returns the full callee including
     template args; the call site supplies (cu, dst, s0, s1, s2, const_acc)."""
     if input_type in _F8_FIXED:
@@ -269,6 +269,11 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     )
     uses_gfx11_wmma_layout = arch in ('rdna3', 'rdna3_5') and is_dense_wmma
     uses_gfx12_wmma_layout = arch == 'rdna4' and is_dense_wmma
+    uses_fixed_wave32_split_k_layout = (
+        ctx.profile.matrix_layout is MatrixLayout.WMMA_SPLIT_K
+        and ctx.profile.wave_size == 32
+        and ctx.profile.wave_size_max == 32
+    )
     swmmac_index_entries = 32 if is_swmmac and K >= 128 and in_bits <= 8 else 16
     if ctx.profile.uses_vgpr_msb_indexing:
         L.append(
@@ -365,11 +370,6 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             )
             L.append(f'  }};')
 
-        uses_fixed_wave32_split_k_layout = (
-            ctx.profile.matrix_layout is MatrixLayout.WMMA_SPLIT_K
-            and ctx.profile.wave_size == 32
-            and ctx.profile.wave_size_max == 32
-        )
         if uses_fixed_wave32_split_k_layout:
             # Fixed-Wave32 split-K IU WMMA overloads neg_lo: bit set means
             # signed extension, bit clear means unsigned.
@@ -528,7 +528,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         # CDNA1-4 VOP3P_MFMA encoding has cbsz/abid/blgp fields for
         # A-matrix broadcast and B-matrix lane permutation. RDNA does
         # not have MFMA (only WMMA), so these fields don't exist.
-        if arch == 'gfx1250':
+        if uses_fixed_wave32_split_k_layout:
             if is_swmmac:
                 if result_type == 'F16':
                     exec_fn = 'exec_swmmac_f16'
@@ -544,7 +544,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             else:
                 # Dense WMMA: a specialized wave32 kernel where one exists, else
                 # the generic exec_wmma_* runtime path.
-                spec = _gfx1250_wmma_spec(result_type, input_type, M, N, K)
+                spec = _fixed_wave32_wmma_spec(result_type, input_type, M, N, K)
                 if spec is not None:
                     if result_type in ('F32', 'BF16F32'):
                         L.append(
