@@ -69,6 +69,8 @@ struct QueueState
     const hsa_queue_t* hsa_queue       = nullptr;  ///< HSA queue pointer for Queue* lookup
     hsa_signal_t       doorbell_signal = {0};      ///< The queue's doorbell signal
     std::mutex         gate_lock       = {};       ///< Lock for packet submission gating
+
+    std::atomic<bool> profiling_enabled{false};  ///< Lazy HW profiling enabled once
 };
 
 using queue_state_ptr_t = std::shared_ptr<QueueState>;

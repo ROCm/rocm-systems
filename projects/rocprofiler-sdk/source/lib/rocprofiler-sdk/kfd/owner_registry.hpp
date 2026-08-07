@@ -29,7 +29,6 @@
 #include <mutex>
 #include <optional>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 // Reverse doorbell-owner registry and the lazy HW-profiling bookkeeping.
@@ -190,49 +189,6 @@ private:
     std::unordered_map<uint64_t, queue_entry>       m_by_queue   = {};
     std::map<std::pair<uint32_t, uint32_t>, size_t> m_owners     = {};
     std::unordered_map<uint32_t, size_t>            m_unresolved = {};
-};
-
-// Which queues have already had HW profiling enabled, so the lazy path enables it
-// exactly once per queue and only for a queue that actually takes the signal path.
-class ProfilingEnableTracker
-{
-public:
-    // True exactly once per queue: the caller then enables profiling on it.
-    bool mark(uint64_t queue_token)
-    {
-        if(m_abandoned.load(std::memory_order_acquire)) return false;
-        auto lk = std::lock_guard<std::mutex>{m_mu};
-        return m_enabled.insert(queue_token).second;
-    }
-
-    void forget(uint64_t queue_token)
-    {
-        if(m_abandoned.load(std::memory_order_acquire)) return;
-        auto lk = std::lock_guard<std::mutex>{m_mu};
-        m_enabled.erase(queue_token);
-    }
-
-    bool enabled(uint64_t queue_token) const
-    {
-        if(m_abandoned.load(std::memory_order_acquire)) return false;
-        auto lk = std::lock_guard<std::mutex>{m_mu};
-        return m_enabled.count(queue_token) != 0;
-    }
-
-    size_t size() const
-    {
-        if(m_abandoned.load(std::memory_order_acquire)) return 0;
-        auto lk = std::lock_guard<std::mutex>{m_mu};
-        return m_enabled.size();
-    }
-
-    // Same one-store child gate as the registry above.
-    void abandon_in_child() { m_abandoned.store(true, std::memory_order_release); }
-
-private:
-    std::atomic<bool>            m_abandoned = {false};
-    mutable std::mutex           m_mu        = {};
-    std::unordered_set<uint64_t> m_enabled   = {};
 };
 }  // namespace kfd
 }  // namespace rocprofiler

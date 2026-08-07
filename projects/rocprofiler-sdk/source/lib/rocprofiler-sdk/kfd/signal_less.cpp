@@ -109,13 +109,6 @@ registry_storage()
     return *_v;
 }
 
-ProfilingEnableTracker&
-profiling_storage()
-{
-    static auto*& _v = common::static_object<ProfilingEnableTracker>::construct();
-    return *_v;
-}
-
 }  // namespace
 
 void
@@ -173,8 +166,6 @@ signal_less_abandon_in_child()
 
     if(auto* _hub = common::static_object<signal_less_hub_t>::get()) _hub->abandon_in_child();
     if(auto* _reg = common::static_object<OwnerRegistry>::get()) _reg->abandon_in_child();
-    if(auto* _prof = common::static_object<ProfilingEnableTracker>::get())
-        _prof->abandon_in_child();
 }
 
 void
@@ -212,12 +203,6 @@ OwnerRegistry&
 owner_registry()
 {
     return registry_storage();
-}
-
-ProfilingEnableTracker&
-profiling_tracker()
-{
-    return profiling_storage();
 }
 
 void
@@ -374,7 +359,6 @@ remove_live_queue(uint64_t queue_token)
 {
     if(g_child_stale.load(std::memory_order_acquire)) return;
     owner_registry().remove_queue(queue_token);
-    profiling_tracker().forget(queue_token);
 }
 
 bool

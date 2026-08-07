@@ -74,9 +74,6 @@ signal_less_hub();
 OwnerRegistry&
 owner_registry();
 
-ProfilingEnableTracker&
-profiling_tracker();
-
 // Registers ownership; on discovering a second live owner it quarantines the
 // slot in the hub (leaking that slot's pending entries) AFTER releasing the
 // registry lock.

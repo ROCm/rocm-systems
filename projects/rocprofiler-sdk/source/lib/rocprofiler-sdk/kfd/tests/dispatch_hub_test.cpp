@@ -608,33 +608,10 @@ TEST(OwnerRegistry, remove_and_reregister_keep_counts_exact)
 
 // Unit 4: lazy HW-profiling enable
 
-// A queue enables profiling exactly once, on its first signal-path batch; a queue
-// that only ever runs signal-less batches never enables it.
-TEST(ProfilingEnableTracker, enables_once_per_queue_and_never_for_signal_less)
-{
-    auto tracker = ProfilingEnableTracker{};
-
-    // Queue 1 takes the signal path three times: enabled once.
-    EXPECT_TRUE(tracker.mark(1));
-    EXPECT_FALSE(tracker.mark(1));
-    EXPECT_FALSE(tracker.mark(1));
-    EXPECT_TRUE(tracker.enabled(1));
-
-    // Queue 2 only ever runs signal-less batches, so mark() is never called.
-    EXPECT_FALSE(tracker.enabled(2));
-    EXPECT_EQ(tracker.size(), 1u);
-
-    // Queue destroy forgets it, so a reused token re-enables on its first signal
-    // batch rather than assuming a new queue inherited the old one's state.
-    tracker.forget(1);
-    EXPECT_FALSE(tracker.enabled(1));
-    EXPECT_TRUE(tracker.mark(1));
-}
-
 // Laziness is tied to the feature being ACTIVE, not merely present: with the env
 // opt-in unset every batch takes the signal path, so the create-time enable stays
 // and the default path is unchanged.
-TEST(ProfilingEnableTracker, laziness_is_tied_to_the_feature_being_active)
+TEST(signal_less_flag, laziness_is_tied_to_the_feature_being_active)
 {
     EXPECT_FALSE(signal_less_lazy_profiling())
         << "lazy profiling must stay off until the operator opts in";

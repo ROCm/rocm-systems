@@ -504,7 +504,9 @@ enable_profiling_for_signal_batch(Queue* queue)
 {
     if(!kfd::signal_less_lazy_profiling()) return;
     if(!queue || !queue->intercept_queue()) return;
-    if(!kfd::profiling_tracker().mark(queue->get_id().handle)) return;
+
+    auto* _st = get_doorbell_tls().state;
+    if(!_st || _st->profiling_enabled.exchange(true, std::memory_order_relaxed)) return;
 
     const auto* _ext = get_amd_ext_table();
     if(!_ext || !_ext->hsa_amd_profiling_set_profiler_enabled_fn) return;
