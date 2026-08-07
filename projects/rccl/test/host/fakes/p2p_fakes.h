@@ -30,13 +30,6 @@
 #include "nccl_fakes.h"
 #include "hip_fakes.h"
 
-// FakeCudaCallocAsync / FakeCudaMemcpyAsync: targets of the macro shims that
-// p2p-test.cc installs over ncclCudaCallocAsync / ncclCudaMemcpyAsync so the
-// header-only templates in alloc.h don't reach real HIP runtime. Default
-// behaviour is what an honest GPU emulator would do: calloc heap memory and
-// memcpy bytes between host pointers. Tests that need to inject failure or
-// observe the calls override these hooks; ResetP2pFakes() frees any
-// outstanding fake allocations.
 extern std::function<ncclResult_t(void** ptr, std::size_t nbytes, hipStream_t)>
     g_fakeCudaCallocAsync;
 extern std::function<ncclResult_t(void* dst, void* src, std::size_t nbytes, hipStream_t)>
