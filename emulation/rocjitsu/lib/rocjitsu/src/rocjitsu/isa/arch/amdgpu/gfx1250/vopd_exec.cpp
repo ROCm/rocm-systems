@@ -46,7 +46,6 @@ constexpr uint16_t kVopdMaxNumF64 = 35;
 constexpr uint16_t kVopdMinNumF64 = 36;
 } // namespace
 
-const bool Vopd::execute_registered_ = register_exec_fn<Vopd>();
 bool Vopd::uses_src_neg_modifier(uint16_t op) {
   switch (op) {
   case kVopdFmacF32:

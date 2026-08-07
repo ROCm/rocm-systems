@@ -661,6 +661,16 @@ __device__ int rocshmem_reduce_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
   return get_internal_ctx(ctx)->reduce_wave<T, Op>(team, dest, source, nreduce);
 }
 
+template <typename T, ROCSHMEM_OP Op>
+__device__ int rocshmem_reduce_scatter_wave(rocshmem_ctx_t ctx,
+                                            rocshmem_team_t team, T *dest,
+                                            const T *source, int nreduce) {
+  LOGD_API("device::reduce_scatter_wave (ctx=%zd, team=%zd, dest=%p, source=%p, nreduce=%d",
+    ctx.ctx_opaque, team, dest, source, nreduce);
+
+  return get_internal_ctx(ctx)->reduce_scatter_wave<T, Op>(team, dest, source, nreduce);
+}
+
 template <typename T>
 __device__ void rocshmem_broadcast_wg(rocshmem_ctx_t ctx,
                                        rocshmem_team_t team, T *dest,
@@ -1472,6 +1482,9 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
       int nreduce);                                                            \
   template __device__ int rocshmem_reduce_wave<T, Op>(                         \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,     \
+      int nreduce);                                                            \
+  template __device__ int rocshmem_reduce_scatter_wave<T, Op>(                 \
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,     \
       int nreduce);
 
 /**
@@ -1713,23 +1726,37 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
     return rocshmem_reduce_scatter_wg<T, Op>(ctx, team, dest, source, nreduce); \
   }
 
-#define ARITH_REDUCTION_DEF_GEN(T, TNAME)                 \
-  REDUCTION_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)         \
-  REDUCTION_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)         \
-  REDUCTION_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)         \
-  REDUCTION_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)       \
-  REDUCE_SCATTER_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)   \
-  REDUCE_SCATTER_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)   \
-  REDUCE_SCATTER_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)   \
-  REDUCE_SCATTER_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)
+#define REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, Op_API, Op)                       \
+  __device__ int rocshmem_ctx_##TNAME##_##Op_API##_reduce_scatter_wave(          \
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,        \
+      int nreduce) {                                                              \
+    return rocshmem_reduce_scatter_wave<T, Op>(ctx, team, dest, source, nreduce); \
+  }
 
-#define BITWISE_REDUCTION_DEF_GEN(T, TNAME)               \
-  REDUCTION_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)           \
-  REDUCTION_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)         \
-  REDUCTION_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)         \
-  REDUCE_SCATTER_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)     \
-  REDUCE_SCATTER_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)   \
-  REDUCE_SCATTER_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)
+#define ARITH_REDUCTION_DEF_GEN(T, TNAME)                        \
+  REDUCTION_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)                \
+  REDUCTION_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)                \
+  REDUCTION_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)                \
+  REDUCTION_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)              \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)          \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)          \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)          \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)        \
+  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)     \
+  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)     \
+  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)     \
+  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)
+
+#define BITWISE_REDUCTION_DEF_GEN(T, TNAME)                      \
+  REDUCTION_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)                  \
+  REDUCTION_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)                \
+  REDUCTION_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)                \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)            \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)          \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)          \
+  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)       \
+  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)     \
+  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)
 
 #define INT_REDUCTION_DEF_GEN(T, TNAME) \
   ARITH_REDUCTION_DEF_GEN(T, TNAME)     \

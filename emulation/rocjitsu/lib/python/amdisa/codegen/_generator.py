@@ -114,6 +114,63 @@ _LITERAL_ENCODING_OPERANDS = {
 }
 
 
+def _exec_mask_flag_stmts(sem) -> list[str]:
+    """Return ``flags_ |= ...;`` statements for EXEC instruction metadata.
+
+    The flags are derived from the instruction's semantic AST so generic
+    liveness/dataflow analyses do not have to know AMDGPU instruction names:
+
+    * ``IGNORES_EXEC`` - branch-style instructions that run regardless of EXEC.
+    * ``WRITES_EXEC``  - the instruction writes EXEC.
+
+    Returns an empty list when ``sem`` is None or its semantic class has no
+    deriver (``derive_sema_block`` returns None) or derives to an empty stub;
+    those instructions stay flag-free and analyses treat them conservatively.
+    """
+    if sem is None:
+        return []
+    # Lazy import mirrors the execute-body generation path and avoids a
+    # module-load import cycle with the sema_* modules.
+    from amdisa.sema_derive import derive_sema_block
+    from amdisa.sema_properties import InstructionProperty, derive_properties
+
+    block = derive_sema_block(sem)
+    if block is None or block.is_empty:
+        return []
+    props = derive_properties(block)
+    return [
+        f'flags_ |= {name};'
+        for prop, name in (
+            (InstructionProperty.IGNORES_EXEC, 'IGNORES_EXEC'),
+            (InstructionProperty.WRITES_EXEC, 'WRITES_EXEC'),
+        )
+        if prop in props
+    ]
+
+
+def _result_combinator_flag_stmts(sem) -> list[str]:
+    """Return ``flags_ |= ...;`` for how the instruction forms its result value.
+    Only returns flags for scalar operations.
+
+
+    * ``RESULT_COPY`` - result is a plain copy of a single source (s_mov).
+    * ``RESULT_OR``   - result is the bitwise OR of its sources (s_or,
+      s_or_saveexec)
+
+    Derived from the per-opcode semantic class/operation.
+    EXEC-state analysis uses this to prove an all-ones EXEC write:
+    """
+    if sem is None:
+        return []
+    cls = sem.semantic_class
+    op = (sem.operation or '').lower()
+    if cls == 'scalar_mov':
+        return ['flags_ |= RESULT_COPY;']
+    if cls in ('scalar_binop', 'scalar_saveexec') and op == 'or':
+        return ['flags_ |= RESULT_OR;']
+    return []
+
+
 @dataclass
 class _SourceImplUnit:
     file_stem: str | None
@@ -211,6 +268,22 @@ class CodeGenerator:
         # _fieldless_canonical_value).
         self._fieldless_canon_cache: dict[str, int] | None = None
         self._emitter = _SemanticEmitter(isa_spec, semantics)
+        # Split profiles assign a dense, generation-local ID to every concrete
+        # instruction class. The matching immutable callback table is emitted
+        # after all instruction classes have been generated.
+        self._split_execution_classes: list[str] = []
+
+    def _split_execute_expr(self, class_name: str) -> str:
+        """Return the model constructor expression for one split instruction."""
+        if not self.isa_spec.profile.split_execution_sources:
+            return f'make_exec_fn<{class_name}>()'
+        classes = getattr(self, '_split_execution_classes', None)
+        if classes is None:
+            classes = []
+            self._split_execution_classes = classes
+        instruction_id = len(classes)
+        classes.append(class_name)
+        return f'selected_exec_fn({instruction_id})'
 
     def _supports_simm64_literal_operands(self) -> bool:
         return 'OPR_SIMM64' in self.isa_spec.operand_types
@@ -635,6 +708,31 @@ class CodeGenerator:
         return opnd.operand_type
 
     @staticmethod
+    def _sdwa_source_modifier_format(
+        sem: InstructionSemantics, source_index: int, opnd: Operand
+    ) -> str:
+        """Return the C++ floating format for one SDWA source modifier.
+
+        MRISA operand formats distinguish conversion inputs from outputs, which
+        instruction-level ``data_type`` cannot do by itself. Two instructions
+        have mixed semantic source types despite homogeneous XML operand
+        formats: class compares use an integer class mask as src1, and LDEXP
+        uses an integer exponent as src1.
+        """
+        if source_index == 1 and (
+            sem.semantic_class in ('vector_cmp_class', 'vector_cmpx_class')
+            or (sem.semantic_class == 'vector_binop' and sem.operation == 'ldexp')
+        ):
+            return 'amdgpu::sdwa::SourceModifierFormat::NONE'
+
+        suffix = {
+            'FMT_NUM_F16': 'F16',
+            'FMT_NUM_BF16': 'BF16',
+            'FMT_NUM_F32': 'F32',
+        }.get(opnd.data_format_name, 'NONE')
+        return f'amdgpu::sdwa::SourceModifierFormat::{suffix}'
+
+    @staticmethod
     def _literal_encoding_info(
         enc: InstEncoding, inst_enc_obj: InstEncoding | None, inst: Instruction
     ) -> tuple[str, tuple[str, ...]] | None:
@@ -886,6 +984,57 @@ class CodeGenerator:
             for ie in self.isa_spec.inst_encodings
         )
 
+    def _instruction_supports_modifier_encoding(
+        self, inst: Instruction, parent_enc_name: str, modifier: str
+    ) -> bool:
+        """Whether the MR ISA lists an alternate modifier encoding.
+
+        Alternate instruction entries are not emitted as independent classes,
+        but their presence is still the instruction-level legality fact. Keep
+        that fact separate from architecture-wide machine-inst availability.
+        """
+        if inst.available_encodings is None:
+            raise ValueError(
+                f'{inst.name}: cannot determine {modifier.upper()} support '
+                'without instruction encoding provenance'
+            )
+
+        parent_upper = parent_enc_name.upper()
+        for enc_name in inst.available_encodings:
+            enc_upper = enc_name.upper()
+            if modifier == 'dpp':
+                matches = '_VOP_DPP' in enc_upper and '_VOP_DPP8' not in enc_upper
+            elif modifier == 'dpp8':
+                matches = '_VOP_DPP8' in enc_upper
+            elif modifier == 'sdwa':
+                matches = '_VOP_SDWA' in enc_upper
+            else:
+                raise ValueError(f'unknown VOP modifier encoding: {modifier}')
+            if (
+                matches
+                and self.isa_spec.profile.is_alt_encoding(enc_name)
+                and self.isa_spec.profile.derive_parent_enc_name(enc_name).upper()
+                == parent_upper
+            ):
+                return True
+        return False
+
+    def _instruction_supports_dpp(self, inst: Instruction, enc_name: str) -> bool:
+        return self._supports_dpp_for_encoding(
+            enc_name
+        ) and self._instruction_supports_modifier_encoding(inst, enc_name, 'dpp')
+
+    def _instruction_supports_dpp8(self, inst: Instruction, enc_name: str) -> bool:
+        return self._instruction_supports_modifier_encoding(inst, enc_name, 'dpp8')
+
+    def _instruction_supports_sdwa(self, inst: Instruction, enc_name: str) -> bool:
+        return self._instruction_supports_modifier_encoding(inst, enc_name, 'sdwa')
+
+    def _instruction_base_encoding_name(self, inst: Instruction) -> str:
+        if inst.is_implied_literal_enc:
+            return self.isa_spec.profile.derive_parent_enc_name(inst.enc_name)
+        return inst.enc_name
+
     def _uses_full_dpp_write_mask(self, enc_name: str) -> bool:
         return self._supports_dpp_for_encoding(enc_name)
 
@@ -909,8 +1058,81 @@ class CodeGenerator:
         # template here preserves one-step regeneration for VOPD-capable profiles.
         self.gen_vopd()
         self.gen_insts()
+        self.gen_execution_backend()
         self.gen_decoder()
         self.gen_test_encodings()
+
+    def gen_execution_backend(self) -> None:
+        """Emit one immutable execution descriptor for a split ISA profile."""
+        if not self.isa_spec.profile.split_execution_sources:
+            return
+
+        arch = self.isa_spec.arch_name
+        header = textwrap.dedent(f'''\
+            {CppFile._prologue_comment()}
+            #pragma once
+
+            #include "rocjitsu/isa/arch/amdgpu/{arch}/isa.h"
+            #include "rocjitsu/isa/execution_backend.h"
+
+            namespace rocjitsu {{
+            namespace {arch} {{
+
+            const IsaExecutionBackend &execution_backend();
+
+            }} // namespace {arch}
+            }} // namespace rocjitsu
+            ''')
+        entries = ''.join(
+            f'    &execute_with_backend<{class_name}>,\n'
+            for class_name in self._split_execution_classes
+        )
+        source = textwrap.dedent(f'''\
+            {CppFile._prologue_comment()}
+            #include "rocjitsu/isa/arch/amdgpu/{arch}/execution_backend.h"
+            #include "rocjitsu/isa/arch/amdgpu/{arch}/insts.h"
+            #include "rocjitsu/isa/arch/amdgpu/{arch}/operand.h"
+
+            #include <array>
+
+            namespace rocjitsu {{
+            namespace {arch} {{
+            namespace {{
+
+            template <typename Derived>
+            void execute_with_backend(Instruction &instruction, void *context) {{
+              // execute_impl may construct temporary operands (for example,
+              // indexed SOP1/VOP1 sources). Re-enter the ISA scope so those
+              // operands capture the same backend as decode-time operands.
+              ScopedIsaExecutionBackend scope(&execution_backend());
+              static_cast<Derived &>(instruction).execute_impl(
+                  *static_cast<Isa::Context *>(context));
+            }}
+
+            constexpr std::array<Instruction::ExecuteFn, {len(self._split_execution_classes)}>
+                kInstructionCallbacks{{{{
+            {entries}    }}}};
+
+            }} // namespace
+
+            const IsaExecutionBackend &execution_backend() {{
+              static const IsaExecutionBackend backend{{
+                  .instruction_callbacks = kInstructionCallbacks.data(),
+                  .instruction_callback_count = kInstructionCallbacks.size(),
+                  .operand_backend = Operand::full_execution_backend(),
+              }};
+              return backend;
+            }}
+
+            }} // namespace {arch}
+            }} // namespace rocjitsu
+            ''')
+        arch_dir = os.path.join(self.out_path, arch)
+        os.makedirs(arch_dir, exist_ok=True)
+        with open(os.path.join(arch_dir, 'execution_backend.h'), 'w') as f:
+            f.write(header)
+        with open(os.path.join(arch_dir, 'execution_backend_exec.cpp'), 'w') as f:
+            f.write(source)
 
     def _supports_generated_vopd(self) -> bool:
         return self.isa_spec.profile.has_vopd
@@ -929,11 +1151,9 @@ class CodeGenerator:
         arch = self.isa_spec.arch_name
         has_vopd3 = self.isa_spec.profile.has_vopd3
         if self.isa_spec.profile.split_execution_sources:
-            vopd_exec_fn = 'registered_exec_fn<Vopd>()'
-            vopd_registration_decl = 'static const bool execute_registered_;\n'
-            vopd_registration_def = (
-                'const bool Vopd::execute_registered_ = register_exec_fn<Vopd>();'
-            )
+            vopd_exec_fn = self._split_execute_expr('Vopd')
+            vopd_registration_decl = ''
+            vopd_registration_def = ''
         else:
             vopd_exec_fn = 'make_exec_fn<Vopd>()'
             vopd_registration_decl = ''
@@ -1993,6 +2213,19 @@ class CodeGenerator:
         for inst_enc in self.isa_spec.inst_encodings:
             if not inst_enc.insts:
                 continue
+            dpp_struct, dpp8_struct = self._vop_dpp_struct_names(inst_enc.enc_name)
+            dpp_extension_conditions = []
+            if dpp_struct is not None and self._supports_dpp_for_encoding(
+                inst_enc.enc_name
+            ):
+                dpp_extension_conditions.append('inst_.src0 == amdgpu::SRC_DPP')
+            if dpp8_struct is not None:
+                dpp_extension_conditions.append('amdgpu::dpp::is_src_dpp8(inst_.src0)')
+            owns_dpp_extension = bool(dpp_extension_conditions)
+            # Compact VOP1/VOP2/VOPC encodings already account for DPP through
+            # !default_encoding(). VOP3-family base encodings are 64 bits, so
+            # their DPP control DWORD must be counted explicitly.
+            needs_explicit_dpp_size = owns_dpp_extension and inst_enc.bit_cnt >= 64
             class_members = []
             public_members = [
                 cgen.Line('public:'),
@@ -2125,10 +2358,20 @@ class CodeGenerator:
                 )
             else:
                 size_line += extension_size_line
+            if needs_explicit_dpp_size:
+                dpp_extension_condition = ' || '.join(dpp_extension_conditions)
+                size_line += (
+                    f' if ({dpp_extension_condition})' ' size_ += sizeof(MachineInst);'
+                )
             if inst_enc.has_implied_literal_ops:
                 size_line += (
                     ' if (hasImpliedLiteral())'
                     ' literal_ = reinterpret_cast<const uint32_t *>(inst)[1];'
+                )
+            if owns_dpp_extension:
+                size_line += (
+                    ' std::memcpy(raw_words_.data(), inst, size_);'
+                    ' raw_encoding_ = raw_words_.data();'
                 )
             if rule.use_flat_mnemonic:
                 # FLAT mnemonics are dynamically constructed ("scratch_*",
@@ -2183,6 +2426,30 @@ class CodeGenerator:
                         f'void {fmt_enc_name}::implicit_uses'
                         f'(RegisterSet &uses) const '
                         f'{{ {implicit_uses_impl} }}'
+                    )
+                )
+            # Only profiles with MODE-controlled VGPR high-bank bits (gfx1250)
+            # have a consumer: InstDefUse calls this hook exclusively on the
+            # vgpr_msb != nullptr path. Emitting it elsewhere would add dead
+            # overrides -- generated lines, compile time and vtable slots -- to
+            # every other architecture, so leave the base-class no-op in place.
+            implicit_use_operands_impl = (
+                self._encoding_implicit_use_operands_impl(inst_enc, enc_field_names)
+                if self.isa_spec.profile.uses_vgpr_msb_indexing
+                else ''
+            )
+            if implicit_use_operands_impl:
+                public_members.append(
+                    cgen.Line(
+                        'void implicit_use_operands('
+                        'std::vector<const ::rocjitsu::Operand *> &operands) const override;'
+                    )
+                )
+                class_func_impls.append(
+                    cgen.Line(
+                        f'void {fmt_enc_name}::implicit_use_operands'
+                        f'(std::vector<const ::rocjitsu::Operand *> &operands) const '
+                        f'{{ {implicit_use_operands_impl} }}'
                     )
                 )
 
@@ -2278,6 +2545,18 @@ class CodeGenerator:
                 cgen.Statement(f'using OpEncoding = {inst_enc.fmt_enc_name}MachineInst')
             )
             class_members.append(cgen.Statement('const OpEncoding inst_'))
+            if owns_dpp_extension:
+                extension_word_capacity = max(
+                    [1, *inst_enc.implied_literal_ops.values()]
+                )
+                if any(name.startswith('has_lit64') for name, _ in inst_enc.enc_conds):
+                    extension_word_capacity = max(extension_word_capacity, 2)
+                raw_word_count = (inst_enc.bit_cnt + 31) // 32 + extension_word_capacity
+                class_members.append(
+                    cgen.Statement(
+                        f'std::array<uint32_t, {raw_word_count}> raw_words_{{}}'
+                    )
+                )
             if inst_enc.has_implied_literal_ops:
                 class_members.append(cgen.Statement('uint32_t literal_ = 0'))
             # FLAT encoding bases need an owned string for the dynamic mnemonic.
@@ -2300,10 +2579,10 @@ class CodeGenerator:
                 if _dpp8_struct:
                     class_members.append(cgen.Statement('uint32_t dpp8_lane_sel_ = 0'))
                 class_members.append(
-                    cgen.Statement('std::unique_ptr<DppOperand> dpp_src0_')
+                    cgen.Statement('std::unique_ptr<StagedOperand> dpp_src0_')
                 )
                 class_members.append(
-                    cgen.Statement('std::unique_ptr<DppOperand> dpp_src1_')
+                    cgen.Statement('std::unique_ptr<StagedOperand> dpp_src1_')
                 )
             if _enc_upper in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC'):
                 # SDWA fields (CDNA and RDNA1/2 have hardware SDWA encoding; fields
@@ -2361,6 +2640,7 @@ class CodeGenerator:
                 ),
                 ('rocjitsu/isa/instruction.h', False),
                 (encoding_helper_header, False),
+                ('array', True),
                 ('cstdint', True),
                 ('string', True),
                 ('string_view', True),
@@ -2394,6 +2674,7 @@ class CodeGenerator:
                 f'rocjitsu/isa/arch/amdgpu/{self.isa_spec.arch_name}/encodings.h',
                 False,
             ),
+            ('cstring', True),
             ('string', True),
         ]
         class_impl_file = CppFile(
@@ -2441,38 +2722,72 @@ class CodeGenerator:
         # VOP3_SDST_ENC on gfx11+ (gated -- GCN/CDNA lack the dpp_* fields).
         # VOPC/VOPCX stay omitted: their result lands in VCC/EXEC, which liveness
         # does not track (see liveness.h).
+        return self._encoding_preserved_dst_body(
+            inst_enc, enc_field_names, 'uses.expand(*ref);'
+        )
+
+    def _encoding_implicit_use_operands_impl(
+        self, inst_enc: InstEncoding, enc_field_names: set[str]
+    ) -> str:
+        """Return C++ body for operand-backed hidden uses on an encoding base.
+
+        Mirrors the operand-backed reads of _encoding_implicit_uses_impl (the
+        SDWA/DPP preserved destination), but appends the source Operand pointers
+        so a caller can resolve each with its own VGPR-MSB role and width. The
+        FLAT/GLOBAL saddr case is intentionally omitted: it reads an encoded
+        field with no backing Operand, so it stays exclusive to implicit_uses().
+        """
+        return self._encoding_preserved_dst_body(
+            inst_enc, enc_field_names, 'operands.push_back(dst);'
+        )
+
+    def _encoding_preserved_dst_body(
+        self, inst_enc: InstEncoding, enc_field_names: set[str], emit: str
+    ) -> str:
+        """Return the SDWA/DPP preserved-destination body, or '' if not applicable.
+
+        SINGLE SOURCE OF TRUTH for both implicit_uses() and
+        implicit_use_operands(): the two hooks must agree on exactly which
+        encodings preserve their destination, and differ only in how they report
+        it (`emit`). This is load-bearing rather than cosmetic -- on gfx1250,
+        InstDefUse clears the VGPR class from the flat implicit_uses() result and
+        takes banked VGPR reads solely from implicit_use_operands(), so an
+        encoding covered by one predicate but not the other would silently vanish
+        from liveness instead of failing a build. Keeping one predicate makes that
+        drift impossible to express.
+        """
         enc = inst_enc.enc_name.upper()
         has_sdwa = enc in ('ENC_VOP1', 'ENC_VOP2')
         has_dpp = enc in ('ENC_VOP1', 'ENC_VOP2') or (
             enc in ('ENC_VOP3', 'ENC_VOP3P', 'VOP3_SDST_ENC')
             and self._supports_vop_dpp_encoding(enc)
         )
-        if (has_sdwa or has_dpp) and 'vdst' in enc_field_names:
-            decls = ''
-            guards = []
-            if has_sdwa:
-                decls += (
-                    'bool sdwa_preserve = sdwa_dst_sel_ != amdgpu::sdwa::DWORD && '
-                    'sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE; '
-                )
-                guards.append('sdwa_preserve')
-            if has_dpp:
-                decls += (
-                    'bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP && '
-                    '(dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF || '
-                    '(dpp_bound_ctrl_ == 0 && '
-                    'amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_))); '
-                )
-                guards.append('dpp_partial')
-            return (
-                decls + f'if ({" || ".join(guards)}) '
-                'for (int i = 0; i < num_dst_operands(); ++i) '
-                'if (const auto *dst = dst_operand(i)) '
-                'if (auto ref = dst->to_register_ref()) '
-                'if (ref->cls == RegClass::VGPR) '
-                'uses.expand(*ref);'
+        if not (has_sdwa or has_dpp) or 'vdst' not in enc_field_names:
+            return ''
+        decls = ''
+        guards = []
+        if has_sdwa:
+            decls += (
+                'bool sdwa_preserve = sdwa_dst_sel_ != amdgpu::sdwa::DWORD && '
+                'sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE; '
             )
-        return ''
+            guards.append('sdwa_preserve')
+        if has_dpp:
+            decls += (
+                'bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP && '
+                '(dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF || '
+                '(dpp_bound_ctrl_ == 0 && '
+                'amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_))); '
+            )
+            guards.append('dpp_partial')
+        return (
+            decls + f'if ({" || ".join(guards)}) '
+            'for (int i = 0; i < num_dst_operands(); ++i) '
+            'if (const auto *dst = dst_operand(i)) '
+            'if (auto ref = dst->to_register_ref()) '
+            'if (ref->cls == RegClass::VGPR) '
+            f'{emit}'
+        )
 
     def _saddr_null_expr(self, enc_name: str) -> str:
         """Return the profile-defined NULL-SADDR selector for an encoding."""
@@ -3120,126 +3435,6 @@ class CodeGenerator:
         )
         return _ImplOutputs(model=[model], execution=[execution])
 
-    def _emit_hwreg_helpers(self) -> str:
-        """Emit C++ helpers for target-specific generated SOPK hwreg access."""
-        profile = self.isa_spec.profile
-        mode_id = profile.hwreg_mode_id
-        status_id = profile.hwreg_status_id
-        wave_sched_id = profile.hwreg_wave_sched_mode_id
-        ib_sts2_id = profile.hwreg_ib_sts2_id
-        constexprs = []
-        if mode_id is not None:
-            constexprs.append(f'constexpr uint32_t HW_REG_MODE = {mode_id};')
-        constexprs.append(f'constexpr uint32_t HW_REG_STATUS = {status_id};')
-        constexprs.extend(
-            [
-                'constexpr uint32_t HW_REG_HW_ID1 = 4;',
-                'constexpr uint32_t HW_REG_HW_ID2 = 5;',
-                'constexpr uint32_t HW_REG_GPR_ALLOC = 6;',
-                'constexpr uint32_t HW_REG_VGPR_ALLOC = 7;',
-            ]
-        )
-        if wave_sched_id is not None:
-            constexprs.append(
-                f'constexpr uint32_t HW_REG_WAVE_SCHED_MODE = {wave_sched_id};'
-            )
-        if ib_sts2_id is not None:
-            constexprs.append(f'constexpr uint32_t HW_REG_IB_STS2 = {ib_sts2_id};')
-            constexprs.extend(
-                [
-                    'constexpr uint32_t HW_REG_IB_STS2_CLUSTER_ID_SHIFT = 6;',
-                    'constexpr uint32_t HW_REG_IB_STS2_CLUSTER_ID_MASK = 0xFu;',
-                    'constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT = 21;',
-                    'constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_MASK = 0xFu;',
-                ]
-            )
-
-        read_cases = []
-        if mode_id is not None:
-            read_cases.append(
-                '  case HW_REG_MODE:\n'
-                '    reg_val = wf.mode_raw();\n'
-                '    return true;'
-            )
-        read_cases.extend(
-            [
-                '  case HW_REG_STATUS:\n'
-                '    reg_val = wf.status_raw();\n'
-                '    return true;',
-                '  case HW_REG_HW_ID1:\n'
-                '    reg_val = static_cast<uint32_t>(wf.cu().id());\n'
-                '    return true;',
-                '  case HW_REG_HW_ID2:\n'
-                '    reg_val = static_cast<uint32_t>(wf.cu().id() >> 16);\n'
-                '    return true;',
-                '  case HW_REG_GPR_ALLOC:\n'
-                '    reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8);\n'
-                '    return true;',
-                '  case HW_REG_VGPR_ALLOC:\n'
-                '    reg_val = (wf.vgpr_alloc().count & 0xFFu) | ((wf.vgpr_alloc().base & 0xFFu) << 8);\n'
-                '    return true;',
-            ]
-        )
-        if wave_sched_id is not None:
-            read_cases.append(
-                '  case HW_REG_WAVE_SCHED_MODE:\n'
-                '    reg_val = wf.wave_sched_mode_raw();\n'
-                '    return true;'
-            )
-        if ib_sts2_id is not None:
-            read_cases.append(
-                '  case HW_REG_IB_STS2:\n'
-                '    reg_val =\n'
-                '        (((wf.cluster_size() > 1 ? 1u : 0u) & HW_REG_IB_STS2_CLUSTER_ID_MASK)\n'
-                '         << HW_REG_IB_STS2_CLUSTER_ID_SHIFT) |\n'
-                '        ((wf.cluster_rank() & HW_REG_IB_STS2_WG_IN_CLUSTER_MASK)\n'
-                '         << HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT);\n'
-                '    return true;'
-            )
-
-        write_cases = []
-        if mode_id is not None:
-            write_cases.append(
-                '  case HW_REG_MODE:\n'
-                '    wf.set_mode_raw(insert_hwreg_field(wf.mode_raw(), src, offset, mask));\n'
-                '    return true;'
-            )
-        write_cases.append(
-            '  case HW_REG_STATUS:\n'
-            '    wf.set_status_raw(insert_hwreg_field(wf.status_raw(), src, offset, mask));\n'
-            '    return true;'
-        )
-        if wave_sched_id is not None:
-            write_cases.append(
-                '  case HW_REG_WAVE_SCHED_MODE:\n'
-                '    wf.set_wave_sched_mode_raw(insert_hwreg_field(wf.wave_sched_mode_raw(), src, offset, mask));\n'
-                '    return true;'
-            )
-
-        return (
-            'namespace {\n' + '\n'.join(constexprs) + '\n\n'
-            '[[maybe_unused]] uint32_t insert_hwreg_field(uint32_t reg_val, uint32_t src, uint32_t offset, uint32_t mask) {\n'
-            '  return (reg_val & ~(mask << offset)) | ((src & mask) << offset);\n'
-            '}\n'
-            '\n'
-            '[[maybe_unused]] bool read_hwreg(amdgpu::Wavefront &wf, uint32_t reg_id, uint32_t &reg_val) {\n'
-            '  switch (reg_id) {\n' + '\n'.join(read_cases) + '\n'
-            '  default:\n'
-            '    return false;\n'
-            '  }\n'
-            '}\n'
-            '\n'
-            '[[maybe_unused]] bool write_hwreg(amdgpu::Wavefront &wf, uint32_t reg_id, uint32_t offset, uint32_t mask,\n'
-            '                 uint32_t src) {\n'
-            '  switch (reg_id) {\n' + '\n'.join(write_cases) + '\n'
-            '  default:\n'
-            '    return false;\n'
-            '  }\n'
-            '}\n'
-            '\n'
-            '} // namespace'
-        )
-
     @staticmethod
     def _emit_gfx1250_scaled_wmma_vop3px2_class() -> str:
         return textwrap.dedent('''\
@@ -3257,16 +3452,15 @@ class CodeGenerator:
               Operand scale_src1;
               OpEncoding scale_inst_;
               std::array<uint32_t, 4> raw_words_{};
-              static const bool execute_registered_;
             };
             ''')
 
-    @staticmethod
-    def _emit_gfx1250_scaled_wmma_vop3px2_impls() -> _ImplOutputs:
+    def _emit_gfx1250_scaled_wmma_vop3px2_impls(self) -> _ImplOutputs:
+        exec_fn = self._split_execute_expr('VWmmaScaleF32Vop3px2')
         model = textwrap.dedent('''\
             VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
                 : Vop3p(gfx1250_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
-                        registered_exec_fn<VWmmaScaleF32Vop3px2>()),
+                        @EXEC_FN@),
                   vdst(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->vdst),
                   src0(gfx1250_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,
@@ -3332,12 +3526,9 @@ class CodeGenerator:
               if (scale_inst_.pad_14)
                 out += " matrix_b_reuse";
             }
-            ''')
+            ''').replace('@EXEC_FN@', exec_fn)
 
         execution = textwrap.dedent('''\
-            const bool VWmmaScaleF32Vop3px2::execute_registered_ =
-                register_exec_fn<VWmmaScaleF32Vop3px2>();
-
             void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
               auto &cu = wf.cu();
               uint32_t vb = wf.vgpr_alloc().base;
@@ -3368,11 +3559,20 @@ class CodeGenerator:
               const uint32_t matrix_b_scale_fmt = scale_inst_.neg_hi & 0x3u;
               const bool scale16 = scale_inst_.op == 0x3a;
 
+              auto scale_word = [&](const Operand &operand, uint32_t lane) -> uint64_t {
+                // For regular scaled WMMA, the inline integer-zero encoding
+                // selects a neutral E8M0 word rather than the numerical value 0.
+                if (!scale16 &&
+                    operand.encoding_value() == OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN)
+                  return 0x7f7f7f7fu;
+                return scale16 ? amdgpu::RegisterAccess(wf).read_lane64(operand, lane)
+                               : amdgpu::RegisterAccess(wf).read_lane(operand, lane);
+              };
               auto scale0 = [&](uint32_t lane) -> uint64_t {
-                return scale16 ? amdgpu::RegisterAccess(wf).read_lane64(scale_src0, lane) : amdgpu::RegisterAccess(wf).read_lane(scale_src0, lane);
+                return scale_word(scale_src0, lane);
               };
               auto scale1 = [&](uint32_t lane) -> uint64_t {
-                return scale16 ? amdgpu::RegisterAccess(wf).read_lane64(scale_src1, lane) : amdgpu::RegisterAccess(wf).read_lane(scale_src1, lane);
+                return scale_word(scale_src1, lane);
               };
 
               bool dispatched = false;
@@ -3502,11 +3702,13 @@ class CodeGenerator:
             for opnd in dst_operands
         )
         uses_true16_vop3 = bool(getattr(profile, 'uses_true16_vop3_opsel', False))
+        ignores_true16_opsel = cls == 'pseudo_scalar_unary' and dtype == 'f16'
         enabled = (
             uses_true16_vop3
             and bool(is_vop3)
             and bool(dst_operands)
             and (has_src or has_dst)
+            and not ignores_true16_opsel
         )
         # A few VOP3 f16 special bodies must still use true16 OP_SEL selection
         # even though their semantic operand model is not a plain 16-bit
@@ -3586,6 +3788,7 @@ class CodeGenerator:
                 'scalar_wrexec',
                 'scalar_addk',
                 'scalar_bfe',
+                'pseudo_scalar_unary',
                 'vector_swap',
                 'vector_mov',
                 'vector_binop',
@@ -3610,7 +3813,12 @@ class CodeGenerator:
                     and dtype in ('b16', 'u16')
                 )
                 is_float_op = dtype in ('f16', 'f32', 'f64', 'bf16')
-                if is_vop3 and is_float_op and not is_true16_mov:
+                if (
+                    is_vop3
+                    and is_float_op
+                    and not is_true16_mov
+                    and cls != 'pseudo_scalar_unary'
+                ):
                     from amdisa.sema_enrich import enrich_block
 
                     ef = {'neg'}
@@ -3649,6 +3857,10 @@ class CodeGenerator:
                     exec_model=sema_block.pragma,
                     operand_map=omap,
                     arch_name=self.isa_spec.arch_name,
+                    # Generic generated scalar F16 arithmetic stays out of
+                    # FP16_OVFL clamping. Explicit scalar F32->F16 converts are
+                    # lowered through sema_lower's mode-aware conversion helper.
+                    mode_sensitive_f16_dst=not cls.startswith('scalar_'),
                 )
                 if cls == 'vector_cmp':
                     # V_CMP writes a fresh wave mask initialized to zero, so false
@@ -4187,104 +4399,34 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_getreg':
-            mode_id = profile.hwreg_mode_id
-            status_id = profile.hwreg_status_id
-            ib_sts2_id = profile.hwreg_ib_sts2_id
             L.append(f'  uint16_t hwreg = {src_ops[0]}.encoding_value_;')
-            L.append('  uint32_t reg_id = hwreg & 0x3Fu;')
-            L.append('  uint32_t offset = (hwreg >> 6) & 0x1Fu;')
-            L.append('  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;')
             L.append('  uint32_t reg_val = 0;')
-            if profile.use_hwreg_helpers:
-                L.append('  if (!read_hwreg(wf, reg_id, reg_val))')
-                L.append(
-                    '    util::Logger::warn("s_getreg_b32: unhandled hwreg id=", reg_id);'
-                )
-            else:
-                L.append('  switch (reg_id) {')
-                if mode_id is not None:
-                    L.append(f'  case {mode_id}: reg_val = wf.mode_raw(); break;')
-                L.append(f'  case {status_id}: reg_val = wf.status_raw(); break;')
-                L.append(
-                    '  case 4: reg_val = static_cast<uint32_t>(wf.cu().id()); break;'
-                )
-                L.append(
-                    '  case 5: reg_val = static_cast<uint32_t>(wf.cu().id() >> 16); break;'
-                )
-                L.append(
-                    '  case 6: reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8); break;'
-                )
-                L.append(
-                    '  case 7: reg_val = (wf.vgpr_alloc().count & 0xFFu) | ((wf.vgpr_alloc().base & 0xFFu) << 8); break;'
-                )
-                if ib_sts2_id is not None:
-                    L.append(f'  case {ib_sts2_id}: reg_val = 0; break;')
-                L.append(
-                    '  default: util::Logger::warn("s_getreg_b32: unhandled hwreg id=", reg_id); break;'
-                )
-                L.append('  }')
-            L.append('  if (offset + size > 32) size = 32 - offset;')
+            L.append('  auto result = amdgpu::read_hwreg_field(wf, hwreg, reg_val);')
+            L.append('  if (result != amdgpu::HwregAccessResult::Success)')
             L.append(
-                '  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);'
+                '    util::Logger::warn("s_getreg_b32: ", amdgpu::hwreg_access_result_name(result), '
+                '" hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));'
             )
             L.append(
-                f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, (reg_val >> offset) & mask);'
+                f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, reg_val);'
             )
             return '\n'.join(L)
 
         if cls == 'scalar_setreg':
-            mode_id = profile.hwreg_mode_id
-            status_id = profile.hwreg_status_id
             L.append(f'  uint16_t hwreg = {dst_ops[0]}.encoding_value_;')
-            L.append('  uint32_t reg_id = hwreg & 0x3Fu;')
-            L.append('  uint32_t offset = (hwreg >> 6) & 0x1Fu;')
-            L.append('  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;')
-            L.append('  if (offset + size > 32) size = 32 - offset;')
-            L.append(
-                '  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);'
-            )
             L.append(
                 f'  uint32_t src = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
             )
-            if profile.use_hwreg_helpers:
-                L.append('  if (!write_hwreg(wf, reg_id, offset, mask, src))')
-                L.append(
-                    '    util::Logger::warn("s_setreg_b32: unhandled hwreg id=", reg_id);'
-                )
-            else:
-                L.append('  switch (reg_id) {')
-                if mode_id is not None:
-                    L.append(f'  case {mode_id}: {{')
-                    L.append('    uint32_t s = wf.mode_raw();')
-                    L.append(
-                        '    s = (s & ~(mask << offset)) | ((src & mask) << offset);'
-                    )
-                    L.append('    wf.set_mode_raw(s);')
-                    L.append('    break;')
-                    L.append('  }')
-                L.append(f'  case {status_id}: {{')
-                L.append('    uint32_t s = wf.status_raw();')
-                L.append('    s = (s & ~(mask << offset)) | ((src & mask) << offset);')
-                L.append('    wf.set_status_raw(s);')
-                L.append('    break;')
-                L.append('  }')
-                L.append(
-                    '  default: util::Logger::warn("s_setreg_b32: unhandled hwreg id=", reg_id); break;'
-                )
-                L.append('  }')
+            L.append('  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);')
+            L.append('  if (result != amdgpu::HwregAccessResult::Success)')
+            L.append(
+                '    util::Logger::warn("s_setreg_b32: ", amdgpu::hwreg_access_result_name(result), '
+                '" hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));'
+            )
             return '\n'.join(L)
 
         if cls == 'scalar_setreg_imm':
-            mode_id = profile.hwreg_mode_id
-            status_id = profile.hwreg_status_id
             L.append(f'  uint16_t hwreg = {dst_ops[0]}.encoding_value_;')
-            L.append('  uint32_t reg_id = hwreg & 0x3Fu;')
-            L.append('  uint32_t offset = (hwreg >> 6) & 0x1Fu;')
-            L.append('  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;')
-            L.append('  if (offset + size > 32) size = 32 - offset;')
-            L.append(
-                '  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);'
-            )
             # S_SETREG_IMM32_B32's source is the extension literal. When it is
             # modeled as a fieldless simm32 operand it appears in src_ops and is
             # read through the observed RegisterAccess facade; when an ISA carries
@@ -4298,32 +4440,13 @@ class CodeGenerator:
                 else 'literal_'
             )
             L.append(f'  uint32_t src = {src_expr};')
-            if profile.use_hwreg_helpers:
-                L.append('  if (!write_hwreg(wf, reg_id, offset, mask, src))')
-                L.append(
-                    '    util::Logger::warn("s_setreg_imm32_b32: unhandled hwreg id=", reg_id);'
-                )
-            else:
-                L.append('  switch (reg_id) {')
-                if mode_id is not None:
-                    L.append(f'  case {mode_id}: {{')
-                    L.append('    uint32_t s = wf.mode_raw();')
-                    L.append(
-                        '    s = (s & ~(mask << offset)) | ((src & mask) << offset);'
-                    )
-                    L.append('    wf.set_mode_raw(s);')
-                    L.append('    break;')
-                    L.append('  }')
-                L.append(f'  case {status_id}: {{')
-                L.append('    uint32_t s = wf.status_raw();')
-                L.append('    s = (s & ~(mask << offset)) | ((src & mask) << offset);')
-                L.append('    wf.set_status_raw(s);')
-                L.append('    break;')
-                L.append('  }')
-                L.append(
-                    '  default: util::Logger::warn("s_setreg_imm32_b32: unhandled hwreg id=", reg_id); break;'
-                )
-                L.append('  }')
+            L.append('  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);')
+            L.append('  if (result != amdgpu::HwregAccessResult::Success)')
+            L.append(
+                '    util::Logger::warn("s_setreg_imm32_b32: ", '
+                'amdgpu::hwreg_access_result_name(result), " hwreg=", '
+                'amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));'
+            )
             return '\n'.join(L)
 
         if cls == 'vector_readfirstlane':
@@ -4385,7 +4508,7 @@ class CodeGenerator:
                     f'    float s2 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({s2_expr}, lane)));'
                 )
                 L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16(std::fma(s0, k, s2)));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16_mode(std::fma(s0, k, s2), wf.fp16_ovfl()));'
                 )
             else:
                 L.append(
@@ -4422,7 +4545,7 @@ class CodeGenerator:
                     f'    float k = util::f16_to_f32(static_cast<uint16_t>({k_expr}));'
                 )
                 L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16(std::fma(s0, s1, k)));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16_mode(std::fma(s0, s1, k), wf.fp16_ovfl()));'
                 )
             else:
                 L.append(
@@ -4596,13 +4719,15 @@ class CodeGenerator:
         if cls == 'buffer_atomic':
             return self._gen_buffer_atomic(dst_ops, src_ops, sem)
 
-        if cls == 'ds_atomic':
+        if cls in ('ds_atomic', 'ds_atomic2'):
             gds_guard = ''
             if self._enc_has_field('gds'):
                 gds_guard = (
                     '  if (inst_.gds)\n'
                     '    throw util::UnimplementedInst(mnemonic());\n'
                 )
+            if cls == 'ds_atomic2':
+                return gds_guard + self._gen_ds_atomic2(dst_ops, src_ops, sem)
             return gds_guard + self._gen_ds_atomic(dst_ops, src_ops, sem)
 
         if cls in ('ds_mskor', 'ds_append_consume', 'ds_barrier_arrive'):
@@ -5010,6 +5135,11 @@ class CodeGenerator:
                 else 'amdgpu::WaitCounterType::LGKMCNT'
             ),
             'ds_atomic': (
+                'amdgpu::WaitCounterType::DSCNT'
+                if is_gfx11_plus
+                else 'amdgpu::WaitCounterType::LGKMCNT'
+            ),
+            'ds_atomic2': (
                 'amdgpu::WaitCounterType::DSCNT'
                 if is_gfx11_plus
                 else 'amdgpu::WaitCounterType::LGKMCNT'
@@ -5514,6 +5644,80 @@ class CodeGenerator:
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
+    def _gen_ds_atomic2(
+        self, dst: list[str], src: list[str], sem: InstructionSemantics
+    ) -> str:
+        """Generate a returning two-address LDS exchange."""
+        esz = sem.elem_size or 4
+        dwords_per_access = esz // 4
+        is_stride64 = 'stride64' in sem.name.lower()
+        stride_scale = f'{esz * 64}U' if is_stride64 else f'{esz}U'
+
+        L = []
+        L.append('  auto &cu = wf.cu();')
+        L.append('  uint64_t exec = wf.exec();')
+        L.append(
+            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+        )
+        L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')};")
+        L.append(f'  d->elem_size = {esz};')
+        L.append('  d->num_elems = 1;')
+        L.append('  d->is_load = true;')
+        L.append('  d->atomic_op = amdgpu::AtomicOp::SWAP;')
+        self._append_wait_counter_type(L, 'ds_atomic2')
+        L.append('  d->exec_mask = exec;')
+        L.append('  d->lane_mask = exec;')
+        L.append('  d->wf_size = wf.wf_size();')
+        L.append('  d->ds2_active = true;')
+        L.append(
+            f"  d->ds2_dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')} + "
+            f'{dwords_per_access};'
+        )
+        L.append(f'  d->store_data.resize(wf.wf_size() * {esz});')
+        L.append(f'  d->ds2_store_data.resize(wf.wf_size() * {esz});')
+        L.append(
+            f"  uint32_t addr_base = {self._vgpr_base_expr('addr', use_acc=False)};"
+        )
+        L.append(
+            f"  uint32_t data0_base = {self._vgpr_base_expr('data0', role='Src1')};"
+        )
+        L.append(
+            f"  uint32_t data1_base = {self._vgpr_base_expr('data1', role='Src2')};"
+        )
+        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        L.append('    if (!(exec & (1ULL << lane))) continue;')
+        L.append(
+            '    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);'
+        )
+        L.append(
+            f'    d->per_lane_addr[lane] = base + '
+            f'static_cast<uint32_t>(inst_.offset0) * {stride_scale} + wf.lds_base();'
+        )
+        L.append(
+            f'    d->ds2_per_lane_addr[lane] = base + '
+            f'static_cast<uint32_t>(inst_.offset1) * {stride_scale} + wf.lds_base();'
+        )
+        for i in range(dwords_per_access):
+            L.append(
+                f'    uint32_t val0_{i} = '
+                f'amdgpu::RegisterAccess(cu).read_vgpr(data0_base + {i}, lane);'
+            )
+            L.append(
+                f'    std::memcpy(&d->store_data[lane * {esz} + {i * 4}], '
+                f'&val0_{i}, 4);'
+            )
+            L.append(
+                f'    uint32_t val1_{i} = '
+                f'amdgpu::RegisterAccess(cu).read_vgpr(data1_base + {i}, lane);'
+            )
+            L.append(
+                f'    std::memcpy(&d->ds2_store_data[lane * {esz} + {i * 4}], '
+                f'&val1_{i}, 4);'
+            )
+        L.append('  }')
+        L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
     def _gen_ds_mskor(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
@@ -5789,10 +5993,38 @@ class CodeGenerator:
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
+    def _append_ds_addtid_addresses(self, lines: list[str]) -> None:
+        """Emit the profile-specific DS ADDTID per-lane address calculation."""
+        lines.append('  {')
+        lines.append('    uint64_t exec = wf.exec();')
+        lines.append('    d->lane_mask = exec; d->exec_mask = exec;')
+        lines.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
+        lines.append('    d->cu_path = wf.cu().full_path();')
+        lines.append(
+            '    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;'
+        )
+        lines.append('    uint32_t m0 = wf.m0();')
+        if self.isa_spec.profile.ds_addtid_uses_m0_byte_base:
+            lines.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+            lines.append('      if (!(exec & (1ULL << lane))) continue;')
+            lines.append('      uint32_t lane_offset = (m0 + lane * 4U) & 0xFFFFFU;')
+            lines.append(
+                '      d->per_lane_addr[lane] = lane_offset + offset + wf.lds_base();'
+            )
+        else:
+            lines.append('    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;')
+            lines.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+            lines.append('      if (!(exec & (1ULL << lane))) continue;')
+            lines.append(
+                '      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();'
+            )
+        lines.append('    }')
+        lines.append('  }')
+
     def _gen_ds_read_addtid(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
-        """ds_read_addtid_b32: addr = thread_id * M0[24:16] * 4 + offset."""
+        """Generate profile-specific DS ADDTID load addressing."""
         L = []
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
@@ -5802,30 +6034,14 @@ class CodeGenerator:
         L.append(f'  d->num_elems = {sem.num_elems};')
         L.append('  d->is_load = true;')
         self._append_wait_counter_type(L, 'ds_read_addtid')
-        L.append('  {')
-        L.append('    uint64_t exec = wf.exec();')
-        L.append('    d->lane_mask = exec; d->exec_mask = exec;')
-        L.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
-        L.append('    d->cu_path = wf.cu().full_path();')
-        L.append(
-            '    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;'
-        )
-        L.append('    uint32_t m0 = wf.m0();')
-        L.append('    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;')
-        L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-        L.append('      if (!(exec & (1ULL << lane))) continue;')
-        L.append(
-            '      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();'
-        )
-        L.append('    }')
-        L.append('  }')
+        self._append_ds_addtid_addresses(L)
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
     def _gen_ds_write_addtid(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
-        """ds_write_addtid_b32: addr = thread_id * M0[24:16] * 4 + offset."""
+        """Generate profile-specific DS ADDTID store addressing."""
         L = []
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
@@ -5834,23 +6050,7 @@ class CodeGenerator:
         L.append(f'  d->num_elems = {sem.num_elems};')
         L.append('  d->is_load = false;')
         self._append_wait_counter_type(L, 'ds_write_addtid')
-        L.append('  {')
-        L.append('    uint64_t exec = wf.exec();')
-        L.append('    d->lane_mask = exec; d->exec_mask = exec;')
-        L.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
-        L.append('    d->cu_path = wf.cu().full_path();')
-        L.append(
-            '    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;'
-        )
-        L.append('    uint32_t m0 = wf.m0();')
-        L.append('    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;')
-        L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-        L.append('      if (!(exec & (1ULL << lane))) continue;')
-        L.append(
-            '      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();'
-        )
-        L.append('    }')
-        L.append('  }')
+        self._append_ds_addtid_addresses(L)
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(f"  uint32_t data_base = {self._vgpr_base_expr('data0')};")
@@ -6140,6 +6340,7 @@ class CodeGenerator:
             'ds_write',
             'ds_write2',
             'ds_atomic',
+            'ds_atomic2',
             'ds_mskor',
             'ds_append_consume',
             'ds_barrier_arrive',
@@ -6819,10 +7020,6 @@ class CodeGenerator:
                     public_members.append(
                         cgen.Statement('void execute_impl(amdgpu::Wavefront &wf)')
                     )
-                    if profile.split_execution_sources:
-                        private_members.append(
-                            cgen.Statement('static const bool execute_registered_')
-                        )
                     # A sub-dword (< 32-bit) destination writes only part of its
                     # 32-bit register lane, so the old value survives and the
                     # register is also a read. Surface these partial defs as
@@ -6847,7 +7044,41 @@ class CodeGenerator:
                             for tag in ('IMM', 'LABEL', 'CONST')
                         )
                     ]
+                    # v_writelane preserves the other lanes of vdst, so it reads
+                    # the old value: a lane-partial def, distinct from the
+                    # sub-dword partial defs above. Surface it only where the XML
+                    # marks vdst output-only (e.g. CDNA4, gfx1250); elsewhere
+                    # vdst is already a source. implicit_uses keeps it out of the
+                    # printed operand list.
+                    _writelane_implicit_use_opnd = None
+                    if inst_sem and inst_sem.semantic_class == 'vector_writelane':
+                        _writelane_implicit_use_opnd = next(
+                            (
+                                o.name
+                                for o in inst.operands
+                                if o.is_output
+                                and not o.is_input
+                                and o.name in ('vdst', 'sdst')
+                            ),
+                            None,
+                        )
                     if _partial_def_outputs:
+                        public_members.append(
+                            cgen.Statement(
+                                'void implicit_uses(RegisterSet &uses) const override'
+                            )
+                        )
+                        # Gated with the definition below: only gfx1250 has a
+                        # consumer for the operand-backed hook.
+                        if self.isa_spec.profile.uses_vgpr_msb_indexing:
+                            public_members.append(
+                                cgen.Statement(
+                                    'void implicit_use_operands('
+                                    'std::vector<const ::rocjitsu::Operand *> &operands) const '
+                                    'override'
+                                )
+                            )
+                    elif _writelane_implicit_use_opnd:
                         public_members.append(
                             cgen.Statement(
                                 'void implicit_uses(RegisterSet &uses) const override'
@@ -6890,7 +7121,7 @@ class CodeGenerator:
                     full_mnemonic = inst.mnemonic + (rule.suffix or '')
                     exec_fn_expr = f'make_exec_fn<{inst.fmt_name}>()'
                     if profile.split_execution_sources:
-                        exec_fn_expr = f'registered_exec_fn<{inst.fmt_name}>()'
+                        exec_fn_expr = self._split_execute_expr(inst.fmt_name)
                     init_list_parts = [
                         f'{inst.fmt_true_enc_name}("{full_mnemonic}", '
                         f'reinterpret_cast<const OpEncoding*>(inst), '
@@ -6920,6 +7151,7 @@ class CodeGenerator:
                             'ds_write',
                             'ds_write2',
                             'ds_atomic',
+                            'ds_atomic2',
                             'ds_mskor',
                             'ds_append_consume',
                             'ds_barrier_arrive',
@@ -6949,6 +7181,24 @@ class CodeGenerator:
                     ctor_body_parts.append(f'num_dst_ = {dst_idx};')
                     ctor_body_parts.extend(conditional_src_body)
                     ctor_body_parts.extend(conditional_dst_body)
+
+                    # Pseudo-scalar V_S_* instructions encode their SGPR
+                    # destination through VDST, but the ISA reserves the VCC
+                    # selectors for this instruction family. Keep this check
+                    # local to pseudo_scalar_unary: OPR_SREG legitimately
+                    # permits VCC destinations for other instructions.
+                    if (
+                        inst_sem is not None
+                        and inst_sem.semantic_class == 'pseudo_scalar_unary'
+                    ):
+                        ctor_body_parts.append(
+                            'if (reinterpret_cast<const OpEncoding*>(inst)->vdst == '
+                            'OpSelSreg::OPR_SREG_VCC_LO || '
+                            'reinterpret_cast<const OpEncoding*>(inst)->vdst == '
+                            'OpSelSreg::OPR_SREG_VCC_HI) '
+                            f'throw util::InvalidInst("{inst.name} may not use VCC as '
+                            'a destination", "");'
+                        )
 
                     # Flat segment-aware operands: adjust addr width and add
                     # saddr for SCRATCH (seg==1) and GLOBAL (seg==2) segments.
@@ -7023,6 +7273,15 @@ class CodeGenerator:
                                 opnd.name in _lit_fields
                                 and opnd.name in enc_field_names
                             ):
+                                # F16 pseudo-scalar V_S_* instructions always
+                                # consume literal bits [15:0]. Unlike generic
+                                # true16 VOP3 operands, OPSEL does not select a
+                                # literal half for this instruction family.
+                                pseudo_scalar_f16 = (
+                                    inst_sem is not None
+                                    and inst_sem.semantic_class == 'pseudo_scalar_unary'
+                                    and inst_sem.data_type == 'f16'
+                                )
                                 fixup = self._literal_operand_fixup_stmt(
                                     opnd,
                                     _lit32_struct,
@@ -7036,6 +7295,7 @@ class CodeGenerator:
                                         and self.isa_spec.profile.has_src_modifiers(
                                             enc.enc_name
                                         )
+                                        and not pseudo_scalar_f16
                                         else None
                                     ),
                                 )
@@ -7112,11 +7372,22 @@ class CodeGenerator:
                         'ENC_VOP3P': 'Vop3p',
                         'VOP3_SDST_ENC': 'Vop3SdstEnc',
                     }
-                    _enc_base = _DPP_ENC_BASES.get(enc.enc_name.upper())
-                    _dpp_struct, _dpp8_struct = self._vop_dpp_struct_names(enc.enc_name)
+                    _modifier_enc_name = self._instruction_base_encoding_name(inst)
+                    _enc_base = _DPP_ENC_BASES.get(_modifier_enc_name.upper())
+                    _dpp_struct, _dpp8_struct = self._vop_dpp_struct_names(
+                        _modifier_enc_name
+                    )
                     _supports_dpp_encoding = (
                         _dpp_struct is not None
-                        and self._supports_dpp_for_encoding(enc.enc_name)
+                        and self._instruction_supports_dpp(inst, _modifier_enc_name)
+                    )
+                    _supports_dpp8_encoding = (
+                        _dpp8_struct is not None
+                        and self._instruction_supports_dpp8(inst, _modifier_enc_name)
+                    )
+                    _recognizes_dpp8_marker = _dpp8_struct is not None or (
+                        enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC')
+                        and self._supports_vop_dpp8()
                     )
                     _dpp_struct_has_fi = self._machine_inst_struct_has_field(
                         _dpp_struct, 'fi'
@@ -7127,7 +7398,7 @@ class CodeGenerator:
                     if _enc_base:
                         for opnd in inst.operands:
                             if opnd.name == 'src0' and opnd.name in enc_field_names:
-                                if _dpp8_struct:
+                                if _supports_dpp8_encoding:
                                     ctor_body_parts.append(
                                         f'if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) {{'
                                         f' auto *dp8 = reinterpret_cast<const {_dpp8_struct}*>(inst);'
@@ -7155,28 +7426,64 @@ class CodeGenerator:
                                         f'{_dpp_fi_ctor_stmt}'
                                         f'}}'
                                     )
-                                elif _dpp_struct:
+                                unsupported_dpp_markers = []
+                                if _dpp_struct and not _supports_dpp_encoding:
+                                    unsupported_dpp_markers.append(
+                                        (
+                                            'reinterpret_cast<const OpEncoding*>(inst)->src0 == '
+                                            'amdgpu::SRC_DPP',
+                                            'DPP',
+                                        )
+                                    )
+                                if (
+                                    _recognizes_dpp8_marker
+                                    and not _supports_dpp8_encoding
+                                ):
+                                    unsupported_dpp_markers.append(
+                                        (
+                                            'amdgpu::dpp::is_src_dpp8('
+                                            'reinterpret_cast<const OpEncoding*>(inst)->src0)',
+                                            'DPP8',
+                                        )
+                                    )
+                                if unsupported_dpp_markers:
+                                    unsupported_dpp_label = (
+                                        unsupported_dpp_markers[0][1]
+                                        if len(unsupported_dpp_markers) == 1
+                                        else 'DPP'
+                                    )
                                     ctor_body_parts.append(
-                                        'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP || '
-                                        'amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) '
-                                        'throw util::UnimplementedInst("VOPC DPP");'
+                                        f'if ({" || ".join(marker for marker, _ in unsupported_dpp_markers)}) '
+                                        f'throw util::InvalidInst("{inst.name} does not support '
+                                        f'{unsupported_dpp_label}", "");'
                                     )
                                 # SDWA (src0 == amdgpu::SRC_SDWA): CDNA and RDNA1/2 only.
                                 _has_sdwa = any(
                                     'SDWA' in ie.enc_name
                                     for ie in self.isa_spec.inst_encodings
                                 )
-                                if _has_sdwa and enc.enc_name.upper() in (
-                                    'ENC_VOP1',
-                                    'ENC_VOP2',
-                                    'ENC_VOPC',
-                                ):
+                                _supports_sdwa_encoding = (
+                                    _has_sdwa
+                                    and enc.enc_name.upper()
+                                    in (
+                                        'ENC_VOP1',
+                                        'ENC_VOP2',
+                                        'ENC_VOPC',
+                                    )
+                                    and self._instruction_supports_sdwa(
+                                        inst, _modifier_enc_name
+                                    )
+                                )
+                                if _supports_sdwa_encoding:
                                     if enc.enc_name.upper() == 'ENC_VOPC':
                                         _sdwa_struct = 'VopcVopSdwaSdstEncMachineInst'
                                     else:
                                         _sdwa_struct = f'{_enc_base}VopSdwaMachineInst'
                                     _sdwa_s1_code = ''
-                                    if enc.enc_name.upper() in ('ENC_VOP2', 'ENC_VOPC'):
+                                    if enc.enc_name.upper() in (
+                                        'ENC_VOP2',
+                                        'ENC_VOPC',
+                                    ):
                                         _sdwa_s1_code = (
                                             f' if (sw->s1)'
                                             f'   vsrc1 = Operand({opnd.size}, OperandType::OPR_SRC,'
@@ -7203,6 +7510,16 @@ class CodeGenerator:
                                             f' sdwa_clamp_ = sw->clamp;'
                                         )
                                         + f'{_sdwa_s1_code}}}'
+                                    )
+                                elif _has_sdwa and enc.enc_name.upper() in (
+                                    'ENC_VOP1',
+                                    'ENC_VOP2',
+                                    'ENC_VOPC',
+                                ):
+                                    ctor_body_parts.append(
+                                        'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == '
+                                        'amdgpu::SRC_SDWA) '
+                                        f'throw util::InvalidInst("{inst.name} does not support SDWA", "");'
                                     )
 
                     # Apply the fieldless-operand capability policy once, after
@@ -7308,6 +7625,14 @@ class CodeGenerator:
                     }:
                         ctor_body_parts.append('flags_ |= ACCVGPR;')
 
+                    # EXEC-mask metadata for liveness/dataflow analyses,
+                    # derived from the instruction's semantic AST (see
+                    # _exec_mask_flag_stmts).
+                    ctor_body_parts.extend(_exec_mask_flag_stmts(_mem_sem))
+                    # Result-combinator metadata (RESULT_COPY / RESULT_OR) for
+                    # EXEC-state all-ones reasoning.
+                    ctor_body_parts.extend(_result_combinator_flag_stmts(_mem_sem))
+
                     # Per-instruction size overrides (e.g., VOP3PX2 128-bit
                     # instructions decoded under 64-bit VOP3P_MFMA).
                     _size_overrides = self.isa_spec.profile.inst_size_overrides
@@ -7370,24 +7695,33 @@ class CodeGenerator:
                         # base's apply_dpp() runs before the ALU logic.
                         _dpp_preamble = ''
                         _enc_upper = enc.enc_name.upper()
+                        _modifier_enc_name = self._instruction_base_encoding_name(inst)
                         _has_sdwa_encoding = _enc_upper in (
                             'ENC_VOP1',
                             'ENC_VOP2',
                             'ENC_VOPC',
-                        )
+                        ) and self._instruction_supports_sdwa(inst, _modifier_enc_name)
                         _dpp_struct, _dpp8_struct = self._vop_dpp_struct_names(
-                            _enc_upper
+                            _modifier_enc_name
                         )
                         _supports_dpp_encoding = (
                             _dpp_struct is not None
-                            and self._supports_dpp_for_encoding(_enc_upper)
+                            and self._instruction_supports_dpp(inst, _modifier_enc_name)
+                        )
+                        _supports_dpp8_encoding = (
+                            _dpp8_struct is not None
+                            and self._instruction_supports_dpp8(
+                                inst, _modifier_enc_name
+                            )
                         )
                         _uses_full_dpp_write_mask = self._uses_full_dpp_write_mask(
                             _enc_upper
                         )
-                        _has_dpp_encoding = (
+                        _has_dpp_encoding = any(
+                            opnd.name == 'src0' for opnd in inst.operands
+                        ) and (
                             _supports_dpp_encoding
-                            or _dpp8_struct is not None
+                            or _supports_dpp8_encoding
                             or _has_sdwa_encoding
                         )
                         if _has_dpp_encoding:
@@ -7420,6 +7754,17 @@ class CodeGenerator:
                             assert all(
                                 not o.fieldless for o in _src_input_ops[:2]
                             ), f'{inst.name}: DPP/SDWA permute source is fieldless'
+                            _dpp_src0_byte_mask_arg = ''
+                            if (
+                                body_true16_vop3
+                                and _src_input_ops
+                                and _src_input_ops[0].size == 16
+                            ):
+                                _dpp_src0_byte_mask_arg = (
+                                    ',\n'
+                                    '        amdgpu::dpp::true16_source_byte_mask(\n'
+                                    '            amdgpu::vop3_opsel(inst_), 0)'
+                                )
                             _is_vopc = enc.enc_name.upper() == 'ENC_VOPC'
                             _is_cmpx_vopc = (
                                 _is_vopc
@@ -7429,38 +7774,6 @@ class CodeGenerator:
                                     'vector_cmpx',
                                     'vector_cmpx_class',
                                 )
-                            )
-                            _dst_reg_expr = self._e32_true16_dst_reg_expr(
-                                inst, enc.enc_name
-                            )
-                            _dst_op = next(
-                                (
-                                    o
-                                    for o in inst.operands
-                                    if o.is_output and self._operand_can_use_vgpr_msb(o)
-                                ),
-                                None,
-                            )
-                            _dst_name = _dst_op.name if _dst_op else None
-                            _uses_logical_dpp_dst = bool(
-                                self.isa_spec.profile.uses_vgpr_msb_indexing
-                                and _dst_name
-                            )
-                            _uses_64bit_dpp_dst = bool(_dst_op and _dst_op.size == 64)
-                            _dpp_old_dst_type = (
-                                'uint64_t' if _uses_64bit_dpp_dst else 'uint32_t'
-                            )
-                            _dpp_dst_read_method = (
-                                'read_lane64' if _uses_64bit_dpp_dst else 'read_lane'
-                            )
-                            _dpp_dst_write_method = (
-                                'write_lane64' if _uses_64bit_dpp_dst else 'write_lane'
-                            )
-                            _dpp_physical_dst_read_method = (
-                                'read_vgpr64' if _uses_64bit_dpp_dst else 'read_vgpr'
-                            )
-                            _dpp_physical_dst_write_method = (
-                                'write_vgpr64' if _uses_64bit_dpp_dst else 'write_vgpr'
                             )
                             _dpp_preamble = ''
 
@@ -7511,47 +7824,6 @@ class CodeGenerator:
                                         '  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
                                         '    throw util::UnimplementedInst(mnemonic());\n'
                                     )
-                            elif not _is_vopc:
-                                if _has_sdwa_encoding:
-                                    _old_dst_read = (
-                                        f'inst_.src0 == amdgpu::SRC_DPP\n'
-                                        f'            ? amdgpu::RegisterAccess(wf).{_dpp_dst_read_method}({_dst_name}, ln)\n'
-                                        f'            : amdgpu::RegisterAccess(wf.cu()).{_dpp_physical_dst_read_method}(vb + {_dst_reg_expr}, ln)'
-                                        if _uses_logical_dpp_dst
-                                        else f'amdgpu::RegisterAccess(wf.cu()).{_dpp_physical_dst_read_method}(vb + {_dst_reg_expr}, ln)'
-                                    )
-                                    _dpp_preamble += (
-                                        f'  {_dpp_old_dst_type} sdwa_old_dst_[64] = {{}};\n'
-                                        '  if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD ||\n'
-                                        '      inst_.src0 == amdgpu::SRC_DPP) {\n'
-                                        '    uint32_t vb = wf.vgpr_alloc().base;\n'
-                                        '    uint64_t ex = wf.exec();\n'
-                                        '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln)\n'
-                                        '      if (ex & (1ULL << ln))\n'
-                                        f'        sdwa_old_dst_[ln] = {_old_dst_read};\n'
-                                        '  }\n'
-                                    )
-                                else:
-                                    _old_dst_read = (
-                                        f'amdgpu::RegisterAccess(wf).{_dpp_dst_read_method}({_dst_name}, ln)'
-                                        if _uses_logical_dpp_dst
-                                        else f'amdgpu::RegisterAccess(wf.cu()).{_dpp_physical_dst_read_method}(vb + {_dst_reg_expr}, ln)'
-                                    )
-                                    _old_dst_vb_setup = (
-                                        ''
-                                        if _uses_logical_dpp_dst
-                                        else '    uint32_t vb = wf.vgpr_alloc().base;\n'
-                                    )
-                                    _dpp_preamble += (
-                                        f'  {_dpp_old_dst_type} sdwa_old_dst_[64] = {{}};\n'
-                                        '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
-                                        f'{_old_dst_vb_setup}'
-                                        '    uint64_t ex = wf.exec();\n'
-                                        '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln)\n'
-                                        '      if (ex & (1ULL << ln))\n'
-                                        f'        sdwa_old_dst_[ln] = {_old_dst_read};\n'
-                                        '  }\n'
-                                    )
                             # apply_dpp/apply_dpp8 modify the architectural src0,
                             # which the emitted code addresses as src_operands_[0].
                             # That index only holds src0 when src0 is the first
@@ -7580,104 +7852,59 @@ class CodeGenerator:
                                     '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
                                     '    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_,\n'
                                     '        dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_, dpp_fi_,\n'
-                                    '        dpp_src0_, wf);\n'
+                                    f'        dpp_src0_, wf{_dpp_src0_byte_mask_arg});\n'
                                 )
-                            if not _reads_all_outputs and _dpp8_struct:
+                            if not _reads_all_outputs and _supports_dpp8_encoding:
                                 _dpp_preamble += (
                                     '  if (amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
                                     '    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_,\n'
-                                    '        dpp_src0_, wf);\n'
+                                    f'        dpp_src0_, wf{_dpp_src0_byte_mask_arg});\n'
                                 )
                             if _has_sdwa_encoding:
-                                # src1 permute references the field-bearing second
-                                # source by name (it may not sit at
-                                # src_operands_[1]; see FMAMK/MADMK note above) and
-                                # redirects reads through its delegate, so the
-                                # src_operands_[] slot is left untouched. Emitted
-                                # only when a field-bearing src1 exists.
+                                # src1 references the field-bearing second source
+                                # by name (it may not sit at src_operands_[1]; see
+                                # FMAMK/MADMK note above). The shared helper owns
+                                # byte observation, source selection/modifiers,
+                                # and staged storage; generated code supplies only
+                                # instruction-specific operands and fields.
+                                _sdwa_src0_modifier_format = (
+                                    self._sdwa_source_modifier_format(
+                                        sem, 0, _src_input_ops[0]
+                                    )
+                                )
                                 _sdwa_src1_block = ''
                                 if _src1_name:
+                                    _sdwa_src1_modifier_format = (
+                                        self._sdwa_source_modifier_format(
+                                            sem, 1, _src_input_ops[1]
+                                        )
+                                    )
                                     _sdwa_src1_block = (
-                                        '    if (sdwa_src1_sel_ != amdgpu::sdwa::DWORD && num_src_ > 1) {\n'
-                                        f'      uint32_t vb = wf.vgpr_alloc().base + {_src1_name}.encoding_value_;\n'
-                                        '      uint32_t result1[64];\n'
-                                        '      for (uint32_t i = 0; i < ws; ++i)\n'
-                                        '        result1[i] = amdgpu::sdwa::sdwa_src_select(\n'
-                                        '            amdgpu::RegisterAccess(cu).read_vgpr(vb, i), sdwa_src1_sel_, sdwa_src1_sext_);\n'
-                                        '      if (sdwa_src1_abs_ || sdwa_src1_neg_) {\n'
-                                        '        for (uint32_t i = 0; i < ws; ++i) {\n'
-                                        '          float sv = std::bit_cast<float>(result1[i]);\n'
-                                        '          if (sdwa_src1_abs_) sv = std::fabs(sv);\n'
-                                        '          if (sdwa_src1_neg_) sv = -sv;\n'
-                                        '          result1[i] = std::bit_cast<uint32_t>(sv);\n'
-                                        '        }\n'
-                                        '      }\n'
-                                        f'      dpp_src1_ = std::make_unique<DppOperand>(\n'
-                                        f'          {_src1_name}, result1, static_cast<int>(ws));\n'
-                                        '    }\n'
+                                        '    if (num_src_ > 1)\n'
+                                        f'      amdgpu::sdwa::stage_source({_src1_name}, sdwa_src1_sel_,\n'
+                                        '          sdwa_src1_sext_, sdwa_src1_neg_, sdwa_src1_abs_,\n'
+                                        f'          {_sdwa_src1_modifier_format}, dpp_src1_, wf);\n'
                                     )
                                 _dpp_preamble += (
                                     '  if (inst_.src0 == amdgpu::SRC_SDWA) {\n'
-                                    '    auto &cu = wf.cu();\n'
-                                    '    uint32_t ws = wf.wf_size();\n'
-                                    '    if (sdwa_src0_sel_ != amdgpu::sdwa::DWORD) {\n'
-                                    '      uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;\n'
-                                    '      uint32_t result[64];\n'
-                                    '      for (uint32_t i = 0; i < ws; ++i)\n'
-                                    '        result[i] = amdgpu::sdwa::sdwa_src_select(\n'
-                                    '            amdgpu::RegisterAccess(cu).read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);\n'
-                                    '      if (sdwa_src0_abs_ || sdwa_src0_neg_) {\n'
-                                    '        for (uint32_t i = 0; i < ws; ++i) {\n'
-                                    '          float sv = std::bit_cast<float>(result[i]);\n'
-                                    '          if (sdwa_src0_abs_) sv = std::fabs(sv);\n'
-                                    '          if (sdwa_src0_neg_) sv = -sv;\n'
-                                    '          result[i] = std::bit_cast<uint32_t>(sv);\n'
-                                    '        }\n'
-                                    '      }\n'
-                                    '      dpp_src0_ = std::make_unique<DppOperand>(\n'
-                                    '          *src_operands_[0], result, static_cast<int>(ws));\n'
-                                    '      src_operands_[0] = dpp_src0_.get();\n'
-                                    '    }\n' + _sdwa_src1_block + '  }\n'
+                                    '    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_,\n'
+                                    '        sdwa_src0_sext_, sdwa_src0_neg_, sdwa_src0_abs_,\n'
+                                    f'        {_sdwa_src0_modifier_format}, dpp_src0_, wf);\n'
+                                    + _sdwa_src1_block
+                                    + '  }\n'
                                 )
                             _dpp_preamble += (
-                                f'  if (dpp_src0_) {_src0_name}.set_delegate(dpp_src0_.get());\n'
+                                f'  ScopedOperandDelegate dpp_src0_binding_({_src0_name}, dpp_src0_.get());\n'
                                 if _src0_name
                                 else ''
                             ) + (
-                                f'  if (dpp_src1_) {_src1_name}.set_delegate(dpp_src1_.get());\n'
+                                f'  ScopedOperandDelegate dpp_src1_binding_({_src1_name}, dpp_src1_.get());\n'
                                 if _src1_name
                                 else ''
                             )
-                        # SDWA postamble: apply dst_sel merge and float clamp after ALU.
+                        # Destination modifiers are applied by the generated
+                        # semantic store.
                         _sdwa_postamble = ''
-                        if enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2'):
-                            is_float_op = sem and sem.data_type in ('f16', 'f32', 'f64')
-                            _sdwa_postamble = (
-                                '  if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {\n'
-                                '    uint64_t ex = wf.exec();\n'
-                                '    uint32_t vb = wf.vgpr_alloc().base;\n'
-                                '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
-                                '      if (!(ex & (1ULL << ln))) continue;\n'
-                                f'      uint32_t dv = amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + {_dst_reg_expr}, ln);\n'
-                                '      dv = amdgpu::sdwa::sdwa_dst_merge(dv, sdwa_old_dst_[ln], sdwa_dst_sel_, sdwa_dst_unused_);\n'
-                                f'      amdgpu::RegisterAccess(wf.cu()).write_vgpr(vb + {_dst_reg_expr}, ln, dv);\n'
-                                '    }\n'
-                                '  }\n'
-                            )
-                            if is_float_op:
-                                _sdwa_postamble += (
-                                    '  if (sdwa_clamp_) {\n'
-                                    '    uint64_t ex = wf.exec();\n'
-                                    '    uint32_t vb = wf.vgpr_alloc().base;\n'
-                                    '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
-                                    '      if (!(ex & (1ULL << ln))) continue;\n'
-                                    f'      uint32_t dv = amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + {_dst_reg_expr}, ln);\n'
-                                    '      float fv = std::bit_cast<float>(dv);\n'
-                                    '      fv = std::clamp(fv, 0.0f, 1.0f);\n'
-                                    f'      amdgpu::RegisterAccess(wf.cu()).write_vgpr(vb + {_dst_reg_expr}, ln, std::bit_cast<uint32_t>(fv));\n'
-                                    '    }\n'
-                                    '  }\n'
-                                )
                         _dpp_cleanup = ''
                         if _has_dpp_encoding:
                             if _is_vopc:
@@ -7708,36 +7935,34 @@ class CodeGenerator:
                                         '    wf.set_vcc(dpp_old_vcc_);\n'
                                         '  }\n'
                                     )
-                            else:
-                                if _supports_dpp_encoding:
-                                    _restore_vb_setup = (
-                                        ''
-                                        if _uses_logical_dpp_dst
-                                        else '      uint32_t vb = wf.vgpr_alloc().base;\n'
-                                    )
-                                    _restore_dst_line = (
-                                        f'          amdgpu::RegisterAccess(wf).{_dpp_dst_write_method}({_dst_name}, ln, sdwa_old_dst_[ln]);\n'
-                                        if _uses_logical_dpp_dst
-                                        else f'          amdgpu::RegisterAccess(wf.cu()).{_dpp_physical_dst_write_method}(vb + {_dst_reg_expr}, ln,\n'
-                                        '              sdwa_old_dst_[ln]);\n'
-                                    )
-                                    _dpp_cleanup += (
-                                        '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
-                                        f'{_dpp_write_mask_lines("dpp_write_mask", declare=True)}'
-                                        '    if (dpp_write_mask != ~0ULL) {\n'
-                                        '      uint64_t ex = wf.exec();\n'
-                                        f'{_restore_vb_setup}'
-                                        '      for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
-                                        '        if ((ex & (1ULL << ln)) && !(dpp_write_mask & (1ULL << ln)))\n'
-                                        f'{_restore_dst_line}'
-                                        '      }\n'
-                                        '    }\n'
-                                        '  }\n'
-                                    )
-                            if _src0_name:
-                                _dpp_cleanup += f'  {_src0_name}.clear_delegate();\n'
-                            if _src1_name:
-                                _dpp_cleanup += f'  {_src1_name}.clear_delegate();\n'
+                        _apply_float_sdwa_clamp = bool(
+                            sem and sem.data_type in ('f16', 'f32', 'f64')
+                        )
+                        _clamp_template_arg = (
+                            'true' if _apply_float_sdwa_clamp else 'false'
+                        )
+                        _local_body = body
+                        _local_body = re.sub(
+                            r'amdgpu::RegisterAccess\(wf\)\.write_lane\(\s*'
+                            r'([A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
+                            rf'amdgpu::sdwa::write_lane<{_clamp_template_arg}>'
+                            r'(*this, wf, \1, lane, ',
+                            _local_body,
+                        )
+                        _local_body = re.sub(
+                            r'amdgpu::RegisterAccess\(wf\)\.write_lane64\(\s*'
+                            r'([A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
+                            rf'amdgpu::sdwa::write_lane64<{_clamp_template_arg}>'
+                            r'(*this, wf, \1, lane, ',
+                            _local_body,
+                        )
+                        if _supports_dpp_encoding:
+                            _local_body = _local_body.replace(
+                                '  uint64_t exec = wf.exec();',
+                                '  uint64_t exec = '
+                                'amdgpu::dpp::execution_lane_mask(*this, wf);',
+                                1,
+                            )
                         # Skip DPP/SDWA preamble and cleanup for unimplemented
                         # instructions whose body is ONLY a throw — the cleanup
                         # code after the throw would be unreachable. Only match
@@ -7894,7 +8119,7 @@ class CodeGenerator:
                                 f'(amdgpu::Wavefront &wf) {{\n'
                                 f'{_dpp_preamble}'
                                 f'{_local_true16_probe_body}'
-                                f'{body}\n'
+                                f'{_local_body}\n'
                                 f'{_dpp_cleanup}'
                                 f'{_sdwa_postamble}}}'
                             )
@@ -7954,6 +8179,41 @@ class CodeGenerator:
                                 f'(RegisterSet &uses) const {{\n'
                                 f'  {inst.fmt_true_enc_name}::implicit_uses(uses);\n'
                                 f'{_pd_body}'
+                                f'}}'
+                            )
+                        )
+                        # Operand-backed twin of implicit_uses: report each partial
+                        # def as a preserved-read Operand so a caller can resolve it
+                        # with its own VGPR-MSB role and width (see
+                        # Instruction::implicit_use_operands). Gated to profiles
+                        # with VGPR-MSB banking -- InstDefUse only consults this
+                        # hook when vgpr_msb != nullptr, so on every other
+                        # architecture the override would be dead weight.
+                        if self.isa_spec.profile.uses_vgpr_msb_indexing:
+                            _pd_operands_body = ''.join(
+                                f'  if ({name}.to_register_ref())\n'
+                                f'    operands.push_back(&{name});\n'
+                                for name in _partial_def_outputs
+                            )
+                            inst_impls.append(
+                                cgen.Line(
+                                    f'void {inst.fmt_name}::implicit_use_operands'
+                                    f'(std::vector<const ::rocjitsu::Operand *> &operands) '
+                                    f'const {{\n'
+                                    f'  {inst.fmt_true_enc_name}::implicit_use_operands(operands);\n'
+                                    f'{_pd_operands_body}'
+                                    f'}}'
+                                )
+                            )
+                    elif _writelane_implicit_use_opnd:
+                        inst_impls.append(
+                            cgen.Line(
+                                f'void {inst.fmt_name}::implicit_uses'
+                                f'(RegisterSet &uses) const {{\n'
+                                f'  {inst.fmt_true_enc_name}::implicit_uses(uses);\n'
+                                f'  if (auto r = '
+                                f'{_writelane_implicit_use_opnd}.to_register_ref())\n'
+                                f'    uses.expand(*r);\n'
                                 f'}}'
                             )
                         )
@@ -8137,16 +8397,23 @@ class CodeGenerator:
                             ('format', True),
                         ]
                     )
-                has_getreg = any(
+                has_hwreg_access = any(
                     self.semantics
                     and (s := self.semantics.instructions.get(i.name))
-                    and s.semantic_class in ('scalar_getreg', 'scalar_setreg')
+                    and (
+                        s.semantic_class
+                        in (
+                            'scalar_getreg',
+                            'scalar_setreg',
+                            'scalar_setreg_imm',
+                        )
+                    )
                     for i in all_insts
                 )
-                if has_getreg and not is_mem_enc:
+                if has_hwreg_access and not is_mem_enc:
                     cpp_includes.extend(
                         [
-                            ('rocjitsu/vm/amdgpu/compute_unit.h', False),
+                            ('rocjitsu/vm/amdgpu/hwreg.h', False),
                             ('util/log.h', False),
                         ]
                     )
@@ -8292,11 +8559,6 @@ class CodeGenerator:
                         class_func_impls.model.insert(
                             0, cgen.Line(self._emit_cdna4_matrix_fmt_helpers())
                         )
-
-                if has_getreg and profile.use_hwreg_helpers and not is_mem_enc:
-                    class_func_impls.execution_target(
-                        profile.split_execution_sources
-                    ).insert(0, self._emit_hwreg_helpers())
 
                 if is_smem:
                     direct_field = self.isa_spec.profile.smem_direct_offset_field
@@ -8793,6 +9055,26 @@ class CodeGenerator:
             prefixed_body = _re.sub(
                 r'\s*\(void\)wf;\s*(?://[^\n]*)?\n?', '\n', prefixed_body
             )
+            clamp_template_arg = (
+                'true' if sem.data_type in ('f16', 'f32', 'f64') else 'false'
+            )
+            prefixed_body = _re.sub(
+                r'amdgpu::RegisterAccess\(wf\)\.write_lane\(\s*'
+                r'(inst\.[A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
+                rf'sdwa::write_lane<{clamp_template_arg}>' r'(inst, wf, \1, lane, ',
+                prefixed_body,
+            )
+            prefixed_body = _re.sub(
+                r'amdgpu::RegisterAccess\(wf\)\.write_lane64\(\s*'
+                r'(inst\.[A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
+                rf'sdwa::write_lane64<{clamp_template_arg}>' r'(inst, wf, \1, lane, ',
+                prefixed_body,
+            )
+            prefixed_body = prefixed_body.replace(
+                '  uint64_t exec = wf.exec();',
+                '  uint64_t exec = dpp::execution_lane_mask(inst, wf);',
+                1,
+            )
             true16_special_ops = {
                 # These forms need reversed-source or ternary 16-bit arithmetic
                 # that the generic sema lowering cannot yet express without
@@ -8836,7 +9118,7 @@ class CodeGenerator:
                 )
                 setup_lines = ''.join(f'    {line}\n' for line in setup)
                 prefixed_body = (
-                    '  uint64_t exec = wf.exec();\n'
+                    '  uint64_t exec = dpp::execution_lane_mask(inst, wf);\n'
                     '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {\n'
                     '    if (!(exec & (1ULL << lane)))\n'
                     '      continue;\n'
@@ -8871,6 +9153,7 @@ class CodeGenerator:
             '#include "rocjitsu/vm/amdgpu/register_access.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
             *simd_extra_includes(),
             '#include "util/data_types.h"',
             '#include "util/except.h"',
@@ -9334,6 +9617,31 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             fn += ' default: return false; } }'
             code_lines.append(cgen.Line(fn))
 
+        # Generate is_immediate_type() constexpr function. Kept here (rather than
+        # in a generated .cpp anonymous namespace) so both the model operand.cpp
+        # (Operand::const_value) and the execution operand.cpp can use it.
+        imm_types = [
+            t
+            for t in (
+                'OPR_SIMM4',
+                'OPR_SIMM8',
+                'OPR_SIMM16',
+                'OPR_SIMM32',
+                'OPR_SIMM64',
+                'OPR_LABEL',
+                'OPR_WAITCNT',
+            )
+            if t in self.isa_spec.operand_types
+        ]
+        if imm_types:
+            fn = '[[nodiscard]] constexpr bool is_immediate_type(OperandType t) {'
+            fn += ' switch (t) {'
+            for t in imm_types:
+                fn += f' case OperandType::{t}:'
+            fn += ' return true;'
+            fn += ' default: return false; } }'
+            code_lines.append(cgen.Line(fn))
+
         opnd_type_def_file = CppFile(
             'operand_types',
             self.out_path,
@@ -9358,21 +9666,23 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             case _:
                 return None
 
+    @staticmethod
+    def _named_reg_ref(operand_name: str) -> tuple[str, int] | None:
+        """Map a named special register to (RegClass, index) for to_register_ref."""
+        match operand_name.upper():
+            case 'EXEC' | 'EXEC_LO':
+                return ('RegClass::EXEC', 0)
+            case 'EXEC_HI':
+                return ('RegClass::EXEC', 1)
+            case _:
+                return None
+
     def gen_operand(self) -> None:
         """Generate the ISA-specific Operand class with name resolution."""
         arch = self.isa_spec.arch_name
         scalar_null_precedes_m0 = self.isa_spec.profile.scalar_null_precedes_m0
         uses_packed_16bit_sources = (
             self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
-        )
-        # In wave32, EXEC_HI remains addressable as scalar scratch even though
-        # it is not part of the active-lane mask. Wave64-only ISAs can keep the
-        # conventional EXEC accessors in their generated operand code.
-        exec_register = (
-            'exec_raw()' if self.isa_spec.profile.wave_size == 32 else 'exec()'
-        )
-        set_exec_register = (
-            'set_exec_raw' if self.isa_spec.profile.wave_size == 32 else 'set_exec'
         )
 
         switch_cases = []
@@ -9430,6 +9740,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         f'if (encoding_value_ == {opsel_name}::{pattern.enum_name}) '
                         f'return "{pattern.operand_name}";'
                     )
+                    named_ref = self._named_reg_ref(pattern.operand_name)
+                    if named_ref is not None:
+                        named_class, named_index = named_ref
+                        ref_case_lines.append(
+                            f'if (encoding_value_ == {opsel_name}::{pattern.enum_name}) '
+                            f'return RegisterRef{{{named_class}, {named_index}, reg_width}};'
+                        )
                 elif pattern.kind == OperandNamePattern.LITERAL:
                     case_lines.append(
                         f'if (encoding_value_ == {opsel_name}::{pattern.enum_name}) '
@@ -9536,7 +9853,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             if uses_packed_16bit_sources
             else '  Operand(int size_bits, OperandType opr_type, int encoding_value);\n'
         )
-        literal64_decl = '  std::optional<uint64_t> literal64_value() const override;\n'
+        literal64_decl = (
+            '  std::optional<uint64_t> literal64_value() const override;\n'
+            '  std::optional<uint64_t> const_value() const override;\n'
+        )
         simd_public_decl = ''
         simd_private_decl = ''
         execution_backend_public_decl = ''
@@ -9569,13 +9889,20 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         )
         operand_base_decl = 'class Operand : public AmdgpuIsaOperand<Isa> {\n'
         operand_base_init = 'AmdgpuIsaOperand<Isa>'
+        execution_backend_ctor_init = ''
         if self.isa_spec.profile.split_execution_sources:
             operand_base_decl = 'class Operand : public IsaOperand<Isa> {\n'
             operand_base_init = 'IsaOperand<Isa>'
             execution_backend_public_decl = (
-                '  /// @brief Verify that full-simulator operand callbacks are registered.\n'
-                '  /// @throws std::logic_error if execution TUs are absent from this image.\n'
-                '  static void require_execution_backend();\n'
+                '  /// @brief Return the immutable full-simulator operand table.\n'
+                '  static const void *full_execution_backend();\n'
+                '  /// @brief Validate that every full-simulator operand callback is present.\n'
+                '  static bool full_execution_backend_complete();\n'
+            )
+            execution_backend_ctor_init = (
+                ',\n'
+                '      execution_backend_(static_cast<const ExecutionBackend *>(\n'
+                '          current_isa_operand_backend()))'
             )
             execution_decls += (
                 '  std::optional<uint32_t> simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const override;\n'
@@ -9587,6 +9914,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  void simd_notify_read_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const override;\n'
                 '  void simd_notify_read64_impl(const amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const override;\n'
                 '  void simd_notify_read64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const override;\n'
+                '  void simd_notify_write_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const override;\n'
+                '  void simd_notify_write64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const override;\n'
                 '  /// Same-image dispatch table populated by the execution TU before decode.\n'
                 '  /// This is not a registration ABI between independently loaded DSOs.\n'
                 '  struct ExecutionBackend {\n'
@@ -9610,9 +9939,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '    void (Operand::*simd_notify_read_mut)(amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;\n'
                 '    void (Operand::*simd_notify_read64)(const amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;\n'
                 '    void (Operand::*simd_notify_read64_mut)(amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;\n'
+                '    void (Operand::*simd_notify_write_mut)(amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;\n'
+                '    void (Operand::*simd_notify_write64_mut)(amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;\n'
                 '  };\n'
-                '  static ExecutionBackend &execution_backend();\n'
-                '  static const bool execution_backend_registered_;\n'
+                '  const ExecutionBackend *execution_backend_ = nullptr;\n'
                 '  bool simd_capable_exec() const;\n'
                 '  void read_lane_chunk_exec(const amdgpu::Wavefront &, uint32_t, uint32_t, uint32_t *) const;\n'
                 '  void write_lane_chunk_exec(amdgpu::Wavefront &, uint32_t, uint32_t, const uint32_t *, uint64_t) const;\n'
@@ -9633,6 +9963,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  void simd_notify_read_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;\n'
                 '  void simd_notify_read64_exec(const amdgpu::Wavefront &, uint64_t, uint8_t) const;\n'
                 '  void simd_notify_read64_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;\n'
+                '  void simd_notify_write_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;\n'
+                '  void simd_notify_write64_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;\n'
             )
 
         class_def = [
@@ -9689,11 +10021,28 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  return literal64_value_;\n'
             '}'
         )
+        # Wavefront-free constant value: the register-state-free subset of
+        # read_scalar(). Registers are not constants and return nullopt, which
+        # also keeps inline-const resolution from misreading a raw register
+        # index as a small immediate. This is a model virtual (it participates in
+        # the Operand vtable), so it must live in the model translation unit.
+        const_value_impl = (
+            'std::optional<uint64_t> Operand::const_value() const {\n'
+            '  if (has_literal64_)\n'
+            '    return literal64_value_;\n'
+            '  if (is_immediate_type(opr_type_))\n'
+            '    return static_cast<uint64_t>(static_cast<uint32_t>(encoding_value_));\n'
+            '  if (to_register_ref())\n'
+            '    return std::nullopt;\n'
+            '  return amdgpu::resolve_src_scalar_statically(encoding_value_);\n'
+            '}'
+        )
         class_impl = _ImplOutputs(
             model=[
                 cgen.Line(
                     f'Operand::Operand({operand_ctor_args})\n'
                     f'    : {operand_base_init}(size_bits, opr_type, encoding_value)'
+                    f'{execution_backend_ctor_init}'
                     f'{operand_ctor_init} {{\n'
                     '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
                     '}'
@@ -9702,7 +10051,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 cgen.Line(
                     'Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
                     '                 uint16_t literal16_display_value, bool has_literal16_display)\n'
-                    f'    : {operand_base_init}(size_bits, opr_type, encoding_value),\n'
+                    f'    : {operand_base_init}(size_bits, opr_type, encoding_value)'
+                    f'{execution_backend_ctor_init},\n'
                     '      literal16_display_value_(literal16_display_value),\n'
                     '      has_literal16_display_(has_literal16_display) {\n'
                     '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
@@ -9710,12 +10060,14 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 ),
                 cgen.Line(
                     'Operand::Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64)\n'
-                    f'    : {operand_base_init}(size_bits, opr_type, static_cast<int>(literal64_value)),\n'
+                    f'    : {operand_base_init}(size_bits, opr_type, static_cast<int>(literal64_value))'
+                    f'{execution_backend_ctor_init},\n'
                     '      literal64_value_(literal64_value), has_literal64_(is_literal64) {\n'
                     '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
                     '}'
                 ),
                 cgen.Line(literal64_impl),
+                cgen.Line(const_value_impl),
                 cgen.Line(name_impl),
                 cgen.Line(ref_impl),
             ]
@@ -9723,165 +10075,184 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
         if self.isa_spec.profile.split_execution_sources:
             class_impl.model.append(cgen.Line(textwrap.dedent('''\
-                    Operand::ExecutionBackend &Operand::execution_backend() {
-                      static ExecutionBackend backend;
-                      return backend;
-                    }
-
-                    void Operand::require_execution_backend() {
-                      const auto &backend = execution_backend();
-                      if (!backend.simd_capable || !backend.read_lane_chunk ||
-                          !backend.write_lane_chunk || !backend.read_scalar ||
-                          !backend.read_lane || !backend.write_scalar ||
-                          !backend.write_lane || !backend.read_lane64 ||
-                          !backend.write_lane64 || !backend.read_scalar64 ||
-                          !backend.write_scalar64 || !backend.simd_vgpr_base ||
-                          !backend.simd_vgpr_storage || !backend.simd_vgpr_storage_mut ||
-                          !backend.simd_vgpr_storage64 || !backend.simd_vgpr_storage64_mut ||
-                          !backend.simd_notify_read || !backend.simd_notify_read_mut ||
-                          !backend.simd_notify_read64 || !backend.simd_notify_read64_mut)
-                        throw std::logic_error("operand execution backend is not linked");
-                    }
-
                     bool Operand::simd_capable() const {
-                      auto fn = execution_backend().simd_capable;
-                      return fn ? (this->*fn)() : false;
+                      decltype(ExecutionBackend::simd_capable) callback =
+                          execution_backend_ ? execution_backend_->simd_capable : nullptr;
+                      return callback ? (this->*callback)() : false;
                     }
 
                     void Operand::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base,
                                                   uint32_t count, uint32_t *out) const {
-                      auto fn = execution_backend().read_lane_chunk;
-                      if (!fn)
+                      decltype(ExecutionBackend::read_lane_chunk) callback =
+                          execution_backend_ ? execution_backend_->read_lane_chunk : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      (this->*fn)(wf, lane_base, count, out);
+                      (this->*callback)(wf, lane_base, count, out);
                     }
 
                     void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base,
                                                    uint32_t count, const uint32_t *vals,
                                                    uint64_t mask) const {
-                      auto fn = execution_backend().write_lane_chunk;
-                      if (!fn)
+                      decltype(ExecutionBackend::write_lane_chunk) callback =
+                          execution_backend_ ? execution_backend_->write_lane_chunk : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      (this->*fn)(wf, lane_base, count, vals, mask);
+                      (this->*callback)(wf, lane_base, count, vals, mask);
                     }
 
                     uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
-                      auto fn = execution_backend().read_scalar;
-                      if (!fn)
+                      decltype(ExecutionBackend::read_scalar) callback =
+                          execution_backend_ ? execution_backend_->read_scalar : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      return (this->*fn)(wf);
+                      return (this->*callback)(wf);
                     }
 
                     uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
-                      auto fn = execution_backend().read_lane;
-                      if (!fn)
+                      decltype(ExecutionBackend::read_lane) callback =
+                          execution_backend_ ? execution_backend_->read_lane : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      return (this->*fn)(wf, lane);
+                      return (this->*callback)(wf, lane);
                     }
 
                     void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {
-                      auto fn = execution_backend().write_scalar;
-                      if (!fn)
+                      decltype(ExecutionBackend::write_scalar) callback =
+                          execution_backend_ ? execution_backend_->write_scalar : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      (this->*fn)(wf, val);
+                      (this->*callback)(wf, val);
                     }
 
                     void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane,
                                              uint32_t val) const {
-                      auto fn = execution_backend().write_lane;
-                      if (!fn)
+                      decltype(ExecutionBackend::write_lane) callback =
+                          execution_backend_ ? execution_backend_->write_lane : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      (this->*fn)(wf, lane, val);
+                      (this->*callback)(wf, lane, val);
                     }
 
                     uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf,
                                                   uint32_t lane) const {
-                      auto fn = execution_backend().read_lane64;
-                      if (!fn)
+                      decltype(ExecutionBackend::read_lane64) callback =
+                          execution_backend_ ? execution_backend_->read_lane64 : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      return (this->*fn)(wf, lane);
+                      return (this->*callback)(wf, lane);
                     }
 
                     void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane,
                                                uint64_t val) const {
-                      auto fn = execution_backend().write_lane64;
-                      if (!fn)
+                      decltype(ExecutionBackend::write_lane64) callback =
+                          execution_backend_ ? execution_backend_->write_lane64 : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      (this->*fn)(wf, lane, val);
+                      (this->*callback)(wf, lane, val);
                     }
 
                     uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
-                      auto fn = execution_backend().read_scalar64;
-                      if (!fn)
+                      decltype(ExecutionBackend::read_scalar64) callback =
+                          execution_backend_ ? execution_backend_->read_scalar64 : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      return (this->*fn)(wf);
+                      return (this->*callback)(wf);
                     }
 
                     void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {
-                      auto fn = execution_backend().write_scalar64;
-                      if (!fn)
+                      decltype(ExecutionBackend::write_scalar64) callback =
+                          execution_backend_ ? execution_backend_->write_scalar64 : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      (this->*fn)(wf, val);
+                      (this->*callback)(wf, val);
                     }
 
                     std::optional<uint32_t>
                     Operand::simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const {
-                      auto fn = execution_backend().simd_vgpr_base;
-                      return fn ? (this->*fn)(wf) : std::nullopt;
+                      decltype(ExecutionBackend::simd_vgpr_base) callback =
+                          execution_backend_ ? execution_backend_->simd_vgpr_base : nullptr;
+                      return callback ? (this->*callback)(wf) : std::nullopt;
                     }
 
                     const amdgpu::VgprStorage *
                     Operand::simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
-                      auto fn = execution_backend().simd_vgpr_storage;
-                      return fn ? (this->*fn)(wf) : nullptr;
+                      decltype(ExecutionBackend::simd_vgpr_storage) callback =
+                          execution_backend_ ? execution_backend_->simd_vgpr_storage : nullptr;
+                      return callback ? (this->*callback)(wf) : nullptr;
                     }
 
                     amdgpu::VgprStorage *
                     Operand::simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const {
-                      auto fn = execution_backend().simd_vgpr_storage_mut;
-                      return fn ? (this->*fn)(wf) : nullptr;
+                      decltype(ExecutionBackend::simd_vgpr_storage_mut) callback =
+                          execution_backend_ ? execution_backend_->simd_vgpr_storage_mut : nullptr;
+                      return callback ? (this->*callback)(wf) : nullptr;
                     }
 
                     amdgpu::ConstVgprStoragePair64
                     Operand::simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const {
-                      auto fn = execution_backend().simd_vgpr_storage64;
-                      return fn ? (this->*fn)(wf)
-                                : amdgpu::ConstVgprStoragePair64{nullptr, nullptr};
+                      decltype(ExecutionBackend::simd_vgpr_storage64) callback =
+                          execution_backend_ ? execution_backend_->simd_vgpr_storage64 : nullptr;
+                      return callback ? (this->*callback)(wf)
+                                      : amdgpu::ConstVgprStoragePair64{nullptr, nullptr};
                     }
 
                     amdgpu::VgprStoragePair64
                     Operand::simd_vgpr_storage64_mut_impl(amdgpu::Wavefront &wf) const {
-                      auto fn = execution_backend().simd_vgpr_storage64_mut;
-                      return fn ? (this->*fn)(wf)
-                                : amdgpu::VgprStoragePair64{nullptr, nullptr};
+                      decltype(ExecutionBackend::simd_vgpr_storage64_mut) callback =
+                          execution_backend_ ? execution_backend_->simd_vgpr_storage64_mut : nullptr;
+                      return callback ? (this->*callback)(wf)
+                                      : amdgpu::VgprStoragePair64{nullptr, nullptr};
                     }
 
                     void Operand::simd_notify_read_impl(const amdgpu::Wavefront &wf,
                                                         uint64_t lane_mask,
                                                         uint8_t byte_mask) const {
-                      if (auto fn = execution_backend().simd_notify_read)
-                        (this->*fn)(wf, lane_mask, byte_mask);
+                      if (decltype(ExecutionBackend::simd_notify_read) callback =
+                              execution_backend_ ? execution_backend_->simd_notify_read : nullptr)
+                        (this->*callback)(wf, lane_mask, byte_mask);
                     }
 
                     void Operand::simd_notify_read_mut_impl(amdgpu::Wavefront &wf,
                                                             uint64_t lane_mask,
                                                             uint8_t byte_mask) const {
-                      if (auto fn = execution_backend().simd_notify_read_mut)
-                        (this->*fn)(wf, lane_mask, byte_mask);
+                      if (decltype(ExecutionBackend::simd_notify_read_mut) callback =
+                              execution_backend_ ? execution_backend_->simd_notify_read_mut : nullptr)
+                        (this->*callback)(wf, lane_mask, byte_mask);
                     }
 
                     void Operand::simd_notify_read64_impl(const amdgpu::Wavefront &wf,
                                                           uint64_t lane_mask,
                                                           uint8_t byte_mask) const {
-                      if (auto fn = execution_backend().simd_notify_read64)
-                        (this->*fn)(wf, lane_mask, byte_mask);
+                      if (decltype(ExecutionBackend::simd_notify_read64) callback =
+                              execution_backend_ ? execution_backend_->simd_notify_read64 : nullptr)
+                        (this->*callback)(wf, lane_mask, byte_mask);
                     }
 
                     void Operand::simd_notify_read64_mut_impl(amdgpu::Wavefront &wf,
                                                               uint64_t lane_mask,
                                                               uint8_t byte_mask) const {
-                      if (auto fn = execution_backend().simd_notify_read64_mut)
-                        (this->*fn)(wf, lane_mask, byte_mask);
+                      if (decltype(ExecutionBackend::simd_notify_read64_mut) callback =
+                              execution_backend_ ? execution_backend_->simd_notify_read64_mut
+                                                 : nullptr)
+                        (this->*callback)(wf, lane_mask, byte_mask);
+                    }
+
+                    void Operand::simd_notify_write_mut_impl(amdgpu::Wavefront &wf,
+                                                             uint64_t lane_mask,
+                                                             uint8_t byte_mask) const {
+                      if (decltype(ExecutionBackend::simd_notify_write_mut) callback =
+                              execution_backend_ ? execution_backend_->simd_notify_write_mut
+                                                 : nullptr)
+                        (this->*callback)(wf, lane_mask, byte_mask);
+                    }
+
+                    void Operand::simd_notify_write64_mut_impl(amdgpu::Wavefront &wf,
+                                                               uint64_t lane_mask,
+                                                               uint8_t byte_mask) const {
+                      if (decltype(ExecutionBackend::simd_notify_write64_mut) callback =
+                              execution_backend_ ? execution_backend_->simd_notify_write64_mut
+                                                 : nullptr)
+                        (this->*callback)(wf, lane_mask, byte_mask);
                     }
                     ''')))
 
@@ -9898,15 +10269,18 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '                                                           OperandType opr_type, int ev) {\n'
                 '  if (!packed_16bit_source || size_bits != 16)\n'
                 '    return std::nullopt;\n'
-                '  if (opr_type == OperandType::OPR_VGPR) {\n'
-                '    if (ev >= 0 && ev <= 127)\n'
-                '      return Packed16VgprSource{static_cast<uint32_t>(ev), 0};\n'
-                '    if (ev >= 128 && ev <= 255)\n'
-                '      return Packed16VgprSource{static_cast<uint32_t>(ev - 128), 16};\n'
+                '  int selector_base;\n'
+                '  if (opr_type == OperandType::OPR_VGPR)\n'
+                '    selector_base = 0;\n'
+                '  else if (opr_type == OperandType::OPR_SRC)\n'
+                '    selector_base = 256;\n'
+                '  else\n'
                 '    return std::nullopt;\n'
-                '  }\n'
-                '  if (ev >= 384 && ev <= 511)\n'
-                '    return Packed16VgprSource{static_cast<uint32_t>(ev - 384), 16};\n'
+                '  int selector = ev - selector_base;\n'
+                '  if (selector >= 0 && selector <= 127)\n'
+                '    return Packed16VgprSource{static_cast<uint32_t>(selector), 0};\n'
+                '  if (selector >= 128 && selector <= 255)\n'
+                '    return Packed16VgprSource{static_cast<uint32_t>(selector - 128), 16};\n'
                 '  return std::nullopt;\n'
                 '}\n'
                 '\n'
@@ -9953,18 +10327,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         _is_vgpr_only_body = (
             'bool is_vgpr_only_type(OperandType t) {\n'
             '  return ' + ' ||\n         '.join(_vgpr_only_parts) + ';\n'
-            '}'
-        )
-        _imm_parts = ['t == OperandType::OPR_SIMM16', 't == OperandType::OPR_SIMM32']
-        for _opt in ('OPR_SIMM4', 'OPR_SIMM8', 'OPR_SIMM64'):
-            if _opt in _opr:
-                _imm_parts.append(f't == OperandType::{_opt}')
-        for _opt in ('OPR_LABEL', 'OPR_WAITCNT'):
-            if _opt in _opr:
-                _imm_parts.append(f't == OperandType::{_opt}')
-        _is_immediate_body = (
-            'bool is_immediate_type(OperandType t) {\n'
-            '  return ' + ' ||\n         '.join(_imm_parts) + ';\n'
             '}'
         )
         # AccVGPR offset within the unified VGPR block.  On CDNA3/4, AccVGPRs
@@ -10110,7 +10472,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     '  if (auto packed = packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, ev)) {',
                     '    uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);',
                     '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, false) : off;',
-                    '    uint32_t raw = amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane);',
+                    '    uint8_t byte_mask = packed->shift ? rocjitsu::ExecutionPlugin::kHighHalfByteMask : rocjitsu::ExecutionPlugin::kLowHalfByteMask;',
+                    '    uint32_t raw = amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane, byte_mask);',
                     '    return (raw >> packed->shift) & 0xffffu;',
                     '  }',
                 ]
@@ -10124,8 +10487,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  if (is_immediate_type(opr_type_))',
                 '    return static_cast<uint32_t>(ev);',
                 '  if (size_bits_ == 16)',
-                '    return resolve_src_scalar16(wf, ev);',
-                '  return resolve_src_scalar(wf, ev);',
+                '    return amdgpu::resolve_src_scalar16(wf, ev, kM0EncodingValue);',
+                '  return amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);',
                 '}',
             ]
         )
@@ -10145,7 +10508,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return literal64_value_;\n'
             '  if (is_immediate_type(opr_type_))\n'
             '    return read_immediate64(opr_type_, ev);\n'
-            '  return resolve_src_scalar64(wf, ev);\n'
+            '  return amdgpu::resolve_src_scalar64(wf, ev, kM0EncodingValue);\n'
             '}'
         )
 
@@ -10264,10 +10627,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
                     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, true) : off;
                     uint32_t idx = wf.vgpr_alloc().base + voff;
-                    uint32_t old = amdgpu::RegisterAccess(wf.cu()).read_vgpr(idx, lane);
-                    uint32_t keep_mask = packed->shift ? 0x0000ffffu : 0xffff0000u;
-                    uint32_t merged = (old & keep_mask) | ((val & 0xffffu) << packed->shift);
-                    amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, merged);
+                    uint8_t write_byte_mask = packed->shift ? rocjitsu::ExecutionPlugin::kHighHalfByteMask : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
+                    uint32_t placed = (val & 0xffffu) << packed->shift;
+                    amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, placed, write_byte_mask);
                     return;
                   }
                 ''')
@@ -10275,265 +10637,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         resolve_code = cgen.Line(
             'namespace {\n'
             '\n'
-            'uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {\n'
-            '  if (ev == 102)\n'
-            '    return static_cast<uint32_t>(wf.scratch_base());\n'
-            '  if (ev == 103)\n'
-            '    return static_cast<uint32_t>(wf.scratch_base() >> 32);\n'
-            '  if (ev <= 105)\n'
-            '    return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
-            '  if (ev == 106)\n'
-            '    return static_cast<uint32_t>(wf.vcc());\n'
-            '  if (ev == 107)\n'
-            '    return static_cast<uint32_t>(wf.vcc() >> 32);\n'
-            '  if (ev >= 108 && ev <= 123)\n'
-            '    return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
-            + (
-                '  if (ev == 124)\n'
-                '    return 0u; // NULL\n'
-                '  if (ev == 125)\n'
-                '    return wf.m0();\n'
-                if scalar_null_precedes_m0
-                else '  if (ev == 124)\n' '    return wf.m0();\n'
-            )
-            + '  if (ev == 126)\n'
-            '    return static_cast<uint32_t>(wf.exec());\n'
-            '  if (ev == 127)\n'
-            f'    return static_cast<uint32_t>(wf.{exec_register} >> 32);\n'
-            '  if (ev >= 128 && ev <= 192)\n'
-            '    return static_cast<uint32_t>(ev - 128);\n'
-            '  if (ev >= 193 && ev <= 208)\n'
-            '    return static_cast<uint32_t>(static_cast<int32_t>(-(ev - 192)));\n'
-            '  if (ev == 230)\n'
-            '    return static_cast<uint32_t>(wf.scratch_base()); // SRC_FLAT_SCRATCH_BASE_LO\n'
-            '  if (ev == 231)\n'
-            '    return static_cast<uint32_t>(wf.scratch_base() >> 32); // SRC_FLAT_SCRATCH_BASE_HI\n'
-            '  if (ev == 240)\n'
-            '    return 0x3F000000u; // 0.5f\n'
-            '  if (ev == 241)\n'
-            '    return 0xBF000000u; // -0.5f\n'
-            '  if (ev == 242)\n'
-            '    return 0x3F800000u; // 1.0f\n'
-            '  if (ev == 243)\n'
-            '    return 0xBF800000u; // -1.0f\n'
-            '  if (ev == 244)\n'
-            '    return 0x40000000u; // 2.0f\n'
-            '  if (ev == 245)\n'
-            '    return 0xC0000000u; // -2.0f\n'
-            '  if (ev == 246)\n'
-            '    return 0x40800000u; // 4.0f\n'
-            '  if (ev == 247)\n'
-            '    return 0xC0800000u; // -4.0f\n'
-            '  if (ev == 248)\n'
-            '    return 0x3E22F983u; // 1/(2*pi)\n'
-            '  if (ev == 235)\n'
-            '    return static_cast<uint32_t>(wf.shared_aperture_base() >> 32); // SRC_SHARED_BASE\n'
-            '  if (ev == 236)\n'
-            '    return static_cast<uint32_t>(wf.shared_aperture_limit() >> 32); // SRC_SHARED_LIMIT\n'
-            '  if (ev == 237)\n'
-            '    return static_cast<uint32_t>(wf.private_aperture_base() >> 32); // SRC_PRIVATE_BASE\n'
-            '  if (ev == 238)\n'
-            '    return static_cast<uint32_t>(wf.private_aperture_limit() >> 32); // SRC_PRIVATE_LIMIT\n'
-            '  if (ev == 249)\n'
-            '    return 0u; // SRC_POPS_EXITING_WAVE_ID (not used in compute)\n'
-            '  if (ev == 250)\n'
-            '    return 0u; // NULL\n'
-            '  if (ev == 251)\n'
-            '    return (wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL))) == 0 ? 1u : 0u; // VCCZ\n'
-            '  if (ev == 252) {\n'
-            '    uint64_t active = wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL);\n'
-            '    return (wf.exec() & active) == 0 ? 1u : 0u; // EXECZ\n'
-            '  }\n'
-            '  if (ev == 253)\n'
-            '    return wf.read_scc() ? 1u : 0u; // SCC\n'
-            '  throw std::logic_error("Unsupported encoding value for scalar read: " + std::to_string(ev));\n'
-            '}\n'
-            '\n'
-            'uint32_t resolve_src_scalar16(const amdgpu::Wavefront &wf, int ev) {\n'
-            '  switch (ev) {\n'
-            '  case 240:\n'
-            '    return 0x3800u; // 0.5h\n'
-            '  case 241:\n'
-            '    return 0xB800u; // -0.5h\n'
-            '  case 242:\n'
-            '    return 0x3C00u; // 1.0h\n'
-            '  case 243:\n'
-            '    return 0xBC00u; // -1.0h\n'
-            '  case 244:\n'
-            '    return 0x4000u; // 2.0h\n'
-            '  case 245:\n'
-            '    return 0xC000u; // -2.0h\n'
-            '  case 246:\n'
-            '    return 0x4400u; // 4.0h\n'
-            '  case 247:\n'
-            '    return 0xC400u; // -4.0h\n'
-            '  case 248:\n'
-            '    return 0x3118u; // f16 1/(2*pi)\n'
-            '  default:\n'
-            '    return resolve_src_scalar(wf, ev);\n'
-            '  }\n'
-            '}\n'
-            '\n'
-            '// Must stay in sync with resolve_src_scalar above — returns true for\n'
-            '// exactly the encoding values that resolve_src_scalar handles without\n'
-            '// throwing. Used by Isa::simd_capable_value() to keep the SIMD fast\n'
-            '// path off operands whose scalar broadcast would throw at runtime.\n'
-            'bool can_resolve_src_scalar(int ev) {\n'
-            + (
-                '  return (ev >= 0 && ev <= 107) || (ev >= 108 && ev <= 123) ||\n'
-                '         ev == 124 || ev == 125 || ev == 126 || ev == 127 ||\n'
-                '         (ev >= 128 && ev <= 208) || ev == 230 || ev == 231 ||\n'
-                '         (ev >= 235 && ev <= 238) || (ev >= 240 && ev <= 253);\n'
-                if scalar_null_precedes_m0
-                else '  return (ev >= 0 && ev <= 107) || (ev >= 108 && ev <= 123) ||\n'
-                '         ev == 124 || ev == 126 || ev == 127 ||\n'
-                '         (ev >= 128 && ev <= 208) || (ev >= 235 && ev <= 238) ||\n'
-                '         (ev >= 240 && ev <= 253);\n'
-            )
-            + '}\n'
-            '\n'
-            'uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {\n'
-            '  if (ev == 102)\n'
-            '    return wf.scratch_base();\n'
-            '  if (ev <= 105) {\n'
-            '    uint32_t lo = amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
-            '    uint32_t hi = amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));\n'
-            '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
-            '  }\n'
-            '  if (ev == 106)\n'
-            '    return wf.vcc();\n'
-            '  if (ev >= 108 && ev <= 122) {\n'
-            '    uint32_t lo = amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
-            '    uint32_t hi = amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));\n'
-            '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
-            '  }\n'
-            + (
-                '  if (ev == 124)\n'
-                '    return 0u; // NULL\n'
-                '  if (ev == 125)\n'
-                '    return wf.m0();\n'
-                if scalar_null_precedes_m0
-                else '  if (ev == 124)\n' '    return wf.m0();\n'
-            )
-            + '  if (ev == 126)\n'
-            f'    return wf.{exec_register};\n'
-            '  if (ev >= 128 && ev <= 192)\n'
-            '    return static_cast<uint64_t>(ev - 128);\n'
-            '  if (ev >= 193 && ev <= 208)\n'
-            '    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(-(ev - 192))));\n'
-            '  if (ev == 230)\n'
-            '    return wf.scratch_base(); // SRC_FLAT_SCRATCH_BASE\n'
-            '  if (ev == 240)\n'
-            '    return 0x3FE0000000000000ULL; // 0.5\n'
-            '  if (ev == 241)\n'
-            '    return 0xBFE0000000000000ULL; // -0.5\n'
-            '  if (ev == 242)\n'
-            '    return 0x3FF0000000000000ULL; // 1.0\n'
-            '  if (ev == 243)\n'
-            '    return 0xBFF0000000000000ULL; // -1.0\n'
-            '  if (ev == 244)\n'
-            '    return 0x4000000000000000ULL; // 2.0\n'
-            '  if (ev == 245)\n'
-            '    return 0xC000000000000000ULL; // -2.0\n'
-            '  if (ev == 246)\n'
-            '    return 0x4010000000000000ULL; // 4.0\n'
-            '  if (ev == 247)\n'
-            '    return 0xC010000000000000ULL; // -4.0\n'
-            '  if (ev == 248)\n'
-            '    return 0x3FC45F306DC9C883ULL; // 1/(2*pi)\n'
-            '  if (ev == 235)\n'
-            '    return wf.shared_aperture_base(); // SRC_SHARED_BASE\n'
-            '  if (ev == 236)\n'
-            '    return wf.shared_aperture_limit(); // SRC_SHARED_LIMIT\n'
-            '  if (ev == 237)\n'
-            '    return wf.private_aperture_base(); // SRC_PRIVATE_BASE\n'
-            '  if (ev == 238)\n'
-            '    return wf.private_aperture_limit(); // SRC_PRIVATE_LIMIT\n'
-            '  throw std::logic_error("Unsupported encoding value for scalar64 read: " + std::to_string(ev));\n'
-            '}\n'
-            '\n'
-            'void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {\n'
-            '  if (ev == 102) {\n'
-            '    uint64_t sb = wf.scratch_base();\n'
-            '    wf.set_scratch_base((sb & 0xFFFFFFFF00000000ULL) | val);\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev == 103) {\n'
-            '    uint64_t sb = wf.scratch_base();\n'
-            '    wf.set_scratch_base((sb & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev <= 105) {\n'
-            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev == 106) {\n'
-            '    wf.set_vcc((wf.vcc() & 0xFFFFFFFF00000000ULL) | val);\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev == 107) {\n'
-            '    wf.set_vcc((wf.vcc() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev >= 108 && ev <= 123) {\n'
-            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);\n'
-            '    return;\n'
-            '  }\n'
-            + (
-                '  if (ev == 124)\n'
-                '    return;\n'
-                '  if (ev == 125) {\n'
-                '    wf.set_m0(val);\n'
-                '    return;\n'
-                '  }\n'
-                if scalar_null_precedes_m0
-                else '  if (ev == 124) {\n'
-                '    wf.set_m0(val);\n'
-                '    return;\n'
-                '  }\n'
-            )
-            + '  if (ev == 126) {\n'
-            '    wf.set_exec((wf.exec() & 0xFFFFFFFF00000000ULL) | val);\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev == 127) {\n'
-            f'    wf.{set_exec_register}((wf.{exec_register} & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));\n'
-            '    return;\n'
-            '  }\n'
-            '  throw std::logic_error("Unsupported encoding value for scalar write: " + std::to_string(ev));\n'
-            '}\n'
-            '\n'
-            'void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {\n'
-            '  if (ev == 102) {\n'
-            '    wf.set_scratch_base(val);\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev <= 105) {\n'
-            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));\n'
-            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev == 106) {\n'
-            '    wf.set_vcc(val);\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev >= 108 && ev <= 122) {\n'
-            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));\n'
-            '    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev == 124)\n'
-            '    return;\n'
-            '  if (ev == 126) {\n'
-            f'    wf.{set_exec_register}(val);\n'
-            '    return;\n'
-            '  }\n'
-            '  throw std::logic_error("Unsupported encoding value for scalar64 write: " + std::to_string(ev));\n'
-            '}\n'
+            f'constexpr int kM0EncodingValue = {125 if scalar_null_precedes_m0 else 124};\n'
             '\n'
             + _is_vgpr_only_body
-            + '\n\n'
-            + _is_immediate_body
             + '\n\n'
             + _vgpr_index_body
             + '\n\n'
@@ -10549,13 +10655,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             + '\n\n'
             'bool Isa::simd_capable_value(OperandType opr_type, int ev) {\n'
             '  return resolved_vgpr_offset(opr_type, ev).has_value() ||\n'
-            '         is_immediate_type(opr_type) || can_resolve_src_scalar(ev);\n'
+            '         is_immediate_type(opr_type) || amdgpu::can_resolve_src_scalar(ev, kM0EncodingValue);\n'
             '}\n'
             '\n'
             'uint32_t Isa::simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type,\n'
             '                                   int ev) {\n'
             '  return is_immediate_type(opr_type) ? static_cast<uint32_t>(ev)\n'
-            '                                     : resolve_src_scalar(wf, ev);\n'
+            '                                     : amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);\n'
             '}\n'
             '\n'
             + simd_methods
@@ -10566,12 +10672,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return static_cast<uint32_t>(literal64_value_);\n'
             '  if (is_immediate_type(opr_type_))\n'
             '    return static_cast<uint32_t>(encoding_value_);\n'
-            '  return resolve_src_scalar(wf, encoding_value_);\n'
+            '  return amdgpu::resolve_src_scalar(wf, encoding_value_, kM0EncodingValue);\n'
             '}\n'
             '\n' + _read_lane_body + '\n\n'
             'void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {\n'
             + _inert_guard(cond='!is_writable()')
-            + '  resolve_dst_write(wf, encoding_value_, val);\n'
+            + '  amdgpu::resolve_dst_write(wf, encoding_value_, val, kM0EncodingValue);\n'
             '}\n'
             '\n'
             'void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {\n'
@@ -10602,12 +10708,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return literal64_value_;\n'
             '  if (is_immediate_type(opr_type_))\n'
             '    return read_immediate64(opr_type_, encoding_value_);\n'
-            '  return resolve_src_scalar64(wf, encoding_value_);\n'
+            '  return amdgpu::resolve_src_scalar64(wf, encoding_value_, kM0EncodingValue);\n'
             '}\n'
             '\n'
             'void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {\n'
             + _inert_guard(cond='!is_writable()')
-            + '  resolve_dst_write64(wf, encoding_value_, val);\n'
+            + '  amdgpu::resolve_dst_write64(wf, encoding_value_, val);\n'
             '}'
         )
         if self.isa_spec.profile.split_execution_sources:
@@ -10732,8 +10838,31 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                   }
                 }
 
-                const bool Operand::execution_backend_registered_ = [] {
-                  execution_backend() = ExecutionBackend{
+                void Operand::simd_notify_write_mut_exec(amdgpu::Wavefront &wf,
+                                                         uint64_t lane_mask,
+                                                         uint8_t byte_mask) const {
+                  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+                    uint32_t voff =
+                        wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+                    wf.cu().raw_cu().notify_vgpr_write(
+                        &wf, wf.vgpr_alloc().base + voff, lane_mask, byte_mask);
+                  }
+                }
+
+                void Operand::simd_notify_write64_mut_exec(amdgpu::Wavefront &wf,
+                                                           uint64_t lane_mask,
+                                                           uint8_t byte_mask) const {
+                  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+                    uint32_t voff =
+                        wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+                    uint32_t reg = wf.vgpr_alloc().base + voff;
+                    wf.cu().raw_cu().notify_vgpr_write(&wf, reg, lane_mask, byte_mask);
+                    wf.cu().raw_cu().notify_vgpr_write(&wf, reg + 1, lane_mask, byte_mask);
+                  }
+                }
+
+                const void *Operand::full_execution_backend() {
+                  static const ExecutionBackend backend{
                       &Operand::simd_capable_exec,
                       &Operand::read_lane_chunk_exec,
                       &Operand::write_lane_chunk_exec,
@@ -10754,25 +10883,60 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                       &Operand::simd_notify_read_mut_exec,
                       &Operand::simd_notify_read64_exec,
                       &Operand::simd_notify_read64_mut_exec,
+                      &Operand::simd_notify_write_mut_exec,
+                      &Operand::simd_notify_write64_mut_exec,
                   };
-                  return true;
-                }();
+                  return &backend;
+                }
+
+                bool Operand::full_execution_backend_complete() {
+                  const auto is_complete = [](const ExecutionBackend &backend) {
+                    return backend.simd_capable != nullptr &&
+                           backend.read_lane_chunk != nullptr &&
+                           backend.write_lane_chunk != nullptr &&
+                           backend.read_scalar != nullptr &&
+                           backend.read_lane != nullptr &&
+                           backend.write_scalar != nullptr &&
+                           backend.write_lane != nullptr &&
+                           backend.read_lane64 != nullptr &&
+                           backend.write_lane64 != nullptr &&
+                           backend.read_scalar64 != nullptr &&
+                           backend.write_scalar64 != nullptr &&
+                           backend.simd_vgpr_base != nullptr &&
+                           backend.simd_vgpr_storage != nullptr &&
+                           backend.simd_vgpr_storage_mut != nullptr &&
+                           backend.simd_vgpr_storage64 != nullptr &&
+                           backend.simd_vgpr_storage64_mut != nullptr &&
+                           backend.simd_notify_read != nullptr &&
+                           backend.simd_notify_read_mut != nullptr &&
+                           backend.simd_notify_read64 != nullptr &&
+                           backend.simd_notify_read64_mut != nullptr &&
+                           backend.simd_notify_write_mut != nullptr &&
+                           backend.simd_notify_write64_mut != nullptr;
+                  };
+                  return is_complete(*static_cast<const ExecutionBackend *>(
+                      full_execution_backend()));
+                }
                 ''')
             resolve_code = cgen.Line(execution_code)
         class_impl.execution_target(
             self.isa_spec.profile.split_execution_sources
         ).append(resolve_code)
 
+        operand_header_includes = [
+            (f'rocjitsu/isa/arch/amdgpu/{arch}/isa.h', False),
+            (f'rocjitsu/isa/arch/amdgpu/{arch}/operand_types.h', False),
+            ('rocjitsu/isa/operand.h', False),
+            ('string', True),
+        ]
+        if self.isa_spec.profile.split_execution_sources:
+            operand_header_includes.append(('rocjitsu/isa/execution_backend.h', False))
+
         header_file = CppFile(
             'operand',
             self.out_path,
             True,
-            [
-                (f'rocjitsu/isa/arch/amdgpu/{arch}/isa.h', False),
-                (f'rocjitsu/isa/arch/amdgpu/{arch}/operand_types.h', False),
-                ('rocjitsu/isa/operand.h', False),
-                ('string', True),
-            ],
+            operand_header_includes,
             [],
             class_def,
             arch,
@@ -10785,6 +10949,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 False,
                 [
                     (f'rocjitsu/isa/arch/amdgpu/{arch}/operand.h', False),
+                    ('rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h', False),
                     ('format', True),
                     ('optional', True),
                     ('stdexcept', True),
@@ -10804,6 +10969,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     ('rocjitsu/vm/amdgpu/compute_unit.h', False),
                     ('rocjitsu/vm/amdgpu/register_access.h', False),
                     ('rocjitsu/vm/amdgpu/wavefront.h', False),
+                    ('rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h', False),
                     ('format', True),
                     ('optional', True),
                     ('stdexcept', True),
@@ -10824,6 +10990,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     ('rocjitsu/vm/amdgpu/compute_unit.h', False),
                     ('rocjitsu/vm/amdgpu/register_access.h', False),
                     ('rocjitsu/vm/amdgpu/wavefront.h', False),
+                    ('rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h', False),
                     ('format', True),
                     ('optional', True),
                     ('stdexcept', True),
