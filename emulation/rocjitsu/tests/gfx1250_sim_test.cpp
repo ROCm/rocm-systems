@@ -4350,6 +4350,27 @@ TEST(Gfx1250DecodeTest, WmmaScaleF8f6f4ConsumesVop3px2Pair) {
             "v_wmma_scale_f32_16x16x128_f8f6f4 v[6:13], v[18:33], v[52:67], 0, v0, v4");
 }
 
+TEST(Gfx1250DecodeTest, WmmaScalePairDoesNotConsumeEmbeddedExtensions) {
+  constexpr uint32_t extension_selectors[] = {255u, 250u, 233u, 234u};
+  for (const uint32_t embedded_src0 : extension_selectors) {
+    SCOPED_TRACE(embedded_src0);
+    const uint32_t words[] = {
+        0xCC350000u,
+        0x20020700u,
+        0xCC330000u,
+        0xD600D400u | embedded_src0,
+    };
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->size(), sizeof(words));
+    for (size_t i = 0; i < std::size(words); ++i)
+      EXPECT_EQ(inst->raw_encoding()[i], words[i]);
+  }
+}
+
 TEST(Gfx1250DecodeTest, WmmaScale16F8f6f4ConsumesVop3px2Pair) {
   const uint32_t words[] = {
       0xCC3A0000u,
