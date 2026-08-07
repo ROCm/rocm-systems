@@ -67,6 +67,7 @@ def _gen_mfma(
     inst: Instruction,
     arch_name: str,
     profile=None,
+    enc_field_names: set[str] | None = None,
 ) -> str:
     profiles = {
         'cdna1': Cdna1Profile,
@@ -90,6 +91,7 @@ def _gen_mfma(
             is_vop3=True,
             has_abs=False,
             arch_name=arch_name,
+            enc_field_names=set() if enc_field_names is None else enc_field_names,
         )
     )
 
@@ -1146,6 +1148,19 @@ def test_matrix_f64_direct_sources_use_direct_base_expressions():
         '                 amdgpu::src_base(vb, src0.encoding_value_),\n'
         '                 amdgpu::src_base(vb, src1.encoding_value_),'
     ) in body
+
+
+def test_smfmac_acc_cd_destination_uses_encoding_field_presence():
+    inst = Instruction('V_SMFMAC_F32_16X16X32_BF16', 'ENC_VOP3P_MFMA', 0, [])
+    profile = _matrix_profile()
+
+    with_acc_cd = _gen_mfma(inst, 'cdna3', profile, {'acc_cd'})
+    without_acc_cd = _gen_mfma(inst, 'cdna3', profile, set())
+
+    assert 'amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd)' in with_acc_cd
+    assert 'amdgpu::dst_base(vb, vdst.encoding_value_, 1)' not in with_acc_cd
+    assert 'amdgpu::dst_base(vb, vdst.encoding_value_, 1)' in without_acc_cd
+    assert 'inst_.acc_cd' not in without_acc_cd
 
 
 def test_fixed_wave32_wmma_f32_passes_c_modifier_to_accumulator_helper():

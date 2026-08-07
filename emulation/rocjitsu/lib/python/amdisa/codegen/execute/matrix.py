@@ -165,8 +165,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         L = []
         L.append(f'  auto &cu = wf.cu();')
         L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
-        has_acc_cd = arch_name in ('cdna2', 'cdna3', 'cdna4')
-        if has_acc_cd:
+        if 'acc_cd' in ctx.enc_field_names:
             L.append(
                 f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, inst_.acc_cd);'
             )
