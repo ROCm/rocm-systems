@@ -4549,6 +4549,16 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
     // Make sure VirtualGPU has an exclusive access to the resources
     std::scoped_lock lock(execution());
 
+    // While an RGP/SQTT capture is active, force per-dispatch profiling so a Timestamp
+    // (and thus a timing-enabled ProfilingSignal) is created in profilingBegin. Without
+    // this, plain HIP launches have profilingInfo().enabled_ == false and the capture has
+    // no GPU begin/end ticks to place command-buffer bars on the RGP timeline.
+    if (auto* captureMgr = dev().GetCaptureMgr()) {
+      if (captureMgr->IsCaptureActive()) {
+        vcmd.EnableProfilingForCapture();
+      }
+    }
+
     profilingBegin(vcmd);
 
     if (vcmd.dynDataPrefetchConfig().isEnabled()) {
