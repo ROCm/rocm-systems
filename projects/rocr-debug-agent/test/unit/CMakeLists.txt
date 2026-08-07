@@ -43,9 +43,10 @@ find_package(Threads REQUIRED)
 # Create unit test executable.
 add_executable(
     rocm-debug-agent-unit-tests
-    test_uri.cpp
     test_formatting.cpp
+    test_uri.cpp
     test_options.cpp
+    test_exceptions.cpp
 )
 
 # Link directly to source files (not the .so).
