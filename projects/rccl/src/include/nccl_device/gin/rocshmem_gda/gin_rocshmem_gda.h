@@ -159,7 +159,7 @@ struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop, int, ncclGinWindow_t, size_t,
                                       ncclGinWindow_t, size_t, size_t, bool,
                                       ncclGinDescriptorSmem*, uint32_t = ncclGinOptFlagsDefault) {
-    __builtin_unreachable();
+    __builtin_trap();
   }
 };
 
