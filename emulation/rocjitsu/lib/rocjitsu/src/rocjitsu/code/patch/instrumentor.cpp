@@ -3,10 +3,12 @@
 
 #include "rocjitsu/code/patch/instrumentor.h"
 
+#include "rocjitsu/analysis/exec_state.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/dbt/scoped_cfg_edges.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
@@ -22,6 +24,7 @@
 #include <array>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -354,12 +357,21 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
     return false;
   }
   decoder_ = std::move(decoder);
-  blocks_ = BasicBlock::build(obj_, *decoder_, arch_);
+  // Force every kernel entry to begin a block. BasicBlock::build only leads at
+  // natural boundaries, so a descriptor entry inside a fallthrough block would
+  // not start a block and would be silently dropped by the entry match below;
+  // a preceding `s_mov exec, -1` could then make it look Full even though
+  // hardware may enter with unknown EXEC, licensing unsound VGPR kills.
+  const std::vector<uint64_t> entry_offsets = obj_.kernel_entry_text_offsets(arch_);
+  blocks_ = BasicBlock::build(obj_, *decoder_, arch_, entry_offsets);
   // BasicBlock::build returns blocks in .text order. Keep clause state across
   // block boundaries because a branch target may split the linear instruction
   // stream in the middle of a clause.
   uint32_t clause_remaining = 0;
+  std::unordered_set<uint64_t> block_starts;
+  block_starts.reserve(blocks_.size());
   for (const auto &block : blocks_) {
+    block_starts.insert(block->start_offset());
     uint64_t cur = block->start_offset();
     for (const Instruction &inst : block->instructions()) {
       if (clause_remaining > 0) {
@@ -370,6 +382,16 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
       if (is_s_clause(inst))
         clause_remaining = std::max(clause_remaining, s_clause_following_instruction_count(inst));
       cur += static_cast<uint64_t>(inst.size());
+    }
+  }
+  // Fail closed if a readable entry still has no exact block (e.g. it points
+  // into undecodable bytes).
+  for (const uint64_t entry : entry_offsets) {
+    if (!block_starts.contains(entry)) {
+      report(error_out, ("kernel entry offset " + std::to_string(entry) +
+                         " has no basic block after construction")
+                            .c_str());
+      return false;
     }
   }
   blocks_built_ = true;
@@ -529,7 +551,21 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   liveness_scope.reserve(blocks_.size());
   for (const auto &block : blocks_)
     liveness_scope.push_back(block.get());
-  const LivenessAnalysis liveness{KernelBlockScope(liveness_scope)};
+  const std::span<const uint8_t> original_text = patcher.text_bytes();
+  const auto liveness_edges =
+      scoped_call_liveness_edges(KernelBlockScope(liveness_scope), original_text);
+  const auto entry_offsets = obj_.kernel_entry_text_offsets(arch_);
+  const std::unordered_set<uint64_t> entry_offset_set(entry_offsets.begin(), entry_offsets.end());
+  std::vector<const BasicBlock *> entry_blocks;
+  for (BasicBlock *block : liveness_scope) {
+    if (block != nullptr && entry_offset_set.contains(block->start_offset()))
+      entry_blocks.push_back(block);
+  }
+  auto exec = std::make_unique<ExecMaskAnalysis>(KernelBlockScope(liveness_scope),
+                                                 obj_.kernel_wavefront_size(arch_), liveness_edges,
+                                                 entry_blocks);
+  const LivenessAnalysis liveness{
+      KernelBlockScope(liveness_scope), std::move(exec), {}, liveness_edges};
 
   // Lay out the appended region as [probe bodies][trampolines]. Each distinct
   // probe body is copied once, ahead of the trampolines that call into it, so a
