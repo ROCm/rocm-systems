@@ -28,6 +28,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Reduced profile-mode peak memory when writing counter data on large workloads.
 
+* Profile mode now gzip-compresses large counter CSV artifacts to reduce workload directory size.
+
 ### Resolved issues
 
 ### Upcoming changes

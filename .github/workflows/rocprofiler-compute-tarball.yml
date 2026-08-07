@@ -79,7 +79,7 @@ jobs:
           apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
           apt install -y rocm-dev
-          apt install -y libdw-dev pkg-config
+          apt install -y libdw-dev zlib1g-dev pkg-config
           echo "✅ ROCm Dependencies Installed!"
 
       - name: Install Python
@@ -139,7 +139,7 @@ jobs:
           apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
           apt install -y rocm-dev
-          apt install -y libdw-dev pkg-config
+          apt install -y libdw-dev zlib1g-dev pkg-config
           echo "✅ ROCm Dependencies Installed!"
 
       - name: Python dependency installs

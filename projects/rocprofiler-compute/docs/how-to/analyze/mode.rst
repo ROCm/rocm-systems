@@ -20,10 +20,12 @@ choose.
 
 .. note::
 
-   Analyze mode concatenates the per-pass ``results_*.csv`` files written by
-   ``rocpd`` profiling into a unified ``pmc_perf.csv`` for analysis. If the
-   workload directory already contains a ``pmc_perf.csv``, that file is used
-   as-is.
+   Analyze mode builds ``pmc_perf.csv`` by concatenating per-pass
+   ``results_*.csv`` files from ``rocpd`` profiling, or uses an existing
+   ``pmc_perf.csv`` as-is. Current releases read ``.csv`` and ``.csv.gz``
+   counter files alike, so older workloads do need not to be regenerated. Releases
+   before 3.9.0 read only uncompressed names; run ``gunzip`` on ``.csv.gz``
+   files to analyze a compressed workload on an older release.
 
 .. note::
 

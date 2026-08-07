@@ -1,6 +1,6 @@
 # Profile Interface Architecture
 
-Status: proposal (Phase A implemented)
+Status: proposal (Phases A and B implemented)
 
 This document describes the architecture for profile data storage and access in
 rocprofiler-compute, and records the decisions made in the design review so the
@@ -333,16 +333,12 @@ and the `--join-type` references in the docs.
 
 ## Phase B: Add Compression at CSV Read/Write
 
-We are to introduce gzip streaming to provide a size reduction to csv files.
-Phase B does not change the shape of
-the profile/analyze contract yet, profile still produces the per-pass CSV result
-and analyze still reads it.
+Status: implemented.
 
-The change goes through one
-compression interface shared by both the native/backend counter writer
-and the Python result-CSV writer. Compression is applied at two write points, the
-native counter output and the result CSV, and decompressed on read
-(during merge in analyze).
+Gzip streaming reduces size of the two large counter CSV intermediates from AD-2.
+Phase B does not change the profile/analyze contract shape. Python and the native
+tool each compress at CSV read/write over a shared format contract; analyze accepts
+plain `.csv` for backward compatibility.
 
 ```mermaid
 sequenceDiagram
