@@ -371,8 +371,6 @@ def test_view_model_carries_the_drawn_knee(benchmarked_roofline) -> None:
         assert roof["kneePerf"] == pytest.approx(drawn_perf)
 
 
-
-
 def test_view_model_to_json_escapes_script_close() -> None:
     model = RooflineViewModel(kernels=[{"name": "evil</script>", "points": []}])
 
