@@ -5,7 +5,6 @@
 
 #include "core/control/clock.hpp"
 #include "core/control/session.hpp"
-#include "core/control/trigger.hpp"
 #include "core/state.hpp"
 
 #include <chrono>
@@ -16,7 +15,7 @@
 namespace rocprofsys::control::triggers
 {
 template <typename Clock>
-class time_window : public trigger
+class time_window
 {
 public:
     struct config
@@ -30,31 +29,19 @@ public:
     , m_clock{ clk }
     , m_config{ cfg }
     {
-        bind_action_setter(sess.register_trigger(*this));
+        sess.register_trigger(trigger_name, initial_action(cfg));
     }
 
-    ~time_window() override
+    ~time_window()
     {
         stop();
-        m_session.unregister_trigger(*this);
+        m_session.unregister_trigger(trigger_name);
     }
 
     time_window(const time_window&)            = delete;
     time_window& operator=(const time_window&) = delete;
     time_window(time_window&&)                 = delete;
     time_window& operator=(time_window&&)      = delete;
-
-    [[nodiscard]] std::string_view name() const noexcept override
-    {
-        return "time_window";
-    }
-
-    [[nodiscard]] action initial_action() const noexcept override
-    {
-        if(m_config.delay > clock_duration::zero()) return action::pause;
-        if(m_config.duration > clock_duration::zero()) return action::trace;
-        return action::skip;
-    }
 
     /// Spawn the worker thread that advances the window through delay and
     /// duration phases. Idempotent: a second call is a no-op. Not safe to
@@ -82,11 +69,20 @@ public:
     }
 
 private:
+    static constexpr std::string_view trigger_name = "time_window";
+
     session&     m_session;
     Clock&       m_clock;
     const config m_config;
     std::thread  m_thread;
     std::mutex   m_lifecycle_mutex;
+
+    [[nodiscard]] static action initial_action(const config& cfg) noexcept
+    {
+        if(cfg.delay > clock_duration::zero()) return action::pause;
+        if(cfg.duration > clock_duration::zero()) return action::trace;
+        return action::skip;
+    }
 
     [[nodiscard]] bool has_window() const noexcept
     {
@@ -96,7 +92,7 @@ private:
 
     void worker()
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         const auto t0           = m_clock.now();
         const bool has_delay    = m_config.delay > clock_duration::zero();
@@ -105,14 +101,14 @@ private:
         if(has_delay)
         {
             if(!m_clock.sleep_until(t0 + m_config.delay)) return;  // interrupted
-            publish_action(action::trace);
+            m_session.set_action(trigger_name, action::trace);
         }
 
         if(has_duration)
         {
             const auto end = t0 + m_config.delay + m_config.duration;
-            if(!m_clock.sleep_until(end)) return;  // interrupted
-            publish_action(action::pause);         // terminal
+            if(!m_clock.sleep_until(end)) return;               // interrupted
+            m_session.set_action(trigger_name, action::pause);  // terminal
         }
     }
 };

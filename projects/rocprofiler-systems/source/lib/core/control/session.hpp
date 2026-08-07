@@ -3,17 +3,32 @@
 
 #pragma once
 
-#include "subscriber.hpp"
-#include "trigger.hpp"
-
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
 namespace rocprofsys::control
 {
+/// What a single trigger currently wants. `skip` and `trace` both mean "not
+/// asking for a pause"; only `pause` affects resolution.
+enum class action
+{
+    skip,
+    trace,
+    pause
+};
+
+struct subscriber
+{
+    std::function<void()> on_pause;
+    std::function<void()> on_resume;
+    std::string           name;
+};
+
 class session
 {
 public:
@@ -29,12 +44,13 @@ public:
 
     void subscribe(subscriber sub);
 
-    /// Register a trigger and seed its initial action. The returned setter
-    /// is the only way to update this trigger's action afterward.
-    [[nodiscard]] trigger::action_setter register_trigger(const trigger& trig);
+    /// Seed a trigger's action. @p name identifies the trigger for the
+    /// lifetime of its registration.
+    void register_trigger(std::string_view name, action initial);
 
-    /// Remove a trigger's action so it no longer contributes to resolution.
-    void unregister_trigger(const trigger& trig);
+    void unregister_trigger(std::string_view name);
+
+    void set_action(std::string_view name, action act);
 
     /// If the session is currently paused, fire pause on all subscribers
     /// to reflect the initial state. Subscribers default to "running", so
