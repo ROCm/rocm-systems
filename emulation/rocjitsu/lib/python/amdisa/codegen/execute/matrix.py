@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from amdisa.codegen.execute.fp8_formats import FNUZ_FP8_ARCHES, fp8_helper_name
+from amdisa.isa_profile import MatrixLayout
 
 if TYPE_CHECKING:
     from amdisa.codegen.execute import ExecuteContext
@@ -364,8 +365,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             )
             L.append(f'  }};')
 
-        if arch == 'gfx1250':
-            # LLVM's gfx1250 IU WMMA convention overloads neg_lo: bit set means
+        uses_fixed_wave32_split_k_layout = (
+            ctx.profile.matrix_layout is MatrixLayout.WMMA_SPLIT_K
+            and ctx.profile.wave_size == 32
+            and ctx.profile.wave_size_max == 32
+        )
+        if uses_fixed_wave32_split_k_layout:
+            # Fixed-Wave32 split-K IU WMMA overloads neg_lo: bit set means
             # signed extension, bit clear means unsigned.
             if is_swmmac:
                 if input_type in ('IU4', 'IU8'):

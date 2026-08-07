@@ -20,6 +20,7 @@ from amdisa.isa_profile import (
     Cdna2Profile,
     CdnaProfile,
     Gfx1250Profile,
+    MatrixLayout,
     MemoryCoherencyModel,
     Rdna1Profile,
     Rdna2Profile,
@@ -98,6 +99,22 @@ def test_max_addressable_vgprs_per_wf(profile, expected):
 )
 def test_uses_vgpr_msb_indexing(profile, expected):
     assert profile.uses_vgpr_msb_indexing is expected
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (CdnaProfile(), MatrixLayout.MFMA_ACCUMULATOR),
+        (Rdna1Profile(), MatrixLayout.MFMA_ACCUMULATOR),
+        (Rdna2Profile(), MatrixLayout.MFMA_ACCUMULATOR),
+        (Rdna3Profile(), MatrixLayout.WMMA_REPLICATED_HALFWAVE),
+        (Rdna3_5Profile(), MatrixLayout.WMMA_REPLICATED_HALFWAVE),
+        (Rdna4Profile(), MatrixLayout.WMMA_SPLIT_K),
+        (Gfx1250Profile(), MatrixLayout.WMMA_SPLIT_K),
+    ],
+)
+def test_matrix_layout(profile, expected):
+    assert profile.matrix_layout is expected
 
 
 def test_only_gfx1250_splits_execution_sources():

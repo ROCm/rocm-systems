@@ -54,6 +54,14 @@ class MemoryCoherencyModel(Enum):
     GFX12_SCOPE_TH = auto()  # RDNA4 — 2-bit SCOPE + TH hint
 
 
+class MatrixLayout(Enum):
+    """Register/lane layout used by matrix instruction executors."""
+
+    MFMA_ACCUMULATOR = auto()
+    WMMA_REPLICATED_HALFWAVE = auto()
+    WMMA_SPLIT_K = auto()
+
+
 @dataclass
 class EncodingModifier:
     """A disassembly modifier to append to an encoding's mnemonic output.
@@ -891,6 +899,11 @@ class _AmdgpuProfileBase(IsaProfile):
         return False
 
     @property
+    def matrix_layout(self) -> MatrixLayout:
+        """Register/lane mapping used by matrix instructions."""
+        return MatrixLayout.MFMA_ACCUMULATOR
+
+    @property
     def flat_scratch_mechanism(self) -> str:
         """How scratch base is located: 'hwreg' (CDNA3/4) or 'sgpr_pair'."""
         return 'sgpr_pair'
@@ -1374,6 +1387,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def matrix_layout(self) -> MatrixLayout:
+        return MatrixLayout.WMMA_REPLICATED_HALFWAVE
+
+    @property
     def has_vopd(self) -> bool:
         return True
 
@@ -1517,6 +1534,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def has_wmma(self) -> bool:
         return True
+
+    @property
+    def matrix_layout(self) -> MatrixLayout:
+        return MatrixLayout.WMMA_SPLIT_K
 
     @property
     def has_vopd(self) -> bool:
