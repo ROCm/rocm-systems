@@ -90,7 +90,7 @@ public:
 
     // Exactly one live owner for this slot on this GPU. False also when the slot
     // is unknown, so an unresolved doorbell is never treated as injective.
-    bool is_injective(uint32_t gpu_id, uint32_t slot) const
+    bool slot_uniquely_owned(uint32_t gpu_id, uint32_t slot) const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
         auto lk = std::lock_guard<std::mutex>{m_mu};

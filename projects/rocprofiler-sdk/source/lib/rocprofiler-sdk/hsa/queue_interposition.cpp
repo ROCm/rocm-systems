@@ -672,10 +672,10 @@ signal_less_batch_eligible(Queue*                                            que
     // can_register_batch() carries the session-mode gate. is_closing() is
     // eligibility-only: a batch already past this point may still register, which
     // is what the destroy path fences before it strands.
-    const bool _eligible =
-        kfd::owner_registry().is_injective(static_cast<uint32_t>(_gpu_id), _db->doorbell_off) &&
-        kfd::signal_less_hub().can_register_batch(_flat) &&
-        !kfd::signal_less_hub().is_closing(static_cast<uint32_t>(_gpu_id), _db->doorbell_off);
+    const auto _gpu      = static_cast<uint32_t>(_gpu_id);
+    const bool _eligible = kfd::owner_registry().slot_uniquely_owned(_gpu, _db->doorbell_off) &&
+                           kfd::signal_less_hub().can_register_batch(_flat) &&
+                           !kfd::signal_less_hub().is_closing(_gpu, _db->doorbell_off);
 
     if(_eligible)
     {

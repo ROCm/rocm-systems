@@ -479,7 +479,7 @@ TEST(DispatchHub, loss_ledger_selects_exactly_the_leaked_ids)
 TEST(OwnerRegistry, unknown_slot_is_not_injective)
 {
     auto reg = OwnerRegistry{};
-    EXPECT_FALSE(reg.is_injective(/*gpu_id=*/0, /*slot=*/4100));
+    EXPECT_FALSE(reg.slot_uniquely_owned(/*gpu_id=*/0, /*slot=*/4100));
 }
 
 TEST(OwnerRegistry, sole_owner_is_injective)
@@ -488,11 +488,11 @@ TEST(OwnerRegistry, sole_owner_is_injective)
     EXPECT_EQ(reg.add_queue(/*token=*/1, /*gpu=*/0, /*slot=*/uint32_t{40}),
               OwnerRegistry::add_result::sole_owner);
 
-    EXPECT_TRUE(reg.is_injective(0, 40));
+    EXPECT_TRUE(reg.slot_uniquely_owned(0, 40));
     EXPECT_EQ(reg.owners_of(0, 40), 1u);
     EXPECT_EQ(reg.live_queues(), 1u);
 
-    EXPECT_TRUE(reg.is_injective(0, 40));
+    EXPECT_TRUE(reg.slot_uniquely_owned(0, 40));
 }
 
 // A second live owner is a collision: the registry says so, the slot stops being
@@ -508,7 +508,7 @@ TEST(OwnerRegistry, second_owner_collides_and_quarantines)
     EXPECT_EQ(reg.add_queue(1, 0, uint32_t{40}), OwnerRegistry::add_result::sole_owner);
     EXPECT_EQ(reg.add_queue(2, 0, uint32_t{40}), OwnerRegistry::add_result::collision);
 
-    EXPECT_FALSE(reg.is_injective(0, 40));
+    EXPECT_FALSE(reg.slot_uniquely_owned(0, 40));
     EXPECT_EQ(reg.owners_of(0, 40), 2u);
 
     // The caller's response: quarantine, stranding what was pending on the slot.
@@ -531,7 +531,7 @@ TEST(OwnerRegistry, quarantine_persists_after_the_collision_clears)
     hub.quarantine_slot(0, 40);
 
     reg.remove_queue(2);
-    EXPECT_TRUE(reg.is_injective(0, 40));       // ownership looks clean again...
+    EXPECT_TRUE(reg.slot_uniquely_owned(0, 40));       // ownership looks clean again...
     EXPECT_TRUE(slot_quarantined(hub, 0, 40));  // ...but the slot stays unusable
     EXPECT_FALSE(hub.can_register_batch({key_of(40, 9)}));
 }
@@ -545,11 +545,11 @@ TEST(OwnerRegistry, pre_session_queue_participates_in_injectivity)
     // Registered at creation, long before any dispatch-log session.
     EXPECT_EQ(reg.add_queue(/*pre-session*/ 1, 0, uint32_t{7}),
               OwnerRegistry::add_result::sole_owner);
-    EXPECT_TRUE(reg.is_injective(0, 7));
+    EXPECT_TRUE(reg.slot_uniquely_owned(0, 7));
 
     EXPECT_EQ(reg.add_queue(/*post-session*/ 2, 0, uint32_t{7}),
               OwnerRegistry::add_result::collision);
-    EXPECT_FALSE(reg.is_injective(0, 7));
+    EXPECT_FALSE(reg.slot_uniquely_owned(0, 7));
 }
 
 // A live queue whose doorbell could not be resolved could be the second owner of
@@ -559,18 +559,18 @@ TEST(OwnerRegistry, unresolved_queue_disables_the_whole_gpu)
     auto reg = OwnerRegistry{};
     reg.add_queue(1, 0, uint32_t{40});
     reg.add_queue(2, 1, uint32_t{50});  // a different GPU
-    EXPECT_TRUE(reg.is_injective(0, 40));
+    EXPECT_TRUE(reg.slot_uniquely_owned(0, 40));
 
     EXPECT_EQ(reg.add_queue(3, 0, std::nullopt), OwnerRegistry::add_result::slot_unknown);
     EXPECT_EQ(reg.unresolved_queues(0), 1u);
 
-    EXPECT_FALSE(reg.is_injective(0, 40));  // this GPU is out
-    EXPECT_FALSE(reg.is_injective(0, 99));
-    EXPECT_TRUE(reg.is_injective(1, 50));  // the other GPU is unaffected
+    EXPECT_FALSE(reg.slot_uniquely_owned(0, 40));  // this GPU is out
+    EXPECT_FALSE(reg.slot_uniquely_owned(0, 99));
+    EXPECT_TRUE(reg.slot_uniquely_owned(1, 50));  // the other GPU is unaffected
 
     reg.remove_queue(3);
     EXPECT_EQ(reg.unresolved_queues(0), 0u);
-    EXPECT_TRUE(reg.is_injective(0, 40));
+    EXPECT_TRUE(reg.slot_uniquely_owned(0, 40));
 }
 
 // Slots are scoped per GPU: the same page-relative slot on two GPUs is not a
@@ -580,8 +580,8 @@ TEST(OwnerRegistry, same_slot_on_different_gpus_is_not_a_collision)
     auto reg = OwnerRegistry{};
     EXPECT_EQ(reg.add_queue(1, 0, uint32_t{40}), OwnerRegistry::add_result::sole_owner);
     EXPECT_EQ(reg.add_queue(2, 1, uint32_t{40}), OwnerRegistry::add_result::sole_owner);
-    EXPECT_TRUE(reg.is_injective(0, 40));
-    EXPECT_TRUE(reg.is_injective(1, 40));
+    EXPECT_TRUE(reg.slot_uniquely_owned(0, 40));
+    EXPECT_TRUE(reg.slot_uniquely_owned(1, 40));
 }
 
 // Destroying a queue releases its ownership so a surviving co-owner is sole again,
@@ -653,7 +653,7 @@ TEST(DispatchHub, destroy_closes_the_slot_for_reuse)
     // Queue B reuses the doorbell. Ownership looks clean, but the slot is
     // quarantined for the rest of the process, so B is signal-path-only.
     reg.add_queue(/*token=*/2, 0, uint32_t{40});
-    EXPECT_TRUE(reg.is_injective(0, 40));
+    EXPECT_TRUE(reg.slot_uniquely_owned(0, 40));
     EXPECT_FALSE(hub.can_register_batch({key_of(40, 1)}));
     EXPECT_FALSE(register_one(hub, key_of(40, 7), 600));
 
@@ -777,7 +777,7 @@ all_entry_points_short_circuit()
     ok = ok && forked_hub().quarantine_slot(0, 40).empty();
     ok = ok && forked_hub().drain_for_teardown().first.empty();
 
-    ok = ok && !forked_registry().is_injective(0, 40);
+    ok = ok && !forked_registry().slot_uniquely_owned(0, 40);
     ok = ok && !forked_registry().slot_of(1).has_value();
     ok = ok && forked_registry().owners_of(0, 40) == 0;
     ok = ok && forked_registry().unresolved_queues(0) == 0;
