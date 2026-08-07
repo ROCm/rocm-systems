@@ -1029,68 +1029,8 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
       DBGAPI_CHECK (
           amd_dbgapi_wave_get_info (wave_id, AMD_DBGAPI_WAVE_INFO_STOP_REASON,
                                     sizeof (stop_reason), &stop_reason));
-      auto stop_reason_bits{ stop_reason };
 
-      std::underlying_type_t<amd_dbgapi_exceptions_t> resume_exceptions = 0;
-      do
-        {
-          auto one_bit
-              = stop_reason_bits ^ (stop_reason_bits & (stop_reason_bits - 1));
-          stop_reason_bits ^= one_bit;
-
-          switch (one_bit)
-            {
-            case AMD_DBGAPI_WAVE_STOP_REASON_NONE:
-            case AMD_DBGAPI_WAVE_STOP_REASON_DEBUG_TRAP:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_NONE;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_BREAKPOINT:
-            case AMD_DBGAPI_WAVE_STOP_REASON_WATCHPOINT:
-            case AMD_DBGAPI_WAVE_STOP_REASON_ASSERT_TRAP:
-            case AMD_DBGAPI_WAVE_STOP_REASON_TRAP:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_TRAP;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_SINGLE_STEP:
-              /* Is this even possible?  */
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_NONE;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_INPUT_DENORMAL:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_DIVIDE_BY_0:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_OVERFLOW:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_UNDERFLOW:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_INEXACT:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FP_INVALID_OPERATION:
-            case AMD_DBGAPI_WAVE_STOP_REASON_INT_DIVIDE_BY_0:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_MATH_ERROR;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_MEMORY_VIOLATION:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_MEMORY_VIOLATION;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_ADDRESS_ERROR:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_ADDRESS_ERROR;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_ILLEGAL_INSTRUCTION:
-              resume_exceptions
-                  |= AMD_DBGAPI_EXCEPTION_WAVE_ILLEGAL_INSTRUCTION;
-              break;
-
-            case AMD_DBGAPI_WAVE_STOP_REASON_ECC_ERROR:
-            case AMD_DBGAPI_WAVE_STOP_REASON_FATAL_HALT:
-              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_ABORT;
-              break;
-
-#if AMD_DBGAPI_VERSION_MAJOR == 0 && AMD_DBGAPI_VERSION_MINOR < 58
-            case AMD_DBGAPI_WAVE_STOP_REASON_RESERVED:
-              break;
-#endif
-            }
-      } while (stop_reason_bits != 0);
+      auto resume_exceptions = map_stop_reason_to_exceptions (stop_reason);
 
       DBGAPI_CHECK (amd_dbgapi_wave_resume (
           wave_id, AMD_DBGAPI_RESUME_MODE_NORMAL,
