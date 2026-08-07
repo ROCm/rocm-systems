@@ -48,6 +48,9 @@ on:
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/CMakePresets.json'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -57,7 +60,7 @@ env:
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
   ROCM_PATH: "/opt/rocm"
 
-  EXCLUDED_TESTS: "fork.*|jacobi-usm-sys-run|jacobi-roctx.*|jpeg-decode-.*|kfd-.*|unified-memory-output-sys-run|rccl-alltoall-perf-sys-run"
+  EXCLUDED_TESTS: "fork.*|jacobi-usm-sys-run|jacobi-roctx.*|kfd-.*|unified-memory-output-sys-run|rccl-alltoall-perf-sys-run"
   EXCLUDED_LABELS: "thread_limit"
 
 jobs:
@@ -97,6 +100,7 @@ jobs:
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
     permissions:
+      contents: read
       packages: read
       checks: write
     defaults:

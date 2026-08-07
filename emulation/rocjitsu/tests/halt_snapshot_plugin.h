@@ -169,7 +169,7 @@ private:
 /// @details Returns the group (attach with `soc->set_plugin_group(group)`), and
 /// sets @p out to the contained plugin for later inspection.
 inline std::shared_ptr<ExecutionPluginGroup> make_halt_snapshot_group(HaltSnapshotPlugin **out) {
-  auto group = std::make_shared<ExecutionPluginGroup>();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto plugin = std::make_unique<HaltSnapshotPlugin>();
   *out = plugin.get();
   [[maybe_unused]] const bool added = group->add(std::move(plugin));
@@ -213,7 +213,7 @@ private:
 
 /// @brief Build a plugin group holding a DispatchCountPlugin, keep a raw handle.
 inline std::shared_ptr<ExecutionPluginGroup> make_dispatch_count_group(DispatchCountPlugin **out) {
-  auto group = std::make_shared<ExecutionPluginGroup>();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto plugin = std::make_unique<DispatchCountPlugin>();
   *out = plugin.get();
   [[maybe_unused]] const bool added = group->add(std::move(plugin));
