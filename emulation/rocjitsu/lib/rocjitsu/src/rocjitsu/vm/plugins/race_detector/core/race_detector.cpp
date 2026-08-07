@@ -80,8 +80,8 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes) con
     if (wave == events_.waveId(eventId)) {
       // Ordinary DS operations from one wave are ordered by the LDS pipeline,
       // so a later DS read cannot overtake this wave's earlier DS write. A
-      // direct-to-LDS VMEM operation is different: the owning wave must still
-      // wait for vmcnt before consuming the LDS bytes.
+      // direct-to-LDS VMEM operation is different: a same-wave DS read of its
+      // destination bytes must wait for vmcnt.
       if (events_.type(eventId) == MemoryEventType::VGPR_TO_LDS ||
           events_.status(eventId) == EventStatus::WAVE_COMPLETE) {
         continue;
@@ -111,7 +111,8 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes) co
   for (EventId eventId : ldsReadEvents) {
     // A later ordinary DS write from the same wave cannot overtake an earlier
     // DS read. The read's destination VGPR remains independently protected by
-    // lgkmcnt until it is safe to consume or overwrite.
+    // lgkmcnt until it is safe to consume or overwrite. This WAR check does
+    // not cover write/write ordering against GLOBAL_TO_LDS events.
     if (wave == events_.waveId(eventId)) {
       continue;
     }

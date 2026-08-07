@@ -414,7 +414,7 @@ __global__ void lds_same_wave_read_write_order_kernel(uint32_t *out) {
       "ds_read_u8 %0, %2\n"
       "ds_write_b8 %1, %3\n"
       "s_waitcnt lgkmcnt(0)\n"
-      : "=v"(observed_old)
+      : "=&v"(observed_old)
       : "v"(lane), "v"(read_lane), "v"(new_value)
       : "memory"
   );

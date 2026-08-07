@@ -198,7 +198,7 @@ TEST(RaceDetector, LdsSameWave_ReadWriteSameLaneOk) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/2);
   b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
-  EXPECT_FALSE(b.hasLdsRace(0));
+  EXPECT_FALSE(b.hasRace());
 }
 
 TEST(RaceDetector, LdsSameWave_ReadWriteCrossLaneOk) {
@@ -207,7 +207,7 @@ TEST(RaceDetector, LdsSameWave_ReadWriteCrossLaneOk) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/2);
   b.checkLdsWrite(/*wave=*/0, /*lane=*/1, /*addr=*/0, /*bytes=*/4);
-  EXPECT_FALSE(b.hasLdsRace(0));
+  EXPECT_FALSE(b.hasRace());
 }
 
 // ---- Same-wave VGPR via LDS load ----
