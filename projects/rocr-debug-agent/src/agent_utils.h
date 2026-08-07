@@ -33,6 +33,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace amd::debug_agent
@@ -44,6 +45,19 @@ std::string hex_string (const std::vector<uint8_t> &value);
 
 std::string register_value_string (const std::string &register_type,
                                      const std::vector<uint8_t> &register_value);
+
+/* URI parsing and sanitization. */
+
+struct parsed_uri_t
+{
+  std::string protocol;
+  std::string decoded_path;
+  std::unordered_map<std::string, std::string> params;
+};
+
+parsed_uri_t parse_code_object_uri (const std::string &uri);
+
+std::string sanitize_uri_for_filename (const std::string &uri);
 
 } /* namespace amd::debug_agent */
 
