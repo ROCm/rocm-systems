@@ -541,6 +541,20 @@ enum OpSelVgprOrLds {
   }
 }
 
+[[nodiscard]] constexpr bool is_immediate_type(OperandType t) {
+  switch (t) {
+  case OperandType::OPR_SIMM4:
+  case OperandType::OPR_SIMM8:
+  case OperandType::OPR_SIMM16:
+  case OperandType::OPR_SIMM32:
+  case OperandType::OPR_LABEL:
+  case OperandType::OPR_WAITCNT:
+    return true;
+  default:
+    return false;
+  }
+}
+
 } // namespace cdna1
 } // namespace rocjitsu
 
