@@ -24,6 +24,7 @@
 
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/platform/wsl/dxg_thunk.hpp"
 
 #include <fmt/core.h>
 #include <fmt/format.h>
@@ -44,84 +45,47 @@ namespace wsl
 {
 namespace
 {
-using PFN_DxgAbiCheck                = int32_t (*)(DxgStructureSizes*);
-using PFN_DxgGetNodeTopology         = int32_t (*)(uint32_t, uint32_t, DxgNodeTopology*);
-using PFN_DxgAcquireTopologySnapshot = int32_t (*)(uint32_t*);
-using PFN_DxgReleaseTopologySnapshot = int32_t (*)();
-using PFN_hsaKmtOpenKFD              = int32_t (*)();
-using PFN_hsaKmtCloseKFD             = int32_t (*)();
-
-// The unversioned soname, matching ThunkLoader::whoami() in the HSA runtime.
-// Never a versioned name (librocdxg.so.1 / .so.7): the ABI is negotiated
-// through DxgAbiCheck, and hard-coding a soversion would silently stop
-// resolving the very object the HSA runtime has loaded.
-constexpr const char* kLibRocdxgSoname = "librocdxg.so";
-
-// RAII handle to librocdxg plus the entry points the topology read needs.
+// RAII handle to librocdxg.
 //
 // The library is normally already resident: the HSA runtime loads it before
 // tools are loaded, so agent enumeration during a profiling run finds it with
 // RTLD_NOLOAD and just takes a reference on the existing object. Pre-HSA
 // consumers (rocprofv3-avail, tool initialization) are the first to touch it
 // and fall through to a real dlopen. Either way the handle is refcounted, so
-// the dlclose below cannot pull the object out from under the HSA runtime.
+// the close below cannot pull the object out from under the HSA runtime.
 struct RocdxgHandle
 {
-    void* handle = nullptr;
+    const DxgLoaderOps& ops;
+    void*               handle = nullptr;
+    DxgThunk            thunk  = {};
 
-    PFN_DxgAbiCheck                abi_check        = nullptr;
-    PFN_DxgGetNodeTopology         get_node         = nullptr;
-    PFN_DxgAcquireTopologySnapshot acquire_snapshot = nullptr;
-    PFN_DxgReleaseTopologySnapshot release_snapshot = nullptr;
-    PFN_hsaKmtOpenKFD              open_kfd         = nullptr;
-    PFN_hsaKmtCloseKFD             close_kfd        = nullptr;
-
-    RocdxgHandle()
+    explicit RocdxgHandle(const DxgLoaderOps& ops_v)
+    : ops{ops_v}
     {
-        handle = ::dlopen(kLibRocdxgSoname, RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD);
-        if(!handle) handle = ::dlopen(kLibRocdxgSoname, RTLD_NOW | RTLD_LOCAL);
+        handle = ops.open(kLibRocdxgSoname, RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD);
+        if(!handle) handle = ops.open(kLibRocdxgSoname, RTLD_NOW | RTLD_LOCAL);
         if(!handle)
         {
             ROCP_WARNING << fmt::format(
                 "wsl topology: dlopen({}) failed: {}. GPU agents cannot be enumerated without "
                 "the DXG thunk, which the HSA runtime also requires for GPU operation.",
                 kLibRocdxgSoname,
-                ::dlerror());
+                ops.error());
             return;
         }
 
-        auto resolve = [this](const char* name) {
-            void* sym = ::dlsym(handle, name);
-            if(!sym)
-                ROCP_WARNING << fmt::format(
-                    "wsl topology: {} does not export {}", kLibRocdxgSoname, name);
-            return sym;
-        };
-
-        abi_check = reinterpret_cast<PFN_DxgAbiCheck>(resolve("DxgAbiCheck"));
-        get_node  = reinterpret_cast<PFN_DxgGetNodeTopology>(resolve("DxgGetNodeTopology"));
-        acquire_snapshot =
-            reinterpret_cast<PFN_DxgAcquireTopologySnapshot>(resolve("DxgAcquireTopologySnapshot"));
-        release_snapshot =
-            reinterpret_cast<PFN_DxgReleaseTopologySnapshot>(resolve("DxgReleaseTopologySnapshot"));
-        open_kfd  = reinterpret_cast<PFN_hsaKmtOpenKFD>(resolve("hsaKmtOpenKFD"));
-        close_kfd = reinterpret_cast<PFN_hsaKmtCloseKFD>(resolve("hsaKmtCloseKFD"));
+        thunk = resolve_dxg_thunk(handle, ops);
     }
 
     ~RocdxgHandle()
     {
-        if(handle) ::dlclose(handle);
+        if(handle) ops.close(handle);
     }
 
     RocdxgHandle(const RocdxgHandle&) = delete;
     RocdxgHandle& operator=(const RocdxgHandle&) = delete;
 
-    bool ready() const
-    {
-        return handle != nullptr && abi_check != nullptr && get_node != nullptr &&
-               acquire_snapshot != nullptr && release_snapshot != nullptr && open_kfd != nullptr &&
-               close_kfd != nullptr;
-    }
+    bool ready() const { return handle != nullptr && thunk.complete(); }
 };
 
 // Confirm the thunk speaks the ABI this build was compiled against before any
@@ -129,7 +93,7 @@ struct RocdxgHandle
 // structure": rocprofiler-sdk only uses the size-aware DxgGetNodeTopology, so
 // it advertises nothing beyond the size of the descriptor block itself.
 bool
-check_abi(const RocdxgHandle& dxg)
+check_abi(const DxgThunk& dxg)
 {
     auto sizes           = DxgStructureSizes{};
     sizes.StructureSizes = sizeof(DxgStructureSizes);
@@ -147,13 +111,60 @@ check_abi(const RocdxgHandle& dxg)
 }
 }  // namespace
 
+const DxgLoaderOps&
+default_loader_ops()
+{
+    static const auto ops =
+        DxgLoaderOps{[](const char* soname, int flags) { return ::dlopen(soname, flags); },
+                     [](void* handle, const char* name) { return ::dlsym(handle, name); },
+                     [](void* handle) { return ::dlclose(handle); },
+                     []() { return static_cast<const char*>(::dlerror()); }};
+    return ops;
+}
+
+DxgThunk
+resolve_dxg_thunk(void* handle, const DxgLoaderOps& ops)
+{
+    auto resolve = [&handle, &ops](const char* name) {
+        void* sym = ops.sym(handle, name);
+        if(!sym)
+            ROCP_WARNING << fmt::format(
+                "wsl topology: {} does not export {}", kLibRocdxgSoname, name);
+        return sym;
+    };
+
+    auto thunk      = DxgThunk{};
+    thunk.abi_check = reinterpret_cast<PFN_DxgAbiCheck>(resolve("DxgAbiCheck"));
+    thunk.get_node  = reinterpret_cast<PFN_DxgGetNodeTopology>(resolve("DxgGetNodeTopology"));
+    thunk.acquire_snapshot =
+        reinterpret_cast<PFN_DxgAcquireTopologySnapshot>(resolve("DxgAcquireTopologySnapshot"));
+    thunk.release_snapshot =
+        reinterpret_cast<PFN_DxgReleaseTopologySnapshot>(resolve("DxgReleaseTopologySnapshot"));
+    thunk.open_kfd  = reinterpret_cast<PFN_hsaKmtOpenKFD>(resolve("hsaKmtOpenKFD"));
+    thunk.close_kfd = reinterpret_cast<PFN_hsaKmtCloseKFD>(resolve("hsaKmtCloseKFD"));
+    return thunk;
+}
+
+std::vector<DxgNodeTopology>
+read_dxg_gpu_topology(const DxgLoaderOps& ops)
+{
+    const auto dxg = RocdxgHandle{ops};
+    if(!dxg.ready()) return {};
+    return read_dxg_gpu_topology(dxg.thunk);
+}
+
 std::vector<DxgNodeTopology>
 read_dxg_gpu_topology()
 {
+    return read_dxg_gpu_topology(default_loader_ops());
+}
+
+std::vector<DxgNodeTopology>
+read_dxg_gpu_topology(const DxgThunk& dxg)
+{
     auto out = std::vector<DxgNodeTopology>{};
 
-    const auto dxg = RocdxgHandle{};
-    if(!dxg.ready()) return out;
+    if(!dxg.complete()) return out;
     if(!check_abi(dxg)) return out;
 
     // The thunk refcounts this: SUCCESS means we opened it, KERNEL_ALREADY_OPENED
@@ -168,7 +179,7 @@ read_dxg_gpu_topology()
 
     struct OpenGuard
     {
-        const RocdxgHandle& dxg;
+        const DxgThunk& dxg;
         ~OpenGuard() { dxg.close_kfd(); }
     } _open_guard{dxg};
 
@@ -182,7 +193,7 @@ read_dxg_gpu_topology()
 
     struct SnapshotGuard
     {
-        const RocdxgHandle& dxg;
+        const DxgThunk& dxg;
         ~SnapshotGuard() { dxg.release_snapshot(); }
     } _snapshot_guard{dxg};
 

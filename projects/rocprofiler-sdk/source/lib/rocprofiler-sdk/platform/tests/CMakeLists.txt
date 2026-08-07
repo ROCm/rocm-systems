@@ -55,3 +55,27 @@ rocprofiler_add_unit_test(
     ENVIRONMENT
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# The librocdxg (WSL) read sequence driven by a fake thunk and a fake dynamic
+# loader. No dlopen, no real thunk and no GPU, so this runs anywhere too.
+set(ROCPROFILER_LIB_WSL_DXG_THUNK_TEST_SOURCES wsl_dxg_thunk.cpp)
+
+add_executable(wsl-dxg-thunk-tests)
+target_sources(wsl-dxg-thunk-tests PRIVATE ${ROCPROFILER_LIB_WSL_DXG_THUNK_TEST_SOURCES})
+target_link_libraries(
+    wsl-dxg-thunk-tests
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-static-library
+            rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+            rocprofiler-sdk::rocprofiler-sdk-drm
+            GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET wsl-dxg-thunk-tests
+    SOURCES ${ROCPROFILER_LIB_WSL_DXG_THUNK_TEST_SOURCES}
+    TIMEOUT 30
+    LABELS "unittests;wsl-dxg-topology"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
