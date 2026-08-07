@@ -25,7 +25,7 @@
 // emitter, the retirement observer (seam S7) and the executor (seam S2) are all
 // injected here and every branch is deterministic.
 
-#include "lib/rocprofiler-sdk/kfd/no_signal_finalizer.hpp"
+#include "lib/rocprofiler-sdk/kfd/complete_signal_less_dispatch.hpp"
 
 #include <gtest/gtest.h>
 
@@ -86,12 +86,12 @@ struct converter
 
 // start_ticks known + conversion + sanity OK -> RESULT_READY: one record with the
 // converted KFD timestamps, correlation id retired exactly once.
-TEST(no_signal_finalizer, result_ready_emits_once_and_retires_once)
+TEST(complete_signal_less_dispatch, result_ready_emits_once_and_retires_once)
 {
     auto obs  = observer{};
     auto conv = converter{};
 
-    auto outcome = run_no_signal_finalizer(std::optional<uint64_t>{500},
+    auto outcome = run_complete_signal_less_dispatch(std::optional<uint64_t>{500},
                                            /*end_ticks=*/900,
                                            /*enqueue_ts=*/0,
                                            /*now_ns=*/10'000'000,
@@ -108,12 +108,12 @@ TEST(no_signal_finalizer, result_ready_emits_once_and_retires_once)
 
 // Shape (ii): the EOP proved completion but the START was lost. No record, but the
 // correlation id still retires -- the kernel is done (G3), so this is NOT a leak.
-TEST(no_signal_finalizer, missing_start_is_completed_no_timing)
+TEST(complete_signal_less_dispatch, missing_start_is_completed_no_timing)
 {
     auto obs  = observer{};
     auto conv = converter{};
 
-    auto outcome = run_no_signal_finalizer(
+    auto outcome = run_complete_signal_less_dispatch(
         std::optional<uint64_t>{}, 900, 0, 10'000'000, conv.fn(), obs.emit_fn(), obs.retire_fn());
 
     EXPECT_EQ(outcome, finalize_outcome::completed_no_timing);
@@ -123,13 +123,13 @@ TEST(no_signal_finalizer, missing_start_is_completed_no_timing)
 
 // Tick conversion failure is not a loss either: no record, normal retire, and
 // crucially NO HSA fallback (there is nothing in this code path that could).
-TEST(no_signal_finalizer, convert_failure_is_completed_no_timing)
+TEST(complete_signal_less_dispatch, convert_failure_is_completed_no_timing)
 {
     auto obs  = observer{};
     auto conv = converter{};
     conv.ok   = false;
 
-    auto outcome = run_no_signal_finalizer(std::optional<uint64_t>{500},
+    auto outcome = run_complete_signal_less_dispatch(std::optional<uint64_t>{500},
                                            900,
                                            0,
                                            10'000'000,
@@ -144,7 +144,7 @@ TEST(no_signal_finalizer, convert_failure_is_completed_no_timing)
 
 // The correlation guard rejects a record that does not fall inside this
 // dispatch's own CPU window -- it is not this dispatch's record.
-TEST(no_signal_finalizer, sanity_failure_is_completed_no_timing)
+TEST(complete_signal_less_dispatch, sanity_failure_is_completed_no_timing)
 {
     auto conv = converter{};
 
@@ -154,7 +154,7 @@ TEST(no_signal_finalizer, sanity_failure_is_completed_no_timing)
     {
         auto obs      = observer{};
         auto passthru = converter{true, /*epoch=*/0};
-        auto outcome  = run_no_signal_finalizer(std::optional<uint64_t>{1},
+        auto outcome  = run_complete_signal_less_dispatch(std::optional<uint64_t>{1},
                                                /*end_ticks=*/1000 + kKfdFutureSlackNs + 1,
                                                /*enqueue_ts=*/0,
                                                /*now_ns=*/1000,
@@ -169,7 +169,7 @@ TEST(no_signal_finalizer, sanity_failure_is_completed_no_timing)
     // Converted interval starts before the dispatch was enqueued.
     {
         auto obs     = observer{};
-        auto outcome = run_no_signal_finalizer(std::optional<uint64_t>{500},
+        auto outcome = run_complete_signal_less_dispatch(std::optional<uint64_t>{500},
                                                900,
                                                /*enqueue_ts=*/9'000'000,
                                                /*now_ns=*/10'000'000,
@@ -184,7 +184,7 @@ TEST(no_signal_finalizer, sanity_failure_is_completed_no_timing)
     // Non-positive interval (end <= start).
     {
         auto obs     = observer{};
-        auto outcome = run_no_signal_finalizer(std::optional<uint64_t>{900},
+        auto outcome = run_complete_signal_less_dispatch(std::optional<uint64_t>{900},
                                                900,
                                                0,
                                                10'000'000,
@@ -201,7 +201,7 @@ TEST(no_signal_finalizer, sanity_failure_is_completed_no_timing)
 // couple of milliseconds past the `now` the finalizer sampled, because the tick
 // conversion's correlation is only periodically re-synced. This must produce a
 // record -- rejecting it discarded every dispatch on gfx1201.
-TEST(no_signal_finalizer, accepts_a_converted_end_slightly_past_now)
+TEST(complete_signal_less_dispatch, accepts_a_converted_end_slightly_past_now)
 {
     constexpr uint64_t now  = 1'000'000'000;
     constexpr uint64_t skew = 2'700'000;  // measured 2.0-2.7 ms
@@ -209,7 +209,7 @@ TEST(no_signal_finalizer, accepts_a_converted_end_slightly_past_now)
     // Converts ticks straight through, so end lands at now + skew.
     auto conv = converter{true, /*epoch=*/0};
 
-    auto outcome = run_no_signal_finalizer(std::optional<uint64_t>{now - 5'000'000},
+    auto outcome = run_complete_signal_less_dispatch(std::optional<uint64_t>{now - 5'000'000},
                                            now + skew,
                                            /*enqueue_ts=*/0,
                                            now,
@@ -225,12 +225,12 @@ TEST(no_signal_finalizer, accepts_a_converted_end_slightly_past_now)
 
 // A throwing client callback must NOT skip cleanup: the scope destructor retires
 // the correlation id exactly once on the way out (AGENTS.md RAII requirement).
-TEST(no_signal_finalizer, throwing_emit_still_retires_exactly_once)
+TEST(complete_signal_less_dispatch, throwing_emit_still_retires_exactly_once)
 {
     auto obs  = observer{};
     auto conv = converter{};
 
-    EXPECT_THROW(run_no_signal_finalizer(
+    EXPECT_THROW(run_complete_signal_less_dispatch(
                      std::optional<uint64_t>{500},
                      900,
                      0,
@@ -251,7 +251,7 @@ TEST(no_signal_finalizer, throwing_emit_still_retires_exactly_once)
 // shape-ii and a rejected sanity clause need opposite fixes, so a mislabelled
 // counter would send the next investigation the wrong way.
 
-TEST(no_signal_finalizer, reports_the_exact_rejection_cause)
+TEST(complete_signal_less_dispatch, reports_the_exact_rejection_cause)
 {
     constexpr uint64_t now = 1'000'000'000;
 
@@ -262,7 +262,7 @@ TEST(no_signal_finalizer, reports_the_exact_rejection_cause)
         auto obs     = observer{};
         auto conv    = converter{convert_ok, /*epoch=*/0};
         auto detail  = finalize_detail{};
-        auto outcome = run_no_signal_finalizer(start_ticks,
+        auto outcome = run_complete_signal_less_dispatch(start_ticks,
                                                end_ticks,
                                                enqueue_ts,
                                                now,
@@ -321,14 +321,14 @@ TEST(no_signal_finalizer, reports_the_exact_rejection_cause)
 // A few ms past now stays inside the slack, so it must be reported as ready and
 // NOT counted against after_now -- otherwise the breakdown would blame the guard
 // for the very skew it was widened to absorb.
-TEST(no_signal_finalizer, conversion_skew_is_not_counted_as_a_rejection)
+TEST(complete_signal_less_dispatch, conversion_skew_is_not_counted_as_a_rejection)
 {
     constexpr uint64_t now  = 1'000'000'000;
     auto               obs  = observer{};
     auto               conv = converter{true, /*epoch=*/0};
     auto               det  = finalize_detail{};
 
-    auto outcome = run_no_signal_finalizer(std::optional<uint64_t>{now - 5'000'000},
+    auto outcome = run_complete_signal_less_dispatch(std::optional<uint64_t>{now - 5'000'000},
                                            now + 2'700'000,
                                            0,
                                            now,

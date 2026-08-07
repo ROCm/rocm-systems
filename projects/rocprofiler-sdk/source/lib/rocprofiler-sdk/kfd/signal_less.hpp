@@ -23,7 +23,7 @@
 #pragma once
 
 #include "lib/rocprofiler-sdk/kfd/dispatch_hub.hpp"
-#include "lib/rocprofiler-sdk/kfd/no_signal_finalizer.hpp"
+#include "lib/rocprofiler-sdk/kfd/complete_signal_less_dispatch.hpp"
 #include "lib/rocprofiler-sdk/kfd/owner_registry.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
@@ -104,16 +104,16 @@ finish_close_signal_less_queue(uint64_t queue_token);
 // true; false means the task group is gone, which only happens once
 // finalization has begun.
 bool
-submit_no_signal_finalize(signal_less_hub_t::proven& p);
+submit_complete_signal_less_dispatch(signal_less_hub_t::proven& p);
 
 // Run the finalizer on the CALLING thread. Only the deferred flush uses this,
 // and only from the teardown thread -- never the reader or processor.
 void
-finalize_no_signal_in_place(signal_less_hub_t::proven&& p);
+finalize_complete_signal_less_dispatch(signal_less_hub_t::proven&& p);
 
 // Take and release every live queue's gate_lock. Caller holds no other lock.
 void
-quiesce_signal_less_interceptor();
+drain_signal_less_interceptor();
 
 // Wait for every already-submitted completion to finish executing.
 void

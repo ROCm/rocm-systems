@@ -25,7 +25,7 @@
 // here without a GPU, the HSA runtime, or the reader thread.
 
 #include "lib/rocprofiler-sdk/kfd/dispatch_hub.hpp"
-#include "lib/rocprofiler-sdk/kfd/no_signal_finalizer.hpp"
+#include "lib/rocprofiler-sdk/kfd/complete_signal_less_dispatch.hpp"
 #include "lib/rocprofiler-sdk/kfd/owner_registry.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
@@ -951,7 +951,7 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
         auto mk      = reference_model::key_t{p.key.doorbell_off, p.key.dispatch_idx_low32};
         int  emits   = 0;
         int  retires = 0;
-        auto outcome = run_no_signal_finalizer(
+        auto outcome = run_complete_signal_less_dispatch(
             p.start_ticks,
             p.end_ticks,
             /*enqueue_ts=*/0,

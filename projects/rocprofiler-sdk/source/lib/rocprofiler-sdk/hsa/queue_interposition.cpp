@@ -524,7 +524,7 @@ enable_profiling_for_signal_batch(Queue* queue)
 // signal and the app may already have destroyed its own, so a convert/sanity
 // failure emits no record but still retires the correlation id.
 void
-no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
+complete_signal_less_dispatch(kfd::signal_less_hub_t::proven&& proven)
 {
     auto&       _payload    = proven.payload;
     const auto* _rocp_agent = agent::get_agent(_payload.agent_id);
@@ -548,7 +548,7 @@ no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
     };
 
     // Retires exactly once whatever the outcome, and even if a client callback
-    // throws (run_no_signal_finalizer arms this from a scope destructor).
+    // throws (run_complete_signal_less_dispatch arms this from a scope destructor).
     auto _retire = [&_payload]() {
         auto* _corr_id = _payload.correlation_id;
         if(!_corr_id) return;
@@ -562,7 +562,7 @@ no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
     const uint64_t _now = common::timestamp_ns();
 
     auto       _detail  = kfd::finalize_detail{};
-    const auto _outcome = kfd::run_no_signal_finalizer(proven.start_ticks,
+    const auto _outcome = kfd::run_complete_signal_less_dispatch(proven.start_ticks,
                                                        proven.end_ticks,
                                                        _payload.enqueue_ts,
                                                        _now,
@@ -603,7 +603,7 @@ submit_to_task_group(kfd::signal_less_hub_t::proven& proven)
     // task_group_t::async takes a std::function, which must be copy-constructible;
     // the payload is move-only, so it travels in a shared_ptr.
     auto _held = std::make_shared<kfd::signal_less_hub_t::proven>(std::move(proven));
-    _tg->async([_held]() { no_signal_finalize(std::move(*_held)); });
+    _tg->async([_held]() { complete_signal_less_dispatch(std::move(*_held)); });
     return true;
 }
 
@@ -1668,19 +1668,19 @@ interposition_fini()
 namespace kfd
 {
 bool
-submit_no_signal_finalize(signal_less_hub_t::proven& p)
+submit_complete_signal_less_dispatch(signal_less_hub_t::proven& p)
 {
     return hsa::queue_interposition::submit_to_task_group(p);
 }
 
 void
-finalize_no_signal_in_place(signal_less_hub_t::proven&& p)
+finalize_complete_signal_less_dispatch(signal_less_hub_t::proven&& p)
 {
-    hsa::queue_interposition::no_signal_finalize(std::move(p));
+    hsa::queue_interposition::complete_signal_less_dispatch(std::move(p));
 }
 
 void
-quiesce_signal_less_interceptor()
+drain_signal_less_interceptor()
 {
     hsa::queue_interposition::fence_all_queue_gates();
 }

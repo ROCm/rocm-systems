@@ -173,7 +173,7 @@ hand_off_proven(signal_less_hub_t::proven&& p)
 {
     if(g_child_stale.load(std::memory_order_acquire)) return;
 
-    if(submit_no_signal_finalize(p)) return;
+    if(submit_complete_signal_less_dispatch(p)) return;
 
     // Deliberately NOT finalized here: this is the processor thread, which must
     // never run a client callback.
@@ -195,7 +195,7 @@ flush_deferred_completions()
     }
     // Outside the lock: the finalizer runs client callbacks.
     for(auto& _p : _taken)
-        finalize_no_signal_in_place(std::move(_p));
+        finalize_complete_signal_less_dispatch(std::move(_p));
     return _taken.size();
 }
 
@@ -403,7 +403,7 @@ signal_less_teardown()
     //   5. leak      -> whatever never got an EOP is ledgered, so finalize skips it
     //   6. join tasks-> safe only now: no producer can submit another task
     signal_less_hub().set_mode(session_mode::stopping);
-    quiesce_signal_less_interceptor();
+    drain_signal_less_interceptor();
     stop_kfd_reader();
     const size_t _flushed = flush_deferred_completions();
 
@@ -444,7 +444,7 @@ signal_less_quiesce()
     if(g_child_stale.load(std::memory_order_acquire)) return;
     if(!signal_less_feature_enabled()) return;
     // (a) no registration/publication is mid-flight...
-    quiesce_signal_less_interceptor();
+    drain_signal_less_interceptor();
     // (b) ...the reader has completed a full drain, so every record it already had
     // has been turned into a handoff...
     wait_for_reader_drain_barrier();

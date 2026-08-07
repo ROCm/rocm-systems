@@ -31,11 +31,10 @@
 #include <optional>
 #include <utility>
 
-// The no-signal finalizer core and the bounded retry owner, free of the HSA and
-// tracing headers so every branch is unit-testable with injected callables.
-//
-// The finalizer runs on a task-group worker, or on the thread flushing the
-// retry owner. It NEVER runs on the reader thread or under a hub/queue lock.
+// Completion of a signal-less dispatch, free of the HSA and tracing headers so
+// every branch is unit-testable with injected callables. Runs on a task-group
+// worker, or on the teardown thread draining deferred completions -- never on
+// the reader or processor thread, and never under a hub/queue lock.
 
 namespace rocprofiler
 {
@@ -125,7 +124,7 @@ resolve_finalize(const std::optional<uint64_t>& start_ticks,
 // Convert, emit on success, and retire EXACTLY ONCE on every path.
 template <typename ConvertFn, typename EmitFn, typename RetireFn>
 finalize_outcome
-run_no_signal_finalizer(const std::optional<uint64_t>& start_ticks,
+run_complete_signal_less_dispatch(const std::optional<uint64_t>& start_ticks,
                         uint64_t                       end_ticks,
                         uint64_t                       enqueue_ts,
                         uint64_t                       now_ns,

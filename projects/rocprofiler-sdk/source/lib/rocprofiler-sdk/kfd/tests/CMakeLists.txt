@@ -87,11 +87,11 @@ rocprofiler_add_unit_test(
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-set(ROCPROFILER_LIB_KFD_NSF_TEST_SOURCES no_signal_finalizer_test.cpp)
+set(ROCPROFILER_LIB_KFD_CSLD_TEST_SOURCES complete_signal_less_dispatch_test.cpp)
 
 add_executable(kfd-dlog-finalizer)
 
-target_sources(kfd-dlog-finalizer PRIVATE ${ROCPROFILER_LIB_KFD_NSF_TEST_SOURCES})
+target_sources(kfd-dlog-finalizer PRIVATE ${ROCPROFILER_LIB_KFD_CSLD_TEST_SOURCES})
 
 target_link_libraries(
     kfd-dlog-finalizer
@@ -101,7 +101,7 @@ target_link_libraries(
 
 rocprofiler_add_unit_test(
     TARGET kfd-dlog-finalizer
-    SOURCES ${ROCPROFILER_LIB_KFD_NSF_TEST_SOURCES}
+    SOURCES ${ROCPROFILER_LIB_KFD_CSLD_TEST_SOURCES}
     TIMEOUT 45
     LABELS "unittests;kfd-dlog"
     ENVIRONMENT

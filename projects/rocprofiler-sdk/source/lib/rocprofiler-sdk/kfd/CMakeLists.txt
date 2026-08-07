@@ -16,7 +16,7 @@ set(ROCPROFILER_LIB_KFD_EVENT_HEADERS
     dispatch_hub.hpp
     signal_less.hpp
     signal_less_gate.hpp
-    no_signal_finalizer.hpp
+    complete_signal_less_dispatch.hpp
     owner_registry.hpp
     record_pipe.hpp)
 
