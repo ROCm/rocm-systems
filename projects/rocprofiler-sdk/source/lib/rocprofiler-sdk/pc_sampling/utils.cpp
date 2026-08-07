@@ -73,21 +73,33 @@ get_matching_hsa_pcs_units(rocprofiler_pc_sampling_unit_t unit)
 size_t
 get_hsa_pcs_buffer_size(uint32_t gfx_target_version)
 {
-    // gfx_target_version encodes major*10000 + minor*100 + patch
-    const uint32_t major = (gfx_target_version / 10000) % 100;
-    const uint32_t minor = (gfx_target_version / 100) % 100;
-
     // Since ROCM-22213, the buffer is split per XCC, so we need larger buffers for these GPUs.
-    // Right now, just enable for MI300/350/400 series chips.
-    const bool is_multi_xcc =
-        (major == 9 && (minor == 4 || minor == 5)) || (major == 12 && minor == 5);
+    // For now, just enable for MI300/350/400 series chips.
+    const auto is_multi_xcc = [](uint32_t gfx_target_version) -> bool {
+        // gfx_target_version encodes major*10000 + minor*100 + patch
+        switch(gfx_target_version / 100)
+        {
+            case 904:
+            case 905:
+            case 1205: return true;
+            default: return false;
+        }
+    };
 
-    if(is_multi_xcc)
+    static_assert(sizeof(perf_sample_hosttrap_v1_t) == 64,
+                  "update size comments below and reevaluate buffer size");
+    size_t num_elems{};
+
+    if(is_multi_xcc(gfx_target_version))
     {
-        return 1024 * 1024 * sizeof(perf_sample_hosttrap_v1_t);  // 64MB
+        num_elems = 1024 * 1024;  // 64mb
+    }
+    else
+    {
+        num_elems = 64 * 1024;  // 4mb
     }
 
-    return 64 * 1024 * sizeof(perf_sample_hosttrap_v1_t);  // 4MB
+    return num_elems * sizeof(perf_sample_hosttrap_v1_t);
 }
 }  // namespace utils
 }  // namespace pc_sampling
