@@ -56,8 +56,6 @@ static ncclKernelMatch const ncclKerns[6] = {
   {(void*)ncclDevKernel_Generic_16, true}, {(void*)ncclDevKernel_Generic_32, true}
 };
 
-
-
 /* Copy of ncclShmemScratchWarpSize */
 constexpr int rcclShmemScratchWarpSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize = 32) {
   return (max_constexpr<int>(

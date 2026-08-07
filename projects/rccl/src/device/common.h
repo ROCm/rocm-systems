@@ -268,12 +268,12 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
     //   packInWork = tid%(workSize/16);
     //   dstWork = tid/(workSize/16);
 
-    // AGV bcast fusion packs up to 64 works (offsetBitset bits) per batch; at 3 packs/work
-    // (48B/16B each) that is 192 packs, which can exceed the loader subgroup size
-    // (tn = threadPerBlock - 2*WARP_SIZE), so bcast requires a stride loop. Coll/P2P
-    // hold at most 1-2 works and always fit in one pass; the break below enforces that.
-    // tid is preserved (not pk) so the nextExtends warp-rotation below stays correct.
-    const int bcastPacks = sizeof(struct ncclDevWorkBcast)/16; // 3 packs/work
+    // AGV bcast fuses up to 64 works/batch (192 packs) and can exceed the loader subgroup size
+    // tn, so bcast strides while coll/P2P break after one pass. tid (not pk) is preserved so
+    // the nextExtends warp rotation stays correct. alignas(16) keeps bcastPacks >= 1.
+    static_assert(sizeof(struct ncclDevWorkBcast) % 16 == 0 && sizeof(struct ncclDevWorkBcast) >= 16,
+                  "ncclDevWorkBcast must be a non-zero multiple of the 16B pack size");
+    constexpr int bcastPacks = sizeof(struct ncclDevWorkBcast)/16; // 3 packs/work
     bool isBcast = batch.workType == (int)ncclDevWorkTypeBcast;
     for (int pk = tid; pk < nPacks; pk += tn) {
       if (isBcast) { dstWork = pk/bcastPacks; packInWork = pk - dstWork*bcastPacks; }
@@ -315,8 +315,7 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
 
     if (batch.nextExtends) {
       batchIx += batch.nextJump;
-      // Rotate by 2*WARP_SIZE (not hardcoded 64) so the next batch uses two warps correctly.
-      tid -= 2*WARP_SIZE;
+      tid -= 2*WARP_SIZE; // Rotate threads so we use the next two warps for next batch struct.
       if (tid < 0) tid += tn;
     } else {
       if (tid == 0) {

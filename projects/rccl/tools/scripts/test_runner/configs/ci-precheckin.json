@@ -105,6 +105,8 @@
         {"name": "GroupCall.SingleRootBroadcastDowngrade_Enabled", "description": "Single-root broadcast downgrade with AllGatherV enabled", "test_filter": "GroupCall.SingleRootBroadcastDowngrade", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}},
         {"name": "GroupCall.MultiRootBroadcastConsecutive_Enabled", "description": "Consecutive AllGatherV group calls validates reclaimPlannerState reset", "test_filter": "GroupCall.MultiRootBroadcastConsecutive", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}},
         {"name": "GroupCall.MixedBroadcastAndAllReduce_Enabled", "description": "Broadcast + AllReduce in same group call with AllGatherV enabled", "test_filter": "GroupCall.MixedBroadcastAndAllReduce", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}},
+        {"name": "GroupCall.MultiRootBroadcastChannelCounts_Enabled", "description": "AllGatherV fusion across pinned channel counts", "test_filter": "GroupCall.MultiRootBroadcastChannelCounts", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}, "timeout": 180},
+        {"name": "GroupCall.MultiRootBroadcastUnalignedSizes_Enabled", "description": "AllGatherV fusion with unaligned buffer sizes", "test_filter": "GroupCall.MultiRootBroadcastUnalignedSizes", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}},
         {"name": "NonBlocking.SingleCalls", "description": "NonBlocking single calls", "test_filter": "NonBlocking.SingleCalls"},
         {"name": "Standalone.SplitComms_RankCheck", "description": "Verify device assignment for each rank using ncclCommSplit API", "test_filter": "Standalone.SplitComms_RankCheck"},
         {"name": "Standalone.SplitComms_OneColor", "description": "Creates communicator for each device with same color", "test_filter": "Standalone.SplitComms_OneColor"},

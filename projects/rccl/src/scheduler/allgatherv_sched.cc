@@ -10,6 +10,20 @@
 
 #include "scheduler.h"
 
+// AllGatherV launches grid=nChannels and does not implement WarpSpeed's warp-level channel
+// distribution, so the tuner's multiplier inflation is undone here; an oversized grid faults
+// on gfx950. Pure function so the derivation stays in one traceable place.
+static int agvChannelCount(struct ncclComm* comm, int tunedChannels) {
+#ifdef ENABLE_WARP_SPEED
+  if (comm->warpSpeedChannelMultiplier > 1) {
+    int channels = std::max(1, tunedChannels / comm->warpSpeedChannelMultiplier);
+    INFO(NCCL_COLL, "AllGatherV: WarpSpeed not supported; channels %d -> %d (multiplier %d)",
+         tunedChannels, channels, comm->warpSpeedChannelMultiplier);
+    return channels;
+  }
+#endif
+  return tunedChannels;
+}
 
 ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan,
                                           struct ncclKernelPlanBudget* budget) {
@@ -65,14 +79,7 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
     if (proto == NCCL_PROTO_LL) chunkSize = chunkSize / 2;
     if (proto == NCCL_PROTO_LL128) chunkSize = (chunkSize / NCCL_LL128_LINEELEMS) * NCCL_LL128_DATAELEMS;
     size_t grainSize = rcclProtoGrainSize(proto, comm);
-    nChannels = tcoll.nMaxChannels;
-#ifdef ENABLE_WARP_SPEED
-    // AllGatherV launches grid=nChannels without WarpSpeed, so undo the tuner's
-    // warpSpeedChannelMultiplier inflation (else the oversized grid faults on gfx950).
-    if (comm->warpSpeedChannelMultiplier > 1) {
-      nChannels = std::max(1, nChannels / comm->warpSpeedChannelMultiplier);
-    }
-#endif
+    nChannels = agvChannelCount(comm, tcoll.nMaxChannels);
     chunkSize = chunkSize / grainSize * grainSize;
 
 
