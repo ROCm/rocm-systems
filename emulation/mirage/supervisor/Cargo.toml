@@ -26,6 +26,10 @@ thiserror = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 inventory = { workspace = true }
+# `test-util` is not in tokio's `full`, and it is what gives the readiness
+# tests a paused clock: they assert on behaviour spanning minutes of
+# bring-up, which is not a thing a test may actually wait for.
+tokio = { workspace = true, features = ["test-util"] }
 chrono = { workspace = true }
 mirage_rocjitsu = { workspace = true }
 mirage_builtin = { workspace = true }

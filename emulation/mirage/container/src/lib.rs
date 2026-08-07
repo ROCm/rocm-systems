@@ -56,9 +56,73 @@ pub struct NodeClient {
     pub name: String,
     /// The provider client process. `None` once it has been killed.
     child: Option<std::process::Child>,
+    /// The last few lines the client wrote to stderr.
+    ///
+    /// Drained on a thread rather than left in the pipe, because the
+    /// client outlives the container and a pipe nobody reads eventually
+    /// blocks the writer. Bounded for the same reason a log is: a client
+    /// that chatters for hours must not grow this without limit.
+    stderr: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
 }
 
+/// How many lines of a provider client's stderr to keep.
+///
+/// Enough for a refusal with a little context around it; the interesting
+/// part of `podman run` failing is always its last words.
+const CLIENT_STDERR_LINES: usize = 20;
+
 impl NodeClient {
+    /// Adopt a freshly-spawned provider client, draining its stderr.
+    fn adopt(rank: u32, name: String, mut child: std::process::Child) -> Self {
+        use std::io::{BufRead as _, BufReader};
+
+        let stderr = std::sync::Arc::new(std::sync::Mutex::new(
+            std::collections::VecDeque::with_capacity(CLIENT_STDERR_LINES),
+        ));
+        if let Some(pipe) = child.stderr.take() {
+            let sink = stderr.clone();
+            std::thread::spawn(move || {
+                for line in BufReader::new(pipe)
+                    .lines()
+                    .map_while(std::result::Result::ok)
+                {
+                    // Recovered from rather than panicked on: this is a
+                    // ring of plain strings with no invariant a panic
+                    // could have broken, and losing the diagnostics this
+                    // thread exists to collect is the worse outcome.
+                    let mut sink = sink.lock().unwrap_or_else(|e| e.into_inner());
+                    if sink.len() == CLIENT_STDERR_LINES {
+                        sink.pop_front();
+                    }
+                    sink.push_back(line);
+                }
+            });
+        }
+        Self {
+            rank,
+            name,
+            child: Some(child),
+            stderr,
+        }
+    }
+
+    /// What the provider client has said, most recent lines last.
+    ///
+    /// Empty when it said nothing, which is the normal case: a healthy
+    /// `podman run` of an idling container is silent for its whole life.
+    #[must_use]
+    pub fn stderr_tail(&self) -> String {
+        self.stderr
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("; ")
+            .trim()
+            .to_string()
+    }
+
     /// Stop the container by killing its provider client, and reap the
     /// client so it does not become a zombie.
     ///
@@ -133,6 +197,27 @@ pub enum ContainerError {
         name: String,
         /// How long mirage waited for it.
         waited: std::time::Duration,
+    },
+
+    /// The provider client exited before its container came up.
+    ///
+    /// Distinct from [`ContainerError::NotRunning`] because it is a
+    /// different event with a different fix. A timeout means the engine
+    /// is slow or wedged; this means it refused, and it usually said why
+    /// — a bound port, a device that does not exist, an entrypoint the
+    /// image cannot run. That reason is the whole value of the variant:
+    /// reporting "did not start within 543ms" against a sixty-second
+    /// budget describes neither what happened nor what to do about it.
+    #[error("container `{name}` stopped immediately (after {waited:?}){}",
+        if .stderr.is_empty() { String::new() } else { format!(": {}", .stderr) })]
+    ClientExited {
+        /// Name of the container that failed to come up.
+        name: String,
+        /// How long the provider client lasted.
+        waited: std::time::Duration,
+        /// What the client wrote to stderr, trimmed. Empty when it said
+        /// nothing.
+        stderr: String,
     },
 }
 
@@ -490,8 +575,57 @@ impl Engine {
     // ---- side-effecting operations --------------------------------
 
     /// Pull `image` so node launches don't race on an implicit pull.
+    ///
+    /// The slowest step in bring-up by a wide margin, and the one a user
+    /// most needs to see. What they see depends on where mirage's stderr
+    /// goes:
+    ///
+    /// * **A terminal** — the provider's own streams are inherited, so
+    ///   `podman pull`'s layer-by-layer progress renders exactly as it
+    ///   does when run by hand. That cannot be reproduced by capturing:
+    ///   a progress bar is `\r`-driven, and a line reader holds every
+    ///   update until a newline that never comes.
+    /// * **Anything else** (a CI log, `2>file`) — captured, as before, so
+    ///   a failure's stderr is carried in the error rather than scattered
+    ///   into whatever the caller redirected to.
+    ///
+    /// The trade on the first branch is deliberate: a failed pull's
+    /// output is not repeated in [`ContainerError::Command`], because the
+    /// user just watched it go past.
     pub fn pull(&self, image: &str) -> Result<()> {
-        self.checked(&["pull".to_string(), image.to_string()])
+        use std::io::IsTerminal as _;
+
+        let args = vec!["pull".to_string(), image.to_string()];
+        if !std::io::stderr().is_terminal() {
+            return self.checked(&args);
+        }
+
+        let status = spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(&args)
+                // stdout as well as stderr: podman writes the pulled
+                // image's digest to stdout, and swallowing it while
+                // showing the progress that led to it would be odd.
+                .stdin(Stdio::null())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .status()
+        })
+        .map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.clone(),
+            source,
+        })?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(ContainerError::Command {
+                provider: self.provider.clone(),
+                args,
+                code: status.code().unwrap_or(-1),
+                stderr: "see the provider's output above".to_string(),
+            })
+        }
     }
 
     /// Build an image tagged `tag` from the given `dockerfile` contents,
@@ -505,7 +639,16 @@ impl Engine {
     /// log at INFO so progress is visible live; the captured lines are
     /// also retained and, on failure, surfaced in the error so a broken
     /// `RUN` step is actionable.
+    ///
+    /// When mirage's stderr is a terminal the lines are echoed there as
+    /// well. The log alone is off unless the user passed `-v`, which made
+    /// the other multi-minute phase of bring-up — see [`Self::pull`] —
+    /// look identical to a hang. Line-buffered rather than inherited,
+    /// unlike the pull: a build's output is lines, not a progress bar,
+    /// and they are wanted in the error too.
     pub fn build_image(&self, tag: &str, dockerfile: &str) -> Result<()> {
+        use std::io::IsTerminal as _;
+        let echo = std::io::stderr().is_terminal();
         let args = vec![
             "build".to_string(),
             "-t".to_string(),
@@ -525,18 +668,7 @@ impl Engine {
             args: args.clone(),
             source,
         })?;
-        // Stream the Dockerfile to the build's stdin, then close it so the
-        // provider proceeds.
         use std::io::{BufRead, BufReader, Write};
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(dockerfile.as_bytes())
-                .map_err(|source| ContainerError::Spawn {
-                    provider: self.provider.clone(),
-                    args: args.clone(),
-                    source,
-                })?;
-        }
 
         // Drain stdout and stderr concurrently, logging each line at INFO
         // as it arrives and retaining it so a failing build's output can
@@ -545,6 +677,7 @@ impl Engine {
         fn log_stream<R: std::io::Read + Send + 'static>(
             reader: Option<R>,
             tag: String,
+            echo: bool,
         ) -> (
             std::sync::Arc<std::sync::Mutex<Vec<String>>>,
             Option<std::thread::JoinHandle<()>>,
@@ -555,6 +688,9 @@ impl Engine {
                 std::thread::spawn(move || {
                     for line in BufReader::new(r).lines().map_while(std::result::Result::ok) {
                         tracing::info!(image = %tag, "{line}");
+                        if echo {
+                            eprintln!("mirage: {tag}: {line}");
+                        }
                         // Recover from poisoning rather than panicking:
                         // the buffer is plain data with no invariant a
                         // panic could have broken, and taking down the
@@ -569,8 +705,36 @@ impl Engine {
             });
             (lines, handle)
         }
-        let (out_lines, out_handle) = log_stream(child.stdout.take(), tag.to_string());
-        let (err_lines, err_handle) = log_stream(child.stderr.take(), tag.to_string());
+        let (out_lines, out_handle) = log_stream(child.stdout.take(), tag.to_string(), echo);
+        let (err_lines, err_handle) = log_stream(child.stderr.take(), tag.to_string(), echo);
+
+        // Only now stream the Dockerfile in, then close stdin so the
+        // provider proceeds.
+        //
+        // Order matters, and getting it wrong deadlocks bring-up with no
+        // timeout: both providers interleave `STEP`/pull progress on
+        // stderr while they are still reading the build context, so
+        // writing first meant the provider could fill its output pipe
+        // — nobody was reading it yet — and block, while this thread
+        // blocked writing to an input pipe the provider had stopped
+        // reading. The drains above are already running, so neither side
+        // can stall the other.
+        if let Some(mut stdin) = child.stdin.take()
+            && let Err(source) = stdin.write_all(dockerfile.as_bytes())
+        {
+            // The provider is still running and owns two pipes we are
+            // about to stop reading. Ending it and reaping it here is
+            // what keeps `?` from orphaning it: `std::process::Child`
+            // has no `Drop`, so returning would leave the build running
+            // unattended and unwaited-for.
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(ContainerError::Spawn {
+                provider: self.provider.clone(),
+                args: args.clone(),
+                source,
+            });
+        }
 
         let status = child.wait().map_err(|source| ContainerError::Spawn {
             provider: self.provider.clone(),
@@ -648,11 +812,20 @@ impl Engine {
     /// Dropping or killing it stops the container, and `--rm` then
     /// removes it.
     ///
-    /// Its standard streams go to `/dev/null`. The container's foreground
+    /// Its stdin and stdout go to `/dev/null`. The container's foreground
     /// process is an idle placeholder — workloads arrive later via
     /// `provider exec` — so it has nothing to say, and letting it write
     /// to mirage's terminal would interleave provider chatter with the
     /// workload output the user actually asked for.
+    ///
+    /// stderr is *captured* rather than discarded, and drained into the
+    /// returned [`NodeClient`]. It too used to go to `/dev/null`, which
+    /// meant a `podman run` that refused instantly — a bound port, a
+    /// device that does not exist, an entrypoint the image cannot run —
+    /// said so into nothing, and mirage reported only that the container
+    /// "did not start". The reason is the single most useful thing about
+    /// a failed bring-up and it was being thrown away a few microseconds
+    /// before it was needed.
     ///
     /// Returns as soon as the client has been spawned. The container is
     /// not necessarily running yet; use [`Self::await_running`] for that.
@@ -673,7 +846,8 @@ impl Engine {
         groups: &[String],
         env: &[(String, String)],
         labels: &[(String, String)],
-    ) -> Result<std::process::Child> {
+        rank: u32,
+    ) -> Result<NodeClient> {
         let command: Vec<String> = CONTAINER_IDLE_COMMAND
             .iter()
             .map(|s| (*s).to_string())
@@ -692,19 +866,20 @@ impl Engine {
             labels,
             &command,
         );
-        spawn_retrying_etxtbsy(|| {
+        let child = spawn_retrying_etxtbsy(|| {
             Command::new(&self.provider)
                 .args(&argv)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stderr(Stdio::piped())
                 .spawn()
         })
         .map_err(|source| ContainerError::Spawn {
             provider: self.provider.clone(),
             args: argv.clone(),
             source,
-        })
+        })?;
+        Ok(NodeClient::adopt(rank, name.to_string(), child))
     }
 
     /// Whether a container named `name` is currently running.
@@ -732,16 +907,41 @@ impl Engine {
     ///
     /// Returns [`ContainerError::NotRunning`] if the container has not
     /// come up within `timeout`.
-    pub fn await_running(&self, name: &str, timeout: std::time::Duration) -> Result<()> {
+    pub fn await_running(
+        &self,
+        client: &mut NodeClient,
+        timeout: std::time::Duration,
+    ) -> Result<()> {
         const POLL: std::time::Duration = std::time::Duration::from_millis(50);
+        let name = client.name.clone();
         let deadline = std::time::Instant::now() + timeout;
         loop {
-            if self.container_running(name) {
+            if self.container_running(&name) {
                 return Ok(());
+            }
+            // The client is the container's lifetime, so a client that
+            // has already exited means the container is never coming.
+            //
+            // Waiting the full timeout for it is worse than slow, it is
+            // misleading: a `podman run` that fails instantly — a bound
+            // port, a device that does not exist, a name already in use,
+            // an entrypoint the image cannot run — would be reported
+            // after 60s of polling as a container that "did not start",
+            // when the engine had said exactly what was wrong in the
+            // first millisecond. Its stderr is captured for precisely
+            // this moment. Checking the client also stops a *leftover*
+            // container of the same name from being adopted as though
+            // this run had created it.
+            if !client.alive() {
+                return Err(ContainerError::ClientExited {
+                    name,
+                    waited: std::time::Instant::now().saturating_duration_since(deadline - timeout),
+                    stderr: client.stderr_tail(),
+                });
             }
             if std::time::Instant::now() >= deadline {
                 return Err(ContainerError::NotRunning {
-                    name: name.to_string(),
+                    name,
                     waited: timeout,
                 });
             }
@@ -902,30 +1102,26 @@ impl Engine {
                     &groups,
                     &env,
                     &labels,
+                    rank,
                 )
-                .and_then(|child| {
+                .and_then(|mut client| {
                     // The client is spawned; the container is not up yet.
                     // Wait for it here rather than letting the first exec
                     // discover the race.
                     //
-                    // The client is adopted by a `NodeClient` *before* the
-                    // wait, so that a timeout still has something that
-                    // owns it. Returning the bare `Child` and dropping it
-                    // on the error path left the provider client running
-                    // and unreaped — `std::process::Child` has no `Drop` —
-                    // and its container out of `state.nodes`, which is the
-                    // only list rollback removes. A slow node therefore
-                    // leaked exactly the orphan container and zombie
-                    // client this crate exists to prevent.
-                    let client = NodeClient {
-                        rank,
-                        name: name.clone(),
-                        child: Some(child),
-                    };
-                    match self.await_running(&name, NODE_START_TIMEOUT) {
+                    // `launch_node` hands back an owning `NodeClient`
+                    // rather than a bare `Child`, so a failure here always
+                    // has something that owns the process. Returning the
+                    // `Child` and dropping it on the error path left the
+                    // provider client running and unreaped —
+                    // `std::process::Child` has no `Drop` — and its
+                    // container out of `state.nodes`, which is the only
+                    // list rollback removes. A slow node therefore leaked
+                    // exactly the orphan container and zombie client this
+                    // crate exists to prevent.
+                    match self.await_running(&mut client, NODE_START_TIMEOUT) {
                         Ok(()) => Ok(client),
                         Err(e) => {
-                            let mut client = client;
                             client.kill();
                             self.rm(&name);
                             Err(e)
@@ -1331,7 +1527,7 @@ mod tests {
         let provider = mock_provider(dir.path(), &log);
         let engine = Engine::with_provider(provider.to_string_lossy().to_string());
 
-        let mut child = engine
+        let mut client = engine
             .launch_node(
                 "mirage-s-node-0",
                 "img",
@@ -1343,11 +1539,19 @@ mod tests {
                 &[],
                 &[],
                 &labels(),
+                0,
             )
             .unwrap();
-        // The mock exits on its own; wait for it so the argv it recorded
-        // is on disk before we read it.
-        child.wait().unwrap();
+        assert_eq!(client.rank, 0);
+        assert_eq!(client.name, "mirage-s-node-0");
+        // The mock exits on its own. Wait for it — `alive` is a `try_wait`
+        // and so reaps it — rather than killing it, so the argv it
+        // recorded is on disk before we read it.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while client.alive() {
+            assert!(std::time::Instant::now() < deadline, "the mock never exited");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
 
         let recorded = std::fs::read_to_string(&log).unwrap();
         assert!(
@@ -1369,18 +1573,49 @@ mod tests {
         let provider = mock_provider(dir.path(), &log);
         let engine = Engine::with_provider(provider.to_string_lossy().to_string());
 
-        let mut client = NodeClient {
-            rank: 0,
-            name: "mirage-s-node-0".to_string(),
-            child: Some(
-                engine
-                    .launch_node("n", "img", None, false, &[], &[], &[], &[], &[], &labels())
-                    .unwrap(),
-            ),
-        };
+        let mut client = engine
+            .launch_node("n", "img", None, false, &[], &[], &[], &[], &[], &labels(), 0)
+            .unwrap();
         client.kill();
         assert!(!client.alive());
         client.kill();
+    }
+
+    #[test]
+    fn a_client_that_refuses_says_why() {
+        // The reason a `podman run` fails is the single most useful thing
+        // about a failed bring-up, and it used to go to `/dev/null`: the
+        // user was told the container "did not start" and nothing else.
+        let dir = tempfile::tempdir().unwrap();
+        let provider = dir.path().join("refusing-provider.sh");
+        std::fs::write(
+            &provider,
+            "#!/bin/sh\n\
+             if [ \"$1\" = run ]; then echo 'Error: no such device /dev/kfd' >&2; exit 125; fi\n\
+             if [ \"$1\" = inspect ]; then echo false; exit 0; fi\n\
+             exit 0\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+
+        let mut client = engine
+            .launch_node("n", "img", None, false, &[], &[], &[], &[], &[], &labels(), 0)
+            .unwrap();
+        let err = engine
+            .await_running(&mut client, std::time::Duration::from_secs(30))
+            .unwrap_err();
+
+        // Fails fast rather than polling out the full timeout, and the
+        // engine's own words come back with it.
+        assert!(
+            matches!(err, ContainerError::ClientExited { .. }),
+            "a client that exited must not be reported as a timeout: {err}"
+        );
+        assert!(
+            err.to_string().contains("no such device /dev/kfd"),
+            "the provider's reason was lost: {err}"
+        );
     }
 
     #[test]

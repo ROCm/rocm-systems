@@ -88,6 +88,16 @@ impl Run {
         self.session.health()
     }
 
+    /// Subscribe to health changes.
+    ///
+    /// How `mirage run` shows bring-up progress: every phase publishes
+    /// here, and a client that only polled `health()` would miss the ones
+    /// between polls — which for a pull is most of them.
+    #[must_use]
+    pub fn watch_health(&self) -> tokio::sync::watch::Receiver<SessionHealth> {
+        self.session.watch_health()
+    }
+
     /// Take a borrower's lease on this session, unless it is tearing down.
     ///
     /// See [`Session::attach`](crate::session::Session::attach).
@@ -137,13 +147,23 @@ impl Run {
         self.session.describe()
     }
 
-    /// Wait until the session is healthy, terminally failed, or `timeout`
-    /// elapses.
+    /// Wait until the session is healthy, terminally failed, or bring-up
+    /// stops making progress for `timeout`.
     ///
-    /// Time spent pulling or building a container image does not count
-    /// against the timeout: those are bounded by a registry and a network
-    /// rather than by mirage, and the timeout exists to catch a session
-    /// that is *stuck*, not one that is slow.
+    /// `timeout` bounds the *gap between phases*, not the total. Bring-up
+    /// is a sequence of steps whose count depends on the session — one
+    /// container launch per node, launched serially — and a budget for
+    /// the whole thing is therefore a budget that a large session
+    /// exceeds by being large rather than by being broken. A four-node
+    /// session taking twenty seconds a node is healthy, and charging it
+    /// against a single sixty-second deadline tore it down.
+    ///
+    /// Time spent pulling or building a container image does not count at
+    /// all: those are bounded by a registry and a network rather than by
+    /// mirage. Progress-based timing alone would not cover them, because
+    /// a pull reports itself once and then goes quiet for however long it
+    /// takes — so the clock is *suspended* for those phases and merely
+    /// *restarted* for the rest.
     ///
     /// # Errors
     ///
@@ -153,33 +173,45 @@ impl Run {
         let mut watch = self.session.watch_health();
         let id = self.session.id().clone();
 
-        // Suspending the clock — rather than restarting it each time round
-        // the loop — is what actually implements "slow is not stuck". Each
-        // phase reports itself exactly once and the work then happens
-        // inside a single blocking call, so a multi-gigabyte pull produces
-        // one health event and then silence: a deadline merely *reset* on
-        // that one event still expires mid-pull, and `mirage run` tears
-        // down a session whose image was downloading normally.
+        // Two mechanisms, because there are two ways to be slow without
+        // being stuck, and neither one covers the other.
         //
-        // Waiting unbounded is safe because bring-up always publishes
-        // again: it records a terminal `failed` health on any error, and
-        // the phase callback fires on the way out of every step.
-        let mut deadline = Some(tokio::time::Instant::now() + timeout);
+        // *Suspending* the clock covers a phase whose duration mirage does
+        // not control. A pull reports itself exactly once and the work
+        // then happens inside a single blocking call, so a multi-gigabyte
+        // download produces one health event and then silence — a
+        // deadline merely restarted on that event still expires mid-pull,
+        // and `mirage run` tears down a session whose image was
+        // downloading normally.
+        //
+        // *Restarting* the clock on every event covers a phase made of
+        // many steps. Node containers are launched one at a time, each
+        // with its own bounded wait, and all of them publish under the
+        // same `starting` state — so a single deadline spanning the whole
+        // phase is a budget for the session's *size*, and a four-node
+        // session at twenty seconds a node was timed out for being big.
+        // Restarting turns the deadline into what it is documented to be:
+        // a detector for bring-up that has stopped moving.
+        //
+        // Waiting unbounded during a suspended phase is safe because
+        // bring-up always publishes again: it records a terminal `failed`
+        // health on any error, and the phase callback fires on the way out
+        // of every step.
         loop {
-            {
+            // Recomputed every time round, which is the restart: the
+            // deadline belongs to the wait for the *next* event, not to
+            // bring-up as a whole.
+            let deadline = {
                 let health = watch.borrow_and_update().clone();
                 if health.is_settled() {
                     return Ok(health);
                 }
-                deadline = if state::is_externally_bounded(health.state.as_deref()) {
+                if state::is_externally_bounded(health.state.as_deref()) {
                     None
                 } else {
-                    // Leaving an externally-bounded phase restarts the
-                    // clock: time spent pulling must not be charged to the
-                    // steps after it either.
-                    Some(deadline.unwrap_or_else(|| tokio::time::Instant::now() + timeout))
-                };
-            }
+                    Some(tokio::time::Instant::now() + timeout)
+                }
+            };
             let changed = match deadline {
                 Some(deadline) => tokio::time::timeout_at(deadline, watch.changed()).await,
                 None => Ok(watch.changed().await),
@@ -191,7 +223,7 @@ impl Run {
                 Ok(Err(_)) => return Err(MirageError::SessionNotFound(id.to_string())),
                 Err(_elapsed) => {
                     return Err(MirageError::Timeout(format!(
-                        "session {id} did not become ready within {timeout:?} \
+                        "session {id} made no progress for {timeout:?} \
                          (last state: {})",
                         watch
                             .borrow()
@@ -459,5 +491,136 @@ impl Run {
 impl Drop for Run {
     fn drop(&mut self) {
         self.session.kill_now();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+    use mirage_core::common::MaybeRef;
+    use mirage_core::emulator::{EmulatorDef, ExecMode};
+    use mirage_core::profile::ProfileDef;
+    use mirage_core::topology::TopologyDef;
+
+    const TIMEOUT: Duration = Duration::from_secs(60);
+
+    /// A `Run` over a session nothing is bringing up, so a test can drive
+    /// its health by hand.
+    ///
+    /// The real bring-up path is covered end to end in
+    /// `supervisor/tests/run.rs`; what these need is the opposite — a
+    /// session that publishes exactly the phases the test says it does,
+    /// at exactly the times it says, which no backend can be persuaded to
+    /// do.
+    ///
+    /// The path override is installed and removed inside this function,
+    /// under the shared lock, and neither outlives it. `TEST_ROOT` is
+    /// process-wide, so a test that held it across its `await`s would
+    /// redirect every other test in this binary for as long as it ran —
+    /// and holding a `std::sync::Mutex` across an await is denied by the
+    /// workspace lints for exactly that class of reason. Nothing after
+    /// construction consults `paths`: the session captured its scratch
+    /// directory, and `wait_ready` only reads a watch channel.
+    fn stalled_run(dir: &std::path::Path) -> Arc<Run> {
+        let _guard = mirage_core::paths::test_env_lock();
+        mirage_core::paths::set_test_root(dir);
+        let id = SessionId::new("waitready").unwrap();
+        let profile = ProfileDef {
+            name: "p".to_string(),
+            description: None,
+            emulator: EmulatorDef {
+                emulator: "stub".to_string(),
+                plugins: Default::default(),
+                exec_mode: ExecMode::Functional,
+                options: Default::default(),
+                topology: MaybeRef::Owned(TopologyDef {
+                    num_nodes: 1,
+                    gpus_per_node: 1,
+                    agent: MaybeRef::Ref("MI350X".to_string()),
+                }),
+            },
+            containerize: None,
+        };
+        let def = make_def(id, MaybeRef::Owned(profile.clone()), "/".to_string(), false);
+        let run = Arc::new(Run {
+            session: Session::new(def, profile).unwrap(),
+        });
+        mirage_core::paths::clear_test_root();
+        run
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn bring_up_that_keeps_moving_is_never_timed_out() {
+        // The regression: the deadline used to span the whole of
+        // bring-up, and node containers are launched one at a time under
+        // a single `starting` state. Four nodes at twenty seconds each is
+        // a healthy session that exceeded a sixty-second budget by being
+        // four nodes, and `mirage run` tore it down.
+        let dir = tempfile::tempdir().unwrap();
+        let run = stalled_run(dir.path());
+
+        // Eight steps, each comfortably inside the timeout, adding up to
+        // well over it.
+        tokio::spawn({
+            let run = run.clone();
+            async move {
+                for step in 0..8 {
+                    tokio::time::sleep(TIMEOUT / 2).await;
+                    run.session
+                        .set_phase(false, state::STARTING, Some(format!("node {step}")));
+                }
+                tokio::time::sleep(TIMEOUT / 2).await;
+                run.session.set_phase(true, state::READY, None);
+            }
+        });
+
+        let health = run.wait_ready(TIMEOUT).await.expect("a session that is still making progress must not be timed out");
+        assert!(health.healthy);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn bring_up_that_stops_moving_is_timed_out() {
+        // The other half: "restart the clock on progress" must not become
+        // "never time out". A session that publishes nothing further is
+        // exactly what the deadline exists to catch.
+        let dir = tempfile::tempdir().unwrap();
+        let run = stalled_run(dir.path());
+        run.session.set_phase(false, state::STARTING, None);
+
+        let err = run.wait_ready(TIMEOUT).await.unwrap_err();
+        assert!(
+            matches!(err, MirageError::Timeout(_)),
+            "expected a timeout, got {err}"
+        );
+        assert!(err.to_string().contains("made no progress"), "{err}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_image_pull_is_not_charged_against_the_clock_at_all() {
+        // A pull reports itself once and then goes quiet for however long
+        // the registry and the network take. Restarting the clock on
+        // progress does not help when there is no further progress to
+        // report, so the externally-bounded phases suspend it outright.
+        let dir = tempfile::tempdir().unwrap();
+        let run = stalled_run(dir.path());
+        run.session
+            .set_phase(false, state::PULLING, Some("pulling image big:latest".to_string()));
+
+        tokio::spawn({
+            let run = run.clone();
+            async move {
+                // Twenty times the timeout, in one silent stretch.
+                tokio::time::sleep(TIMEOUT * 20).await;
+                run.session.set_phase(true, state::READY, None);
+            }
+        });
+
+        let health = run
+            .wait_ready(TIMEOUT)
+            .await
+            .expect("time spent pulling must not count against readiness");
+        assert!(health.healthy);
     }
 }

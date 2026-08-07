@@ -122,10 +122,19 @@ async fn run_owned(
     // minutes, and a user who changes their mind in the middle of it
     // should get their prompt back — with the half-built session removed
     // by the caller's teardown, not left for `mirage state purge`.
+    //
+    // And say what is happening while it happens. Bring-up already
+    // describes every phase it enters, but until now only to `tracing`,
+    // which is off unless the user passed `-v` — so the common case of a
+    // cold image was several silent minutes with no way to tell a slow
+    // pull from a hung one.
     let health = tokio::select! {
         health = run.wait_ready(READY_TIMEOUT) => health?,
         sig = interrupts.next() => {
             return Ok(ExitCode::from(u8::try_from(128 + sig).unwrap_or(130)));
+        }
+        () = report_progress(run.watch_health()) => {
+            unreachable!("progress reporting ends only with the session")
         }
         () = &mut serving => unreachable!("the control socket serves until dropped"),
     };
@@ -181,6 +190,44 @@ async fn run_owned(
     code
 }
 
+/// Print each new bring-up phase to stderr as the session reports it.
+///
+/// Never resolves on its own: the caller races it against readiness, and
+/// dropping it stops the reporting. Written that way rather than as a
+/// spawned task so there is nothing left to cancel once bring-up is over.
+///
+/// Only *changed* messages are printed. Health is republished on every
+/// phase, and several phases share a message shape ("node 1/4 started",
+/// "node 2/4…"), so echoing every notification would repeat lines that
+/// say nothing new.
+///
+/// stderr, not stdout: this is mirage talking about itself, and it must
+/// not land in the middle of a workload's piped output.
+async fn report_progress(mut health: tokio::sync::watch::Receiver<mirage_core::session::SessionHealth>) {
+    let mut last: Option<String> = None;
+    loop {
+        {
+            // Scoped so the watch guard is released before the await
+            // below; holding one across a yield point is denied by the
+            // workspace lints, and for good reason — it would block every
+            // publisher, which here is bring-up itself.
+            let current = health.borrow_and_update();
+            if let Some(message) = &current.message
+                && last.as_ref() != Some(message)
+            {
+                eprintln!("mirage: {message}");
+                last = Some(message.clone());
+            }
+        }
+        if health.changed().await.is_err() {
+            // The session is gone; there is nothing further to report and
+            // the caller is about to finish anyway. Park rather than
+            // return, so this stays the "never resolves" arm of a
+            // `select!` and cannot be mistaken for readiness.
+            std::future::pending::<()>().await;
+        }
+    }
+}
 
 /// Hold the session open while other terminals are still using it.
 async fn wait_for_borrowers(
