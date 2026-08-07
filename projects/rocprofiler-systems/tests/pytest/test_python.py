@@ -366,8 +366,9 @@ class TestPythonFrontend:
             },
             timeout=self.TIMEOUT_SEC,
         )
-        assert result.returncode == 0, result.stderr
-        return result.stdout.splitlines()[-1]
+        lines = result.stdout.splitlines()
+        assert lines, f"probe produced no stdout; stderr:\n{result.stderr}"
+        return lines[-1]
 
     @pytest.mark.parametrize("log_level", ["debug", "trace"])
     def test_help_survives_verbose_logging(self, rocprof_config, log_level: str) -> None:
@@ -393,6 +394,7 @@ class TestPythonFrontend:
 
     def test_banner_names_the_project(self, rocprof_config) -> None:
         result = self._run_wrapper(rocprof_config, ["--help"])
+        assert result.returncode == 0, result.stderr
         assert "rocprofiler-systems :: executing" in result.stdout
 
     def test_library_path_points_at_the_runtime(self, rocprof_config) -> None:
@@ -400,4 +402,5 @@ class TestPythonFrontend:
             rocprof_config,
             "import os, rocprofsys\nprint(os.environ.get('ROCPROFSYS_PATH', ''))\n",
         )
+        assert library_path, "rocprofsys did not export ROCPROFSYS_PATH"
         assert (Path(library_path) / "librocprof-sys-dl.so").exists()
