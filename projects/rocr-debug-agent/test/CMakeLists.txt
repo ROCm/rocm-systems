@@ -259,3 +259,9 @@ install(
     DESTINATION tests/rocm-debug-agent
     COMPONENT tests
 )
+
+# Unit tests (logic tests with no GPU/HIP runtime dependencies).
+option(ENABLE_UNIT_TESTS "Enable building unit tests" ON)
+if(ENABLE_UNIT_TESTS)
+    add_subdirectory(unit)
+endif()

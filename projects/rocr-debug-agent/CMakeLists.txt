@@ -247,6 +247,7 @@ install(
 )
 
 if(ENABLE_TESTS)
+    find_package(GTest CONFIG QUIET)
     enable_testing()
     add_subdirectory(test)
 endif()
