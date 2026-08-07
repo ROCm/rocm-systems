@@ -3373,6 +3373,15 @@
             "NCCL_GIN_TYPE": "2",
             "NCCL_GIN_ENABLE": "1"
           }
+        },
+        {
+          "name": "GIN_Barrier_FourRanks",
+          "description": "ncclGinBarrierSession over the 4-rank world team: 16 collective rounds with 3 peers per rank; completion proves the multi-peer arrival accounting keeps all ranks in lockstep",
+          "test_filter": "GinMPIDeviceTests.Barrier_FourRanks",
+          "env_variables": {
+            "NCCL_GIN_TYPE": "2",
+            "NCCL_GIN_ENABLE": "1"
+          }
         }
       ]
     },
