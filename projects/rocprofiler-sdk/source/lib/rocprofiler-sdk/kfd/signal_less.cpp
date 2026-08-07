@@ -146,6 +146,7 @@ signal_less_counter_name(signal_less_counter which)
         case signal_less_counter::eop_unmatched: return "eop-unmatched";
         case signal_less_counter::finalizer_emitted: return "emitted";
         case signal_less_counter::finalizer_no_timing: return "no-timing";
+        case signal_less_counter::register_refused: return "register-refused";
         case signal_less_counter::kCount: break;
     }
     return "?";

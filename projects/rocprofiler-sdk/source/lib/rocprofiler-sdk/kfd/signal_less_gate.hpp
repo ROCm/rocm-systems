@@ -72,6 +72,7 @@ enum class signal_less_counter
     eop_unmatched,         // firmware EOP found no pending entry (key mismatch?)
     finalizer_emitted,     // RESULT_READY: record emitted with KFD timestamps
     finalizer_no_timing,   // COMPLETED_NO_TIMING: retired, no record
+    register_refused,      // hub refused a batch eligibility had accepted; id retired here
     kCount
 };
 

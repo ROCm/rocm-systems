@@ -1089,9 +1089,18 @@ write_interceptor(Queue*                                queue,
            !kfd::signal_less_hub().register_batch(std::move(_signal_less_regs)))
         {
             // Reachable only if another queue's collision quarantined this slot between
-            // eligibility and here. The packets have already skipped their signals.
+            // eligibility and here. The packets already skipped their signals, so nothing
+            // else will retire these ids.
+            kfd::note_signal_less(kfd::signal_less_counter::register_refused, _signal_less_count);
+            for(auto& _reg : _signal_less_regs)
+            {
+                auto* _corr_id = _reg.payload.correlation_id;
+                if(_corr_id == nullptr) continue;
+                _corr_id->sub_kern_count();
+                _corr_id->sub_ref_count();
+            }
             ROCP_WARNING << "KFD dispatch-log: signal-less batch registration refused; these "
-                            "dispatches will not complete";
+                            "dispatches will not be timed";
         }
         else if(_signal_less_batch)
         {
