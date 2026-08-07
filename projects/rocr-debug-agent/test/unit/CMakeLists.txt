@@ -67,5 +67,67 @@ find_package(
 )
 
 # Create unit test executable.
-# Note: Test files will be added in subsequent commits.
-# This commit only sets up the GoogleTest infrastructure.
+add_executable(
+    rocm-debug-agent-unit-tests
+    test_uri.cpp
+)
+
+# Link directly to source files (not the .so).
+target_sources(
+    rocm-debug-agent-unit-tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/../src/agent_utils.cpp
+        ${PROJECT_SOURCE_DIR}/../src/logging.cpp
+)
+
+# Include directories.
+target_include_directories(
+    rocm-debug-agent-unit-tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/../src
+)
+
+# Link libraries.
+target_link_libraries(
+    rocm-debug-agent-unit-tests
+    PRIVATE
+        GTest::gtest
+        GTest::gtest_main
+        amd-dbgapi
+        Threads::Threads
+)
+
+# C++ standard and compile options (match main library).
+set_target_properties(
+    rocm-debug-agent-unit-tests
+    PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+)
+
+target_compile_options(
+    rocm-debug-agent-unit-tests
+    PRIVATE
+        -Werror -Wall -Wno-attributes
+)
+
+# Define _GNU_SOURCE for getopt_long() support on Linux.
+target_compile_definitions(
+    rocm-debug-agent-unit-tests
+    PRIVATE
+        _GNU_SOURCE
+        __STDC_LIMIT_MACROS
+        __STDC_CONSTANT_MACROS
+)
+
+# Enable CTest integration.
+include(GoogleTest)
+gtest_discover_tests(rocm-debug-agent-unit-tests)
+
+# Install (match integration test pattern).
+install(
+    TARGETS rocm-debug-agent-unit-tests
+    RUNTIME DESTINATION tests/rocm-debug-agent/unit
+    COMPONENT tests
+)
