@@ -358,13 +358,12 @@ memory:
     <<: *level_2
     # disabling due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
     tags: []
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_wsl]
   Unit_hipHostRegister_DirectReferenceFromKernel: *level_2
   Unit_hipHostRegister_DirectReferenceMultGpu:
     <<: *level_2
     tags: []
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_wsl]
   Unit_hipHostRegister_SameChunkRepeat:
     <<: *level_2
     tags: [alloc]
@@ -381,7 +380,7 @@ memory:
     <<: *level_2
     tags: [alloc]
     # disabled due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_wsl]
   Unit_hipHostRegister_AsyncApis:
     <<: *level_2
     tags: [alloc]
@@ -668,7 +667,7 @@ memory:
   Unit_hipMemPrefetchAsync_NonPageSz:
     <<: *level_2
     # Disabling below tests temporarily due to change in API behavior
-    disabled: [amd_windows, amd_wsl, amd_linux]
+    disabled: [amd_windows, amd_wsl]
     tags: [query]
   Unit_hipMemAdvise_MmapMem:
     <<: *level_2
@@ -1063,7 +1062,7 @@ memory:
     <<: *level_2
     # SWDEV-396616 hipMemMap returns invalid error
     # AIRUNTIME-2291: temporarily disabled (hangs in CI 942)
-    disabled: [amd_windows, amd_wsl, amd_linux]
+    disabled: [amd_windows, amd_wsl]
     tags: [virtualMemoryManagement]
   Unit_hipMemVmm_Uncached:
     <<: *level_2
@@ -1137,7 +1136,7 @@ memory:
   Unit_hipMemPrefetchAsync_v2_Device_Host:
     <<: *level_2
     # AIRUNTIME-2337: temporarily disabled (intermittent failure in CI)
-    disabled: [amd_windows, amd_wsl, amd_linux]
+    disabled: [amd_windows, amd_wsl]
     tags: [query]
   Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent:
     <<: *level_2
@@ -1983,7 +1982,7 @@ memory:
   Unit_hipMemPrefetchAsync_Basic_AllDevices:
     <<: *level_2
     # AIRUNTIME-2337: temporarily disabled (intermittent failure in CI)
-    disabled: [amd_windows, amd_wsl, amd_linux]
+    disabled: [amd_windows, amd_wsl]
     tags: []
   Unit_hipMemPrefetchAsync_Sync_Behavior:
     <<: *level_2
@@ -1997,16 +1996,16 @@ memory:
   Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation:
     <<: *level_2
     # AIRUNTIME-2337: temporarily disabled (intermittent failure in CI)
-    disabled: [amd_windows, amd_wsl, amd_linux]
+    disabled: [amd_windows, amd_wsl]
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_LocationDistribution:
     <<: *level_2
-    disabled: [amd_windows, amd_linux, amd_wsl]
+    disabled: [amd_windows, amd_wsl]
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity:
     <<: *level_2
     # AIRUNTIME-2337: temporarily disabled (intermittent failure in CI)
-    disabled: [amd_windows, amd_wsl, amd_linux]
+    disabled: [amd_windows, amd_wsl]
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_Negative_NullAndInvalidPointers:
     <<: *level_2
@@ -2174,7 +2173,7 @@ memory:
     <<: *level_2
     # Note: Windows disabled
     # AIRUNTIME-2291: temporarily disabled (hangs in CI 942)
-    disabled: [amd_windows, amd_wsl, amd_linux]
+    disabled: [amd_windows, amd_wsl]
     tags: [query]
   Unit_hipMemAdvise_TstAlignedAllocMem:
     <<: *level_2
@@ -2232,8 +2231,7 @@ memory:
     tags: [alloc]
   Unit_hipFreeAsync_capturehipFreeAsync:
     <<: *level_2
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_wsl]
     tags: [alloc]
   Unit_hipFreeHost_InvalidMemory:
     <<: *level_2

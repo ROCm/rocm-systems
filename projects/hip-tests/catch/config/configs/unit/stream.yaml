@@ -60,7 +60,7 @@ stream:
     <<: *level_2
     tags: [memory]
     # disabled due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_wsl]
   Unit_hipStreamCreateWithFlags_Negative_NullStream:
     <<: *level_2
     tags: [lifecycle]
@@ -108,9 +108,9 @@ stream:
   Unit_hipStreamPriorityAqlLog_ChildWorkload:
     <<: *level_2
     # Internal helper, only invoked by the parent test via re-exec (by exact
-    # name, which still runs hidden [.] cases). Disabled everywhere so it does
-    # not run as a standalone no-op in the regular suite.
-    disabled: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+    # name, which still runs hidden [.] cases). Enabled on amd_linux, where it
+    # runs as a harmless standalone no-op; disabled on other platforms.
+    disabled: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
     tags: [lifecycle]
   Unit_hipStreamPriorityAqlLog_TraceReportsPriority:
     <<: *level_2
@@ -141,7 +141,7 @@ stream:
   Unit_hipMemPrefetchAsync_Basic:
     <<: *level_2
     # AIRUNTIME-2337: temporarily disabled (intermittent failure in CI)
-    disabled: [amd_windows, amd_wsl, amd_linux]
+    disabled: [amd_windows, amd_wsl]
     tags: [memory]
   Unit_hipMemPoolApi_hipStreamLegacy_Basic:
     <<: *level_2
@@ -206,9 +206,8 @@ stream:
     tags: [synchronization]
   Unit_hipStreamQuery_WithPendingWork:
     <<: *level_2
-    # (amd_linux) Rock_Linux_Failures_on_gfx94X
     # (amd_wsl) Note: TDR (pass)
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_wsl]
     tags: [synchronization]
   Unit_hipDeviceGetStreamPriorityRange_Default:
     <<: *level_2
@@ -227,8 +226,7 @@ stream:
     tags: [callback]
   Unit_hipLaunchHostFunc_streams:
     <<: *level_2
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_wsl]
     tags: [callback]
   Unit_hipLaunchHostFunc_multistreams:
     <<: *level_2
@@ -350,8 +348,7 @@ stream:
     tags: [properties]
   Unit_hipExtStreamCreateWithCUMask_NegTst:
     <<: *level_2
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_wsl]
     tags: [properties]
   Unit_hipStreamAddCallback_MultipleThreads:
     <<: *level_2
