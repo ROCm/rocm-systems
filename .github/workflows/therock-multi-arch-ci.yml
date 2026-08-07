@@ -28,6 +28,11 @@
 name: TheRock Multi-Arch CI
 
 on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -92,6 +97,8 @@ jobs:
 
       - name: Configure CI
         id: configure
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
             --event-name "${{ github.event_name }}" \
@@ -108,9 +115,12 @@ jobs:
       # Limit GPU families for rocm-systems CI
       # Note: gfx125X is added for MI455 bringup with limited tests (hip-tests, rocrtst, sanity)
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
-      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx1151' }}
+      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
+      # rocm-systems affects compiler-runtime (HIP, CLR, runtime, profiler-core)
+      # which cascades to ALL downstream stages. No stages can be reused.
+      # Hard-coding to empty for now.
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       repository: ROCm/TheRock
