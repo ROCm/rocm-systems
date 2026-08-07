@@ -95,6 +95,7 @@
 #include "suites/functional/counted_queues.h"
 #include "suites/functional/queue_create.h"
 #include "suites/functional/cuid.h"
+#include "suites/functional/trap_handler_test.h"
 #include "common/os.h"
 #include "common/platform_filter.h"
 #include "common/base_rocr_utils.h"
@@ -488,6 +489,76 @@ TEST(rocrtstFunc, DISABLED_DebugBasicTests) {
     if (!RunCustomTestProlog(&mt)) return;
     mt.VectorAddDebugTrapTest();
     RunCustomTestEpilog(&mt);
+}
+
+// Trap Handler Tests (SWDEV-209233)
+// Tests s_trap instruction handling and queue error callbacks.
+// Working tests: NoTrap, Abort, Generic (validated on MI300X gfx942)
+
+TEST(rocrtstFunc, TrapHandler_NoTrap) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestNoTrap();
+    RunCustomTestEpilog(&th);
+}
+
+TEST(rocrtstFunc, TrapHandler_Abort) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestTrapAbort();
+    RunCustomTestEpilog(&th);
+}
+
+TEST(rocrtstFunc, TrapHandler_Generic) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestTrapGeneric();
+    RunCustomTestEpilog(&th);
+}
+
+// DISABLED: Requires debugger to be attached. s_trap 3 waits for debugger
+// and the trap handler skips reporting when TTMP11_DEBUG_ENABLED is not set.
+TEST(rocrtstFunc, DISABLED_TrapHandler_Debugger) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestTrapDebugger();
+    RunCustomTestEpilog(&th);
+}
+
+// DISABLED: Memory fault triggers trap but causes queue state corruption
+// during cleanup in Debug builds. Needs runtime fixes for clean error recovery.
+TEST(rocrtstFunc, DISABLED_TrapHandler_MemoryViolation) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestTrapMemoryViolation();
+    RunCustomTestEpilog(&th);
+}
+
+// DISABLED: The instruction encoding 0xB0FF0000 may not trigger illegal
+// instruction exception on all GFX generations. Needs ISA-specific encodings.
+TEST(rocrtstFunc, DISABLED_TrapHandler_IllegalInstruction) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestTrapIllegalInstruction();
+    RunCustomTestEpilog(&th);
+}
+
+// DISABLED: GPU integer divide-by-zero does NOT trap per AMD ISA.
+// Returns 0 for quotient/remainder. Would need FP exception instead.
+TEST(rocrtstFunc, DISABLED_TrapHandler_MathException) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestTrapMathException();
+    RunCustomTestEpilog(&th);
+}
+
+// DISABLED: Wild pointer access triggers trap but causes queue state corruption
+// during cleanup in Debug builds. Needs runtime fixes for clean error recovery.
+TEST(rocrtstFunc, DISABLED_TrapHandler_ApertureViolation) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestTrapApertureViolation();
+    RunCustomTestEpilog(&th);
 }
 
 TEST(rocrtstFunc, Memory_Alignment_Test) {
