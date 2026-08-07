@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <msgpack.hpp>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "isa_target_match.h"
@@ -414,8 +415,11 @@ kpack_error_t kpack_load_code_object(kpack_cache_t cache,
     // to find an archive that has a matching architecture.
     KPACK_DEBUG(cache, "trying architecture: %s", arch);
 
-    kpack_archive_t archive = nullptr;
-    std::string matched_arch;
+    // A single architecture's kernels may be split across several archives
+    // (e.g. an xnack-variant kpack holding a handful of kernels plus the bare
+    // kpack holding the rest), so collect every matching archive rather than
+    // committing to the most specific one.
+    std::vector<std::pair<kpack_archive_t, std::string>> candidates;
 
     // Find archive containing a compatible architecture
     // Lock only for cache lookup, release before kernel fetch
@@ -435,34 +439,39 @@ kpack_error_t kpack_load_code_object(kpack_cache_t cache,
 
           auto archive_it = cache->archives.find(archive_path);
           if (archive_it != cache->archives.end()) {
-            archive = archive_it->second;
-            matched_arch = target;
-            return true;  // found — stop searching
+            candidates.emplace_back(archive_it->second, target);
           }
         }
-        return false;  // try next compatible target
+        return false;  // keep collecting from every compatible target
       });
     }  // Release cache->archive_mutex before kernel fetch
 
-    if (!archive) {
+    if (candidates.empty()) {
       continue;
     }
 
     // Fetch kernel using the matched architecture (which may be a subset of
     // the agent's full ISA, e.g., bare "gfx942" for a release build).
-    err = kpack_get_kernel(archive, lookup_key.c_str(), matched_arch.c_str(),
-                           &kernel_data, &kernel_size);
-    if (err == KPACK_SUCCESS) {
-      KPACK_DEBUG(cache, "  found kernel: %zu bytes", kernel_size);
+    for (const auto& [archive, matched_arch] : candidates) {
+      err = kpack_get_kernel(archive, lookup_key.c_str(), matched_arch.c_str(),
+                             &kernel_data, &kernel_size);
+      if (err == KPACK_SUCCESS) {
+        KPACK_DEBUG(cache, "  found kernel: %zu bytes", kernel_size);
+        break;
+      }
+      // This archive matched the architecture but does not hold the kernel
+      // (e.g. an xnack-variant kpack that only carries a few kernels). Try
+      // the next candidate — a less specific but still ISA-compatible
+      // archive (e.g. bare gfx90a.kpack) may contain it.
+      KPACK_DEBUG(cache,
+                  "  kernel not found in this archive (error %d), trying next candidate",
+                  err);
+      last_err = err;
+    }
+
+    if (kernel_data) {
       break;
     }
-    // Archive was found with matching architecture but the kernel was not
-    // present in it (e.g. an xnack-variant kpack that is missing a kernel
-    // present in the base/generic kpack). Continue to the next candidate
-    // rather than returning immediately — a less-specific but still ISA-
-    // compatible archive (e.g. bare gfx90a.kpack) may contain the kernel.
-    KPACK_DEBUG(cache, "  kernel not found in this archive (error %d), trying next candidate", err);
-    last_err = err;
   }
 
   if (!kernel_data) {
