@@ -41,16 +41,7 @@ CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DE
 
 static int ncclCuMemSupported = 0;
 
-// cuMem VMM API availability by HIP/driver version.
-#define NCCL_CUMEM_NATIVE_MIN_VERSION   71260540
-#define NCCL_CUMEM_BACKPORT_MIN_VERSION 70051831
-#define NCCL_CUMEM_BACKPORT_MAX_VERSION 70060000
-
-#define NCCL_CUMEM_VERSION_SUPPORTED(version)                  \
-  ((version) >= NCCL_CUMEM_NATIVE_MIN_VERSION ||               \
-   ((version) >= NCCL_CUMEM_BACKPORT_MIN_VERSION &&            \
-    (version) < NCCL_CUMEM_BACKPORT_MAX_VERSION))
-
+// cuMem version predicate lives in rocmwrap.h.
 #define KERNEL_VERSION_CODE(major, minor) ((major << 16) | (minor << 8))
 
 static int ncclGetKernelVersionCode() {
