@@ -679,7 +679,7 @@ rocprofsys_init_tooling_hidden(void)
             using ucx_t   = component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>;
 
             // clang-format off
-            const auto subscribers = std::to_array<control::subscriber>({
+            auto subscribers = std::to_array<control::subscriber>({
                 { .on_pause = &rocprofiler_sdk::pause, .on_resume = &rocprofiler_sdk::resume, .name = "rocm" },
                 { .on_pause = &sampling::pause, .on_resume = &sampling::resume, .name = "sampling" },
                 { .on_pause = &component::mpi_gotcha::pause, .on_resume = &component::mpi_gotcha::resume, .name = "mpi" },
@@ -693,8 +693,8 @@ rocprofsys_init_tooling_hidden(void)
                 { .on_pause = &invoke_external_pause_callbacks, .on_resume = &invoke_external_resume_callbacks, .name = "external" },
             });
             // clang-format on
-            for(const auto& sub : subscribers)
-                g_control_session.subscribe(sub);
+            for(auto& sub : subscribers)
+                g_control_session.subscribe(std::move(sub));
 
             g_control_session.force_initial_pause();
         }

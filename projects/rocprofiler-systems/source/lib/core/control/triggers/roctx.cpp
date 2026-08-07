@@ -34,19 +34,10 @@ roctx::roctx(session& sess, std::string_view trace_regions)
     }
 
     m_should_write.store(compute_should_write(), std::memory_order_relaxed);
-    bind_action_setter(sess.register_trigger(*this));
+    sess.register_trigger(trigger_name, compute_action());
 }
 
-roctx::~roctx()
-{
-    m_session.unregister_trigger(*this);
-}
-
-action
-roctx::initial_action() const noexcept
-{
-    return compute_action();
-}
+roctx::~roctx() { m_session.unregister_trigger(trigger_name); }
 
 void
 roctx::on_range_start(std::uint64_t range_id, const char* message)
@@ -159,6 +150,6 @@ void
 roctx::refresh_state()
 {
     m_should_write.store(compute_should_write(), std::memory_order_relaxed);
-    publish_action(compute_action());
+    m_session.set_action(trigger_name, compute_action());
 }
 }  // namespace rocprofsys::control::triggers

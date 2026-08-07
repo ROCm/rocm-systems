@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/control/trigger.hpp"
+#include "core/control/session.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -14,26 +14,18 @@
 #include <string_view>
 #include <unordered_set>
 
-namespace rocprofsys::control
-{
-class session;
-}
-
 namespace rocprofsys::control::triggers
 {
-class roctx : public trigger
+class roctx
 {
 public:
     roctx(session& sess, std::string_view trace_regions);
-    ~roctx() override;
+    ~roctx();
 
     roctx(const roctx&)            = delete;
     roctx& operator=(const roctx&) = delete;
     roctx(roctx&&)                 = delete;
     roctx& operator=(roctx&&)      = delete;
-
-    [[nodiscard]] std::string_view name() const noexcept override { return "roctx"; }
-    [[nodiscard]] action           initial_action() const noexcept override;
 
     void on_range_start(std::uint64_t range_id, const char* message);
     void on_range_stop(std::uint64_t range_id);
@@ -50,13 +42,15 @@ public:
     }
 
 private:
-    session&                           m_session;
     std::set<std::string, std::less<>> m_trace_regions;
-    std::unordered_set<std::uint64_t>   m_active_range_ids;
-    std::atomic<bool>                   m_in_region{ false };
-    std::atomic<bool>                   m_user_paused{ false };
-    std::atomic<bool>                   m_should_write{ true };
-    std::mutex                          m_mutex;
+    std::unordered_set<std::uint64_t>  m_active_range_ids;
+    std::atomic<bool>                  m_in_region{ false };
+    std::atomic<bool>                  m_user_paused{ false };
+    std::atomic<bool>                  m_should_write{ true };
+    std::mutex                         m_mutex;
+    session&                           m_session;
+
+    static constexpr std::string_view trigger_name = "roctx";
 
     [[nodiscard]] action compute_action() const noexcept;
     [[nodiscard]] bool   compute_should_write() const noexcept;

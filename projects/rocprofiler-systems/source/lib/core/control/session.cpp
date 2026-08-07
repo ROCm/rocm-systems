@@ -34,43 +34,47 @@ session::subscribe(subscriber sub)
     m_subscribers.push_back(std::move(sub));
 }
 
-trigger::action_setter
-session::register_trigger(const trigger& trig)
+void
+session::register_trigger(std::string_view name, action initial)
 {
-    std::string name{ trig.name() };
-    {
-        const std::scoped_lock lk{ m_actions_mutex };
-        m_actions[name] = trig.initial_action();
-        m_active.store(resolve_locked(), std::memory_order_relaxed);
-    }
-
-    return [this, name](action new_action) {
-        const std::scoped_lock notify_lk{ m_notify_mutex };
-
-        bool was_active = false;
-        bool now_active = false;
-        {
-            const std::scoped_lock lk{ m_actions_mutex };
-            was_active      = m_active.load(std::memory_order_relaxed);
-            m_actions[name] = new_action;
-            now_active      = resolve_locked();
-            m_active.store(now_active, std::memory_order_relaxed);
-        }
-
-        if(was_active == now_active) return;
-        if(now_active)
-            notify_resume();
-        else
-            notify_pause();
-    };
+    const std::scoped_lock lk{ m_actions_mutex };
+    m_actions[std::string{ name }] = initial;
+    m_active.store(resolve_locked(), std::memory_order_relaxed);
 }
 
 void
-session::unregister_trigger(const trigger& trig)
+session::unregister_trigger(std::string_view name)
 {
     const std::scoped_lock lk{ m_actions_mutex };
-    m_actions.erase(std::string{ trig.name() });
+    m_actions.erase(std::string{ name });
     m_active.store(resolve_locked(), std::memory_order_relaxed);
+}
+
+void
+session::set_action(std::string_view name, action act)
+{
+    const std::scoped_lock notify_lk{ m_notify_mutex };
+
+    bool was_active = false;
+    bool now_active = false;
+    {
+        const std::scoped_lock lk{ m_actions_mutex };
+
+        was_active                     = m_active.load(std::memory_order_relaxed);
+        m_actions[std::string{ name }] = act;
+        now_active                     = resolve_locked();
+        m_active.store(now_active, std::memory_order_relaxed);
+    }
+
+    if(was_active == now_active) return;
+
+    LOG_DEBUG("session: trigger '{}' {} the session", name,
+              now_active ? "resumed" : "paused");
+
+    if(now_active)
+        notify_resume();
+    else
+        notify_pause();
 }
 
 void
