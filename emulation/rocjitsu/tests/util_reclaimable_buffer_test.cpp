@@ -65,6 +65,14 @@ TEST(ReclaimableBuffer, AllocatesAlignedZeroInitializedStableStorage) {
   ASSERT_NE(buffer.data(), nullptr);
   EXPECT_EQ(buffer.size(), kBytes);
   EXPECT_EQ(reinterpret_cast<uintptr_t>(buffer.data()) % kAlignment, 0u);
+  const size_t reclamation_granularity = util::ReclaimableBuffer::reclamation_granularity();
+#if defined(__linux__)
+  EXPECT_EQ(reclamation_granularity, system_page_size());
+#else
+  EXPECT_EQ(reclamation_granularity, 1u);
+#endif
+  ASSERT_GT(reclamation_granularity, 0u);
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(buffer.data()) % reclamation_granularity, 0u);
   const std::byte *original_address = buffer.data();
   for (size_t index = 0; index < buffer.size(); ++index)
     ASSERT_EQ(buffer.data()[index], std::byte{0}) << "byte " << index;
@@ -204,7 +212,7 @@ TEST(ReclaimableBuffer, ReclaimsWhollyCoveredPages) {
   EXPECT_GE(resident_pages, 4u);
 
   buffer.zero_and_reclaim(/*offset=*/0, buffer.size());
-  EXPECT_LE(resident_page_count(buffer.data(), buffer.size()), 2u);
+  EXPECT_EQ(resident_page_count(buffer.data(), buffer.size()), 0u);
 #else
   GTEST_SKIP() << "physical-page residency is only observable on Linux";
 #endif

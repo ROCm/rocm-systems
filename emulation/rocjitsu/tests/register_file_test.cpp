@@ -74,10 +74,9 @@ TEST(RegisterFileTest, DemandPagedStorageIsContiguousAndInitiallyZero) {
   ASSERT_NE(file.data(), nullptr);
 #if defined(__linux__)
   EXPECT_EQ(resident_page_count(file.data(), file.total_regs() * sizeof(uint32_t)), 0u);
-  const long page_size_result = sysconf(_SC_PAGESIZE);
-  ASSERT_GT(page_size_result, 0);
-  const size_t page_size = static_cast<size_t>(page_size_result);
-  EXPECT_EQ(reinterpret_cast<uintptr_t>(file.data()) % page_size, alignof(std::max_align_t));
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(file.data()) %
+                util::ReclaimableBuffer::reclamation_granularity(),
+            0u);
 #endif
   ASSERT_EQ(file.allocate(1), 0);
   ASSERT_EQ(file.allocate(1), 1000);
@@ -93,6 +92,9 @@ TEST(RegisterFileTest, DemandPagedResetPreservesNeighboringUnalignedBlocks) {
   File file("demand_paged");
   file.init(/*total_regs=*/3000, /*regs_per_block=*/1000);
 
+#if defined(__linux__)
+  EXPECT_FALSE(DemandPagedUint32Storage::can_reclaim_independently(1000));
+#endif
   ASSERT_EQ(file.allocate(1), 0);
   ASSERT_EQ(file.allocate(1), 1000);
   ASSERT_EQ(file.allocate(1), 2000);
@@ -114,7 +116,9 @@ TEST(RegisterFileTest, DemandPagedResetPreservesNeighboringUnalignedBlocks) {
   file.free(1000);
   file.free(2000);
 #if defined(__linux__)
-  EXPECT_LE(resident_page_count(file.data(), file.total_regs() * sizeof(uint32_t)), 2u);
+  // The final whole-file reset releases the pages shared by the unaligned
+  // blocks, leaving only the partially covered trailing page resident.
+  EXPECT_LE(resident_page_count(file.data(), file.total_regs() * sizeof(uint32_t)), 1u);
 #endif
 }
 
@@ -139,31 +143,51 @@ TEST(RegisterFileTest, DemandPagedVectorBlockResetClearsEveryLane) {
 TEST(RegisterFileTest, DemandPagedFreeRecyclesPhysicalPages) {
 #if defined(__linux__)
   using Vgpr = simdojo::VectorReg<64, uint32_t>;
+  using Storage = simdojo::detail::DemandPagedRegisterStorage<Vgpr>;
   using File = RegisterFile<Vgpr, RegisterFileStorage::DEMAND_PAGED>;
   File file("vgpr");
-  file.init(/*total_regs=*/512, /*regs_per_block=*/512);
+  file.init(/*total_regs=*/1024, /*regs_per_block=*/512);
 
   ASSERT_EQ(file.allocate(256), 0);
-  for (uint32_t reg = 0; reg < 512; ++reg)
-    for (uint32_t lane = 0; lane < 64; ++lane)
+  ASSERT_EQ(file.allocate(256), 512);
+  for (uint32_t reg = 0; reg < 512; ++reg) {
+    for (uint32_t lane = 0; lane < 64; ++lane) {
       file[reg][lane] = reg + lane + 1;
+      file[512 + reg][lane] = reg + lane + 2;
+    }
+  }
 
   const size_t block_bytes = 512 * sizeof(Vgpr);
-  const size_t page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
-  const uintptr_t first_page = reinterpret_cast<uintptr_t>(file.data()) & ~(page_size - 1);
-  const uintptr_t last_page =
-      (reinterpret_cast<uintptr_t>(file.data()) + block_bytes + page_size - 1) & ~(page_size - 1);
-  const size_t block_pages = (last_page - first_page) / page_size;
+  const size_t reclamation_granularity = util::ReclaimableBuffer::reclamation_granularity();
+  ASSERT_EQ(block_bytes % reclamation_granularity, 0u);
+  EXPECT_TRUE(Storage::can_reclaim_independently(512));
+  const size_t block_pages = block_bytes / reclamation_granularity;
   EXPECT_EQ(resident_page_count(file.data(), block_bytes), block_pages);
+  EXPECT_EQ(resident_page_count(file.data() + 512, block_bytes), block_pages);
 
   file.free(0);
-  // The two partial edge pages are zeroed in place because they can overlap
-  // neighboring allocation blocks. Every page wholly owned by this block is
-  // discarded immediately.
-  EXPECT_LE(resident_page_count(file.data(), block_bytes), 2u);
+  EXPECT_EQ(resident_page_count(file.data(), block_bytes), 0u);
+  EXPECT_EQ(resident_page_count(file.data() + 512, block_bytes), block_pages);
+  for (uint32_t reg = 0; reg < 512; ++reg)
+    for (uint32_t lane = 0; lane < 64; ++lane)
+      EXPECT_EQ(file[512 + reg][lane], reg + lane + 2);
 #else
   GTEST_SKIP() << "physical-page residency is only observable on Linux";
 #endif
 }
+
+#if GTEST_HAS_DEATH_TEST && !defined(NDEBUG)
+TEST(RegisterFileDeathTest, ConstAccessToFreedBlockAsserts) {
+  using File = RegisterFile<uint32_t, RegisterFileStorage::DEMAND_PAGED>;
+  File file("demand_paged");
+  file.init(/*total_regs=*/16, /*regs_per_block=*/8);
+
+  ASSERT_EQ(file.allocate(1), 0);
+  file.free(0);
+  const File &const_file = file;
+
+  EXPECT_DEATH({ static_cast<void>(const_file[0]); }, "const access to a free register block");
+}
+#endif
 
 } // namespace

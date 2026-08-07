@@ -92,15 +92,19 @@ public:
                               static_cast<size_t>(count) * sizeof(RegType));
   }
 
+  [[nodiscard]] static bool can_reclaim_independently(uint32_t count) noexcept {
+    const size_t bytes = static_cast<size_t>(count) * sizeof(RegType);
+    return bytes % util::ReclaimableBuffer::reclamation_granularity() == 0;
+  }
+
   RegType &operator[](uint32_t idx) { return data_[idx]; }
   const RegType &operator[](uint32_t idx) const { return data_[idx]; }
   RegType *data() { return data_; }
   const RegType *data() const { return data_; }
 
 private:
-  // Retain the allocator-like max-aligned cache index used by the original
-  // register backing store instead of placing ordinary registers at a page
-  // boundary.
+  // Preserve the register type's alignment; ReclaimableBuffer strengthens it
+  // to the platform reclamation granularity when needed.
   static constexpr size_t DATA_ALIGNMENT = std::max(alignof(RegType), alignof(std::max_align_t));
 
   util::ReclaimableBuffer storage_;
@@ -119,9 +123,9 @@ using RegisterStorage =
 /// @details Templated on the register type: use uint32_t for scalar files or
 /// VectorReg<NumElems, Elem> for vector files. The file is divided into
 /// fixed-size blocks (one per hardware context slot). Allocation finds a
-/// free block and returns its base register index. Mutable references and
-/// pointers are allocation-scoped: callers must not use them before allocation
-/// or after freeing their block. Freeing a block invalidates every mutable
+/// free block and returns its base register index. References and pointers are
+/// allocation-scoped: callers must not read or write through them before
+/// allocation or after freeing their block. Freeing a block invalidates every
 /// handle into that block.
 ///
 /// @tparam RegType Register element type (default: uint32_t).
@@ -179,14 +183,19 @@ public:
     assert(!free_blocks_[block] && "double-free of register block");
     free_blocks_[block] = true;
     if constexpr (Storage == RegisterFileStorage::DEMAND_PAGED) {
-      // Return physical pages as soon as a hardware context becomes idle. The
-      // next allocation reads the anonymous mapping's zero-filled pages.
-      const bool all_blocks_free = std::all_of(free_blocks_.begin(), free_blocks_.end(),
-                                               [](bool is_free) { return is_free; });
-      if (all_blocks_free)
+      // Immediately restore the retired block's zero state and let the backing
+      // store release physical storage when the platform supports it. Generic
+      // layouts whose blocks share reclamation units receive one final
+      // whole-file reset so their boundary storage can also be released.
+      const bool independently_reclaimable = data_.can_reclaim_independently(regs_per_block_);
+      const bool all_blocks_free =
+          !independently_reclaimable && std::all_of(free_blocks_.begin(), free_blocks_.end(),
+                                                    [](bool is_free) { return is_free; });
+      if (all_blocks_free) {
         data_.reset(0, total_regs_);
-      else
+      } else {
         data_.reset(base, regs_per_block_);
+      }
       needs_reset_[block] = false;
     } else {
       needs_reset_[block] = true;
@@ -205,19 +214,23 @@ public:
 
   /// @brief Access a register by index (const).
   /// @param idx Register index.
+  /// @pre The allocation block containing @p idx is currently allocated.
   /// @returns Const reference to the register.
   const RegType &operator[](uint32_t idx) const {
     assert(idx < total_regs_);
+    assert(is_allocated(idx) && "const access to a free register block");
     return data_[idx];
   }
 
   /// @brief Return a pointer to the underlying register storage.
-  /// @pre Callers may mutate only registers in currently allocated blocks, and
-  /// must stop using each mutable pointer when its block is freed.
+  /// @pre Callers may dereference the returned pointer only within currently
+  /// allocated blocks and must stop accessing each block when it is freed.
   /// @returns Mutable pointer to the first register.
   RegType *data() { return data_.data(); }
 
   /// @brief Return a pointer to the underlying register storage (const).
+  /// @pre Callers may dereference the returned pointer only within currently
+  /// allocated blocks and must stop accessing each block when it is freed.
   /// @returns Const pointer to the first register.
   const RegType *data() const { return data_.data(); }
 
