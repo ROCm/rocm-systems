@@ -278,9 +278,6 @@ hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode*)
     return hipErrorInvalidValue;
 }
 
-// --- additional stubs (folded in from the former micro_link_stubs.cc):
-//     symbols some ROCm/toolchain versions' hipified sources reference and
-//     others don't. Unreferenced ones are harmless dead defs.
 hipError_t hipSetDevice(int) { return hipErrorInvalidValue; }
 hipError_t hipMalloc(void** p, size_t) { if (p) *p = nullptr; return hipErrorInvalidValue; }
 hipError_t hipMemcpy(void*, const void*, size_t, hipMemcpyKind) { return hipErrorInvalidValue; }
