@@ -54,7 +54,9 @@ struct device_snapshot_t
     bool empty() const { return blocks.empty(); }
 };
 
-// Copy (device->host) every tracked allocation owned by `agent`. Returns the captured snapshot.
+// Copy (device->host) every tracked allocation owned by `agent`, plus every module-scope variable
+// (__device__ / __constant__ global) visible to `agent` in the loaded executables. Returns the
+// captured snapshot.
 device_snapshot_t
 snap(hsa_agent_t agent);
 
