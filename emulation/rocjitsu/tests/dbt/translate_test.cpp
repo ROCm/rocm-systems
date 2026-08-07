@@ -16263,6 +16263,143 @@ TEST(BinaryTranslatorE2E, Gfx1250LeavesLiteralMatchingSelectorNumberUnchangedFor
   }
 }
 
+// The cases above all put their source fields in word 0. VOP3 puts them in word
+// 1 and its literal in word 2, so it is the only layout where the field being
+// rewritten and the literal that must survive live in different words.
+//
+// Both sources here read 231: src0 genuinely names the selector, while src1 is
+// an ordinary literal that merely collides with its number. The two must be
+// treated differently in a single instruction -- src0 repointed at the borrowed
+// pair, src1 and its trailing dword untouched.
+TEST(BinaryTranslatorE2E, Gfx1250RewritesVop3SelectorButKeepsCollidingLiteralForA0) {
+  constexpr uint32_t kLiteralSelector = 255;
+  const auto source = gfx1250::build_vop3(
+      gfx1250::kVMulU64Vop3,
+      {.vdst = 10, .src0 = kFlatScratchBaseHiSelector, .src1 = kLiteralSelector});
+  const auto out =
+      translate_gfx1250_b0_to_a0_words({source[0], source[1], kFlatScratchBaseHiSelector});
+  ASSERT_GE(out.size(), 5u) << "the rewrite prepends one scalar move and keeps four words";
+
+  ASSERT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
+  const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+  EXPECT_EQ(pair_base % 2u, 0u) << "a 64-bit scalar operand must be even-aligned";
+
+  EXPECT_EQ(out[1], source[0]) << "vdst, opcode, and modifiers are unchanged";
+  EXPECT_EQ(out[2] & 0x1ffu, pair_base) << "the real selector must name the borrowed pair";
+  EXPECT_EQ((out[2] >> 9) & 0x1ffu, kLiteralSelector)
+      << "the literal marker must survive, or its dword becomes an instruction";
+  EXPECT_EQ(out[3], kFlatScratchBaseHiSelector) << "the literal dword itself is unchanged";
+  EXPECT_EQ(out.size(), 5u) << "only the prologue is added";
+}
+
+namespace {
+
+/// @brief Run one gfx1250 B0-to-A0 translation and return what it wrote to
+/// stderr. The deferred-family warning goes through util::Logger, which emits
+/// to std::cerr with no redirection hook, so the buffer is swapped instead.
+[[nodiscard]] std::string translate_gfx1250_b0_to_a0_capturing_stderr(std::vector<uint32_t> words) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  words.push_back(kGfx1250SEndpgm);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+
+  std::ostringstream captured;
+  std::streambuf *previous = std::cerr.rdbuf(captured.rdbuf());
+  const auto result = translator.translate(source);
+  std::cerr.rdbuf(previous);
+  EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  return captured.str();
+}
+
+/// @brief Count non-overlapping occurrences of @p needle in @p haystack.
+[[nodiscard]] size_t count_occurrences(std::string_view haystack, std::string_view needle) {
+  size_t count = 0;
+  for (size_t pos = haystack.find(needle); pos != std::string_view::npos;
+       pos = haystack.find(needle, pos + needle.size())) {
+    ++count;
+  }
+  return count;
+}
+
+} // namespace
+
+// A deferred family passes through unchanged and warns so the gap stays
+// visible. The warning describes the mnemonic, not the site, so repeating it
+// per instruction adds nothing: one RCCL all_reduce run emitted 104,831 copies.
+TEST(BinaryTranslatorE2E, Gfx1250WarnsOncePerDeferredMnemonicWithinOneTranslation) {
+  const uint32_t sleep = gfx1250::build_sopp(gfx1250::kSSleepSopp, {.simm16 = 1})[0];
+  const std::string log =
+      translate_gfx1250_b0_to_a0_capturing_stderr({sleep, sleep, sleep, sleep, sleep});
+
+  EXPECT_EQ(count_occurrences(log, "'s_sleep'"), 1u)
+      << "five s_sleep instructions must produce one warning, not five:\n"
+      << log;
+}
+
+// Distinct deferred mnemonics are distinct gaps, so suppressing one must not
+// suppress another.
+TEST(BinaryTranslatorE2E, Gfx1250WarnsSeparatelyForEachDeferredMnemonic) {
+  const uint32_t sleep = gfx1250::build_sopp(gfx1250::kSSleepSopp, {.simm16 = 1})[0];
+  const uint32_t monitor_sleep = gfx1250::build_sopp(gfx1250::kSMonitorSleepSopp, {.simm16 = 1})[0];
+  const std::string log =
+      translate_gfx1250_b0_to_a0_capturing_stderr({sleep, monitor_sleep, sleep, monitor_sleep});
+
+  EXPECT_EQ(count_occurrences(log, "'s_sleep'"), 1u) << log;
+  EXPECT_EQ(count_occurrences(log, "'s_monitor_sleep'"), 1u) << log;
+}
+
+// The suppression is scoped to one translation. Process-wide state would let
+// the first code object that uses a deferred mnemonic hide the same gap in
+// every object loaded afterwards, which is exactly how HotSwap runs: many code
+// objects translated in one process.
+TEST(BinaryTranslatorE2E, Gfx1250WarnsAgainForEachSeparateTranslation) {
+  const uint32_t sleep = gfx1250::build_sopp(gfx1250::kSSleepSopp, {.simm16 = 1})[0];
+  const std::string first = translate_gfx1250_b0_to_a0_capturing_stderr({sleep, sleep});
+  const std::string second = translate_gfx1250_b0_to_a0_capturing_stderr({sleep, sleep});
+
+  EXPECT_EQ(count_occurrences(first, "'s_sleep'"), 1u) << first;
+  EXPECT_EQ(count_occurrences(second, "'s_sleep'"), 1u)
+      << "a second code object must report the gap independently:\n"
+      << second;
+}
+
+// A translator instance reused across code objects must behave the same way,
+// since the state lives on the translator rather than in a local.
+TEST(BinaryTranslatorE2E, Gfx1250WarnsAgainWhenOneTranslatorIsReused) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const uint32_t sleep = gfx1250::build_sopp(gfx1250::kSSleepSopp, {.simm16 = 1})[0];
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({sleep, sleep, kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+
+  std::array<std::string, 2> logs;
+  for (std::string &log : logs) {
+    std::ostringstream captured;
+    std::streambuf *previous = std::cerr.rdbuf(captured.rdbuf());
+    const auto result = translator.translate(source);
+    std::cerr.rdbuf(previous);
+    EXPECT_TRUE(result.ok());
+    log = captured.str();
+  }
+
+  EXPECT_EQ(count_occurrences(logs[0], "'s_sleep'"), 1u) << logs[0];
+  EXPECT_EQ(count_occurrences(logs[1], "'s_sleep'"), 1u)
+      << "translate() must reset the per-translation suppression state:\n"
+      << logs[1];
+}
+
 // A vector 64-bit read cannot name the selector on A0, so the base is moved
 // into a dead SGPR pair and the source position is repointed at that pair.
 TEST(BinaryTranslatorE2E, Gfx1250MovesVectorFlatScratchBase64BitSourceToSgprPairForA0) {

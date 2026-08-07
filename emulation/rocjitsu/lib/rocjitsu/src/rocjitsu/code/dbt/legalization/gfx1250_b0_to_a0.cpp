@@ -20,7 +20,6 @@
 
 #include <array>
 #include <cstring>
-#include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -163,21 +162,25 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
          mnemonic == "s_monitor_sleep";
 }
 
-/// @brief True the first time each deferred mnemonic is seen in this process.
+/// @brief True the first time @p mnemonic is seen in the current translation.
 ///
 /// @details The warning reports a gap in the translator, which is a property of
 /// the mnemonic and not of any one instruction. Emitting it per instruction says
 /// nothing extra and drowns the log: one RCCL all_reduce run produced 104,831
-/// copies, which is itself a usability problem and buries the diagnostics that
-/// do identify a specific site.
+/// copies, which buries the diagnostics that do identify a specific site.
 ///
-/// The set is process-wide and never pruned. It is bounded by the small list in
-/// is_deferred_gfx1250_family(), so it cannot grow with workload size.
-[[nodiscard]] bool first_report_of_deferred_family(std::string_view mnemonic) {
-  static std::mutex reported_mutex;
-  static std::unordered_set<std::string> reported;
-  const std::lock_guard<std::mutex> lock(reported_mutex);
-  return reported.emplace(mnemonic).second;
+/// The state is owned by the caller and scoped to one translation, so every
+/// code object reports its own gaps. Process-wide state would be wrong here:
+/// HotSwap translates many code objects in one process, and the first one to
+/// use a deferred mnemonic would silence the warning for all the rest.
+///
+/// A null set disables suppression rather than silencing the warning, so a
+/// caller that has nowhere to keep the state still sees every occurrence.
+[[nodiscard]] bool first_report_of_deferred_family(std::unordered_set<std::string> *reported,
+                                                   std::string_view mnemonic) {
+  if (reported == nullptr)
+    return true;
+  return reported->emplace(mnemonic).second;
 }
 
 [[nodiscard]] bool is_wmma_completion_wait(const Instruction &inst) {
@@ -265,7 +268,9 @@ void gfx1250_b0_to_a0_append_wmma_completion_wait_if_needed(
   words.push_back(gfx1250::build_sopp(gfx1250::kSWaitAluSopp, {.simm16 = kWaitVaVdstZero})[0]);
 }
 
-const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &inst) {
+const InstructionLegalization *
+gfx1250_b0_to_a0_legalization(const Instruction &inst,
+                              std::unordered_set<std::string> *reported_deferred_families) {
   // CLAMP=0 is the common E4M3 operation on both steppings. CLAMP=1 selects
   // the B0-only E5M3 behavior and therefore requires a semantic expansion.
   const std::string_view mnemonic = inst.mnemonic();
@@ -279,9 +284,10 @@ const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &
   if (!requires_b0_to_a0_expansion(inst.mnemonic()) &&
       !gfx1250_reads_flat_scratch_base_64bit(inst)) {
     // Deferred families pass through unchanged but warn, so the not-yet-handled
-    // case is visible rather than silent. Once per mnemonic: see
-    // is_deferred_gfx1250_family and first_report_of_deferred_family.
-    if (is_deferred_gfx1250_family(mnemonic) && first_report_of_deferred_family(mnemonic))
+    // case is visible rather than silent. Once per mnemonic per translation:
+    // see is_deferred_gfx1250_family and first_report_of_deferred_family.
+    if (is_deferred_gfx1250_family(mnemonic) &&
+        first_report_of_deferred_family(reported_deferred_families, mnemonic))
       util::Logger::warn("gfx1250 translation passes through '", mnemonic,
                          "' unchanged; target-specific handling is not yet implemented");
     return nullptr;

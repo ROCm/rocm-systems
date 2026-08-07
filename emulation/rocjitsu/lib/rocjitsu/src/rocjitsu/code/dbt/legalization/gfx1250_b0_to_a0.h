@@ -8,7 +8,9 @@
 #define ROCJITSU_CODE_DBT_LEGALIZATION_GFX1250_B0_TO_A0_H_
 
 #include <cstdint>
+#include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -30,7 +32,16 @@ struct InstructionLegalization;
 /// classifier may therefore recognize a complete mnemonic family while the
 /// corresponding semantic rule inspects the precise operand predicate before
 /// changing code.
-[[nodiscard]] const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &inst);
+///
+/// @param inst The decoded instruction to classify.
+/// @param reported_deferred_families Mnemonics whose deferred-family
+///        pass-through warning has already been emitted for the translation in
+///        progress, updated in place. Each translation should pass its own set
+///        so a code object reports the gap independently of any earlier one.
+///        Passing nullptr emits the warning for every classified instruction.
+[[nodiscard]] const InstructionLegalization *
+gfx1250_b0_to_a0_legalization(const Instruction &inst,
+                              std::unordered_set<std::string> *reported_deferred_families);
 
 /// @brief True when a low-precision B0 WMMA needs an A0 completion wait.
 ///

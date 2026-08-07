@@ -98,6 +98,23 @@ TEST(Gfx1250B0ToA0Library, ReportsInvalidCodeObjectDiagnostic) {
   EXPECT_NE(matching, diagnostics.end());
 }
 
+// This fixture covers the rule-refused path (`translator-expand-failed`): a
+// rule exists for v_cvt_pk_fp8_f32 but declines the DPP operand form.
+//
+// The sibling `translator-expand-missing` kind -- classified as needing an
+// expansion with no rule registered at all -- has no end-to-end gfx1250 fixture
+// because no gfx1250 mnemonic can currently reach it. Every branch of
+// requires_b0_to_a0_expansion() has a matching entry in
+// semantic_expand_rules_gfx1250_b0_to_a0(), and the operand-driven
+// flat-scratch-base path answers Success or Failed but never NotHandled.
+//
+// It is still covered on both sides of that gap: the translator behavior by
+// BinaryTranslatorE2E.ExpandLegalizationWithoutSemanticRuleFails (cdna4-to-cdna3,
+// tests/dbt/translate_test.cpp), where an Expand legalization without a rule is
+// reachable, and the reported kind and its required-work field by
+// HsaHotswapHookTest.RendersRequiredWorkDiagnostic, which feeds a synthetic
+// diagnostic straight through the rendering seam. Add a fixture here if a
+// gfx1250 mnemonic is ever classified fail-closed ahead of its rule.
 TEST(Gfx1250B0ToA0Library, ReportsTranslatorDiagnostics) {
   rocjitsu::gfx1250::Vop3VopDpp16MachineInst dpp{};
   dpp.vdst = 30;

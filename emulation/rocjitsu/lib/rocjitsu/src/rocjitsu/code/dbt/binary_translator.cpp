@@ -1284,14 +1284,13 @@ bool BinaryTranslator::is_gfx1250_b0_to_a0() const {
          options_.output_revision == ProcessorRevision::Gfx1250A0;
 }
 
-const InstructionLegalization *
-BinaryTranslator::lookup_legalization(const Instruction &inst) const {
+const InstructionLegalization *BinaryTranslator::lookup_legalization(const Instruction &inst) {
   // gfx1250 B0 and A0 have the same structural ISA, so the generated cross-ISA
   // tables cannot express their revision-specific behavior. Instructions in
   // the B0-to-A0 profile use handwritten legalization; everything else follows
   // the raw same-ISA copy path.
   if (is_gfx1250_b0_to_a0())
-    return gfx1250_b0_to_a0_legalization(inst);
+    return gfx1250_b0_to_a0_legalization(inst, &reported_deferred_families_);
 
   return legalization_lookup_ ? legalization_lookup_(inst.encoding_id(), inst.opcode()) : nullptr;
 }
@@ -1303,6 +1302,10 @@ void BinaryTranslator::set_trace_callback(TranslationTraceCallback callback) {
 TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   TranslatedCodeObject result;
   result.host_arch = host_arch_;
+
+  // Deferred-family warnings are suppressed per translation, not per translator
+  // instance, so a reused translator still reports each code object's gaps.
+  reported_deferred_families_.clear();
 
   auto leave_unchanged = [&]() {
     const auto *image = reinterpret_cast<const uint8_t *>(obj.image_data());

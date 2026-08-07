@@ -28,6 +28,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "rocjitsu/code/dbt/encoding_translator.h"
@@ -196,7 +197,11 @@ private:
   [[nodiscard]] bool is_gfx1250_b0_to_a0() const;
 
   /// @brief Return the generated or revision-specific legalization for an instruction.
-  [[nodiscard]] const InstructionLegalization *lookup_legalization(const Instruction &inst) const;
+  ///
+  /// @details Not const: the gfx1250 B0-to-A0 classifier records which deferred
+  /// mnemonics it has already warned about, so each translation reports a gap
+  /// once rather than once per instruction.
+  [[nodiscard]] const InstructionLegalization *lookup_legalization(const Instruction &inst);
 
   /// @brief Translate a single instruction via the encoding translation pipeline.
   ///
@@ -224,6 +229,14 @@ private:
   EncodingTranslateFn encoding_translate_;                  ///< Per-pair encoding translator.
   LegalizationLookupFn legalization_lookup_;                ///< Per-pair legalization table.
   std::unique_ptr<SemanticTranslator> semantic_translator_; ///< Per-pair semantic rule engine.
+
+  /// @brief Deferred-family mnemonics already warned about in this translation.
+  ///
+  /// @details Cleared at the start of every translate() call. Scoping the
+  /// suppression to one code object keeps the warning informative without
+  /// letting the first object that uses a deferred mnemonic hide the same gap
+  /// in every object loaded after it.
+  std::unordered_set<std::string> reported_deferred_families_;
 };
 
 } // namespace rocjitsu
