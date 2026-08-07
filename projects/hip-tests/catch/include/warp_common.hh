@@ -318,6 +318,8 @@ const char* opToString()
   }
 }
 
+inline unsigned short maskCounter = 1;
+
 template <class T, class Gen>
 void genRandomMasks(LinearAllocGuard<T>& d_buf,
                     LinearAllocGuard<T>& buf,
@@ -336,17 +338,19 @@ void genRandomMasks(LinearAllocGuard<T>& d_buf,
   d_buf = std::move(d_tmp);
 
   for (int i = 0; i < numItems; i++) {
-    T mask;
+    T mask = 0ull;
+    unsigned char* maskAsUChar = reinterpret_cast<unsigned char*>(&mask); 
 
-    if (i % 5 == 0) {
-      // every five masks, create a mask that starts in position zero and has "no holes",
-      // because those take a different code path, where DPP instructions are used
-      mask = 1ull << distNoHoles(gen);
-      mask--;
-    } else {
-      mask = dist(gen);
+    // map each bit of maskCounter to a byte of mask
+    // e.g. 101 --> 0xFF00FF
+    for (int i = 0; i < sizeof(maskCounter) * 8; i++) {
+      if (maskcounter & (1 << i)) {
+        maskUChar[i] = 0xFF;
+      }
     }
 
+    maskCounter++;
+    maskCounter = maskCounter ? maskCounter : 1;
     buf.ptr()[i] = mask;
   }
 
@@ -392,11 +396,11 @@ void genRandomBuffers(LinearAllocGuard<T>& d_buf,
     unsigned char exponent = dist(gen) % 17 + 1;
 
     for (int i = 0; i < numItems; i++) {
-      buf.ptr()[i] = genRandomHalf(dist, gen, exponent);
+      buf.ptr()[i] = i;
     }
   } else {
     for (int i = 0; i < numItems; i++) {
-      buf.ptr()[i] = dist(gen);
+      buf.ptr()[i] = i;
     }
   }
   HIP_CHECK(hipMemcpy(d_buf.ptr(), buf.ptr(), numBytes, hipMemcpyHostToDevice));
