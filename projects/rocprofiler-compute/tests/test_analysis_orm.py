@@ -17,6 +17,7 @@ from utils.analysis_orm import (
     Dispatch,
     InstructionLine,
     Kernel,
+    KernelSymbol,
     PCSampleStallReason,
     PCSampleStallReasonLookup,
     PCSampleState,
@@ -112,8 +113,7 @@ def add_pc_sampling_state(
         code_object_offset=offset,
         comment=source,
         instruction=instruction,
-        code_object_store=code_object,
-        kernel=kernel,
+        kernel_symbol=KernelSymbol(code_object_store=code_object, kernel=kernel),
     )
     sample_state = PCSampleState(
         total_count=total_count,
@@ -218,8 +218,8 @@ def test_duplicate_dispatch_id_under_same_kernel_rejected(db_session):
         db_session.commit()
 
 
-def test_duplicate_instruction_identity_under_same_parents_rejected(db_session):
-    """Reject duplicate instruction identities under the same parents."""
+def test_duplicate_instruction_identity_under_same_symbol_rejected(db_session):
+    """Reject two instruction lines at one offset within a single symbol."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="k", workload=workload)
     code_object = CodeObjectStore(
@@ -228,26 +228,71 @@ def test_duplicate_instruction_identity_under_same_parents_rejected(db_session):
         load_base=0x1000,
         workload=workload,
     )
+    kernel_symbol = KernelSymbol(code_object_store=code_object, kernel=kernel)
     db_session.add(Dispatch(dispatch_id=0, kernel=kernel))
     db_session.add_all([
         InstructionLine(
             code_object_offset=0x10,
             comment="/s/a.cpp:1",
             instruction="v_mov",
-            code_object_store=code_object,
-            kernel=kernel,
+            kernel_symbol=kernel_symbol,
         ),
         InstructionLine(
             code_object_offset=0x10,
             comment="/s/a.cpp:1",
             instruction="v_mov",
-            code_object_store=code_object,
-            kernel=kernel,
+            kernel_symbol=kernel_symbol,
         ),
     ])
 
     with pytest.raises(IntegrityError):
         db_session.commit()
+
+
+def test_duplicate_kernel_symbol_under_same_parents_rejected(db_session):
+    """Reject two symbols for one kernel within a single code object."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(kernel_name="k", workload=workload)
+    code_object = CodeObjectStore(
+        code_object_id=5,
+        pid=42,
+        load_base=0x1000,
+        workload=workload,
+    )
+    db_session.add_all([
+        KernelSymbol(code_object_store=code_object, kernel=kernel),
+        KernelSymbol(code_object_store=code_object, kernel=kernel),
+    ])
+
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+
+def test_two_kernels_in_one_code_object_get_separate_symbols(db_session):
+    """One code object holding two kernels yields one symbol per kernel."""
+    workload = Workload(name="w", sub_name="s")
+    code_object = CodeObjectStore(
+        code_object_id=5,
+        pid=42,
+        load_base=0x1000,
+        workload=workload,
+    )
+    for kernel_name, symbol_offset in (("k1", 0x100), ("k2", 0x200)):
+        db_session.add(
+            KernelSymbol(
+                code_object_store=code_object,
+                kernel=Kernel(kernel_name=kernel_name, workload=workload),
+                code_object_offset=symbol_offset,
+            )
+        )
+    db_session.commit()
+
+    symbols = db_session.query(KernelSymbol).all()
+    assert len(symbols) == 2
+    assert {symbol.kernel.kernel_name for symbol in symbols} == {"k1", "k2"}
+    assert {symbol.code_object_uuid for symbol in symbols} == {
+        code_object.code_object_uuid
+    }
 
 
 def test_duplicate_code_object_identity_within_process_rejected(db_session):
@@ -282,19 +327,19 @@ def test_equal_identities_under_distinct_parent_chains_get_distinct_uuids(
         load_base=0x1000,
         workload=workload,
     )
+    first_symbol = KernelSymbol(code_object_store=first_code_object, kernel=kernel)
+    second_symbol = KernelSymbol(code_object_store=second_code_object, kernel=kernel)
     first_instruction = InstructionLine(
         code_object_offset=0x10,
         comment="/s/a.cpp:1",
         instruction="v_mov",
-        code_object_store=first_code_object,
-        kernel=kernel,
+        kernel_symbol=first_symbol,
     )
     second_instruction = InstructionLine(
         code_object_offset=0x10,
         comment="/s/a.cpp:1",
         instruction="v_mov",
-        code_object_store=second_code_object,
-        kernel=kernel,
+        kernel_symbol=second_symbol,
     )
     db_session.add_all([
         first_dispatch,
@@ -309,9 +354,9 @@ def test_equal_identities_under_distinct_parent_chains_get_distinct_uuids(
     assert (first_code_object.pid, second_code_object.pid) == (42, 99)
     assert first_instruction.instruction_uuid != second_instruction.instruction_uuid
     # Same kernel and offset; the process-scoped code object is what separates them.
-    assert first_instruction.kernel is second_instruction.kernel
-    assert first_instruction.code_object_store is first_code_object
-    assert second_instruction.code_object_store is second_code_object
+    assert first_symbol.kernel is second_symbol.kernel
+    assert first_symbol.code_object_store is first_code_object
+    assert second_symbol.code_object_store is second_code_object
 
 
 def test_duplicate_stall_reason_lookup_rejected(db_session):
@@ -387,6 +432,33 @@ def test_pc_sampling_view_flattens_normalized_tables(db_session):
             "stall_reason": {"WAITCNT": 2},
         }
     ]
+
+
+def test_pc_sample_state_placeholder_columns_default_to_none(db_session):
+    """The unpopulated PCSampleState columns exist and stay null."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(kernel_name="vecCopy", workload=workload)
+    sample_state = add_pc_sampling_state(
+        db_session, workload=workload, kernel=kernel, pid=42
+    )
+    db_session.commit()
+
+    assert sample_state.active_thread_percent is None
+    assert sample_state.wave_occupancy_percent is None
+    assert sample_state.dispatch_uuid is None
+
+
+def test_instruction_line_static_type_defaults_to_none(db_session):
+    """The unpopulated static instruction type exists and stays null."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(kernel_name="vecCopy", workload=workload)
+    sample_state = add_pc_sampling_state(
+        db_session, workload=workload, kernel=kernel, pid=42
+    )
+    db_session.commit()
+
+    assert sample_state.instruction_line.instruction_type_uuid is None
+    assert sample_state.instruction_line.instruction_type_lookup is None
 
 
 def test_pc_sampling_view_separates_states_by_code_object(db_session):

@@ -2138,18 +2138,22 @@ def test_pc_sampling_analyze_database_output(
             # Only dispatched kernels' ISA is stored, so every line is attributed.
             attributed = conn.execute(
                 "SELECT COUNT(*) FROM compute_instruction_line il "
-                "JOIN compute_kernel k ON il.kernel_uuid = k.kernel_uuid"
+                "JOIN compute_kernel_symbol ks "
+                "ON il.kernel_symbol_uuid = ks.kernel_symbol_uuid "
+                "JOIN compute_kernel k ON ks.kernel_uuid = k.kernel_uuid"
             ).fetchone()[0]
             unattributed = conn.execute(
                 "SELECT COUNT(*) FROM compute_instruction_line "
-                "WHERE kernel_uuid IS NULL"
+                "WHERE kernel_symbol_uuid IS NULL"
             ).fetchone()[0]
-            # The (code object, offset) pair is unique across all lines.
+            # The ISA pass never re-inserts an offset the sampling pass added.
             duplicate_offsets = conn.execute(
                 "SELECT COUNT(*) FROM ("
-                "SELECT code_object_uuid, code_object_offset "
-                "FROM compute_instruction_line "
-                "GROUP BY code_object_uuid, code_object_offset "
+                "SELECT ks.code_object_uuid, il.code_object_offset "
+                "FROM compute_instruction_line il "
+                "JOIN compute_kernel_symbol ks "
+                "ON il.kernel_symbol_uuid = ks.kernel_symbol_uuid "
+                "GROUP BY ks.code_object_uuid, il.code_object_offset "
                 "HAVING COUNT(*) > 1)"
             ).fetchone()[0]
             db_pc_sampling = pd.read_sql_query(

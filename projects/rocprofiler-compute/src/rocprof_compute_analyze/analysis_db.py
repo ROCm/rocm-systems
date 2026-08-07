@@ -14,6 +14,7 @@ import pandas as pd
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
 from pc_sampling.code_object_analysis import (
+    CodeObjectSymbol,
     load_code_object_disassemblies,
 )
 from pc_sampling.pc_sampling_analysis import (
@@ -72,6 +73,7 @@ from utils.utils_counter_defs import (
 
 KernelKey = str
 CodeObjectKey = tuple[int, int]
+KernelSymbolKey = tuple[int, int, str]
 
 
 class MetricInfoRow(NamedTuple):
@@ -217,14 +219,16 @@ class db_analysis(OmniAnalyze_Base):
                 )
 
             # Add pc sampling data, then the full code-object ISA
+            kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol] = {}
             code_object_stores = self.add_pc_sampling_data(
-                workload_path, workload_obj, kernel_objs
+                workload_path, workload_obj, kernel_objs, kernel_symbols
             )
             self.add_code_object_isa(
                 workload_path,
                 workload_obj,
                 kernel_objs,
                 code_object_stores,
+                kernel_symbols,
             )
 
             # Add metrics and values - iterate on values, create metrics as needed
@@ -402,6 +406,7 @@ class db_analysis(OmniAnalyze_Base):
         workload_path: str,
         workload_obj: orm.Workload,
         kernel_objs: dict[KernelKey, orm.Kernel],
+        kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
     ) -> dict[CodeObjectKey, orm.CodeObjectStore]:
         """Insert the normalized PC-sampling rows for one workload."""
         code_object_stores: dict[CodeObjectKey, orm.CodeObjectStore] = {}
@@ -430,15 +435,37 @@ class db_analysis(OmniAnalyze_Base):
                         line,
                         code_object_store,
                         kernel_objs,
+                        kernel_symbols,
                     )
 
         return code_object_stores
+
+    @staticmethod
+    def _get_or_create_kernel_symbol(
+        code_object_store: orm.CodeObjectStore,
+        kernel: orm.Kernel,
+        kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
+    ) -> orm.KernelSymbol:
+        """Return the symbol for a (code object, kernel) pair, creating it once."""
+        key: KernelSymbolKey = (
+            code_object_store.pid,
+            code_object_store.code_object_id,
+            kernel.kernel_name,
+        )
+        if key not in kernel_symbols:
+            kernel_symbols[key] = orm.KernelSymbol(
+                code_object_store=code_object_store,
+                kernel=kernel,
+            )
+            Database.get_session().add(kernel_symbols[key])
+        return kernel_symbols[key]
 
     @staticmethod
     def _add_instruction_line(
         line: InstructionLineRecord,
         code_object_store: orm.CodeObjectStore,
         kernel_objs: dict[KernelKey, orm.Kernel],
+        kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
     ) -> None:
         """Insert one instruction line, its sample state, and child counts."""
         kernel = kernel_objs.get(line.kernel_name)
@@ -450,8 +477,9 @@ class db_analysis(OmniAnalyze_Base):
             code_object_offset=line.code_object_offset,
             comment=line.comment,
             instruction=line.instruction,
-            code_object_store=code_object_store,
-            kernel=kernel,
+            kernel_symbol=db_analysis._get_or_create_kernel_symbol(
+                code_object_store, kernel, kernel_symbols
+            ),
         )
         Database.get_session().add(instruction_line)
 
@@ -490,6 +518,7 @@ class db_analysis(OmniAnalyze_Base):
         workload_obj: orm.Workload,
         kernel_objs: dict[KernelKey, orm.Kernel],
         code_object_stores: dict[CodeObjectKey, orm.CodeObjectStore],
+        kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
     ) -> None:
         """Add dispatched kernels' disassembly as instruction lines,
         skipping any offset already present."""
@@ -544,32 +573,46 @@ class db_analysis(OmniAnalyze_Base):
                     )
                     continue
 
-                existing_offsets = {
-                    line.code_object_offset
-                    for line in code_object_store.instruction_lines
-                }
-                for instruction in disassembly.instructions:
+                for symbol in disassembly.symbols:
                     kernel = kernel_by_symbol.get((
                         disassembly.code_object_id,
-                        instruction.kernel_name,
+                        symbol.name,
                     ))
                     if kernel is None:
                         continue
-                    code_object_offset = (
-                        instruction.virtual_address - code_object_store.load_base
+                    kernel_symbol = self._get_or_create_kernel_symbol(
+                        code_object_store, kernel, kernel_symbols
                     )
-                    if code_object_offset in existing_offsets:
-                        continue
-                    existing_offsets.add(code_object_offset)
-                    Database.get_session().add(
-                        orm.InstructionLine(
-                            code_object_offset=code_object_offset,
-                            comment=instruction.comment,
-                            instruction=instruction.instruction,
-                            code_object_store=code_object_store,
-                            kernel=kernel,
-                        )
+                    # Offsets are relative to the runtime load_base, never the
+                    # file offsets the code object info artifact carries.
+                    kernel_symbol.code_object_offset = (
+                        symbol.virtual_address - code_object_store.load_base
                     )
+                    self._add_symbol_isa(kernel_symbol, symbol)
+
+    @staticmethod
+    def _add_symbol_isa(
+        kernel_symbol: orm.KernelSymbol,
+        symbol: CodeObjectSymbol,
+    ) -> None:
+        """Add a symbol's disassembly, skipping offsets it already holds."""
+        existing_offsets = {
+            line.code_object_offset for line in kernel_symbol.instruction_lines
+        }
+        load_base = kernel_symbol.code_object_store.load_base
+        for instruction in symbol.instructions:
+            code_object_offset = instruction.virtual_address - load_base
+            if code_object_offset in existing_offsets:
+                continue
+            existing_offsets.add(code_object_offset)
+            Database.get_session().add(
+                orm.InstructionLine(
+                    code_object_offset=code_object_offset,
+                    comment=instruction.comment,
+                    instruction=instruction.instruction,
+                    kernel_symbol=kernel_symbol,
+                )
+            )
 
     @staticmethod
     def evaluate(
