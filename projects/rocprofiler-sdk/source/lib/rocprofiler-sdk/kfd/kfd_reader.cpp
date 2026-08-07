@@ -45,6 +45,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <mutex>
 #include <new>
 #include <string>
@@ -80,6 +81,10 @@ constexpr size_t kMaxSessions = 8;
 constexpr uint64_t kEvictIntervalNs          = 1'000'000'000ull;  // 1 s
 constexpr uint64_t kProcessorEvictIntervalNs = 1'000'000'000ull;  // 1 s
 constexpr uint64_t kStartMaxAgeNs            = 5'000'000'000ull;  // 5 s
+
+// Overflow depth at which the processor is clearly not keeping up. Not a cap:
+// dropping here would lose records the ring already gave us.
+constexpr size_t kOverflowWarnDepth = 256;
 
 // Owned exclusively by the processor thread, so none of it needs a lock.
 struct processor_state
@@ -149,6 +154,10 @@ struct dlog_session
 
     // Touched ONLY by the ring-copier thread.
     ring_cursors cursors = {};
+    // Batches copied out of the ring that had no free pipe slot. Reading the ring
+    // is what keeps the firmware from lapping us, so it must never be skipped.
+    std::deque<record_batch> overflow        = {};
+    bool                     overflow_warned = false;
 
     // Per-session, so one GPU failing to arm never disables another.
     std::atomic<bool> ready  = {false};
@@ -184,7 +193,7 @@ struct reader_state
     // Copier is the sole producer, processor the sole consumer.
     record_pipe<kBatchPipeDepth> pipe             = {};
     std::thread                  processor_thread = {};
-    std::atomic<uint64_t>        batches_dropped  = {0};
+    std::atomic<uint64_t>        overflow_peak    = {0};
 
     reader_state() = default;
     ~reader_state();
@@ -442,11 +451,32 @@ teardown_session(int kfd, dlog_session* s)
     }
 }
 
+// Reader thread only.
+void
+note_overflow_depth(reader_state& st, dlog_session& s)
+{
+    const auto _depth = s.overflow.size();
+    if(_depth > st.overflow_peak.load(std::memory_order_relaxed))
+        st.overflow_peak.store(_depth, std::memory_order_relaxed);
+
+    if(_depth <= kOverflowWarnDepth || s.overflow_warned) return;
+    s.overflow_warned = true;
+    ROCP_WARNING << fmt::format(
+        "KFD dispatch-log (gpu_id={}): the record processor is not keeping up -- {} batch(es) "
+        "queued. Records are still being read, so nothing is lost, but memory grows until it "
+        "catches up.",
+        s.gpu_id,
+        _depth);
+}
+
 // STAGE 1, reader thread: copy the ring into a batch and get out. This is the
 // ONLY code touching the volatile mapping, and every microsecond here widens
-// the window for the firmware to lap us -- so no lock, no map, no pairing. If
-// the processor is a full pipe behind we DROP the batch rather than block,
-// since blocking the ring read causes the very overruns this avoids.
+// the window for the firmware to lap us -- so no lock, no map, no pairing.
+//
+// The ring is drained on EVERY pass, even when the pipe is full: copy_pipes()
+// advances rptr, so skipping the read is what lets the firmware lap us. Batches
+// with nowhere to go queue in the session's overflow and enter the pipe, in
+// order, as slots free.
 uint64_t
 copy_records(reader_state& st)
 {
@@ -464,14 +494,11 @@ copy_records(reader_state& st)
         auto* wptr_arr = reinterpret_cast<volatile uint64_t*>(base + _s.info.wptr_offset);
         auto* rptr_arr = reinterpret_cast<volatile uint64_t*>(base + _s.info.rptr_offset);
 
-        auto* _batch = st.pipe.acquire();
-        if(!_batch)
-        {
-            // Do NOT read the ring: leaving the records for the next pass loses less
-            // than copying them somewhere we cannot publish.
-            st.batches_dropped.fetch_add(1, std::memory_order_relaxed);
-            continue;
-        }
+        // Only take a slot when nothing is queued ahead of this batch, or it would
+        // reach the processor before the older ones.
+        record_batch* _batch = _s.overflow.empty() ? st.pipe.acquire() : nullptr;
+        const bool    _direct = (_batch != nullptr);
+        if(!_direct) _batch = &_s.overflow.emplace_back();
 
         _batch->now_ns     = common::timestamp_ns();
         _batch->gpu_id     = _s.gpu_id;
@@ -483,9 +510,25 @@ copy_records(reader_state& st)
                                         _s.cursors,
                                         _batch->records);
 
-        // Release-store inside publish() orders the copy above before the
-        // processor can observe the batch.
-        if(_copied > 0) st.pipe.publish();
+        if(_direct)
+        {
+            // Release-store inside publish() orders the copy above before the
+            // processor can observe the batch.
+            if(_copied > 0) st.pipe.publish();
+        }
+        else
+        {
+            if(_copied == 0) _s.overflow.pop_back();
+            while(!_s.overflow.empty())
+            {
+                auto* _slot = st.pipe.acquire();
+                if(!_slot) break;
+                *_slot = std::move(_s.overflow.front());
+                _s.overflow.pop_front();
+                st.pipe.publish();
+            }
+            note_overflow_depth(st, _s);
+        }
         _total += _copied;
     }
     return _total;
@@ -530,24 +573,23 @@ process_batch(processor_state& proc, const record_batch& batch)
 // process-wide. Rate-limited per escalating episode. Reader thread only, so
 // the statics need no lock.
 void
-report_overrun(uint32_t gpu_id, const ring_cursors& c, uint64_t batches_dropped)
+report_overrun(uint32_t gpu_id, const ring_cursors& c, uint64_t overflow_peak)
 {
     // Per GPU: one ring lapping says nothing about another's.
     static std::unordered_map<uint32_t, std::pair<uint64_t, uint64_t>> _reported;
     auto&                                                              _prev = _reported[gpu_id];
-    if(c.overruns == _prev.first && batches_dropped == _prev.second) return;
-    _prev = {c.overruns, batches_dropped};
+    if(c.overruns == _prev.first && overflow_peak == _prev.second) return;
+    _prev = {c.overruns, overflow_peak};
 
     ROCP_WARNING << fmt::format(
         "KFD dispatch-log (gpu_id={}): ring overrun -- {} lap(s) so far, at least {} record(s) "
-        "lost, {} "
-        "batch(es) dropped because the processor fell behind. Those dispatches have no "
+        "lost, processor backlog peaked at {} batch(es). Those dispatches have no "
         "dispatch-log timestamps; everything else is unaffected and collection continues. Raise "
         "the ring with ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB if this repeats.",
         gpu_id,
         c.overruns,
         c.lost_records,
-        batches_dropped);
+        overflow_peak);
 }
 
 // KFD_DLOG_STREAM_OP_STATUS is DIAGNOSTICS ONLY: the kernel's counters are logged
@@ -778,7 +820,7 @@ reader_loop()
             for(size_t i = 0, _n = st.session_count.load(std::memory_order_acquire); i < _n; ++i)
                 report_overrun(st.sessions[i].gpu_id,
                                st.sessions[i].cursors,
-                               st.batches_dropped.load(std::memory_order_relaxed));
+                               st.overflow_peak.load(std::memory_order_relaxed));
 
             st.drain_epoch.fetch_add(1, std::memory_order_release);
 
@@ -800,7 +842,7 @@ reader_loop()
         {
             report_overrun(st.sessions[i].gpu_id,
                            st.sessions[i].cursors,
-                           st.batches_dropped.load(std::memory_order_relaxed));
+                           st.overflow_peak.load(std::memory_order_relaxed));
             log_stream_status(st.sessions[i]);
         }
     }
@@ -820,11 +862,12 @@ reader_loop()
 
     ROCP_WARNING_IF(signal_less_feature_enabled() && (_ring_overruns > 0 || _ring_lost > 0))
         << fmt::format(
-               "KFD dispatch-log ring: {} lap(s), {} record(s) lost to laps, {} batch(es) dropped "
-               "-- a lost record is a lost START, which shows up as a start-unknown no-timing",
+               "KFD dispatch-log ring: {} lap(s), {} record(s) lost to laps, processor backlog "
+               "peaked at {} batch(es) -- a lost record is a lost START, which shows up as a "
+               "start-unknown no-timing",
                _ring_overruns,
                _ring_lost,
-               st.batches_dropped.load(std::memory_order_relaxed));
+               st.overflow_peak.load(std::memory_order_relaxed));
 }
 }  // namespace
 

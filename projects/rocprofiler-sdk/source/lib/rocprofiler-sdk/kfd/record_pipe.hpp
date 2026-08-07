@@ -37,9 +37,8 @@
 // so steady state allocates nothing.
 //
 // The producer NEVER blocks. With no free slot acquire() returns nullptr and the
-// caller drops the batch: blocking would stall the ring read and cause the very
-// overrun this split avoids, and growing unbounded would trade a bounded data
-// loss for an unbounded memory one.
+// caller queues the batch in its own overflow: blocking would stall the ring
+// read and cause the very overrun this split avoids.
 //
 // MEMORY ORDERING: the release/acquire pair on m_tail publishes the filled bytes
 // to the consumer; the pair on m_head publishes the slot's availability, so the

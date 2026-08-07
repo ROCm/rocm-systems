@@ -31,6 +31,8 @@
 
 #include <gtest/gtest.h>
 
+#include <deque>
+
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -848,6 +850,65 @@ TEST(record_pipe, producer_never_blocks_when_the_consumer_stalls)
 
 // Slots are a reused pool: a recycled batch arrives cleared, so a stale record
 // from a previous cycle can never be processed twice.
+// The copier's overflow discipline (kfd_reader.cpp copy_records): the ring is
+// drained on every pass even when the pipe is full, and queued batches reach the
+// processor in the order they left the ring.
+TEST(record_pipe, overflow_preserves_order_and_never_skips_a_read)
+{
+    auto pipe     = record_pipe<4>{};
+    auto overflow = std::deque<record_batch>{};
+
+    // One "poll": always copy, into a slot only when nothing is queued ahead.
+    auto copy_one = [&](uint32_t id) {
+        record_batch* dst    = overflow.empty() ? pipe.acquire() : nullptr;
+        const bool    direct = (dst != nullptr);
+        if(!direct) dst = &overflow.emplace_back();
+
+        dst->gpu_id = id;
+        dst->records.assign(1, copied_record{});
+
+        if(direct)
+        {
+            pipe.publish();
+            return;
+        }
+        while(!overflow.empty())
+        {
+            auto* slot = pipe.acquire();
+            if(slot == nullptr) break;
+            *slot = std::move(overflow.front());
+            overflow.pop_front();
+            pipe.publish();
+        }
+    };
+
+    // 20 reads against a 4-deep pipe with a consumer that never runs: every read
+    // still happens, so the ring is never left unread.
+    for(uint32_t i = 0; i < 20; ++i)
+        copy_one(i);
+    EXPECT_EQ(pipe.size(), pipe.capacity());
+    EXPECT_EQ(overflow.size(), 16u);
+
+    // Drain, interleaving further reads, and check strict FIFO across the handoff.
+    uint32_t expected = 0;
+    for(uint32_t i = 20; i < 40; ++i)
+    {
+        while(auto* got = pipe.peek())
+        {
+            EXPECT_EQ(got->gpu_id, expected++) << "batches left the pipe out of order";
+            pipe.pop();
+        }
+        copy_one(i);
+    }
+    while(auto* got = pipe.peek())
+    {
+        EXPECT_EQ(got->gpu_id, expected++) << "batches left the pipe out of order";
+        pipe.pop();
+    }
+    EXPECT_TRUE(overflow.empty());
+    EXPECT_EQ(expected, 40u) << "a batch read out of the ring never reached the processor";
+}
+
 TEST(record_pipe, recycled_slots_are_cleared)
 {
     auto  pipe = record_pipe<2>{};
