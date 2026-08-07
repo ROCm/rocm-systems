@@ -728,6 +728,24 @@ T Pow2Pad(
     return ret;
 }
 
+/// Casts a scoped enum value to it's underlying type.
+/// This is intended to be a shortcut to save from typing the pattern static_cast<underlying_type>.
+/// Will be deprecated by C++23's std::to_underlying
+///
+/// @returns The value of e as it's underlying integer type.
+template<typename E>
+constexpr auto ToUnderlyingType(E e) noexcept
+{
+    if constexpr (std::is_enum_v<E>)
+    {
+        return std::underlying_type_t<E>(e);
+    }
+    else
+    {
+        return e;
+    }
+}
+
 /// Computes the base-2 logarithm of an unsigned integer.
 ///
 /// If the given integer is not a power of 2, this function will not provide an exact answer.
@@ -736,11 +754,28 @@ T Pow2Pad(
 ///
 /// @returns log_2(u)
 template <typename T>
-uint32 Log2(
+constexpr uint32 Log2(
     T u)
 {
     uint32 logValue = 0;
-    return BitMaskScanReverse(&logValue, u) ? logValue : 0;
+
+    // TODO: On C++23 we can make this a "consteval if".
+    if (std::is_constant_evaluated())
+    {
+        // An enum type doesn't define '>>=', so convert to its underlying integral type before shifting.
+        auto val = ToUnderlyingType(u);
+        while (val > 1)
+        {
+            val >>= 1;
+            logValue++;
+        }
+    }
+    else
+    {
+        BitMaskScanReverse(&logValue, u);
+    }
+
+    return logValue;
 }
 
 /// Computes the base-2 logarithm of an unsigned 64-bit integer based on ceiling
@@ -1593,24 +1628,6 @@ inline void* Memcpy(
 {
     static_assert(DestByteSize >= (sizeof(SourceType) * SourceSize));
     return std::memcpy(pDest, source, sizeof(SourceType) * SourceSize);
-}
-
-/// Casts a scoped enum value to it's underlying type.
-/// This is intended to be a shortcut to save from typing the pattern static_cast<underlying_type>.
-/// Will be deprecated by C++23's std::to_underlying
-///
-/// @returns The value of e as it's underlying integer type.
-template<typename E>
-constexpr auto ToUnderlyingType(E e) noexcept
-{
-    if constexpr (std::is_enum_v<E>)
-    {
-        return std::underlying_type_t<E>(e);
-    }
-    else
-    {
-        return e;
-    }
 }
 
 /// This function should be used to convert a larger integer to a smaller integer without generating a "possible loss

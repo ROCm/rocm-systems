@@ -51,8 +51,8 @@ namespace TraceChunk
 {
 
 /// "CodeObject" RDF chunk identifier & version
-constexpr char        CodeObjectChunkId[TextIdentifierSize] = "CodeObject";
-constexpr Pal::uint32 CodeObjectChunkVersion                = 2;
+constexpr TraceChunkId CodeObjectChunkId      = TraceChunkId("CodeObject");
+constexpr Pal::uint32  CodeObjectChunkVersion = 2;
 
 /// Header for the "CodeObject" RDF chunk
 struct CodeObjectHeader
@@ -62,8 +62,8 @@ struct CodeObjectHeader
 };
 
 /// "COLoadEvent" RDF chunk identifier & version
-constexpr char        CodeObjectLoadEventChunkId[TextIdentifierSize] = "COLoadEvent";
-constexpr Pal::uint32 CodeObjectLoadEventChunkVersion                = 3;
+constexpr TraceChunkId CodeObjectLoadEventChunkId      = TraceChunkId("COLoadEvent");
+constexpr Pal::uint32  CodeObjectLoadEventChunkVersion = 3;
 
 struct CodeObjectLoadEventHeader
 {
@@ -88,8 +88,8 @@ struct CodeObjectLoadEvent
 };
 
 /// "PsoCorrelation" RDF chunk identifier & version
-constexpr char        PsoCorrelationChunkId[TextIdentifierSize] = "PsoCorrelation";
-constexpr Pal::uint32 PsoCorrelationChunkVersion                = 3;
+constexpr TraceChunkId PsoCorrelationChunkId      = TraceChunkId("PsoCorrelation");
+constexpr Pal::uint32  PsoCorrelationChunkVersion = 3;
 
 struct PsoCorrelationHeader
 {
@@ -106,8 +106,8 @@ struct PsoCorrelation
 };
 
 /// "COCorrelation" RDF chunk identifier & version
-constexpr char     CodeObjectCorrelationChunkId[TextIdentifierSize] = "COCorrelation";
-constexpr uint32_t CodeObjectCorrelationChunkVersion                = 4;
+constexpr TraceChunkId CodeObjectCorrelationChunkId      = TraceChunkId("COCorrelation");
+constexpr Pal::uint32  CodeObjectCorrelationChunkVersion = 4;
 
 struct CodeObjectCorrelationHeader
 {
@@ -147,8 +147,8 @@ static_assert(static_cast<Pal::uint32>(Pal::ShaderType::Mesh) == static_cast<Pal
 static_assert(static_cast<Pal::uint32>(Pal::ShaderType::Ps)   == static_cast<Pal::uint32>(ApiShaderType::Pixel));
 
 /// "PsoCorrelation" RDF chunk identifier & version
-constexpr char        ShaderObjectCorrelationChunkId[TextIdentifierSize] = "SOCorrelation";
-constexpr Pal::uint32 ShaderObjectCorrelationChunkVersion                = 1;
+constexpr TraceChunkId ShaderObjectCorrelationChunkId      = TraceChunkId("SOCorrelation");
+constexpr Pal::uint32  ShaderObjectCorrelationChunkVersion = 1;
 
 struct ShaderObjectCorrelationHeader
 {
