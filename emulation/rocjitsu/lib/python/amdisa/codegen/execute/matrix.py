@@ -486,14 +486,25 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 L.append(f'                     s2, const_acc,')
                 L.append(f'                     inst_.cbsz, inst_.abid, inst_.blgp);')
     else:
-        # F32, F16, and BF16 matrix results accumulate in f32. gfx1250 WMMA
-        # uses a wave32 layout; CDNA MFMA uses the GFX9 MFMA layout helpers.
-        if arch == 'gfx1250' and input_type in ('F8_F6_F4', 'F8F6F4'):
-            L.append(f'  uint32_t matrix_a_fmt = inst_.opsel;')
-            L.append(f'  uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;')
+        # F32, F16, and BF16 matrix results accumulate in f32.
+        if ctx.profile.supports_matrix_data_type_selectors and input_type in (
+            'F8_F6_F4',
+            'F8F6F4',
+        ):
+            selector_fields = ctx.profile.matrix_data_type_selector_fields
+            if selector_fields is None:
+                raise ValueError(
+                    'matrix data-type selection requires Matrix A/B selector fields'
+                )
+            a_type, b_type_hi, b_type_lo = selector_fields
+            L.append(f'  uint32_t matrix_a_type = inst_.{a_type};')
+            L.append(
+                f'  uint32_t matrix_b_type = '
+                f'(inst_.{b_type_hi} << 2) | inst_.{b_type_lo};'
+            )
             L.append(
                 f'  bool dispatched = amdgpu::dispatch_matrix_fmt_pair('
-                f'matrix_a_fmt, matrix_b_fmt,'
+                f'matrix_a_type, matrix_b_type,'
             )
             L.append(
                 f'      [&](uint32_t a_bits, uint32_t b_bits, auto extract_a, auto extract_b) {{'

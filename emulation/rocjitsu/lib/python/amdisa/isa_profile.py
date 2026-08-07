@@ -904,6 +904,16 @@ class _AmdgpuProfileBase(IsaProfile):
         return MatrixLayout.MFMA_ACCUMULATOR
 
     @property
+    def supports_matrix_data_type_selectors(self) -> bool:
+        """True when instruction fields select the Matrix A and B data types."""
+        return False
+
+    @property
+    def matrix_data_type_selector_fields(self) -> tuple[str, str, str] | None:
+        """Field names for Matrix A type and Matrix B type high/low bits."""
+        return None
+
+    @property
     def flat_scratch_mechanism(self) -> str:
         """How scratch base is located: 'hwreg' (CDNA3/4) or 'sgpr_pair'."""
         return 'sgpr_pair'
@@ -1712,6 +1722,14 @@ class Gfx1250Profile(Rdna4Profile):
     @property
     def uses_vgpr_msb_indexing(self) -> bool:
         return True
+
+    @property
+    def supports_matrix_data_type_selectors(self) -> bool:
+        return True
+
+    @property
+    def matrix_data_type_selector_fields(self) -> tuple[str, str, str]:
+        return ('opsel', 'pad_14', 'opsel_hi')
 
     @property
     def uses_packed_16bit_e32_source_selectors(self) -> bool:

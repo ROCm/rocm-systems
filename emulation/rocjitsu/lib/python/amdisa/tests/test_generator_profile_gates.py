@@ -100,12 +100,16 @@ def _matrix_profile(
     matrix_layout: MatrixLayout = MatrixLayout.MFMA_ACCUMULATOR,
     wave_size: int = 64,
     wave_size_max: int | None = None,
+    supports_matrix_data_type_selectors: bool = False,
+    matrix_data_type_selector_fields: tuple[str, str, str] | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
         matrix_layout=matrix_layout,
         wave_size=wave_size,
         wave_size_max=wave_size if wave_size_max is None else wave_size_max,
+        supports_matrix_data_type_selectors=supports_matrix_data_type_selectors,
+        matrix_data_type_selector_fields=matrix_data_type_selector_fields,
     )
 
 
@@ -1150,6 +1154,54 @@ def test_gfx1250_wmma_f32_passes_c_modifier_to_accumulator_helper():
 
     assert 'amdgpu::exec_wmma_f32_16x16x32_f16(' in body
     assert 'amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi)' in body
+
+
+def test_matrix_data_types_use_profile_selector_fields_and_dispatch():
+    inst = Instruction('V_WMMA_F32_16X16X128_F8F6F4', 'ENC_VOP3P', 0, [])
+    profile = _matrix_profile(
+        matrix_layout=MatrixLayout.WMMA_SPLIT_K,
+        wave_size=32,
+        wave_size_max=32,
+        supports_matrix_data_type_selectors=True,
+        matrix_data_type_selector_fields=(
+            'a_selector',
+            'b_selector_hi',
+            'b_selector_lo',
+        ),
+    )
+
+    body = _gen_mfma(inst, 'renamed_dynamic_formats', profile)
+
+    assert 'uint32_t matrix_a_type = inst_.a_selector;' in body
+    assert (
+        'uint32_t matrix_b_type = (inst_.b_selector_hi << 2) | '
+        'inst_.b_selector_lo;' in body
+    )
+    assert 'dispatch_matrix_fmt_pair(matrix_a_type, matrix_b_type,' in body
+    assert 'amdgpu::exec_wmma_f32_mixed(cu, 16, 16, 128,' in body
+
+
+def test_matrix_data_type_dispatch_rejects_unsupported_pair():
+    inst = Instruction('V_WMMA_F32_16X16X128_F8F6F4', 'ENC_VOP3P', 0, [])
+    profile = _matrix_profile(
+        supports_matrix_data_type_selectors=True,
+        matrix_data_type_selector_fields=('opsel', 'pad_14', 'opsel_hi'),
+    )
+
+    body = _gen_mfma(inst, 'renamed_dynamic_formats', profile)
+
+    assert 'bool dispatched = amdgpu::dispatch_matrix_fmt_pair(' in body
+    assert 'if (!dispatched)\n    throw util::UnimplementedInst(mnemonic());' in body
+
+
+def test_profile_without_matrix_data_type_selectors_uses_mfma_format_fields():
+    inst = Instruction('V_MFMA_F32_16X16X128_F8F6F4', 'ENC_VOP3P_MFMA', 0, [])
+
+    body = _gen_mfma(inst, 'renamed_mfma', _matrix_profile())
+
+    assert 'uint32_t matrix_a_type' not in body
+    assert 'dispatch_matrix_fmt_pair(inst_.cbsz, inst_.blgp,' in body
+    assert 'amdgpu::exec_f32_mixed(cu, 16, 16, 128,' in body
 
 
 def test_rdna_wmma_uses_arch_specific_wave32_operand_layout():

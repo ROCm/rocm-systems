@@ -117,6 +117,25 @@ def test_matrix_layout(profile, expected):
     assert profile.matrix_layout is expected
 
 
+@pytest.mark.parametrize(
+    ('profile', 'supported', 'selector_fields'),
+    [
+        (Cdna1Profile(), False, None),
+        (Cdna2Profile(), False, None),
+        (CdnaProfile(), False, None),
+        (Rdna1Profile(), False, None),
+        (Rdna2Profile(), False, None),
+        (Rdna3Profile(), False, None),
+        (Rdna3_5Profile(), False, None),
+        (Rdna4Profile(), False, None),
+        (Gfx1250Profile(), True, ('opsel', 'pad_14', 'opsel_hi')),
+    ],
+)
+def test_matrix_data_type_selector_properties(profile, supported, selector_fields):
+    assert profile.supports_matrix_data_type_selectors is supported
+    assert profile.matrix_data_type_selector_fields == selector_fields
+
+
 def test_only_gfx1250_splits_execution_sources():
     assert Gfx1250Profile().split_execution_sources
     assert not Rdna4Profile().split_execution_sources
