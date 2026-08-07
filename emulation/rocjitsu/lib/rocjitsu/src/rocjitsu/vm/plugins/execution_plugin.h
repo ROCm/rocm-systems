@@ -36,6 +36,12 @@ namespace rocjitsu {
 /// the SoC and all components that fire hooks (CommandProcessor,
 /// ComputeUnit, Hart). A static empty group is used as the default
 /// so the plugin group pointer is never null.
+///
+/// Lifecycle callbacks are host-ordered, not part of the hot/infrequent hook
+/// locking policy: onInit() completes before simulation callbacks begin, and
+/// onShutdown() begins only after all simulation callbacks have stopped. The
+/// host must enforce this ordering; lifecycle callbacks do not synchronize
+/// with concurrently executing simulation hooks.
 class ExecutionPlugin {
 public:
   static constexpr uint8_t kFullByteMask = 0xF;
@@ -66,12 +72,12 @@ public:
   // -- Lifecycle hooks ------------------------------------------------------
 
   /// Called when the emulated driver opens (simulation is ready to accept work).
-  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
+  /// The host completes this callback before starting simulation callbacks.
   virtual void onInit() {}
 
   /// Called when the emulated driver closes (simulation is shutting down).
   /// All simulation state is still valid during this callback.
-  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
+  /// The host starts this callback only after simulation callbacks have stopped.
   virtual void onShutdown() {}
 
   // -- AMDGPU hooks --------------------------------------------------------

@@ -31,6 +31,10 @@
 
 namespace rocjitsu {
 
+namespace test {
+class ExecutionPluginGroupTestAccess;
+}
+
 /// @brief Deleter for owned plugin instances.
 ///
 /// Every plugin instance is freed through a destroy function, so allocation and
@@ -118,6 +122,9 @@ public:
   bool requires_serial_hot_hooks() const { return serialize_hot_hooks_; }
 
   // -- Lifecycle (non-virtual) --
+  // The host calls these outside the simulation-callback interval: onInit()
+  // completes before callbacks start, and onShutdown() starts after they stop.
+  // callback_mutex_ orders simulation callbacks, not lifecycle teardown.
   void onInit() {
     dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
@@ -259,10 +266,13 @@ public:
   }
 
 private:
+  friend class test::ExecutionPluginGroupTestAccess;
+
   template <typename Callback> void dispatch_with_plugin_lock(Callback &&callback) {
     if (plugins_.empty())
       return;
     std::lock_guard<std::recursive_mutex> lock(callback_mutex_);
+    ++callback_lock_acquisitions_;
     std::forward<Callback>(callback)();
   }
 
@@ -279,6 +289,9 @@ private:
   // acquisition preserves one cross-hook serialization domain without
   // deadlocking that same-thread re-entry.
   std::recursive_mutex callback_mutex_;
+  // Read only through the friend test seam. The mutex protects increments;
+  // empty groups return before touching either the mutex or this counter.
+  uint64_t callback_lock_acquisitions_ = 0;
   bool serialize_hot_hooks_ = false;
 
   /// Internal fanout over sinks whose lifetime is guaranteed by the owning

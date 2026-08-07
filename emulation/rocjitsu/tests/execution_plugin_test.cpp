@@ -78,6 +78,17 @@ RJ_DIAGNOSTIC_POP
 #include <unistd.h>
 #endif
 
+namespace rocjitsu::test {
+
+class ExecutionPluginGroupTestAccess {
+public:
+  static uint64_t callback_lock_acquisitions(const ExecutionPluginGroup &group) {
+    return group.callback_lock_acquisitions_;
+  }
+};
+
+} // namespace rocjitsu::test
+
 namespace {
 
 using namespace rocjitsu;
@@ -962,9 +973,10 @@ TEST(ExecutionPluginTest, SerialHotHookOptInPreventsInfrequentAndHighFrequencyOv
   EXPECT_EQ(probe_ptr->probe().max_active(), 1);
 }
 
-TEST(ExecutionPluginTest, EmptyGroupDispatchIsSafeAcrossThreads) {
+TEST(ExecutionPluginTest, EmptyGroupDispatchBypassesCallbackLock) {
   auto group = ExecutionPluginGroup::empty_group();
   ASSERT_TRUE(group->empty());
+  const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(*group);
 
   run_two_threads([&]() {
     for (int i = 0; i < 10000; ++i) {
@@ -973,6 +985,16 @@ TEST(ExecutionPluginTest, EmptyGroupDispatchIsSafeAcrossThreads) {
       group->onAmdgpuWorkgroupCompleted(0, 0);
     }
   });
+
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(*group), before);
+
+  ExecutionPluginGroup non_empty_group(PluginSinkConfig{});
+  ASSERT_TRUE(non_empty_group.add(std::make_unique<ExecutionPlugin>("no-op")));
+  const uint64_t non_empty_before =
+      test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(non_empty_group);
+  non_empty_group.onInit();
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(non_empty_group),
+            non_empty_before + 1);
 }
 
 int run_serial_hot_hook_halt_snapshot() {
