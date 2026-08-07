@@ -11,6 +11,8 @@ configuring the profiler for common workload scenarios. Instead of manually
 setting numerous environment variables, use a single ``--preset`` flag or
 combine domain flags for composable configuration.
 
+.. _using-preset-profiles-quick-start:
+
 Quick start
 ===========
 

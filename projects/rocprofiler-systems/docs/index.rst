@@ -22,6 +22,10 @@ It is the successor to `<https://github.com/ROCm/omnitrace>`__.
     * :doc:`Install ROCm Systems Profiler <./install/install>`
     * :doc:`Build from source <./install/build>`
 
+  .. grid-item-card:: Quick reference
+
+    * :doc:`ROCm Systems Profiler at a glance <./quick-reference/rocprofiler-systems-at-a-glance>`
+
 Use the following topics to learn more about the advantages of ROCm Systems Profiler in application
 profiling, how it supports performance analysis, and how to leverage its capabilities in practice:
 
