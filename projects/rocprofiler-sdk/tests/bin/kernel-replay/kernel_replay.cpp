@@ -58,6 +58,13 @@ vecAdd(const float* __restrict__ a, const float* __restrict__ b, float* __restri
         c[i] = a[i] + b[i];
 }
 
+// Module-scope __device__ counter, bumped once per saxpy execution by a single thread. It lives in
+// the executable's data segment (not a tracked hipMalloc allocation), so kernel replay must restore
+// it between passes: a replayed dispatch then nets exactly one bump (as if run once), while a
+// broken module-variable restore accumulates one bump per pass. Legit accumulation ACROSS host
+// launches is preserved -- only per-pass accumulation is the bug. Exercised by run_inplace_saxpy().
+__device__ int g_saxpy_calls = 0;
+
 // SAXPY: in-place read-write kernel (y is both read and written).
 __global__ void
 saxpy(float alpha, const float* __restrict__ x, float* __restrict__ y, int n)
@@ -65,6 +72,8 @@ saxpy(float alpha, const float* __restrict__ x, float* __restrict__ y, int n)
     const int stride = blockDim.x * gridDim.x;
     for(int i = blockDim.x * blockIdx.x + threadIdx.x; i < n; i += stride)
         y[i] = alpha * x[i] + y[i];
+
+    if(blockIdx.x == 0 && threadIdx.x == 0) g_saxpy_calls += 1;
 }
 
 // VecScale: in-place scalar multiply (a third distinct kernel).
@@ -232,20 +241,27 @@ run_vecscale(int n, int iters)
     return EXIT_SUCCESS;
 }
 
-// Restore-correctness mode: launch ONE in-place saxpy dispatch (y = a*x + y) and self-check that
-// the effect landed exactly once. Under --kernel-replay-beta-enabled with N counter groups the
-// SDK re-executes this single dispatch N times, restoring device memory between passes, so the
-// result is data-dependent on restore:
-//   restore WORKS  -> y == y0 + a*x        (applied once)          e.g. 102
-//   restore BROKEN -> y == y0 + N*(a*x)    (accumulated per pass)  e.g. 110 for N=5
-// A no-op/broken restore therefore makes this exit non-zero -- unlike a counter-only check.
+// Restore-correctness mode (buffer AND module variable). Launch the in-place saxpy dispatch
+// (y = a*x + y with x=1, a=2, so each host-observed launch adds `step` to y) kLaunches times; the
+// kernel also bumps the __device__ counter g_saxpy_calls once per execution. Under
+// --kernel-replay-beta-enabled each host-observed dispatch is re-executed N times (N counter
+// groups), with device memory AND module variables restored between passes, so BOTH quantities must
+// scale with the number of *launches*, never launches*passes:
+//   restore WORKS  -> y == y0 + kLaunches*step   AND g_saxpy_calls == kLaunches      (e.g. 106 / 3)
+//   restore BROKEN -> y == y0 + kLaunches*N*step AND g_saxpy_calls == kLaunches*N    (e.g. 130 /
+//   15)
+// Legit accumulation ACROSS launches is expected (kLaunches, not 1); only per-pass accumulation is
+// a bug. Checking the tracked buffer AND the untracked __device__ global (snap()'s
+// HSA_SYMBOL_KIND_VARIABLE path) makes this a stronger end-to-end proof than a single-launch check.
 int
 run_inplace_saxpy(int n)
 {
-    const size_t bytes = static_cast<size_t>(n) * sizeof(float);
-    const float  alpha = 2.0f;
-    const float  x_val = 1.0f;
-    const float  y0    = 100.0f;
+    constexpr int kLaunches = 3;
+    const size_t  bytes     = static_cast<size_t>(n) * sizeof(float);
+    const float   alpha     = 2.0f;
+    const float   x_val     = 1.0f;
+    const float   y0        = 100.0f;
+    const float   step      = alpha * x_val;  // per-application delta to y (2)
 
     std::vector<float> h_x(n, x_val);
     std::vector<float> h_y(n, y0);
@@ -256,35 +272,65 @@ run_inplace_saxpy(int n)
     HIP_CHECK(hipMemcpy(d_x, h_x.data(), bytes, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_y, h_y.data(), bytes, hipMemcpyHostToDevice));
 
-    saxpy<<<512, 512>>>(alpha, d_x, d_y, n);  // exactly one host-observed launch
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    // Reset the module-scope counter so earlier saxpy launches (run_saxpy) don't skew it.
+    const int zero = 0;
+    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_saxpy_calls), &zero, sizeof(int)));
 
-    HIP_CHECK(hipMemcpy(h_y.data(), d_y, bytes, hipMemcpyDeviceToHost));
+    bool ok = true;
+    for(int i = 0; i < kLaunches; ++i)
+    {
+        saxpy<<<512, 512>>>(alpha, d_x, d_y, n);  // host-observed launch i
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Both the buffer and the __device__ counter grow by one application per launch,
+        // never per replay pass, so a broken restore is caught at the first launch (values == N
+        // instead of 1) rather than only in aggregate.
+        const int   expected_calls = i + 1;
+        const float expected_y     = y0 + static_cast<float>(expected_calls) * step;
+
+        HIP_CHECK(hipMemcpy(h_y.data(), d_y, bytes, hipMemcpyDeviceToHost));
+        int calls = -1;
+        HIP_CHECK(hipMemcpyFromSymbol(&calls, HIP_SYMBOL(g_saxpy_calls), sizeof(int)));
+
+        int nonuniform = 0;
+        for(int e = 0; e < n; ++e)
+            if(!approx_equal(h_y[e], h_y[0])) ++nonuniform;
+
+        const float buf_apps = (h_y[0] - y0) / step;
+        printf("[rstest] launch=%d/%d y[0]=%.3f expected=%.3f buffer_applications=%.3f "
+               "device_counter=%d nonuniform=%d\n",
+               expected_calls,
+               kLaunches,
+               h_y[0],
+               expected_y,
+               buf_apps,
+               calls,
+               nonuniform);
+
+        if(!approx_equal(h_y[0], expected_y) || nonuniform != 0 || calls != expected_calls)
+        {
+            printf("[rstest] FAIL after launch %d: buffer_applications=%.3f device_counter=%d "
+                   "(expected %d each) -> restore did NOT revert between replay passes\n",
+                   expected_calls,
+                   buf_apps,
+                   calls,
+                   expected_calls);
+            ok = false;
+            break;
+        }
+    }
+
     HIP_CHECK(hipFree(d_x));
     HIP_CHECK(hipFree(d_y));
 
-    const float applied_once = y0 + alpha * x_val;  // 102
-    const float step         = alpha * x_val;       // 2
-
-    int nonuniform = 0;
-    for(int i = 0; i < n; ++i)
-        if(!approx_equal(h_y[i], h_y[0])) ++nonuniform;
-
-    const float observed = (h_y[0] - y0) / step;
-    printf("[rstest] y[0]=%.3f applied_once=%.3f observed_applications=%.3f nonuniform=%d\n",
-           h_y[0],
-           applied_once,
-           observed,
-           nonuniform);
-
-    if(approx_equal(h_y[0], applied_once) && nonuniform == 0)
+    if(ok)
     {
-        printf("[rstest] PASS: kernel effect applied exactly once (restore reverted inputs)\n");
+        printf("[rstest] PASS: buffer and __device__ global each grew exactly once per launch over "
+               "%d launches (restore reverted inputs between passes)\n",
+               kLaunches);
         return EXIT_SUCCESS;
     }
-
-    printf("[rstest] FAIL: applied %.3f times -> restore did NOT revert inputs\n", observed);
     return EXIT_FAILURE;
 }
 }  // namespace
