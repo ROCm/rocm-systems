@@ -6223,6 +6223,62 @@ pub fn amdsmi_get_link_topology_nearest(
     Ok(topology_nearest_info)
 }
 
+/// Retrieve the unified link topology information between two processors.
+///
+/// This function retrieves the link weight, status, type, hop count, and framebuffer sharing flag for the connection between the source and destination processor handles.
+///
+/// # Arguments
+///
+/// * `processor_handle_src` - A handle to the source processor.
+/// * `processor_handle_dst` - A handle to the destination processor.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<AmdsmiLinkTopologyT>` - Returns `Ok(AmdsmiLinkTopologyT)` containing the [`AmdsmiLinkTopologyT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   // Initialize the AMD SMI library
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     // Example processor handles, assuming the number of processors is greater than zero
+///     let processor_handles = amdsmi_get_processor_handles!();
+///     let processor_handle_src = processor_handles[0];
+///     let processor_handle_dst = processor_handles[processor_handles.len() - 1];
+///
+///     match amdsmi_get_link_topology(processor_handle_src, processor_handle_dst) {
+///         Ok(info) => {
+///             println!("Link Topology Info: {:?}", info);
+///         },
+///         Err(e) => println!("Failed to retrieve link topology information: {}", e),
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_link_topology` call fails.
+pub fn amdsmi_get_link_topology(
+    processor_handle_src: AmdsmiProcessorHandle,
+    processor_handle_dst: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiLinkTopologyT> {
+    let mut topology_info = MaybeUninit::<AmdsmiLinkTopologyT>::uninit();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_link_topology(
+        processor_handle_src,
+        processor_handle_dst,
+        topology_info.as_mut_ptr()
+    ));
+    let topology_info = unsafe { topology_info.assume_init() };
+    Ok(topology_info)
+}
+
 /// A macro to get all the GPU processor handles directly.
 ///
 /// This macro retrieves all the GPU processor handles by first getting the socket handles

@@ -1596,6 +1596,33 @@ pub enum AmdsmiLinkStatusT {
     AmdsmiLinkStatusError = 3,
 }
 #[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiLinkTopologyT {
+    pub weight: u64,
+    pub link_status: AmdsmiLinkStatusT,
+    pub link_type: AmdsmiLinkTypeT,
+    pub num_hops: u8,
+    pub fb_sharing: u8,
+    pub reserved: [u32; 10usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiLinkTopologyT"][::std::mem::size_of::<AmdsmiLinkTopologyT>() - 64usize];
+    ["Alignment of AmdsmiLinkTopologyT"][::std::mem::align_of::<AmdsmiLinkTopologyT>() - 8usize];
+    ["Offset of field: AmdsmiLinkTopologyT::weight"]
+        [::std::mem::offset_of!(AmdsmiLinkTopologyT, weight) - 0usize];
+    ["Offset of field: AmdsmiLinkTopologyT::link_status"]
+        [::std::mem::offset_of!(AmdsmiLinkTopologyT, link_status) - 8usize];
+    ["Offset of field: AmdsmiLinkTopologyT::link_type"]
+        [::std::mem::offset_of!(AmdsmiLinkTopologyT, link_type) - 12usize];
+    ["Offset of field: AmdsmiLinkTopologyT::num_hops"]
+        [::std::mem::offset_of!(AmdsmiLinkTopologyT, num_hops) - 16usize];
+    ["Offset of field: AmdsmiLinkTopologyT::fb_sharing"]
+        [::std::mem::offset_of!(AmdsmiLinkTopologyT, fb_sharing) - 17usize];
+    ["Offset of field: AmdsmiLinkTopologyT::reserved"]
+        [::std::mem::offset_of!(AmdsmiLinkTopologyT, reserved) - 20usize];
+};
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct AmdsmiLinkMetricsT {
     pub num_links: u32,
@@ -4956,6 +4983,13 @@ extern "C" {
         processor_handle_dst: AmdsmiProcessorHandle,
         hops: *mut u64,
         type_: *mut AmdsmiLinkTypeT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_link_topology(
+        processor_handle_src: AmdsmiProcessorHandle,
+        processor_handle_dst: AmdsmiProcessorHandle,
+        topology_info: *mut AmdsmiLinkTopologyT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {
