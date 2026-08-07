@@ -210,7 +210,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Rtc_Reduce_Simple, float, __half) {
           // call the operator only if the lane is mentioned in the mask
           T& result = output[idx];
           result = )" +
-              intrinsicName + R"((masks[i], input[idx]);
+              intrinsicName + R"((masks[i], input[laneId]);
         }
       }
    })";
@@ -234,7 +234,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Rtc_Reduce_Simple, float, __half) {
 
     maskCounter++;
     maskCounter = (maskCounter && (maskCounter < std::pow(2, getWarpSize() / 8 )))? maskCounter : 1;
-    masks.host_ptr()[numReduce] = mask;
+    masks.host_ptr()[i] = mask;
   }
 
   HIP_CHECK(hipMemcpy(d_masks.ptr(), masks.ptr(), masks.size_bytes(), hipMemcpyHostToDevice));
@@ -242,11 +242,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_Rtc_Reduce_Simple, float, __half) {
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost));
 
-  while (numReduce < kNumReduces) {
+  while (numReduce < numReduces) {
     TestType expectedByLane[64];
-    TestType* waveInput = &input.ptr()[numReduce * wavefrontSize];
     TestType expected = calculateExpected<TestType>(expectedByLane,
-                                      waveInput,
+                                      input.ptr(),
                                       op,
                                       masks.ptr()[numReduce],
                                       AggregationType::Reduce);
@@ -264,13 +263,13 @@ HIP_TEMPLATE_TEST_CASE(Unit_Rtc_Reduce_Simple, float, __half) {
             REQUIRE(__half2float(result) == __half2float(expected));
           else {
             if (result != expected) {
-              printMismatch(result, expected, waveInput, mask, lane);
+              printMismatch(result, expected, input.ptr(), mask, lane);
               INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
               REQUIRE(result == expected);
             }
           }
         } else
-          compareFloatingPoint<std::plus<TestType>>(result, expected, mask, waveInput, lane);
+          compareFloatingPoint<std::plus<TestType>>(result, expected, mask, input.ptr(), lane);
 
       }
       lane++;
