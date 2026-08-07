@@ -5797,8 +5797,8 @@ TEST(D16FormatExecution, PackedFormatD16LoadStoreThrowUnimplemented) {
     std::array<uint32_t, 2> words;
   };
   const std::array<Case, 2> cases = {{
-      {"buffer_load_d16_format_x", {0xC4020000U, 0x00000000U}},
-      {"buffer_store_d16_format_x", {0xC4030000U, 0x00000000U}},
+      {"buffer_load_d16_format_xy", {0xC4024000U, 0x00000000U}},
+      {"buffer_store_d16_format_xy", {0xC4034000U, 0x00000000U}},
   }};
 
   // The exec body throws before touching wavefront state, so a single wf can be
@@ -5808,6 +5808,7 @@ TEST(D16FormatExecution, PackedFormatD16LoadStoreThrowUnimplemented) {
     std::unique_ptr<Instruction> inst(decoder->decode(c.words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), c.mnemonic);
+    EXPECT_TRUE(inst->is_memory_op()) << c.mnemonic;
     EXPECT_THROW(cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst);
   }
 }

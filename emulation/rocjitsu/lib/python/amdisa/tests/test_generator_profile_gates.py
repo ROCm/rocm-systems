@@ -3243,9 +3243,7 @@ def test_gfx1250_d16_load_preserves_destination_without_printing_it(
 
     # vdst is a destination, never a source (kept out of the printed operands).
     assert 'dst_operands_[0] = &vdst;' in ctor
-    assert 'src_operands_[0] = &vdst;' not in ctor
-    assert 'src_operands_[1] = &vdst;' not in ctor
-    assert 'src_operands_[num_src_++] = &vdst;' not in ctor
+    assert not re.search(r'src_operands_\[[^\]]*\]\s*=\s*&vdst;', ctor)
 
     # The preserved-destination read is modeled via both implicit hooks.
     uses_override = f'void {class_name}::implicit_uses(RegisterSet &uses) const'
