@@ -393,6 +393,17 @@ WriteInterceptor(const void* packets,
         return;
     }
 
+    // Kernel replay does not support HIP graph launches. Warn once (rather than skipping silently)
+    // when a graph launch is seen under an active replay context; a graph with no other consumers
+    // runs un-replayed via the fast path below, and a graph that reaches the replay gate is a hard
+    // error (see the ROCP_FATAL_IF there).
+    if(has_kernel_replay && graph_launch_active)
+    {
+        static std::atomic<bool> _warned_graph_replay{false};
+        if(!_warned_graph_replay.exchange(true, std::memory_order_relaxed))
+            ROCP_WARNING << "kernel replay: HIP graph launches are not supported";
+    }
+
     // Fast path: graph_launch is the only reason we're here. Increment the per-launch
     // dispatch count and write the original packets without allocating signals or rewriting
     // packets. Large graph launches in summary-only mode would otherwise pay the full
@@ -824,6 +835,14 @@ WriteInterceptor(const void* packets,
     // TODO: inline process_packet_batch / graphs
     if(has_kernel_replay && pkt_count == 1 && num_dispatch_packets == 1)
     {
+        // A graph node's dispatch must never be replayed -- snapshot/restore around a graph's
+        // runtime-managed memory and ordering is undefined. Graph replay is future work, so a graph
+        // launch reaching the replay path (even as a single-packet dispatch) is a hard error rather
+        // than something we silently mis-handle. Non-graph single dispatches replay as usual below.
+        ROCP_FATAL_IF(graph_launch_active)
+            << "kernel replay: attempted to replay a HIP graph dispatch (graph replay is not "
+               "supported)";
+
         const auto thr_id           = corr_id->thread_idx;
         const auto internal_corr_id = corr_id->internal;
         const auto ancestor_corr_id = corr_id->ancestor;
