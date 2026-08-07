@@ -81,7 +81,7 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends \
-            git ca-certificates gcc g++ cmake make file pkg-config \
+            git ca-certificates gcc g++ clang cmake make file pkg-config \
             libdrm-dev libnl-3-dev libnl-genl-3-dev libmnl-dev python3 sudo
 
       - name: Install RPM build prerequisites
@@ -93,7 +93,7 @@ jobs:
           dnf config-manager --set-enabled crb
           dnf install -y epel-release
           dnf install -y \
-            git gcc gcc-c++ cmake make rpm-build file \
+            git gcc gcc-c++ clang cmake make rpm-build file \
             libdrm-devel libnl3-devel libmnl-devel python3 sudo
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

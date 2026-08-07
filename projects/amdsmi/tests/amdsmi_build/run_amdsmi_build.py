@@ -433,13 +433,13 @@ def package_glob(package_format: str) -> str:
 def build_prereqs_present() -> bool:
     """True if every tool the build needs is already on the image.
 
-    cmake/make/gcc alone are not enough: a missing pkg-config, git, libdrm
+    cmake/make/clang alone are not enough: a missing pkg-config, git, libdrm
     header or rpmbuild only surfaces much later, at cmake configure, at
     FetchContent's clone, or inside `make package`.
     """
     if not all(shutil.which(t) for t in ("cmake", "make", "pkg-config", "git", "rpmbuild")):
         return False
-    if not (shutil.which("gcc") or shutil.which("cc")):
+    if not (shutil.which("amdclang++") or shutil.which("clang++")):
         return False
     return (
         subprocess.call(
@@ -476,6 +476,7 @@ def install_build_prereqs(cfg: "RunnerConfig") -> None:
                 "--no-install-recommends",
                 "cmake",
                 "build-essential",
+                "clang",
                 "git",
                 "pkg-config",
                 # libdrm: pkg_check_modules in CMakeLists.txt. rpm: cpack runs
@@ -504,6 +505,7 @@ def install_build_prereqs(cfg: "RunnerConfig") -> None:
                 "cmake",
                 "gcc",
                 "gcc-c++",
+                "clang",
                 "make",
                 "git",
             ],
@@ -513,7 +515,7 @@ def install_build_prereqs(cfg: "RunnerConfig") -> None:
         )
     elif cfg.package_manager == "zypper":
         run_command(
-            ["zypper", "--non-interactive", "install", "cmake", "gcc", "gcc-c++", "make", "git"],
+            ["zypper", "--non-interactive", "install", "cmake", "gcc", "gcc-c++", "clang", "make", "git"],
             name="zypper-install-prereqs",
             retries=cfg.retries,
             log_dir=cfg.log_dir,
