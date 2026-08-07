@@ -92,6 +92,10 @@ if(TARGET rocshmem-demo)
         TIMEOUT 60
         LABELS "integration-tests"
         ENVIRONMENT "${PRELOAD_ENV}"
+        # rocshmem-demo prints this and exits 0 when it cannot run (no launcher-provided
+        # local rank, or no visible GPU). Without it such a run would be reported as a pass
+        # despite tracing nothing at all.
+        SKIP_REGULAR_EXPRESSION "rocSHMEM demo unavailable"
         FIXTURES_SETUP rocprofv3-test-rocshmem-tracing
         DISABLED "${IS_DISABLED}")
 
@@ -107,5 +111,9 @@ if(TARGET rocshmem-demo)
         TIMEOUT 45
         LABELS "integration-tests"
         FIXTURES_REQUIRED rocprofv3-test-rocshmem-tracing
+        # conftest.py skips when the trace files are absent, which happens whenever the
+        # execute test above was skipped. Surface that as a ctest skip so validating nothing
+        # is not reported as a pass.
+        SKIP_REGULAR_EXPRESSION "SKIPPED"
         DISABLED "${IS_DISABLED}")
 endif()
