@@ -133,6 +133,51 @@ def override_bundled_hip_runtime(artifact_lib_dir: Path) -> None:
         )
 
 
+def setup_kpack_device_code(artifact_dir: Path) -> None:
+    """Configure kpack device code loading for TheRock-built libraries.
+
+    TheRock's build system (kpack pipeline) strips device code from shared
+    libraries into separate .kpack archive files per GPU architecture.  The
+    HIP runtime (built with ROCM_KPACK_ENABLED) loads device code from these
+    archives at runtime using search paths embedded in the binary's
+    .rocm_kpack_ref ELF section.
+
+    Because override_bundled_rccl() copies the library into pip's
+    site-packages (breaking the embedded relative paths), we set
+    ROCM_KPACK_PATH with absolute paths so the kpack runtime can find
+    the archives regardless of where the library is loaded from.
+
+    The @GFXARCH@ placeholder is expanded by the kpack runtime at load
+    time based on the actual GPU architecture — no manual detection needed.
+    """
+    kpack_files = sorted(artifact_dir.rglob("*.kpack"))
+    if not kpack_files:
+        log.info("No .kpack files found in %s — device code may be embedded", artifact_dir)
+        return
+
+    seen: set[str] = set()
+    search_patterns: list[str] = []
+    for f in kpack_files:
+        parts = f.stem.rsplit("_", 1)
+        if len(parts) == 2 and parts[1].startswith("gfx"):
+            pattern = str(f.parent.resolve() / f"{parts[0]}_@GFXARCH@.kpack")
+            if pattern not in seen:
+                seen.add(pattern)
+                search_patterns.append(pattern)
+                log.info("kpack search pattern: %s", pattern)
+        else:
+            log.info("kpack file (no arch suffix): %s", f.name)
+
+    if not search_patterns:
+        log.warning("Found .kpack files but no @GFXARCH@ patterns could be derived")
+        return
+
+    os.environ["ROCM_KPACK_PATH"] = ":".join(search_patterns)
+    os.environ["ROCM_KPACK_DEBUG"] = "1"
+    log.info("ROCM_KPACK_PATH=%s", os.environ["ROCM_KPACK_PATH"])
+    log.info("ROCM_KPACK_DEBUG=1 (verbose kpack logging enabled)")
+
+
 def quarantine_rocm_sysdeps(artifact_lib_dir: Path) -> None:
     """Remove TheRock-bundled libamd_smi and rocm_sysdeps from artifact dir.
 
