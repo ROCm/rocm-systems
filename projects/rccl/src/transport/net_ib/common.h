@@ -466,6 +466,9 @@ struct ncclIbGpuFlush {
   struct ibv_sge sge;
   struct ncclIbQp qp;
   int dmabuf_fd;
+  // gpuFlushGpuMem comes from ncclMemAlloc on the cuMem path but from
+  // hipExtMallocWithFlags on the HSA fallback, so the free has to match the allocator.
+  bool gpuFlushMemIsHipAlloc;
 };
 
 // This structure describes the FIFO which the receiver uses when it sends CTS

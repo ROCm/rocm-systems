@@ -25,7 +25,7 @@ from utils.utils_analysis import (
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
-from utils.utils_common import convert_filter_blocks_to_panel_ids, is_gfx115x
+from utils.utils_common import convert_filter_blocks_to_panel_ids, is_gfx9, is_gfx115x
 
 
 def _tty_view_is_table(args: argparse.Namespace) -> bool:
@@ -798,13 +798,15 @@ def format_table_output(
         value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
         df = scale_bw_columns(df, value_cols, args.decimal)
 
-    # When --view table is set, force table output and ignore cli_style from config
+    # When --view table is set, force table output and ignore cli_style from config.
+    # Gate to architectures with a renderer so unsupported arches fall back to table.
     use_mem_chart = (
         not _tty_view_is_table(args)
         and table_config.get("cli_style") == "mem_chart"
         and len(runs) == 1
         and "Metric" in df.columns
         and "Value" in df.columns
+        and (is_gfx9(gpu_arch) or is_gfx115x(gpu_arch))
     )
 
     if use_mem_chart:
@@ -819,7 +821,18 @@ def format_table_output(
                 .to_dict()["Value"]
             )
 
-        if is_gfx115x(gpu_arch):
+        if is_gfx9(gpu_arch):
+            content += (
+                mem_chart_gfx9.plot_mem_chart(
+                    mem_data,
+                    chart_title=_mem_chart_heading(
+                        int(table_config["id"]),
+                        args.normal_unit,
+                    ),
+                )
+                + "\n"
+            )
+        elif is_gfx115x(gpu_arch):
             content += (
                 mem_chart_gfx11.plot_mem_chart(
                     mem_data,
@@ -831,16 +844,7 @@ def format_table_output(
                 + "\n"
             )
         else:
-            content += (
-                mem_chart_gfx9.plot_mem_chart(
-                    mem_data,
-                    chart_title=_mem_chart_heading(
-                        int(table_config["id"]),
-                        args.normal_unit,
-                    ),
-                )
-                + "\n"
-            )
+            pass
     else:
         content += (
             get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
@@ -991,13 +995,17 @@ def show_all(
                 if processed_df.empty:
                     continue
 
-                # For gfx115x mem_chart panels, collect all tables and merge
-                # into a single chart on the first table; skip subsequent ones.
-                is_mem_chart = table_config.get(
-                    "cli_style"
-                ) == "mem_chart" and not _tty_view_is_table(args)
+                # For mem_chart panels, collect all tables and merge
+                # into a single chart; skip individual table output.
+                # Gate to architectures with a renderer; unsupported arches fall back to
+                # normal table output.
+                is_mem_chart = (
+                    table_config.get("cli_style") == "mem_chart"
+                    and not _tty_view_is_table(args)
+                    and (is_gfx9(gpu_arch) or is_gfx115x(gpu_arch))
+                )
 
-                if is_mem_chart and is_gfx115x(gpu_arch) and len(runs) == 1:
+                if is_mem_chart and len(runs) == 1:
                     has_cols = (
                         "Metric" in processed_df.columns
                         and "Value" in processed_df.columns
@@ -1019,19 +1027,27 @@ def show_all(
                     gpu_arch,
                 )
 
-        # Emit merged gfx115x mem_chart for the panel
+        # Emit merged mem_chart for the panel (all architectures)
         if mem_chart_data and not _tty_view_is_table(args):
             heading = _mem_chart_heading(
                 int((panel or {}).get("id", 300)),
                 args.normal_unit,
             )
-            panel_content += (
-                mem_chart_gfx11.plot_mem_chart(
-                    mem_chart_data,
-                    chart_title=heading,
+            if is_gfx115x(gpu_arch):
+                panel_content += (
+                    mem_chart_gfx11.plot_mem_chart(
+                        mem_chart_data,
+                        chart_title=heading,
+                    )
+                    + "\n"
                 )
-                + "\n"
-            )
+            elif is_gfx9(gpu_arch):
+                panel_content += (
+                    mem_chart_gfx9.plot_mem_chart(mem_chart_data, chart_title=heading)
+                    + "\n"
+                )
+            else:
+                pass
 
         # Roofline printing is handled separately above in is_roofline_shown.
         # With --view table, roofline tables (401/402) render as normal tables.
