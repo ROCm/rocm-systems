@@ -35,6 +35,16 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
   )
 
+  # CPU-only unit test: guards the pure-Python assembly-extraction, resource-
+  # aggregation, dispatcher-patching, and flag-parsing logic in
+  # tools/rccl-device-compile (the device-image-unification driver). Needs no
+  # GPU, no built library, and no amdclang++/ld.lld.
+  add_test(
+    NAME rccl-device-compile-unittest
+    COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/tools/test_rccl_device_compile.py"
+  )
+
   if (ENABLE_CODE_COVERAGE)
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
