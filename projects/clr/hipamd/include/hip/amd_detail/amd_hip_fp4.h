@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#pragma once
-
-#include "amd_hip_mx_common.h"
-#include "amd_hip_fp8.h"
-
-#include "amd_hip_ocp_host.hpp"
+#ifndef _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP4_H_
+#define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP4_H_
 
 #if defined(__HIPCC_RTC__)
 #define __FP4_HOST_DEVICE__ __device__
@@ -17,15 +13,19 @@
 #else
 #define __FP4_HOST_DEVICE__ __host__ __device__
 #define __FP4_HOST_DEVICE_STATIC__ __FP4_HOST_DEVICE__ static inline
+#include "amd_hip_mx_common.h"
+#include "amd_hip_fp8.h"
+
+#include "amd_hip_ocp_host.hpp"
 #endif  // __HIPCC_RTC__
 
 typedef __hip_fp8_storage_t __hip_fp4_storage_t;
 typedef __hip_fp8_storage_t __hip_fp4x2_storage_t;
 typedef __hip_fp8x2_storage_t __hip_fp4x4_storage_t;
 
-static_assert(sizeof(__hip_fp4_storage_t[4]) == sizeof(uint32_t), "");
-static_assert(sizeof(__hip_fp4x2_storage_t[4]) == sizeof(uint32_t), "");
-static_assert(sizeof(__hip_fp4x4_storage_t[2]) == sizeof(uint32_t), "");
+static_assert(sizeof(__hip_fp4_storage_t[4]) == sizeof(__hip_uint32_t), "");
+static_assert(sizeof(__hip_fp4x2_storage_t[4]) == sizeof(__hip_uint32_t), "");
+static_assert(sizeof(__hip_fp4x4_storage_t[2]) == sizeof(__hip_uint32_t), "");
 
 enum __hip_fp4_interpretation_t {
   __HIP_E2M1 = 0,
@@ -38,7 +38,7 @@ __FP4_HOST_DEVICE_STATIC__ __hip_fp4_storage_t __hip_cvt_bfloat16raw_to_fp4(
     const __hip_bfloat16_raw x, const __hip_fp4_interpretation_t /* fp4_interpretation */,
     const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp4_storage_t fp4[4];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -67,7 +67,7 @@ __FP4_HOST_DEVICE_STATIC__ __hip_fp4x2_storage_t __hip_cvt_bfloat16raw2_to_fp4x2
     const __hip_bfloat162_raw x, const __hip_fp4_interpretation_t /* fp4_interpretation */,
     const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp4x2_storage_t fp4x2[4];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -97,7 +97,7 @@ __FP4_HOST_DEVICE_STATIC__ __hip_fp4_storage_t
 __hip_cvt_double_to_fp4(const double x, const __hip_fp4_interpretation_t /* fp4_interpretation */,
                         const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp4_storage_t fp4[4];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -120,7 +120,7 @@ __FP4_HOST_DEVICE_STATIC__ __hip_fp4x2_storage_t __hip_cvt_double2_to_fp4x2(
     const double2 x, const __hip_fp4_interpretation_t /* fp4_interpretation */,
     const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp4x2_storage_t fp4x2[4];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -146,7 +146,7 @@ __FP4_HOST_DEVICE_STATIC__ __hip_fp4_storage_t
 __hip_cvt_float_to_fp4(const float x, const __hip_fp4_interpretation_t /* fp4_interpretation */,
                        const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp4_storage_t fp4[4];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -168,7 +168,7 @@ __FP4_HOST_DEVICE_STATIC__ __hip_fp4x2_storage_t
 __hip_cvt_float2_to_fp4x2(const float2 x, const __hip_fp4_interpretation_t /* fp4_interpretation */,
                           const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp4x2_storage_t fp4x2[4];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -257,7 +257,7 @@ __FP4_HOST_DEVICE_STATIC__ __hip_fp4_storage_t __hip_cvt_halfraw_to_fp4(
     const __half_raw x, const __hip_fp4_interpretation_t /* fp4_interpretation */,
     const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp4_storage_t fp4[4];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -282,7 +282,7 @@ __FP4_HOST_DEVICE_STATIC__ __hip_fp4x2_storage_t __hip_cvt_halfraw2_to_fp4x2(
     const __half2_raw x, const __hip_fp4_interpretation_t /* fp4_interpretation */,
     const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp4x2_storage_t fp4x2[4];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -590,3 +590,5 @@ struct __hip_fp4x4_e2m1 {
   }
 #endif  // !defined(__HIP_NO_FP4_CONVERSION_OPERATORS__)
 };
+
+#endif  // _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP4_H_

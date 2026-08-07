@@ -8,6 +8,7 @@
 #include "nccl.h"
 #include "debug.h"
 #include "rocmwrap.h"
+#include "archinfo.h"
 #include "kernel_config.h"
 #include "hsa/hsa.h"
 #include "param.h"
@@ -35,7 +36,7 @@ static pthread_once_t initOnceControl = PTHREAD_ONCE_INIT;
 static ncclResult_t initResult;
 
 // This env var (NCCL_CUMEM_ENABLE) toggles cuMem API usage
-NCCL_PARAM(CuMemEnable, "CUMEM_ENABLE", 0);
+NCCL_PARAM(CuMemEnable, "CUMEM_ENABLE", -2);
 NCCL_PARAM(CuMemHostEnable, "CUMEM_HOST_ENABLE", -1);
 // Handle type used for cuMemCreate()
 CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
@@ -55,6 +56,72 @@ static int ncclGetKernelVersionCode() {
   return KERNEL_VERSION_CODE(major, minor);
 }
 
+// Runtime probe: run the cuMem VMM cycle + register.cc pointer queries once; some ROCm builds advertise cuMem but reject the ops at runtime. Returns 1 if all succeed, 0 otherwise; never fatal.
+static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
+  size_t granularity = 0;
+  CUmemGenericAllocationHandle handle = 0;
+  CUdeviceptr ptr = 0;
+  CUmemAllocationProp prop = {};
+  CUmemAccessDesc accessDesc = {};
+  int ok = 0;
+  bool created = false, reserved = false, mapped = false;
+
+  prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+  prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  prop.location.id = devOrdinal;
+  prop.requestedHandleTypes = ncclCuMemHandleType;
+
+  // Smallest legal allocation: one granularity unit.
+  if (CUPFN(cuMemGetAllocationGranularity(&granularity, &prop,
+            CU_MEM_ALLOC_GRANULARITY_MINIMUM)) != hipSuccess || granularity == 0)
+    goto done;
+
+  if (CUPFN(cuMemCreate(&handle, granularity, &prop, 0)) != hipSuccess)
+    goto done;                       // 7.0.2.2-without-backport fails here
+  created = true;
+
+  if (CUPFN(cuMemAddressReserve(&ptr, granularity, granularity, 0, 0)) != hipSuccess)
+    goto cleanup;
+  reserved = true;
+
+  if (CUPFN(cuMemMap(ptr, granularity, 0, handle, 0)) != hipSuccess)
+    goto cleanup;
+  mapped = true;
+
+  accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  accessDesc.location.id = devOrdinal;
+  accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+  if (CUPFN(cuMemSetAccess(ptr, granularity, &accessDesc, 1)) != hipSuccess)
+    goto cleanup;
+
+  // register.cc queries: LEGACY_IPC is the op 7.0.2.2 rejects even though alloc/map above succeed.
+  {
+    CUdeviceptr base = 0;
+    size_t baseSize = 0;
+    CUmemorytype memType;
+    int legacyIpcCap = 0;
+    if (CUPFN(cuMemGetAddressRange(&base, &baseSize, ptr)) != hipSuccess)
+      goto cleanup;
+    if (CUPFN(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, ptr)) != hipSuccess)
+      goto cleanup;
+    if (CUPFN(cuPointerGetAttribute((void*)&legacyIpcCap,
+              CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, base)) != hipSuccess)
+      goto cleanup;
+  }
+
+  ok = 1;
+
+cleanup:
+  if (mapped)   CUCHECKIGNORE(cuMemUnmap(ptr, granularity));
+  if (reserved) CUCHECKIGNORE(cuMemAddressFree(ptr, granularity));
+  if (created)  CUCHECKIGNORE(cuMemRelease(handle));
+  (void)hipGetLastError();           // clear any sticky error from the probe
+done:
+  if (!ok)
+    INFO(NCCL_INIT, "cuMem functional probe failed on device %d; disabling cuMem", devOrdinal);
+  return ok;
+}
+
 // Determine whether CUMEM & VMM RDMA is supported on this platform
 int ncclIsCuMemSupported() {
   CUdevice currentDev;
@@ -63,6 +130,16 @@ int ncclIsCuMemSupported() {
   int flag = 0;
   int supported = 1;
   ncclResult_t ret = ncclSuccess;
+  char gcnArch[256] = "unknown";
+
+  // Auto-detect (NCCL_CUMEM_ENABLE=-2) only turns cuMem on where the VMM path is
+  // required; NCCL_CUMEM_ENABLE=1 bypasses this gate.
+  CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
+  if (GetGcnArchName(cudaDev, gcnArch) != 0 || !IsArchMatch(gcnArch, "gfx1250")) {
+    INFO(NCCL_INIT, "cuMem auto-enable is limited to gfx1250 (detected %s); set NCCL_CUMEM_ENABLE=1 to override",
+         gcnArch);
+    return 0;
+  }
 
   if (ncclGetKernelVersionCode() < KERNEL_VERSION_CODE(6, 8)) {
     WARN("cuMem support requires Linux kernel >= 6.8");
@@ -73,11 +150,10 @@ int ncclIsCuMemSupported() {
     // Block scope prevents the goto in CUDACHECKGOTO from jumping over the bool initialization.
     bool cuMemSupported = NCCL_CUMEM_VERSION_SUPPORTED(cudaDriverVersion);
     if (!cuMemSupported) {
-      WARN("cuMem support requires HIP_VERSION >= 7.12.60540 (or ROCm 7.0.2.x backport)");
+      WARN("cuMem support requires HIP_VERSION >= 7.2.0 (or ROCm 7.0.2.x backport)");
       supported = 0;
     }
   }
-  CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
   if (CUPFN(cuMemCreate) == NULL) supported = 0;
   CUCHECKGOTO(cuDeviceGet(&currentDev, cudaDev), ret, error);
   // Query device to see if CUMEM VMM support is available
@@ -88,6 +164,10 @@ int ncclIsCuMemSupported() {
     supported = 0;
   }
 
+  // Cheap gates passed — confirm the driver actually implements the VMM path at runtime.
+  if (supported && !ncclCuMemFunctionalProbe(currentDev, cudaDev))
+    supported = 0;
+
   return supported;
 error:
   return (ret == ncclSuccess);
@@ -95,6 +175,7 @@ error:
 
 int ncclCuMemEnable() {
 #if NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
+  // NCCL_CUMEM_ENABLE=-2 means auto-detect CUMEM support
   int param = ncclParamCuMemEnable();
   return param >= 0 ? param : (param == -2 && ncclCuMemSupported);
 #else
@@ -119,6 +200,7 @@ int ncclCuMemHostEnable() {
   ncclResult_t ret = ncclSuccess;
   int cudaDriverVersion;
   int paramValue = -1;
+  int cudaDev;
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
   if (!NCCL_CUMEM_HOST_VERSION_SUPPORTED(cudaDriverVersion)) {
     ncclCumemHostEnable = 0;
@@ -129,7 +211,6 @@ int ncclCuMemHostEnable() {
     if (ncclCumemHostEnable) {
       // Verify that host allocations actually work.  Docker in particular is known to disable "get_mempolicy",
       // causing such allocations to fail (this can be fixed by invoking Docker with "--cap-add SYS_NICE").
-      int cudaDev;
       CUdevice currentDev;
       int cpuNumaNodeId = -1;
       CUmemAllocationProp prop = {};
