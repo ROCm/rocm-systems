@@ -106,6 +106,18 @@ test:
    then re-render coverage (see the Coverage section) to confirm the new branch
    is covered.
 
+> **Moving an existing test into this directory?** Do not assume its link
+> dependencies carry over. A test previously built against
+> `RCCL_COMMON_LINK_LIBS` (the ordinary, *runtime-linked* RCCL test targets such
+> as `rccl-UnitTests`) may have obtained HIP host-runtime symbols through
+> `hip::host`; `rccl-UnitTestsMicro` intentionally links neither `hip::host`,
+> `libamdhip64.so`, nor `librccl.so`. Replace those dependencies with
+> fakes/seams, or keep the test in a runtime-linked RCCL target if exercising
+> the real HIP runtime is part of what it validates. (The other host-only suite,
+> `rccl-HostUnitTests`, is likewise hermetic and does not provide `hip::host`
+> either — "host-only" means *where code runs*; the microtest additionally means
+> *no HIP-runtime linkage*.)
+
 ## Adding more controllable seams
 
 The fakes today return constants. When a test needs to drive one of
@@ -149,17 +161,29 @@ triage it into the right bucket:
 - **It's a `ncclProxy*` / `ncclShm*` / `ncclCommGraph*` / `ncclTopo*`
   function** → add a return-failure stub. If a future test will need
   to drive it, plan for the function-pointer-hook upgrade.
-- **It's a `cuMem*` / `hipMem*` symbol** → first try
-  linking against `hip::host` (already in `RCCL_COMMON_LINK_LIBS`);
-  most `hipMem*` host-runtime entry points resolve from there. If
-  the symbol isn't in the host runtime — typically a CUDA-driver-API
-  shim that the real RCCL resolves through `dlsym` on `libcuda.so`
-  at runtime (`cuMemGetAddressRange`, `cuPointerGetAttribute`,
-  `cuMemCreate`, `cuMemExportToShareableHandle`, …) — define your
-  own version in `fakes/p2p_fakes.cc`. Use the same signature the
-  header declares and have it return a failure code (or a canned
-  success) by default; this is just another bucket-C seam and gets
-  the function-pointer-hook treatment when a test needs to drive it.
+- **It's a `cuMem*` / `hipMem*` symbol** → first identify which test
+  model you are extending; the two treat the HIP runtime differently:
+  - **Ordinary RCCL unit-test targets** link `RCCL_COMMON_LINK_LIBS`,
+    which already includes `hip::host`, so most `hipMem*` host-runtime
+    entry points resolve from there. Tests imported from those suites may
+    legitimately rely on HIP host-runtime symbols when exercising the real
+    runtime is the point of the test.
+  - **`rccl-UnitTestsMicro`** deliberately does **not** link `hip::host`,
+    `libamdhip64.so`, or `librccl.so`. For this target, add a fake or
+    hookable seam in `fakes/` with the exact signature the HIP headers
+    declare — do **not** add `hip::host` merely to resolve an undefined
+    symbol. An unresolved HIP symbol is precisely the mechanism that
+    surfaces an unfaked dependency.
+
+  Either way, CUDA-driver-API shims that the real RCCL resolves
+  dynamically via `dlsym` on `libcuda.so` (`cuMemGetAddressRange`,
+  `cuPointerGetAttribute`, `cuMemCreate`, `cuMemExportToShareableHandle`,
+  …) are never ordinary HIP host-runtime symbols, so under
+  `rccl-UnitTestsMicro` they always need an explicit definition in
+  `fakes/p2p_fakes.cc`: use the signature the header declares and return a
+  failure code (or a canned success) by default — another bucket-C seam
+  that gets the function-pointer-hook treatment when a test needs to
+  drive it.
 - **It's a HIP kernel launch** → you almost certainly don't want to
   test the path that launches it from this binary. Refactor the test
   to avoid the branch, or split the kernel-launching code into a
@@ -250,7 +274,7 @@ make -j $(nproc) rccl-UnitTestsMicro
 
 # One test:
 ./build/release/test/host/rccl-UnitTestsMicro \
-    --gtest_filter='IpcRegisterBuffer.NullRegRecordIsNoOp'
+    --gtest_filter='P2pMicrotest.IpcRegisterBuffer_NullRegRecordIsNoOp'
 
 # Coverage: see the Coverage section (run under LLVM_PROFILE_FILE, then llvm-cov).
 ```
