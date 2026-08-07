@@ -420,6 +420,9 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s, bool* permanent = nullp
 void
 teardown_session(int kfd, dlog_session* s)
 {
+    s->overflow.clear();
+    s->overflow_warned = false;
+
     if(s->smap != MAP_FAILED)
     {
         munmap(s->smap, s->smap_len);

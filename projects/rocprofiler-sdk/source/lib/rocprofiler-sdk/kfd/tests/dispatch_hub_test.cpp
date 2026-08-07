@@ -482,7 +482,7 @@ TEST(OwnerRegistry, unknown_slot_is_not_injective)
     EXPECT_FALSE(reg.slot_uniquely_owned(/*gpu_id=*/0, /*slot=*/4100));
 }
 
-TEST(OwnerRegistry, sole_owner_is_injective)
+TEST(OwnerRegistry, sole_owner_is_unique)
 {
     auto reg = OwnerRegistry{};
     EXPECT_EQ(reg.add_queue(/*token=*/1, /*gpu=*/0, /*slot=*/uint32_t{40}),
