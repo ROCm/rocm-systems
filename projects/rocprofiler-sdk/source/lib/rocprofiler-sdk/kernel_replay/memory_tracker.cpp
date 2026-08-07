@@ -79,6 +79,9 @@ decltype(AmdExtTable{}.hsa_amd_memory_pool_free_fn)     next_pool_free       = n
 decltype(CoreApiTable{}.hsa_memory_allocate_fn)         next_memory_allocate = nullptr;
 decltype(CoreApiTable{}.hsa_memory_free_fn)             next_memory_free     = nullptr;
 
+// HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG is absent from older HSA headers
+constexpr uint32_t memory_pool_executable_flag = (1U << 2);
+
 hsa_status_t
 pool_allocate_wrapper(hsa_amd_memory_pool_t pool, size_t size, uint32_t flags, void** ptr)
 {
@@ -89,7 +92,7 @@ pool_allocate_wrapper(hsa_amd_memory_pool_t pool, size_t size, uint32_t flags, v
     // state, not application data; snapshotting them means restore() clobbers the in-flight
     // kernargs of a concurrent dispatch. We already have the flag here, so skip before
     // query_alloc's hsa_amd_pointer_info query rather than re-deriving it.
-    const bool is_executable = (flags & HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG) != 0;
+    const bool is_executable = (flags & memory_pool_executable_flag) != 0;
     if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && ptr && *ptr &&
        !is_executable)
         record_alloc(*ptr, size);
