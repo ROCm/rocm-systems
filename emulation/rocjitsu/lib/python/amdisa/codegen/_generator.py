@@ -2333,6 +2333,22 @@ class CodeGenerator:
                 if name.startswith('has_lit') and not name.startswith('has_lit64')
             ]
             literal32_condition = ' || '.join(f'{name}()' for name in literal32_conds)
+            extension_word_capacity = 0
+            if owns_dpp_extension:
+                extension_word_capacity = 1
+            if has_real_default_check and default_cond != 'true':
+                extension_word_capacity = max(extension_word_capacity, 1)
+            if literal32_condition:
+                extension_word_capacity = max(extension_word_capacity, 1)
+            if literal64_condition:
+                extension_word_capacity = max(extension_word_capacity, 2)
+            if inst_enc.has_implied_literal_ops:
+                extension_word_capacity = max(
+                    extension_word_capacity,
+                    1,
+                    *inst_enc.implied_literal_ops.values(),
+                )
+            owns_extension_words = extension_word_capacity > 0
             extension_size_line = ''
             if literal64_condition and size_condition is not None:
                 extension_size_line = (
@@ -2373,7 +2389,7 @@ class CodeGenerator:
                     ' if (hasImpliedLiteral())'
                     ' literal_ = reinterpret_cast<const uint32_t *>(inst)[1];'
                 )
-            if owns_dpp_extension:
+            if owns_extension_words:
                 size_line += (
                     ' std::memcpy(raw_words_.data(), inst, size_);'
                     ' raw_encoding_ = raw_words_.data();'
@@ -2550,12 +2566,7 @@ class CodeGenerator:
                 cgen.Statement(f'using OpEncoding = {inst_enc.fmt_enc_name}MachineInst')
             )
             class_members.append(cgen.Statement('const OpEncoding inst_'))
-            if owns_dpp_extension:
-                extension_word_capacity = max(
-                    [1, *inst_enc.implied_literal_ops.values()]
-                )
-                if any(name.startswith('has_lit64') for name, _ in inst_enc.enc_conds):
-                    extension_word_capacity = max(extension_word_capacity, 2)
+            if owns_extension_words:
                 raw_word_count = (inst_enc.bit_cnt + 31) // 32 + extension_word_capacity
                 class_members.append(
                     cgen.Statement(

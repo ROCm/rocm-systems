@@ -21,6 +21,8 @@ Sop1::Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exe
     size_ += 2 * sizeof(MachineInst);
   else if (!default_encoding())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Sop1::default_encoding() { return (inst_.ssrc0 != 254 && inst_.ssrc0 != 255); }
@@ -39,6 +41,8 @@ Sopc::Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exe
     size_ += 2 * sizeof(MachineInst);
   else if (!default_encoding())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Sopc::default_encoding() {
@@ -93,6 +97,8 @@ Sopk::Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   if (hasImpliedLiteral())
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Sopk::default_encoding() { return true; }
@@ -111,6 +117,8 @@ Sop2::Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   if (hasImpliedLiteral())
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Sop2::default_encoding() {
