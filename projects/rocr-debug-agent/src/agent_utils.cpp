@@ -456,4 +456,116 @@ parse_debug_agent_options (const char *env_options)
   return options;
 }
 
+/* Exception bitmask mapping.  */
+
+std::underlying_type_t<amd_dbgapi_exceptions_t>
+map_stop_reason_to_exceptions (
+    std::underlying_type_t<amd_dbgapi_wave_stop_reasons_t> stop_reason)
+{
+  std::underlying_type_t<amd_dbgapi_exceptions_t> resume_exceptions = 0;
+  auto stop_reason_bits{ stop_reason };
+
+  do
+    {
+      auto one_bit
+          = stop_reason_bits ^ (stop_reason_bits & (stop_reason_bits - 1));
+      stop_reason_bits ^= one_bit;
+
+      switch (one_bit)
+        {
+        case AMD_DBGAPI_WAVE_STOP_REASON_NONE:
+        case AMD_DBGAPI_WAVE_STOP_REASON_DEBUG_TRAP:
+          resume_exceptions |= AMD_DBGAPI_EXCEPTION_NONE;
+          break;
+
+        case AMD_DBGAPI_WAVE_STOP_REASON_BREAKPOINT:
+        case AMD_DBGAPI_WAVE_STOP_REASON_WATCHPOINT:
+        case AMD_DBGAPI_WAVE_STOP_REASON_ASSERT_TRAP:
+        case AMD_DBGAPI_WAVE_STOP_REASON_TRAP:
+          resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_TRAP;
+          break;
+
+        case AMD_DBGAPI_WAVE_STOP_REASON_SINGLE_STEP:
+          /* Is this even possible? */
+          resume_exceptions |= AMD_DBGAPI_EXCEPTION_NONE;
+          break;
+
+        case AMD_DBGAPI_WAVE_STOP_REASON_FP_INPUT_DENORMAL:
+        case AMD_DBGAPI_WAVE_STOP_REASON_FP_DIVIDE_BY_0:
+        case AMD_DBGAPI_WAVE_STOP_REASON_FP_OVERFLOW:
+        case AMD_DBGAPI_WAVE_STOP_REASON_FP_UNDERFLOW:
+        case AMD_DBGAPI_WAVE_STOP_REASON_FP_INEXACT:
+        case AMD_DBGAPI_WAVE_STOP_REASON_FP_INVALID_OPERATION:
+        case AMD_DBGAPI_WAVE_STOP_REASON_INT_DIVIDE_BY_0:
+          resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_MATH_ERROR;
+          break;
+
+        case AMD_DBGAPI_WAVE_STOP_REASON_MEMORY_VIOLATION:
+          resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_MEMORY_VIOLATION;
+          break;
+
+        case AMD_DBGAPI_WAVE_STOP_REASON_ADDRESS_ERROR:
+          resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_ADDRESS_ERROR;
+          break;
+
+        case AMD_DBGAPI_WAVE_STOP_REASON_ILLEGAL_INSTRUCTION:
+          resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_ILLEGAL_INSTRUCTION;
+          break;
+
+        case AMD_DBGAPI_WAVE_STOP_REASON_ECC_ERROR:
+        case AMD_DBGAPI_WAVE_STOP_REASON_FATAL_HALT:
+          resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_ABORT;
+          break;
+
+#if AMD_DBGAPI_VERSION_MAJOR == 0 && AMD_DBGAPI_VERSION_MINOR < 58
+        case AMD_DBGAPI_WAVE_STOP_REASON_RESERVED:
+          break;
+#endif
+        }
+    }
+  while (stop_reason_bits != 0);
+
+  return resume_exceptions;
+}
+
+const char *
+stop_reason_to_string (amd_dbgapi_wave_stop_reasons_t reason)
+{
+  static constexpr const char *stop_reason_names[] = {
+    "BREAKPOINT",            /* Bit 0 */
+    "WATCHPOINT",            /* Bit 1 */
+    "SINGLE_STEP",           /* Bit 2 */
+    "FP_INPUT_DENORMAL",     /* Bit 3 */
+    "FP_DIVIDE_BY_0",        /* Bit 4 */
+    "FP_OVERFLOW",           /* Bit 5 */
+    "FP_UNDERFLOW",          /* Bit 6 */
+    "FP_INEXACT",            /* Bit 7 */
+    "FP_INVALID_OPERATION",  /* Bit 8 */
+    "INT_DIVIDE_BY_0",       /* Bit 9 */
+    "DEBUG_TRAP",            /* Bit 10 */
+    "ASSERT_TRAP",           /* Bit 11 */
+    "TRAP",                  /* Bit 12 */
+    "MEMORY_VIOLATION",      /* Bit 13 */
+    "ADDRESS_ERROR",         /* Bit 14 */
+    "ILLEGAL_INSTRUCTION",   /* Bit 15 */
+    "ECC_ERROR",             /* Bit 16 */
+    "FATAL_HALT",            /* Bit 17 */
+#if AMD_DBGAPI_VERSION_MAJOR == 0 && AMD_DBGAPI_VERSION_MINOR < 58
+    "RESERVED",              /* Bit 18 */
+#endif
+  };
+
+  if (reason == 0)
+    return "NONE";
+
+  /* Find the bit position using count trailing zeros.  */
+  auto value = static_cast<std::underlying_type_t<amd_dbgapi_wave_stop_reasons_t>> (reason);
+  int bit_pos = __builtin_ctz (value);
+
+  if (bit_pos < static_cast<int> (sizeof (stop_reason_names) / sizeof (stop_reason_names[0])))
+    return stop_reason_names[bit_pos];
+
+  return "";
+}
+
 } /* namespace amd::debug_agent */
