@@ -168,6 +168,25 @@ EOF
 
 export CMAKE_PREFIX_PATH=${INSTALL_DIR}:${CMAKE_PREFIX_PATH}
 
+# A find_package() call naming no COMPONENTS must still succeed. On that path
+# <project>_LIBRARIES is populated only from PROJECT_BUILD_TARGETS, and it is a
+# REQUIRED_VAR of the package config, so an empty list fails here while every
+# COMPONENTS-based call keeps working.
+NO_COMPONENTS_DIR=$(mktemp -t -d rocprof-sys-test-nocomp-XXXX)
+
+cat << EOF > ${NO_COMPONENTS_DIR}/CMakeLists.txt
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
+
+project(test-no-components LANGUAGES CXX)
+
+find_package(rocprofiler-systems REQUIRED)
+
+message(STATUS "rocprofiler-systems_LIBRARIES :: \${rocprofiler-systems_LIBRARIES}")
+EOF
+
+verbose-run cmake -B ${NO_COMPONENTS_DIR}/build ${NO_COMPONENTS_DIR} ||
+    error-message "find_package(rocprofiler-systems REQUIRED) failed without COMPONENTS"
+
 verbose-run find .
 verbose-run cmake -B ${BINARY_DIR} ${SOURCE_DIR}
 verbose-run cmake --build ${BINARY_DIR} --target all --parallel 2 -- VERBOSE=1

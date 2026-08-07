@@ -34,11 +34,11 @@ target_include_directories(
     rocprofiler-systems-causal-api-library
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../rocprof-sys-common-api>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_link_libraries(
     rocprofiler-systems-causal-api-library
+    PUBLIC rocprofiler-systems::rocprofiler-systems-common-api-library
     PRIVATE
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
 )
