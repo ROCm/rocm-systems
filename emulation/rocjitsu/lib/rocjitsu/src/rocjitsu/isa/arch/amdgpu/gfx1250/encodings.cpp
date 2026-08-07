@@ -408,20 +408,23 @@ bool Vop3::has_dpp16() {
   return (((inst_.src0 == 250) && (inst_.src1 != 255)) && (inst_.src2 != 255));
 }
 
-Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn)
+Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn,
+             bool decode_extensions)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if (has_lit_0() || has_lit_1() || has_lit_0_and_has_lit_1() || has_lit_2() ||
-      has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||
-      has_lit_0_and_has_lit_1_and_has_lit_2())
-    size_ += sizeof(MachineInst);
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    size_ += sizeof(MachineInst);
-  std::memcpy(raw_words_.data(), inst, size_);
-  raw_encoding_ = raw_words_.data();
+  if (decode_extensions) {
+    if (has_lit_0() || has_lit_1() || has_lit_0_and_has_lit_1() || has_lit_2() ||
+        has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||
+        has_lit_0_and_has_lit_1_and_has_lit_2())
+      size_ += sizeof(MachineInst);
+    if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
+      size_ += sizeof(MachineInst);
+    std::memcpy(raw_words_.data(), inst, size_);
+    raw_encoding_ = raw_words_.data();
+  }
 }
 
 void Vop3p::implicit_uses(RegisterSet &uses) const {

@@ -567,7 +567,8 @@ public:
 
 class Vop3p : public IsaInstruction<Isa> {
 public:
-  Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
+  Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn,
+        bool decode_extensions = true);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   bool has_lit_0();

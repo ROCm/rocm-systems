@@ -2218,6 +2218,10 @@ class CodeGenerator:
         for inst_enc in self.isa_spec.inst_encodings:
             if not inst_enc.insts:
                 continue
+            supports_fixed_size_embedding = (
+                self._supports_gfx1250_scaled_wmma_vop3px2()
+                and inst_enc.fmt_enc_name == 'Vop3p'
+            )
             dpp_struct, dpp8_struct = self._vop_dpp_struct_names(inst_enc.enc_name)
             dpp_extension_conditions = []
             if dpp_struct is not None and self._supports_dpp_for_encoding(
@@ -2232,18 +2236,21 @@ class CodeGenerator:
             # their DPP control DWORD must be counted explicitly.
             needs_explicit_dpp_size = owns_dpp_extension and inst_enc.bit_cnt >= 64
             class_members = []
+            constructor_args = [
+                cgen.Value('std::string_view', 'mnemonic'),
+                cgen.Value(
+                    f'const {inst_enc.fmt_enc_name}MachineInst',
+                    '*inst',
+                ),
+                cgen.Value('ExecuteFn', 'exec_fn'),
+            ]
+            if supports_fixed_size_embedding:
+                constructor_args.append(cgen.Value('bool', 'decode_extensions = true'))
             public_members = [
                 cgen.Line('public:'),
                 cgen.FunctionDeclaration(
                     cgen.Value('', f'{inst_enc.fmt_enc_name}'),
-                    [
-                        cgen.Value('std::string_view', 'mnemonic'),
-                        cgen.Value(
-                            f'const {inst_enc.fmt_enc_name}MachineInst',
-                            '*inst',
-                        ),
-                        cgen.Value('ExecuteFn', 'exec_fn'),
-                    ],
+                    constructor_args,
                 ),
             ]
             # Determine whether the constructor needs a runtime size
@@ -2372,6 +2379,8 @@ class CodeGenerator:
                 extension_size_line = (
                     f' if ({literal32_condition}) size_ += sizeof(MachineInst);'
                 )
+            if supports_fixed_size_embedding:
+                size_line += ' if (decode_extensions) {'
             if inst_enc.has_variable_implied_literal_size:
                 size_line += (
                     ' if (hasImpliedLiteral()) size_ += impliedLiteralWordCount()'
@@ -2394,13 +2403,19 @@ class CodeGenerator:
                     ' std::memcpy(raw_words_.data(), inst, size_);'
                     ' raw_encoding_ = raw_words_.data();'
                 )
+            if supports_fixed_size_embedding:
+                size_line += ' }'
+            constructor_extra_arg = (
+                ', bool decode_extensions' if supports_fixed_size_embedding else ''
+            )
             if rule.use_flat_mnemonic:
                 # FLAT mnemonics are dynamically constructed ("scratch_*",
                 # "global_*"). Store the owned string in a member so the
                 # string_view in Instruction doesn't dangle.
                 class_ctor_impl = (
                     f'{inst_enc.fmt_enc_name}::{inst_enc.fmt_enc_name}'
-                    f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst, ExecuteFn exec_fn) '
+                    f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst, '
+                    f'ExecuteFn exec_fn{constructor_extra_arg}) '
                     f': IsaInstruction<Isa>("", exec_fn), inst_(*inst), '
                     f'owned_mnemonic_({mnemonic_expr}) '
                     f'{{ mnemonic_ = owned_mnemonic_;{size_line}}}'
@@ -2408,7 +2423,8 @@ class CodeGenerator:
             else:
                 class_ctor_impl = (
                     f'{inst_enc.fmt_enc_name}::{inst_enc.fmt_enc_name}'
-                    f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst, ExecuteFn exec_fn) '
+                    f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst, '
+                    f'ExecuteFn exec_fn{constructor_extra_arg}) '
                     f': IsaInstruction<Isa>({mnemonic_expr}, exec_fn), inst_(*inst) '
                     f'{{{size_line}}}'
                 )
@@ -3476,7 +3492,7 @@ class CodeGenerator:
         model = textwrap.dedent('''\
             VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
                 : Vop3p(gfx1250_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
-                        @EXEC_FN@),
+                        @EXEC_FN@, false),
                   vdst(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->vdst),
                   src0(gfx1250_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,

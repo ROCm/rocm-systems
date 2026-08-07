@@ -2747,6 +2747,7 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
     helpers = codegen._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers()
     assert 'isVop3pOp' in helpers
     assert 'isWmmaScaleF32Vop3px2' not in helpers
+    assert ', false),' in codegen._emit_gfx1250_scaled_wmma_vop3px2_impls().model[0]
 
     decoder = (gfx1250_generated_root / 'decoder.cpp').read_text()
     decode_body = decoder.split(
@@ -2795,6 +2796,20 @@ def test_vopd_dispatch_uses_primary_decode_table(
     assert 'Decoder::decodeVopd(const MachineInst *opcode)' in decoder
     assert 'is_vopd' not in (arch_root / 'vopd.h').read_text()
     assert 'is_vopd' not in (arch_root / 'vopd.cpp').read_text()
+
+
+def test_gfx1250_scaled_wmma_skips_vop3p_extension_decode(
+    gfx1250_generated_root: Path,
+):
+    encodings_h = (gfx1250_generated_root / 'encodings.h').read_text()
+    encodings_cpp = (gfx1250_generated_root / 'encodings.cpp').read_text()
+    vop3p_cpp = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+
+    assert 'bool decode_extensions = true' in encodings_h
+    assert 'if (decode_extensions)' in _generated_constructor_body(
+        encodings_cpp, 'Vop3p'
+    )
+    assert 'selected_exec_fn(1250), false)' in vop3p_cpp
 
 
 @pytest.mark.parametrize(
