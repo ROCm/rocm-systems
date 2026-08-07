@@ -3141,21 +3141,42 @@ def test_gfx1250_buffer_u64_atomic_payload_width_uses_two_dwords():
 
 
 def test_ev124_125_arch_gating_in_generated_operand(amdgpu_generated_root: Path):
-    rdna4_op = (amdgpu_generated_root / 'rdna4' / 'operand.cpp').read_text()
-    assert 'if (ev == 124)\n    return 0u; // NULL' in rdna4_op
-    assert 'if (ev == 125)\n    return wf.m0()' in rdna4_op
+    # M0 is encoded as 125 on RDNA3+ (and gfx1250) and as 124 on the
+    # older RDNA1/2 and all CDNA arches. Verify the generated operand.cpp
+    # carries the correct kM0EncodingValue constant for each ISA.
+    expected_m0_encoding = {
+        'cdna1': 124,
+        'cdna2': 124,
+        'cdna3': 124,
+        'cdna4': 124,
+        'rdna1': 124,
+        'rdna2': 124,
+        'rdna3': 125,
+        'rdna3_5': 125,
+        'rdna4': 125,
+        'gfx1250': 125,
+    }
+    for arch, encoding in expected_m0_encoding.items():
+        # The kM0EncodingValue constant lives with the scalar-resolve code, which
+        # is emitted into operand.cpp for unsplit arches and into operand_exec.cpp
+        # for arches that split model/execution sources (e.g. gfx1250).
+        op = (amdgpu_generated_root / arch / 'operand.cpp').read_text()
+        exec_path = amdgpu_generated_root / arch / 'operand_exec.cpp'
+        if exec_path.exists():
+            op += exec_path.read_text()
+        assert (
+            f'constexpr int kM0EncodingValue = {encoding};' in op
+        ), f'{arch}: expected kM0EncodingValue = {encoding}'
 
-    rdna3_op = (amdgpu_generated_root / 'rdna3' / 'operand.cpp').read_text()
-    assert 'if (ev == 124)\n    return 0u; // NULL' in rdna3_op
-    assert 'if (ev == 125)\n    return wf.m0()' in rdna3_op
-
-    rdna3_5_op = (amdgpu_generated_root / 'rdna3_5' / 'operand.cpp').read_text()
-    assert 'if (ev == 124)\n    return 0u; // NULL' in rdna3_5_op
-    assert 'if (ev == 125)\n    return wf.m0()' in rdna3_5_op
-
-    cdna4_op = (amdgpu_generated_root / 'cdna4' / 'operand.cpp').read_text()
-    assert 'if (ev == 124)\n    return wf.m0()' in cdna4_op
-    assert 'ev == 125' not in cdna4_op.split('can_resolve_src_scalar')[1].split('}')[0]
+    # The M0 resolution logic is shared (parameterized by m0_ev) in
+    # scalar_operand_resolve.h rather than emitted per-arch, so verify the gating
+    # there: encoding value 124 is the NULL slot when M0 is 125, and the operand
+    # matching the arch's M0 encoding reads M0.
+    shared_resolve = (
+        amdgpu_generated_root / 'shared' / 'scalar_operand_resolve.h'
+    ).read_text()
+    assert 'if (m0_ev == 125 && ev == 124)\n    return 0u; // NULL' in shared_resolve
+    assert 'if (ev == m0_ev)\n    return wf.m0();' in shared_resolve
 
 
 def test_cdna4_mfma_f8f6f4_accepts_standalone_and_prefixed_encodings(

@@ -22,6 +22,9 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 env:
   ROCPROFSYS_CI: ON
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
