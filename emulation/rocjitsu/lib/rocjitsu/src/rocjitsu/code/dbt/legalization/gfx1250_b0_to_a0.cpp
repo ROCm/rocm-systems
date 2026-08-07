@@ -33,20 +33,10 @@ namespace {
 /// rules. Prefix-classified WMMA/SWMMAC and cluster-load instructions are
 /// handled separately by family-level translation rules.
 ///
-/// NOT-YET-SUPPORTED (classified as needing an expansion but with no semantic
-/// expander, so translating a kernel that uses them fails closed rather than
-/// passing the instruction through unchanged):
-///   * v_cvt_pk_fp8_f32, v_cvt_sr_fp8_f32 (only when CLAMP selects the B0-only
-///     mode; the ordinary form stays on the copy path),
-///   * v_wmma_scale / v_wmma_scale16 forms without an implemented rule,
-///   * integer IU4 and IU8 WMMA/SWMMAC forms without an implemented spacing
-///     rule.
 /// Separately, a 64-bit source reading FLAT_SCRATCH_BASE is classified via
 /// operand inspection (see gfx1250_reads_flat_scratch_base_64bit), and the
 /// barrier-state and sleep/monitor families are DEFERRED with a pass-through
 /// warning rather than fail-closed (see is_deferred_gfx1250_family).
-/// Classifying the fail-closed cases keeps the failure explicit and located; add
-/// the semantic rule (and update this note) once each expansion is implemented.
 inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemonics = {
     "ds_load_2addr_b32",
     "ds_load_2addr_b64",
@@ -96,8 +86,8 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
   // but not A0, so they require semantic expansion. The common f32 K=128 forms
   // use one neutral regular-Scale mixed-format operation. Source fields with no
   // meaning for these opcodes are discarded while constructing the target.
-  // The standalone 32x16 FP4 form splits into two scaled M=16 halves; the f16
-  // K=128 forms still fail closed in their semantic rule.
+  // The standalone 32x16 FP4 form splits into two scaled M=16 halves. Packed-f16
+  // K=128 forms lower through an f32 accumulator and pack the final result.
   const bool is_k128_fp8_bf8 = (mnemonic.starts_with("v_wmma_f16_16x16x128_") ||
                                 mnemonic.starts_with("v_wmma_f32_16x16x128_")) &&
                                (mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||
