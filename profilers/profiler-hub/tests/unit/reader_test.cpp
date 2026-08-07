@@ -2649,4 +2649,156 @@ TEST_F(reader_v4_counter_test,
     ASSERT_NE(grbm->pmc_info, nullptr);
 }
 
+class reader_v4_mem_activity_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        m_storage = std::make_unique<profiler_hub::storage_t>(m_database_path, "");
+        m_reader  = std::make_shared<profiler_hub::reader_t>(std::move(m_storage));
+    }
+
+    void TearDown() override
+    {
+        m_reader.reset();
+        m_storage.reset();
+    }
+
+    std::string m_database_path{ ROCPD_DB_V4_MEM_ACTIVITY_PATH };
+    std::unique_ptr<profiler_hub::storage_t> m_storage;
+    std::shared_ptr<profiler_hub::reader_t>  m_reader;
+};
+
+TEST_F(reader_v4_mem_activity_test, v4_discovers_two_mem_activity_tracks)
+{
+    auto tracks = find_tracks(m_reader->get_tracks(),
+                              profiler_hub::reader_types::track_type_t::memory_activity);
+    ASSERT_EQ(tracks.size(), 2U);
+
+    for(const auto& t : tracks)
+    {
+        ASSERT_NE(t->agent_info, nullptr);
+        ASSERT_EQ(t->pmc_info, nullptr);
+    }
+
+    std::set<size_t> agent_ids;
+    for(const auto& t : tracks)
+        agent_ids.insert(t->agent_info->id);
+    ASSERT_TRUE(agent_ids.count(1) == 1);
+    ASSERT_TRUE(agent_ids.count(2) == 1);
+}
+
+TEST_F(reader_v4_mem_activity_test, v4_mem_activity_running_sum_agent1)
+{
+    // Same logical sequence as v3: ALLOC(4096)+FREE(4096)+REALLOC(no-op)+ALLOC(2048).
+    // Rows inserted out of start order to prove ORDER BY ts_s.value.
+    auto tracks = find_tracks(m_reader->get_tracks(),
+                              profiler_hub::reader_types::track_type_t::memory_activity);
+    profiler_hub::reader_types::track_info_ptr_t agent1_track;
+    for(const auto& t : tracks)
+    {
+        if(t->agent_info && t->agent_info->id == 1) agent1_track = t;
+    }
+    ASSERT_NE(agent1_track, nullptr);
+
+    auto scalars = m_reader->get_scalar_track(agent1_track->id);
+    ASSERT_EQ(scalars.size(), 3U);
+
+    ASSERT_EQ(scalars[0].timestamp, 1000U);
+    ASSERT_EQ(scalars[1].timestamp, 3000U);
+    ASSERT_EQ(scalars[2].timestamp, 5000U);
+
+    ASSERT_DOUBLE_EQ(scalars[0].value, 4096.0);
+    ASSERT_DOUBLE_EQ(scalars[1].value, 0.0);
+    ASSERT_DOUBLE_EQ(scalars[2].value, 2048.0);
+}
+
+TEST_F(reader_v4_mem_activity_test, v4_mem_activity_non_interference_agent2)
+{
+    auto tracks = find_tracks(m_reader->get_tracks(),
+                              profiler_hub::reader_types::track_type_t::memory_activity);
+    profiler_hub::reader_types::track_info_ptr_t agent2_track;
+    for(const auto& t : tracks)
+    {
+        if(t->agent_info && t->agent_info->id == 2) agent2_track = t;
+    }
+    ASSERT_NE(agent2_track, nullptr);
+
+    auto scalars = m_reader->get_scalar_track(agent2_track->id);
+    ASSERT_EQ(scalars.size(), 1U);
+    ASSERT_EQ(scalars[0].timestamp, 2000U);
+    ASSERT_DOUBLE_EQ(scalars[0].value, 8192.0);
+}
+
+TEST_F(reader_v4_mem_activity_test, v4_mem_activity_track_stats)
+{
+    auto tracks = find_tracks(m_reader->get_tracks(),
+                              profiler_hub::reader_types::track_type_t::memory_activity);
+    for(const auto& t : tracks)
+    {
+        auto scalars = m_reader->get_scalar_track(t->id);
+        auto stats   = m_reader->get_track_stats(t->id);
+        ASSERT_TRUE(stats.min_ts.has_value());
+        ASSERT_TRUE(stats.max_ts.has_value());
+        ASSERT_EQ(stats.count, scalars.size());
+        ASSERT_EQ(stats.min_ts.value(), scalars.front().timestamp);
+        ASSERT_EQ(stats.max_ts.value(), scalars.back().timestamp);
+    }
+}
+
+TEST_F(reader_v4_mem_activity_test, v4_get_interval_track_returns_empty_for_mem_activity)
+{
+    auto tracks = find_tracks(m_reader->get_tracks(),
+                              profiler_hub::reader_types::track_type_t::memory_activity);
+    ASSERT_GE(tracks.size(), 1U);
+    ASSERT_TRUE(m_reader->get_interval_track(tracks.front()->id).empty());
+}
+
+// Task 044: the v4 `memory`-typed tracks (the real rocpd_track rows carrying
+// memory_allocate rows, distinct from the synthesized memory_activity tracks)
+// exercise the v4 memory arms of get_interval_track (memory_alloc_interval_track_v4)
+// and get_track_stats (memory_alloc_stats_track_v4), which no prior test lit. The
+// fixture's 5 allocate rows resolve through the rocpd_timestamp spine to:
+//   track 1 (agent 1): starts {1000,3000,4000,5000} ends {..,5100} -> count 4
+//   track 2 (agent 2): start  {2000}                end 2100       -> count 1
+TEST_F(reader_v4_mem_activity_test, v4_memory_track_interval_matches_stats)
+{
+    auto tracks = find_tracks(m_reader->get_tracks(),
+                              profiler_hub::reader_types::track_type_t::memory);
+    ASSERT_EQ(tracks.size(), 2U);
+
+    bool saw_track1 = false;
+    bool saw_track2 = false;
+    for(const auto& t : tracks)
+    {
+        auto intervals = m_reader->get_interval_track(t->id);
+        auto stats     = m_reader->get_track_stats(t->id);
+        ASSERT_TRUE(is_start_sorted(intervals));
+        expect_stats_match_intervals(stats, intervals);
+
+        if(stats.min_ts.has_value() && stats.min_ts.value() == 1000U)
+        {
+            saw_track1 = true;
+            ASSERT_EQ(intervals.size(), 4U);
+            ASSERT_EQ(intervals[0].start, 1000U);
+            ASSERT_EQ(intervals[1].start, 3000U);
+            ASSERT_EQ(intervals[2].start, 4000U);
+            ASSERT_EQ(intervals[3].start, 5000U);
+            ASSERT_EQ(stats.count, 4U);
+            ASSERT_EQ(stats.max_ts.value(), 5100U);
+        }
+        else
+        {
+            saw_track2 = true;
+            ASSERT_EQ(intervals.size(), 1U);
+            ASSERT_EQ(intervals[0].start, 2000U);
+            ASSERT_EQ(stats.count, 1U);
+            ASSERT_EQ(stats.min_ts.value(), 2000U);
+            ASSERT_EQ(stats.max_ts.value(), 2100U);
+        }
+    }
+    ASSERT_TRUE(saw_track1);
+    ASSERT_TRUE(saw_track2);
+}
+
 }  // namespace
