@@ -200,6 +200,7 @@ if(BUILD_TESTS)
     CpuAffinityTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
+    IbvSymbolsEnvTests.cpp
     common/main.cpp
     common/CallCollectiveForked.cpp
     common/CollectiveArgs.cpp
@@ -223,6 +224,7 @@ if(BUILD_TESTS)
     list(APPEND TEST_SOURCE_FILES
       ../src/misc/recorder.cc
       ../src/misc/proxy_trace/proxy_trace.cc
+      ../src/misc/ibvsymbols.cc  # buildIbvSymbols() is hidden in librccl; compile it in for IbvSymbolsEnvTests
     )
   endif()
 
@@ -231,8 +233,8 @@ if(BUILD_TESTS)
   # Create rccl-UnitTests binary
   add_executable(rccl-UnitTests ${TEST_SOURCE_FILES})
 
-  # AICOMRCCL-1534: net_reload_plugin.cpp is compiled into rccl-UnitTests and loaded
-  # in-process via NCCL_NET_PLUGIN=STATIC_PLUGIN (dlopen(NULL)), so no external .so.
+  # AICOMRCCL-1534 / net-plugin assignment tests: net_reload_plugin.cpp is compiled into
+  # rccl-UnitTests and loaded in-process via NCCL_NET_PLUGIN=STATIC_PLUGIN (dlopen(NULL)).
   # Scope its headers to the file so the generic example headers don't shadow others.
   set_source_files_properties(plugin/net_reload_plugin.cpp PROPERTIES
     INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/net/example/nccl)
@@ -240,7 +242,7 @@ if(BUILD_TESTS)
   # dlsym(dlopen(NULL), ...) only finds symbols present in the dynamic symbol table;
   # export just the one plugin symbol (narrow, unlike a broad -rdynamic).
   target_link_options(rccl-UnitTests PRIVATE
-    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v10")
+    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12")
 
   # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
   # (inline, static, constexpr, template functions) and can run in both Release and Debug.
@@ -360,6 +362,7 @@ if(BUILD_TESTS)
       DdaFabricEligibilityTests.cpp
       CeAlltoAllvEligibilityTests.cpp
       EnqueueTests.cpp
+      LL128RegVariantKernelTests.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
       TopoNicFusionTests.cpp
@@ -441,6 +444,20 @@ if(BUILD_TESTS)
     endif()
   endif()
 
+  # rccl-UnitTestsGdr: Compiles the peer-memory detection helper (gdr_peermem.cc,
+  # shared by the net_ib and net_ib_cast transports) directly so the sysfs scan can
+  # be exercised against a mock `memory_peers` tree in a temp directory. The helper
+  # is pure (no HIP, no librccl.so symbols, no GPU), so this target builds in
+  # Release and Debug.
+  list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsGdr)
+
+  set(TEST_GDR_SOURCE_FILES
+    GdrPeerMemTests.cpp
+    ../src/misc/gdr_peermem.cc
+    common/main_altrsmi.cpp
+  )
+
+  add_executable(rccl-UnitTestsGdr ${TEST_GDR_SOURCE_FILES})
   # rccl-UnitTestsAmdSmi: tests for the amdsmi_wrap layer.
   #
   # AmdSmiFabricTests.cpp covers the fabric predicates and struct layout pinned in
