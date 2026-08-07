@@ -18,6 +18,7 @@
 
 typedef struct {
   std::string type;
+  amdsmi_link_type_t link_type;
   uint64_t hops;
   uint64_t weight;
   bool accessible;
@@ -106,6 +107,7 @@ void TestHWTopologyRead::Run(void) {
     for (uint32_t dv_ind_dst = 0; dv_ind_dst < num_devices; dv_ind_dst++) {
       if (dv_ind_src == dv_ind_dst) {
         gpu_links[dv_ind_src][dv_ind_dst].type = "X";
+        gpu_links[dv_ind_src][dv_ind_dst].link_type = AMDSMI_LINK_TYPE_UNKNOWN;
         gpu_links[dv_ind_src][dv_ind_dst].hops = 0;
         gpu_links[dv_ind_src][dv_ind_dst].weight = 0;
         gpu_links[dv_ind_src][dv_ind_dst].accessible = true;
@@ -127,6 +129,7 @@ void TestHWTopologyRead::Run(void) {
             CHK_ERR_ASRT(err)
           }
         } else {
+          gpu_links[dv_ind_src][dv_ind_dst].link_type = type;
           switch (type) {
             case AMDSMI_LINK_TYPE_PCIE:
               gpu_links[dv_ind_src][dv_ind_dst].type = "PCIE";
@@ -217,6 +220,7 @@ void TestHWTopologyRead::Run(void) {
           // The unified API must agree with the component queries it aggregates.
           const gpu_link_t& link = gpu_links[dv_ind_src][dv_ind_dst];
           EXPECT_EQ(topology.weight, link.weight);
+          EXPECT_EQ(topology.link_type, link.link_type);
           EXPECT_EQ(topology.num_hops, link.hops > 255 ? 255 : static_cast<uint8_t>(link.hops));
           EXPECT_EQ(topology.fb_sharing, link.accessible ? 1 : 0);
           if (topology.link_type == AMDSMI_LINK_TYPE_NOT_APPLICABLE ||
