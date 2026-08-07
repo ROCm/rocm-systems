@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace amd::debug_agent
@@ -27,6 +28,28 @@ std::string hex_string (const std::vector<uint8_t> &value);
    \return Formatted string representation of the register value.  */
 std::string register_value_string (const std::string &register_type,
                                      const std::vector<uint8_t> &register_value);
+
+/* URI parsing and sanitization.  */
+
+/* Result of parsing a code object URI.  */
+struct parsed_uri_t
+{
+  std::string protocol;          /* Protocol scheme (e.g., "file").  */
+  std::string decoded_path;      /* Path component with percent-decoding applied.  */
+  std::unordered_map<std::string, std::string> params;  /* Query/fragment parameters.  */
+};
+
+/* Parse a code object URI into its components.
+   Extracts protocol, path (percent-decoded), and parameters from query/fragment.
+   \param uri The URI string to parse (e.g., "file:///path?param=value").
+   \return Parsed URI structure.  */
+parsed_uri_t parse_code_object_uri (const std::string &uri);
+
+/* Convert a URI to a safe filename by replacing special characters.
+   Replaces characters like :, /, #, ?, &, = with underscores.
+   \param uri The URI string to sanitize.
+   \return Filename-safe string.  */
+std::string sanitize_uri_for_filename (const std::string &uri);
 
 } /* namespace amd::debug_agent */
 
