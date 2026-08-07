@@ -823,9 +823,9 @@ capture_doorbell_key(uint32_t               gpu_id,
         // hsa_signal_t::handle IS the address of the amd_signal_t in the AMD HSA
         // ABI, so the int-to-ptr conversion is the only way to reach it; same
         // construct as queue_interposition.cpp's lookup_queue_state_by_doorbell.
+        const uint64_t _h = intercept_queue->doorbell_signal.handle;
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        const auto* sig =
-            reinterpret_cast<const amd_signal_t*>(intercept_queue->doorbell_signal.handle);
+        const auto* sig = reinterpret_cast<const amd_signal_t*>(_h);
         // hardware_doorbell_ptr aliases other union members for non-doorbell kinds.
         if(sig->kind == AMD_SIGNAL_KIND_DOORBELL || sig->kind == AMD_SIGNAL_KIND_LEGACY_DOORBELL)
             hwptr = reinterpret_cast<uint64_t>(sig->hardware_doorbell_ptr);

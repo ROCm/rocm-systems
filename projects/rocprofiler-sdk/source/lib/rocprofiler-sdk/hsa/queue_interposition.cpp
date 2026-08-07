@@ -524,9 +524,9 @@ enable_profiling_for_signal_batch(Queue* queue)
 void
 no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
 {
-    auto& _payload    = proven.payload;
-    auto* _rocp_agent = agent::get_agent(_payload.agent_id);
-    auto  _hsa_agent  = agent::get_hsa_agent(_rocp_agent);
+    auto&       _payload    = proven.payload;
+    const auto* _rocp_agent = agent::get_agent(_payload.agent_id);
+    auto        _hsa_agent  = agent::get_hsa_agent(_rocp_agent);
 
     auto _convert = [&_hsa_agent](uint64_t ticks, uint64_t* out) {
         if(!_hsa_agent) return false;
