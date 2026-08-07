@@ -155,9 +155,21 @@ void GraphInstantiateWithFlags_DependencyGraph(bool ctxt_change = false) {
   if (ctxt_change) {
     HIP_CHECK(hipSetDevice(1));
     HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
+    // On AMD, graphs are device-bound: a graph built on device 0 cannot be
+    // instantiated while device 1 is the current device, so
+    // hipGraphInstantiateWithFlags returns hipErrorNotSupported. Treat this as
+    // an unsupported-feature skip rather than a failure.
+    hipError_t instErr = hipGraphInstantiateWithFlags(&graphExec, graph, 0);
+    if (instErr == hipErrorNotSupported) {
+      HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
+      HIP_CHECK(hipGraphDestroy(graph));
+      HIP_SKIP_TEST("cross-device graph instantiate not supported (device-bound graphs).");
+    }
+    HIP_CHECK(instErr);
+  } else {
+    // Instantiate and launch the cloned graph
+    HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph, 0));
   }
-  // Instantiate and launch the cloned graph
-  HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph, 0));
   HIP_CHECK(hipGraphLaunch(graphExec, 0));
   HIP_CHECK(hipStreamSynchronize(0));
 
