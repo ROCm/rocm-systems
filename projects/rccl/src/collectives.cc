@@ -331,7 +331,8 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
   // actually ran. Symmetric-registered buffers are extracted downstream, so DDA is
   // gated on !symEligible inside the decision, exactly as before.
   struct rcclCollDecision decision;
-  NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, sendcount, datatype, /*query=*/false, &decision));
+  NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, sendcount, datatype, /*query=*/false,
+                                /*graphCapturingHint=*/false, &decision));
 
   switch (decision.algo) {
   case RCCL_DDA_FABRIC_LL:
@@ -364,6 +365,9 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     // Mark the info so taskAppend posts this as A2A-style per-peer Send/Recv
     // P2P tasks (no peer rotation, no in-place self skip).
     info.useDirect = true;
+    return ncclEnqueueCheck(&info);
+  case RCCL_CE_REGISTERED:
+    // CE dispatch happens in taskAppend(); just enqueue.
     return ncclEnqueueCheck(&info);
   default:
     // RCCL_AG_RING / native kernel algorithms go through the standard enqueue path.

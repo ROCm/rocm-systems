@@ -184,6 +184,7 @@ ncclResult_t rcclGetAlgoProtoIndex(const char* envStr, const char* algoProtoStri
 
 extern int64_t ncclParamMinNchannels();
 extern int64_t ncclParamMaxNchannels();
+extern int64_t ncclParamSymCeThreshold();
 RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
 
 ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc) {
@@ -459,7 +460,8 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
 
   if (coll == ncclFuncAllGather) {
     struct rcclCollDecision decision;
-    NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, (size_t)count, dataType, /*query=*/true, &decision));
+    NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, (size_t)count, dataType, /*query=*/true,
+                                  /*graphCapturingHint=*/graphCapturing != 0, &decision));
     *algo = decision.algo;
     *protocol = decision.protocol;
     *maxChannels = decision.nMaxChannels;
@@ -861,7 +863,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 // ncclAllGather_impl() (DDA) and rcclSelectAllGatherAlgo() (hierarchical / direct
 // / ring); the outcome for any given operands is identical.
 ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
-                                 ncclDataType_t datatype, bool query, struct rcclCollDecision* decision) {
+                                 ncclDataType_t datatype, bool query, bool graphCapturingHint,
+                                 struct rcclCollDecision* decision) {
   memset(decision, 0, sizeof(*decision));
   decision->algo = NCCL_ALGO_RING;
   decision->protocol = NCCL_PROTO_SIMPLE;
@@ -951,7 +954,26 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     return ncclSuccess;
   }
 
-  // (4) Standard ring kernel. Fill algo/protocol/channels for reporting; the live
+  // (4) CE AllGather. Mirrors taskAppend()'s gate; Direct (above) outranks it.
+  // Reporting only here (taskAppend does the live dispatch).
+  {
+    const bool ceCapturing = query ? graphCapturingHint : false;
+    struct ncclDevrWindow* sendWin = nullptr;
+    struct ncclDevrWindow* recvWin = nullptr;
+    ncclDevrFindWindow(comm, sendbuff, &sendWin);
+    ncclDevrFindWindow(comm, recvbuff, &recvWin);
+    ncclSymRegType_t winRegType;
+    NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+    const bool ceAvailable =
+      !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
+    if (ceAvailable && comm->symmetricSupport && sendcount > (size_t)ncclParamSymCeThreshold() &&
+        comm->minCompCap >= 100 && comm->isAllDirectNvlink) {
+      decision->algo = RCCL_CE_REGISTERED;
+      return ncclSuccess;
+    }
+  }
+
+  // (5) Standard ring kernel. Fill algo/protocol/channels for reporting; the live
   // path recomputes these in taskAppend(), so only the query needs them.
   decision->algo = NCCL_ALGO_RING;
   decision->protocol = NCCL_PROTO_SIMPLE;
