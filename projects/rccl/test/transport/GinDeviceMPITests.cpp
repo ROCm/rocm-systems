@@ -1021,11 +1021,13 @@ TEST_F(GinMPIDeviceTests, WaitCounterAndSignal) {
 }
 
 // Collective kernel: every rank runs the same code. The barrier composes
-// signal + waitSignal + an epoch counter (gin_barrier__funcs.h:42-60) -- each
-// sync sends SignalInc to every other rank and waits for the local signal
-// cell to reach a higher epoch, so consecutive syncs don't collide on the
-// same expected value. The ncclTeamTagRail{} overload routes to
-// comm.railGinBarrier and the rail team automatically.
+// signal + waitSignal over a per-peer signal window (gin_barrier__funcs.h):
+// each sync sends a SignalInc to every other rank -- bumping cell
+// (base + myRank) on that peer -- then waits on its own (base + peer) cell
+// for every peer. The expected value comes from the local signal shadow,
+// incremented once per sync, so consecutive syncs don't collide on the same
+// value. The ncclTeamTagRail{} overload routes to comm.railGinBarrier and
+// the rail team automatically.
 __global__ void barrier2RanksKernel(int iters, struct ncclDevComm devComm) {
   ncclGin gin{devComm, /*ginContext=*/0};
   // barrierIndex must be < railGinBarrierCount (we set =1, so 0).
@@ -1056,31 +1058,28 @@ TEST_F(GinMPIDeviceTests, Barrier_TwoRanks) {
   ncclCommCount(comm, &nRanks);
   ASSERT_EQ(2, nRanks);
 
-  // Large enough that a stuck-at-zero epoch would deadlock at iter 1
-  // (not silently pass on iter 0); small enough to stay fast. Each round
-  // sends 1 SignalInc per peer (1 in the 2-rank case) and waits for the
-  // corresponding signal cell to reach the new epoch.
+  // Large enough that a stuck-at-zero expected value would deadlock at
+  // iter 1 (not silently pass on iter 0); small enough to stay fast. Each
+  // round sends 1 SignalInc per peer (1 in the 2-rank case) and waits for
+  // that peer's own cell to reach the incremented shadow value.
   constexpr int kIters = 16;
 
   // railGinBarrierCount=1 covers our 1-CTA launch (barrierIndex=0). The
   // barrier session uses the rail-team GIN barrier pool that the runtime
-  // allocates via ncclGinBarrierCreateRequirement; its signal cells live
-  // at (handle.signal0 + barrierIndex), separate from the user-facing
-  // ginSignalCount pool.
+  // allocates via ncclGinBarrierCreateRequirement, which reserves
+  // nBarriers*railTeam.nRanks cells -- one per source rank per barrier -- so
+  // a cell lives at
+  // (handle.signal0 + barrierIndex*railTeam.nRanks + srcRank). That pool is
+  // appended after the user-facing ginSignalCount range, so it never shifts
+  // user signal indices.
   //
-  // ginForceEnable is REQUIRED. ncclDevCommCreateInternal only activates
-  // GIN (populating ginHandles[]/ginSignalBase) when nNodes>1 OR
-  // ginForceEnable OR ginSignalCount!=0 OR ginCounterCount!=0 -- the gate
-  // intentionally ignores railGinBarrierCount. Without this flag a
-  // single-node test that asks only for railGinBarrierCount gets NULL
-  // ginHandles[0], and the barrier's internal waitSignal -> getSignalPtr
-  // dispatch dereferences a NULL ncclGinProxyGpuCtx and faults at (nil)
-  // on the GPU. Other tests dodge the gate accidentally by setting
-  // ginSignalCount/ginCounterCount non-zero; this one has neither so we
-  // ask for GIN explicitly.
+  // GIN activation matters here: without it ginHandles[0] is NULL and the
+  // barrier's internal waitSignal -> getSignalPtr dispatch faults on a NULL
+  // ncclGinProxyGpuCtx. defaultGinReqs() asks for it explicitly by setting
+  // ginConnectionType=FULL, which is what a single-node run needs since this
+  // test requests no signal or counter pool of its own.
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
-  reqs.ginForceEnable      = true;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
   auto devCommCleanup = makeScopeGuard([&]() {
@@ -1091,16 +1090,87 @@ TEST_F(GinMPIDeviceTests, Barrier_TwoRanks) {
   MPI_Barrier(MPI_COMM_WORLD);
 
   // Both ranks launch the same kernel -- barrier is collective, no
-  // producer/consumer split. Each rank's iter i sends SignalInc to the
-  // other rank and waits for its own signal cell to reach epoch+1; if the
-  // barrier raced past the peer (epoch broken), iter i+1 would either spin
-  // forever or read a stale epoch. Kernel completion means all kIters
-  // rounds stayed in lockstep.
+  // producer/consumer split. Each rank's iter i sends SignalInc to the other
+  // rank's cell and waits for its own cell for that peer to reach the newly
+  // incremented shadow value; if the barrier raced past the peer, iter i+1
+  // would either spin forever or match a stale count. Kernel completion
+  // means all kIters rounds stayed in lockstep.
   barrier2RanksKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(kIters, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   // Successful return of the kernel IS the assertion: signal + waitSignal
-  // + epoch all worked together for kIters rounds.
+  // + shadow bookkeeping all worked together for kIters rounds.
+  MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// Same barrier as barrier2RanksKernel but over the world team, so every rank
+// has 3 peers instead of 1.
+__global__ void barrier4RanksKernel(int iters, struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  // barrierIndex must be < worldGinBarrierCount (we set =1, so 0).
+  ncclGinBarrierSession<ncclCoopCta> bar{
+      ncclCoopCta(), gin, ncclTeamTagWorld{}, /*barrierIndex=*/0};
+  for (int i = 0; i < iters; i++) {
+    bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  }
+}
+
+// Multi-peer counterpart to Barrier_TwoRanks. At 2 ranks the barrier has a
+// single peer, so it never exercises the rotating peer order, the distribution
+// of peers across the coop group, or several per-peer waits outstanding at
+// once. With 4 ranks every rank has 3 peers and all three are in play.
+//
+// Deliberately asserts only that the barrier completes, same as
+// Barrier_TwoRanks: how the barrier lays out or accounts for its signals is an
+// internal detail that has already changed once (2.29.7) and may change again,
+// so this test stays behavioural. A regression in the arrival accounting still
+// surfaces -- as a deadlock at some round, not a silent pass.
+//
+// Uses the WORLD GIN barrier, not the rail one: ncclTeamRail has
+// nRanks = comm.nRanks / lsaSize, so a 4-rank job only yields a 4-rank rail
+// team at 4 nodes x 1 GPU, whereas the world team is 4 ranks on any layout
+// (including the 2-node x 2-GPU config the other 4-rank GIN tests run on).
+TEST_F(GinMPIDeviceTests, Barrier_FourRanks) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/4, /*max_processes=*/4))
+    GTEST_SKIP() << "Requires exactly 4 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int nRanks = -1;
+  ncclCommCount(comm, &nRanks);
+  ASSERT_EQ(4, nRanks);
+
+  // Same reasoning as Barrier_TwoRanks: large enough that stuck bookkeeping
+  // deadlocks rather than passing on round 0, small enough to stay fast.
+  constexpr int kIters = 16;
+
+  // worldGinBarrierCount=1 covers the 1-CTA launch (barrierIndex=0) and sizes
+  // the pool at 1*worldTeam.nRanks = 4 cells. GIN activation comes from
+  // defaultGinReqs()'s ginConnectionType=FULL, as in Barrier_TwoRanks.
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.worldGinBarrierCount = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  // All ranks finished setup before any kernel launches.
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  // All four ranks run the same collective loop. Each round every rank signals
+  // its 3 peers and waits for all 3 to arrive; if the arrival accounting broke
+  // for any peer, that round would spin forever rather than pass.
+  barrier4RanksKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(kIters, devComm);
+  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+  // Successful return of the kernel IS the assertion, as in Barrier_TwoRanks:
+  // all kIters rounds kept 4 ranks in lockstep across 3 peers each.
   MPI_Barrier(MPI_COMM_WORLD);
 }
 
@@ -1217,9 +1287,10 @@ TEST_F(GinMPIDeviceTests, BarrierSession_LsaOnly) {
 
 // Collective over the world team: composes the inner LSA barrier with the
 // outer rail-GIN barrier (ncclTeamTagWorld ctor). Mirrors Barrier_TwoRanks'
-// "completion == success" philosophy -- a broken inner or outer epoch
-// deadlocks at iter 1 -- but routes through both substrates. On single node
-// the outer rail arm degenerates; multi-node it crosses rails.
+// "completion == success" philosophy -- a broken inner LSA epoch or outer
+// per-peer signal count deadlocks at iter 1 -- but routes through both
+// substrates. On single node the outer rail arm degenerates; multi-node it
+// crosses rails.
 __global__ void barrierSessionHybridKernel(int iters, struct ncclDevComm devComm) {
   ncclGin gin{devComm, /*ginContext=*/0};
   ncclBarrierSession<ncclCoopCta> bar{
@@ -1248,11 +1319,11 @@ TEST_F(GinMPIDeviceTests, BarrierSession_Hybrid) {
   constexpr int kIters = 16;
 
   // The world-team ncclBarrierSession sizes its hybrid LSA+rail-GIN barriers from
-  // reqs.barrierCount (not lsa/railGinBarrierCount); 0 hangs the rail arm. ginForceEnable
-  // activates GIN so the outer barrier's waitSignal has a valid ctx (see Barrier_TwoRanks).
+  // reqs.barrierCount (not lsa/railGinBarrierCount); 0 hangs the rail arm.
+  // defaultGinReqs()'s ginConnectionType=FULL activates GIN so the outer
+  // barrier's waitSignal has a valid ctx (see Barrier_TwoRanks).
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.barrierCount        = 1;
-  reqs.ginForceEnable      = true;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
   auto devCommCleanup = makeScopeGuard([&]() {
@@ -1262,7 +1333,8 @@ TEST_F(GinMPIDeviceTests, BarrierSession_Hybrid) {
   MPI_Barrier(MPI_COMM_WORLD);
 
   // All ranks run the same collective barrier loop; completion means every
-  // round's inner LSA + outer rail-GIN epochs stayed in lockstep.
+  // round's inner LSA epochs and outer rail-GIN per-peer signal counts
+  // stayed in lockstep.
   barrierSessionHybridKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(kIters, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
@@ -1806,8 +1878,7 @@ TEST_F(GinMPIDeviceTests, Alltoall_PureReference) {
   ASSERT_LE(nRanks, 8);
 
   // ginSignalCount=1 covers signalIndex=0; railGinBarrierCount=1 matches
-  // our single-CTA launch. Both non-zero so GIN activates without
-  // ginForceEnable.
+  // our single-CTA launch.
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 1;
