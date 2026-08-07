@@ -188,6 +188,7 @@ struct drm_virtgpu_resource_create_blob {
 #define VIRTGPU_BLOB_FLAG_USE_USERPTR      0x0008
 #define VIRTGPU_BLOB_FLAG_USERPTR_RDONLY   0x0010
 #define VIRTGPU_BLOB_FLAG_USE_SVM          0x0020
+#define VIRTGPU_BLOB_FLAG_SVM_RDONLY       0x0040
 	/* zero is invalid blob_mem */
 	__u32 blob_mem;
 	__u32 blob_flags;
