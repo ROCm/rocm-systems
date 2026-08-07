@@ -29,6 +29,11 @@
 
 namespace
 {
+// Module-scope __device__ global. It lives in the loaded executable's data segment, not a tracked
+// hipMalloc allocation, so only snap()'s HSA_SYMBOL_KIND_VARIABLE path captures it. Kernels bump it
+// in place (single thread) so replay must restore it between passes, else it accumulates per pass.
+__device__ int g_module_counter = 0;
+
 __global__ void
 fill_kernel(float* d, float val, int n)
 {
@@ -51,6 +56,10 @@ saxpy_kernel(float* y, const float* x, float a, int n)
     const int stride = blockDim.x * gridDim.x;
     for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride)
         y[i] = a * x[i] + y[i];
+
+    // Also bump the module-scope counter once per execution so the in-place saxpy test exercises
+    // __device__ (module-variable) restore alongside the buffer restore.
+    if(blockIdx.x == 0 && threadIdx.x == 0) g_module_counter += 1;
 }
 
 __global__ void
@@ -59,6 +68,12 @@ add_kernel(float* d, float delta, int n)
     const int stride = blockDim.x * gridDim.x;
     for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride)
         d[i] = d[i] + delta;
+}
+
+__global__ void
+bump_module_counter_kernel()
+{
+    if(blockIdx.x == 0 && threadIdx.x == 0) g_module_counter += 1;
 }
 
 constexpr int NUM_THREADS = 1024;
@@ -94,5 +109,25 @@ void
 add(float* d, float delta, int n)
 {
     add_kernel<<<blocks_for(n), NUM_THREADS>>>(d, delta, n);
+}
+
+void
+set_module_counter(int v)
+{
+    (void) hipMemcpyToSymbol(HIP_SYMBOL(g_module_counter), &v, sizeof(int));
+}
+
+int
+read_module_counter()
+{
+    int v = 0;
+    (void) hipMemcpyFromSymbol(&v, HIP_SYMBOL(g_module_counter), sizeof(int));
+    return v;
+}
+
+void
+bump_module_counter()
+{
+    bump_module_counter_kernel<<<1, 64>>>();
 }
 }  // namespace kernel_launch

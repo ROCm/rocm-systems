@@ -251,6 +251,8 @@ TEST(kernel_replay_snapshot, restore_reverts_device_memory)
 
 // Restoring between passes must stop an in-place kernel from accumulating: N saxpy passes with a
 // restore each should net one application (y0 + a), not N. A no-op restore would leave y0 + N*a.
+// The saxpy kernel also bumps a __device__ module global once per pass, so this covers both tracked
+// buffer restore AND untracked module-variable restore (snap()'s HSA_SYMBOL_KIND_VARIABLE path).
 TEST(kernel_replay_snapshot, restore_prevents_inplace_accumulation_across_passes)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
@@ -273,16 +275,23 @@ TEST(kernel_replay_snapshot, restore_prevents_inplace_accumulation_across_passes
     launch_fill(x, 1.0f, N_ELEMS);
     launch_fill(y, y0, N_ELEMS);
 
+    // Seed the __device__ module counter so snap() captures a known baseline (0); the saxpy kernel
+    // bumps it once per pass, so a working module-variable restore keeps it at 0 across passes.
+    kernel_launch::set_module_counter(0);
+
     auto snapshot = msnp::snap(agent);
 
     for(int pass = 0; pass < passes; ++pass)
     {
         launch_saxpy(y, x, a, N_ELEMS);
         {
-            // sensitivity: mutation landed this pass
+            // sensitivity: buffer mutation landed this pass
             auto mutated = read_device(y, N_ELEMS);
             for(size_t i = 0; i < N_ELEMS; ++i)
                 ASSERT_FLOAT_EQ(mutated[i], y0 + a) << "pass " << pass << " elem " << i;
+            // and the __device__ module global was bumped this pass
+            ASSERT_EQ(kernel_launch::read_module_counter(), 1)
+                << "module counter after saxpy, pass " << pass;
         }
 
         msnp::restore(snapshot);
@@ -291,6 +300,9 @@ TEST(kernel_replay_snapshot, restore_prevents_inplace_accumulation_across_passes
             auto reverted = read_device(y, N_ELEMS);
             for(size_t i = 0; i < N_ELEMS; ++i)
                 ASSERT_FLOAT_EQ(reverted[i], y0) << "post-restore pass " << pass << " elem " << i;
+            // the module global was reverted too (not just the buffer)
+            ASSERT_EQ(kernel_launch::read_module_counter(), 0)
+                << "module counter post-restore, pass " << pass;
         }
     }
 
@@ -299,6 +311,8 @@ TEST(kernel_replay_snapshot, restore_prevents_inplace_accumulation_across_passes
         for(size_t i = 0; i < N_ELEMS; ++i)
             ASSERT_FLOAT_EQ(final_state[i], y0) << "final elem " << i;
     }
+    EXPECT_EQ(kernel_launch::read_module_counter(), 0)
+        << "final module counter accumulated across passes instead of being restored";
 
     ASSERT_EQ(hipFree(y), hipSuccess);
     ASSERT_EQ(hipFree(x), hipSuccess);
@@ -419,4 +433,59 @@ TEST(kernel_replay_snapshot, pool_filter_excludes_kernarg_and_cpu)
 
     EXPECT_EQ(hipHostFree(host), hipSuccess);
     ASSERT_EQ(hipFree(dev), hipSuccess);
+}
+
+// A __device__ module global mutated by a kernel must be reverted by restore(). It is not a
+// hipMalloc allocation -- it lives in the loaded executable's data segment and is captured only by
+// snap()'s HSA_SYMBOL_KIND_VARIABLE path. Without that path this reads kBase+1 after restore.
+TEST(kernel_replay_snapshot, restore_reverts_module_variable)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    const auto agent = gpu_agent();
+    ASSERT_NE(agent.handle, 0U) << "no GPU agent found";
+
+    constexpr int kBase = 7;
+    kernel_launch::set_module_counter(kBase);
+    ASSERT_EQ(kernel_launch::read_module_counter(), kBase) << "failed to seed __device__ global";
+
+    auto snapshot = msnp::snap(agent);
+
+    kernel_launch::bump_module_counter();
+    sync_ok();
+    ASSERT_EQ(kernel_launch::read_module_counter(), kBase + 1) << "kernel mutation did not land";
+
+    msnp::restore(snapshot);
+    EXPECT_EQ(kernel_launch::read_module_counter(), kBase)
+        << "module variable (__device__ global) was not restored by snapshot/restore";
+}
+
+// The replay scenario for a module global: N passes each bump it; a restore between passes must
+// prevent accumulation, so the final value stays kBase (each pass reverts kBase+1 -> kBase), never
+// kBase + N. A no-op (missing) module-variable restore would leave kBase + N.
+TEST(kernel_replay_snapshot, restore_prevents_module_variable_accumulation_across_passes)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    const auto agent = gpu_agent();
+    ASSERT_NE(agent.handle, 0U) << "no GPU agent found";
+
+    constexpr int kBase  = 0;
+    constexpr int passes = 5;
+    kernel_launch::set_module_counter(kBase);
+
+    auto snapshot = msnp::snap(agent);
+
+    for(int pass = 0; pass < passes; ++pass)
+    {
+        kernel_launch::bump_module_counter();
+        sync_ok();
+        ASSERT_EQ(kernel_launch::read_module_counter(), kBase + 1) << "mutation, pass " << pass;
+
+        msnp::restore(snapshot);
+        ASSERT_EQ(kernel_launch::read_module_counter(), kBase) << "post-restore, pass " << pass;
+    }
+
+    EXPECT_EQ(kernel_launch::read_module_counter(), kBase)
+        << "module variable accumulated across passes instead of being restored";
 }
