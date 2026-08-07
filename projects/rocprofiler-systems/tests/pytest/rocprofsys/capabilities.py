@@ -290,12 +290,17 @@ class SystemCapabilities:
         return count if count > 0 else 2
 
     @persistent_cached_property
-    def ptrace_scope(self) -> int:
-        """Get the value of the ptrace_scope kernel parameter."""
-        if not Path("/proc/sys/kernel/yama/ptrace_scope").exists():
-            return 3
+    def ptrace_scope(self) -> Optional[int]:
+        """Get the value of the yama ``ptrace_scope`` kernel parameter.
+
+        Returns ``None`` when the sysctl does not exist, which means the yama
+        LSM is not active and therefore places no restriction on ptrace.
+        """
+        scope_path = Path("/proc/sys/kernel/yama/ptrace_scope")
+        if not scope_path.exists():
+            return None
         try:
-            return int(Path("/proc/sys/kernel/yama/ptrace_scope").read_text().strip())
+            return int(scope_path.read_text().strip())
         except (OSError, ValueError):
             return 3
 
@@ -309,44 +314,37 @@ class SystemCapabilities:
         except (OSError, ValueError):
             return 4
 
-    @persistent_cached_property
-    def cap_sys_admin(self) -> bool:
-        """Get the value of the CAP_SYS_ADMIN capability."""
+    # Results for the relevant caps are cached in functions below
+    def _has_capability(self, name: str, capability_set: str = "effective") -> bool:
+        """Return True if this process holds *name* in *capability_set*."""
         capchk = self.rocprofsys_tests_dir / "rocprof-sys-capchk"
         if not capchk.exists():
             return False
         try:
             result = subprocess.run(
-                [capchk, "CAP_SYS_ADMIN", "effective"],
+                [capchk, name, capability_set],
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
-            if result.returncode != 0:
-                return False
-            return result.stdout.strip() == "1"
         except (subprocess.SubprocessError, OSError):
             return False
+        return result.returncode == 0
+
+    @persistent_cached_property
+    def cap_sys_admin(self) -> bool:
+        """Whether CAP_SYS_ADMIN is in the effective capability set."""
+        return self._has_capability("CAP_SYS_ADMIN")
 
     @persistent_cached_property
     def cap_perfmon(self) -> bool:
-        """Get the value of the CAP_PERFMON capability."""
-        capchk = self.rocprofsys_tests_dir / "rocprof-sys-capchk"
-        if not capchk.exists():
-            return False
-        try:
-            result = subprocess.run(
-                [capchk, "CAP_PERFMON", "effective"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode != 0:
-                return False
+        """Whether CAP_PERFMON is in the effective capability set."""
+        return self._has_capability("CAP_PERFMON")
 
-            return result.stdout.strip() == "1"
-        except (subprocess.SubprocessError, OSError):
-            return False
+    @persistent_cached_property
+    def cap_sys_ptrace(self) -> bool:
+        """Whether CAP_SYS_PTRACE is in the effective capability set."""
+        return self._has_capability("CAP_SYS_PTRACE")
 
     @persistent_cached_property
     def perf_events_usable(self) -> bool:
@@ -354,12 +352,9 @@ class SystemCapabilities:
 
         This gates anything that opens Linux perf events, including PAPI
         hardware/software counters and overflow sampling. It mirrors the
-        runtime gate in ``source/lib/core/config.cpp``, which disables PAPI
-        when ``/proc/sys/kernel/perf_event_paranoid`` is greater than 2 unless
-        ``CAP_SYS_ADMIN`` is held. Note the runtime does not consult
-        ``CAP_PERFMON``, so it is intentionally not checked here.
+        runtime gate in ``source/lib/core/config.cpp``
         """
-        return self.perf_event_paranoid <= 2 or self.cap_sys_admin
+        return self.perf_event_paranoid <= 2 or self.cap_perfmon or self.cap_sys_admin
 
     @persistent_cached_property
     def papi_availability(self) -> bool:
