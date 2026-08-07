@@ -461,7 +461,7 @@
       "install_prefix": "/opt/rocprofiler-systems",
       "sanity_check_rocm": true,
       "ccache_key_distro": "ubuntu-jammy-system-deps",
-      "system_deps_apt": "g++ binutils-dev libboost-all-dev libtbb-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev",
+      "system_deps_apt": "g++ binutils-dev libboost-all-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev",
       "group": "ubuntu-22.04"
     },
     {
@@ -477,7 +477,7 @@
       "install_prefix": "/opt/rocprofiler-systems",
       "sanity_check_rocm": true,
       "ccache_key_distro": "ubuntu-jammy-system-deps",
-      "system_deps_apt": "g++ binutils-dev libboost-all-dev libtbb-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev",
+      "system_deps_apt": "g++ binutils-dev libboost-all-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev",
       "group": "ubuntu-22.04"
     },
     {
@@ -493,7 +493,7 @@
       "install_prefix": "/opt/rocprofiler-systems",
       "sanity_check_rocm": true,
       "ccache_key_distro": "ubuntu-noble-system-deps",
-      "system_deps_apt": "g++ binutils-dev libboost-all-dev libtbb-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev",
+      "system_deps_apt": "g++ binutils-dev libboost-all-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev",
       "group": "ubuntu-24.04"
     },
     {
@@ -509,7 +509,7 @@
       "install_prefix": "/opt/rocprofiler-systems",
       "sanity_check_rocm": true,
       "ccache_key_distro": "ubuntu-noble-system-deps",
-      "system_deps_apt": "g++ binutils-dev libboost-all-dev libtbb-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev",
+      "system_deps_apt": "g++ binutils-dev libboost-all-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev",
       "group": "ubuntu-24.04"
     },
     {
@@ -525,7 +525,7 @@
       "install_prefix": "/opt/rocprofiler-systems",
       "sanity_check_rocm": true,
       "ccache_key_distro": "debian-system-deps",
-      "system_deps_apt": "g++ binutils-dev libboost-all-dev libtbb-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev",
+      "system_deps_apt": "g++ binutils-dev libboost-all-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev",
       "group": "debian"
     },
     {
@@ -541,7 +541,7 @@
       "install_prefix": "/opt/rocprofiler-systems",
       "sanity_check_rocm": true,
       "ccache_key_distro": "debian-system-deps",
-      "system_deps_apt": "g++ binutils-dev libboost-all-dev libtbb-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev",
+      "system_deps_apt": "g++ binutils-dev libboost-all-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev",
       "group": "debian"
     },
     {

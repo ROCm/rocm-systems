@@ -111,10 +111,6 @@
 [submodule "projects/rocprofiler-compute/src/vendored/pyyaml"]
 	path = projects/rocprofiler-compute/src/vendored/pyyaml
 	url = https://github.com/yaml/pyyaml.git
-[submodule "projects/rocprofiler-systems/external/onetbb"]
-	path = projects/rocprofiler-systems/external/onetbb
-	url = https://github.com/uxlfoundation/oneTBB.git
-	tag = v2022.3.0
 [submodule "projects/rocprofiler-sdk/external/abseil-cpp"]
 	path = projects/rocprofiler-sdk/external/abseil-cpp
 	url = https://github.com/abseil/abseil-cpp.git

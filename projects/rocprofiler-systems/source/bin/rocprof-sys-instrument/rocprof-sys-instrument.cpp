@@ -341,8 +341,8 @@ main(int argc, char** argv)
 
     const auto libs_regex =
         std::regex{ "lib(dyninstAPI|stackwalk|pcontrol|patchAPI|parseAPI|"
-                    "instructionAPI|symtabAPI|dynDwarf|common|dynElf|tbb|tbbmalloc|"
-                    "tbbmalloc_proxy|gotcha|libunwind|hsa-runtime|amdhip|"
+                    "instructionAPI|symtabAPI|dynDwarf|common|dynElf|"
+                    "gotcha|libunwind|hsa-runtime|amdhip|"
                     "amd_comgr|amd_smi|rocprofiler-register|"
                     "rocprofiler-sdk|rocprofiler-sdk-roctx)\\.(so|a)" };
 

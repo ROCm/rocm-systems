@@ -27,9 +27,6 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-elfutils
 rocprofiler_systems_add_interface_library(rocprofiler-systems-libiberty
     "LibIberty interface library (for Dyninst)"
 )
-rocprofiler_systems_add_interface_library(
-    rocprofiler-systems-tbb "Threading Building Blocks interface library (for Dyninst)"
-)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-rocm
     "Provides flags and libraries for ROCm"
 )
@@ -508,19 +505,6 @@ else()
             )
         endif()
 
-        # try to find TBB
-        find_package(TBB QUIET)
-
-        # if fail try to use the Dyninst installed FindTBB.cmake
-        if(NOT TBB_FOUND)
-            list(APPEND CMAKE_MODULE_PATH ${Dyninst_DIR}/Modules)
-            find_package(TBB QUIET)
-        endif()
-
-        if(NOT TBB_FOUND)
-            find_path(TBB_INCLUDE_DIR NAMES tbb/tbb.h PATH_SUFFIXES include)
-        endif()
-
         target_link_libraries(
             rocprofiler-systems-dyninst
             INTERFACE ${DYNINST_LIBRARIES} ${Boost_LIBRARIES}
@@ -537,7 +521,6 @@ else()
             system
             thread
             date_time
-            TBB
         )
             if(TARGET Dyninst::${_TARG})
                 target_link_libraries(
@@ -556,7 +539,7 @@ else()
         target_include_directories(
             rocprofiler-systems-dyninst
             SYSTEM
-            INTERFACE ${TBB_INCLUDE_DIR} ${Boost_INCLUDE_DIRS} ${DYNINST_HEADER_DIR}
+            INTERFACE ${Boost_INCLUDE_DIRS} ${DYNINST_HEADER_DIR}
         )
         rocprofiler_systems_target_compile_definitions(rocprofiler-systems-dyninst
             INTERFACE ROCPROFSYS_USE_DYNINST

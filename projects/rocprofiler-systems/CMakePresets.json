@@ -13,7 +13,6 @@
                 "ROCPROFSYS_BUILD_DYNINST": "ON",
                 "ROCPROFSYS_BUILD_ELFUTILS": "ON",
                 "ROCPROFSYS_BUILD_LIBIBERTY": "ON",
-                "ROCPROFSYS_BUILD_TBB": "ON",
                 "ROCPROFSYS_STRIP_LIBRARIES": "OFF",
                 "ROCPROFSYS_USE_PYTHON": "ON"
             },
@@ -82,7 +81,6 @@
                 "ROCPROFSYS_BUILD_GTEST": "ON",
                 "ROCPROFSYS_BUILD_HIDDEN_VISIBILITY": "OFF",
                 "ROCPROFSYS_BUILD_LIBIBERTY": "OFF",
-                "ROCPROFSYS_BUILD_TBB": "OFF",
                 "ROCPROFSYS_BUILD_TESTING": "ON",
                 "ROCPROFSYS_MAX_THREADS": "64",
                 "ROCPROFSYS_STRIP_LIBRARIES": "OFF",

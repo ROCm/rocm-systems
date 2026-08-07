@@ -74,7 +74,6 @@ Required third-party packages
 * `Dyninst <https://github.com/dyninst/dyninst>`_ for dynamic or static instrumentation.
   Dyninst uses the following required and optional components.
 
-  * `TBB <https://github.com/oneapi-src/oneTBB>`_ (required)
   * `Elfutils <https://sourceware.org/elfutils/>`_ (required)
   * `Libiberty <https://github.com/gcc-mirror/gcc/tree/master/libiberty>`_ (required)
   * `OpenMP <https://www.openmp.org/>`_ (optional)
@@ -89,7 +88,7 @@ Required third-party packages
 Any of the third-party packages required by Dyninst, along with Dyninst itself, can be built and installed
 during the ROCm Systems Profiler build. The following list indicates the package, the version,
 the application that requires the package (for example, ROCm Systems Profiler requires Dyninst
-while Dyninst requires TBB), and the CMake option to build the package alongside ROCm Systems Profiler:
+while Dyninst requires ElfUtils), and the CMake option to build the package alongside ROCm Systems Profiler:
 
 .. csv-table::
    :header: "Third-Party Library", "Minimum Version", "Required By", "CMake Option"
@@ -98,7 +97,6 @@ while Dyninst requires TBB), and the CMake option to build the package alongside
    "Libunwind", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_LIBUNWIND`` (default: ON)"
    "Nlohmann/JSON", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_NLOHMANN_JSON`` (default: ON)"
    "spdlog", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_SPDLOG`` (default: ON)"
-   "TBB", "2018.6", "Dyninst", "``ROCPROFSYS_BUILD_TBB`` (default: OFF)"
    "ElfUtils", "0.178", "Dyninst", "``ROCPROFSYS_BUILD_ELFUTILS`` (default: OFF)"
    "LibIberty",  "", "Dyninst", "``ROCPROFSYS_BUILD_LIBIBERTY`` (default: OFF)"
    "OpenMP", "4.x", "Dyninst", ""
@@ -152,8 +150,8 @@ Building Dyninst alongside ROCm Systems Profiler
 
 To install Dyninst alongside ROCm Systems Profiler, configure ROCm Systems Profiler with ``ROCPROFSYS_BUILD_DYNINST=ON``.
 Depending on the version of Ubuntu, the ``apt`` package manager might have current enough
-versions of the Dyninst TBB and LibIberty dependencies
-(use ``apt-get install libtbb-dev libiberty-dev``).
+versions of the Dyninst LibIberty dependency
+(use ``apt-get install libiberty-dev``).
 However, it is possible to also build and install the Dyninst dependencies
 via ``ROCPROFSYS_BUILD_<DEP>=ON``, as follows:
 
@@ -163,11 +161,11 @@ via ``ROCPROFSYS_BUILD_<DEP>=ON``, as follows:
    git -C rocm-systems sparse-checkout set projects/rocprofiler-systems
 
    cmake -B rocprof-sys-build -DROCPROFSYS_BUILD_DYNINST=ON \
-         -DROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=ON \
+         -DROCPROFSYS_BUILD_{ELFUTILS,LIBIBERTY}=ON \
          -S rocm-systems/projects/rocprofiler-systems
 
-where ``-DROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=ON`` is expanded by
-the shell to ``-DROCPROFSYS_BUILD_TBB=ON -DROCPROFSYS_BUILD_ELFUTILS=ON ...``
+where ``-DROCPROFSYS_BUILD_{ELFUTILS,LIBIBERTY}=ON`` is expanded by
+the shell to ``-DROCPROFSYS_BUILD_ELFUTILS=ON -DROCPROFSYS_BUILD_LIBIBERTY=ON``
 
 .. _cmake-options:
 
@@ -197,7 +195,6 @@ in `the Perfetto UI <https://ui.perfetto.dev>`_.
        -D CMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems  \
        -D ROCPROFSYS_USE_PYTHON=ON                       \
        -D ROCPROFSYS_BUILD_DYNINST=ON                    \
-       -D ROCPROFSYS_BUILD_TBB=ON                        \
        -D ROCPROFSYS_BUILD_ELFUTILS=ON                   \
        -D ROCPROFSYS_BUILD_LIBIBERTY=ON                  \
        -S rocm-systems/projects/rocprofiler-systems
