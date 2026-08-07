@@ -68,19 +68,17 @@ rocm_install(TARGETS rccl-UnitTestsMicro COMPONENT tests)
 # (AICOMRCCL-1685). A DEDICATED executable (not shared with rccl-UnitTestsMicro)
 # so init.cc's symbols don't collide with p2p's (allocTracker etc.), its
 # std::once_flag state is isolated, and it can carry its own compile-definition
-# variants. Deliberately does NOT link p2p-test.cc / p2p_fakes.cc.
-#
-# NOTE: real host-only oracle TUs (argcheck.cc / archinfo.cc / utils.cc) and the
-# two HIP_*_UNCACHED_MEMORY compile variants are added during bring-up once the
-# surviving-symbol inventory (steps 1-4) says which symbols must be satisfied.
+# variants. Deliberately does NOT link p2p-test.cc / p2p_fakes.cc. It also
+# compiles the real host-only oracle TUs (argcheck.cc / archinfo.cc / utils.cc)
+# and builds two HIP_*_UNCACHED_MEMORY compile variants (see below).
 # ---------------------------------------------------------------------------
 set(TEST_MICRO_INIT_SOURCE_FILES
   init-test.cc
   fakes/init_fakes.cc                  # init-only seams (micro_getenv, ResetInitFakes)
-  fakes/init_stubs.cc                  # fail-loud stubs (Tier-E) + data symbols
+  fakes/init_stubs.cc                  # fail-loud deep-path stubs + data symbols
   fakes/nccl_fakes.cc                  # reusable nccl* stubs (g_loadParam, ...)
   fakes/hip_fakes.cc                   # HIP runtime seams
-  # Real host-only oracle TUs (D3): compiled from the hipified snapshot so the
+  # Real host-only oracle TUs: compiled from the hipified snapshot so the
   # REAL PtrCheck/CommCheck (argcheck), IsArchMatch/GcnArchNameFormat (archinfo),
   # and busId/hash helpers (utils) are exercised, not reimplemented. --gc-sections
   # (below) drops every other function these TUs define so their deep deps don't
@@ -101,7 +99,7 @@ set_source_files_properties(
   ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc
   PROPERTIES GENERATED TRUE)
 
-# Two compile variants (D2): the default (cached) build leaves HIP_*_UNCACHED_MEMORY
+# Two compile variants: the default (cached) build leaves HIP_*_UNCACHED_MEMORY
 # undefined -> checkHostUncacheMemSetting takes the gfx950-check arm and fillInfo
 # uses the finegrained-malloc line; the -uncached build defines both -> the
 # unconditional-success arm and the uncached-malloc line. Tests self-select via

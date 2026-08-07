@@ -109,7 +109,7 @@ static hipError_t DefaultHipPointerGetAttribute(void* data,
 std::function<hipError_t(void*, hipPointer_attribute, hipDeviceptr_t)>
     g_hipPointerGetAttribute = DefaultHipPointerGetAttribute;
 
-// --- Device model (init.cc Tier-C): runtime version + device properties -----
+// --- Device model (init.cc): runtime version + device properties -----
 static hipError_t DefaultHipRuntimeGetVersion(int* version)
 {
     if (version) *version = 60443484;  // plausible ROCm 6.x runtime version
@@ -285,7 +285,7 @@ hipError_t hipSetDevice(int deviceId) { return g_hipSetDevice(deviceId); }
 
 hipError_t hipGetDeviceCount(int* count) { return g_hipGetDeviceCount(count); }
 
-// Deep-path HIP stubs (commAlloc/devCommSetup); not exercised by Tier A-D tests.
+// Deep-path HIP stubs (commAlloc/devCommSetup).
 hipError_t hipDeviceSetLimit(hipLimit_t, size_t) { return hipErrorInvalidValue; }
 hipError_t hipEventCreateWithFlags(hipEvent_t* e, unsigned int) {
     if (e) *e = (g_hipEventCreateResult == hipSuccess) ? reinterpret_cast<hipEvent_t>(0x1) : nullptr;

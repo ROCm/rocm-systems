@@ -22,7 +22,7 @@
 #include "nccl_fakes.h"
 
 // -------------------------------------------------------------------------
-// getenv seam (plan F2). init.cc reads a couple of environment variables via
+// getenv seam. init.cc reads a couple of environment variables via
 // libc getenv() directly (HSA_NO_SCRATCH_RECLAIM, HSA_FORCE_FINE_GRAIN_PCIE),
 // which ncclGetEnv()/g_getEnv cannot control. init-test.cc activates a
 // `#define getenv(n) micro_getenv(n)` ONLY around `#include INIT_CC_PATH`;
@@ -47,12 +47,12 @@ extern int g_firmwareVersion;
 extern int g_gdrSupportValue;
 extern int g_gdrSupportCalls;
 
-// D5: ncclInit()-tree seams run real ncclInit() host-only. bootstrapNetInit
+// ncclInit()-tree seams run real ncclInit() host-only. bootstrapNetInit
 // success is injectable so a (process-isolated) test can drive ncclInit failure.
 extern bool g_bootstrapNetInitFail;
 
 // -------------------------------------------------------------------------
-// Tier-E: commAlloc() deep seams. These were fail-loud stubs; they are now
+// commAlloc() deep seams. These were fail-loud stubs; they are now
 // controllable so commAlloc() runs host-only. Each returns its g_*Result
 // (default ncclSuccess) so a test can inject a failure at exactly one check to
 // cover that early-return arm. ncclNetInit installs a fake comm->ncclNet

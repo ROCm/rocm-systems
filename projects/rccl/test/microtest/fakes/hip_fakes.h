@@ -65,7 +65,7 @@ extern std::function<hipError_t(void* /*data*/,
                                 hipDeviceptr_t /*ptr*/)>
     g_hipPointerGetAttribute;
 
-// Device model (init.cc, Tier-C): controllable runtime version + device
+// Device model (init.cc): controllable runtime version + device
 // properties. Tests inject a specific arch (gfx942/gfx950), total memory, or a
 // fatal failure. hipGetDeviceProperties resolves to hipGetDevicePropertiesR0600
 // after hipify; g_hipGetDeviceProperties backs that symbol.
@@ -79,7 +79,7 @@ extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/, unsigned /
     g_hipExtMallocWithFlags;
 extern std::function<hipError_t(void* /*ptr*/)> g_hipFree;
 
-// Device inventory + current-device state (ncclCommInitAll, Tier-D). Defaults
+// Device inventory + current-device state (ncclCommInitAll). Defaults
 // succeed; g_deviceCount backs hipGetDeviceCount, g_currentDevice tracks
 // hipGetDevice/hipSetDevice. Tests inject faults or set the count.
 extern int g_deviceCount;
@@ -88,7 +88,7 @@ extern std::function<hipError_t(int* /*dev*/)> g_hipGetDevice;
 extern std::function<hipError_t(int /*dev*/)> g_hipSetDevice;
 extern std::function<hipError_t(int* /*count*/)> g_hipGetDeviceCount;
 
-// Deep-path (commAlloc/devCommSetup, Tier-E) result seams. These default to
+// Deep-path (commAlloc/devCommSetup) result seams. These default to
 // hipErrorInvalidValue so any call a test hasn't opted into still surfaces as an
 // unexpected call (preserving the p2p tests). Set to hipSuccess to enable the
 // commAlloc happy path (InstallCommAllocSuccess does this), or leave one at the

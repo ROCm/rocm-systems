@@ -68,8 +68,8 @@ int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_
 // -------------------------------------------------------------------------
 // Recorder: pure instrumentation -> no-op fake. Only the overloads reached by
 // the currently-tested init.cc paths are defined (record(const char*) covers
-// the getters / version / async-error). More overloads are added as Tier-D
-// (InitAll/Destroy/InitRank) lands.
+// the getters / version / async-error). More overloads are added as deeper
+// (InitAll/Destroy/InitRank) paths come under test.
 // -------------------------------------------------------------------------
 namespace rccl {
 Recorder::Recorder() {}
@@ -166,7 +166,7 @@ ncclResult_t ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t* asyncError) {
   return ncclCommGetAsyncError_impl(comm, asyncError);
 }
 
-// D5: ncclInit()-tree seams -- controllable SUCCESS so real ncclInit() runs
+// ncclInit()-tree seams -- controllable SUCCESS so real ncclInit() runs
 // host-only (moved from the fail-loud floor). bootstrapNetInit failure is
 // injectable to drive ncclInit's error arm (process-isolated tests).
 bool g_bootstrapNetInitFail = false;
@@ -190,7 +190,7 @@ ncclResult_t ncclTopoGetStrFromSys(const char* /*path*/, const char* fileName, c
 }
 
 // -------------------------------------------------------------------------
-// Tier-E: commAlloc() deep seams (controllable). Defaults succeed so real
+// commAlloc() deep seams (controllable). Defaults succeed so real
 // commAlloc() runs host-only; a test injects one failure to cover a specific
 // early-return arm. ncclNetInit/ncclNetInitFromParent live in init-test.cc --
 // they set comm->ncclNet, which needs the full ncclComm/ncclNet_t layout that

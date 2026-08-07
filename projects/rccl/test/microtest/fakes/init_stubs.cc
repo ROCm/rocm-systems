@@ -4,8 +4,8 @@
  ************************************************************************/
 // Fail-loud stub floor for src/init.cc deep-path symbols (AICOMRCCL-1685).
 // gc-sections retains ncclCommInitRankDev/ncclInit, whose bodies reference the
-// whole bootstrap/topology/transport/nvls/gin/proxy surface. Tier A-D tests
-// never CALL these (they return on validation arms), but the refs must LINK, so
+// whole bootstrap/topology/transport/nvls/gin/proxy surface. The shallower
+// tests never CALL these (they return on validation arms), but the refs must LINK, so
 // each is an abort-on-call stub. Mostly auto-generated from header decls; see
 // gen_stubs.sh. Real fakes replace individual entries as deeper tests need them.
 #include <cstdlib>

@@ -80,7 +80,7 @@
 #endif
 #endif
 
-// getenv seam (plan F2): active ONLY around the UUT include. init.cc's direct
+// getenv seam: active ONLY around the UUT include. init.cc's direct
 // getenv("HSA_NO_SCRATCH_RECLAIM")/("HSA_FORCE_FINE_GRAIN_PCIE") reads route
 // through micro_getenv (defined in init_fakes.cc, where this macro is inactive).
 #define getenv(n) micro_getenv(n)
@@ -94,7 +94,7 @@
 #undef getenv
 
 // -------------------------------------------------------------------------
-// Tier-E: ncclNetInit()/ncclNetInitFromParent() fakes. Defined HERE (not in
+// ncclNetInit()/ncclNetInitFromParent() fakes. Defined HERE (not in
 // init_fakes.cc) because they set comm->ncclNet, which needs the full
 // ncclComm/ncclNet_t layout that only this UUT TU sees. commAlloc() reads
 // comm->ncclNet again in dmaBufSupported(), so a non-null net is required on
@@ -120,7 +120,7 @@ ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* paren
 
 // ===========================================================================
 // Fixture: resets all init-layer fakes between tests (TearDown). Tests that
-// exercise ncclInit()/call_once outcomes run process-isolated (see plan F4).
+// exercise ncclInit()/call_once outcomes run process-isolated.
 // ===========================================================================
 class InitMicrotest : public ::testing::Test {
  protected:
@@ -147,7 +147,7 @@ class HostPattern {
 };
 }  // namespace
 
-// --- Tier A: uniformRanksPerHost (init.cc:1249) -- pure host logic, no seams ---
+// --- uniformRanksPerHost (init.cc:1249) -- pure host logic, no seams ---
 // Returns true iff every host has the same (>0) number of ranks and they cover
 // all nranks.
 
@@ -176,7 +176,7 @@ TEST_F(InitMicrotest, UniformRanksPerHost_ZeroRanks_ReturnsFalse) {
   EXPECT_FALSE(uniformRanksPerHost(p.comm(), 0));
 }
 
-// --- Tier B: ctaPolicyIsValid (init.cc:132) -- pure; valid range is
+// --- ctaPolicyIsValid (init.cc:132) -- pure; valid range is
 // [0, DEFAULT|EFFICIENCY|ZERO]. -----------------------------------------------
 TEST_F(InitMicrotest, CtaPolicyIsValid_Default_True) {
   EXPECT_TRUE(ctaPolicyIsValid(NCCL_CTA_POLICY_DEFAULT));
@@ -193,7 +193,7 @@ TEST_F(InitMicrotest, CtaPolicyIsValid_AboveMax_False) {
   EXPECT_FALSE(ctaPolicyIsValid(maxPolicy + 1));
 }
 
-// --- Tier B: parseCommConfig (init.cc:3041) -- one validation arm per test.
+// --- parseCommConfig (init.cc:3041) -- one validation arm per test.
 // A fresh NCCL_CONFIG_INITIALIZER (current version) passes every arm; each test
 // perturbs exactly one field and expects ncclInvalidArgument. ---------------
 namespace {
@@ -237,7 +237,7 @@ TEST_F(InitMicrotest, ParseCommConfig_ValidDefault_ReturnsSuccessAndAssigns) {
   EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT, comm->config.CTAPolicy);  // undef -> default
 }
 
-// --- Tier B: getters + version + async-error (init.cc:4224+) ---
+// --- getters + version + async-error (init.cc:4224+) ---
 // CommCheck/PtrCheck are the REAL argcheck.cc oracles; a "ready" comm has valid
 // magics and abortFlag->0 so ncclCommEnsureReady takes the async-error path,
 // which returns ncclSuccess for a zero-inited comm (no proxy/gin/groupJob).
@@ -308,7 +308,7 @@ TEST_F(InitMicrotest, GetAsyncError_ReadyComm_ReturnsSuccess) {
   EXPECT_EQ(ncclSuccess, e);
 }
 
-// --- Tier B: ncclCommSetAsyncError (init.cc:3415) -- pure guard + atomic store -
+// --- ncclCommSetAsyncError (init.cc:3415) -- pure guard + atomic store -
 TEST_F(InitMicrotest, SetAsyncError_ValidState_StoresAndSucceeds) {
   auto comm = std::make_unique<ncclComm>();
   EXPECT_EQ(ncclSuccess, ncclCommSetAsyncError(comm.get(), ncclInProgress));
@@ -326,7 +326,7 @@ TEST_F(InitMicrotest, SetAsyncError_NullComm_ReturnsInvalidArgument) {
   EXPECT_EQ(ncclInvalidArgument, ncclCommSetAsyncError(nullptr, ncclSuccess));
 }
 
-// --- Tier B: envConfigOverride (init.cc:2793) -- per-env override branches.
+// --- envConfigOverride (init.cc:2793) -- per-env override branches.
 // g_loadParam dispatches on the NCCL_PARAM env key; TearDown restores defaults. -
 namespace {
 // Fresh comm whose embedded config is all-UNDEF (via NCCL_CONFIG_INITIALIZER).
@@ -366,7 +366,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CgaClusterSizeInRange_Applied) {
 // though COMM_BLOCKING/CGA_CLUSTER_SIZE (same g_loadParam path) do -- investigate
 // whether ncclParamMinCTAs resolves outside the redirected NCCL_PARAM. Deferred.
 
-// --- Tier B: computeBuffSizes (init.cc:1180) -- buff/chunk selection. Params
+// --- computeBuffSizes (init.cc:1180) -- buff/chunk selection. Params
 // return -2 (default) so buffSizes come from rcclSetDefaultBuffSizes; single
 // node + owner==comm sets the shared tpP2pChunkSize. ---------------------------
 TEST_F(InitMicrotest, ComputeBuffSizes_SingleNodeOwner_UsesDefaultsAndSetsShared) {
@@ -382,7 +382,7 @@ TEST_F(InitMicrotest, ComputeBuffSizes_SingleNodeOwner_UsesDefaultsAndSetsShared
   EXPECT_EQ(comm->p2pChunkSize, sr->tpP2pChunkSize);
 }
 
-// --- Tier B: ncclCommGetAsyncError precedence (init.cc:4260) ------------------
+// --- ncclCommGetAsyncError precedence (init.cc:4260) ------------------
 TEST_F(InitMicrotest, GetAsyncError_CommErrorWins_OverProxyGin) {
   ReadyComm rc;
   rc.get()->asyncResult = ncclSystemError;  // set before proxy/gin checks
@@ -420,7 +420,7 @@ TEST_F(InitMicrotest, GetAsyncError_GroupJobCompletes_AndClears) {
 }
 
 // ===========================================================================
-// Tier C: GPU-facing helpers via the controllable device model (F1) + fault
+// GPU-facing helpers via the controllable device model + fault
 // injection. "mock various GPUs": g_hipGetDeviceProperties supplies gcnArchName;
 // g_hipRuntimeGetVersion / g_hipGetDeviceProperties inject fatal HIP errors.
 // ===========================================================================
@@ -545,10 +545,10 @@ TEST_F(InitMicrotest, FillInfo_AllocOk_DmaBufSupported_EnablesGdrDirectly) {
 }
 
 // ===========================================================================
-// Tier D: ncclCommInitAll_impl (init.cc:3350) validation arms + device-count
-// model. cudaGetDevice runs before any validation; cudaGetDeviceCount gates the
-// devlist checks. (Full happy path / restoration lands with the D5 ncclInit
-// bring-up since the loop calls ncclCommInitRankDev.)
+// ncclCommInitAll_impl (init.cc:3350) validation arms + device-count model.
+// cudaGetDevice runs before any validation; cudaGetDeviceCount gates the devlist
+// checks. (The full happy path is not covered here: the loop calls
+// ncclCommInitRankDev, which runs the whole init tree.)
 // ===========================================================================
 TEST_F(InitMicrotest, CommInitAll_GetDeviceFault_StopsBeforeCount) {
   g_hipGetDevice = [](int*) { return hipErrorInvalidValue; };
@@ -601,9 +601,9 @@ TEST_F(InitMicrotest, CommInitAll_SetTargetDeviceFault_RestoresOriginalDevice) {
   EXPECT_GE(setCalls, 2);     // in-loop set + restore set
 }
 
-// --- Tier D: ncclCommInitRankDev (init.cc:3244) pre-ncclInit validation arms.
-// Only the nId checks run before ncclInit(); the post-init arms (null newcomm/
-// config, nranks/myrank) require the D5 real-ncclInit bring-up and land there. -
+// --- ncclCommInitRankDev (init.cc:3244) pre-ncclInit validation arms. Only the
+// nId checks run before ncclInit(); the post-init arms (null newcomm/config,
+// nranks/myrank) run after the real ncclInit() and are covered below. -
 TEST_F(InitMicrotest, CommInitRankDev_NIdNonPositive_ReturnsInvalidArgument) {
   ncclComm_t nc = nullptr;
   ncclUniqueId id{};
@@ -619,7 +619,7 @@ TEST_F(InitMicrotest, CommInitRankDev_NIdGreaterThanNranks_ReturnsInvalidArgumen
             ncclCommInitRankDev(&nc, /*nranks=*/4, /*nId=*/5, &id, /*myrank=*/0, 0, &cfg, "t"));
 }
 
-// --- D5: real ncclInit() runs host-only. This drives the whole init-once tree
+// --- real ncclInit() runs host-only. This drives the whole init-once tree
 // (checkHsaEnvSetting, initEnv, setCpuStackSize->ncclOsInitialize, initGdrCopy,
 // bootstrapNetInit) via the controllable success seams, THEN the post-ncclInit
 // null-newcomm validation arm returns before ncclCalloc/ncclAsyncLaunch.
@@ -655,7 +655,7 @@ TEST_F(InitMicrotest, CommInitRankDev_PostInit_MyrankGeNranks_ReturnsInvalidArgu
             ncclCommInitRankDev(&nc, /*nranks=*/1, /*nId=*/1, &id, /*myrank=*/1, 0, &cfg, "t"));
 }
 
-// --- D5 (process-isolated): ncclInit() FAILURE arm. ncclInit uses call_once, so
+// --- (process-isolated) ncclInit() FAILURE arm. ncclInit uses call_once, so
 // once any in-process test runs it (success), it can't be made to fail. The
 // ProcessIsolatedTestRunner re-execs a fresh binary image (pristine call_once)
 // per registered test, so bootstrapNetInit failure genuinely fails ncclInit. --
@@ -693,7 +693,7 @@ TEST_F(InitMicrotest, CheckHostUncacheMemSetting_Cached_Gfx942_ReturnsSuccess) {
 #endif
 
 // ===========================================================================
-// Tier-E: commAlloc() -- the deep allocation entry point. Runs host-only via
+// commAlloc() -- the deep allocation entry point. Runs host-only via
 // the controllable deep seams (InstallCommAllocSuccess). The two arg-check arms
 // need no seams; the happy path needs all seams; each failure arm injects ONE
 // failure so the corresponding early-return is covered in isolation.
@@ -777,7 +777,7 @@ TEST_F(InitMicrotest, CommAlloc_MemPoolCreateFails_ReturnsError) {
 }
 
 // ===========================================================================
-// Tier-E: devCommSetup() -- builds the device-side comm/channels image. Runs on
+// devCommSetup() -- builds the device-side comm/channels image. Runs on
 // a comm produced by commAlloc()'s happy path; the device work goes through the
 // controllable HIP async-op seams (InstallDevCommSetupSuccess). cuMem stays off
 // (default) so the alloc templates take the hipExtMallocWithFlags host arm.
@@ -814,7 +814,7 @@ TEST_F(InitMicrotest, DevCommSetup_DevCommAllocFails_ReturnsError) {
 }
 
 // ===========================================================================
-// Tier-E: commFree() -- the teardown path. commFree() ends with free(comm), so
+// commFree() -- the teardown path. commFree() ends with free(comm), so
 // the comm MUST be ncclCalloc()'d (malloc-backed) exactly like production, NOT
 // new'd. It also dereferences comm->abortFlag / abortFlagRefCount (set by the
 // init path, not commAlloc); we point them at locals with refCount>1 so the
