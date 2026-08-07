@@ -267,9 +267,10 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         and ctx.profile.wave_size != ctx.profile.wave_size_max
         and is_swmmac
     )
-    uses_plain_vgpr_dst = arch in ('rdna3', 'rdna3_5', 'rdna4') and (
-        is_dense_wmma or uses_runtime_wave_split_k_sparse_layout
-    )
+    uses_direct_vgpr_dst = ctx.profile.matrix_layout in (
+        MatrixLayout.WMMA_REPLICATED_HALFWAVE,
+        MatrixLayout.WMMA_SPLIT_K,
+    ) and (is_dense_wmma or uses_runtime_wave_split_k_sparse_layout)
     uses_gfx11_wmma_layout = arch in ('rdna3', 'rdna3_5') and is_dense_wmma
     uses_gfx12_wmma_layout = arch == 'rdna4' and is_dense_wmma
     uses_fixed_wave32_split_k_layout = (
@@ -328,7 +329,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             L.append(
                 f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, inst_.acc_cd);'
             )
-        elif uses_plain_vgpr_dst:
+        elif uses_direct_vgpr_dst:
             L.append(f'  uint32_t dst = vb + {d}.encoding_value_;')
         else:
             L.append(f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, 1);')

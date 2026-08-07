@@ -1111,13 +1111,77 @@ def test_matrix_resolved_sparse_index_rejects_missing_vgpr_offset():
 
 def test_matrix_direct_offsets_do_not_use_resolved_operand_setup():
     inst = Instruction('V_WMMA_F32_16X16X16_F16', 'ENC_VOP3P', 0, [])
-    profile = _matrix_profile()
+    profile = _matrix_profile(
+        matrix_layout=MatrixLayout.WMMA_REPLICATED_HALFWAVE,
+        wave_size=32,
+        wave_size_max=64,
+    )
 
-    body = _gen_mfma(inst, 'rdna4', profile)
+    body = _gen_mfma(inst, 'renamed_replicated_halfwave', profile)
 
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
     assert 'Isa::resolved_vgpr_offset' not in body
     assert 'amdgpu::resolve_acc(vb, dst,' in body
+
+
+@pytest.mark.parametrize(
+    ('inst_name', 'profile'),
+    [
+        (
+            'V_WMMA_F32_16X16X16_F16',
+            _matrix_profile(
+                matrix_layout=MatrixLayout.WMMA_REPLICATED_HALFWAVE,
+                wave_size=32,
+                wave_size_max=64,
+            ),
+        ),
+        (
+            'V_SWMMAC_F32_16X16X32_F16',
+            _matrix_profile(
+                matrix_layout=MatrixLayout.WMMA_SPLIT_K,
+                wave_size=32,
+                wave_size_max=64,
+            ),
+        ),
+    ],
+)
+def test_matrix_wmma_layouts_use_direct_vgpr_destinations(inst_name, profile):
+    inst = Instruction(inst_name, 'ENC_VOP3P', 0, [])
+
+    body = _gen_mfma(inst, 'renamed_direct_vgpr', profile)
+
+    assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
+    assert 'amdgpu::dst_base(vb, vdst.encoding_value_' not in body
+    assert 'resolved_vgpr_offset(wf, vdst.opr_type_' not in body
+
+
+def test_matrix_mfma_layout_uses_accumulator_bank_destination():
+    inst = Instruction('V_MFMA_F32_16X16X16_F16', 'ENC_VOP3P_MFMA', 0, [])
+
+    body = _gen_mfma(inst, 'renamed_accumulator_bank', _matrix_profile())
+
+    assert 'uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, 1);' in body
+    assert 'uint32_t dst = vb + vdst.encoding_value_;' not in body
+    assert 'resolved_vgpr_offset(wf, vdst.opr_type_' not in body
+
+
+def test_matrix_vgpr_msb_indexing_uses_resolved_vgpr_destination():
+    inst = Instruction('V_WMMA_F32_16X16X16_F16', 'ENC_VOP3P', 0, [])
+    profile = _matrix_profile(
+        uses_vgpr_msb_indexing=True,
+        matrix_layout=MatrixLayout.WMMA_SPLIT_K,
+        wave_size=32,
+        wave_size_max=32,
+    )
+
+    body = _gen_mfma(inst, 'renamed_resolved_vgpr', profile)
+
+    assert (
+        'uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, '
+        'vdst.encoding_value_, vdst.vgpr_msb_role());'
+    ) in body
+    assert 'uint32_t dst = vb + vdst.encoding_value_;' not in body
+    assert 'amdgpu::dst_base(vb, vdst.encoding_value_' not in body
 
 
 def test_matrix_f64_resolved_sources_use_normalized_base_expressions():
