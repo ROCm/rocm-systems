@@ -15,9 +15,21 @@ if(NOT _nm_result EQUAL 0)
     message(FATAL_ERROR "nm failed: ${_nm_error}")
 endif()
 
+# Split gfx1250 execution helpers use an `_exec` suffix. Match their qualified
+# operand-method names instead of the global `_exec(` substring, which also
+# occurs in legitimate model-side helpers such as `writes_exec`.
+string(REPLACE "\n" ";" _symbol_lines "${_symbols}")
+foreach(_symbol IN LISTS _symbol_lines)
+    if(_symbol MATCHES "rocjitsu::gfx1250::Operand::.*_exec\\(")
+        message(
+            FATAL_ERROR
+            "model-only binary contains forbidden execution symbol: ${_symbol}"
+        )
+    endif()
+endforeach()
+
 set(_forbidden_symbols
     "::execute_impl("
-    "_exec("
     "rocjitsu::amdgpu::ComputeUnitCore"
     "ds_calculate_addresses("
     "flat_calculate_addresses("
