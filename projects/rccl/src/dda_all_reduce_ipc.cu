@@ -133,6 +133,13 @@ bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   return true;
 }
 
+int ncclAllReduceDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  (void)comm;
+  auto grid = meta::comms::getGridAndBlockDims(count, ncclTypeSize(datatype),
+                                               nccl_dda_detail::ddaMaxNBlocksForScratch()).first;
+  return (int)grid.x;
+}
+
 ncclResult_t ncclAllReduceDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                  ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   (void)op;

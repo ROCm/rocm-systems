@@ -171,6 +171,11 @@ bool ncclAllReduceDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* 
   return true;
 }
 
+int ncclAllReduceDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  auto grid = meta::comms::getGridAndBlockDims(count, ncclTypeSize(datatype), comm->ddaFabricMaxBlocks).first;
+  return (int)grid.x;
+}
+
 ncclResult_t ncclAllReduceDdaFabric(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                     ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   (void)op;

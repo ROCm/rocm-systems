@@ -128,6 +128,16 @@ bool ncclAllReduceDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
   return true;
 }
 
+int ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  const size_t nPk = (count * ncclTypeSize(datatype)) >> 3; // 8 payload bytes per packet
+  const unsigned threads = 256;
+  int nBlocksMax = std::min(comm->ddaFabricMaxBlocks, nccl_dda_detail::kDdaFabricLLArMaxBlocks);
+  if (nBlocksMax < 1) nBlocksMax = 1;
+  unsigned blocks = (unsigned)std::min<size_t>((nPk + threads - 1) / threads, (size_t)nBlocksMax);
+  if (blocks == 0) blocks = 1;
+  return (int)blocks;
+}
+
 ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                       ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   (void)op;

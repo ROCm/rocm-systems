@@ -159,6 +159,22 @@ bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
   return true;
 }
 
+int ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  const size_t nWords = (count * ncclTypeSize(datatype)) >> 3;
+  const size_t numLines = (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
+  const unsigned threads = ddaLL128ArThreads(1024);
+  const size_t groups = threads / (unsigned)kDdaLL128Lanes;
+  int nBlocksMax = comm->ddaFabricMaxBlocks;
+  if (nBlocksMax < 1) nBlocksMax = 1;
+  unsigned blocks = (unsigned)std::min<size_t>((numLines + groups - 1) / groups, (size_t)nBlocksMax);
+  if (blocks == 0) blocks = 1;
+  if ((int)blocks > comm->ddaLLEpochLen) {
+    blocks = (unsigned)comm->ddaLLEpochLen;
+    if (blocks == 0) blocks = 1;
+  }
+  return (int)blocks;
+}
+
 ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                          ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   (void)op;

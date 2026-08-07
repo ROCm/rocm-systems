@@ -775,6 +775,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
           ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
+        decision->nMaxChannels = ncclAllReduceDdaFabricLLBlocks(comm, count, datatype);
         return ncclSuccess;
       }
       // Mid-size fast lane: LL128 protocol (128B lines, no GPU barrier).
@@ -782,15 +783,18 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
           ncclAllReduceDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL128;
         decision->protocol = NCCL_PROTO_LL128;
+        decision->nMaxChannels = ncclAllReduceDdaFabricLL128Blocks(comm, count, datatype);
         return ncclSuccess;
       }
       if (ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_VMM;
+        decision->nMaxChannels = ncclAllReduceDdaFabricBlocks(comm, count, datatype);
         return ncclSuccess;
       }
     } else {
       if (ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_IPC;
+        decision->nMaxChannels = ncclAllReduceDdaIpcBlocks(comm, count, datatype);
         return ncclSuccess;
       }
     }
