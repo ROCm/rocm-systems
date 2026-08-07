@@ -218,8 +218,8 @@ constexpr auto invalid_context_handle = 0UL;
 
 struct resolved_counter
 {
-    rocprofiler_counter_id_t                               id           = {};
-    std::vector<trace_cache::info::spm_counter_name_entry> name_entries = {};
+    rocprofiler_counter_id_t                                    id           = {};
+    std::vector<trace_cache::info::gpu_perf_counter_name_entry> name_entries = {};
 };
 
 using spm_available_config_vec_t = std::vector<rocprofiler_spm_available_configuration_t>;
@@ -251,8 +251,8 @@ struct agent_config_result
 
 struct counter_config_data
 {
-    spm_counter_id_vec_t                                   counter_ids  = {};
-    std::vector<trace_cache::info::spm_counter_name_entry> name_entries = {};
+    spm_counter_id_vec_t                                        counter_ids  = {};
+    std::vector<trace_cache::info::gpu_perf_counter_name_entry> name_entries = {};
 };
 
 void
@@ -348,23 +348,20 @@ make_counter_config_data(resolved_counter_vec_t& counters)
     return config_data;
 }
 
-std::vector<trace_cache::info::spm_counter_name_entry>
+std::vector<trace_cache::info::gpu_perf_counter_name_entry>
 spm_counter_name_entries(
-    rocprofiler_counter_id_t                               counter_id,
     const std::vector<gpu_perf_counter::counter_metadata>& counter_details,
     std::uint64_t                                          device_id)
 {
-    auto entries = std::vector<trace_cache::info::spm_counter_name_entry>{};
+    auto entries = std::vector<trace_cache::info::gpu_perf_counter_name_entry>{};
     entries.reserve(counter_details.size());
 
     for(const auto& metadata : counter_details)
     {
         auto counter_name = gpu_perf_counter::make_qualified_name(metadata);
         auto track_name   = fmt::format("GPU SPM {} [{}]", counter_name, device_id);
-        auto track_key =
-            std::hash<std::string>{}(track_name + std::to_string(metadata.counter_id));
         entries.push_back(
-            { counter_id.handle, metadata.counter_id, track_key, std::move(track_name) });
+            { metadata.counter_id, std::move(counter_name), std::move(track_name) });
     }
 
     return entries;
@@ -404,7 +401,7 @@ query_supported_spm_counters(rocprofiler_agent_id_t                 agent_id,
         auto name = details.front().name;
         if(requested_names.count(name) > 0)
         {
-            auto name_entries = spm_counter_name_entries(counter, details, device_id);
+            auto name_entries = spm_counter_name_entries(details, device_id);
             counters.push_back({ counter, std::move(name_entries) });
             matched.emplace(std::move(name));
         }
@@ -667,8 +664,6 @@ spm_record_callback(const rocprofiler_spm_dispatch_counting_service_data_t* disp
 bool
 configure_runtime(client_data* data, const request& req)
 {
-    if(!req.requested()) return true;
-
     if(data == nullptr)
     {
         LOG_WARNING("SPM runtime collection requested but client data is unavailable");
@@ -726,10 +721,8 @@ log_data_loss(client_data* data)
 }
 #else
 bool
-configure_runtime(client_data*, const request& req)
+configure_runtime(client_data*, const request&)
 {
-    if(!req.requested()) return true;
-
     LOG_WARNING("SPM runtime collection was requested, but this rocprofiler-sdk "
                 "build does not provide the experimental SPM API. Build with a "
                 "rocprofiler-sdk version that provides "

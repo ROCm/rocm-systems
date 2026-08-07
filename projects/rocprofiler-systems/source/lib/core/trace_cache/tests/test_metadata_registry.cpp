@@ -39,26 +39,27 @@ TEST(metadata_registry_test, gpu_perf_counter_lookup_uses_device_and_counter_id)
     EXPECT_FALSE(registry.find_gpu_perf_counter_by_id(2, 10).has_value());
 }
 
-TEST(metadata_registry_test, spm_counter_lookup_uses_device_and_counter_instance_id)
+TEST(metadata_registry_test, spm_counter_lookup_reuses_gpu_counter_entry)
 {
     metadata_registry registry;
 
     registry.set_spm_counter_names(
-        0,
-        {
-            info::spm_counter_name_entry{ 7, 1001, 9001, "GPU SPM SQ_WAVES[XCC=0] [0]" },
-            info::spm_counter_name_entry{ 7, 1002, 9002, "GPU SPM SQ_WAVES[XCC=1] [0]" },
-        });
+        0, {
+               info::gpu_perf_counter_name_entry{ 1001, "SQ_WAVES[XCC=0]",
+                                                  "GPU SPM SQ_WAVES[XCC=0] [0]" },
+               info::gpu_perf_counter_name_entry{ 1002, "SQ_WAVES[XCC=1]",
+                                                  "GPU SPM SQ_WAVES[XCC=1] [0]" },
+           });
     registry.set_spm_counter_names(
-        1,
-        {
-            info::spm_counter_name_entry{ 7, 1001, 9101, "GPU SPM SQ_WAVES[XCC=0] [1]" },
-        });
+        1, {
+               info::gpu_perf_counter_name_entry{ 1001, "SQ_WAVES[XCC=0]",
+                                                  "GPU SPM SQ_WAVES[XCC=0] [1]" },
+           });
 
     auto device0_counter1002 = registry.find_spm_counter_by_id(0, 1002);
     ASSERT_TRUE(device0_counter1002.has_value());
-    EXPECT_EQ(device0_counter1002->get().counter_id, 7);
-    EXPECT_EQ(device0_counter1002->get().track_key, 9002);
+    EXPECT_EQ(device0_counter1002->get().counter_id, 1002);
+    EXPECT_EQ(device0_counter1002->get().pmc_info_name, "SQ_WAVES[XCC=1]");
     EXPECT_EQ(device0_counter1002->get().track_name, "GPU SPM SQ_WAVES[XCC=1] [0]");
 
     auto device1_counter1001 = registry.find_spm_counter_by_id(1, 1001);

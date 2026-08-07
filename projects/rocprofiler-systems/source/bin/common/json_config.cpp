@@ -398,13 +398,13 @@ resolve_schema_config(const nlohmann::json& config)
             resolve_value(result, hw, "rocm_events", env_vars::ROCM_EVENTS);
             resolve_value(result, hw, "papi_events", env_vars::PAPI_EVENTS);
             resolve_value(result, hw, "gpu_perf_counters", env_vars::GPU_PERF_COUNTERS);
-        }
-        if(hw.contains("spm"))
-        {
-            const auto& spm = hw["spm"];
-            resolve_value(result, spm, "events", env_vars::ROCM_SPM_EVENTS);
-            resolve_value(result, spm, "sample_interval",
-                          env_vars::ROCM_SPM_SAMPLE_INTERVAL);
+            if(hw.contains("spm"))
+            {
+                const auto& spm = hw["spm"];
+                resolve_value(result, spm, "events", env_vars::ROCM_SPM_EVENTS);
+                resolve_value(result, spm, "sample_interval",
+                              env_vars::ROCM_SPM_SAMPLE_INTERVAL);
+            }
         }
         if(hw.contains("papi_multiplexing"))
             resolve_enabled(result, hw["papi_multiplexing"], "enabled",

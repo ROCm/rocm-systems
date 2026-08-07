@@ -184,6 +184,7 @@ TEST_F(json_config_test, resolves_spm_hardware_counters_section)
 {
     auto j = nlohmann::json::parse(R"({
         "hardware_counters": {
+            "enabled": true,
             "spm": {
                 "events": {"value": ["SQ_WAVES"]},
                 "sample_interval": {"value": 4200}
@@ -195,6 +196,24 @@ TEST_F(json_config_test, resolves_spm_hardware_counters_section)
 
     EXPECT_EQ(result.at(env_vars::ROCM_SPM_EVENTS), "SQ_WAVES");
     EXPECT_EQ(result.at(env_vars::ROCM_SPM_SAMPLE_INTERVAL), "4200");
+}
+
+TEST_F(json_config_test, does_not_resolve_spm_when_hardware_counters_are_disabled)
+{
+    auto j = nlohmann::json::parse(R"({
+        "hardware_counters": {
+            "enabled": false,
+            "spm": {
+                "events": {"value": ["SQ_WAVES"]},
+                "sample_interval": {"value": 4200}
+            }
+        }
+    })");
+
+    auto result = resolve_config(j);
+
+    EXPECT_EQ(result.count(env_vars::ROCM_SPM_EVENTS), 0u);
+    EXPECT_EQ(result.count(env_vars::ROCM_SPM_SAMPLE_INTERVAL), 0u);
 }
 
 // Test new schema format - causal section
@@ -437,10 +456,30 @@ TEST_F(json_config_test, exports_large_spm_sample_interval_as_integer)
     EXPECT_EQ(j["hardware_counters"]["spm"]["sample_interval"]["value"], 4294967296ULL);
 }
 
+TEST_F(json_config_test, spm_env_export_round_trips_through_hw_counter_gate)
+{
+    std::map<std::string, std::string> env_vars = {
+        { rocprofsys::env_vars::ROCM_SPM_EVENTS, "SQ_WAVES:device=0" },
+        { rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL, "8192" },
+    };
+
+    auto j = env_vars_to_json_schema(env_vars);
+
+    EXPECT_EQ(j["hardware_counters"]["enabled"], true);
+    EXPECT_EQ(j["hardware_counters"]["spm"]["events"]["value"], "SQ_WAVES:device=0");
+    EXPECT_EQ(j["hardware_counters"]["spm"]["sample_interval"]["value"], 8192);
+
+    auto result = resolve_config(j);
+
+    EXPECT_EQ(result.at(env_vars::ROCM_SPM_EVENTS), "SQ_WAVES:device=0");
+    EXPECT_EQ(result.at(env_vars::ROCM_SPM_SAMPLE_INTERVAL), "8192");
+}
+
 TEST_F(json_config_test, resolves_large_spm_sample_interval_from_json)
 {
     auto j = nlohmann::json::parse(R"({
         "hardware_counters": {
+            "enabled": true,
             "spm": {
                 "sample_interval": {"value": 4294967296}
             }

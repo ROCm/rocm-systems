@@ -98,6 +98,21 @@ constexpr auto spm_preset_json = R"({
         "description": "SPM trace preset"
     },
     "hardware_counters": {
+        "enabled": true,
+        "spm": {
+            "events": {"value": "SQ_WAVES:device=0"},
+            "sample_interval": {"value": 8192}
+        }
+    }
+})";
+
+constexpr auto disabled_spm_preset_json = R"({
+    "metadata": {
+        "name": "spm-disabled",
+        "cli_flag": "--spm-disabled",
+        "description": "Disabled SPM trace preset"
+    },
+    "hardware_counters": {
         "enabled": false,
         "spm": {
             "events": {"value": "SQ_WAVES:device=0"},
@@ -317,7 +332,7 @@ TEST_F(preset_registry_test, describe_generates_output_tree)
     EXPECT_NE(desc.find("CPU Sampling:"), std::string::npos);
 }
 
-TEST_F(preset_registry_test, describe_reports_spm_events_without_hw_counter_gate)
+TEST_F(preset_registry_test, describe_reports_spm_events_when_hw_counters_enabled)
 {
     temp_dir dir;
     dir.write_file("spm-trace.json", spm_preset_json);
@@ -331,4 +346,20 @@ TEST_F(preset_registry_test, describe_reports_spm_events_without_hw_counter_gate
     EXPECT_NE(desc.find("ROCm SPM:        ON"), std::string::npos);
     EXPECT_NE(desc.find("ROCm SPM Events: SQ_WAVES:device=0"), std::string::npos);
     EXPECT_NE(desc.find("SPM Interval:    8192"), std::string::npos);
+}
+
+TEST_F(preset_registry_test, describe_omits_spm_events_when_hw_counters_disabled)
+{
+    temp_dir dir;
+    dir.write_file("spm-disabled.json", disabled_spm_preset_json);
+
+    ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
+    preset_registry registry;
+    auto            desc = registry.describe("spm-disabled");
+    ::unsetenv(env_vars::PRESET_DIR);
+
+    EXPECT_NE(desc.find("Disabled SPM trace preset"), std::string::npos);
+    EXPECT_EQ(desc.find("ROCm SPM:        ON"), std::string::npos);
+    EXPECT_EQ(desc.find("ROCm SPM Events: SQ_WAVES:device=0"), std::string::npos);
+    EXPECT_EQ(desc.find("SPM Interval:    8192"), std::string::npos);
 }
