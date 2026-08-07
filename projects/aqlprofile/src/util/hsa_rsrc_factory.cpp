@@ -170,8 +170,43 @@ HsaRsrcFactory::~HsaRsrcFactory() {
 
 hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {
 #ifdef _WIN32
-  (void)api;
-  return HSA_STATUS_ERROR;
+  // On Windows the aqlprofile symbols live in hsa-amd-aqlprofile64.dll, which is
+  // resolved via LoadLibrary/GetProcAddress rather than dlopen/dlsym.
+  const char* kAqlProfileLibWin = "hsa-amd-aqlprofile64.dll";
+  HMODULE handle = LoadLibraryA(kAqlProfileLibWin);
+  if (handle == NULL) {
+    fprintf(stderr, "Loading '%s' failed, error %lu\n", kAqlProfileLibWin,
+            static_cast<unsigned long>(GetLastError()));
+    return HSA_STATUS_ERROR;
+  }
+
+  api->hsa_ven_amd_aqlprofile_error_string =
+      (decltype(::hsa_ven_amd_aqlprofile_error_string)*)GetProcAddress(
+          handle, "hsa_ven_amd_aqlprofile_error_string");
+  api->hsa_ven_amd_aqlprofile_validate_event =
+      (decltype(::hsa_ven_amd_aqlprofile_validate_event)*)GetProcAddress(
+          handle, "hsa_ven_amd_aqlprofile_validate_event");
+  api->hsa_ven_amd_aqlprofile_start =
+      (decltype(::hsa_ven_amd_aqlprofile_start)*)GetProcAddress(handle,
+                                                                "hsa_ven_amd_aqlprofile_start");
+  api->hsa_ven_amd_aqlprofile_stop =
+      (decltype(::hsa_ven_amd_aqlprofile_stop)*)GetProcAddress(handle,
+                                                               "hsa_ven_amd_aqlprofile_stop");
+#ifdef AQLPROF_NEW_API
+  api->hsa_ven_amd_aqlprofile_read =
+      (decltype(::hsa_ven_amd_aqlprofile_read)*)GetProcAddress(handle,
+                                                               "hsa_ven_amd_aqlprofile_read");
+#endif
+  api->hsa_ven_amd_aqlprofile_legacy_get_pm4 =
+      (decltype(::hsa_ven_amd_aqlprofile_legacy_get_pm4)*)GetProcAddress(
+          handle, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
+  api->hsa_ven_amd_aqlprofile_get_info = (decltype(::hsa_ven_amd_aqlprofile_get_info)*)GetProcAddress(
+      handle, "hsa_ven_amd_aqlprofile_get_info");
+  api->hsa_ven_amd_aqlprofile_iterate_data =
+      (decltype(::hsa_ven_amd_aqlprofile_iterate_data)*)GetProcAddress(
+          handle, "hsa_ven_amd_aqlprofile_iterate_data");
+
+  return HSA_STATUS_SUCCESS;
 #else
   void* handle = dlopen(kAqlProfileLib, RTLD_NOW);
   if (handle == NULL) {
@@ -530,13 +565,18 @@ bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* br
   std::string filename(brig_path);
   std::clog << "Code object filename: " << filename << std::endl;
 
-  // Open the file containing code object
+  // Open the file containing code object.
+  // On Windows hsa_file_t is a Win32 HANDLE (void*), so use CreateFile/CloseHandle;
+  // on POSIX it is an int file descriptor from open()/close().
 #ifdef _WIN32
-  hsa_file_t file_handle = _open(filename.c_str(), _O_RDONLY | _O_BINARY);
+  hsa_file_t file_handle = CreateFileA(filename.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL,
+                                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  const bool file_open_failed = (file_handle == INVALID_HANDLE_VALUE);
 #else
   hsa_file_t file_handle = open(filename.c_str(), O_RDONLY);
+  const bool file_open_failed = (file_handle == -1);
 #endif
-  if (file_handle == -1) {
+  if (file_open_failed) {
     std::cerr << "Error: failed to load '" << filename << "'" << std::endl;
     assert(false);
     return false;
@@ -571,7 +611,7 @@ bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* br
   CHECK_STATUS("Error in looking up kernel symbol", status);
 
 #ifdef _WIN32
-  _close(file_handle);
+  CloseHandle(file_handle);
 #else
   close(file_handle);
 #endif

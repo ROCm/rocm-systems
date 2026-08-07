@@ -95,7 +95,10 @@ if(NOT GTest_FOUND)
     endif()
 endif()
 
-if(NOT WIN32)
+# The legacy standalone test app (ctrl) is POSIX-only by default. On Windows it is
+# opt-in via AQLPROFILE_BUILD_WIN_TESTS so it can be built to exercise SQTT/PMC paths.
+option(AQLPROFILE_BUILD_WIN_TESTS "Build legacy standalone tests on Windows" OFF)
+if(NOT WIN32 OR AQLPROFILE_BUILD_WIN_TESTS)
   set ( TEST_BINARY_DIR ${PROJECT_BINARY_DIR}/test )
   add_subdirectory ( ${TEST_DIR} ${TEST_BINARY_DIR} )
 endif()
