@@ -262,9 +262,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
     arch = arch_name
     is_dense_wmma = name.startswith('V_WMMA_')
-    uses_rdna4_swmmac_layout = arch == 'rdna4' and is_swmmac
+    uses_runtime_wave_split_k_sparse_layout = (
+        ctx.profile.matrix_layout is MatrixLayout.WMMA_SPLIT_K
+        and ctx.profile.wave_size != ctx.profile.wave_size_max
+        and is_swmmac
+    )
     uses_plain_vgpr_dst = arch in ('rdna3', 'rdna3_5', 'rdna4') and (
-        is_dense_wmma or uses_rdna4_swmmac_layout
+        is_dense_wmma or uses_runtime_wave_split_k_sparse_layout
     )
     uses_gfx11_wmma_layout = arch in ('rdna3', 'rdna3_5') and is_dense_wmma
     uses_gfx12_wmma_layout = arch == 'rdna4' and is_dense_wmma
@@ -328,7 +332,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             L.append(f'  uint32_t dst = vb + {d}.encoding_value_;')
         else:
             L.append(f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, 1);')
-        if uses_rdna4_swmmac_layout:
+        if uses_runtime_wave_split_k_sparse_layout:
             L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
             L.append(f'  uint32_t s2 = dst;')
             L.append(
@@ -404,7 +408,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f'  amdgpu::exec_wmma_i32(cu, {M}, {N}, {K}, {in_bits}, dst, src0_base,'
                 f' src1_base, s2, extract_a, extract_b, inst_.clamp, const_acc);'
             )
-        elif uses_rdna4_swmmac_layout:
+        elif uses_runtime_wave_split_k_sparse_layout:
             if input_type in ('IU4', 'IU8'):
                 suffix = '4' if input_type == 'IU4' else '8'
                 append_signed_extractors(suffix)
@@ -572,7 +576,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                             f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst, src0_base,'
                             f' src1_base, s2, {ea}, {eb}, const_acc);'
                         )
-        elif uses_rdna4_swmmac_layout:
+        elif uses_runtime_wave_split_k_sparse_layout:
             if result_type == 'F16':
                 exec_fn = 'exec_swmmac_f16'
             elif result_type == 'BF16':

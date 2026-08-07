@@ -2835,7 +2835,7 @@ def test_generated_rdna3_dot2acc_uses_dot2c_simd_probe(
     assert 'throw util::UnimplementedInst' not in body
 
 
-def test_rdna4_swmmac_uses_src2_as_sparse_index_vgpr():
+def test_runtime_wave_split_k_sparse_layout_uses_src2_as_index_vgpr():
     inst = Instruction(
         'V_SWMMAC_F32_16X16X32_FP8_FP8',
         'ENC_VOP3P',
@@ -2847,10 +2847,14 @@ def test_rdna4_swmmac_uses_src2_as_sparse_index_vgpr():
             Operand('src2', 32, 'OPR_SRC_VGPR', True, False, False, False, 3),
         ],
     )
+    profile = _matrix_profile(
+        matrix_layout=MatrixLayout.WMMA_SPLIT_K,
+        wave_size=32,
+        wave_size_max=64,
+    )
 
-    body = _gen_mfma(inst, 'rdna4')
+    body = _gen_mfma(inst, 'renamed_runtime_split_k', profile)
 
-    assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
     assert 'uint32_t const_acc = amdgpu::ACC_FROM_VGPR;' in body
     assert 'uint32_t s2 = dst;' in body
     assert 'uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);' in body
@@ -2862,6 +2866,41 @@ def test_rdna4_swmmac_uses_src2_as_sparse_index_vgpr():
         'index_key, amdgpu::extract_fp8, amdgpu::extract_fp8, const_acc, wf.wf_size());'
     ) in body
     assert 'resolve_acc' not in body
+
+
+def test_runtime_wave_split_k_sparse_i32_uses_swmmac_executor():
+    inst = Instruction('V_SWMMAC_I32_16X16X32_IU4', 'ENC_VOP3P', 0, [])
+    profile = _matrix_profile(
+        matrix_layout=MatrixLayout.WMMA_SPLIT_K,
+        wave_size=32,
+        wave_size_max=64,
+    )
+
+    body = _gen_mfma(inst, 'renamed_runtime_split_k', profile)
+
+    assert 'uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);' in body
+    assert (
+        'amdgpu::exec_swmmac_i32(cu, 16, 16, 32, 4, dst, '
+        'amdgpu::src_base(vb, src0.encoding_value_), '
+        'amdgpu::src_base(vb, src1.encoding_value_), s2, index_base, '
+        '16, index_key, extract_a, extract_b, inst_.clamp, const_acc, wf.wf_size());'
+    ) in body
+
+
+def test_non_split_k_sparse_layout_does_not_use_swmmac_index_layout():
+    inst = Instruction('V_SWMMAC_F32_16X16X32_FP8_FP8', 'ENC_VOP3P', 0, [])
+    profile = _matrix_profile(
+        matrix_layout=MatrixLayout.WMMA_REPLICATED_HALFWAVE,
+        wave_size=32,
+        wave_size_max=64,
+    )
+
+    body = _gen_mfma(inst, 'renamed_non_split_k', profile)
+
+    assert 'uint32_t s2 = amdgpu::resolve_acc(' in body
+    assert 'uint32_t index_base' not in body
+    assert 'uint32_t index_key' not in body
+    assert 'amdgpu::exec_swmmac_f32' not in body
 
 
 def test_rdna4_f16_bf16_swmmac_dispatch_wiring_is_generated():
