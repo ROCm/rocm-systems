@@ -17,7 +17,6 @@ endif()
 
 set(_forbidden_symbols
     "::execute_impl("
-    "_exec("
     "rocjitsu::amdgpu::ComputeUnitCore"
     "ds_calculate_addresses("
     "flat_calculate_addresses("
@@ -32,6 +31,17 @@ foreach(_forbidden IN LISTS _forbidden_symbols)
         )
     endif()
 endforeach()
+
+# Generated gfx1250 execution helpers use an `_exec` suffix. Qualify the
+# namespace so unrelated analysis helpers such as writes_exec remain valid.
+set(_forbidden_symbol_pattern "rocjitsu::gfx1250::[A-Za-z0-9_:]+_exec\\(")
+string(REGEX MATCH "${_forbidden_symbol_pattern}" _match "${_symbols}")
+if(_match)
+    message(
+        FATAL_ERROR
+        "model-only binary contains forbidden symbol matching: ${_forbidden_symbol_pattern}"
+    )
+endif()
 
 # Keep the denylist from passing vacuously if the model objects disappear from
 # the final link.
