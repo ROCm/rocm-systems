@@ -13,6 +13,7 @@
 #include <limits>
 #include <sstream>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -950,7 +951,7 @@ TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
 TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
                                                     const KernelTextLayout &layout,
                                                     rj_code_arch_t arch) {
-  std::unordered_map<uint64_t, std::pair<uint64_t, uint64_t>> rewritten_regions;
+  std::unordered_map<uint64_t, std::tuple<uint64_t, uint64_t, bool>> rewritten_regions;
   for (const IndirectCallFixup &fixup : layout.recovered_builder_fixups) {
     auto target_target = target_for_source_offset(layout, fixup.source_target_offset);
     if (!target_target) {
@@ -970,18 +971,20 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
                               "recovered indirect branch builder points outside translated .text");
     }
 
-    // One source-side builder may feed multiple consumers. Rewriting the same
-    // builder more than once is valid only when every consumer agrees on the
-    // final relocated target and byte range.
+    // One source-side builder may feed multiple consumers. Only the first one
+    // rewrites the range, so reuse is valid only when every consumer asks for
+    // the same replacement -- same target, same byte range, and the same drain
+    // requirement, which changes the words emitted.
     const auto rewrite_key =
-        std::pair{fixup.target_recovery_end_offset, static_cast<uint64_t>(*target_target)};
+        std::tuple{fixup.target_recovery_end_offset, static_cast<uint64_t>(*target_target),
+                   fixup.source_requires_xcnt_drain};
     auto [rewrite_it, inserted] =
         rewritten_regions.emplace(fixup.target_recovery_begin_offset, rewrite_key);
     if (!inserted) {
       if (rewrite_it->second != rewrite_key) {
         return relocation_error(
             fixup.source_call_offset,
-            "recovered indirect branch builder is reused for incompatible targets");
+            "recovered indirect branch builder is reused for incompatible replacements");
       }
       continue;
     }
@@ -997,6 +1000,19 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
     const int64_t base = static_cast<int64_t>(fixup.target_getpc_offset + sizeof(uint32_t));
     const int64_t delta = static_cast<int64_t>(*target_target) - base;
     std::vector<uint32_t> replacement_words;
+    if (fixup.source_requires_xcnt_drain) {
+      // The drain the source range held ordered the writes to this same SGPR
+      // pair, so it has to come before the builder rather than be NOP-filled
+      // away with the rest of the range.
+      const auto drain = build_s_wait_xcnt(arch);
+      if (!drain) {
+        return relocation_error(
+            fixup.source_call_offset,
+            "target ISA cannot encode the XCNT drain the recovered builder requires",
+            TextLayoutFailureCategory::ResourceLimit);
+      }
+      replacement_words.push_back(*drain);
+    }
     if (!append_pc_delta_builder(replacement_words, arch, fixup.source_call_sreg, delta)) {
       return relocation_error(
           fixup.source_call_offset,
