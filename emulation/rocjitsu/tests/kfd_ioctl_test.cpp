@@ -682,7 +682,9 @@ TEST_F(KfdIoctlTest, RuntimeDisableReportsProcessRuntimeTransition) {
   // runtime_info rather than the notifier, but drain anyway so the read below
   // can only be answering the disable.
   uint64_t drained = 0;
-  (void)::read(notifier, &drained, sizeof(drained));
+  // EAGAIN is the expected answer -- the notifier is EFD_NONBLOCK and the attach
+  // does not post to it -- so the result is deliberately not asserted on.
+  [[maybe_unused]] const ssize_t drained_rc = ::read(notifier, &drained, sizeof(drained));
 
   kfd_ioctl_runtime_enable_args disable{};
   disable.mode_mask = 0;
@@ -2629,8 +2631,13 @@ TEST(RemoteDriverDbgQueueSnapshotTest, SuccessfulSnapshotScattersIntoTheCallerSt
     // down at kEntryBytes and reports that as entry_size(OUT).
     serve_one_ioctl_reply(server_fd, 0, sizeof(kfd_ioctl_dbg_trap_args), kEntryBytes, kPoison,
                           [](const rocjitsu::RpcHeader &, kfd_ioctl_dbg_trap_args &echoed) {
+                            // Spelled out rather than reaching for kEntryBytes: inside the
+                            // enclosing [&] lambda that name is a captured reference, which
+                            // gcc then demands this lambda capture too and clang rejects as
+                            // an unnecessary capture.
                             echoed.queue_snapshot.num_queues = 1;
-                            echoed.queue_snapshot.entry_size = kEntryBytes;
+                            echoed.queue_snapshot.entry_size =
+                                static_cast<uint32_t>(sizeof(kfd_queue_snapshot_entry));
                           });
   });
 
@@ -4448,7 +4455,23 @@ TEST_F(KfdIoctlTest, DbgTrapDebuggerExitReapsSessionAndAllowsReenable) {
   daemon.close(replacement_debugger);
 }
 
+#if defined(__SANITIZE_THREAD__)
+#define RJ_TEST_THREAD_SANITIZER 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define RJ_TEST_THREAD_SANITIZER 1
+#endif
+#endif
+
 TEST_F(KfdIoctlTest, DebugSessionReaperShutdownDoesNotHang) {
+#ifdef RJ_TEST_THREAD_SANITIZER
+  // The child below starts the reaper thread after forking from this
+  // multi-threaded parent, which ThreadSanitizer refuses outright ("starting new
+  // threads after multi-threaded fork is not supported") and kills the child
+  // for. The shutdown this test exists to measure never runs, so the result
+  // would say nothing about it either way.
+  GTEST_SKIP() << "starting threads after fork is unsupported under ThreadSanitizer";
+#else
   pid_t worker = fork();
   ASSERT_GE(worker, 0);
   if (worker == 0) {
@@ -4463,6 +4486,7 @@ TEST_F(KfdIoctlTest, DebugSessionReaperShutdownDoesNotHang) {
   ASSERT_EQ(waitpid(worker, &status, 0), worker);
   ASSERT_TRUE(WIFEXITED(status));
   EXPECT_EQ(WEXITSTATUS(status), 0);
+#endif
 }
 
 } // namespace
