@@ -557,6 +557,15 @@ static void testDeregisterNullHandle() {
 static void testWindowRegisterSingleRankNonSymTeardown() {
     SKIP_IF_NO_GPU();
 
+    hipDeviceProp_t prop;
+    HIPCALL(hipGetDeviceProperties(&prop, 0));
+    if (!isArchSupportedForP2pCollTest(prop.gcnArchName)) {
+        GTEST_SKIP() << "Non-symmetric window register path hangs on "
+                     << prop.gcnArchName
+                     << "; test requires gfx942 / gfx950.";
+        return;
+    }
+
     HIPCALL(hipSetDevice(0));
 
     ncclComm_t comm;
