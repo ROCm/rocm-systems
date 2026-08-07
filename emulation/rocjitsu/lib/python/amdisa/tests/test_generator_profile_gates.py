@@ -1772,6 +1772,40 @@ def test_f64_mfma_neg_follows_profile_capability(supports_blgp_neg, expected_neg
     assert f's2, const_acc, {expected_neg});' in body
 
 
+def test_i32_mfma_without_blgp_field_uses_mixed_signedness_executor():
+    inst = Instruction('V_MFMA_I32_16X16X32_IU8', 'ENC_VOP3P_MFMA', 0, [])
+
+    body = _gen_mfma(inst, 'cdna4', _matrix_profile(), set())
+
+    assert '(inst_.neg & 0x1u) ? amdgpu::extract_i8(cu, base, loc)' in body
+    assert '(inst_.neg & 0x2u) ? amdgpu::extract_i8(cu, base, loc)' in body
+    assert 'amdgpu::exec_i32_mixed(cu, 16, 16, 32,' in body
+    assert 'extract_a, extract_b, const_acc, inst_.clamp);' in body
+    assert 'amdgpu::exec_i32_i8' not in body
+
+
+def test_i32_mfma_iu4_with_blgp_field_uses_unsigned_extractors():
+    inst = Instruction('V_MFMA_I32_16X16X64_IU4', 'ENC_VOP3P_MFMA', 0, [])
+
+    body = _gen_mfma(inst, 'renamed_mfma', _matrix_profile(), {'blgp'})
+
+    assert 'amdgpu::exec_i32_mixed(cu, 16, 16, 64,' in body
+    assert 's2, amdgpu::extract_u4, amdgpu::extract_u4, const_acc);' in body
+    assert 'auto extract_a' not in body
+    assert 'inst_.clamp' not in body
+
+
+def test_i32_mfma_i8_with_blgp_field_uses_broadcast_executor():
+    inst = Instruction('V_MFMA_I32_16X16X32_I8', 'ENC_VOP3P_MFMA', 0, [])
+    broadcast_fields = {'cbsz', 'abid', 'blgp'}
+
+    body = _gen_mfma(inst, 'renamed_mfma', _matrix_profile(), broadcast_fields)
+
+    assert 'amdgpu::exec_i32_i8(cu, 16, 16, 32,' in body
+    assert 'inst_.cbsz, inst_.abid, inst_.blgp);' in body
+    assert 'amdgpu::exec_i32_mixed' not in body
+
+
 def test_div_scale_uses_signed_tiny_exponent_threshold():
     body = gen_vector_div_scale(
         ['vdst', 'sdst'], ['src0', 'src1', 'src2'], 'f32', is_vop3=True

@@ -455,7 +455,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f' inst_.clamp, const_acc, wf.wf_size());'
             )
         else:
-            has_blgp = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
+            has_blgp = 'blgp' in ctx.enc_field_names
             if not has_blgp:
                 suffix = '4' if input_type == 'IU4' else '8'
                 append_signed_extractors(suffix)
