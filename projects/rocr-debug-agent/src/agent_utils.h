@@ -33,9 +33,12 @@
 
 #include "logging.h"
 
+#include <amd-dbgapi/amd-dbgapi.h>
+
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -82,6 +85,15 @@ void print_usage ();
 
 std::variant<std::string, debug_agent_options_t>
 parse_debug_agent_options (const char *env_options);
+
+/* Exception bitmask mapping. */
+
+std::underlying_type_t<amd_dbgapi_exceptions_t>
+map_stop_reason_to_exceptions (
+  std::underlying_type_t<amd_dbgapi_wave_stop_reasons_t> stop_reason);
+
+const char *
+stop_reason_to_string (amd_dbgapi_wave_stop_reasons_t reason);
 
 } /* namespace amd::debug_agent */
 
