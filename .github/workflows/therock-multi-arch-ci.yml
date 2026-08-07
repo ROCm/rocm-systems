@@ -62,6 +62,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   # A PR number if a pull request and otherwise the commit hash. This cancels
