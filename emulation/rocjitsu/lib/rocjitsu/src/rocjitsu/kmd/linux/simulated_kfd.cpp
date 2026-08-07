@@ -3411,8 +3411,7 @@ namespace {
 /// absent process, or an empty request answers false, leaving the kernel's
 /// behaviour in place.
 bool queues_all_dead(KfdProcess *proc, const kfd_ioctl_dbg_trap_args &args) {
-  constexpr uint32_t kQueueStatus =
-      (uint32_t{1} << KFD_DBG_QUEUE_ERROR_BIT) | (uint32_t{1} << KFD_DBG_QUEUE_INVALID_BIT);
+  constexpr uint32_t kQueueStatus = KFD_DBG_QUEUE_ERROR_MASK | KFD_DBG_QUEUE_INVALID_MASK;
   if (proc == nullptr)
     return false;
   uint32_t count = 0;
@@ -3426,7 +3425,14 @@ bool queues_all_dead(KfdProcess *proc, const kfd_ioctl_dbg_trap_args &args) {
   } else {
     return false;
   }
-  if (count == 0 || array_ptr == 0)
+  // An empty batch names nothing live, so it belongs on the answered side: with
+  // the runtime up the handlers return 0 for it, and refusing it here would flip
+  // that to the -EPERM rocdbgapi escalates to a fatal purely on runtime state.
+  if (count == 0)
+    return true;
+  // A null array with a non-zero count is malformed; leave it to the handler's
+  // -EFAULT rather than inventing an answer for it.
+  if (array_ptr == 0)
     return false;
   const auto *queue_ids = reinterpret_cast<const uint32_t *>(static_cast<uintptr_t>(array_ptr));
   std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
@@ -3699,6 +3705,11 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
     // size.
     kfd_runtime_info info{};
     if (target_proc != nullptr) {
+      // The session does not exist yet when the common path above records this,
+      // so ENABLE has to do it itself; otherwise an inferior that opens
+      // /dev/kfd, runs and exits before the debugger's first suspend/resume
+      // never sets the flag and the gate below answers -EPERM after all.
+      sess.saw_kfd_process = true;
       std::lock_guard<std::mutex> rlk(target_proc->runtime_mutex_);
       const auto &rt = target_proc->runtime_state_;
       sess.runtime_state = rt.enabled ? DEBUG_RUNTIME_STATE_ENABLED : DEBUG_RUNTIME_STATE_DISABLED;
