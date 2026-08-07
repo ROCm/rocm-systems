@@ -1363,8 +1363,6 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t agent, hsa_amd_memory
     return;
   }
 
-  rocrtst::SetEnv("HSAKMT_DEBUG_LEVEL", "7");
-
   rocrtst::pool_info_t pool_i;
   ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
   if (!pool_i.alloc_allowed || pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
@@ -1434,8 +1432,8 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t agent, hsa_amd_memory
 
   // Write to addr1
   int* data1 = reinterpret_cast<int*>(addr1);
+  std::cout << "    Writing data to => " << data1 << std::endl;
   for (int i = 0; i < kMemoryAllocSize; ++i) {
-    std::cout << "    Writing data1[" << i << "] = " << i << std::endl;
     data1[i] = i;
   }
 
@@ -2000,6 +1998,8 @@ void VirtMemoryTestBasic::SetUp(void) {
   ASSERT_SUCCESS(rocrtst::SetDefaultAgents(this));
   ASSERT_SUCCESS(rocrtst::SetPoolsTypical(this));
 
+  // Enable thunk logs
+  rocrtst::SetEnv("HSAKMT_DEBUG_LEVEL", "7");
   return;
 }
 

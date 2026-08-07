@@ -4101,7 +4101,16 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
         region->Free(driver_handle);
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
-      agent_for_drm = gpus.front();
+      // Select the GPU with the lowest DrmRenderMinor to use the primary DRM device
+      // (e.g. renderD128) which is directly CPU BAR-accessible. On multi-die GPUs like
+      // MI300X, secondary XCDs have higher DrmRenderMinor values (renderD136 etc.) and
+      // are not directly CPU BAR-accessible, causing SEGFAULT on CPU writes after
+      // hsa_amd_vmem_set_access if the wrong DRM device is used for mmap.
+      agent_for_drm = *std::min_element(
+          gpus.begin(), gpus.end(), [](const core::Agent* a, const core::Agent* b) {
+            return static_cast<const AMD::GpuAgent*>(a)->properties().DrmRenderMinor <
+                   static_cast<const AMD::GpuAgent*>(b)->properties().DrmRenderMinor;
+          });
       drm_owner = agent_for_drm;
     }
 
@@ -4306,11 +4315,18 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
     int mmap_fd = -1;
 
     /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
-     * The driver_handle created during import should have the correct mmap_offset. */
+     * The driver_handle created during import should have the correct mmap_offset.
+     * Select the GPU with the lowest DrmRenderMinor to ensure we use the primary DRM device
+     * (e.g. renderD128), which is CPU BAR-accessible. On multi-die GPUs (MI300X), secondary
+     * XCDs have higher DrmRenderMinor values and are not CPU BAR-accessible. */
     if (mappedHandle->mem_handle->imported) {
       const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
       if (!gpus.empty()) {
-        agent = gpus.front();
+        agent = *std::min_element(
+            gpus.begin(), gpus.end(), [](const core::Agent* a, const core::Agent* b) {
+              return static_cast<const AMD::GpuAgent*>(a)->properties().DrmRenderMinor <
+                     static_cast<const AMD::GpuAgent*>(b)->properties().DrmRenderMinor;
+            });
         agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
       }
     } else if (mappedHandle->mem_handle->region) {
