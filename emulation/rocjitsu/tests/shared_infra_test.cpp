@@ -4950,6 +4950,45 @@ void rdna4_vop3_dpp_availability_is_instruction_specific() {
   rdna4_vop3p_dpp_marker_is_unsupported<rdna4::Vop3pVopDpp8MachineInst>(amdgpu::SRC_DPP8_FI_0);
 }
 
+template <typename Raw> void rdna4_vopc_dpp_marker_is_instruction_specific(uint32_t marker) {
+  Raw raw{};
+  raw.src0 = marker;
+  raw.vsrc1 = 8;
+  raw.op = rdna4::kVCmpEqU32Vopc;
+  raw.encoding = rdna4::encoding::kVopc >> 2;
+  raw.vsrc0 = 4;
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  {
+    util::StringDiagnostic diagnostic;
+    const DecodeResult decoded =
+        decoder->decode(reinterpret_cast<const uint32_t *>(&raw), diagnostic.emitter());
+    EXPECT_TRUE(decoded.succeeded()) << diagnostic.message();
+    EXPECT_TRUE(diagnostic.message().empty());
+  }
+
+  raw.op = rdna4::kVCmpEqF64Vopc;
+  {
+    util::StringDiagnostic diagnostic;
+    const DecodeResult decoded =
+        decoder->decode(reinterpret_cast<const uint32_t *>(&raw), diagnostic.emitter());
+    const uint32_t encoded_word = std::bit_cast<std::array<uint32_t, 2>>(raw)[0];
+    EXPECT_TRUE(decoded.failed()) << "decoded as " << decoded.value()->mnemonic() << " for "
+                                  << expected_label << ", word=0x" << std::hex << encoded_word
+                                  << ", primary=0x" << (encoded_word >> 24);
+    const std::string expected_message =
+        std::string("V_CMP_EQ_F64 does not support ") + expected_label;
+    EXPECT_EQ(diagnostic.message(), expected_message);
+  }
+}
+
+void rdna4_vopc_dpp_availability_is_instruction_specific() {
+  rdna4_vopc_dpp_marker_is_instruction_specific<rdna4::VopcVopDpp16MachineInst>(amdgpu::SRC_DPP);
+  rdna4_vopc_dpp_marker_is_instruction_specific<rdna4::VopcVopDpp8MachineInst>(
+      amdgpu::SRC_DPP8_FI_0);
+}
+
 TEST(DppPermuteTest, CdnaGeneratedVop1UsesSharedRowBroadcast) {
   cdna_generated_vop1_uses_shared_row_broadcast<Cdna1DppTraits>();
   cdna_generated_vop1_uses_shared_row_broadcast<Cdna2DppTraits>();
@@ -4981,6 +5020,10 @@ TEST(DppPermuteTest, Cdna4UnsupportedSdwaDecodeHaltsWave) {
 
 TEST(DppPermuteTest, Rdna4Vop3DppAvailabilityIsInstructionSpecific) {
   rdna4_vop3_dpp_availability_is_instruction_specific();
+}
+
+TEST(DppPermuteTest, Rdna4VopcDppAvailabilityIsInstructionSpecific) {
+  rdna4_vopc_dpp_availability_is_instruction_specific();
 }
 
 TEST(DppPermuteTest, RdnaGeneratedVop1DppWriteMaskHonorsBoundCtrl) {
