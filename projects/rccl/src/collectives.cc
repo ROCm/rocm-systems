@@ -883,8 +883,8 @@ enum rcclReduceScatterAlgo {
 };
 
 static rcclReduceScatterAlgo rcclSelectReduceScatterAlgo(struct ncclComm* comm, size_t msgSize, ncclRedOp_t op) {
-  // User-defined op is not supported for hierarchical reduce scatter
-  if (ncclGroupDepth == 0 && (int(op) < int(ncclNumOps)) && rcclUseHierarchicalReduceScatter(comm, msgSize)) {
+  // Only sum is supported for hierarchical reduce scatter
+  if (ncclGroupDepth == 0 && op == ncclSum && rcclUseHierarchicalReduceScatter(comm, msgSize)) {
     return RCCL_RS_HIERARCHICAL;
   }
   if (ncclGroupDepth == 0 && rcclUseReduceScatterDirect(comm, msgSize)) {

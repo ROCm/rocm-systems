@@ -374,7 +374,7 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
       *protocol = NCCL_PROTO_SIMPLE;
       *maxChannels = interComm->p2pnChannels;
     } else {
-      struct ncclTaskColl task;
+      struct ncclTaskColl task = {};
       task.func = ncclFuncAllGather;
       task.count = count;
       task.datatype = dataType;
@@ -390,7 +390,7 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
       intraProto = NCCL_PROTO_SIMPLE;
       intraChan = intraComm->p2pnChannels;
     } else {
-      struct ncclTaskColl task;
+      struct ncclTaskColl task = {};
       task.func = ncclFuncAllGather;
       task.count = intraCount;
       task.datatype = dataType;
@@ -417,7 +417,7 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
       *protocol = NCCL_PROTO_SIMPLE;
       *maxChannels = interComm->p2pnChannels;
     } else {
-      struct ncclTaskColl task;
+      struct ncclTaskColl task = {};
       task.func = ncclFuncReduceScatter;
       task.count = count;
       task.datatype = dataType;
@@ -429,7 +429,7 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
     int intraProto, intraChan;
     size_t intraCount = count * nNodes;
     {
-      struct ncclTaskColl task;
+      struct ncclTaskColl task = {};
       task.func = ncclFuncReduceScatter;
       task.count = intraCount;
       task.datatype = dataType;
@@ -451,7 +451,7 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
     *maxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
-  struct ncclTaskColl task;
+  struct ncclTaskColl task = {};
   task.func = coll;
   task.count = count;
   task.datatype = dataType;

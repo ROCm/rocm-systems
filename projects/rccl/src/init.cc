@@ -2759,7 +2759,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
           tempBufSize = (comm->nNodes >= 32) ? HIERARCHICAL_TEMP_BUFFER_SIZE :
                         (comm->nNodes >= 16) ? HIERARCHICAL_TEMP_BUFFER_SIZE / 2 :
                                                HIERARCHICAL_TEMP_BUFFER_SIZE / 4;
-        }  
+        }
         NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), tempBufSize, comm->memManager), res, fail);
         comm->hierarchicalCommsInitialized = true;
         INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
