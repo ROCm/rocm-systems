@@ -3093,6 +3093,15 @@ struct Gfx1250DppTraits {
   }
 };
 
+// Test-only RDNA4 trait for exercising 64-bit EXEC handling. The production
+// RDNA factory still constructs the ISA default Wave32 form.
+struct Rdna4Wave64DppTestIsa : rdna4::Isa {
+  static constexpr uint32_t WF_SIZE = 64;
+  static constexpr uint32_t WF_SIZE_MAX = 64;
+};
+
+static_assert(GpuIsa<Rdna4Wave64DppTestIsa>);
+
 template <typename Traits> void generated_dpp_instruction_reuse_reads_current_source() {
   SCOPED_TRACE(Traits::name);
   ScopedIsaExecutionBackend execution_backend_scope{&Traits::backend()};
@@ -4631,6 +4640,60 @@ void wave32_generated_vcmpx_dpp_zeros_invalid_sources_preserves_exec_hi() {
   EXPECT_EQ(wf->exec_raw(), 0xA5A55A5AFFFE005AULL);
 }
 
+void rdna4_wave64_generated_vcmpx_dpp_write_mask_preserves_exec() {
+  ScopedIsaExecutionBackend execution_backend_scope{&rdna4::execution_backend()};
+  amdgpu::GpuMemory mem("rdna4_dpp_vcmpx_wave64_exec_mask_mem");
+  amdgpu::L2Cache l2("rdna4_dpp_vcmpx_wave64_exec_mask_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = rdna4::Isa::MAX_SGPRS_PER_WF;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = std::make_unique<
+      amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Rdna4Wave64DppTestIsa>>(
+      "rdna4_dpp_vcmpx_wave64_exec_mask_cu", cfg, &mem, &l2);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+
+  constexpr uint64_t kOldExec = 0xA5A55A5AFFFF005AULL;
+  constexpr uint64_t kOldVcc = 0x00000000000000A5ULL;
+  wf->set_exec(kOldExec);
+  wf->set_vcc(kOldVcc);
+
+  constexpr uint32_t kSrc0 = 4;
+  constexpr uint32_t kSrc1 = 8;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    uint32_t src = 0x1000u + lane;
+    uint32_t cmp = lane < 16 ? 0xDEAD0000u + lane : 0x1000u + ((lane & ~15u) - 1u);
+    if (lane == 20)
+      cmp = 0xDEAD0020u;
+    cu->write_vgpr(vbase + kSrc0, lane, src);
+    cu->write_vgpr(vbase + kSrc1, lane, cmp);
+  }
+
+  rdna4::VopcVopDpp16MachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc1 = kSrc1;
+  raw.vsrc0 = kSrc0;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_BCAST15;
+  raw.fi = 1;
+  raw.bound_ctrl = 0;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+
+  rdna4::VCmpxEqU32Vopc inst(reinterpret_cast<const rdna4::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(wf->vcc(), kOldVcc);
+  EXPECT_EQ(wf->exec(), 0xA5A55A5AFFEF005AULL);
+}
+
 template <typename Traits> void wave32_generated_vcmpx_preserves_exec_hi() {
   SCOPED_TRACE(Traits::name);
   ScopedIsaExecutionBackend execution_backend_scope{&Traits::backend()};
@@ -5282,6 +5345,10 @@ TEST(DppPermuteTest, RdnaGeneratedVopcDppZerosMaskedCompareBits) {
   wave32_generated_vopc_dpp_zeros_masked_compare_bits<Rdna3DppTraits>();
   wave32_generated_vopc_dpp_zeros_masked_compare_bits<Rdna3_5DppTraits>();
   wave32_generated_vopc_dpp_zeros_masked_compare_bits<Rdna4DppTraits>();
+}
+
+TEST(DppPermuteTest, Rdna4GeneratedVcmpxDppWave64WriteMaskPreservesExec) {
+  rdna4_wave64_generated_vcmpx_dpp_write_mask_preserves_exec();
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVopcDppZerosMaskedCompareBits) {
