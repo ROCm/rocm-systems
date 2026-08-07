@@ -6,7 +6,6 @@
 
 #include "library/rocprofiler-sdk/spm.hpp"
 
-#include "common/span.hpp"
 #include "core/utility.hpp"
 #include "logger/debug.hpp"
 
@@ -16,6 +15,7 @@
 #include <cstdint>
 #include <iterator>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -620,8 +620,8 @@ spm_record_callback(const rocprofiler_spm_dispatch_counting_service_data_t* disp
     samples.reserve(record_count);
     counter_info_indices.reserve(record_count);
     sample_indices.reserve(record_count);
-    for(const auto* record : rocprofsys::span<const rocprofiler_spm_counter_record_t*>{
-            records, record_count })
+    for(const auto* record :
+        std::span<const rocprofiler_spm_counter_record_t*>{ records, record_count })
     {
         if(record == nullptr) continue;
         auto [counter_itr, inserted_counter] = counter_info_indices.emplace(
