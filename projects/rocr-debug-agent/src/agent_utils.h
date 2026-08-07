@@ -4,9 +4,13 @@
 #ifndef ROCM_DEBUG_AGENT_UTILS_H
 #define ROCM_DEBUG_AGENT_UTILS_H
 
+#include "logging.h"
+
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace amd::debug_agent
@@ -50,6 +54,40 @@ parsed_uri_t parse_code_object_uri (const std::string &uri);
    \param uri The URI string to sanitize.
    \return Filename-safe string.  */
 std::string sanitize_uri_for_filename (const std::string &uri);
+
+/* Path format token expansion.  */
+
+/* Expand format tokens in a string with runtime values.
+   Supported tokens: %p (PID), %h (hostname), %t (timestamp), %e (executable),
+   %u (UID), %g (GID), %% (literal %).
+   \param format Format string containing tokens (e.g., "/tmp/trace-%p-%t").
+   \return String with tokens replaced by actual values.  */
+std::string expand_format_tokens (const std::string &format);
+
+/* Debug agent options parsing.  */
+
+/* Configuration options for the debug agent.  */
+struct debug_agent_options_t
+{
+  bool all_wavefronts = false;          /* Print all wavefronts on exception.  */
+  bool disable_sigquit = false;         /* Disable SIGQUIT handler.  */
+  bool precise_memory = false;          /* Enable precise memory exception mode.  */
+  bool precise_alu_exceptions = false;  /* Enable precise ALU exceptions.  */
+  bool lazy = true;                     /* Lazy code object loading.  */
+  bool delay_loading = false;           /* Delay code object inspection.  */
+  std::optional<std::string> code_objects_dir;  /* Directory to save code objects.  */
+  std::optional<std::string> output_file;       /* Output file for agent logs.  */
+  log_level_t log_level = log_level_t::warning; /* Logging verbosity level.  */
+};
+
+/* Print usage message to stderr.  */
+void print_usage ();
+
+/* Parse debug agent options from environment string.
+   \param env_options Space-separated option string (e.g., "-a --log-level=info").
+   \return Either a parsed options structure or an error/help message string.  */
+std::variant<std::string, debug_agent_options_t>
+parse_debug_agent_options (const char *env_options);
 
 } /* namespace amd::debug_agent */
 
