@@ -56,9 +56,7 @@ extern std::function<hipError_t(hipMemGenericAllocationHandle_t /*handle*/)>
 // (HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) through this call
 // instead of consulting ncclParamLegacyCudaRegister(). The default returns
 // hipSuccess and reports the buffer as NOT legacy-capable (writes 0), which
-// keeps the cuMem and nothing-works arms reachable. Tests that need the
-// legacy-export arm install ForceLegacyIpcCapable() (see p2p-test.cc), the
-// HIP-branch analogue of ForceLegacyCudaRegister().
+// keeps the cuMem and nothing-works arms reachable.
 extern std::function<hipError_t(void* /*data*/,
                                 hipPointer_attribute /*attribute*/,
                                 hipDeviceptr_t /*ptr*/)>
