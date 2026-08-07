@@ -207,8 +207,6 @@ parse_cpu_info()
                     info_v.model_name =
                         sdk::parse::strip(std::string{info_v.model_name}, " \t\n\v\f\r");
                 }
-#else
-#    error "Unsupported architecture: /proc/cpuinfo parsing not implemented"
 #endif
             }
             else
@@ -224,8 +222,8 @@ parse_cpu_info()
             }
         }
 
-#if defined(__powerpc64__) || defined(__PPC64__)
-        // Default x86-specific fields that have no equivalent in POWER /proc/cpuinfo.
+#if !defined(__x86_64__) && !defined(_M_X64)
+        // Default x86-specific fields that have no equivalent on this architecture.
         // Use processor index as a proxy for apicid to allow CPU agent matching.
         if(info_v.family < 0) info_v.family = 0;
         if(info_v.model < 0) info_v.model = 0;
@@ -233,6 +231,13 @@ parse_cpu_info()
         if(info_v.core_id < 0) info_v.core_id = 0;
         if(info_v.apicid < 0) info_v.apicid = info_v.processor;
         if(info_v.vendor_id.empty()) info_v.vendor_id = "Unknown";
+        if(info_v.model_name.empty()) info_v.model_name = "Unknown";
+#if !defined(__powerpc64__) && !defined(__PPC64__)
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "Some /proc/cpuinfo fields could not be parsed for processor {} on this "
+            "architecture; using defaults",
+            info_v.processor);
+#endif  // !ppc64le
 #endif
 
         if(info_v.is_valid())
