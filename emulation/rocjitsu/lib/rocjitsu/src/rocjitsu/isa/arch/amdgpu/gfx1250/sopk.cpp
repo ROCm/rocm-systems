@@ -94,6 +94,13 @@ void SSetregB32Sopk::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void SSetregB32Sopk::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Sopk::implicit_use_operands(operands);
+  if (simm16.to_register_ref())
+    operands.push_back(&simm16);
+}
+
 SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
     : Sopk("s_setreg_imm32_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(187)),
       simm16(16, OperandType::OPR_HWREG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
@@ -109,6 +116,13 @@ void SSetregImm32B32Sopk::implicit_uses(RegisterSet &uses) const {
   Sopk::implicit_uses(uses);
   if (auto r = simm16.to_register_ref())
     uses.expand(*r);
+}
+
+void SSetregImm32B32Sopk::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Sopk::implicit_use_operands(operands);
+  if (simm16.to_register_ref())
+    operands.push_back(&simm16);
 }
 
 SCallI64Sopk::SCallI64Sopk(const MachineInst *inst)

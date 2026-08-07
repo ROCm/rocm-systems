@@ -243,8 +243,9 @@ install needs to be uninstalled manually.
      The wheel ships its own SONAME-renamed `libamd_smi_python.so` next to
      the wrapper, so it does not depend on `/opt/rocm` being present.
 
-   See `py-interface/README.md` in the source tree for the full
-   install-paths matrix and the `AMDSMI_LIB_OVERRIDE` override.
+   See `py-interface/README.md` in the source tree, or
+   [Packaging and install paths](../packaging.md) for the full install-paths
+   matrix, coexistence rules, and the `AMDSMI_LIB_OVERRIDE` override.
 
    > **Note:** `sudo` may be required for the system-package path. For pip,
    > use `--break-system-packages` only if installing into a non-venv

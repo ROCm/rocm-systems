@@ -11,7 +11,6 @@ set(PY_BUILD_DIR "python_package")
 # amdsmi part of this string is the directory containing all python files
 # additionally defined in pyproject.toml
 set(PY_PACKAGE_DIR "${PY_BUILD_DIR}/amdsmi")
-set(PY_WRAPPER_INSTALL_DIR "${SHARE_INSTALL_PREFIX}" CACHE STRING "Wrapper installation directory")
 # AMDSMI_PYTHON_LIB_NAME is overloaded: when BUILD_PYTHON_WHEEL=OFF it
 # resolves to the system libamd_smi.so (the python_package staging tree
 # just copies it for in-tree imports); when ON it resolves to the
@@ -26,6 +25,19 @@ set(AMDSMI_PYTHON_LIB_PATH "${PROJECT_BINARY_DIR}/src/${AMDSMI_PYTHON_LIB_NAME}"
 set(GOOD_CLANG_FOUND FALSE)
 # only try to re-generate amdsmi_wrapper.py if BUILD_WRAPPER is on/true
 if(BUILD_WRAPPER)
+    # The committed wrapper is authoritative: its loader and every ctypes binding
+    # key on 'libamd_smi.so'. With BUILD_PYTHON_WHEEL=ON the generator is fed
+    # -l libamd_smi_python.so, so ctypeslib would emit bindings keyed on
+    # 'libamd_smi_python.so' while the loader still populates 'libamd_smi.so' --
+    # every API call would then KeyError. The wheel reuses the committed wrapper
+    # (only flipping the fallback flag), so it never needs regeneration. Reject
+    # the combination rather than emit a broken wrapper.
+    if(BUILD_PYTHON_WHEEL)
+        message(
+            FATAL_ERROR
+            "BUILD_WRAPPER=ON is incompatible with BUILD_PYTHON_WHEEL=ON: regenerating the wrapper against libamd_smi_python.so produces bindings that mismatch the committed libamd_smi.so loader. Regenerate the wrapper with BUILD_PYTHON_WHEEL=OFF, then build the wheel from the committed wrapper."
+        )
+    endif()
     find_program(clang NAMES clang REQUIRED)
     # extract clang version manually because find_package(clang) doesn't work
     execute_process(COMMAND ${clang} --version OUTPUT_VARIABLE clang_full_version_string)
@@ -101,8 +113,10 @@ add_custom_command(
         ${PY_PACKAGE_DIR}/amdsmi_interface_utils.py
         ${PY_PACKAGE_DIR}/README.md
         ${PY_PACKAGE_DIR}/LICENSE
+        ${PY_BUILD_DIR}/setup.py
     DEPENDS python_wrapper
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py ${PY_PACKAGE_DIR}/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/setup.py ${PY_BUILD_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_exception.py ${PY_PACKAGE_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_interface.py ${PY_PACKAGE_DIR}/
     COMMAND
@@ -130,6 +144,7 @@ add_custom_target(
         ${PY_PACKAGE_DIR}/amdsmi_interface_utils.py
         ${PY_PACKAGE_DIR}/README.md
         ${PY_PACKAGE_DIR}/LICENSE
+        ${PY_BUILD_DIR}/setup.py
         ${PY_PACKAGE_DIR}/${AMDSMI_PYTHON_LIB_NAME}
 )
 if(BUILD_PYTHON_WHEEL)
@@ -216,7 +231,7 @@ print(sysconfig.get_paths()["purelib"])
 ]]
 )
 # The module must land where the system's DEFAULT python3 looks -- that is the
-# interpreter /opt/rocm/bin/amd-smi runs under (its `#!/usr/bin/python3` shebang)
+# interpreter /opt/rocm/bin/amd-smi runs under (its `#!/usr/bin/env python3` shebang)
 # and the one a plain `import amdsmi` uses. We must NOT detect from a
 # non-default interpreter: RHEL build/CI images frequently repoint
 # /usr/bin/python3 to a newer python via `alternatives` (e.g. to run a 3.7+
@@ -259,6 +274,20 @@ if(NOT AMDSMI_SYSTEM_PYTHON_SITELIB)
             )
             set(_amdsmi_detected_sitelib "${Python3_SITELIB}")
         endif()
+    elseif(NOT BUILD_PYTHON_WHEEL)
+        # System-package build with no default system python3: Python3_SITELIB
+        # points at whatever interpreter cmake found (e.g. a manylinux
+        # /opt/python/... build python), a path no target host has on sys.path.
+        # The module would install "successfully" yet `import amdsmi` would fail
+        # with ModuleNotFoundError. Fail loudly instead. Wheel builds (which run
+        # in exactly such containers) are exempt and set the destination there.
+        message(
+            FATAL_ERROR
+            "Cannot detect the system python3 for the module install path: neither "
+            "/usr/libexec/platform-python nor /usr/bin/python3 exists. Set "
+            "-DAMDSMI_SYSTEM_PYTHON_SITELIB=<dir> explicitly, or build the wheel "
+            "with -DBUILD_PYTHON_WHEEL=ON."
+        )
     else()
         set(_amdsmi_detected_sitelib "${Python3_SITELIB}")
     endif()
@@ -296,51 +325,39 @@ set(AMDSMI_SYSTEM_PYTHON_ABI
     FORCE
 )
 
-# Concrete interpreter the amd-smi CLI shebang must point at, for RPM distros
-# where the module lives in a version-specific site-packages. The CLI ships with
-# `#!/usr/bin/python3`, but on RHEL that symlink can be repointed (by
-# `alternatives`, a venv on PATH, or simply a newer default in a later release)
-# to a python minor whose site-packages does NOT contain amdsmi -- then the CLI
-# dies with ModuleNotFoundError even though the package is installed. Pinning the
-# shebang to the exact interpreter the module was built for makes the CLI immune
-# to that. The value must be the REAL path of the detection interpreter, not a
-# guessed /usr/bin/python3.X: on el8 `python(abi) = 3.6` is provided by
-# platform-python, whose binary is /usr/libexec/platform-python3.6 -- there is NO
-# /usr/bin/python3.6 -- so a hardcoded /usr/bin/python3.X shebang would be a
-# guaranteed "bad interpreter" failure. Resolving the anchor's realpath yields
-# the interpreter that the python(abi) dependency actually guarantees present
-# (el8 -> /usr/libexec/platform-python3.6, el9 -> /usr/bin/python3.9,
-# Azure -> /usr/bin/python3.12). Only set on RPM distros (ABI derived); Debian
-# keeps the version-agnostic /usr/bin/python3 shebang (dist-packages serves every
-# python3 minor there, and pinning would break across default-python transitions).
-set(AMDSMI_CLI_SHEBANG_INTERP "")
-if(AMDSMI_SYSTEM_PYTHON_ABI AND EXISTS "${_amdsmi_detect_python}")
-    execute_process(
-        COMMAND ${_amdsmi_detect_python} -c "import os,sys;print(os.path.realpath(sys.executable))"
-        OUTPUT_VARIABLE _amdsmi_cli_interp
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _amdsmi_cli_interp_rc
+# Install the module into the system site-packages for the DEB/RPM (skipped for
+# the wheel, which ships its own tree). AMDSMI_SYSTEM_PYTHON_SITELIB is absolute,
+# so it is redirected only by DESTDIR -- which CPack and distro packagers set but
+# a plain `cmake --install` does not. Copy at install time and only when DESTDIR
+# is set; a direct install would otherwise hit the host's real /usr and EACCES.
+# Direct installs still get the module via the share/amd_smi copy below.
+if(NOT BUILD_PYTHON_WHEEL)
+    set(_amdsmi_module_src "${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}")
+    set(_amdsmi_sitelib "${AMDSMI_SYSTEM_PYTHON_SITELIB}")
+    # Pin permissions so a permissive build umask cannot leave group/other
+    # writable .py files under a system directory (files 0644, dirs 0755).
+    string(
+        CONFIGURE
+            [[
+if("$ENV{DESTDIR}" STREQUAL "")
+    message(STATUS "amdsmi: DESTDIR unset; skipping system site-packages install (module still staged under share/amd_smi)")
+else()
+    file(
+        INSTALL
+        "@_amdsmi_module_src@"
+        DESTINATION "@_amdsmi_sitelib@"
+        FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
+        DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+        PATTERN "libamd_smi*.so" EXCLUDE
     )
-    if(_amdsmi_cli_interp_rc EQUAL 0 AND EXISTS "${_amdsmi_cli_interp}")
-        set(AMDSMI_CLI_SHEBANG_INTERP "${_amdsmi_cli_interp}")
-    endif()
 endif()
-set(AMDSMI_CLI_SHEBANG_INTERP
-    "${AMDSMI_CLI_SHEBANG_INTERP}"
-    CACHE STRING
-    "Concrete interpreter path for the amd-smi CLI shebang on RPM distros (empty = keep #!/usr/bin/python3, e.g. Debian)."
-    FORCE
-)
-if(AMDSMI_CLI_SHEBANG_INTERP)
-    message(STATUS "amd-smi CLI shebang interpreter: ${AMDSMI_CLI_SHEBANG_INTERP}")
+]]
+        _amdsmi_sitelib_install_code
+        @ONLY
+        ESCAPE_QUOTES
+    )
+    install(CODE "${_amdsmi_sitelib_install_code}" COMPONENT dev)
 endif()
-
-install(
-    DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}
-    DESTINATION ${AMDSMI_SYSTEM_PYTHON_SITELIB}
-    COMPONENT dev
-    PATTERN "libamd_smi*.so" EXCLUDE
-)
 
 # Also stage the module under share/amd_smi (the historical location). site-
 # packages above is the primary, importable location for the DEB/RPM and for
@@ -360,5 +377,7 @@ install(
     DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}
     DESTINATION ${SHARE_INSTALL_PREFIX}
     COMPONENT dev
+    FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
+    DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
     PATTERN "libamd_smi*.so" EXCLUDE
 )

@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include <format>
 #include <optional>
 #include <stdexcept>
@@ -31,15 +32,18 @@ std::optional<Packed16VgprSource> packed_16bit_vgpr_source(bool packed_16bit_sou
                                                            OperandType opr_type, int ev) {
   if (!packed_16bit_source || size_bits != 16)
     return std::nullopt;
-  if (opr_type == OperandType::OPR_VGPR) {
-    if (ev >= 0 && ev <= 127)
-      return Packed16VgprSource{static_cast<uint32_t>(ev), 0};
-    if (ev >= 128 && ev <= 255)
-      return Packed16VgprSource{static_cast<uint32_t>(ev - 128), 16};
+  int selector_base;
+  if (opr_type == OperandType::OPR_VGPR)
+    selector_base = 0;
+  else if (opr_type == OperandType::OPR_SRC)
+    selector_base = 256;
+  else
     return std::nullopt;
-  }
-  if (ev >= 384 && ev <= 511)
-    return Packed16VgprSource{static_cast<uint32_t>(ev - 384), 16};
+  int selector = ev - selector_base;
+  if (selector >= 0 && selector <= 127)
+    return Packed16VgprSource{static_cast<uint32_t>(selector), 0};
+  if (selector >= 128 && selector <= 255)
+    return Packed16VgprSource{static_cast<uint32_t>(selector - 128), 16};
   return std::nullopt;
 }
 
@@ -88,6 +92,16 @@ std::optional<uint64_t> Operand::literal64_value() const {
   if (!has_literal64_)
     return std::nullopt;
   return literal64_value_;
+}
+
+std::optional<uint64_t> Operand::const_value() const {
+  if (has_literal64_)
+    return literal64_value_;
+  if (is_immediate_type(opr_type_))
+    return static_cast<uint64_t>(static_cast<uint32_t>(encoding_value_));
+  if (to_register_ref())
+    return std::nullopt;
+  return amdgpu::resolve_src_scalar_statically(encoding_value_);
 }
 
 std::string Operand::name() const {
@@ -871,6 +885,8 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
     break;
   }
   case OperandType::OPR_EXEC: {
+    if (encoding_value_ == OpSelExec::OPR_EXEC_EXEC)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
     break;
   }
   case OperandType::OPR_GPUMEM: {
@@ -885,9 +901,17 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     break;
   }
   case OperandType::OPR_SDST_EXEC: {
+    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     break;
   }
   case OperandType::OPR_SDST_M0: {
@@ -925,6 +949,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     if (encoding_value_ >= OpSelSrc::OPR_SRC_VGPR_MIN &&
         encoding_value_ <= OpSelSrc::OPR_SRC_VGPR_MAX)
       return RegisterRef{RegClass::VGPR,
@@ -939,6 +967,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSrcNoinline::OPR_SRC_NOINLINE_SGPR_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     if (encoding_value_ >= OpSelSrcNoinline::OPR_SRC_NOINLINE_VGPR_MIN &&
         encoding_value_ <= OpSelSrcNoinline::OPR_SRC_NOINLINE_VGPR_MAX)
       return RegisterRef{
@@ -954,6 +986,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSrcSimple::OPR_SRC_SIMPLE_SGPR_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     if (encoding_value_ >= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN &&
         encoding_value_ <= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MAX)
       return RegisterRef{
@@ -1002,6 +1038,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     break;
   }
   case OperandType::OPR_SSRC_BARRIER_ID: {
@@ -1180,6 +1220,20 @@ void Operand::simd_notify_read64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_m
                                           uint8_t byte_mask) const {
   if (decltype(ExecutionBackend::simd_notify_read64_mut) callback =
           execution_backend_ ? execution_backend_->simd_notify_read64_mut : nullptr)
+    (this->*callback)(wf, lane_mask, byte_mask);
+}
+
+void Operand::simd_notify_write_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                         uint8_t byte_mask) const {
+  if (decltype(ExecutionBackend::simd_notify_write_mut) callback =
+          execution_backend_ ? execution_backend_->simd_notify_write_mut : nullptr)
+    (this->*callback)(wf, lane_mask, byte_mask);
+}
+
+void Operand::simd_notify_write64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                           uint8_t byte_mask) const {
+  if (decltype(ExecutionBackend::simd_notify_write64_mut) callback =
+          execution_backend_ ? execution_backend_->simd_notify_write64_mut : nullptr)
     (this->*callback)(wf, lane_mask, byte_mask);
 }
 

@@ -105,6 +105,67 @@ protected:
     }
 };
 
+class PatLazyInitMPITest : public MPITestBase
+{};
+
+TEST_F(PatLazyInitMPITest, DefersConnectionUntilFirstCollective)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(/*min_processes=*/4));
+
+    MPI_Comm local_comm;
+    ASSERT_MPI_EQ(MPI_SUCCESS,
+                  MPI_Comm_split_type(
+                      MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &local_comm));
+    int local_size = 0;
+    ASSERT_MPI_EQ(MPI_SUCCESS, MPI_Comm_size(local_comm, &local_size));
+    ASSERT_MPI_EQ(MPI_SUCCESS, MPI_Comm_free(&local_comm));
+    if(local_size != 1)
+    {
+        GTEST_SKIP() << "PAT requires exactly one MPI rank per node";
+    }
+
+    MPIHelpers::MpiEnvGuard debug("NCCL_DEBUG", "INFO");
+    MPIHelpers::MpiEnvGuard debug_subsys("NCCL_DEBUG_SUBSYS", "INIT");
+    MPIHelpers::MpiEnvGuard pat_enable("NCCL_PAT_ENABLE", "1");
+    MPIHelpers::MpiEnvGuard pat_lazy("NCCL_PAT_LAZY_INIT", "1");
+    MPIHelpers::MpiEnvGuard algorithm("NCCL_ALGO", "PAT");
+    MPIHelpers::MpiEnvGuard protocol("NCCL_PROTO", "SIMPLE");
+    MPIHelpers::MpiEnvGuard cumem("NCCL_CUMEM_ENABLE", "0");
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeNcclDebugFileAssertionOptions(getTestMpiRank()));
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_FALSE(comm->initAlgoChannels[NCCL_ALGO_PAT]);
+
+    const std::string init_log = log_ctx.readNcclDebugLog();
+    ASSERT_MPI_TRUE(init_log.find("PAT lazy init enabled") != std::string::npos);
+    ASSERT_MPI_TRUE(init_log.find("Connected binomial trees") == std::string::npos);
+
+    void* send_buffer = nullptr;
+    void* recv_buffer = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&send_buffer, sizeof(uint8_t)));
+    auto send_guard = makeDeviceBufferAutoGuard(send_buffer);
+    ASSERT_MPI_EQ(hipSuccess,
+                  hipMalloc(&recv_buffer, sizeof(uint8_t) * MPIEnvironment::world_size));
+    auto recv_guard = makeDeviceBufferAutoGuard(recv_buffer);
+
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclAllGather(send_buffer,
+                                recv_buffer,
+                                1,
+                                ncclUint8,
+                                comm,
+                                getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    ASSERT_MPI_TRUE(comm->initAlgoChannels[NCCL_ALGO_PAT]);
+    const std::string collective_log = log_ctx.readNcclDebugLog();
+    ASSERT_MPI_TRUE(collective_log.find("Connected binomial trees") != std::string::npos);
+}
+
 /**
  * @class TrafficClassMPITest
  * @brief Test fixture for Traffic Class (QoS) configuration via ncclConfig_t.

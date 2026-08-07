@@ -117,6 +117,7 @@ jobs:
       ref: main
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
       # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
+      # NOTE: MI455 machine is down - test-runs-on set to "" until back online (was: linux-mi455-gpu-rocm)
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
@@ -124,7 +125,7 @@ jobs:
           "family_overrides": {
             "gfx125x": {
               "linux": {
-                "test-runs-on": "linux-mi455-gpu-rocm",
+                "test-runs-on": "",
                 "test_labels_for_family": ["test:hip-tests", "test:rocrtst"],
                 "fetch-gfx-targets": ["gfx1250"]
               }
@@ -142,7 +143,6 @@ jobs:
         needs.configure.outputs.skip_tests != 'true'
       }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
-    secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -167,7 +167,6 @@ jobs:
         needs.configure.outputs.skip_tests != 'true'
       }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@main
-    secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}

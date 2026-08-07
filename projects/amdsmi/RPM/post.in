@@ -8,12 +8,12 @@ do_configureLogrotate() {
 
   mkdir -p "${logPath}"
   touch "${logFile}"
-  # Relax permissions on the operational log file only so non-root
-  # processes can append to it. Do NOT use chmod -R here: recursing
-  # would also make the log directory and sibling files (e.g.
-  # postinst.log) world-writable, which would let a local user create
-  # or tamper with files under a root-owned log directory (CWE-732).
-  chmod a+rw "${logFile}"
+  # Relax permissions on the operational log file only so non-root processes
+  # in the same group can append to it. 0664 keeps it group-writable but not
+  # world-writable. Do NOT use chmod -R here: recursing would also make the log
+  # directory and sibling files (e.g. postinst.log) writable, which would let a
+  # local user tamper with files under a root-owned log directory (CWE-732).
+  chmod 0664 "${logFile}"
 
   if ! command -v logrotate &>/dev/null; then
     echo "[WARNING] Detected logrotate is not installed."\
@@ -66,7 +66,7 @@ EOF
 do_ldconfig() {
   # left-hand term originates from ENABLE_LDCONFIG = ON/OFF at package build
   if [ "@ENABLE_LDCONFIG@" == "ON" ]; then
-    echo $RPM_INSTALL_PREFIX0/@CMAKE_INSTALL_LIBDIR@ > /etc/ld.so.conf.d/x86_64-libamd_smi_lib.conf
+    echo "$RPM_INSTALL_PREFIX0/@CMAKE_INSTALL_LIBDIR@" > /etc/ld.so.conf.d/x86_64-libamd_smi_lib.conf
     ldconfig
   fi
 }
