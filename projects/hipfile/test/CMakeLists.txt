@@ -36,7 +36,7 @@ if(AIS_BUILD_NVIDIA_DETAIL)
     list(APPEND TEST_SYSINCLS ${HIPFILE_NVIDIA_SOURCE_PATH})
 else()
     list(APPEND SYSTEM_TEST_SOURCE_FILES system/amd/io.cpp system/amd/io_data_modification.cpp
-         system/amd/verify-kernel.hip)
+         system/amd/io_data_modification_bytes.cpp system/amd/verify-kernel.hip)
     list(APPEND SHARED_SOURCE_FILES common/ais-capability.cpp)
     list(APPEND TEST_SYSINCLS ${HIPFILE_AMD_SOURCE_PATH})
 endif()
