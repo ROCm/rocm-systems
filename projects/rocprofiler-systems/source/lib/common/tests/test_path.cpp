@@ -436,3 +436,37 @@ TEST_F(PathTest, ParentPath_RealExe_TwoLevels)
     EXPECT_FALSE(result.empty());
     EXPECT_EQ(result.front(), '/');
 }
+
+TEST_F(PathTest, Filename_StandardPath) { EXPECT_EQ(filename("/a/b.so"), "b.so"); }
+
+TEST_F(PathTest, Filename_NoSlash) { EXPECT_EQ(filename("filename"), "filename"); }
+
+TEST_F(PathTest, Filename_TrailingSlash) { EXPECT_EQ(filename("/a/b/"), ""); }
+
+TEST_F(PathTest, Filename_TrailingDoubleSlash) { EXPECT_EQ(filename("/a/b//"), ""); }
+
+TEST_F(PathTest, Filename_Root) { EXPECT_EQ(filename("/"), ""); }
+
+TEST_F(PathTest, Filename_EmptyString) { EXPECT_EQ(filename(""), ""); }
+
+TEST_F(PathTest, Filename_Dot) { EXPECT_EQ(filename("."), "."); }
+
+TEST_F(PathTest, Filename_DotDot) { EXPECT_EQ(filename(".."), ".."); }
+
+TEST_F(PathTest, Filename_DoubleSlash) { EXPECT_EQ(filename("/a//b"), "b"); }
+
+TEST_F(PathTest, Filename_RedundantInteriorSlash) { EXPECT_EQ(filename("/a///b"), "b"); }
+
+TEST_F(PathTest, Filename_MultipleExtensions)
+{
+    EXPECT_EQ(filename("/a/b.tar.gz"), "b.tar.gz");
+}
+
+TEST_F(PathTest, Filename_Dotfile) { EXPECT_EQ(filename("/a/.bashrc"), ".bashrc"); }
+
+TEST_F(PathTest, Filename_RelativePath) { EXPECT_EQ(filename("a/b/c"), "c"); }
+
+TEST_F(PathTest, Filename_AcceptsTemporary)
+{
+    EXPECT_EQ(filename(std::string("/a/b/c.so")), "c.so");
+}

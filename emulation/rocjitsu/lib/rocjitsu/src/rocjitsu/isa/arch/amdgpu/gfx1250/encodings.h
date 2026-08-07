@@ -435,6 +435,7 @@ class Vop1 : public IsaInstruction<Isa> {
 public:
   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   bool default_encoding();
   bool has_lit();
   bool has_lit64();
@@ -449,8 +450,8 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<DppOperand> dpp_src0_;
-  std::unique_ptr<DppOperand> dpp_src1_;
+  std::unique_ptr<StagedOperand> dpp_src0_;
+  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -481,8 +482,8 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<DppOperand> dpp_src0_;
-  std::unique_ptr<DppOperand> dpp_src1_;
+  std::unique_ptr<StagedOperand> dpp_src0_;
+  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -499,6 +500,7 @@ class Vop2 : public IsaInstruction<Isa> {
 public:
   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   bool default_encoding();
   bool has_lit();
   bool has_lit64();
@@ -517,8 +519,8 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<DppOperand> dpp_src0_;
-  std::unique_ptr<DppOperand> dpp_src1_;
+  std::unique_ptr<StagedOperand> dpp_src0_;
+  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -536,6 +538,7 @@ class Vop3 : public IsaInstruction<Isa> {
 public:
   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_and_has_lit_1();
@@ -554,14 +557,15 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<DppOperand> dpp_src0_;
-  std::unique_ptr<DppOperand> dpp_src1_;
+  std::unique_ptr<StagedOperand> dpp_src0_;
+  std::unique_ptr<StagedOperand> dpp_src1_;
 };
 
 class Vop3p : public IsaInstruction<Isa> {
 public:
   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_and_has_lit_1();
@@ -580,8 +584,8 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<DppOperand> dpp_src0_;
-  std::unique_ptr<DppOperand> dpp_src1_;
+  std::unique_ptr<StagedOperand> dpp_src0_;
+  std::unique_ptr<StagedOperand> dpp_src1_;
 };
 
 class Vds : public IsaInstruction<Isa> {
@@ -634,6 +638,7 @@ class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
   Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_and_has_lit_1();
@@ -652,8 +657,8 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<DppOperand> dpp_src0_;
-  std::unique_ptr<DppOperand> dpp_src1_;
+  std::unique_ptr<StagedOperand> dpp_src0_;
+  std::unique_ptr<StagedOperand> dpp_src1_;
 };
 
 } // namespace gfx1250
