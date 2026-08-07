@@ -1,8 +1,9 @@
 # VGPR saturation benchmark
 
 This standalone HIP program measures rocjitsu's behavior as a Wave64 kernel's
-live VGPR set approaches the architectural limit. It is intentionally not a
-CTest: the results are performance observations rather than pass/fail gates.
+live VGPR set approaches the architectural limit. Performance measurements are
+intentionally not CTest gates. The compiler resource-profile verifier is a
+labelled CTest so compiler changes cannot silently invalidate the experiment.
 
 The kernel keeps 8 through 252 independent values live across a runtime-sized
 update loop and consumes every value in an observable checksum. On gfx942, the
@@ -88,6 +89,13 @@ ROCM_PATH=/path/to/rocm \
   --rocm-path=/path/to/rocm vgpr_saturation.hip -o vgpr_saturation
 ```
 
+A rocjitsu CMake build also exposes the benchmark and verifier through the
+explicit `vgpr_saturation_check` target. It is not part of the default build:
+
+```bash
+cmake --build /path/to/rocjitsu-build --target vgpr_saturation_check
+```
+
 Before collecting timings, verify that the compiler still emits the intended
 resource profile. This standalone check compiles GPU assembly and requires each
 kernel to use `Count + 1` VGPRs, zero VGPR spills, zero private-segment bytes,
@@ -96,6 +104,9 @@ and zero AGPRs:
 ```bash
 ROCM_PATH=/path/to/rocm ./verify_resources.py --arch gfx942
 ```
+
+The same verification is registered as the `VgprSaturationResourceCheck`
+CTest with the `benchmark` label.
 
 The supported count list is shared by the benchmark and verifier through
 `vgpr_saturation_counts.def`, so adding or removing a kernel updates both.

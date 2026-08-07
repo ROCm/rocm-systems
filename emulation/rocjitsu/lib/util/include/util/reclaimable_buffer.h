@@ -31,7 +31,8 @@ namespace util {
 /// system when possible. Other platforms use aligned heap storage and clear the
 /// requested range eagerly. Reclamation is always best-effort and never affects
 /// correctness. The address returned by data() remains stable until ownership
-/// is transferred or the buffer is destroyed.
+/// is transferred or the buffer is destroyed. data() is aligned to both the
+/// alignment requested by allocate() and reclamation_granularity().
 class ReclaimableBuffer {
 public:
   ReclaimableBuffer() noexcept = default;
@@ -49,6 +50,21 @@ public:
     return *this;
   }
 
+  /// @brief Return the byte granularity of independent reset units.
+  ///
+  /// A range whose address and size are multiples of this value does not share
+  /// reset storage with adjacent ranges. Linux uses its physical-page size so
+  /// such ranges are independently reclaimable. The portable zeroing-only
+  /// backend returns 1 because every byte range can be cleared independently;
+  /// it does not release physical storage before buffer destruction.
+  [[nodiscard]] static size_t reclamation_granularity() noexcept {
+#if defined(__linux__)
+    return system_page_size();
+#else
+    return 1;
+#endif
+  }
+
   /// @brief Allocate stable, zero-initialized storage.
   /// @param bytes Number of usable bytes.
   /// @param alignment Required alignment of data(); must be a power of two.
@@ -63,6 +79,7 @@ public:
 
     alignment_ = std::max(alignment, alignof(std::max_align_t));
 #if defined(__linux__)
+    alignment_ = std::max(alignment_, reclamation_granularity());
     allocate_anonymous_mapping(bytes);
 #else
     void *allocation = ::operator new(bytes, std::align_val_t(alignment_));
@@ -155,12 +172,12 @@ private:
     // created in this storage without initializing and faulting in its pages.
     allocation_ = ::new (mapping) std::byte[allocation_bytes_];
     const uintptr_t allocation_address = reinterpret_cast<uintptr_t>(allocation_);
-    // Keep ordinary buffers at the allocator-like max-aligned offset instead
-    // of placing every one at the mapping's page-aligned cache index.
-    const uintptr_t candidate_address = allocation_address + alignment_;
-    const size_t candidate_remainder = candidate_address % alignment_;
+    // Use the first address satisfying the requested alignment. Anonymous
+    // mappings are page-aligned, so ordinary buffers retain that alignment and
+    // page-sized subranges can be reclaimed without partial edge pages.
+    const size_t candidate_remainder = allocation_address % alignment_;
     const uintptr_t data_address =
-        candidate_address + (candidate_remainder == 0 ? 0 : alignment_ - candidate_remainder);
+        allocation_address + (candidate_remainder == 0 ? 0 : alignment_ - candidate_remainder);
     data_ = reinterpret_cast<std::byte *>(data_address);
     size_ = bytes;
 
@@ -171,11 +188,7 @@ private:
 #endif
   }
 
-  static size_t checked_padding(size_t alignment) {
-    if (alignment > std::numeric_limits<size_t>::max() / 2 + size_t{1})
-      throw std::bad_alloc();
-    return alignment + (alignment - 1);
-  }
+  static size_t checked_padding(size_t alignment) { return alignment - 1; }
 
   static size_t system_page_size() noexcept {
     static const size_t value = [] {

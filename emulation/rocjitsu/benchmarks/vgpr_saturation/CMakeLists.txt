@@ -61,6 +61,16 @@ add_custom_command(
 
 add_custom_target(
     vgpr_saturation_check
-    ALL
     DEPENDS ${VGPR_SATURATION_BINARY} ${VGPR_SATURATION_RESOURCE_STAMP}
+)
+
+add_test(
+    NAME VgprSaturationResourceCheck
+    COMMAND
+        ${Python3_EXECUTABLE} ${VGPR_SATURATION_VERIFIER} --compiler ${AMDCXX}
+        --rocm-path ${ROCM_PATH} --arch gfx942
+)
+set_tests_properties(
+    VgprSaturationResourceCheck
+    PROPERTIES LABELS benchmark TIMEOUT 120
 )
