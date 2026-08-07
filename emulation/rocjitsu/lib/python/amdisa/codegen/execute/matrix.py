@@ -275,7 +275,11 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         ctx.profile.matrix_layout is MatrixLayout.WMMA_REPLICATED_HALFWAVE
         and is_dense_wmma
     )
-    uses_gfx12_wmma_layout = arch == 'rdna4' and is_dense_wmma
+    uses_runtime_wave_split_k_wmma_layout = (
+        ctx.profile.matrix_layout is MatrixLayout.WMMA_SPLIT_K
+        and ctx.profile.wave_size != ctx.profile.wave_size_max
+        and is_dense_wmma
+    )
     uses_fixed_wave32_split_k_layout = (
         ctx.profile.matrix_layout is MatrixLayout.WMMA_SPLIT_K
         and ctx.profile.wave_size == 32
@@ -439,7 +443,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f' amdgpu::src_base(vb, {s1}.encoding_value_), s2, extract_a, extract_b,'
                 f' inst_.clamp, const_acc);'
             )
-        elif uses_gfx12_wmma_layout:
+        elif uses_runtime_wave_split_k_wmma_layout:
             if input_type in ('IU4', 'IU8'):
                 suffix = '4' if input_type == 'IU4' else '8'
                 append_signed_extractors(suffix)
@@ -606,7 +610,10 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f' {src0_base}, {src1_base}, s2, {ea}, {eb}, const_acc,'
                 f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
             )
-        elif uses_gfx12_wmma_layout and input_type not in ('F8_F6_F4', 'F8F6F4'):
+        elif uses_runtime_wave_split_k_wmma_layout and input_type not in (
+            'F8_F6_F4',
+            'F8F6F4',
+        ):
             src0_base = f'amdgpu::src_base(vb, {s0}.encoding_value_)'
             src1_base = f'amdgpu::src_base(vb, {s1}.encoding_value_)'
             if result_type == 'F16':
@@ -682,7 +689,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 ' (inst_.op_sel >> 2) & 0x1u,'
             )
             L.append(f'      {ea}, {eb}, const_acc);')
-        elif uses_gfx12_wmma_layout and result_type in ('F16', 'BF16'):
+        elif uses_runtime_wave_split_k_wmma_layout and result_type in ('F16', 'BF16'):
             exec_fn = 'exec_wmma_f16' if result_type == 'F16' else 'exec_wmma_bf16'
             L.append(f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,')
             L.append(f'      amdgpu::src_base(vb, {s0}.encoding_value_),')

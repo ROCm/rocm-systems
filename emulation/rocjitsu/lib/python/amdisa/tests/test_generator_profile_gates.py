@@ -1388,6 +1388,96 @@ def test_replicated_halfwave_wmma_f16_bf16_dispatch_is_feature_selected():
         assert f'exec_gfx11_wmma_{lower}' not in non_replicated_body
 
 
+def _runtime_wave_split_k_wmma_profile() -> SimpleNamespace:
+    return _matrix_profile(
+        matrix_layout=MatrixLayout.WMMA_SPLIT_K,
+        wave_size=32,
+        wave_size_max=64,
+    )
+
+
+@pytest.mark.parametrize(
+    ('result_type', 'input_type', 'exec_fn'),
+    [
+        ('F32', 'F16', 'exec_wmma_f32'),
+        ('F16', 'F16', 'exec_wmma_f16'),
+        ('BF16', 'BF16', 'exec_wmma_bf16'),
+    ],
+)
+def test_runtime_wave_split_k_wmma_float_dispatch_is_feature_selected(
+    result_type,
+    input_type,
+    exec_fn,
+):
+    inst = Instruction(
+        f'V_WMMA_{result_type}_16X16X16_{input_type}',
+        'ENC_VOP3P',
+        0,
+        [],
+    )
+
+    body = _gen_mfma(
+        inst,
+        'renamed_runtime_split_k',
+        _runtime_wave_split_k_wmma_profile(),
+    )
+
+    assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
+    assert f'amdgpu::{exec_fn}(cu, 16, 16, 16, 16, dst,' in body
+    assert 'wf.wf_size());' in body
+    assert 'exec_gfx11_wmma' not in body
+
+
+def test_runtime_wave_split_k_wmma_i32_dispatch_is_feature_selected():
+    inst = Instruction('V_WMMA_I32_16X16X16_IU8', 'ENC_VOP3P', 0, [])
+
+    body = _gen_mfma(
+        inst,
+        'renamed_runtime_split_k',
+        _runtime_wave_split_k_wmma_profile(),
+    )
+
+    assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
+    assert 'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst,' in body
+    assert 'inst_.clamp, const_acc, wf.wf_size());' in body
+    assert 'exec_gfx11_wmma_i32' not in body
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected_executor'),
+    [
+        (
+            _matrix_profile(
+                matrix_layout=MatrixLayout.WMMA_SPLIT_K,
+                wave_size=32,
+                wave_size_max=32,
+            ),
+            'amdgpu::exec_wmma_f32(cu, 16, 16, 16, 16, dst,',
+        ),
+        (
+            _matrix_profile(
+                matrix_layout=MatrixLayout.WMMA_REPLICATED_HALFWAVE,
+                wave_size=32,
+                wave_size_max=64,
+            ),
+            'amdgpu::exec_gfx11_wmma_f32(cu, wf.wf_size(),',
+        ),
+    ],
+)
+def test_non_runtime_wave_split_k_wmma_layout_avoids_runtime_wave_executor(
+    profile,
+    expected_executor,
+):
+    inst = Instruction('V_WMMA_F32_16X16X16_F16', 'ENC_VOP3P', 0, [])
+
+    body = _gen_mfma(inst, 'rdna4', profile)
+
+    assert expected_executor in body
+    assert (
+        'amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi), wf.wf_size());' not in body
+    )
+
+
 def _fixed_wave32_split_k_profile() -> SimpleNamespace:
     return _matrix_profile(
         uses_vgpr_msb_indexing=True,
