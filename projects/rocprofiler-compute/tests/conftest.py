@@ -7,16 +7,6 @@ import random
 import sys
 from pathlib import Path
 
-from common import ROOT
-
-# Determine script path
-rocprof_compute_script_path = Path(ROOT) / "src/rocprof-compute"
-if not rocprof_compute_script_path.exists():
-    rocprof_compute_script_path = Path(ROOT) / "rocprof-compute"
-if not rocprof_compute_script_path.exists():
-    raise FileNotFoundError("Cannot find rocprof-compute script")
-rocprof_compute_script_path = str(rocprof_compute_script_path)
-
 
 class ProfileModeImportGuard:
     """
