@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/code_object_identity.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
+#include "rocjitsu/code/dbt/gfx1250_b0_to_a0_diagnostics.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -91,8 +92,9 @@ void emit_diagnostic(rj_gfx1250_b0_to_a0_diagnostic_callback_t callback, void *u
   invoke_diagnostic_callback(callback, view, user_data);
 }
 
-void emit_diagnostics(rj_gfx1250_b0_to_a0_diagnostic_callback_t callback, void *user_data,
-                      const std::vector<rocjitsu::TranslationDiagnostic> &diagnostics) noexcept {
+void emit_diagnostics_impl(
+    rj_gfx1250_b0_to_a0_diagnostic_callback_t callback, void *user_data,
+    const std::vector<rocjitsu::TranslationDiagnostic> &diagnostics) noexcept {
   if (callback == nullptr)
     return;
   for (const rocjitsu::TranslationDiagnostic &diagnostic : diagnostics) {
@@ -117,6 +119,12 @@ void emit_diagnostics(rj_gfx1250_b0_to_a0_diagnostic_callback_t callback, void *
 }
 
 } // namespace
+
+void rocjitsu::emit_gfx1250_b0_to_a0_diagnostics(
+    rj_gfx1250_b0_to_a0_diagnostic_callback_t callback, void *user_data,
+    const std::vector<TranslationDiagnostic> &diagnostics) noexcept {
+  emit_diagnostics_impl(callback, user_data, diagnostics);
+}
 
 rj_status_t
 rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size, uint8_t **translated_elf,
@@ -164,7 +172,8 @@ rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size, uint8_
     // rediscovering it. ROCJITSU_STATUS_ERROR is left to mean the translator threw,
     // which carries no such promise.
     if (result.elf_bytes.empty() || !result.dispatchable()) {
-      emit_diagnostics(diagnostic_callback, user_data, result.diagnostics);
+      rocjitsu::emit_gfx1250_b0_to_a0_diagnostics(diagnostic_callback, user_data,
+                                                  result.diagnostics);
       if (result.diagnostics.empty())
         emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindResultNotDispatchable,
                         "translation produced no dispatchable code object");
