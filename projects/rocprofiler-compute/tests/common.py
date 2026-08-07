@@ -31,6 +31,7 @@ SUPPORTED_ARCHS = {
     "gfx1151": {"rdna35_halo": ["RDNA35_HALO"]},
     "gfx1152": {"rdna35_point_2": ["RDNA35_POINT_2"]},
     "gfx1153": {"rdna35_gorgon_point": ["RDNA35_GORGON_POINT"]},
+    "gfx1250": {"gfx1250_series": ["gfx1250"]},
 }
 
 
