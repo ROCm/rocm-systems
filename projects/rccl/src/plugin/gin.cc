@@ -208,12 +208,15 @@ static void initPluginLibsOnceFunc() {
   char* envGinPluginList = nullptr;
   char* savePtr = nullptr;
   int pluginCounter = 0;
+  // "none" and an empty value only opt out of external plugins; they must not disable the internal AINIC path
+  bool extGinPluginRequested = false;
 
   memset(ginPluginLibs, 0, NCCL_GIN_MAX_PLUGINS * sizeof(ginPluginLib_t));
   envGinPlugin = ncclGetEnv("NCCL_GIN_PLUGIN");
   if (envGinPlugin) {
     INFO(NCCL_ENV | NCCL_NET, "NCCL_GIN_PLUGIN set by environment to %s", envGinPlugin);
     if (strcasecmp(envGinPlugin, "none") == 0) envGinPlugin = "";
+    extGinPluginRequested = (envGinPlugin[0] != '\0');
     envGinPluginList = strdup(envGinPlugin);
     // Iterate over list until the list is empty
     ginPluginName = strtok_r(envGinPluginList, ",", &savePtr);
@@ -255,8 +258,8 @@ static void initPluginLibsOnceFunc() {
   if (envNet && (strcasecmp(envNet, "ROCM-IB") == 0)) {
     envNet = "IB-CAST";
   }
-  if ((envNet && strcasecmp(envNet, "IB-CAST") == 0 && !(envGinPlugin)) ||
-      (!envNet && rcclUseAinic() && !(envGinPlugin))) {
+  if ((envNet && strcasecmp(envNet, "IB-CAST") == 0 && !extGinPluginRequested) ||
+      (!envNet && rcclUseAinic() && !extGinPluginRequested)) {
     ginPluginLibs[pluginCounter].ncclGin = &IbCastGinIb;
     ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
     ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
