@@ -1634,7 +1634,7 @@ def test_runtime_wave_split_k_i32_does_not_use_fixed_wave32_executor():
 
 def test_cdna3_fp8_mfma_uses_fnuz_helper_variant():
     inst = Instruction('V_MFMA_F32_16X16X32_FP8_FP8', 'ENC_VOP3P_MFMA', 0, [])
-    body = _gen_mfma(inst, 'cdna3')
+    body = _gen_mfma(inst, 'cdna3', enc_field_names={'cbsz', 'abid', 'blgp'})
 
     assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true, true>(' in body
 
@@ -1649,7 +1649,7 @@ def test_cdna3_fp8_smfmac_uses_fnuz_readers():
 
 def test_cdna4_fp8_mfma_keeps_ocp_helper_variant():
     inst = Instruction('V_MFMA_F32_16X16X32_FP8_FP8', 'ENC_VOP3P_MFMA', 0, [])
-    body = _gen_mfma(inst, 'cdna4')
+    body = _gen_mfma(inst, 'cdna4', enc_field_names={'cbsz', 'abid', 'blgp'})
 
     assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true>(' in body
     assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true, true>(' not in body
@@ -1804,6 +1804,64 @@ def test_i32_mfma_i8_with_blgp_field_uses_broadcast_executor():
     assert 'amdgpu::exec_i32_i8(cu, 16, 16, 32,' in body
     assert 'inst_.cbsz, inst_.abid, inst_.blgp);' in body
     assert 'amdgpu::exec_i32_mixed' not in body
+
+
+def test_fp8_mfma_specialization_follows_encoding_modifier_fields():
+    inst = Instruction('V_MFMA_F32_16X16X32_FP8_FP8', 'ENC_VOP3P_MFMA', 0, [])
+    modifier_fields = {'cbsz', 'abid', 'blgp'}
+
+    body = _gen_mfma(inst, 'renamed_mfma', _matrix_profile(), modifier_fields)
+
+    assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true>(' in body
+    assert 'const_acc, inst_.cbsz, inst_.abid, inst_.blgp);' in body
+
+
+def test_regular_mfma_specialization_follows_encoding_modifier_fields():
+    operands = [Operand('vdst', 128, 'OPR_VGPR', False, True, False, False, 0)]
+    inst = Instruction('V_MFMA_F32_16X16X16_F16', 'ENC_VOP3P_MFMA', 0, operands)
+    modifier_fields = {'cbsz', 'abid', 'blgp'}
+
+    body = _gen_mfma(inst, 'renamed_mfma', _matrix_profile(), modifier_fields)
+
+    assert 'amdgpu::exec_f32_mfma_f16_spec<16, 16, 16>(' in body
+    assert 'const_acc, inst_.cbsz, inst_.abid, inst_.blgp);' in body
+
+
+@pytest.mark.parametrize(
+    'enc_field_names',
+    [
+        {'cbsz'},
+        {'abid'},
+        {'blgp'},
+        {'cbsz', 'abid'},
+        {'cbsz', 'blgp'},
+        {'abid', 'blgp'},
+    ],
+)
+def test_incomplete_mfma_modifier_fields_do_not_enable_modifier_execution(
+    enc_field_names,
+):
+    inst = Instruction('V_MFMA_F32_4X4X4_F16', 'ENC_VOP3P_MFMA', 0, [])
+
+    body = _gen_mfma(inst, 'renamed_mfma', _matrix_profile(), enc_field_names)
+
+    assert 'amdgpu::exec_f32(cu, 4, 4, 4, 4, 16,' in body
+    assert 'amdgpu::extract_f16, amdgpu::extract_f16, const_acc);' in body
+    assert 'inst_.cbsz' not in body
+    assert 'inst_.abid' not in body
+    assert 'inst_.blgp' not in body
+
+
+def test_generic_mfma_without_modifier_fields_uses_unmodified_executor():
+    inst = Instruction('V_MFMA_F32_4X4X4_F16', 'ENC_VOP3P_MFMA', 0, [])
+
+    body = _gen_mfma(inst, 'cdna4', _matrix_profile(), set())
+
+    assert 'amdgpu::exec_f32(cu, 4, 4, 4, 4, 16,' in body
+    assert 'amdgpu::extract_f16, amdgpu::extract_f16, const_acc);' in body
+    assert 'inst_.cbsz' not in body
+    assert 'inst_.abid' not in body
+    assert 'inst_.blgp' not in body
 
 
 def test_div_scale_uses_signed_tiny_exponent_threshold():

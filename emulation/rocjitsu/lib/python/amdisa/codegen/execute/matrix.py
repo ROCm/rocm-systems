@@ -696,33 +696,34 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f' wf.wf_size());'
             )
         else:
-            # CDNA1-4 VOP3P_MFMA encoding has cbsz/abid/blgp fields for A-matrix
-            # broadcast and B-matrix lane permutation; RDNA WMMA does not, so
-            # pass 0 (the spec templates require the args explicitly).
-            has_blgp = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
-            cbsz = 'inst_.cbsz' if has_blgp else '0u'
-            abid = 'inst_.abid' if has_blgp else '0u'
-            blgp = 'inst_.blgp' if has_blgp else '0u'
+            # Pass each matrix modifier when its encoding field exists. The
+            # specialized templates require all three arguments explicitly.
+            cbsz = 'inst_.cbsz' if 'cbsz' in ctx.enc_field_names else '0u'
+            abid = 'inst_.abid' if 'abid' in ctx.enc_field_names else '0u'
+            blgp = 'inst_.blgp' if 'blgp' in ctx.enc_field_names else '0u'
+            has_matrix_modifiers = all(
+                field in ctx.enc_field_names for field in ('cbsz', 'abid', 'blgp')
+            )
             s0b = f'amdgpu::src_base(vb, {s0}.encoding_value_)'
             s1b = f'amdgpu::src_base(vb, {s1}.encoding_value_)'
-            if N % 16 == 0 and input_type in _F8_FIXED and has_blgp:
+            if N % 16 == 0 and input_type in _F8_FIXED and has_matrix_modifiers:
                 a_fp8, b_fp8 = _f8_bools(input_type)
                 fnuz = ', true' if arch in FNUZ_FP8_ARCHES else ''
                 L.append(
                     f'  amdgpu::exec_f32_mfma_f8_spec<{M}, {N}, {K}, {a_fp8}, {b_fp8}{fnuz}>('
                     f'cu, dst, {s0b}, {s1b}, s2, const_acc, {cbsz}, {abid}, {blgp});'
                 )
-            elif N % 16 == 0 and input_type in _MFMA_F32_SPEC and has_blgp:
+            elif N % 16 == 0 and input_type in _MFMA_F32_SPEC and has_matrix_modifiers:
                 fam = _MFMA_F32_SPEC[input_type]
                 targ = _mma_targ(M, N, K, B, batch_optional=(fam != 'f32'))
                 L.append(
                     f'  amdgpu::exec_f32_mfma_{fam}_spec<{targ}>(cu, dst, {s0b}, {s1b}, s2,'
                     f' const_acc, {cbsz}, {abid}, {blgp});'
                 )
-            elif has_blgp:
+            elif has_matrix_modifiers:
                 L.append(
                     f'  amdgpu::exec_f32(cu, {M}, {N}, {K}, {B}, {in_bits}, dst, {s0b}, {s1b},'
-                    f' s2, {ea}, {eb}, const_acc, inst_.cbsz, inst_.abid, inst_.blgp);'
+                    f' s2, {ea}, {eb}, const_acc, {cbsz}, {abid}, {blgp});'
                 )
             else:
                 L.append(
