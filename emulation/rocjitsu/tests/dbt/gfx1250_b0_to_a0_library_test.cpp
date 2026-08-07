@@ -141,7 +141,7 @@ TEST(Gfx1250B0ToA0Library, ReportsTranslatorDiagnostics) {
 // The diagnostic above carries no required work. This one does, so it covers
 // the fan-out through the public C entry point rather than the emit helper
 // exercised by FansOutRequiredWorkAsCallbackViews.
-TEST(Gfx1250B0ToA0Library, ReportsTranslatorDiagnosticsAndRequiredWork) {
+TEST(Gfx1250B0ToA0Library, ReportsTranslatorExpandFailedAndRequiredWork) {
   constexpr auto conversion =
       rocjitsu::gfx1250::build_sop1(rocjitsu::gfx1250::kSBarrierSignalIsfirstSop1, {.ssrc0 = 195});
   constexpr uint32_t kEndpgm = 0xBFB00000u;
