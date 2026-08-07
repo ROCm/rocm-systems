@@ -465,6 +465,19 @@ enum OpSelVgpr {
   }
 }
 
+[[nodiscard]] constexpr bool is_immediate_type(OperandType t) {
+  switch (t) {
+  case OperandType::OPR_SIMM8:
+  case OperandType::OPR_SIMM16:
+  case OperandType::OPR_SIMM32:
+  case OperandType::OPR_SIMM64:
+  case OperandType::OPR_LABEL:
+    return true;
+  default:
+    return false;
+  }
+}
+
 } // namespace gfx1250
 } // namespace rocjitsu
 

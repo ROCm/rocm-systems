@@ -291,6 +291,36 @@ void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
 }
 
 // ================================================================================================
+hipError_t Device::GetAndClearBlockingStreamsAsyncError() {
+  hipError_t async_error = hipSuccess;
+  bool saw_null_stream = false;
+
+  auto update_async_error = [&async_error](hip::Stream* stream) {
+    // Always drain each stream's error so a later one isn't stranded because an
+    // earlier stream in this scan already reported one.
+    hipError_t err = stream->GetAndClearAsyncError();
+    if (async_error == hipSuccess) {
+      async_error = err;
+    }
+  };
+
+  std::shared_lock lock(streamSetLock_);
+  auto* null_stream = GetNullStream();
+  for (auto* stream : streamSet_) {
+    if (stream == null_stream) {
+      saw_null_stream = true;
+    }
+    if (stream == null_stream || (stream->Flags() & hipStreamNonBlocking) == 0) {
+      update_async_error(stream);
+    }
+  }
+  if (null_stream != nullptr && !saw_null_stream) {
+    update_async_error(null_stream);
+  }
+  return async_error;
+}
+
+// ================================================================================================
 void Device::CleanupDeferredIpcSignal(const DeferredIpcSignal& item) {
   if (item.signal != nullptr) {
     // Only armed signals (event != null) have an in-flight barrier to wait on; waiting on a
