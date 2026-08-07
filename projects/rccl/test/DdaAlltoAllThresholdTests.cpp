@@ -131,14 +131,6 @@ TEST_F(DdaAlltoAllThresholdTest, FewerThanEightRanks_Disabled)
         mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
 }
 
-TEST_F(DdaAlltoAllThresholdTest, SymmetricSupport_Disabled)
-{
-    mockComm_.reset("gfx950:sramecc+:xnack-");
-    mockComm_.comm.symmetricSupport = 1;
-    EXPECT_FALSE(testRcclDdaAlltoAllThresholdEnabled(
-        mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
-}
-
 TEST_F(DdaAlltoAllThresholdTest, StagingBytesAtThresholdMatches4Mb)
 {
     const size_t stagingBytes = testAlltoAllDdaIpcStagingBytes(

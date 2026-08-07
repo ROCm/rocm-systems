@@ -30,17 +30,19 @@ inline bool testRcclDdaEnabled(
     size_t gfx942Default,
     size_t gfx950Default = 0,
     size_t gfx1250Default = 0) {
-  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0 ||
-      comm->nRanks < 8 || comm->symmetricSupport) {
+  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
     return false;
   }
   size_t threshold;
   if (IsArchMatch(comm->archName, "gfx1250")) {
     threshold = gfx1250Default ? gfx1250Default : static_cast<size_t>(rcclParamDdaThreshold());
-  } else if (IsArchMatch(comm->archName, "gfx942")) {
-    threshold = gfx942Default;
-  } else if (IsArchMatch(comm->archName, "gfx950")) {
-    threshold = gfx950Default ? gfx950Default : static_cast<size_t>(rcclParamDdaThreshold());
+  } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
+    if (comm->nRanks < 8) return false;
+    if (IsArchMatch(comm->archName, "gfx942")) {
+      threshold = gfx942Default;
+    } else {
+      threshold = gfx950Default ? gfx950Default : static_cast<size_t>(rcclParamDdaThreshold());
+    }
   } else {
     return false;
   }

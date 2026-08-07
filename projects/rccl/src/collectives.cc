@@ -191,11 +191,9 @@ RCCL_PARAM(DdaLL128, "DDA_LL128", 0);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
 
 // Returns true when the DDA fast path should be attempted for a collective
-// with the given total byte count.  gfx942Default is the per-collective
-// threshold for gfx942 (MI300).  gfx950Default optionally caps MI350; when 0,
-// gfx950 uses the user-configurable rcclParamDdaThreshold().
-// gfx1250 uses the user-configurable rcclParamDdaThreshold().
-// All other architectures return false (threshold 0).
+// with the given total byte count. Per-arch defaults cap the threshold; when 0,
+// gfx950/gfx1250 fall back to the user-configurable rcclParamDdaThreshold().
+// All other architectures return false.
 static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default,
                            size_t gfx950Default = 0, size_t gfx1250Default = 0) {
   if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) return false;
