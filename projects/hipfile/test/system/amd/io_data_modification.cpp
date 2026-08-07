@@ -89,6 +89,10 @@ struct HipFileVerify : public testing::TestWithParam<std::tuple<IoTestParam, Siz
         ASSERT_EQ(hipSuccess, hipMemset(device_buffer, kSentinelByte, buffer_bytes));
         // hipMemset is not synchronous w.r.t. the host, and hipFileRead is not ordered w.r.t. the stream.
         ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+
+        if (backend() == IoTestBackend::Fastpath) {
+            enforceFastpathGate(tmpfile_handle, device_buffer);
+        }
     }
 
     void TearDown() override
@@ -321,6 +325,10 @@ struct HipFileVerifyCombined
         ASSERT_EQ(hipSuccess, hipMemset(device_buffer, kSentinelByte, buffer_bytes));
         // hipMemset is not synchronous w.r.t. the host, and hipFileRead is not ordered w.r.t. the stream.
         ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+
+        if (backend() == IoTestBackend::Fastpath) {
+            enforceFastpathGate(tmpfile_handle, device_buffer);
+        }
     }
 
     void TearDown() override
@@ -492,6 +500,10 @@ struct HipFileExtend : public testing::TestWithParam<std::tuple<IoTestParam, Sce
 
         ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, buffer_bytes));
         ASSERT_EQ(hipSuccess, hipMemset(device_buffer, kSentinelByte, buffer_bytes));
+
+        if (backend() == IoTestBackend::Fastpath) {
+            enforceFastpathGate(tmpfile_handle, device_buffer);
+        }
     }
 
     void TearDown() override
