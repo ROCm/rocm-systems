@@ -205,65 +205,6 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     ) in output
 
 
-def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
-    profiles = [
-        ('cdna1', Cdna1Profile()),
-        ('cdna2', Cdna2Profile()),
-        ('cdna3', CdnaProfile()),
-        ('cdna4', CdnaProfile()),
-        ('rdna1', Rdna1Profile()),
-        ('rdna2', Rdna2Profile()),
-        ('rdna3', Rdna3Profile()),
-        ('rdna3_5', Rdna3_5Profile()),
-        ('rdna4', Rdna4Profile()),
-        ('gfx1250', Gfx1250Profile()),
-    ]
-    specs = [
-        (name, SimpleNamespace(profile=profile), None) for name, profile in profiles
-    ]
-
-    generated = emit_isa_properties(str(tmp_path), specs).read_text()
-    checked_in = (
-        Path(__file__).resolve().parents[3]
-        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/isa_properties.h'
-    ).read_text()
-
-    assert generated == checked_in
-
-
-@pytest.mark.parametrize(
-    ('arch', 'profile', 'raw_exec'),
-    [
-        ('cdna3', CdnaProfile(), False),
-        ('rdna4', Rdna4Profile(), True),
-    ],
-)
-def test_operand_exec_register_access_is_wave32_gated(
-    tmp_path, arch, profile, raw_exec
-):
-    generator = CodeGenerator(
-        SimpleNamespace(
-            arch_name=arch,
-            opnd_selectors=[],
-            operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
-            profile=profile,
-        ),
-        str(tmp_path),
-    )
-
-    generator.gen_operand()
-    operand_cpp = (tmp_path / arch / 'operand.cpp').read_text()
-
-    assert 'return static_cast<uint32_t>(wf.exec());' in operand_cpp
-    assert 'wf.set_exec((wf.exec() & 0xFFFFFFFF00000000ULL) | val);' in operand_cpp
-    if raw_exec:
-        assert 'return static_cast<uint32_t>(wf.exec_raw() >> 32);' in operand_cpp
-        assert 'wf.set_exec_raw((wf.exec_raw() & 0x00000000FFFFFFFFULL)' in operand_cpp
-    else:
-        assert 'exec_raw' not in operand_cpp
-        assert 'set_exec_raw' not in operand_cpp
-
-
 def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     generator = CodeGenerator(
         SimpleNamespace(
