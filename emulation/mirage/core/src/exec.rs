@@ -140,8 +140,6 @@ pub struct ExecDef {
     #[serde(default = "one_proc", skip_serializing_if = "is_one_proc")]
     pub nproc_per_node: u32,
 
-    /// Run the workload on a pseudo-terminal instead of pipes.
-    ///
     /// Run only on this node, instead of on every node in the session.
     ///
     /// The reason this exists is terminals. A job spanning several nodes

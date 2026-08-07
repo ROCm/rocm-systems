@@ -55,14 +55,16 @@ fn validate_name(kind: &str, name: &str) -> Result<()> {
     // filesystem reads as structure. Beyond that the set is deliberately
     // generous — `+` in particular is both harmless and already used for
     // composite names like `rocjitsu+node+mi350x`.
+    //
+    // No separate `..` rule is needed. Escaping requires either a
+    // separator — which the set above forbids — or a leading `..`, which
+    // the leading-`.` rule above already rejects. What is left, `a..b`,
+    // is an ordinary single component and harmless.
     if let Some(c) = name
         .chars()
         .find(|c| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+')))
     {
         return bad(&format!("it contains {c:?}; allowed: [A-Za-z0-9._+-]"));
-    }
-    if name.split('.').any(|part| part.is_empty()) && name.contains("..") {
-        return bad("it contains '..'");
     }
     Ok(())
 }

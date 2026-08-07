@@ -786,9 +786,17 @@ fn a_provider_that_cannot_be_found_fails_the_run_with_a_reason() {
         .fails(&["run", "--profile", "bad", "--", "/bin/true"]);
     // A session that cannot come up must say why, and the run that owns
     // it must not stay around pretending to serve it.
+    //
+    // The reason has to name the binary that could not be found. The
+    // previous three-way disjunction added nothing over the non-zero exit
+    // `fails` already asserted: "provider" is a substring of the
+    // `--container-provider` flag the error echoes, and "failed" appears
+    // in every bring-up error there is — so a regression to a bare
+    // "session bring-up failed" would still have passed a test whose name
+    // promises a reason.
     assert!(
-        err.contains("failed") || err.contains("provider") || err.contains("No such file"),
-        "{err}"
+        err.contains("/nonexistent/provider-binary"),
+        "the error must name the provider that could not be found: {err}"
     );
     assert!(
         env.base.live_runs().is_empty(),

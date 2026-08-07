@@ -349,9 +349,21 @@ fn exec_without_a_live_run_says_so() {
 fn an_invalid_session_id_is_rejected() {
     let env = Env::new();
     let err = env.fails(&["exec", "--session", "../escape", "--", "/bin/true"]);
+    // Asserting on the rejection itself, not on a substring that anything
+    // could satisfy: the previous `err.contains("invalid") ||
+    // err.contains("id")` was really just the second arm, because
+    // "invalid" *ends* in "id" — and "id" appears in almost any message
+    // this command can produce, including "no such session id". A test
+    // that passes when path validation is deleted is not testing it.
     assert!(
-        err.contains("invalid") || err.contains("id"),
-        "an id that could escape the runtime directory must be rejected: {err}"
+        err.contains("invalid"),
+        "an id that could escape the runtime directory must be rejected as invalid: {err}"
+    );
+    // And nothing may have been created outside the runtime root.
+    assert!(
+        !env.runtime().parent().is_some_and(|p| p.join("escape").exists()),
+        "`../escape` must not have resolved to a path outside {}",
+        env.runtime().display()
     );
 }
 
@@ -567,7 +579,19 @@ fn stdin_reaches_the_workload() {
     // `cat` exit.
     drop(stdin);
 
-    let out = child.wait_with_output().unwrap();
+    // Bounded, because the regression this test exists to catch is
+    // exactly "the workload's stdin never closed". Collecting the output
+    // unbounded would then block forever, hanging the whole e2e binary
+    // until the 1800s ctest timeout with nothing saying which test wedged
+    // — instead of failing the assertion written for it.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    let out = rx
+        .recv_timeout(Duration::from_secs(60))
+        .expect("`cat` must see EOF when mirage's stdin closes, not block forever")
+        .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("piped through"), "{stdout}");
 }

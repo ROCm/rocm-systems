@@ -805,20 +805,37 @@ impl Engine {
         };
         let mut clients: Vec<NodeClient> = Vec::new();
 
+        // Whether this bring-up is the one that created the network. A
+        // rollback must remove only what it made: the network may have
+        // been there already — left by a run that was `SIGKILL`ed, or
+        // created by something else entirely — and removing it would
+        // disconnect whatever is using it.
+        let network_existed = self.network_exists(&network);
+
         // Helper that removes anything created so far on failure.
         // Killing the clients first stops the containers; `rm -f` then
         // cleans up any that `--rm` has not caught up with yet.
+        //
+        // Removal goes through the same ownership check as
+        // [`mirage_core::container::teardown`]: a container's name is
+        // derived from the session id and is not proof that mirage
+        // created it, and this is the one removal path that can run
+        // against a resource this bring-up did not make.
         let rollback = |engine: &Engine, nodes: &[NodeContainer], clients: &mut Vec<NodeClient>| {
             for c in clients.iter_mut() {
                 c.kill();
             }
-            for n in nodes {
-                engine.rm(&n.name);
-            }
-            engine.network_rm(&network);
+            let state = ContainerState {
+                provider: engine.provider.clone(),
+                image: def.image.clone(),
+                network: (!network_existed).then(|| network.clone()),
+                head_port,
+                nodes: nodes.to_vec(),
+            };
+            mirage_core::container::teardown(&state);
         };
 
-        if self.network_exists(&network) {
+        if network_existed {
             progress(BringUpPhase::NetworkExists {
                 network: network.clone(),
             });

@@ -252,7 +252,23 @@ impl Session {
     #[must_use]
     pub fn containers_alive(&self) -> bool {
         let mut inner = self.lock();
-        inner.container_clients.iter_mut().all(NodeClient::alive)
+        // Every client, not `all`. `NodeClient::alive` is a `try_wait`,
+        // so asking it is also what *reaps* a provider client that exited
+        // on its own — and `Iterator::all` short-circuits on the first
+        // `false`, which meant the moment one container died none of the
+        // ones after it were ever polled again. Their clients then stayed
+        // zombies for the rest of the run, which is the whole thing this
+        // method's second job exists to prevent.
+        // An explicit loop, not `all`/`fold`: clippy rewrites both back to
+        // the short-circuiting form, and its own note for
+        // `unnecessary_fold` names the hazard — "`all` is short
+        // circuiting and may change the program semantics if the iterator
+        // has side effects". This iterator has one, and it is the point.
+        let mut alive = true;
+        for client in &mut inner.container_clients {
+            alive &= client.alive();
+        }
+        alive
     }
 
     /// Record the emulator injection to apply to every workload.
@@ -489,13 +505,26 @@ impl Session {
         // The emulator's environment was computed against the host
         // filesystem; inside a container those paths do not exist.
         let (env, ld_preload) = match &containers {
-            Some(_) => (
-                remap_env_for_container(&injection.env, &self.ctx.runtime_dir),
-                injection
-                    .ld_preload
-                    .as_ref()
-                    .map(|p| library_in_container(p).unwrap_or_else(|| p.clone())),
-            ),
+            Some(_) => {
+                let mut env = remap_env_for_container(&injection.env, &self.ctx.runtime_dir);
+                // `provider exec -e KEY=V` overrides the container's own
+                // value for that process, so this has to carry the same
+                // `CONTAINER_LIB_DIR` prefix `plan_container` gave the
+                // container — see [`container_library_path`]. Without it
+                // every exec silently dropped the directory holding the
+                // emulator's libraries.
+                env.insert(
+                    "LD_LIBRARY_PATH".to_string(),
+                    container_library_path(&injection.env, &self.ctx.runtime_dir),
+                );
+                (
+                    env,
+                    injection
+                        .ld_preload
+                        .as_ref()
+                        .map(|p| libraries_in_container(p).unwrap_or_else(|| p.clone())),
+                )
+            }
             None => (injection.env.clone(), injection.ld_preload.clone()),
         };
 
@@ -815,7 +844,56 @@ fn remap_env_for_container(
         .collect()
 }
 
+/// The `LD_LIBRARY_PATH` a containerised process must run with.
+///
+/// [`CONTAINER_LIB_DIR`] first, because that is the only place the
+/// emulator's libraries and its interposer exist inside the container,
+/// followed by whatever the emulator asked for — remapped, like every
+/// other value, so an entry naming the session scratch directory points
+/// at its mount rather than at a host path that does not exist there.
+///
+/// Computed here so that both places that build a container environment
+/// agree. They did not: `plan_container` prepended the directory when it
+/// launched the container, and `Session::describe` did not, so every
+/// `provider exec` passed `-e LD_LIBRARY_PATH=<emulator's value>` and
+/// overrode the container's own — deleting the one directory the
+/// interposer's sibling libraries resolve from, for every workload.
+fn container_library_path(
+    env: &BTreeMap<String, String>,
+    runtime_dir: &std::path::Path,
+) -> String {
+    match env.get("LD_LIBRARY_PATH") {
+        Some(existing) if !existing.is_empty() => {
+            let remapped = to_container_path(existing, runtime_dir, CONTAINER_RUNTIME_DIR);
+            format!("{CONTAINER_LIB_DIR}:{remapped}")
+        }
+        _ => CONTAINER_LIB_DIR.to_string(),
+    }
+}
+
 /// The in-container path a host library is bind-mounted at.
+///
+/// `LD_PRELOAD` is a `:`-separated *list*, and at least one backend uses
+/// it as one: hotswap preloads its patched ROCR and then its intercept,
+/// as `"<dir>/libhsa-runtime64.so:<dir>/libhsa_intercept.so"`. Treating
+/// that as a single path made `Path::file_name` return only the last
+/// component, so the patched ROCR silently vanished from the preload and
+/// the mount built from the same string named a file with a `:` in it —
+/// which `-v host:container:ro` cannot even express. Each entry is
+/// mapped separately.
+fn libraries_in_container(host_paths: &str) -> Option<String> {
+    let mapped: Vec<String> = split_library_list(host_paths)
+        .filter_map(library_in_container)
+        .collect();
+    (!mapped.is_empty()).then(|| mapped.join(":"))
+}
+
+/// The individual library paths in a `:`-separated search list.
+fn split_library_list(value: &str) -> impl Iterator<Item = &str> {
+    value.split(':').map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// The in-container path one host library is bind-mounted at.
 fn library_in_container(host_path: &str) -> Option<String> {
     std::path::Path::new(host_path)
         .file_name()
@@ -882,7 +960,10 @@ pub fn plan_container(ctx: &SessionContext, injection: &InjectionDef) -> Contain
     // mounts on the same container path is an error.
     let mut libraries: Vec<String> = injection.libraries.clone();
     if let Some(preload) = &injection.ld_preload {
-        libraries.push(preload.clone());
+        // A preload is a `:`-separated list; every entry needs its own
+        // mount, or the ones after the first are named in `LD_PRELOAD`
+        // and never actually present in the container.
+        libraries.extend(split_library_list(preload).map(str::to_string));
     }
     let mut seen = std::collections::HashSet::new();
     for lib in &libraries {
@@ -913,16 +994,15 @@ pub fn plan_container(ctx: &SessionContext, injection: &InjectionDef) -> Contain
     // not exist inside the container, and `ld.so` fails the whole process
     // with "cannot be preloaded" rather than skipping it.
     if let Some(preload) = &injection.ld_preload
-        && let Some(in_container) = library_in_container(preload)
+        && let Some(in_container) = libraries_in_container(preload)
     {
         env.push(("LD_PRELOAD".to_string(), in_container));
     }
 
-    let library_path = match injection.env.get("LD_LIBRARY_PATH") {
-        Some(existing) if !existing.is_empty() => format!("{CONTAINER_LIB_DIR}:{existing}"),
-        _ => CONTAINER_LIB_DIR.to_string(),
-    };
-    env.push(("LD_LIBRARY_PATH".to_string(), library_path));
+    env.push((
+        "LD_LIBRARY_PATH".to_string(),
+        container_library_path(&injection.env, &ctx.runtime_dir),
+    ));
     env.push((
         "MIRAGE_RUNTIME".to_string(),
         CONTAINER_RUNTIME_DIR.to_string(),
@@ -994,6 +1074,78 @@ mod tests {
             },
             containerize: None,
         }
+    }
+
+    #[test]
+    fn a_multi_entry_preload_keeps_every_entry() {
+        // hotswap preloads its patched ROCR *and* its intercept, as one
+        // `:`-separated value. Treating that as a single path kept only
+        // the last component — so the patched ROCR silently vanished from
+        // `LD_PRELOAD` and the workload ran against the unpatched runtime
+        // while mirage reported success.
+        assert_eq!(
+            libraries_in_container("/opt/hs/libhsa-runtime64.so:/opt/hs/libhsa_intercept.so"),
+            Some(format!(
+                "{CONTAINER_LIB_DIR}/libhsa-runtime64.so:{CONTAINER_LIB_DIR}/libhsa_intercept.so"
+            ))
+        );
+        assert_eq!(
+            libraries_in_container("/opt/x/libone.so"),
+            Some(format!("{CONTAINER_LIB_DIR}/libone.so"))
+        );
+        assert_eq!(libraries_in_container(""), None);
+    }
+
+    #[test]
+    fn every_preloaded_library_is_mounted_not_just_the_last() {
+        // A path named in `LD_PRELOAD` but never bind-mounted is a file
+        // that does not exist inside the container.
+        let dir = tempfile::tempdir().unwrap();
+        let injection = InjectionDef {
+            ld_preload: Some("/opt/hs/libhsa-runtime64.so:/opt/hs/libhsa_intercept.so".to_string()),
+            ..Default::default()
+        };
+        let plan = plan_container(&ctx(dir.path().to_path_buf()), &injection);
+        for name in ["libhsa-runtime64.so", "libhsa_intercept.so"] {
+            assert!(
+                plan.mounts
+                    .iter()
+                    .any(|m| m.container_path == format!("{CONTAINER_LIB_DIR}/{name}")),
+                "{name} is preloaded but never mounted: {:?}",
+                plan.mounts
+            );
+        }
+    }
+
+    #[test]
+    fn the_container_library_path_always_leads_with_the_mount() {
+        // `CONTAINER_LIB_DIR` is the only place the emulator's libraries
+        // exist inside the container, so it has to win the search whether
+        // or not the backend asked for a path of its own.
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = dir.path();
+
+        let empty = BTreeMap::new();
+        assert_eq!(container_library_path(&empty, runtime), CONTAINER_LIB_DIR);
+
+        let mut env = BTreeMap::new();
+        env.insert("LD_LIBRARY_PATH".to_string(), "/opt/hs/lib".to_string());
+        assert_eq!(
+            container_library_path(&env, runtime),
+            format!("{CONTAINER_LIB_DIR}:/opt/hs/lib")
+        );
+
+        // And a value naming the session scratch is remapped onto its
+        // mount, like every other value in the injection.
+        let mut env = BTreeMap::new();
+        env.insert(
+            "LD_LIBRARY_PATH".to_string(),
+            runtime.join("lib").display().to_string(),
+        );
+        assert_eq!(
+            container_library_path(&env, runtime),
+            format!("{CONTAINER_LIB_DIR}:{CONTAINER_RUNTIME_DIR}/lib")
+        );
     }
 
     #[test]

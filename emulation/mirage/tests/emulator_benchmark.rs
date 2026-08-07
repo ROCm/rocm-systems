@@ -326,9 +326,24 @@ fn benchmark_emulators_and_write_report() {
     // which backend was skipped and why.
     let ran: Vec<&EmulatorResult> = results.iter().filter(|r| r.runs > 0).collect();
     if ran.is_empty() {
+        // Same bargain the session suites make through
+        // `harness::assert_suite_can_run`, and for the same reason: a
+        // benchmark that measures nothing must not report success unless
+        // somebody said the skips were expected. Without the gate this
+        // goes green forever the moment the one backend a machine can run
+        // stops being discoverable — a moved ROCM_HOME, a stale build —
+        // and an accuracy regression becomes invisible.
+        assert!(
+            std::env::var_os(harness::ENV_ALLOW_SKIP).is_some(),
+            "no emulator was runnable on this host, so the benchmark \
+             measured nothing. See the skip reasons in the report above.\n\n\
+             If this machine deliberately has no runnable backend, set \
+             {}=1 to accept the skip.",
+            harness::ENV_ALLOW_SKIP
+        );
         eprintln!(
-            "no emulator was runnable on this host; benchmark measured \
-             nothing. See the skip reasons in the report above."
+            "{} is set; accepting a benchmark that measured nothing.",
+            harness::ENV_ALLOW_SKIP
         );
         return;
     }

@@ -55,6 +55,17 @@ pub struct Exec {
     /// delivered through the provider instead. Fixed at start, because
     /// the mapping does not change over the exec's life.
     containers: BTreeMap<u32, ContainerProc>,
+    /// Whether this exec is the single-process kind that takes the
+    /// caller's terminal whole.
+    ///
+    /// Decided from the specs, not from how many processes happen to be
+    /// alive later. Those are different answers: a two-rank exec whose
+    /// second rank fails to spawn has one live pid but was built with
+    /// [`StdioMode::Capture`], so its surviving rank has `/dev/null` on
+    /// stdin and must *not* be handed the terminal — doing so makes
+    /// mirage a background process group and diverts Ctrl-C away from
+    /// the interrupt handling that drives teardown.
+    owns_terminal: bool,
     /// Cancels every process supervisor belonging to this exec.
     cancel: CancellationToken,
     /// Set once the exec has fully finished and been cleaned up.
@@ -136,12 +147,18 @@ impl Exec {
         // Drop our sender so the forwarder ends once every pump is done.
         drop(tx);
 
+        // One process, on a mode that takes the caller's stdin: this is
+        // the interactive shape. `build_specs` gives every rank of one
+        // exec the same mode, so any spec answers for all of them.
+        let owns_terminal = specs.len() == 1 && specs.iter().all(|s| s.stdio.owns_terminal());
+
         let exec = Arc::new(Self {
             id,
             def,
             status: Mutex::new(status),
             pids: Mutex::new(pids),
             containers,
+            owns_terminal,
             cancel: CancellationToken::new(),
             finished: watch::channel(false).0,
         });
@@ -165,13 +182,29 @@ impl Exec {
         self.lock_status().clone()
     }
 
-    /// Rank 0's pid, while it is running.
+    /// The process group to hand the caller's terminal to, if any.
     ///
-    /// Rank 0 is the process that holds the caller's terminal, so this is
-    /// the process group the caller hands the terminal to.
+    /// `Some` only for a single-process exec on an inheriting stdio mode
+    /// — the interactive shape, where the workload's stdin *is* the
+    /// caller's terminal and it therefore has to become the terminal's
+    /// foreground group or be stopped by `SIGTTIN` on its first read.
+    ///
+    /// Keyed off the exec's shape rather than a rank number on purpose.
+    /// The pid map is keyed by *global* rank, so `mirage exec --node 2`
+    /// — the whole reason single-node execs exist — registers its one
+    /// process under rank 2 and a lookup of rank 0 finds nothing: the
+    /// shell would inherit the terminal, sit in a background process
+    /// group, and stop on the first keystroke.
     #[must_use]
-    pub fn rank_zero_pid(&self) -> Option<u32> {
-        self.lock_pids().get(&0).copied()
+    pub fn terminal_pid(&self) -> Option<u32> {
+        if !self.owns_terminal {
+            return None;
+        }
+        let pids = self.lock_pids();
+        match pids.len() {
+            1 => pids.values().next().copied(),
+            _ => None,
+        }
     }
 
     /// Pids of the processes still running in this exec.
@@ -189,15 +222,20 @@ impl Exec {
     /// stop an exec. This exists so that "the process is definitely gone"
     /// is reachable even when "await teardown properly" is not.
     pub fn kill_now(&self) {
-        for (node, pid) in self.lock_pids().iter() {
+        // The pid list is copied out and the lock released before any
+        // process is signalled. Signalling a containerised rank forks a
+        // provider client, and holding the pid mutex across one fork per
+        // rank would block every other reader of it — in a path whose
+        // whole purpose is to work from a `Drop` or a panic handler.
+        for (node, pid) in self.lock_pids_for_kill() {
             // Containerised: the pid is the provider's client, in our
             // namespace, and killing it leaves the workload running
             // inside the container. Push the signal through the provider
             // too, without waiting — there is no runtime to wait on here.
-            if let Some(container) = self.containers.get(node) {
+            if let Some(container) = self.containers.get(&node) {
                 container.signal_now(Signal::SIGKILL);
             }
-            signal_process_group_only(*pid, Signal::SIGKILL);
+            signal_process_group_only(pid, Signal::SIGKILL);
         }
     }
 
@@ -287,12 +325,36 @@ impl Exec {
         }
     }
 
+    fn lock_pids_for_kill(&self) -> Vec<(u32, u32)> {
+        self.lock_pids().iter().map(|(n, p)| (*n, *p)).collect()
+    }
+
     fn lock_status(&self) -> std::sync::MutexGuard<'_, ExecStatus> {
         self.status.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     fn lock_pids(&self) -> std::sync::MutexGuard<'_, BTreeMap<u32, u32>> {
         self.pids.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+impl Drop for Exec {
+    /// Last resort: nothing that owns an `Exec` may drop it with
+    /// processes still running.
+    ///
+    /// [`Run`](crate::Run) has had this guarantee since it was written,
+    /// but `mirage exec` never builds a `Run` — it holds an `Exec`
+    /// directly — so on that path a panic or an early `?` return had
+    /// nothing enforcing it. For a native workload tokio's
+    /// `kill_on_drop` eventually catches it; for a containerised one it
+    /// does not, because killing the provider's client leaves the
+    /// workload alive inside the container. Attaching the rule to the
+    /// type that owns the processes covers both owners at once.
+    ///
+    /// A no-op in the normal case: every pid has already been retired by
+    /// its supervising task.
+    fn drop(&mut self) {
+        self.kill_now();
     }
 }
 
@@ -616,6 +678,51 @@ mod tests {
         let err = exec.signal(9999).await.unwrap_err();
         assert!(err.to_string().contains("invalid signal"), "{err}");
         finish(&exec).await;
+    }
+
+    #[tokio::test]
+    async fn a_single_node_exec_offers_its_terminal_whatever_rank_it_is() {
+        // `mirage exec --node 2 -- bash`: one process, on the caller's
+        // own streams. Its global rank is 2, not 0, and the terminal
+        // handoff used to look the pid up under rank 0 — so the shell
+        // inherited the terminal, sat in a background process group, and
+        // stopped with SIGTTIN on the first keystroke.
+        let mut s = spec(2, "sleep 300");
+        s.stdio = crate::process::StdioMode::Inherit { stdin: true };
+        let (exec, _out) = start(vec![s]);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let pid = exec.terminal_pid();
+        assert!(
+            pid.is_some(),
+            "a one-process exec on node 2 must still be handed the terminal"
+        );
+        assert_eq!(pid, exec.status().nodes[&2].pid);
+        exec.terminate().await;
+    }
+
+    #[tokio::test]
+    async fn a_grid_never_offers_its_terminal_even_when_only_one_rank_survives() {
+        // The shape is fixed at spawn: this exec was built captured, so
+        // every rank has `/dev/null` on stdin and none of them may become
+        // the terminal's foreground group. Deciding from the *live* pid
+        // count read a partly-failed grid as the interactive case and
+        // handed the terminal away, which diverts Ctrl-C from mirage and
+        // so from the teardown it drives.
+        let mut bad = spec(1, "");
+        bad.command = "definitely-not-a-real-binary".to_string();
+        let (exec, _out) = start(vec![spec(0, "sleep 300"), bad]);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            exec.live_pids().len(),
+            1,
+            "the setup must leave exactly one rank running"
+        );
+        assert_eq!(
+            exec.terminal_pid(),
+            None,
+            "a captured exec must not be handed the terminal"
+        );
+        exec.terminate().await;
     }
 
     #[tokio::test]

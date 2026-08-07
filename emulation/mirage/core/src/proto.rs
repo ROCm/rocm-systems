@@ -115,13 +115,19 @@ pub struct ContainerTargets {
 }
 
 impl ContainerTargets {
-    /// The container hosting `rank`, falling back to rank 0's when the
-    /// topology and the container list disagree.
+    /// The container hosting `rank`, or `None` if there is none.
+    ///
+    /// No fallback. Falling back to rank 0's container when the list is
+    /// shorter than the topology looked defensive and was the opposite:
+    /// the caller's `None` branch raises "session has no container for
+    /// node N", which is the truth, whereas the fallback silently ran
+    /// rank N's workload inside rank 0's container. Two ranks then share
+    /// one PID namespace while each believes it is on a different node,
+    /// so their `NCCL_HOSTID`s collide, the pid files they write to the
+    /// shared scratch name processes in the same namespace, and the
+    /// rendezvous is quietly wrong — with nothing logged anywhere.
     #[must_use]
     pub fn name(&self, rank: u32) -> Option<&str> {
-        self.names
-            .get(rank as usize)
-            .or_else(|| self.names.first())
-            .map(String::as_str)
+        self.names.get(rank as usize).map(String::as_str)
     }
 }

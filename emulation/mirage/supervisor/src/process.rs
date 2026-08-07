@@ -169,6 +169,15 @@ impl ContainerProc {
     /// `kill` is used as a *shell builtin*, via `/bin/sh -c`: many
     /// minimal images ship no `/bin/kill` binary, and
     /// `provider exec <c> kill …` would fail on those.
+    ///
+    /// The script's exit status is the *delivery* result, deliberately.
+    /// It used to end in `exit 0`, which made [`ContainerProc::signal`]
+    /// report success for a pid that no longer existed inside the
+    /// container — and callers use that boolean to decide whether the
+    /// workload still needs signalling by another route, so a false
+    /// "delivered" meant the signal reached nothing at all. `||` makes
+    /// the status true only if one of the two forms actually found
+    /// something to signal.
     fn kill_argv(&self, pid: u32, sig: Signal) -> Vec<String> {
         let n = sig as i32;
         vec![
@@ -176,7 +185,7 @@ impl ContainerProc {
             self.container.clone(),
             "/bin/sh".to_string(),
             "-c".to_string(),
-            format!("kill -{n} -{pid} 2>/dev/null; kill -{n} {pid} 2>/dev/null; exit 0"),
+            format!("kill -{n} -{pid} 2>/dev/null || kill -{n} {pid} 2>/dev/null"),
         ]
     }
 
@@ -193,6 +202,25 @@ impl ContainerProc {
             );
             return false;
         };
+        self.deliver(pid, sig).await
+    }
+
+    /// Deliver `sig` using the pid already on disk, without waiting for
+    /// one to appear.
+    ///
+    /// For the second attempt in [`Spawned::terminate`], where the
+    /// wrapper has had the provider client's entire lifetime to record
+    /// its pid: if the file is still absent it is not coming, and
+    /// waiting another [`PID_FILE_WAIT`] only makes teardown slower.
+    pub async fn signal_recorded(&self, sig: Signal) -> bool {
+        match self.pid() {
+            Some(pid) => self.deliver(pid, sig).await,
+            None => false,
+        }
+    }
+
+    /// Run the provider's `kill` for `pid`, reporting whether it landed.
+    async fn deliver(&self, pid: u32, sig: Signal) -> bool {
         let status = Command::new(&self.provider)
             .args(self.kill_argv(pid, sig))
             .stdin(std::process::Stdio::null())
@@ -768,7 +796,24 @@ impl Spawned {
 
         // Give it the grace period to exit on its own terms.
         let status = match tokio::time::timeout(TERM_GRACE, self.child.wait()).await {
-            Ok(status) => status,
+            Ok(status) => {
+                // A containerised rank we could not reach through the
+                // provider needs one more attempt now that the client is
+                // gone. The client dies from its own SIGTERM in
+                // milliseconds, so this arm — not the escalation below —
+                // is the one a containerised process actually takes, and
+                // returning here would leave a workload that was never
+                // signalled running inside the container with mirage
+                // reporting the exec finished. By now the wrapper has had
+                // the client's whole lifetime to record its pid, so the
+                // lookup that failed before usually succeeds.
+                if !reached_workload
+                    && let Some(container) = self.container.clone()
+                {
+                    container.signal_recorded(Signal::SIGKILL).await;
+                }
+                status
+            }
             Err(_elapsed) => {
                 // It ignored SIGTERM, or is wedged. SIGKILL cannot be
                 // caught or blocked, so this stage always terminates.

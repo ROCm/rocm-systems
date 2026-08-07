@@ -378,7 +378,9 @@ pub struct ExecArgsCli {
     /// shared between readers. Naming one node makes this a
     /// single-process exec, which does get the terminal:
     ///
-    ///     mirage exec --node 2 -- bash
+    /// ```text
+    /// mirage exec --node 2 -- bash
+    /// ```
     ///
     /// The process still believes it is that node: same rank variables,
     /// same `WORLD_SIZE`, same rendezvous as its neighbours.
@@ -1253,7 +1255,15 @@ fn apply_profile_overrides(
     if num_nodes.is_some() || gpus_per_node.is_some() {
         let mut topo = match &profile.emulator.topology {
             MaybeRef::Owned(t) => t.clone(),
-            MaybeRef::Ref(name) => mirage_core::topology::store::get(name)?,
+            // Through the store's front door, so the name is validated
+            // before it is joined to the config directory. The raw
+            // `topology::store::get` skips that check, and a name is only
+            // a filename by convention: a profile whose topology
+            // reference is `../../../../tmp/evil` resolved to a document
+            // outside the config root, and a missing one reported an io
+            // error naming the traversed path instead of
+            // `TopologyNotFound`.
+            MaybeRef::Ref(name) => mirage_core::store::topology_get(name)?,
         };
         if let Some(n) = num_nodes {
             topo.num_nodes = n;

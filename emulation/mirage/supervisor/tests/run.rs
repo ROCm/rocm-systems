@@ -280,9 +280,19 @@ async fn a_workload_that_forks_has_its_whole_tree_reaped() {
         .expect("teardown must not hang");
     let _ = exec;
 
-    let size_after_teardown = std::fs::metadata(&marker).map(|m| m.len()).unwrap_or(0);
+    // `expect`, not `unwrap_or(0)`. Defaulting both samples to 0 made the
+    // assertion `0 == 0` — satisfied whenever the marker could not be
+    // read at all, which no longer distinguishes "the grandchild was
+    // reaped" from "the file went away". The file provably existed a few
+    // lines above, so a read failure here is a broken test, not a pass.
+    let size = |what: &str| {
+        std::fs::metadata(&marker)
+            .unwrap_or_else(|e| panic!("the marker must still be readable {what}: {e}"))
+            .len()
+    };
+    let size_after_teardown = size("right after teardown");
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let size_later = std::fs::metadata(&marker).map(|m| m.len()).unwrap_or(0);
+    let size_later = size("half a second later");
     let _ = std::fs::remove_file(&marker);
     assert_eq!(
         size_after_teardown, size_later,

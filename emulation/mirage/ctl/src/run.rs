@@ -138,23 +138,17 @@ async fn run_owned(
     }
 
     let session = run.id();
-    let (cmd, args) = split_argv(&a.argv);
-    let def = ExecDef {
-        timestamp: chrono::Utc::now(),
-        session: session.clone(),
-        exec: ExecArgs {
-            command: cmd,
-            args,
-            env: parse_envs(&a.envs)?,
-            workdir: a.workdir.clone(),
-        },
-        worker_exec: None,
-        nproc_per_node: a.nproc_per_node.unwrap_or(1).max(1),
-        // `run` starts the whole job; `exec --node N` is how you reach
-        // one node of it.
-        node: None,
-        clear_env: a.clear_env_vars,
-    };
+    // `run` starts the whole job; `exec --node N` is how you reach one
+    // node of it, so the node is unset here.
+    let def = exec_def(
+        session.clone(),
+        &a.argv,
+        &a.envs,
+        a.workdir.clone(),
+        a.nproc_per_node,
+        None,
+        a.clear_env_vars,
+    )?;
 
     let (exec, output) = run.exec(&def).await?;
 
@@ -214,6 +208,45 @@ pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
     supervise_locally(exec, output, &mut interrupts).await
 }
 
+/// Build the [`ExecDef`] for one command invocation.
+///
+/// Shared by `run` and `exec` so the two cannot drift. They differ in
+/// exactly one field — `run` starts the whole job and passes `node:
+/// None`, `exec` passes whatever `--node` named — and that difference is
+/// a parameter here rather than a second copy of the literal. It was a
+/// second copy, and the copy is how `--node` came to be parsed and then
+/// dropped on the floor: the comment explaining why `None` is right for
+/// `run` was carried into `exec` along with the value it justified.
+///
+/// # Errors
+///
+/// Returns an error if an `--env` argument is not in `KEY=VALUE` form.
+fn exec_def(
+    session: SessionId,
+    argv: &[String],
+    envs: &[String],
+    workdir: Option<String>,
+    nproc_per_node: Option<u32>,
+    node: Option<u32>,
+    clear_env: bool,
+) -> anyhow::Result<ExecDef> {
+    let (command, args) = split_argv(argv);
+    Ok(ExecDef {
+        timestamp: chrono::Utc::now(),
+        session,
+        exec: ExecArgs {
+            command,
+            args,
+            env: parse_envs(envs)?,
+            workdir,
+        },
+        worker_exec: None,
+        nproc_per_node: nproc_per_node.unwrap_or(1).max(1),
+        node,
+        clear_env,
+    })
+}
+
 /// Run an exec to completion in this terminal, printing captured output
 /// and stopping it cleanly if we are interrupted.
 ///
@@ -243,11 +276,13 @@ async fn supervise_locally(
     // It costs a grid nothing, because a grid is not an interactive
     // program: it has no stdin either way. `mirage exec --node N` is how
     // you get a terminal on one node of one.
-    let single_process = exec.live_pids().len() <= 1;
-    let _terminal = single_process
-        .then(|| exec.rank_zero_pid().map(TerminalHandoff::give_to))
-        .flatten()
-        .flatten();
+    //
+    // [`Exec::terminal_pid`] answers from the exec's *shape* rather than
+    // from how many processes are alive right now. Counting live pids
+    // read a partly-failed grid — one rank of four whose command was not
+    // found, or three ranks that exited first — as the interactive case,
+    // and handed the terminal to a rank built with `/dev/null` on stdin.
+    let _terminal = exec.terminal_pid().and_then(TerminalHandoff::give_to);
 
     // Ctrl-C reaches us, not the workload: children lead their own
     // process groups, so the terminal's foreground group is this process
@@ -566,5 +601,66 @@ impl Drop for TerminalHandoff {
         with_sigttou_blocked(|| {
             let _ = nix::unistd::tcsetpgrp(stdin.as_fd(), self.restore);
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+
+    fn session() -> SessionId {
+        SessionId::new("s").unwrap()
+    }
+
+    fn argv() -> Vec<String> {
+        vec!["/bin/true".to_string()]
+    }
+
+    #[test]
+    fn exec_carries_the_node_it_was_given() {
+        // The regression that made `mirage exec --node 2` a no-op: the
+        // flag was parsed and then dropped, because `exec_cmd` built its
+        // own `ExecDef` literal with `node: None` copied from `run`. The
+        // exec then fanned out to every node, which — several processes
+        // sharing one terminal — takes the captured branch and connects
+        // nobody's stdin, i.e. the exact opposite of what `--node` is for.
+        let def = exec_def(session(), &argv(), &[], None, None, Some(2), false).unwrap();
+        assert_eq!(def.node, Some(2));
+    }
+
+    #[test]
+    fn run_starts_the_whole_job() {
+        // `run` has no `--node`: it brings the session up and runs on all
+        // of it. This is the one field the two commands must differ on.
+        let def = exec_def(session(), &argv(), &[], None, None, None, false).unwrap();
+        assert_eq!(def.node, None);
+    }
+
+    #[test]
+    fn the_rest_of_the_definition_is_built_the_same_way_for_both() {
+        let def = exec_def(
+            session(),
+            &["/bin/echo".to_string(), "hi".to_string()],
+            &["K=V".to_string()],
+            Some("/w".to_string()),
+            Some(4),
+            None,
+            true,
+        )
+        .unwrap();
+        assert_eq!(def.exec.command, "/bin/echo");
+        assert_eq!(def.exec.args, vec!["hi".to_string()]);
+        assert_eq!(def.exec.env.get("K").map(String::as_str), Some("V"));
+        assert_eq!(def.exec.workdir.as_deref(), Some("/w"));
+        assert_eq!(def.nproc_per_node, 4);
+        assert!(def.clear_env);
+    }
+
+    #[test]
+    fn a_zero_process_count_is_clamped_rather_than_starting_no_processes() {
+        let def = exec_def(session(), &argv(), &[], None, Some(0), None, false).unwrap();
+        assert_eq!(def.nproc_per_node, 1);
     }
 }

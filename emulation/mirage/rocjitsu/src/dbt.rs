@@ -95,23 +95,7 @@ impl EmulatorBackend for RocjitsuDbt {
     fn shutdown(&self, _ctx: &SessionContext) {}
 
     fn validate_profile(&self, def: &ProfileDef) -> std::result::Result<(), String> {
-        // Resolving the guest gfx version exercises the same topology +
-        // agent reference resolution the run path needs, so any error
-        // here is exactly what would otherwise surface at run time.
-        let gfx = guest_gfx_version(&def.emulator)
-            .map_err(|e| format!("rocjitsu-dbt cannot use this profile: {e}"))?;
-        // A source override (option or env) lets a caller name a guest
-        // ISA explicitly; otherwise the agent's gfx must be one the DBT
-        // translator can read.
-        if source_override(&def.emulator, &ProcessEnv).is_none() && dbt_isa_name(gfx).is_none() {
-            return Err(format!(
-                "rocjitsu-dbt: guest {} (gfx_target_version {gfx}) is not a translatable \
-                 source ISA; supported: {}",
-                gfx_name(gfx),
-                supported_isa_list(),
-            ));
-        }
-        Ok(())
+        self.validate_profile_with(def, &ProcessEnv)
     }
 
     fn installed(&self) -> bool {
@@ -153,6 +137,45 @@ impl EmulatorBackend for RocjitsuDbt {
 }
 
 impl RocjitsuDbt {
+    /// [`EmulatorBackend::validate_profile`] against an explicit
+    /// environment.
+    ///
+    /// Exists for the same reason [`Self::injection_def_with`] does. The
+    /// check consults `RJ_DBT_SOURCE_ISA`, a documented user-facing
+    /// override, so reading the *process* environment makes the test for
+    /// it fail for any developer who has it exported — and the
+    /// alternative, `remove_var`, is `unsafe` in Rust 2024 and races the
+    /// rest of the test binary. Threading the lookup through was done for
+    /// every other env-reading path in this file; this one was missed.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming the problem when the profile's guest ISA
+    /// cannot be resolved or is not translatable.
+    pub fn validate_profile_with(
+        &self,
+        def: &ProfileDef,
+        env_lookup: &impl EnvLookup,
+    ) -> std::result::Result<(), String> {
+        // Resolving the guest gfx version exercises the same topology +
+        // agent reference resolution the run path needs, so any error
+        // here is exactly what would otherwise surface at run time.
+        let gfx = guest_gfx_version(&def.emulator)
+            .map_err(|e| format!("rocjitsu-dbt cannot use this profile: {e}"))?;
+        // A source override (option or env) lets a caller name a guest
+        // ISA explicitly; otherwise the agent's gfx must be one the DBT
+        // translator can read.
+        if source_override(&def.emulator, env_lookup).is_none() && dbt_isa_name(gfx).is_none() {
+            return Err(format!(
+                "rocjitsu-dbt: guest {} (gfx_target_version {gfx}) is not a translatable \
+                 source ISA; supported: {}",
+                gfx_name(gfx),
+                supported_isa_list(),
+            ));
+        }
+        Ok(())
+    }
+
     /// [`EmulatorBackend::injection_def`] against an explicit
     /// environment.
     ///
@@ -627,7 +650,12 @@ mod tests {
             emulator: def_with(MaybeRef::Owned(topology)),
             containerize: None,
         };
-        let err = RocjitsuDbt.validate_profile(&profile).unwrap_err();
+        // Against an injected empty environment, not the process's:
+        // `RJ_DBT_SOURCE_ISA` is a documented override, so a developer
+        // who has it exported would otherwise fail this test.
+        let err = RocjitsuDbt
+            .validate_profile_with(&profile, &empty_env())
+            .unwrap_err();
         assert!(err.contains("not a translatable"), "unexpected: {err}");
     }
 
@@ -650,6 +678,10 @@ mod tests {
             emulator: def_with(MaybeRef::Owned(topology)),
             containerize: None,
         };
-        assert!(RocjitsuDbt.validate_profile(&profile).is_ok());
+        assert!(
+            RocjitsuDbt
+                .validate_profile_with(&profile, &empty_env())
+                .is_ok()
+        );
     }
 }
