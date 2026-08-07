@@ -357,7 +357,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         L.append(f'  amdgpu::exec_f64(cu, {M}, {N}, {K}, {B}, dst,')
         L.append(f'                 {src0_base_expr},')
         L.append(f'                 {src1_base_expr},')
-        neg = 'inst_.blgp' if arch in ('cdna3', 'cdna4') else '0u'
+        neg = 'inst_.blgp' if ctx.profile.supports_f64_mfma_blgp_neg else '0u'
         L.append(f'                 s2, const_acc, {neg});')
     elif result_type == 'I32':
 

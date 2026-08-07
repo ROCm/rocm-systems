@@ -104,6 +104,7 @@ def _matrix_profile(
     wave_size_max: int | None = None,
     supports_matrix_data_type_selectors: bool = False,
     matrix_data_type_selector_fields: tuple[str, str, str] | None = None,
+    supports_f64_mfma_blgp_neg: bool = False,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
@@ -112,6 +113,7 @@ def _matrix_profile(
         wave_size_max=wave_size if wave_size_max is None else wave_size_max,
         supports_matrix_data_type_selectors=supports_matrix_data_type_selectors,
         matrix_data_type_selector_fields=matrix_data_type_selector_fields,
+        supports_f64_mfma_blgp_neg=supports_f64_mfma_blgp_neg,
     )
 
 
@@ -1748,7 +1750,14 @@ def test_fp16_ovfl_sensitive_f16_simd_probes_stay_vectorized():
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' in add_probe
 
 
-def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
+@pytest.mark.parametrize(
+    ('supports_blgp_neg', 'expected_neg'),
+    [
+        (True, 'inst_.blgp'),
+        (False, '0u'),
+    ],
+)
+def test_f64_mfma_neg_follows_profile_capability(supports_blgp_neg, expected_neg):
     operands = [
         Operand('vdst', 256, 'OPR_VGPR', False, True, False, False, 0),
         Operand('src0', 64, 'OPR_SRC_VGPR', True, False, False, False, 1),
@@ -1756,14 +1765,11 @@ def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
         Operand('src2', 256, 'OPR_SRC_VGPR_OR_INLINE', True, False, False, False, 3),
     ]
     inst = Instruction('V_MFMA_F64_16X16X4_F64', 'ENC_VOP3P_MFMA', 0, operands)
+    profile = _matrix_profile(supports_f64_mfma_blgp_neg=supports_blgp_neg)
 
-    for arch in ('cdna3', 'cdna4'):
-        body = _gen_mfma(inst, arch)
-        assert 's2, const_acc, inst_.blgp);' in body
+    body = _gen_mfma(inst, 'renamed_f64_mfma', profile)
 
-    for arch in ('rdna3', 'rdna4', 'gfx1250'):
-        body = _gen_mfma(inst, arch)
-        assert 's2, const_acc, 0u);' in body
+    assert f's2, const_acc, {expected_neg});' in body
 
 
 def test_div_scale_uses_signed_tiny_exponent_threshold():

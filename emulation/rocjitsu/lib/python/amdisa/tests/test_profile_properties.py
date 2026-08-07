@@ -136,6 +136,24 @@ def test_matrix_data_type_selector_properties(profile, supported, selector_field
     assert profile.matrix_data_type_selector_fields == selector_fields
 
 
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (Cdna1Profile(), False),
+        (Cdna2Profile(), False),
+        (CdnaProfile(), True),
+        (Rdna1Profile(), False),
+        (Rdna2Profile(), False),
+        (Rdna3Profile(), False),
+        (Rdna3_5Profile(), False),
+        (Rdna4Profile(), False),
+        (Gfx1250Profile(), False),
+    ],
+)
+def test_supports_f64_mfma_blgp_neg(profile, expected):
+    assert profile.supports_f64_mfma_blgp_neg is expected
+
+
 def test_only_gfx1250_splits_execution_sources():
     assert Gfx1250Profile().split_execution_sources
     assert not Rdna4Profile().split_execution_sources

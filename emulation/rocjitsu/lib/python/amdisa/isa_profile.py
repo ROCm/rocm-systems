@@ -914,6 +914,11 @@ class _AmdgpuProfileBase(IsaProfile):
         return None
 
     @property
+    def supports_f64_mfma_blgp_neg(self) -> bool:
+        """True when F64 MFMA repurposes BLGP as the NEG modifier."""
+        return False
+
+    @property
     def flat_scratch_mechanism(self) -> str:
         """How scratch base is located: 'hwreg' (CDNA3/4) or 'sgpr_pair'."""
         return 'sgpr_pair'
@@ -1088,6 +1093,10 @@ class CdnaProfile(_AmdgpuProfileBase):
         return True
 
     @property
+    def supports_f64_mfma_blgp_neg(self) -> bool:
+        return True
+
+    @property
     def has_acc_vgpr(self) -> bool:
         return True
 
@@ -1124,6 +1133,10 @@ class Cdna1Profile(CdnaProfile):
     - Scratch base via SGPR pair (not HW register).
     - ENC_VOP3PX2 does not exist in CDNA1 XML.
     """
+
+    @property
+    def supports_f64_mfma_blgp_neg(self) -> bool:
+        return False
 
     @property
     def has_acc_vgpr(self) -> bool:
@@ -1175,6 +1188,10 @@ class Cdna2Profile(CdnaProfile):
     - Scratch base via SGPR pair.
     - ENC_VOP3PX2 does not exist in CDNA2 XML.
     """
+
+    @property
+    def supports_f64_mfma_blgp_neg(self) -> bool:
+        return False
 
     @property
     def acc_vgpr_encoding_base(self) -> int:
