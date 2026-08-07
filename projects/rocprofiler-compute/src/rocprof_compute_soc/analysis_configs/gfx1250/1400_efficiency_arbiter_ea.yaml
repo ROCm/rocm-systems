@@ -1,0 +1,273 @@
+# =============================================================================
+# gfx1250 EA (Efficiency Arbiter) Metrics
+# =============================================================================
+#
+# The Efficiency Arbiter (EA) is the gasket block between GL2 cache and SDF
+# (Scalable Data Fabric). It handles memory request routing to different
+# destinations: DRAM (HBM), IO, HDM (Host Data Memory), and GMI (Global
+# Memory Interconnect for multi-GPU).
+#
+# =============================================================================
+
+Panel Config:
+  id: 1400
+  title: Efficiency Arbiter (EA)
+  description: |-
+    Efficiency Arbiter (EA) metrics for gfx1250. The EA is the gasket block
+    between GL2 and SDF, handling memory request routing to DRAM (HBM), IO,
+    HDM (host memory), and GMI (multi-GPU interconnect).
+
+  data source:
+
+  - metric_table:
+      id: 1401
+      title: "EA Utilization"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Utilization:
+          avg: AVG((100 * GC_EA_SE_BUSY_CYCLE_sum / GC_EA_SE_CYCLE_sum) if (GC_EA_SE_CYCLE_sum != 0) else None)
+          min: MIN((100 * GC_EA_SE_BUSY_CYCLE_sum / GC_EA_SE_CYCLE_sum) if (GC_EA_SE_CYCLE_sum != 0) else None)
+          max: MAX((100 * GC_EA_SE_BUSY_CYCLE_sum / GC_EA_SE_CYCLE_sum) if (GC_EA_SE_CYCLE_sum != 0) else None)
+          unit: Percent
+
+  - metric_table:
+      id: 1402
+      title: "EA Traffic Bandwidth"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        DRAM Bandwidth - Read:
+          avg: AVG(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          min: MIN(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          max: MAX(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+        DRAM Bandwidth - Write:
+          avg: AVG(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          min: MIN(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          max: MAX(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+        IO Bandwidth - Read:
+          avg: AVG(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          min: MIN(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          max: MAX(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+        IO Bandwidth - Write:
+          avg: AVG(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          min: MIN(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          max: MAX(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+        HDM Bandwidth - Read:
+          avg: AVG(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          min: MIN(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          max: MAX(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+        HDM Bandwidth - Write:
+          avg: AVG(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          min: MIN(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          max: MAX(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+        GMI Bandwidth - Read:
+          avg: AVG(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          min: MIN(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          max: MAX(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+        GMI Bandwidth - Write:
+          avg: AVG(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          min: MIN(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          max: MAX(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+
+  - metric_table:
+      id: 1403
+      title: "EA-SDP Interface - Outstanding Requests"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Outstanding Requests:
+          avg: AVG((GC_EA_SE_SARB_OUTSTANDING_ALL_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((GC_EA_SE_SARB_OUTSTANDING_ALL_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((GC_EA_SE_SARB_OUTSTANDING_ALL_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Count
+        Outstanding Requests - IO Read:
+          avg: AVG((GC_EA_SE_SARB_OUTSTANDING_IO_RD_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((GC_EA_SE_SARB_OUTSTANDING_IO_RD_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((GC_EA_SE_SARB_OUTSTANDING_IO_RD_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Count
+        Outstanding Requests - IO Write:
+          avg: AVG((GC_EA_SE_SARB_OUTSTANDING_IO_WR_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((GC_EA_SE_SARB_OUTSTANDING_IO_WR_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((GC_EA_SE_SARB_OUTSTANDING_IO_WR_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Count
+        Outstanding Requests - DRAM Read:
+          avg: AVG((GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Count
+        Outstanding Requests - DRAM Write:
+          avg: AVG((GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Count
+        Outstanding Requests - GMI Read:
+          avg: AVG((GC_EA_SE_SARB_OUTSTANDING_GMI_RD_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((GC_EA_SE_SARB_OUTSTANDING_GMI_RD_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((GC_EA_SE_SARB_OUTSTANDING_GMI_RD_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Count
+        Outstanding Requests - GMI Write:
+          avg: AVG((GC_EA_SE_SARB_OUTSTANDING_GMI_WR_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((GC_EA_SE_SARB_OUTSTANDING_GMI_WR_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((GC_EA_SE_SARB_OUTSTANDING_GMI_WR_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Count
+        Outstanding Requests - HDM Read:
+          avg: AVG((GC_EA_SE_SARB_OUTSTANDING_HDM_RD_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((GC_EA_SE_SARB_OUTSTANDING_HDM_RD_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((GC_EA_SE_SARB_OUTSTANDING_HDM_RD_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Count
+        Outstanding Requests - HDM Write:
+          avg: AVG((GC_EA_SE_SARB_OUTSTANDING_HDM_WR_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((GC_EA_SE_SARB_OUTSTANDING_HDM_WR_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((GC_EA_SE_SARB_OUTSTANDING_HDM_WR_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Count
+        Outstanding Requests - Probe Request:
+          avg: AVG((GC_EA_SE_PROBE_OUTSTANDING_REQ_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((GC_EA_SE_PROBE_OUTSTANDING_REQ_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((GC_EA_SE_PROBE_OUTSTANDING_REQ_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Count
+        Outstanding Requests - Probe Response:
+          avg: AVG((GC_EA_SE_PROBE_OUTSTANDING_RESP_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((GC_EA_SE_PROBE_OUTSTANDING_RESP_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((GC_EA_SE_PROBE_OUTSTANDING_RESP_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Count
+
+  - metric_table:
+      id: 1404
+      title: "EA-SDP Interface - Stalls"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        EA Stalled by SDP:
+          avg: AVG((100 * GC_EA_SE_SARB_STALLED_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((100 * GC_EA_SE_SARB_STALLED_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((100 * GC_EA_SE_SARB_STALLED_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Percent
+        EA Stalled by SDP - IO Read:
+          avg: AVG((100 * GC_EA_SE_STALL_IO_RD_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((100 * GC_EA_SE_STALL_IO_RD_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((100 * GC_EA_SE_STALL_IO_RD_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Percent
+        EA Stalled by SDP - IO Write:
+          avg: AVG((100 * GC_EA_SE_STALL_IO_WR_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((100 * GC_EA_SE_STALL_IO_WR_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((100 * GC_EA_SE_STALL_IO_WR_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Percent
+        EA Stalled by SDP - DRAM:
+          avg: AVG((100 * GC_EA_SE_STALL_DRAM_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((100 * GC_EA_SE_STALL_DRAM_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((100 * GC_EA_SE_STALL_DRAM_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Percent
+        EA Stalled by SDP - GMI:
+          avg: AVG((100 * GC_EA_SE_STALL_GMI_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((100 * GC_EA_SE_STALL_GMI_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((100 * GC_EA_SE_STALL_GMI_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Percent
+        EA Stalled by SDP - HDM:
+          avg: AVG((100 * GC_EA_SE_STALL_HDM_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          min: MIN((100 * GC_EA_SE_STALL_HDM_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          max: MAX((100 * GC_EA_SE_STALL_HDM_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          unit: Percent
+
+  metrics_description:
+    Utilization: >-
+      Percentage of cycles EA is busy processing memory requests.
+
+    DRAM Bandwidth - Read: >-
+      Total HBM read bandwidth.
+
+    DRAM Bandwidth - Write: >-
+      Total HBM write bandwidth.
+
+    IO Bandwidth - Read: >-
+      PCI-E and other IO read bandwidth from host CPU memory (pinned or mapped) through the EA.
+
+    IO Bandwidth - Write: >-
+      PCI-E and other IO write bandwidth to host CPU memory through the EA.
+
+    HDM Bandwidth - Read: >-
+      Host Data Memory (unified memory pages) read bandwidth through the EA.
+
+    HDM Bandwidth - Write: >-
+      Host Data Memory (unified memory pages) write bandwidth through the EA.
+
+    GMI Bandwidth - Read: >-
+      GMI read bandwidth from peer GPU HBM via Infinity Fabric.
+
+    GMI Bandwidth - Write: >-
+      GMI write bandwidth to peer GPU HBM via Infinity Fabric.
+
+    Outstanding Requests: >-
+      Average number of in-flight requests from EA to SDP.
+
+    Outstanding Requests - IO Read: >-
+      Average in-flight PCI-E and other IO read requests from EA to SDP.
+
+    Outstanding Requests - IO Write: >-
+      Average in-flight PCI-E and other IO write requests from EA to SDP.
+
+    Outstanding Requests - DRAM Read: >-
+      Average in-flight HBM read requests from EA to SDP.
+
+    Outstanding Requests - DRAM Write: >-
+      Average in-flight HBM write requests from EA to SDP.
+
+    Outstanding Requests - GMI Read: >-
+      Average in-flight GMI read requests from EA to SDP.
+
+    Outstanding Requests - GMI Write: >-
+      Average in-flight GMI write requests from EA to SDP.
+
+    Outstanding Requests - HDM Read: >-
+      Average in-flight HDM read requests from EA to SDP.
+
+    Outstanding Requests - HDM Write: >-
+      Average in-flight HDM write requests from EA to SDP.
+
+    Outstanding Requests - Probe Request: >-
+      Time-averaged number of in-flight cache coherence probe requests from EA.
+
+    Outstanding Requests - Probe Response: >-
+      Average in-flight cache coherence probe responses from EA.
+
+    EA Stalled by SDP: >-
+      Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline.
+
+    EA Stalled by SDP - IO Read: >-
+      Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on PCI-E and other IO read path.
+
+    EA Stalled by SDP - IO Write: >-
+      Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on PCI-E and other IO write path.
+
+    EA Stalled by SDP - DRAM: >-
+      Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on DRAM path.
+
+    EA Stalled by SDP - GMI: >-
+      Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on GMI path.
+
+    EA Stalled by SDP - HDM: >-
+      Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on HDM path.

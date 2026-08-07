@@ -2654,7 +2654,9 @@ def test_generated_execute_shared_calls_have_definitions(amdgpu_generated_root: 
     assert not missing
 
 
-def test_gfx1250_helper_blocks_emit_scaled_wmma_hooks():
+def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
+    gfx1250_generated_root: Path,
+):
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='gfx1250',
@@ -2663,9 +2665,57 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_hooks():
 
     assert codegen._supports_gfx1250_scaled_wmma_vop3px2()
     assert 'VWmmaScaleF32Vop3px2' in (codegen._emit_gfx1250_scaled_wmma_vop3px2_class())
-    assert 'isWmmaScaleF32Vop3px2' in (
-        codegen._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers()
-    )
+    helpers = codegen._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers()
+    assert 'isVop3pOp' in helpers
+    assert 'isWmmaScaleF32Vop3px2' not in helpers
+
+    decoder = (gfx1250_generated_root / 'decoder.cpp').read_text()
+    decode_body = decoder.split(
+        'std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {'
+    )[1].split('std::unique_ptr<Instruction> Decoder::decodeInvalid', 1)[0]
+    assert 'isWmmaScaleF32Vop3px2' not in decode_body
+    assert decoder.count('&Decoder::decodeVWmmaScaleF32Vop3px2,') == 2
+    assert 'if (!isVop3pOp(opcode[2], 0x33)' in decoder
+
+
+@pytest.mark.parametrize(
+    ('arch_name', 'expected_vopd_indices'),
+    [
+        ('rdna3', set(range(0x190, 0x198))),
+        ('rdna3_5', set(range(0x190, 0x198))),
+        ('rdna4', set(range(0x190, 0x198))),
+        ('gfx1250', set(range(0x190, 0x198)) | set(range(0x19E, 0x1A0))),
+    ],
+)
+def test_vopd_dispatch_uses_primary_decode_table(
+    amdgpu_generated_root: Path,
+    arch_name: str,
+    expected_vopd_indices: set[int],
+):
+    arch_root = amdgpu_generated_root / arch_name
+    decoder = (arch_root / 'decoder.cpp').read_text()
+    decode_body = decoder.split(
+        'std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {'
+    )[1].split('std::unique_ptr<Instruction> Decoder::decodeInvalid', 1)[0]
+
+    assert 'Vopd::is_vopd' not in decode_body
+    primary_table = decoder.split('Decoder::primary_decode_table = {', 1)[1].split(
+        '\n};', 1
+    )[0]
+    primary_entries = [
+        line.strip().removesuffix(',')
+        for line in primary_table.splitlines()
+        if line.strip()
+    ]
+    actual_vopd_indices = {
+        index
+        for index, entry in enumerate(primary_entries)
+        if entry == '&Decoder::decodeVopd'
+    }
+    assert actual_vopd_indices == expected_vopd_indices
+    assert 'Decoder::decodeVopd(const MachineInst *opcode)' in decoder
+    assert 'is_vopd' not in (arch_root / 'vopd.h').read_text()
+    assert 'is_vopd' not in (arch_root / 'vopd.cpp').read_text()
 
 
 @pytest.mark.parametrize(
@@ -2815,7 +2865,7 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     cpp = (tmp_path / 'gfx1250' / 'vopd.cpp').read_text()
     exec_cpp = (tmp_path / 'gfx1250' / 'vopd_exec.cpp').read_text()
 
-    assert '(word0 >> 24) == 0xCF' in cpp
+    assert '(word0_ >> 24) == 0xCF' in cpp
     assert '[[maybe_unused]] bool vopd3' not in cpp
     assert 'vopd3 ? OperandType::OPR_SRC_SIMPLE : OperandType::OPR_SRC' in cpp
     assert 'bool literal_uses_f64_high_bits' in cpp
@@ -2875,7 +2925,7 @@ def test_rdna4_vopd_template_uses_available_src_operand_type(tmp_path):
     assert 'OperandType::OPR_SRC_SIMPLE' not in cpp
     assert 'vopd3 ? OperandType::OPR_SRC : OperandType::OPR_SRC' not in cpp
     assert 'return Operand(bits, OperandType::OPR_SRC, encoded);' in cpp
-    assert '(word0 >> 24) == 0xCF' not in cpp
+    assert '(word0_ >> 24) == 0xCF' not in cpp
     assert 'Format::Vopd3' not in cpp
     assert 'literal_uses_f64_high_bits' in cpp
     assert 'is_float64_op' not in cpp
@@ -3141,21 +3191,42 @@ def test_gfx1250_buffer_u64_atomic_payload_width_uses_two_dwords():
 
 
 def test_ev124_125_arch_gating_in_generated_operand(amdgpu_generated_root: Path):
-    rdna4_op = (amdgpu_generated_root / 'rdna4' / 'operand.cpp').read_text()
-    assert 'if (ev == 124)\n    return 0u; // NULL' in rdna4_op
-    assert 'if (ev == 125)\n    return wf.m0()' in rdna4_op
+    # M0 is encoded as 125 on RDNA3+ (and gfx1250) and as 124 on the
+    # older RDNA1/2 and all CDNA arches. Verify the generated operand.cpp
+    # carries the correct kM0EncodingValue constant for each ISA.
+    expected_m0_encoding = {
+        'cdna1': 124,
+        'cdna2': 124,
+        'cdna3': 124,
+        'cdna4': 124,
+        'rdna1': 124,
+        'rdna2': 124,
+        'rdna3': 125,
+        'rdna3_5': 125,
+        'rdna4': 125,
+        'gfx1250': 125,
+    }
+    for arch, encoding in expected_m0_encoding.items():
+        # The kM0EncodingValue constant lives with the scalar-resolve code, which
+        # is emitted into operand.cpp for unsplit arches and into operand_exec.cpp
+        # for arches that split model/execution sources (e.g. gfx1250).
+        op = (amdgpu_generated_root / arch / 'operand.cpp').read_text()
+        exec_path = amdgpu_generated_root / arch / 'operand_exec.cpp'
+        if exec_path.exists():
+            op += exec_path.read_text()
+        assert (
+            f'constexpr int kM0EncodingValue = {encoding};' in op
+        ), f'{arch}: expected kM0EncodingValue = {encoding}'
 
-    rdna3_op = (amdgpu_generated_root / 'rdna3' / 'operand.cpp').read_text()
-    assert 'if (ev == 124)\n    return 0u; // NULL' in rdna3_op
-    assert 'if (ev == 125)\n    return wf.m0()' in rdna3_op
-
-    rdna3_5_op = (amdgpu_generated_root / 'rdna3_5' / 'operand.cpp').read_text()
-    assert 'if (ev == 124)\n    return 0u; // NULL' in rdna3_5_op
-    assert 'if (ev == 125)\n    return wf.m0()' in rdna3_5_op
-
-    cdna4_op = (amdgpu_generated_root / 'cdna4' / 'operand.cpp').read_text()
-    assert 'if (ev == 124)\n    return wf.m0()' in cdna4_op
-    assert 'ev == 125' not in cdna4_op.split('can_resolve_src_scalar')[1].split('}')[0]
+    # The M0 resolution logic is shared (parameterized by m0_ev) in
+    # scalar_operand_resolve.h rather than emitted per-arch, so verify the gating
+    # there: encoding value 124 is the NULL slot when M0 is 125, and the operand
+    # matching the arch's M0 encoding reads M0.
+    shared_resolve = (
+        amdgpu_generated_root / 'shared' / 'scalar_operand_resolve.h'
+    ).read_text()
+    assert 'if (m0_ev == 125 && ev == 124)\n    return 0u; // NULL' in shared_resolve
+    assert 'if (ev == m0_ev)\n    return wf.m0();' in shared_resolve
 
 
 def test_cdna4_mfma_f8f6f4_accepts_standalone_and_prefixed_encodings(
