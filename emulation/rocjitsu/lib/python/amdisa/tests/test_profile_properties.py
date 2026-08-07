@@ -205,6 +205,32 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     ) in output
 
 
+def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
+    profiles = [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', CdnaProfile()),
+        ('rdna1', Rdna1Profile()),
+        ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+        ('gfx1250', Gfx1250Profile()),
+    ]
+    specs = [
+        (name, SimpleNamespace(profile=profile), None) for name, profile in profiles
+    ]
+
+    generated = emit_isa_properties(str(tmp_path), specs).read_text()
+    checked_in = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/isa_properties.h'
+    ).read_text()
+
+    assert generated == checked_in
+
+
 def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     generator = CodeGenerator(
         SimpleNamespace(
