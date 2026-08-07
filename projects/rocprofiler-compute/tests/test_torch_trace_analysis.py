@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import gzip
 import json
 import sqlite3
 from pathlib import Path
@@ -18,7 +19,11 @@ from utils.utils_analysis import (
     process_ml_api_trace_output,
     write_ml_api_trace_consolidated_csv,
 )
-from utils.utils_profile import _augment_marker_csv, _parse_function_backend
+from utils.utils_profile import (
+    _augment_marker_csv,
+    _parse_function_backend,
+    save_ml_api_trace_inputs,
+)
 
 GUID = "abc-1234-def"
 
@@ -359,6 +364,27 @@ def build_kernel_top_df():
     return pd.DataFrame({
         "Kernel_Name": sorted({r[12] for r in COUNTER_ROWS}),
     })
+
+
+def test_ml_api_trace_counter_copy_stays_compressed(tmp_path):
+    """Counter copy stays compressed when results_*.csv is .csv.gz."""
+    src_counter = tmp_path / "results_run0.csv.gz"
+    with gzip.open(src_counter, "wt", newline="") as f:
+        build_counter_df(include_guid=True).to_csv(f, index=False)
+    src_dir = tmp_path / "out" / "pmc_1"
+    src_dir.mkdir(parents=True)
+    build_marker_df(include_guid=True).to_csv(
+        src_dir / "run0_marker_api_trace.csv", index=False
+    )
+
+    save_ml_api_trace_inputs(str(tmp_path), "run0", src_counter)
+
+    dst = tmp_path / "ml_api_trace_run0_counter_collection.csv.gz"
+    assert dst.is_file(), "counter copy should keep the compressed name"
+    assert dst.read_bytes() == src_counter.read_bytes(), "should be a byte copy"
+
+    consolidated_df, _ = process_ml_api_trace_output(str(tmp_path))
+    assert not consolidated_df.empty, "analyze must resolve the compressed copy"
 
 
 def test_ml_api_trace_output_same_for_rocpd_and_csv():

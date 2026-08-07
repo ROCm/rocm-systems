@@ -18,6 +18,7 @@ import pytest
 import yaml
 from conftest import require_torch, require_triton
 
+from utils.csv_compression import find_csvs
 from utils.utils_common import canonical_config_arch
 
 # Runtime config options
@@ -1363,7 +1364,7 @@ def test_bench_only_basic(binary_handler_profile_rocprof_compute):
     assert not (workload_path / "perfmon").exists()
     assert not (workload_path / "sysinfo.csv").exists()
     assert not (workload_path / "profiling_config.yaml").exists()
-    assert not list(workload_path.glob("results_*.csv"))
+    assert not find_csvs(workload_path, "results_*.csv")
     assert not list(workload_path.glob("pmc_perf_*.csv"))
 
 
@@ -1874,7 +1875,7 @@ def test_lds_section(binary_handler_profile_rocprof_compute):
     assert common.check_file_pattern(
         f"- '{lds_block}'", f"{workload_dir}/profiling_config.yaml"
     )
-    results_files = Path(workload_dir).glob("results_*.csv")
+    results_files = find_csvs(workload_dir, "results_*.csv")
     assert any(common.check_file_pattern("SQ_INSTS_LDS", str(f)) for f in results_files)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1900,11 +1901,11 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
     )
     assert common.check_file_pattern("- '3'", f"{workload_dir}/profiling_config.yaml")
     instmix_counter = "SQ_INSTS_FLAT" if is_gfx115x_soc() else "TA_FLAT_WAVEFRONTS"
-    results_files = Path(workload_dir).glob("results_*.csv")
+    results_files = find_csvs(workload_dir, "results_*.csv")
     assert any(
         common.check_file_pattern(instmix_counter, str(f)) for f in results_files
     )
-    results_files = Path(workload_dir).glob("results_*.csv")
+    results_files = find_csvs(workload_dir, "results_*.csv")
     assert any(
         common.check_file_pattern("SQC_TC_DATA_READ_REQ", str(f)) for f in results_files
     )
@@ -1931,7 +1932,7 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
         f"- '{lds_sol_block}'", f"{workload_dir}/profiling_config.yaml"
     )
     lds_sol_counter = "SQC_LDS_IDX_ACTIVE" if is_gfx115x_soc() else "SQ_ACTIVE_INST_LDS"
-    results_files = Path(workload_dir).glob("results_*.csv")
+    results_files = find_csvs(workload_dir, "results_*.csv")
     assert any(
         common.check_file_pattern(lds_sol_counter, str(f)) for f in results_files
     )
@@ -1966,11 +1967,11 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
         "- global_write", f"{workload_dir}/profiling_config.yaml"
     )
     kernel_counter = "SQ_INSTS_FLAT_STORE" if is_gfx115x_soc() else "TA_FLAT_WAVEFRONTS"
-    results_files = Path(workload_dir).glob("results_*.csv")
+    results_files = find_csvs(workload_dir, "results_*.csv")
     assert any(common.check_file_pattern(kernel_counter, str(f)) for f in results_files)
-    results_files = Path(workload_dir).glob("results_*.csv")
+    results_files = find_csvs(workload_dir, "results_*.csv")
     assert any(common.check_file_pattern("global_write", str(f)) for f in results_files)
-    results_files = Path(workload_dir).glob("results_*.csv")
+    results_files = find_csvs(workload_dir, "results_*.csv")
     assert not any(
         common.check_file_pattern("global_read", str(f)) for f in results_files
     )
@@ -3204,7 +3205,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     assert returncode_baseline == 0, "Baseline profiling failed"
 
     # Read baseline timestamps
-    baseline_results_files = list(Path(workload_dir_baseline).glob("results_*.csv"))
+    baseline_results_files = find_csvs(workload_dir_baseline, "results_*.csv")
     baseline_df = pd.concat(
         [pd.read_csv(f) for f in baseline_results_files], ignore_index=True
     )
@@ -3226,7 +3227,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     with_flag_time = time.time() - start_with_flag
     assert returncode_with_flag == 0, "Profiling with torch-trace failed"
     # Read with-flag timestamps
-    with_flag_results_files = list(Path(workload_dir_with_flag).glob("results_*.csv"))
+    with_flag_results_files = find_csvs(workload_dir_with_flag, "results_*.csv")
     with_flag_df = pd.concat(
         [pd.read_csv(f) for f in with_flag_results_files], ignore_index=True
     )
@@ -3634,7 +3635,7 @@ def test_torch_trace_deep_tensor_wraps_overhead(
             elapsed = time.time() - start
             assert returncode == 0, "torch-trace profiling run failed"
 
-            results_files = list(Path(workload_dir).glob("results_*.csv"))
+            results_files = find_csvs(workload_dir, "results_*.csv")
             df = pd.concat([pd.read_csv(f) for f in results_files], ignore_index=True)
             kernel_duration_total = (
                 df["End_Timestamp"].max() - df["Start_Timestamp"].min()

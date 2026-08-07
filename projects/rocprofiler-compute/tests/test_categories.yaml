@@ -31,6 +31,8 @@ test_categories:
       - test_num_xcds_cli_output
       - test_mi_gpu_spec
       - test_utils_profile_csv
+      - test_csv_compression
+      - test_analysis_base
       - test_inject_roctx_package
       - test_torch_cpp_loader
       - test_import_guard
@@ -41,6 +43,7 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-compression
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -91,6 +94,8 @@ test_categories:
       - test_code_object_analysis
       - test_pc_sampling_analysis
       - test_utils_profile_csv
+      - test_csv_compression
+      - test_analysis_base
       - test_inject_roctx_package
       - test_torch_cpp_loader
       - test_profiler_base
@@ -103,6 +108,7 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-compression
       - test_profile_torch_trace
       - test_profile_triton_trace
       - test_profile_live_attach_detach
@@ -156,6 +162,8 @@ test_categories:
       - test_code_object_analysis
       - test_pc_sampling_analysis
       - test_utils_profile_csv
+      - test_csv_compression
+      - test_analysis_base
       - test_inject_roctx_package
       - test_torch_cpp_loader
       - test_profiler_base
@@ -168,6 +176,7 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-compression
       - test_profile_torch_trace
       - test_profile_triton_trace
       - test_profile_live_attach_detach
@@ -221,6 +230,8 @@ test_categories:
       - test_code_object_analysis
       - test_pc_sampling_analysis
       - test_utils_profile_csv
+      - test_csv_compression
+      - test_analysis_base
       - test_inject_roctx_package
       - test_torch_cpp_loader
       - test_profiler_base
@@ -233,6 +244,7 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-compression
       - test_profile_torch_trace
       - test_profile_triton_trace
       - test_profile_live_attach_detach
@@ -251,6 +263,7 @@ test_categories:
     test_patterns:
       - test-rocprofiler-compute-tool
       - test-pc-sampling-collector
+      - test-compression
     labels:
       - "sanitizer"
 

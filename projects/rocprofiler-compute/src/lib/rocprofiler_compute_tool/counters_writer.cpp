@@ -2,25 +2,71 @@
 // SPDX-License-Identifier:  MIT
 #include "counters_writer.h"
 
-#include <fstream>
-#include <iostream>
+#include "compression/gzip_output_stream.h"
 
-void rocprofiler_compute_tool::CsvCountersWriter::write_counters(tool_data_t* tool_data)
+#include <iostream>
+#include <sstream>
+#include <string>
+
+namespace rocprofiler_compute_tool
 {
-    std::ofstream ofs(tool_data->output_filename);
-    if (!ofs.is_open())
+namespace
+{
+constexpr std::string_view kHeader = "dispatch_id,gpu_id,kernel_id,lds_per_workgroup,"
+                                     "counter_id,counter_name,counter_value\n";
+
+// Batch rows so millions of records do not cross the sink per row.
+constexpr std::size_t kBatchBytes = 256 * 1024;
+}  // namespace
+
+bool format_counters_csv(const tool_data_t& tool_data, const std::function<bool(std::string_view)>& sink)
+{
+    // ostringstream keeps counter_value formatting the readers already parse.
+    std::ostringstream batch;
+    batch << kHeader;
+
+    const auto flush_batch = [&sink, &batch]()
+    {
+        const auto text = batch.str();
+        batch.str(std::string{});
+        return text.empty() || sink(text);
+    };
+
+    for (const auto& r : tool_data.counter_records)
+    {
+        batch << r.dispatch_id << ',' << r.agent_id << ',' << r.kernel_id << ',' << r.LDS_memory_size
+              << ',' << r.counter_id << ',' << r.counter_name << ',' << r.counter_value << '\n';
+
+        if (static_cast<std::size_t>(batch.tellp()) >= kBatchBytes && !flush_batch())
+            return false;
+    }
+
+    return flush_batch();
+}
+
+void CsvCountersWriter::write_counters(tool_data_t* tool_data)
+{
+    compression::GzipFileOutputStream stream(tool_data->output_filename);
+    if (!stream.is_open())
     {
         std::cerr << "Failed to open output file: " << tool_data->output_filename << std::endl;
         return;
     }
-    // Write header at the beginning of the file
-    ofs << "dispatch_id,gpu_id,kernel_id,lds_per_workgroup,"
-           "counter_id,counter_name,counter_value\n";
-    for (const auto& r : tool_data->counter_records)
-        ofs << r.dispatch_id << ',' << r.agent_id << "," << r.kernel_id << ',' << r.LDS_memory_size
-            << ',' << r.counter_id << ',' << r.counter_name << ',' << r.counter_value << '\n';
-    ofs.flush();
+
+    const auto wrote = format_counters_csv(*tool_data,
+                                           [&stream](std::string_view text)
+                                           { return stream.write(text); });
+
+    // close() emits the gzip trailer; failure there corrupts the file.
+    if (!stream.close() || !wrote)
+    {
+        std::cerr << "Failed to write output file: " << tool_data->output_filename << std::endl;
+        return;
+    }
+
     std::clog << "[rocprofiler-compute] [" << __FUNCTION__
               << "] Counter collection data has been written to: " << tool_data->output_filename
               << std::endl;
 }
+
+}  // namespace rocprofiler_compute_tool

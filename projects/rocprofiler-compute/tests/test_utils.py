@@ -20,6 +20,7 @@ import utils.utils_analysis as utils_analysis
 import utils.utils_common as utils_common
 import utils.utils_profile as utils_profile
 from utils.amdsmi_interface import _per_device_query
+from utils.csv_compression import find_csvs, is_compressed
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import (
     format_duration,
@@ -1030,8 +1031,7 @@ def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = tmp_path / "workload"
 
-    # rocprofiler-sdk backend with native-tool counter collection writes a
-    # per-pid .db here; child pids that never touched the GPU have no CSV.
+    # Child pids with no GPU work have a .db but no native counter CSV.
     pmc1 = workload_dir / "out" / "pmc_1"
     (pmc1 / "12345").mkdir(parents=True)
     (pmc1 / "12345" / "12345.db").touch()
@@ -1124,7 +1124,7 @@ def test_run_prof_zero_kernels_writes_no_results_csv(
     )
 
     assert any("No GPU kernel data collected" in m for m in warnings)
-    assert list(workload_dir.glob("results_*.csv")) == []
+    assert find_csvs(workload_dir, "results_*.csv") == []
     assert not (workload_dir / "out").exists()
 
 
@@ -1152,9 +1152,11 @@ def test_run_prof_relabels_dispatch_and_kernel_ids(tmp_path, monkeypatch):
         str(workload_dir),
     )
 
-    results = pd.read_csv(workload_dir / "results_pmc_perf_test.csv")
+    results_csv = workload_dir / "results_pmc_perf_test.csv.gz"
+    assert is_compressed(results_csv)
+
+    results = pd.read_csv(results_csv)
     assert "PID" not in results.columns
-    # Rows of one dispatch share a Dispatch_ID; each new dispatch gets the next.
     assert results["Dispatch_ID"].tolist() == [0, 0, 1, 2]
     # Kernel_ID keys off launch shape, so both kernel_a dispatches share one.
     assert results["Kernel_ID"].tolist() == [0, 0, 0, 1]
@@ -1863,9 +1865,9 @@ NaN,,,"""
     assert "Profiling data could be corrupt" in error_args[1]
 
 
-def test_is_workload_empty_completely_empty_csv(tmp_path):
+def test_is_workload_empty_completely_empty_gzip_csv(tmp_path):
     """
-    Test is_workload_empty with completely empty pmc_perf.csv file.
+    Test is_workload_empty with a valid gzip file containing no CSV data.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -1873,13 +1875,14 @@ def test_is_workload_empty_completely_empty_csv(tmp_path):
     Returns:
         None: Asserts function detects empty CSV file.
     """
+    import gzip
     from unittest.mock import patch
 
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
-    pmc_perf_file.write_text("")
+    result_file = workload_dir / "results_pmc_perf_0.csv.gz"
+    result_file.write_bytes(gzip.compress(b""))
 
     console_error_calls = []
 
@@ -1887,10 +1890,14 @@ def test_is_workload_empty_completely_empty_csv(tmp_path):
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
-        try:
-            utils_analysis.is_workload_empty(str(workload_dir))
-        except Exception:
-            pass
+        utils_analysis.is_workload_empty(str(workload_dir))
+
+    assert len(console_error_calls) == 1
+    error_args = console_error_calls[0][0]
+    assert error_args[0] == "profiling"
+    assert "No counter data" in error_args[1]
+    assert str(result_file) in error_args[1]
+    assert "Profiling data could be corrupt" in error_args[1]
 
 
 def test_is_workload_empty_headers_only_csv(tmp_path):

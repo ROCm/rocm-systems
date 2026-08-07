@@ -27,8 +27,7 @@ file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FULL_VERSION_STRING LIMIT_COUNT 
 string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
 set(ROCPROFCOMPUTE_FULL_VERSION "${FULL_VERSION_STRING}")
 string(
-    REGEX REPLACE
-    "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)"
+    REGEX REPLACE "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)"
     "\\1.\\2.\\3"
     ROCPROFCOMPUTE_VERSION
     "${FULL_VERSION_STRING}"
@@ -146,7 +145,7 @@ if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
     file(
         APPEND
-        ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+            ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
         ${mod_additions}
     )
     list(POP_BACK CMAKE_MESSAGE_INDENT)
@@ -752,6 +751,30 @@ add_test(
         tests/test_utils_profile_csv.py ${WORKING_DIR_OPTION}
 )
 
+# ---------------------------------------
+# Compression boundary for csv artifacts
+# ---------------------------------------
+
+add_test(
+    NAME test_csv_compression
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_csv_compression.xml ${COV_OPTION}
+        tests/test_csv_compression.py ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
+# Analyze base unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_analysis_base
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_analysis_base.xml ${COV_OPTION} tests/test_analysis_base.py
+        ${WORKING_DIR_OPTION}
+)
+
 # -----------------------------------
 # Profiler base unit tests
 # -----------------------------------
@@ -832,6 +855,19 @@ if(TARGET test-pc-sampling-collector)
     endif()
 endif()
 
+if(TARGET test-compression)
+    if(TEST_FROM_INSTALL)
+        set(_compression_test_cmd tests/test-compression)
+    else()
+        set(_compression_test_cmd $<TARGET_FILE:test-compression>)
+    endif()
+    add_test(NAME test-compression COMMAND ${_compression_test_cmd})
+    sanitizer_runtime_env(_san_env OFF)
+    if(_san_env)
+        set_tests_properties(test-compression PROPERTIES ENVIRONMENT "${_san_env}")
+    endif()
+endif()
+
 # -----------------------------------
 # Generate coverage tests
 # -----------------------------------
@@ -883,6 +919,8 @@ if(${ENABLE_COVERAGE})
         test_soc_base
         test_tty
         test_utils_profile_csv
+        test_csv_compression
+        test_analysis_base
         test_import_guard
         test_profile_iteration_multiplexing_1
         test_profile_iteration_multiplexing_2
