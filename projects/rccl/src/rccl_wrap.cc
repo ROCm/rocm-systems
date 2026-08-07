@@ -184,7 +184,7 @@ ncclResult_t rcclGetAlgoProtoIndex(const char* envStr, const char* algoProtoStri
 
 extern int64_t ncclParamMinNchannels();
 extern int64_t ncclParamMaxNchannels();
-extern int64_t ncclParamSymCeThreshold();
+extern int64_t rcclParamForceCe();
 RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
 
 ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc) {
@@ -946,31 +946,43 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     return ncclSuccess;
   }
 
-  // (3) Direct AllGather (per-peer Send/Recv).
-  if (rcclUseAllGatherDirect(comm, msgSize)) {
-    decision->algo = RCCL_DIRECT_ALLGATHER;
-    decision->protocol = NCCL_PROTO_SIMPLE;
-    decision->nMaxChannels = comm->p2pnChannels;
-    return ncclSuccess;
-  }
-
-  // (4) CE AllGather. Mirrors taskAppend()'s gate; Direct (above) outranks it.
-  // Reporting only here (taskAppend does the live dispatch).
+  // (3) CE AllGather. Mirrors taskAppend()'s live gates and outranks Direct, as
+  // taskAppend checks CE before the useDirect branch. Reporting only here; the
+  // live path re-decides and dispatches CE in taskAppend().
   {
     const bool ceCapturing = query ? graphCapturingHint : false;
     struct ncclDevrWindow* sendWin = nullptr;
     struct ncclDevrWindow* recvWin = nullptr;
     ncclDevrFindWindow(comm, sendbuff, &sendWin);
     ncclDevrFindWindow(comm, recvbuff, &recvWin);
+    const bool hasSysmemSegment =
+      ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
     ncclSymRegType_t winRegType;
     NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
-    const bool ceAvailable =
-      !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
-    if (ceAvailable && comm->symmetricSupport && sendcount > (size_t)ncclParamSymCeThreshold() &&
-        comm->minCompCap >= 100 && comm->isAllDirectNvlink) {
+    // Branch #2: FORCE_CE via DDA scratch (unregistered windows).
+    const bool ceScratch =
+      !ceCapturing && ncclCeScratchAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
+    if (rcclParamForceCe() && ceScratch && winRegType != ncclSymSendRegRecvReg &&
+        winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr &&
+        totalBytes <= (size_t)comm->ddaScratchBytes) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
+    // Branch #3: CE via registered symmetric windows.
+    const bool ceAvailable =
+      !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
+    if (ceAvailable && !hasSysmemSegment) {
+      decision->algo = RCCL_CE_REGISTERED;
+      return ncclSuccess;
+    }
+  }
+
+  // (4) Direct AllGather (per-peer Send/Recv).
+  if (rcclUseAllGatherDirect(comm, msgSize)) {
+    decision->algo = RCCL_DIRECT_ALLGATHER;
+    decision->protocol = NCCL_PROTO_SIMPLE;
+    decision->nMaxChannels = comm->p2pnChannels;
+    return ncclSuccess;
   }
 
   // (5) Standard ring kernel. Fill algo/protocol/channels for reporting; the live
