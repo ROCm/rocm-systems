@@ -19,6 +19,7 @@
 # library surface.
 
 import ast
+import builtins
 import ctypes
 import importlib
 import importlib.util
@@ -432,6 +433,81 @@ class DisableSystemFallbackToolTest(unittest.TestCase):
             self.assertNotEqual(rc, 0)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class _ProfileModeLikeGuard:
+    """Minimal clone of rocprofiler-compute's profile-mode import guard.
+
+    Allows stdlib plus a small ROCm whitelist; every other top-level package
+    raises ImportError (the parent class, not ModuleNotFoundError) from both
+    the meta_path finder and the builtins.__import__ hook. rocm_sdk is
+    deliberately left off the whitelist so a stray third-party import in the
+    loader is caught here.
+    """
+
+    _ALLOWED = frozenset({"amdsmi", "amdsmi_wrapper", "amdsmi_interface", "hip", "rocprofv3"})
+
+    def __enter__(self):
+        sys.meta_path.insert(0, self)
+        self._real_import = builtins.__import__
+        builtins.__import__ = self._guarded_import
+        return self
+
+    def __exit__(self, *exc):
+        builtins.__import__ = self._real_import
+        if self in sys.meta_path:
+            sys.meta_path.remove(self)
+
+    def _forbid(self, fullname):
+        top = fullname.split(".")[0]
+        if top in sys.stdlib_module_names or top in self._ALLOWED:
+            return
+        raise ImportError("forbidden package in profile mode: %s" % top)
+
+    def find_spec(self, fullname, path, target=None):
+        self._forbid(fullname)
+        return None
+
+    def _guarded_import(self, name, *args, **kwargs):
+        level = args[3] if len(args) > 3 else kwargs.get("level", 0)
+        if level == 0:
+            self._forbid(name)
+        return self._real_import(name, *args, **kwargs)
+
+
+class RestrictiveImportGuardTest(unittest.TestCase):
+    """Importing the wrapper must survive a hostile import environment.
+
+    Reproduces the downstream break where the loader did ``import rocm_sdk`` in
+    its search path but caught only ``(ModuleNotFoundError, FileNotFoundError)``;
+    a profile-mode guard raised a bare ImportError that escaped and aborted
+    ``import amdsmi``. With rocm_sdk kept off the whitelist, any unguarded
+    third-party import that returns to the load path fails here instead of in
+    downstream TheRock CI.
+    """
+
+    def setUp(self):
+        self._saved_override = os.environ.get("AMDSMI_LIB_OVERRIDE")
+        os.environ["AMDSMI_LIB_OVERRIDE"] = "/tmp/amdsmi-fake-libamd_smi.so"
+
+    def tearDown(self):
+        if self._saved_override is None:
+            os.environ.pop("AMDSMI_LIB_OVERRIDE", None)
+        else:
+            os.environ["AMDSMI_LIB_OVERRIDE"] = self._saved_override
+        sys.modules.pop("amdsmi_wrapper", None)
+
+    @unittest.skipUnless(sys.version_info >= (3, 10), "sys.stdlib_module_names requires 3.10+")
+    def test_loader_survives_restrictive_import_guard(self):
+        sys.modules.pop("amdsmi_wrapper", None)
+        with _ProfileModeLikeGuard(), _Patch(STABLE_SYMBOLS):
+            w = _import_fresh_wrapper()
+        self.assertEqual(
+            w._loaded_lib_path,
+            "/tmp/amdsmi-fake-libamd_smi.so",
+            "loader failed under a restrictive import guard -- an unguarded "
+            "third-party import likely crept back into the load path",
+        )
 
 
 if __name__ == "__main__":
