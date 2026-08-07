@@ -4,6 +4,8 @@
 #ifndef ROCM_DEBUG_AGENT_UTILS_H
 #define ROCM_DEBUG_AGENT_UTILS_H
 
+#include "logging.h"
+
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -54,6 +56,15 @@ parsed_uri_t parse_code_object_uri (const std::string &uri);
    \param uri The URI string to sanitize.
    \return Filename-safe string.  */
 std::string sanitize_uri_for_filename (const std::string &uri);
+
+/* Path format token expansion.  */
+
+/* Expand format tokens in a string with runtime values.
+   Supported tokens: %p (PID), %h (hostname), %t (timestamp), %e (executable),
+   %u (UID), %g (GID), %% (literal %).
+   \param format Format string containing tokens (e.g., "/tmp/trace-%p-%t").
+   \return String with tokens replaced by actual values.  */
+std::string expand_format_tokens (const std::string &format);
 
 } /* namespace amd::debug_agent */
 
