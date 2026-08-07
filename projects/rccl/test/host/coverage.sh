@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
 # Run rccl-UnitTestsMicro under llvm source-based coverage and emit a
 # report scoped to the file(s) compiled directly into the binary
-# (currently just hipify/src/transport/p2p.cc).
+# (currently just the unit-under-test hipify/src/transport/p2p_tmp.cc).
 #
 # Requirements:
-#   - Configure with -DENABLE_MICROTEST_COVERAGE=ON so the test binary is
-#     built with -fprofile-instr-generate -fcoverage-mapping. (We use
-#     our own knob rather than -DENABLE_CODE_COVERAGE because the
-#     latter is Debug-only at the top level; the microtest binary doesn't
-#     need that constraint.)
+#   - rccl-UnitTestsMicro built with llvm source-based coverage
+#     (-fprofile-instr-generate -fcoverage-mapping). The in-RCCL-build target
+#     is always instrumented; the standalone build is controlled by
+#     -DMICRO_COVERAGE=ON (default ON).
 #   - llvm-profdata and llvm-cov on PATH (or under /opt/rocm/llvm/bin).
 #
 # Usage:
-#   test/host/coverage.sh                            # text summary to stdout
-#   test/host/coverage.sh --html out/cov-html        # also emit HTML report
-#   FUNC=ipcRegisterBuffer test/host/coverage.sh ... # scope to one function
-#   BUILD_DIR=build/debug test/host/coverage.sh      # non-default build tree
+#   test/host/coverage.sh                                # text summary to stdout
+#   test/host/coverage.sh --html out/cov-html            # also emit HTML report
+#   FUNC=ipcRegisterBuffer test/host/coverage.sh         # scope to one function
+#   BUILD_DIR=build/debug test/host/coverage.sh          # non-default build tree
+#   test/host/coverage.sh --html out -- --gtest_filter=X # forward args to the test
+#
+# Script options (--html DIR) are consumed here; everything after a literal
+# `--` is forwarded verbatim to the test binary.
 #
 # HTML reports include inline branch counts (--show-branches=count) and a
 # branch column in the per-file summary, so branch coverage is visible
@@ -25,6 +28,29 @@
 # where the script is invoked from.
 
 set -euo pipefail
+
+# --- Parse this script's own options up front. Everything after a literal
+#     `--` (and any unrecognized leading args) is forwarded to the test binary,
+#     so `--html DIR` is never handed to GoogleTest. ---
+HTML_DIR=""
+TEST_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --html)
+      HTML_DIR="${2:?--html requires an output directory}"
+      shift 2
+      ;;
+    --)
+      shift
+      TEST_ARGS+=("$@")
+      break
+      ;;
+    *)
+      TEST_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RCCL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -42,24 +68,30 @@ COV_TOOL="$(command -v "${LLVM_BIN}/llvm-cov"      || command -v llvm-cov)"
 
 if [[ ! -x "${BIN}" ]]; then
   echo "error: ${BIN} not found." >&2
-  echo "       Build with: cmake -DBUILD_TESTS=ON -DENABLE_CODE_COVERAGE=ON ..." >&2
+  echo "       Build it first (standalone: cmake -B build -DRCCL_BUILD_DIR=... && cmake --build build;" >&2
+  echo "       in-tree: ./install.sh -t). Coverage is on by default (standalone: -DMICRO_COVERAGE=ON)." >&2
   exit 1
 fi
 
 mkdir -p "${COV_DIR}"
 
 # 1. Run the test binary with LLVM_PROFILE_FILE pointing at our .profraw.
-echo "==> Running ${BIN}"
-LLVM_PROFILE_FILE="${PROFRAW}" "${BIN}" "$@"
+#    Only forward test args (never this script's own --html) to the binary.
+echo "==> Running ${BIN} ${TEST_ARGS[*]:-}"
+LLVM_PROFILE_FILE="${PROFRAW}" "${BIN}" ${TEST_ARGS[@]+"${TEST_ARGS[@]}"}
 
 # 2. Merge raw profile into indexed profdata.
 echo "==> Merging profile -> ${PROFDATA}"
 "${PROFDATA_TOOL}" merge -sparse "${PROFRAW}" -o "${PROFDATA}"
 
-# 3. Scope the report to the source file(s) actually under test. Add more
-#    -sources as the binary grows.
+# 3. Scope the report to the source file(s) actually compiled into the binary.
+#    The unit under test is included via P2P_CC_PATH, which points at the
+#    unroll-transformed p2p_tmp.cc (there is no plain src/transport/p2p.cc in
+#    the hipify tree). Scoping to a non-existent p2p.cc makes llvm-cov silently
+#    fall back to whole-binary totals, so name p2p_tmp.cc explicitly. Add more
+#    -sources here as the binary grows.
 SOURCES=(
-  "${BUILD_DIR}/hipify/src/transport/p2p.cc"
+  "${BUILD_DIR}/hipify/src/transport/p2p_tmp.cc"
 )
 
 # Optional: scope the HTML / annotated-source output to a single function
@@ -90,9 +122,8 @@ if [[ -n "${FUNC:-}" ]]; then
     "${SOURCES[@]}"
 fi
 
-# Optional HTML output: --html <dir>
-if [[ "${1:-}" == "--html" ]]; then
-  HTML_DIR="${2:?--html requires an output directory}"
+# Optional HTML output: --html <dir> (parsed up top into HTML_DIR).
+if [[ -n "${HTML_DIR}" ]]; then
   mkdir -p "${HTML_DIR}"
   echo "==> Writing HTML report to ${HTML_DIR}"
   # --show-branches=count puts hit/miss counts inline next to each branch;

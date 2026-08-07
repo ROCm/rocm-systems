@@ -77,11 +77,33 @@ to:
   unit-test coverage, not integration coverage. Keep the existing
   `librccl.so`-linked tests for end-to-end behaviour.
 - **`static` and `#include "x.cc"` is unusual.** It's standard C++,
-  but readers will need a moment to orient. 
+  but readers will need a moment to orient.
 
 ## Adding a new test
 
-TODO REPLACE DELETED SLOP
+The unit-under-test is the production `.cc` that the test TU `#include`s via a
+build-time path macro (e.g. `P2P_CC_PATH` → the hipified `p2p.cc`). To add a
+test:
+
+1. **Pick the unit.** If it lives in a `.cc` that is already `#include`d
+   (currently `p2p.cc`), skip to step 3. Otherwise add a new path macro in
+   `CMakeLists.txt` (mirror `P2P_CC_PATH`) pointing at the hipified copy, and
+   `#include` it from the test TU *after* the fakes/macro shims are in scope.
+2. **Register the source.** Add the test `.cc` to the target's source list in
+   `test/host/CMakeLists.txt` — both the in-build `TEST_MICRO_SOURCE_FILES`
+   and the standalone `rccl-UnitTestsMicro` list. If you add a new gtest suite,
+   add its pattern to `test/test_categories_micro.yaml` so CTest runs it.
+3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls
+   `ResetP2pFakes()` so hooks do not leak between tests. Install per-test
+   behaviour by overwriting a `std::function` hook (see the `ScopedHook`
+   helper in `p2p-test.cc`) rather than editing a fake's default.
+4. **Only exercise faked seams.** Every external symbol the `#include`d `.cc`
+   reaches must be satisfied by `fakes/` (or `micro_link_stubs.cc` in the
+   standalone build): a missing symbol surfaces as a link error, a wrongly
+   defaulted hook as an unexpected call. Add or override the seam as needed
+   (see "Adding more controllable seams" below).
+5. **Build and run** `rccl-UnitTestsMicro` (or `ctest -R rccl-UnitTestsMicro`),
+   then re-run `coverage.sh` to confirm the new branch is covered.
 
 ## Adding more controllable seams
 

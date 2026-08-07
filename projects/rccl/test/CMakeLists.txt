@@ -153,16 +153,14 @@ if(BUILD_TESTS)
     fmt::fmt-header-only
   )
 
-  # Link libs for the host-only micro-test binary (test/host).
-  # We keep the HIP *compile* requirements (device intrinsics, gfx codegen,
-  # headers) via $<COMPILE_ONLY:...> but deliberately drop the real HIP
-  # runtime from the *link* line, so any un-shimmed HIP API call surfaces
-  # as an undefined-symbol link error instead of silently binding to
-  # libamdhip64.so at runtime.
+  # Link libs for the host-only micro-test binary (test/host). Deliberately no
+  # HIP runtime on the link line, so any un-shimmed HIP API call surfaces as an
+  # undefined-symbol link error instead of silently binding to libamdhip64.so.
+  # HIP's *compile* requirements (device intrinsics, gfx codegen, headers) are
+  # applied in test/host/CMakeLists.txt via $<TARGET_PROPERTY:hip::*,...> (a
+  # CMake 3.16-safe stand-in for $<COMPILE_ONLY:hip::*>, which needs 3.27).
   set(MICRO_TEST_LINK_LIBS
     ${GTEST_BOTH_LIBRARIES}
-    $<COMPILE_ONLY:hip::host>
-    $<COMPILE_ONLY:hip::device>
     Threads::Threads
     dl
     fmt::fmt-header-only

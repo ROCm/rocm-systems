@@ -19,9 +19,9 @@ if(BUILD_TESTS)
   # rccl-UnitTestsMicro: standalone unit-test binary compiled directly into
   # the test binary. This lets us use preprocessor and link-time substitution
   # to provide test doubles for anything that would require a GPU or other
-  # special hardware. Deliberately NOT linking librccl.so or the HIP runtime:
-  # $<COMPILE_ONLY:hip::*> (via MICRO_TEST_LINK_LIBS) keeps the HIP compile
-  # requirements while any un-shimmed HIP call surfaces as a link error.
+  # special hardware. Deliberately NOT linking librccl.so or the HIP runtime,
+  # so any un-shimmed HIP call surfaces as a link error rather than binding
+  # libamdhip64.so (HIP compile requirements are applied below without linking).
   set(TEST_MICRO_SOURCE_FILES
     p2p-test.cc
     fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
@@ -37,6 +37,22 @@ if(BUILD_TESTS)
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${RCCL_COMMON_INCLUDE_DIRS})
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
+
+  # Apply HIP's *compile* usage requirements (headers, device intrinsics/codegen,
+  # compile defs) WITHOUT linking the HIP runtime. $<COMPILE_ONLY:hip::host> would
+  # express this in one line but requires CMake >= 3.27; pulling the interface
+  # properties directly keeps this valid at the project's declared minimum (3.16).
+  foreach(_hip_tgt hip::host hip::device)
+    if(TARGET ${_hip_tgt})
+      target_include_directories(rccl-UnitTestsMicro PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+      target_compile_definitions(rccl-UnitTestsMicro PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+      target_compile_options(rccl-UnitTestsMicro PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
+    endif()
+  endforeach()
+
   target_link_libraries(rccl-UnitTestsMicro PRIVATE ${MICRO_TEST_LINK_LIBS})
 
   # Pass the absolute path of hipified source files through as string
@@ -78,6 +94,29 @@ if(BUILD_TESTS)
   # their unit-under-test source file(s) directly. Add files to
   # TEST_MICRO_SOURCE_FILES above as new units come under test.
   rocm_install(TARGETS rccl-UnitTestsMicro COMPONENT tests)
+
+  # Register with CTest exactly as rccl-UnitTests / rccl-UnitTestsFixtures do:
+  # via RCCL's shared category mechanism (no bare add_test, matching the rest of
+  # test/CMakeLists.txt). apply_test_category_labels is defined by
+  # shared/ctest/TestCategories.cmake, which the parent test/CMakeLists.txt
+  # include()s (globally) when building inside rocm-systems; INSTALL_TEST_FILE is
+  # likewise set by the parent. Guard on COMMAND so a non-monorepo configure
+  # (shared/ctest absent) still succeeds -- there, as with the other binaries,
+  # the target is built but not category-registered.
+  if(COMMAND apply_test_category_labels)
+    set(_micro_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+    if(EXISTS "${_micro_categories_yaml}")
+      message(STATUS "Applying test categories for rccl-UnitTestsMicro")
+      apply_test_category_labels(
+        rccl-UnitTestsMicro
+        "${_micro_categories_yaml}"
+        "${PROJECT_BINARY_DIR}"
+        "${INSTALL_TEST_FILE}"
+      )
+    else()
+      message(WARNING "Skipping test categories for rccl-UnitTestsMicro: missing ${_micro_categories_yaml}")
+    endif()
+  endif()
 
   return()
 endif()
@@ -320,3 +359,8 @@ if(MICRO_COVERAGE)
   target_compile_options(rccl-UnitTestsMicro PRIVATE -fprofile-instr-generate -fcoverage-mapping)
   target_link_options(rccl-UnitTestsMicro PRIVATE -fprofile-instr-generate -fcoverage-mapping)
 endif()
+
+# NOTE: the standalone project intentionally does not register these binaries
+# with CTest (matching test/host from #9320); run them directly, e.g.
+#   ./build/rccl-UnitTestsMicro   or   ./build/rccl-HostUnitTests
+# The in-RCCL-build path registers rccl-UnitTestsMicro via CTest categories.
