@@ -1,0 +1,94 @@
+# =============================================================================
+# gfx1250 UTCL1 (Unified Translation Cache Level 1) Metrics
+# =============================================================================
+#
+# UTCL1 is the first-level unified translation cache that handles address
+# translation requests from UTCL0 (in WGP/GL0). It caches page table entries
+# and forwards misses to UTCL2.
+#
+# =============================================================================
+
+Panel Config:
+  id: 1600
+  title: UTCL1 (Translation Cache L1)
+  description: |-
+    UTCL1 (Unified Translation Cache Level 1) metrics for gfx1250. UTCL1 handles
+    address translation requests from UTCL0 and forwards misses to UTCL2.
+
+  data source:
+
+  - metric_table:
+      id: 1601
+      title: "UTCL1 Metrics"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Total Requests from UTCL0:
+          avg: AVG(UTCL1_REQS_sum / $denom)
+          min: MIN(UTCL1_REQS_sum / $denom)
+          max: MAX(UTCL1_REQS_sum / $denom)
+          unit: (Count + $normUnit)
+        Total Returns to UTCL0:
+          avg: AVG(UTCL1_RTNS_sum / $denom)
+          min: MIN(UTCL1_RTNS_sum / $denom)
+          max: MAX(UTCL1_RTNS_sum / $denom)
+          unit: (Count + $normUnit)
+        UTCL1 Lookup Hit Rate:
+          avg: AVG((100 * UTCL1_HITS_sum / UTCL1_REQS_sum) if (UTCL1_REQS_sum != 0) else None)
+          min: MIN((100 * UTCL1_HITS_sum / UTCL1_REQS_sum) if (UTCL1_REQS_sum != 0) else None)
+          max: MAX((100 * UTCL1_HITS_sum / UTCL1_REQS_sum) if (UTCL1_REQS_sum != 0) else None)
+          unit: Percent
+        UTCL1-UTCL2 Requests:
+          avg: AVG(UTCL1_UTCL2_REQS_sum / $denom)
+          min: MIN(UTCL1_UTCL2_REQS_sum / $denom)
+          max: MAX(UTCL1_UTCL2_REQS_sum / $denom)
+          unit: (Count + $normUnit)
+        UTCL1-UTCL2 Returns:
+          avg: AVG(UTCL1_UTCL2_RET_CNT_sum / $denom)
+          min: MIN(UTCL1_UTCL2_RET_CNT_sum / $denom)
+          max: MAX(UTCL1_UTCL2_RET_CNT_sum / $denom)
+          unit: (Count + $normUnit)
+        UTCL1-UTCL2 Request Latency:
+          avg: AVG((UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM_sum / UTCL1_UTCL2_REQS_sum) if (UTCL1_UTCL2_REQS_sum != 0) else None)
+          min: MIN((UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM_sum / UTCL1_UTCL2_REQS_sum) if (UTCL1_UTCL2_REQS_sum != 0) else None)
+          max: MAX((UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM_sum / UTCL1_UTCL2_REQS_sum) if (UTCL1_UTCL2_REQS_sum != 0) else None)
+          unit: Cycles
+        UTCL1-UTCL2 Request Stall Rate:
+          avg: AVG((100 * UTCL1_STALL_UTCL2_CREDITS_sum / UTCL1_XLAT_REQ_BUSY_sum) if (UTCL1_XLAT_REQ_BUSY_sum != 0) else None)
+          min: MIN((100 * UTCL1_STALL_UTCL2_CREDITS_sum / UTCL1_XLAT_REQ_BUSY_sum) if (UTCL1_XLAT_REQ_BUSY_sum != 0) else None)
+          max: MAX((100 * UTCL1_STALL_UTCL2_CREDITS_sum / UTCL1_XLAT_REQ_BUSY_sum) if (UTCL1_XLAT_REQ_BUSY_sum != 0) else None)
+          unit: Percent
+        UTCL1 Miss Handler FIFO Full Rate:
+          avg: AVG((100 * UTCL1_STALL_MH_FULL_sum / UTCL1_XLAT_REQ_BUSY_sum) if (UTCL1_XLAT_REQ_BUSY_sum != 0) else None)
+          min: MIN((100 * UTCL1_STALL_MH_FULL_sum / UTCL1_XLAT_REQ_BUSY_sum) if (UTCL1_XLAT_REQ_BUSY_sum != 0) else None)
+          max: MAX((100 * UTCL1_STALL_MH_FULL_sum / UTCL1_XLAT_REQ_BUSY_sum) if (UTCL1_XLAT_REQ_BUSY_sum != 0) else None)
+          unit: Percent
+
+  metrics_description:
+    Total Requests from UTCL0: >-
+      Total address translation requests received by UTCL1 from UTCL0.
+
+    Total Returns to UTCL0: >-
+      Total translation results returned from UTCL1 to UTCL0.
+
+    UTCL1 Lookup Hit Rate: >-
+      UTCL1 TLB hit rate.
+
+    UTCL1-UTCL2 Requests: >-
+      Number of UTCL1 TLB misses forwarded to UTCL2.
+
+    UTCL1-UTCL2 Returns: >-
+      Number of translation results returned from UTCL2 to UTCL1.
+
+    UTCL1-UTCL2 Request Latency: >-
+      Average UTCL1-to-UTCL2 translation latency.
+
+    UTCL1-UTCL2 Request Stall Rate: >-
+      Percentage of UTCL1-busy cycles stalled sending to UTCL2.
+
+    UTCL1 Miss Handler FIFO Full Rate: >-
+      Percentage of UTCL1-busy cycles stalled because the miss handler FIFO is full.

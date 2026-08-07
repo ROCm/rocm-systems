@@ -29,6 +29,7 @@
 namespace rocjitsu {
 
 class BasicBlock;
+class ExecMaskAnalysis;
 class Gfx1250VgprMsbAnalysis;
 class Instruction;
 
@@ -141,7 +142,13 @@ public:
   /// object. The pointed-to BasicBlocks and their Instructions must outlive this
   /// analysis because deferred CFG queries retain and later dereference them.
   /// @param blocks Blocks in one kernel CFG scope.
-  LivenessAnalysis(KernelBlockScope blocks, LivenessAnalysisOptions options = {},
+  /// @param exec Optional program-point EXEC-state analysis over the same
+  /// @p blocks scope; lets EXEC-masked vector defs count as kills where EXEC is
+  /// provably full. Ownership is moved into the analysis. Defaults to null: with
+  /// no EXEC analysis every EXEC-masked vector def is treated as `Unknown`, so
+  /// the conservative behavior (never promote such a def to a kill) is preserved.
+  LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<ExecMaskAnalysis> exec = nullptr,
+                   LivenessAnalysisOptions options = {},
                    std::span<const ScopedCfgEdge> extra_edges = {});
   ~LivenessAnalysis();
 
@@ -257,6 +264,10 @@ private:
   uint16_t min_free_vgpr_ = 0;
   uint16_t max_free_vgpr_ = 0;
   std::unique_ptr<Gfx1250VgprMsbAnalysis> gfx1250_vgpr_msb_;
+  // EXEC-state analysis over the same scope, captured at construction so the
+  // deferred backward dataflow can treat an EXEC-masked vector def as a kill
+  // where EXEC is provably full.
+  std::unique_ptr<ExecMaskAnalysis> exec_;
   RegisterSet globally_used_registers_;
   std::vector<BasicBlock *> deferred_blocks_;
   std::unordered_set<const BasicBlock *> scoped_blocks_;

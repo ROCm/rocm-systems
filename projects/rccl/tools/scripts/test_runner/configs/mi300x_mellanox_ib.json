@@ -1018,7 +1018,10 @@
         "NCCL_DEBUG": "INFO"
       },
       "tests": [
-        {"name": "NetPluginReload.CustomPluginReloadsAfterCommDestroy", "description": "AICOMRCCL-1534: a non-default NCCL_NET_PLUGIN must remain reloadable after the communicator that first used it is destroyed", "test_filter": "NetPluginReload.CustomPluginReloadsAfterCommDestroy"}
+        {"name": "NetPluginReload.CustomPluginReloadsAfterCommDestroy", "description": "AICOMRCCL-1534: a non-default NCCL_NET_PLUGIN must remain reloadable after the communicator that first used it is destroyed", "test_filter": "NetPluginReload.CustomPluginReloadsAfterCommDestroy"},
+        {"name": "NetPluginAssignFail.FinalizesOnFailedAssignment", "description": "NCCL 2.28.7: ncclNetPluginFinalize() runs when plugin init succeeds but assignment fails (incompatible UNPACK version)", "test_filter": "NetPluginAssignFail.FinalizesOnFailedAssignment"},
+        {"name": "NetPluginAssignFail.NetNameMismatchSkipsInit", "description": "NCCL 2.28.7: comm config netName mismatch skips external plugin init entirely", "test_filter": "NetPluginAssignFail.NetNameMismatchSkipsInit"},
+        {"name": "NetPluginAssignFail.SurvivesMultipleCommCycles", "description": "NCCL 2.28.7: failed assignment cleanup leaves no orphaned state across multiple comm cycles", "test_filter": "NetPluginAssignFail.SurvivesMultipleCommCycles"}
       ]
     },
     "debug_tests": {
@@ -3369,6 +3372,15 @@
           "name": "GIN_BarrierSession_Hybrid",
           "description": "ncclBarrierSession hybrid: inner LSA composed with outer rail-GIN barrier; the rail arm crosses nodes",
           "test_filter": "GinMPIDeviceTests.BarrierSession_Hybrid",
+          "env_variables": {
+            "NCCL_GIN_TYPE": "2",
+            "NCCL_GIN_ENABLE": "1"
+          }
+        },
+        {
+          "name": "GIN_Barrier_FourRanks",
+          "description": "ncclGinBarrierSession over the 4-rank world team: 16 collective rounds with 3 peers per rank; completion proves the multi-peer arrival accounting keeps all ranks in lockstep",
+          "test_filter": "GinMPIDeviceTests.Barrier_FourRanks",
           "env_variables": {
             "NCCL_GIN_TYPE": "2",
             "NCCL_GIN_ENABLE": "1"
