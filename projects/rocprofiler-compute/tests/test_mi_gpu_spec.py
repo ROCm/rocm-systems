@@ -8,6 +8,7 @@ from unittest.mock import patch
 import common
 
 from utils.mi_gpu_spec import MIGPUSpecs
+from utils.specs import _extract_gpu_info
 
 
 class TestMIGPUSpecs:
@@ -92,10 +93,12 @@ class TestMIGPUSpecs:
             "gfx941",
             "gfx942",
             "gfx950",
+            "gfx1250",
             "GFX940",
             "GFX941",
             "GFX942",
             "GFX950",
+            "GFX1250",
         ):
             assert MIGPUSpecs.is_partition_supported(gpu_arch=arch, gpu_model=None), (
                 f"is_partition_supported(gpu_arch={arch!r}) should be True"
@@ -226,3 +229,36 @@ class TestMIGPUSpecs:
         result_lower = MIGPUSpecs.get_memory_levels("mi300x_a1")
         result_upper = MIGPUSpecs.get_memory_levels("MI300X_A1")
         assert result_lower == result_upper
+
+    # -- extract_gpu_info (gfx1250 partition defaults) -----------------------
+
+    def _mock_smi(self, mock_smi, num_compute_units=256):
+        mock_smi.get_gpu_vbios_part_number.return_value = "TEST"
+        mock_smi.get_gpu_compute_partition.return_value = "N/A"
+        mock_smi.get_gpu_memory_partition.return_value = "N/A"
+        mock_smi.get_gpu_num_compute_units.return_value = num_compute_units
+        mock_smi.get_gpu_cache_info.return_value = {}
+
+    def test_gfx1250_defaults_memory_partition_to_nps1(self):
+        with patch("utils.specs.amdsmi_interface") as mock_smi:
+            self._mock_smi(mock_smi)
+            result = _extract_gpu_info("gfx1250")
+        assert result["memory_partition"] == "NPS1"
+
+    def test_gfx1250_defaults_compute_partition_to_spx(self):
+        with patch("utils.specs.amdsmi_interface") as mock_smi:
+            self._mock_smi(mock_smi)
+            result = _extract_gpu_info("gfx1250")
+        assert result["compute_partition"] == "SPX"
+
+    def test_gfx942_does_not_default_memory_partition(self):
+        with patch("utils.specs.amdsmi_interface") as mock_smi:
+            self._mock_smi(mock_smi, num_compute_units=304)
+            result = _extract_gpu_info("gfx942")
+        assert result["memory_partition"] == "N/A"
+
+    def test_gfx942_defaults_compute_partition_to_spx(self):
+        with patch("utils.specs.amdsmi_interface") as mock_smi:
+            self._mock_smi(mock_smi, num_compute_units=304)
+            result = _extract_gpu_info("gfx942")
+        assert result["compute_partition"] == "SPX"
