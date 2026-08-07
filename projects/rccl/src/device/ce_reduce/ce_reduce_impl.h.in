@@ -128,37 +128,15 @@ struct ReduceOp<T, 3> {
 //   in[k * chunkElems + i]  =  element i contributed by rank k
 //
 // NOTE on the elementwise apply loops below: they are intentionally NOT
-// marked #pragma unroll (unlike the load/store loops). For byte-granularity
-// T (int8_t/uint8_t, W=16) combined with Min/Max, the compiler cannot lower
-// the packed compare-select to a vector op the way it can add/mul, so a
-// full static unroll of U*W (=64) scalar extract/compare/select/pack
-// sequences balloons a single kernel to ~56K instructions and made this
-// file's device-link/codegen step take ~48 minutes on its own. Leaving
-// these as real loops keeps one copy of that sequence and lets it execute
-// W times at runtime instead of being duplicated W times in the binary --
-// semantics are unchanged, only code size/compile time is affected.
+// marked #pragma unroll (unlike the load/store loops). For 8-byte types
+// T combined with Min/Max, the compiler cannot vectorize, so the
+// fully unrolled loop ends up with ~56K instructions and compile time
+// is 40+ minutes. 
 //
-// NOTE on the `for (r = 1; r < nRanks; r++)` rank loops: they always disable
-// LLVM's runtime loop-unroller, because, left to its own heuristics, LLVM was
-// unrolling this loop (nRanks is a runtime value, not a compile-time
-// constant) by up to 64x with generated remainder handling, on top of the
-// already-manual U/W unroll/vectorization -- for int8_t/uint8_t Min/Max this
-// produced ~900 PHI nodes and ~150 shufflevector ops per kernel and
-// dominated llc's instruction-selection/register-alloc time. The manual
-// U-way unroll and 16-byte vector loads already provide the intended ILP;
-// this loop does not need LLVM unrolling it again.
+// The directives on the rank loops avoid too much unrolling and vectorization
+// in cases where the generated code is faster (determined by both timing and
+// code inspection).
 //
-// Whether the loop *vectorizer* also stays enabled is instantiation-specific
-// (CE_REDUCE_VECTORIZE_OK, defined per .cpp before including this header --
-// see generate.py's VECTORIZE_OK set). Measured on gfx950, >=1MB/rank:
-//   - int8_t Min/Max/Sum, uint8_t Sum:  vectorize ON is ~10-12% faster.
-//   - int32_t/uint32_t Sum/Prod:        vectorize OFF is ~2.2x faster (this
-//     is the dominant win from disabling the runtime unroller in the first
-//     place -- with the vectorizer also left on, most of that win disappears).
-//   - uint8_t Min/Max:                  vectorize OFF is ~7-8% faster.
-//   - everything else:                  no measurable difference either way.
-// So this isn't a single global tradeoff -- each instantiation gets whichever
-// setting measured faster, keyed by (type, redop) in generate.py.
 // *********************************************************************************
 template <typename T, int RedOp, int U>
 __global__ __launch_bounds__(256) void ncclCeLocalReduceKernelVec(const T* __restrict__ in, T* __restrict__ out,
@@ -201,6 +179,9 @@ __global__ __launch_bounds__(256) void ncclCeLocalReduceKernelVec(const T* __res
       }
 #pragma unroll
       for (int i = 0; i < U; i++) {
+        // Intentionally no unroll/vectorize pragma:
+        // W is small and a compile-time constant, and any
+        // pragma here regresses runtime performance.
         for (int k = 0; k < W; k++) {
           acc[i].v[k] = ReduceOp<T, RedOp>::apply(acc[i].v[k], tmp[i].v[k]);
         }
@@ -214,6 +195,8 @@ __global__ __launch_bounds__(256) void ncclCeLocalReduceKernelVec(const T* __res
   }
 
   // Drain remaining vectorized elements (one vector per thread per step).
+  // Intentionally no unroll pragma on this outer loop -- see #9797 note
+  // above the kernel; same as the strided-unroll loop's own outer loop.
   for (; vi < nVec; vi += stride) {
     Pack acc;
     size_t elementOffset = vi * W;
@@ -229,6 +212,8 @@ __global__ __launch_bounds__(256) void ncclCeLocalReduceKernelVec(const T* __res
       size_t rankOffset = (size_t)r * chunkElems + vi * W;
       tmp.vec = *reinterpret_cast<const LT*>(in + rankOffset);
 
+      // no pragma here, same rationale as
+      // the twin loop in the strided-unroll section above.
       for (int k = 0; k < W; k++) {
         acc.v[k] = ReduceOp<T, RedOp>::apply(acc.v[k], tmp.v[k]);
       }
@@ -241,6 +226,7 @@ __global__ __launch_bounds__(256) void ncclCeLocalReduceKernelVec(const T* __res
   const size_t tailLen = chunkElems - tailBase;
   for (size_t i = tid; i < tailLen; i += stride) {
     T a = in[tailBase + i];
+    // No pragma here, unneeded
     for (int r = 1; r < nRanks; r++) {
       T v = in[(size_t)r * chunkElems + tailBase + i];
       a = ReduceOp<T, RedOp>::apply(a, v);
