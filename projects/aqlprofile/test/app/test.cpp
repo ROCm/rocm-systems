@@ -21,7 +21,11 @@
 // THE SOFTWARE.
 
 
+#ifdef _WIN32
+#include "hsa_ext_amd.h"
+#else
 #include "hsa/hsa_ext_amd.h"
+#endif
 #include "aqlprofile-sdk/aql_profile_v2.h"
 #include <stdlib.h>
 

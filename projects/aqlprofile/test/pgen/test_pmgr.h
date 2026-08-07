@@ -24,8 +24,13 @@
 #ifndef TEST_PGEN_TEST_PMGR_H_
 #define TEST_PGEN_TEST_PMGR_H_
 
+#ifdef _WIN32
+#include <hsa.h>
+#include <hsa_ven_amd_aqlprofile.h>
+#else
 #include <hsa/hsa.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
+#endif
 
 #include <atomic>
 

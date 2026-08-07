@@ -24,8 +24,13 @@
 #ifndef TEST_CTRL_TEST_AQL_H_
 #define TEST_CTRL_TEST_AQL_H_
 
+#ifdef _WIN32
+#include <hsa.h>
+#include <hsa_ven_amd_aqlprofile.h>
+#else
 #include <hsa/hsa.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
+#endif
 
 #include "util/hsa_rsrc_factory.h"
 
