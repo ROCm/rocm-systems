@@ -16,10 +16,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -43,11 +45,16 @@ uint64_t align_up(uint64_t value, uint64_t alignment) {
 }
 
 // A 64-byte kernel descriptor whose wavefront SGPR granulation field is
-// `granulated`; everything else zero.
-KD make_kd(uint32_t granulated) {
+// `granulated` and whose ENABLE_WAVEFRONT_SIZE32 bit is set iff `wave32`;
+// everything else zero.
+KD make_kd(uint32_t granulated, bool wave32 = false) {
   KD desc{};
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                   granulated);
+  if (wave32) {
+    AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                    1);
+  }
   return desc;
 }
 
@@ -57,10 +64,14 @@ KD make_kd(uint32_t granulated) {
 // sh_addr, and each .kd symbol's st_value is that descriptor's virtual address,
 // so min_kernel_sgpr_count() can locate and decode them via Section::vaddr().
 // Sections: [1]=.text [2]=.rodata [3]=.strtab [4]=.symtab [5]=.shstrtab.
-std::vector<uint8_t>
-make_elf_with_kds(const std::vector<std::pair<std::string, uint32_t>> &kernels) {
+std::vector<uint8_t> make_elf_with_kds(const std::vector<std::pair<std::string, uint32_t>> &kernels,
+                                       bool wave32 = false,
+                                       std::span<const size_t> unreadable = {}) {
   constexpr uint64_t kTextAddr = 0x1000;
   constexpr uint64_t kRodataAddr = 0x2000;
+  // A vaddr covered by no section, so kernel_wavefront_size() cannot decode a
+  // descriptor placed here and must treat it as unreadable.
+  constexpr uint64_t kUnreadableAddr = 0xF000;
 
   std::vector<uint8_t> shstrtab{'\0'};
   const uint32_t text_name = add_elf_name(shstrtab, ".text");
@@ -75,13 +86,14 @@ make_elf_with_kds(const std::vector<std::pair<std::string, uint32_t>> &kernels) 
   std::vector<uint8_t> strtab{'\0'};
   std::vector<Elf64_Sym> syms(1); // mandatory null symbol
   for (size_t i = 0; i < kernels.size(); ++i) {
-    const KD desc = make_kd(kernels[i].second);
+    const KD desc = make_kd(kernels[i].second, wave32);
     std::memcpy(rodata.data() + i * sizeof(KD), &desc, sizeof(KD));
+    const bool is_unreadable = std::ranges::find(unreadable, i) != unreadable.end();
     Elf64_Sym sym{};
     sym.st_name = add_elf_name(strtab, kernels[i].first + ".kd");
     sym.st_info = static_cast<uint8_t>((1u << 4) | kElfSymbolTypeObject); // global object
     sym.st_shndx = 2;                                                     // .rodata
-    sym.st_value = kRodataAddr + i * sizeof(KD);
+    sym.st_value = is_unreadable ? kUnreadableAddr : kRodataAddr + i * sizeof(KD);
     sym.st_size = sizeof(KD);
     syms.push_back(sym);
   }
@@ -207,6 +219,42 @@ TEST(AmdGpuCodeObjectSgpr, NoKernelDescriptorReturnsNullopt) {
   AmdGpuCodeObject obj(image.data(), image.size());
   ASSERT_TRUE(obj.is_valid());
   EXPECT_FALSE(obj.min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA2).has_value());
+}
+
+// CDNA is always Wave64 regardless of the descriptor's Wave32 bit.
+TEST(AmdGpuCodeObjectWavefront, CdnaIsAlwaysWave64) {
+  const auto image = make_elf_with_kds({{"k", 0}}, /*wave32=*/true);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.kernel_wavefront_size(ROCJITSU_CODE_ARCH_CDNA2), 64u);
+}
+
+// RDNA: Wave32 only when every kernel descriptor is readable and opts in.
+TEST(AmdGpuCodeObjectWavefront, RdnaAllReadableWave32IsWave32) {
+  const auto image = make_elf_with_kds({{"a", 0}, {"b", 0}}, /*wave32=*/true);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4), 32u);
+}
+
+// RDNA: a cleared Wave32 bit means Wave64.
+TEST(AmdGpuCodeObjectWavefront, RdnaWave32BitClearIsWave64) {
+  const auto image = make_elf_with_kds({{"k", 0}}, /*wave32=*/false);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4), 64u);
+}
+
+// RDNA regression: an unreadable descriptor must not let readable Wave32 kernels
+// claim the whole object is Wave32 -- the unreadable one could be Wave64, so the
+// conservative answer is 64.
+TEST(AmdGpuCodeObjectWavefront, RdnaUnreadableDescriptorFallsBackToWave64) {
+  const std::array<size_t, 1> unreadable{1};
+  const auto image = make_elf_with_kds({{"readable_wave32", 0}, {"unreadable", 0}},
+                                       /*wave32=*/true, unreadable);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4), 64u);
 }
 
 } // namespace
