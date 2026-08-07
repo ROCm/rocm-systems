@@ -8181,11 +8181,6 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
-                    if profile.split_execution_sources:
-                        exec_impl = cgen.Line(
-                            f'const bool {inst.fmt_name}::execute_registered_ = '
-                            f'register_exec_fn<{inst.fmt_name}>();\n\n{exec_impl}'
-                        )
                     execution_impls = [exec_impl]
                     if not profile.split_execution_sources:
                         inst_impls.extend(execution_impls)
