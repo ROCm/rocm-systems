@@ -14,16 +14,16 @@ librdc = "librdc_bootstrap.so"
 # Search librdc_bootstrap.so paths
 current_folder = os.path.dirname(os.path.realpath(__file__))
 rdc_paths = [
-    "",  # without path
-    current_folder + "/../../../lib/",  # package installation
-    current_folder + "/../../../lib64/",  # package installation
-    current_folder + "/../build/rdc_libs/",  # build from source code
+    os.path.join(current_folder, "../../../lib"),  # package installation
+    os.path.join(current_folder, "../../../lib64"),  # package installation
+    os.path.join(current_folder, "../build/rdc_libs"),  # build from source code
+    "",  # last-resort dynamic-loader lookup
 ]
 
 rdc = None
 for r in rdc_paths:
     try:
-        rdc = CDLL(r + librdc)
+        rdc = CDLL(os.path.join(r, librdc))
         break
     except:
         pass
