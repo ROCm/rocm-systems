@@ -103,13 +103,22 @@ class PlanTest(unittest.TestCase):
         self.assertTrue(plan.ready)
         self.assertIsNone(plan.baseline_run_id)
 
-    def test_skips_unsuccessful_source_run(self) -> None:
+    def test_accepts_failed_source_run_with_valid_candidate(self) -> None:
         self.event["workflow_run"]["conclusion"] = "failure"
 
         plan = HELPER.resolve_plan(self.event, self.api, REPOSITORY)
 
+        self.assertTrue(plan.ready)
+        self.assertEqual(plan.candidate_run_id, 100)
+
+    def test_skips_source_run_without_candidate(self) -> None:
+        self.event["workflow_run"]["conclusion"] = "failure"
+        self.api.artifacts[100] = []
+
+        plan = HELPER.resolve_plan(self.event, self.api, REPOSITORY)
+
         self.assertFalse(plan.ready)
-        self.assertIn("did not succeed", plan.reason)
+        self.assertIn("found 0", plan.reason)
 
     def test_skips_untrusted_source_workflow_path(self) -> None:
         self.event["workflow_run"]["path"] = ".github/workflows/untrusted.yml"
