@@ -9,14 +9,12 @@
 #include "hipfile.h"
 
 #include "ais-capability.h"
+#include "io.hpp"
 #include "test-common.h"
 #include "test-options.h"
 
-#include <array>
-#include <cstdlib>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
-#include <string>
 #include <thread>
 #include <unistd.h>
 
@@ -49,21 +47,6 @@ enforceFastpathGate(hipFileHandle_t handle, void *device_buffer)
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
-
-enum class IoTestBackend {
-    Fastpath,
-    Fallback,
-};
-
-struct IoTestParam {
-    IoTestBackend backend;
-    std::string   name;
-};
-
-HIPFILE_WARN_NO_EXIT_DTOR_OFF
-static std::array<IoTestParam, 2> io_test_params{
-    {{IoTestBackend::Fastpath, "Fastpath"}, {IoTestBackend::Fallback, "Fallback"}}};
-HIPFILE_WARN_NO_EXIT_DTOR_ON
 
 struct HipFileIo : public testing::TestWithParam<IoTestParam> {
 
