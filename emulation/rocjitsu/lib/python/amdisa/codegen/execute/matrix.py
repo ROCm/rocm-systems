@@ -282,6 +282,8 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             f'  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, {s1}.opr_type_, '
             f'{s1}.encoding_value_, {s1}.vgpr_msb_role());'
         )
+        src0_base_expr = 'src0_base'
+        src1_base_expr = 'src1_base'
         if is_swmmac:
             L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
             L.append(f'  uint32_t s2 = dst;')
@@ -307,6 +309,8 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             L.append(f'    const_acc = amdgpu::RegisterAccess(wf).read_scalar({s2});')
             L.append(f'  }}')
     else:
+        src0_base_expr = f'amdgpu::src_base(vb, {s0}.encoding_value_)'
+        src1_base_expr = f'amdgpu::src_base(vb, {s1}.encoding_value_)'
         # acc_cd field exists in CDNA2/3/4 VOP3P_MFMA encoding (controls
         # AccVGPR bank selection). CDNA1 and RDNA lack this field — default
         # to 1 (always use AccVGPR bank, the CDNA1 behavior).
@@ -336,12 +340,8 @@ def gen_mfma(ctx: ExecuteContext) -> str:
 
     if result_type == 'F64':
         L.append(f'  amdgpu::exec_f64(cu, {M}, {N}, {K}, {B}, dst,')
-        if arch == 'gfx1250':
-            L.append(f'                 src0_base,')
-            L.append(f'                 src1_base,')
-        else:
-            L.append(f'                 amdgpu::src_base(vb, {s0}.encoding_value_),')
-            L.append(f'                 amdgpu::src_base(vb, {s1}.encoding_value_),')
+        L.append(f'                 {src0_base_expr},')
+        L.append(f'                 {src1_base_expr},')
         neg = 'inst_.blgp' if arch in ('cdna3', 'cdna4') else '0u'
         L.append(f'                 s2, const_acc, {neg});')
     elif result_type == 'I32':

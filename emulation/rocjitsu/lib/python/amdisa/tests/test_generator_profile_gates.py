@@ -1098,6 +1098,36 @@ def test_matrix_direct_offsets_do_not_use_resolved_operand_setup():
     assert 'amdgpu::resolve_acc(vb, dst,' in body
 
 
+def test_matrix_f64_resolved_sources_use_normalized_base_expressions():
+    inst = Instruction('V_MFMA_F64_16X16X4_F64', 'ENC_VOP3P_MFMA', 0, [])
+    profile = SimpleNamespace(uses_vgpr_msb_indexing=True)
+
+    body = _gen_mfma(inst, 'rdna4', profile)
+
+    assert (
+        'uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, '
+        'src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());'
+    ) in body
+    assert (
+        'uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, '
+        'src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());'
+    ) in body
+    assert '                 src0_base,\n                 src1_base,' in body
+
+
+def test_matrix_f64_direct_sources_use_direct_base_expressions():
+    inst = Instruction('V_MFMA_F64_16X16X4_F64', 'ENC_VOP3P_MFMA', 0, [])
+    profile = SimpleNamespace(uses_vgpr_msb_indexing=False)
+
+    body = _gen_mfma(inst, 'gfx1250', profile)
+
+    assert 'Isa::resolved_vgpr_offset' not in body
+    assert (
+        '                 amdgpu::src_base(vb, src0.encoding_value_),\n'
+        '                 amdgpu::src_base(vb, src1.encoding_value_),'
+    ) in body
+
+
 def test_gfx1250_wmma_f32_passes_c_modifier_to_accumulator_helper():
     inst = Instruction('V_WMMA_F32_16X16X32_F16', 'ENC_VOP3P', 0, [])
     body = _gen_mfma(inst, 'gfx1250')
