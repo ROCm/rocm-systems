@@ -38,6 +38,33 @@ Users that wish to also build the AMD SMI Rust interface will also need the foll
 
 * Rust (1.56 or later)
 
+## Compiler requirements
+
+AMD SMI automatically selects the best available Clang compiler in the following priority order:
+
+1. **amdclang++** (recommended) - AMD's optimized Clang compiler from ROCm
+2. **clang++** - ROCm's clang++ if ROCm is installed, otherwise system clang++
+
+**GCC is supported but not auto-selected.** To build with GCC, use a toolchain file (see below).
+
+### How compilers are discovered
+
+The build uses **`hipconfig --path`** for tool-based ROCm discovery.
+
+**If ROCm is installed** (hipconfig found):
+- Searches **ONLY in ROCm paths** for compilers (in order):
+  1. `<rocm-path>/lib/llvm/bin/amdclang++` - Current standard location
+  2. `<rocm-path>/llvm/bin/amdclang++` - Legacy symlink location
+  3. `<rocm-path>/lib/llvm/bin/clang++` - ROCm clang++
+  4. `<rocm-path>/llvm/bin/clang++` - ROCm clang++ (legacy)
+- **Does NOT fall back to system clang++** - ensures ROCm compiler is used
+
+**If ROCm is NOT installed** (hipconfig not found):
+- Searches **ONLY in system PATH** for `clang++` (e.g., `/usr/bin/clang++`)
+- This allows builds on systems without ROCm
+
+**Note:** Hardcoded paths like `/opt/rocm` are intentionally not used to support multiple ROCm installations and relocatable builds.
+
 ## Build steps
 
 1. Clone the rocm-systems repository to your local Linux machine
@@ -61,7 +88,7 @@ Users that wish to also build the AMD SMI Rust interface will also need the foll
    ```bash
    mkdir -p build
    cd build
-   cmake ..
+   cmake ..          # Discovers ROCm and uses amdclang++
    make -j $(nproc)
    make install
    ```
@@ -72,6 +99,70 @@ Users that wish to also build the AMD SMI Rust interface will also need the foll
    ```bash
    make package
    ```
+
+## Alternative compiler options
+
+### Building with GCC
+
+To build with GCC instead of amdclang++, use the provided toolchain file:
+
+```bash
+mkdir -p build
+cd build
+cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/amdsmi-gcc-toolchain.cmake
+make -j $(nproc)
+```
+
+To use a specific GCC version, edit `cmake/toolchains/amdsmi-gcc-toolchain.cmake` or create your own toolchain file.
+
+### Building with clang++
+
+To use clang++ instead of amdclang++, explicitly specify the compiler with full path.
+
+**Using ROCm's clang++:**
+
+```bash
+mkdir -p build
+cd build
+cmake .. -DCMAKE_CXX_COMPILER=/opt/rocm-<version_number>/lib/llvm/bin/clang++ -DCMAKE_C_COMPILER=/opt/rocm-<version_number>/lib/llvm/bin/clang
+make -j $(nproc)
+```
+
+**Using system clang++:**
+
+Requires clang to be installed (`sudo apt install clang` on Ubuntu/Debian).
+
+```bash
+mkdir -p build
+cd build
+cmake .. -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_C_COMPILER=/usr/bin/clang
+make -j $(nproc)
+```
+
+### Troubleshooting compiler detection
+
+**If cmake fails with "amdclang++ not found":**
+
+```bash
+# Check if ROCm is installed and hipconfig is available
+which hipconfig
+hipconfig --path
+
+# If hipconfig not found, add ROCm to PATH
+export PATH=$PATH:/opt/rocm/bin
+cmake ..
+```
+
+**To check what compiler will be used:**
+
+```bash
+# Check available compilers
+which amdclang++ clang++ g++ hipconfig
+
+# Run cmake with verbose output
+cmake .. -DCMAKE_VERBOSE_MAKEFILE=ON
+```
+
 
 (rebuild_py_wrapper)=
 ## Rebuild the Python wrapper

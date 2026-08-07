@@ -37,6 +37,86 @@ The following are required to install and use the AMD SMI library through its la
   export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib:/opt/rocm/lib64
   ```
 
+### Build requirements
+
+AMD SMI automatically selects the best available Clang compiler in the following priority order:
+
+1. **amdclang++** (recommended) - AMD's optimized Clang compiler from ROCm
+2. **clang++** - ROCm's clang++ if ROCm is installed, otherwise system clang++
+
+**GCC is supported but not auto-selected.** To build with GCC, use a toolchain file (see below).
+
+#### Standard build
+
+```bash
+mkdir -p build
+cd build
+cmake ..          # Automatically selects: amdclang++ → clang++
+make -j $(nproc)
+make install
+```
+
+#### How compilers are discovered
+
+The build uses **`hipconfig --path`** for tool-based ROCm discovery.
+
+**If ROCm is installed** (hipconfig found):
+- Searches **ONLY in ROCm paths** for compilers (in order):
+  1. `<rocm-path>/lib/llvm/bin/amdclang++` - Current standard location
+  2. `<rocm-path>/llvm/bin/amdclang++` - Legacy symlink location
+  3. `<rocm-path>/lib/llvm/bin/clang++` - ROCm clang++
+  4. `<rocm-path>/llvm/bin/clang++` - ROCm clang++ (legacy)
+- **Does NOT fall back to system clang++** - ensures ROCm compiler is used
+
+**If ROCm is NOT installed** (hipconfig not found):
+- Searches **ONLY in system PATH** for `clang++` (e.g., `/usr/bin/clang++`)
+- This allows builds on systems without ROCm
+
+**Note:** Hardcoded paths like `/opt/rocm` are intentionally not used to support multiple ROCm installations and relocatable builds.
+
+#### Building with GCC
+
+To build with GCC instead of Clang, use the provided toolchain file:
+
+```bash
+mkdir -p build
+cd build
+cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/amdsmi-gcc-toolchain.cmake
+make -j $(nproc)
+```
+
+To use a specific GCC version, edit `cmake/toolchains/amdsmi-gcc-toolchain.cmake` or create your own toolchain file.
+
+#### Troubleshooting
+
+**If cmake fails with "amdclang++ not found":**
+
+```bash
+# Check if ROCm is installed and hipconfig is available
+which hipconfig
+hipconfig --path
+
+# If hipconfig not found, add ROCm to PATH
+export PATH=$PATH:/opt/rocm/bin
+cmake ..
+```
+
+**To use a different compiler:**
+
+```bash
+# Use GCC via toolchain file (recommended)
+cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/amdsmi-gcc-toolchain.cmake
+
+# Or explicitly specify GCC
+cmake .. -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
+
+# Or explicitly specify ROCm clang++ (instead of amdclang++)
+cmake .. -DCMAKE_CXX_COMPILER=/opt/rocm-<version_number>/lib/llvm/bin/clang++ -DCMAKE_C_COMPILER=/opt/rocm-<version_number>/lib/llvm/bin/clang
+
+# Or explicitly specify system clang++ (requires clang installed: sudo apt install clang)
+cmake .. -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_C_COMPILER=/usr/bin/clang
+```
+
 ### Python interface and CLI tool prerequisites
 
 * Python 3.6.8+ (64-bit)
