@@ -585,6 +585,7 @@ def do_emit_device_obj(args, forwarded_flags):
         '--offload-device-only',
         f'--offload-arch={arch}',
         '-fhip-emit-relocatable',
+        '-fPIC',
         '-gline-tables-only',
         '-w',
     ] + forwarded_flags + [
