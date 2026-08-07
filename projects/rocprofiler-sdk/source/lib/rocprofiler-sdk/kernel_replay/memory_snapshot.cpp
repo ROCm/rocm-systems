@@ -23,10 +23,15 @@
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 
 #include "lib/common/logging.hpp"
+#include "lib/rocprofiler-sdk/code_object/code_object.hpp"
+#include "lib/rocprofiler-sdk/code_object/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 
 #include <hsa/hsa.h>
+
+#include <cstdint>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -42,6 +47,67 @@ dma_copy(void* dst, const void* src, size_t n)
     auto* core = hsa::get_core_table();
     if(!core || !core->hsa_memory_copy_fn) return HSA_STATUS_ERROR;
     return core->hsa_memory_copy_fn(dst, src, n);
+}
+
+// A module-scope variable (__device__ / __constant__ global) discovered in a loaded executable.
+struct module_variable_t
+{
+    void*  gpu_addr = nullptr;
+    size_t size     = 0;
+};
+
+// hsa_executable_iterate_agent_symbols callback: collect HSA_SYMBOL_KIND_VARIABLE symbols
+// (device address + size) into the vector passed via `data`. The HSA callback cannot capture, so
+// state is threaded through the void* argument.
+hsa_status_t
+collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t symbol, void* data)
+{
+    auto* out  = static_cast<std::vector<module_variable_t>*>(data);
+    auto* core = hsa::get_core_table();
+    if(!core || !core->hsa_executable_symbol_get_info_fn) return HSA_STATUS_SUCCESS;
+
+    hsa_symbol_kind_t kind{};
+    if(core->hsa_executable_symbol_get_info_fn(symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &kind) !=
+           HSA_STATUS_SUCCESS ||
+       kind != HSA_SYMBOL_KIND_VARIABLE)
+        return HSA_STATUS_SUCCESS;
+
+    uint64_t addr = 0;
+    uint32_t size = 0;
+    if(core->hsa_executable_symbol_get_info_fn(
+           symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, &addr) != HSA_STATUS_SUCCESS ||
+       core->hsa_executable_symbol_get_info_fn(
+           symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &size) != HSA_STATUS_SUCCESS)
+        return HSA_STATUS_SUCCESS;
+
+    // Skip empties; 1 GiB per-variable sanity cap.
+    if(addr == 0 || size == 0 || size > (1ULL << 30)) return HSA_STATUS_SUCCESS;
+
+    // HSA reports the variable's device address as an integer; converting to a pointer is required.
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    out->push_back(module_variable_t{reinterpret_cast<void*>(addr), size});
+    return HSA_STATUS_SUCCESS;
+}
+
+// Enumerate module-scope variables visible to `agent` across all loaded executables. They live in
+// the executable's data segment -- not in the allocation tracker's inventory -- so a kernel that
+// mutates a __device__ global would otherwise leak that mutation across replay passes. Must run at
+// snap time (not executable-load time): constant memory may not be populated at load.
+std::vector<module_variable_t>
+discover_module_variables(hsa_agent_t agent)
+{
+    std::vector<module_variable_t> found;
+
+    auto* core = hsa::get_core_table();
+    if(!core || !core->hsa_executable_iterate_agent_symbols_fn) return found;
+
+    code_object::iterate_loaded_code_objects([&](const code_object::hsa::code_object& co) {
+        // Iterating for `agent` naturally scopes to executables loaded on this agent (others yield
+        // no symbols), matching snap()'s per-agent contract.
+        core->hsa_executable_iterate_agent_symbols_fn(
+            co.hsa_executable, agent, collect_module_variable, &found);
+    });
+    return found;
 }
 }  // namespace
 
@@ -70,8 +136,27 @@ snap(hsa_agent_t agent)
         out.blocks.push_back(std::move(blk));
     }
 
-    ROCP_INFO << "replay snapshot: captured " << out.blocks.size() << "/" << inventory.size()
-              << " regions for agent " << agent.handle;
+    // Module-scope variables (__device__ / __constant__ globals) live in the loaded executable's
+    // data segment, not in the allocation tracker, so capture them here too. Restored via the same
+    // per-block host->device copy as tracked allocations (see restore()).
+    for(const auto& var : discover_module_variables(agent))
+    {
+        mem_block_t blk;
+        blk.gpu_addr = var.gpu_addr;
+        blk.host_copy.resize(var.size);
+
+        if(dma_copy(blk.host_copy.data(), var.gpu_addr, var.size) != HSA_STATUS_SUCCESS)
+        {
+            ROCP_WARNING << "replay snapshot: device->host copy failed for module variable "
+                         << var.gpu_addr;
+            continue;
+        }
+
+        out.blocks.push_back(std::move(blk));
+    }
+
+    ROCP_INFO << "replay snapshot: captured " << out.blocks.size()
+              << " regions (tracked allocations + module variables) for agent " << agent.handle;
     return out;
 }
 
