@@ -25,7 +25,6 @@
 #include <array>
 #include <cstdint>
 #include <functional>
-#include <string_view>
 
 // Signal-less kernel-dispatch completion: the feature flag and the per-batch
 // eligibility decision. Deliberately free of the SDK tracing/HSA headers so the
@@ -49,13 +48,6 @@ signal_less_id_is_leaked(uint64_t correlation_id);
 // Record that the loss ledger is now non-empty. Called by the loss paths only.
 void
 note_signal_less_losses();
-
-// Pure so the accepted spellings are unit-testable.
-inline bool
-parse_signal_less_env(std::string_view v)
-{
-    return v == "1" || v == "on" || v == "ON" || v == "true" || v == "TRUE" || v == "yes";
-}
 
 // Steps 1-6 of the teardown order, called BEFORE the existing
 // queue_controller_fini / kfd::finalize / correlation_id_finalize sequence.

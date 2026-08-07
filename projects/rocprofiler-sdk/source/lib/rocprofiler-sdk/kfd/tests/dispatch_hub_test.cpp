@@ -408,29 +408,6 @@ TEST(DispatchHub, can_register_batch_refuses_live_quarantined_and_duplicate_keys
     EXPECT_FALSE(hub.can_register_batch({key_of(7, 1)}));
 }
 
-// Feature flag + eligibility decision table
-
-// Default OFF: only an explicit, recognised enable turns the feature on, so a
-// typo, an empty value, or an unrelated string can never activate it.
-TEST(signal_less_flag, only_explicit_enable_turns_it_on)
-{
-    EXPECT_TRUE(parse_signal_less_env("1"));
-    EXPECT_TRUE(parse_signal_less_env("on"));
-    EXPECT_TRUE(parse_signal_less_env("ON"));
-    EXPECT_TRUE(parse_signal_less_env("true"));
-    EXPECT_TRUE(parse_signal_less_env("TRUE"));
-    EXPECT_TRUE(parse_signal_less_env("yes"));
-
-    EXPECT_FALSE(parse_signal_less_env(""));
-    EXPECT_FALSE(parse_signal_less_env("0"));
-    EXPECT_FALSE(parse_signal_less_env("off"));
-    EXPECT_FALSE(parse_signal_less_env("false"));
-    EXPECT_FALSE(parse_signal_less_env("2"));
-    EXPECT_FALSE(parse_signal_less_env("enable"));
-    EXPECT_FALSE(parse_signal_less_env(" 1"));
-    EXPECT_FALSE(parse_signal_less_env("1 "));
-}
-
 // Unit 3: EOP shape (ii), overrun leak-and-shout, and the finalize skip
 
 // Shape (ii): an EOP whose START was lost still proves completion for the unique

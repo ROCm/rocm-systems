@@ -57,8 +57,7 @@ signal_less_feature_enabled()
     // Read once: the answer must not change under a running process, and the
     // enqueue path cannot afford an env lookup per batch.
     static const bool _enabled = []() {
-        auto _v = common::get_env_optional("ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS");
-        if(!_v || !parse_signal_less_env(*_v)) return false;
+        if(!common::get_env("ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS", false)) return false;
         ROCP_WARNING << "KFD dispatch-log: signal-less kernel-dispatch completion is ACTIVE "
                         "(ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS). Eligible batches publish "
                         "their packets untouched and complete from firmware records instead of "
