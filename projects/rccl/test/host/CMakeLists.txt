@@ -1,5 +1,87 @@
 cmake_minimum_required(VERSION 3.16)
 
+# =====================================================================
+# In-RCCL-build integration.
+#
+# When this directory is pulled in via add_subdirectory(host) from
+# test/CMakeLists.txt (i.e. as part of ./install.sh -t), BUILD_TESTS is
+# set and the parent build has already established the toolchain,
+# project(), and the shared RCCL_COMMON_INCLUDE_DIRS /
+# RCCL_COMMON_COMPILE_DEFS / MICRO_TEST_LINK_LIBS variables. In that mode
+# we only build the host-only micro-test binary(ies) here and return
+# before the standalone project() setup below.
+#
+# When invoked directly (cmake -B build on this directory) BUILD_TESTS is
+# not defined, so we fall through to the standalone project that builds
+# rccl-HostUnitTests + rccl-UnitTestsMicro from a hipified snapshot.
+# =====================================================================
+if(BUILD_TESTS)
+  # rccl-UnitTestsMicro: standalone unit-test binary compiled directly into
+  # the test binary. This lets us use preprocessor and link-time substitution
+  # to provide test doubles for anything that would require a GPU or other
+  # special hardware. Deliberately NOT linking librccl.so or the HIP runtime:
+  # $<COMPILE_ONLY:hip::*> (via MICRO_TEST_LINK_LIBS) keeps the HIP compile
+  # requirements while any un-shimmed HIP call surfaces as a link error.
+  set(TEST_MICRO_SOURCE_FILES
+    p2p-test.cc
+    fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
+    fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
+    fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
+    ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
+    ../common/ProcessIsolatedTestRunner.cpp
+  )
+
+  add_executable(rccl-UnitTestsMicro ${TEST_MICRO_SOURCE_FILES})
+
+  target_include_directories(rccl-UnitTestsMicro PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${RCCL_COMMON_INCLUDE_DIRS})
+  target_compile_definitions(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
+  target_link_libraries(rccl-UnitTestsMicro PRIVATE ${MICRO_TEST_LINK_LIBS})
+
+  # Pass the absolute path of hipified source files through as string
+  # literals so the #include in the test translation unit stays independent of
+  # the build directory layout.
+  target_compile_definitions(rccl-UnitTestsMicro PRIVATE
+    P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
+  )
+
+  # Make sure the hipify step has run before trying to compile the test.
+  add_dependencies(rccl-UnitTestsMicro hipify_all copy_nccl_device_headers)
+
+  # Always build this binary with llvm source-based coverage.
+  # Restrict the instrumentation to the host compilation pass: applying it to the
+  # amdgcn device pass pulls in LLVM profiling runtime symbols
+  # (__llvm_profile_raw_version, __start___llvm_prf_cnts, ...) that don't exist on
+  # the device, which makes amdgcn-link fail.
+  #
+  # The "SHELL:" prefix keeps each "-Xarch_device <flag>" pair intact: without
+  # it CMake de-duplicates the repeated -Xarch_device token, which would leave
+  # -fno-coverage-mapping unqualified and silently drop __llvm_covmap from the
+  # host pass too.
+  target_compile_options(rccl-UnitTestsMicro PRIVATE
+    -fprofile-instr-generate -fcoverage-mapping
+    "SHELL:-Xarch_device -fno-profile-instr-generate"
+    "SHELL:-Xarch_device -fno-coverage-mapping")
+  target_link_options(rccl-UnitTestsMicro PRIVATE
+    -fprofile-instr-generate -fcoverage-mapping)
+
+  if(BUILD_ADDRESS_SANITIZER)
+    target_compile_options(rccl-UnitTestsMicro PRIVATE -fsanitize=address)
+    target_link_options(rccl-UnitTestsMicro PRIVATE -fsanitize=address -shared-libasan)
+    if(DEFINED ASAN_RUNTIME_DIR)
+      target_link_options(rccl-UnitTestsMicro PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+    endif()
+  endif()
+
+  # Deliberately NOT linking librccl.so: this binary is for tests that compile
+  # their unit-under-test source file(s) directly. Add files to
+  # TEST_MICRO_SOURCE_FILES above as new units come under test.
+  rocm_install(TARGETS rccl-UnitTestsMicro COMPONENT tests)
+
+  return()
+endif()
+
 # --- hipcc is mandatory ---
 # Auto-detect hipcc via ROCM_PATH, or pass -DCMAKE_CXX_COMPILER=hipcc.
 if(NOT DEFINED CMAKE_CXX_COMPILER OR CMAKE_CXX_COMPILER STREQUAL "")
@@ -191,3 +273,50 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
   rccl-source-wrappers
   -Wl,--no-whole-archive
 )
+
+# --- Standalone micro-test binary ---------------------------------------
+# rccl-UnitTestsMicro: same host-only model as rccl-HostUnitTests (hipcc
+# --offload-host-only, -no-hip-rt), built from the hipified snapshot. It
+# #includes the unit-under-test production .cc directly (via P2P_CC_PATH) and
+# satisfies every HIP/nccl symbol from fakes/ + micro_link_stubs.cc rather
+# than librccl.so or the HIP runtime.
+add_executable(rccl-UnitTestsMicro
+  p2p-test.cc
+  fakes/nccl_fakes.cc
+  fakes/p2p_fakes.cc
+  fakes/hip_fakes.cc
+  micro_link_stubs.cc
+  ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
+  ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
+)
+
+target_compile_options(rccl-UnitTestsMicro PRIVATE
+  -Wno-unused-parameter -Wno-unused-variable)
+
+target_include_directories(rccl-UnitTestsMicro PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${RCCL_INCLUDE_DIRS}
+)
+
+target_compile_definitions(rccl-UnitTestsMicro PRIVATE
+  __HIP_PLATFORM_AMD__
+  NCCL_OS_LINUX
+  ROCM_VERSION=70000
+  P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
+)
+
+target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt)
+target_link_libraries(rccl-UnitTestsMicro PRIVATE
+  GTest::GTest
+  Threads::Threads
+  fmt::fmt-header-only
+)
+
+# llvm source-based coverage (host-only build: no -Xarch_device split needed
+# because --offload-host-only never runs the amdgcn device pass).
+# On by default; disable with -DMICRO_COVERAGE=OFF.
+option(MICRO_COVERAGE "Build rccl-UnitTestsMicro with llvm source-based coverage" ON)
+if(MICRO_COVERAGE)
+  target_compile_options(rccl-UnitTestsMicro PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(rccl-UnitTestsMicro PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+endif()
