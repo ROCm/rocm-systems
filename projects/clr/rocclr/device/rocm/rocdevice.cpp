@@ -158,6 +158,20 @@ Device::Device(hsa_agent_t bkendDevice)
   cache_state_ = Device::CacheState::kCacheStateInvalid;
 }
 
+int Device::agentGlobalIndex(hsa_agent_t agent) {
+  for (size_t gpu_idx = 0; gpu_idx < gpu_agents_.size(); ++gpu_idx) {
+    if (gpu_agents_[gpu_idx].handle == agent.handle) {
+      return static_cast<int>(gpu_idx);
+    }
+  }
+  for (size_t cpu_idx = 0; cpu_idx < cpu_agents_.size(); ++cpu_idx) {
+    if (cpu_agents_[cpu_idx].agent.handle == agent.handle) {
+      return static_cast<int>(gpu_agents_.size() + cpu_idx);
+    }
+  }
+  return -1;
+}
+
 void Device::setupCpuAgent() {
   int32_t numaDistance = std::numeric_limits<int32_t>::max();
   uint32_t index = 0;  // 0 as default
