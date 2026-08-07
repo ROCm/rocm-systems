@@ -18,6 +18,7 @@
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/invoke.hpp"
+#include "common/path.hpp"
 #include "common/setup.hpp"
 #include "dl/dl.hpp"
 #include "rocprofiler-systems/categories.h"
@@ -224,11 +225,11 @@ struct ROCPROFSYS_INTERNAL_API indirect
         {
             ROCPROFSYS_COMMON_LIBRARY_LOG_START
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
-                    ::basename(_omnilib.c_str()), m_omnilib.c_str());
+                    path::filename(_omnilib).c_str(), m_omnilib.c_str());
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
-                    ::basename(_dllib.c_str()), m_dllib.c_str());
+                    path::filename(_dllib).c_str(), m_dllib.c_str());
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
-                    ::basename(_userlib.c_str()), m_userlib.c_str());
+                    path::filename(_userlib).c_str(), m_userlib.c_str());
             ROCPROFSYS_COMMON_LIBRARY_LOG_END
         }
 
@@ -1263,7 +1264,7 @@ rocprofsys_postinit(std::string _exe)
             if(_exe.empty())
                 rocprofsys_push_trace("main");
             else
-                rocprofsys_push_trace(basename(_exe.c_str()));
+                rocprofsys_push_trace(path::filename(_exe).c_str());
             break;
         }
         case InstrumentMode::PythonProfile:
@@ -1573,7 +1574,7 @@ extern "C"
 
         int ret = (*::rocprofsys::dl::main_real)(argc, argv, envp);
 
-        rocprofsys_pop_trace(basename(argv[0]));
+        rocprofsys_pop_trace(rocprofsys::path::filename(argv[0]).c_str());
         rocprofsys_finalize();
 
         return ret;

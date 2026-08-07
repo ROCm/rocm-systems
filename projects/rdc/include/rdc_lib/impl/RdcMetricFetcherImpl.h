@@ -85,6 +85,7 @@ class RdcMetricFetcherImpl final : public RdcMetricFetcher {
 
   uint64_t now();
   void get_ecc(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
+  void get_afid(uint32_t gpu_index, rdc_field_value* value);
   void get_ecc_total(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
   void get_ecc_deferred(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
   void get_ecc_deferred_total(uint32_t gpu_index, rdc_field_value* value);

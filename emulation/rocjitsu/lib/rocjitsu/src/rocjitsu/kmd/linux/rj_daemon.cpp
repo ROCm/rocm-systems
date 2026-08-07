@@ -49,8 +49,6 @@ namespace {
 
 using namespace rocjitsu;
 
-constexpr uint32_t kMaxPayloadBytes = 16 * 1024 * 1024;
-
 bool checked_product(size_t lhs, size_t rhs, size_t *product) {
   if (lhs != 0 && rhs > std::numeric_limits<size_t>::max() / lhs)
     return false;

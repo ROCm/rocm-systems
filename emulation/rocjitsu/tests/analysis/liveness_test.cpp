@@ -2,15 +2,19 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/exec_state.h"
 #include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/dbt/binary_translator_internal.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
@@ -51,17 +55,42 @@ public:
   TestOperand(RegisterRef ref, int size_bits) : Operand(size_bits, ref.index), ref_(ref) {}
 
   std::optional<RegisterRef> to_register_ref() const override { return ref_; }
+  std::optional<uint64_t> literal64_value() const override { return lit_; }
+  std::optional<uint64_t> const_value() const override {
+    return const_.has_value() ? const_ : literal64_value();
+  }
+
+  // Turn this into a 64-bit literal source operand (no register ref). Models the
+  // literal64 path: both literal64_value() and const_value() report it.
+  void set_literal(uint64_t v) {
+    lit_ = v;
+    size_bits_ = 64;
+  }
+
+  // Turn this into an inline-constant source operand: const_value() reports it
+  // but literal64_value() stays empty (mirrors how inline constants behave).
+  void set_inline_const(uint64_t v) {
+    const_ = v;
+    size_bits_ = 64;
+  }
 
 private:
   std::optional<RegisterRef> ref_;
+  std::optional<uint64_t> lit_;
+  std::optional<uint64_t> const_;
 };
 
 class TestInstruction : public Instruction {
 public:
+  // `literal_src`, when set, appends one literal source operand carrying the
+  // given value via literal64_value() — models an instruction's literal64
+  // (SIMM) immediate, e.g. the all-ones source of `s_mov_b64 exec, <lit>`.
   TestInstruction(std::string_view mnemonic, std::initializer_list<RegisterRef> defs = {},
                   std::initializer_list<RegisterRef> uses = {}, uint64_t flags = 0,
                   std::optional<int64_t> branch_delta = std::nullopt,
-                  std::initializer_list<RegisterRef> implicit_uses = {}, int def_size_bits = 0)
+                  std::initializer_list<RegisterRef> implicit_uses = {},
+                  std::optional<uint64_t> literal_src = std::nullopt,
+                  std::optional<uint64_t> inline_const_src = std::nullopt, int def_size_bits = 0)
       : Instruction(mnemonic, nullptr), implicit_uses_(implicit_uses), branch_delta_(branch_delta) {
     size_ = 4;
     flags_ = flags;
@@ -76,6 +105,16 @@ public:
     }
     for (RegisterRef ref : uses) {
       src_storage_[num_src_] = TestOperand(ref);
+      src_operands_[num_src_] = &src_storage_[num_src_];
+      ++num_src_;
+    }
+    if (literal_src) {
+      src_storage_[num_src_].set_literal(*literal_src);
+      src_operands_[num_src_] = &src_storage_[num_src_];
+      ++num_src_;
+    }
+    if (inline_const_src) {
+      src_storage_[num_src_].set_inline_const(*inline_const_src);
       src_operands_[num_src_] = &src_storage_[num_src_];
       ++num_src_;
     }
@@ -149,7 +188,15 @@ enum class TestOpcode : uint32_t {
   CBranchToElseAfterTwo = 14,
   IndirectCall = 15,
   IndirectBranch = 16,
-  PartialDefSgpr4 = 17,
+  WriteExecFull = 17,
+  WriteExecNarrow = 18,
+  WriteExecFullInline = 19,
+  WriteExecOrAllOnes = 20,
+  WriteExecAndSaveexec = 21,
+  WriteExecLoHalf = 22,
+  WriteExecHiHalf = 23,
+  WriteExecHiHalfZero = 25,
+  PartialDefSgpr4 = 24,
 };
 
 class TestDecoder : public Decoder {
@@ -192,10 +239,49 @@ public:
       return new TestInstruction("test_indirect_call", {}, {}, INDIRECT_CALL);
     case TestOpcode::IndirectBranch:
       return new TestInstruction("test_indirect_branch", {}, {}, INDIRECT_BRANCH);
+    case TestOpcode::WriteExecFull:
+      // s_mov exec, <all-ones literal>: COPY of a single all-ones source.
+      return new TestInstruction("test_write_exec_full", {{RegClass::EXEC, 0, 2}}, {}, RESULT_COPY,
+                                 std::nullopt, {}, ~0ULL);
+    case TestOpcode::WriteExecNarrow:
+      // exec <- sgpr (non-constant): writes EXEC but not provably all-ones.
+      return new TestInstruction("test_write_exec_narrow", {{RegClass::EXEC, 0, 2}},
+                                 {{RegClass::SGPR, 0, 1}}, RESULT_COPY);
+    case TestOpcode::WriteExecFullInline:
+      // s_mov exec, -1: COPY of an inline-constant all-ones source (reports
+      // const_value() but not literal64_value()).
+      return new TestInstruction("test_write_exec_full_inline", {{RegClass::EXEC, 0, 2}}, {},
+                                 RESULT_COPY, std::nullopt, {}, std::nullopt, ~0ULL);
+    case TestOpcode::WriteExecOrAllOnes:
+      // s_or_b64 exec, exec, -1: OR of a (non-constant) source and an all-ones
+      // inline constant -> all-ones regardless of the other operand.
+      return new TestInstruction("test_write_exec_or_allones", {{RegClass::EXEC, 0, 2}},
+                                 {{RegClass::SGPR, 0, 1}}, RESULT_OR, std::nullopt, {},
+                                 std::nullopt, ~0ULL);
+    case TestOpcode::WriteExecAndSaveexec:
+      // s_and_saveexec exec, -1: writes EXEC (flag), single all-ones source, but
+      // exec = exec & -1 = exec -> NOT all-ones. No RESULT_* -> must stay Unknown.
+      return new TestInstruction("test_write_exec_and_saveexec", {{RegClass::SGPR, 0, 2}}, {},
+                                 WRITES_EXEC, std::nullopt, {}, std::nullopt, ~0ULL);
+    case TestOpcode::WriteExecLoHalf:
+      // s_mov_b32 exec_lo, -1: a 32-bit COPY of all-ones into only the low half
+      // of EXEC. Full on Wave32; a partial write on Wave64.
+      return new TestInstruction("test_write_exec_lo_half", {{RegClass::EXEC, 0, 1}}, {},
+                                 RESULT_COPY, std::nullopt, {}, std::nullopt, ~0ULL);
+    case TestOpcode::WriteExecHiHalf:
+      // s_mov_b32 exec_hi, -1: a 32-bit COPY of all-ones into only the high half
+      // of EXEC. Never covers the active lanes, so it can never establish Full.
+      return new TestInstruction("test_write_exec_hi_half", {{RegClass::EXEC, 1, 1}}, {},
+                                 RESULT_COPY, std::nullopt, {}, std::nullopt, ~0ULL);
+    case TestOpcode::WriteExecHiHalfZero:
+      // s_mov_b32 exec_hi, 0: a 32-bit COPY of zero into only the high half of EXEC.
+      return new TestInstruction("test_write_exec_hi_half_zero", {{RegClass::EXEC, 1, 1}}, {},
+                                 RESULT_COPY, std::nullopt, {}, std::nullopt, 0ULL);
     case TestOpcode::PartialDefSgpr4:
       // 16-bit write to s4: defines only part of the lane, so it also reads s4.
       return new TestInstruction("test_partial_def_s4", {{RegClass::SGPR, 4, 1}}, {}, 0,
-                                 std::nullopt, {}, /*def_size_bits=*/16);
+                                 std::nullopt, {}, std::nullopt, std::nullopt,
+                                 /*def_size_bits=*/16);
     }
     return new TestInstruction("test_end", {}, {}, PROGRAM_TERMINATOR);
   }
@@ -250,7 +336,18 @@ std::span<const uint8_t> text_span(const CodeObject &co) {
 
 LivenessAnalysis analyze_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   auto scope = block_scope(blocks);
-  return LivenessAnalysis(KernelBlockScope(scope));
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  return LivenessAnalysis(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec));
+}
+
+// Wire the same scoped call/return edges into BOTH analyses, as BinaryTranslator
+// does; feeding them to only one makes the two disagree around calls and returns.
+LivenessAnalysis analyze_scope_with_edges(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                          std::span<const ScopedCfgEdge> extra_edges) {
+  auto scope = block_scope(blocks);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64, extra_edges);
+  return LivenessAnalysis(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                          /*options=*/{}, extra_edges);
 }
 
 // CFG/liveness tests care about decoded register effects, not the physical
@@ -409,6 +506,138 @@ TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {
   ASSERT_EQ(blocks[0]->successors().size(), 1u);
   EXPECT_EQ(blocks[0]->successors()[0], blocks[0].get());
   EXPECT_TRUE(has_predecessor(*blocks[0], blocks[0].get()));
+}
+
+TEST(CfgAnalysis, Gfx1250ClassifiesImplicitUnreachableStubTerminator) {
+  struct Case {
+    const char *name;
+    std::vector<uint32_t> words;
+    bool has_terminator;
+    bool has_implicit_terminator;
+    bool falls_through_to_undecodable_text;
+  };
+  const std::array cases = {
+      Case{"clang unreachable stub", {0xb9800641u, 1u, 0}, true, true, false},
+      Case{"clang unreachable stub with prefetch",
+           {0xee174000u, 0x00040000u, 0, 0x7e000000u, 0xb9800641u, 1u, 0},
+           true,
+           true,
+           false},
+      Case{"section-final clang unreachable stub", {0xb9800641u, 1u}, true, true, false},
+      Case{"ordinary fallthrough",
+           {build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), 0},
+           false,
+           false,
+           true},
+      Case{"architectural terminator",
+           {build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), 0},
+           true,
+           false,
+           false},
+  };
+
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    TestCodeObject co(test_case.words);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_NE(decoder, nullptr);
+    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+    ASSERT_EQ(blocks.size(), 1u);
+    EXPECT_EQ(blocks[0]->has_terminator(), test_case.has_terminator);
+    EXPECT_EQ(blocks[0]->has_implicit_terminator(), test_case.has_implicit_terminator);
+    EXPECT_EQ(blocks[0]->falls_through_to_undecodable_text(),
+              test_case.falls_through_to_undecodable_text);
+  }
+}
+
+TEST(CfgAnalysis, DirectCallToImplicitNonreturningTargetDropsFallthrough) {
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> words = {
+      rocjitsu::build_s_call_b64(kReturnSreg, 1, ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x04 continuation.
+      0xb9800641u,
+      1u,
+      0, // 0x08 clang unreachable-stub target followed by padding.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  auto *target = block_starting_at(blocks, 8);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  EXPECT_TRUE(caller->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*caller, target->start_offset()));
+  EXPECT_FALSE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_FALSE(has_predecessor(*continuation, caller));
+}
+
+TEST(CfgAnalysis, PreviousInstructionReturnsPrecedingInstructionInBlock) {
+  auto blocks = build_test_blocks({TestOpcode::Nop, TestOpcode::UseSgpr4, TestOpcode::End});
+
+  ASSERT_EQ(blocks.size(), 1u);
+  auto instruction = blocks[0]->instructions().begin();
+  ASSERT_NE(instruction, blocks[0]->instructions().end());
+  const Instruction *first = &*instruction;
+  ++instruction;
+  ASSERT_NE(instruction, blocks[0]->instructions().end());
+  const Instruction *second = &*instruction;
+
+  EXPECT_EQ(first->previous_instruction(), nullptr);
+  EXPECT_EQ(second->previous_instruction(), first);
+}
+
+TEST(CfgAnalysis, PreviousInstructionIsNullAtBranchTargetBlockEntry) {
+  auto blocks = build_test_blocks(
+      {TestOpcode::CBranchToElse, TestOpcode::Nop, TestOpcode::UseSgpr4, TestOpcode::End});
+
+  BasicBlock *target = block_starting_at(blocks, 8);
+  ASSERT_NE(target, nullptr);
+  ASSERT_NE(target->instructions().begin(), target->instructions().end());
+  const Instruction &entry = *target->instructions().begin();
+  EXPECT_EQ(entry.previous_instruction(), nullptr);
+}
+
+TEST(CfgAnalysis, NextInstructionReturnsFollowingInstructionInBlock) {
+  auto blocks = build_test_blocks({TestOpcode::Nop, TestOpcode::UseSgpr4, TestOpcode::End});
+
+  ASSERT_EQ(blocks.size(), 1u);
+  auto instruction = blocks[0]->instructions().begin();
+  ASSERT_NE(instruction, blocks[0]->instructions().end());
+  const Instruction *first = &*instruction;
+  ++instruction;
+  ASSERT_NE(instruction, blocks[0]->instructions().end());
+  const Instruction *second = &*instruction;
+
+  EXPECT_EQ(first->next_instruction(), second);
+}
+
+TEST(CfgAnalysis, NextInstructionIsNullAtBlockTerminator) {
+  auto blocks = build_test_blocks(
+      {TestOpcode::CBranchToElse, TestOpcode::Nop, TestOpcode::UseSgpr4, TestOpcode::End});
+
+  ASSERT_FALSE(blocks.empty());
+  const Instruction *terminator = blocks[0]->terminator();
+  ASSERT_NE(terminator, nullptr);
+  EXPECT_EQ(terminator->next_instruction(), nullptr);
+}
+
+TEST(CfgAnalysis, StandaloneInstructionHasNoDecodedNeighbors) {
+  constexpr uint32_t kNop = 0xbf800000u;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> instruction(decoder->decode(&kNop));
+
+  ASSERT_NE(instruction, nullptr);
+  EXPECT_EQ(instruction->previous_instruction(), nullptr);
+  EXPECT_EQ(instruction->next_instruction(), nullptr);
 }
 
 TEST(CfgAnalysis, IfElseSuccessorsAndPredecessorsAreInverse) {
@@ -665,6 +894,190 @@ TEST(CfgAnalysis, IncompleteFactConsumerIsFlaggedIncomplete) {
       << "a consumer joined from an unconstrained path must be flagged incomplete";
 }
 
+TEST(CfgAnalysis, IncompleteSwappcTargetSetKeepsContinuation) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  std::vector<uint32_t> words = {
+      pack_sopp(5, 5),                                     // 0x00 -> bypass at 0x18.
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x04: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
+      28,                                                  // 0x0c: target at 0x24.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
+      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> consumer at 0x1c.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x18: unconstrained bypass.
+      pack_sop1(0x1e, kReturnSreg, kPcSreg),               // 0x1c: joined swappc consumer.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x20: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x24: known non-returning target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *consumer = block_starting_at(blocks, 28);
+  auto *continuation = block_starting_at(blocks, 32);
+  auto *target = block_starting_at(blocks, 36);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(target, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_TRUE(consumer->static_indirect_call_fixups()[0].source_incomplete);
+  EXPECT_TRUE(consumer->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*consumer, continuation->start_offset()));
+  EXPECT_TRUE(has_successor_start(*consumer, target->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, consumer));
+}
+
+TEST(CfgAnalysis, IncompleteRecoveredSetpcInCalleeKeepsOuterContinuation) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kOuterReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kOuterReturnSreg, 1),               // 0x00 -> callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x04 live continuation.
+      pack_sopp(5, 5),                                     // 0x08 -> bypass at 0x20.
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x0c: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x10: s_add_u32.
+      28,                                                  // 0x14: target at 0x2c.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x18: s_addc_u32.
+      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4),         // 0x1c -> consumer at 0x24.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x20: unconstrained bypass.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x24: joined setpc.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x28: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x2c: known target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  auto *callee = block_starting_at(blocks, 8);
+  auto *consumer = block_starting_at(blocks, 36);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(callee, nullptr);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_TRUE(consumer->static_indirect_call_fixups()[0].source_incomplete);
+
+  EXPECT_TRUE(caller->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*caller, callee->start_offset()));
+  EXPECT_TRUE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, caller));
+}
+
+TEST(CfgAnalysis, ReportsResolvedPcAddressBuilderForEveryProducer) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // Recovered consumers are only one use of a getpc builder. DBT also needs the
+  // producer itself so it can prove a whole kernel scope holds no unrelocated
+  // PC-derived value, so every builder is reported with the exact byte range
+  // whose delta relocation may rewrite.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x00: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x04: s_add_u32.
+      16,                                                  // 0x08: 0x04 + 16 = 0x14.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c: s_addc_u32.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x10: consumer setpc.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x14: target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *builder_block = block_starting_at(blocks, 0);
+  ASSERT_NE(builder_block, nullptr);
+  ASSERT_EQ(builder_block->static_pc_address_builders().size(), 1u);
+  const auto &builder = builder_block->static_pc_address_builders()[0];
+  EXPECT_TRUE(builder.resolved);
+  EXPECT_TRUE(builder.contiguous);
+  EXPECT_EQ(builder.source_getpc_offset, 0u);
+  EXPECT_EQ(builder.source_recovery_begin_offset, 4u);
+  EXPECT_EQ(builder.source_recovery_end_offset, 16u);
+  EXPECT_EQ(builder.source_target_offset, 20);
+  EXPECT_EQ(builder.source_sreg, kPcSreg);
+}
+
+TEST(CfgAnalysis, PcAddressBuilderWithGapInstructionIsReportedNonContiguous) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kUnrelatedSreg = 20;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // An unrelated s_mov_b32 sits between the low add and the high carry. The pass
+  // still tracks the pair across it (the move writes s20, not the pair), so the
+  // builder's recorded value is known and its recovery range spans the move. The
+  // relocation patcher NOPs that whole range, so rewriting it would erase the
+  // move. The producer must therefore be reported non-contiguous even though its
+  // final value resolved, so the whole-scope proof declines to rewrite it.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                     // 0x00: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand), // 0x04: s_add_u32.
+      20,                                              // 0x08: 0x04 + 20 = 0x18.
+      build_s_mov_b32(kUnrelatedSreg, 0,
+                      ROCJITSU_CODE_ARCH_CDNA4),           // 0x0c: unrelated write, in range.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x14: consumer setpc.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x18: target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *builder_block = block_starting_at(blocks, 0);
+  ASSERT_NE(builder_block, nullptr);
+  ASSERT_EQ(builder_block->static_pc_address_builders().size(), 1u);
+  const auto &builder = builder_block->static_pc_address_builders()[0];
+  EXPECT_TRUE(builder.resolved);
+  EXPECT_FALSE(builder.contiguous)
+      << "a builder range spanning an unrelated instruction must be non-contiguous";
+}
+
+TEST(CfgAnalysis, UnfollowedPcAddressBuilderIsReportedUnresolved) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kAddendSreg = 12;
+
+  // The low-half add takes a register addend the pass does not model, so the
+  // pair's final value is unknown. The producer still exists and still yields a
+  // PC-derived value at run time, so it must be reported as unresolved rather
+  // than omitted: omitting it would let a caller conclude the scope has no
+  // unrelocatable PC producer.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                 // 0x00: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kAddendSreg), // 0x04: s_add_u32 with register addend.
+      pack_sop1(0x1d, 0, kPcSreg),                 // 0x08: consumer setpc.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x0c.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *builder_block = block_starting_at(blocks, 0);
+  ASSERT_NE(builder_block, nullptr);
+  ASSERT_EQ(builder_block->static_pc_address_builders().size(), 1u);
+  EXPECT_EQ(builder_block->static_pc_address_builders()[0].source_getpc_offset, 0u);
+  EXPECT_FALSE(builder_block->static_pc_address_builders()[0].resolved)
+      << "a producer the pass cannot follow must not be reported as relocatable";
+  EXPECT_TRUE(builder_block->static_indirect_call_fixups().empty());
+}
+
 TEST(CfgAnalysis, DominatedPcBuilderRemainsCompleteAcrossCallLoopBackedge) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint16_t kReturnSreg = 30;
@@ -740,37 +1153,42 @@ TEST(CfgAnalysis, SeedsTextEntryWithLoopBackedgeForCrossBlockPcBuilder) {
   EXPECT_FALSE(consumer->static_indirect_call_fixups()[0].source_incomplete);
 }
 
-TEST(CfgAnalysis, ExplicitKernelEntryMakesIncomingPcBuilderIncomplete) {
+TEST(CfgAnalysis, MultipleUnorderedExplicitEntriesMakeIncomingPcBuilderIncomplete) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint32_t kLiteralOperand = 255;
   constexpr uint32_t kInlineInt0 = 128;
 
-  // Entry A builds a static target and branches into entry B. B is also a
-  // separately launchable kernel, so its externally supplied s[8:9] value is
-  // unconstrained and must participate in the join with A's concrete builder.
+  // Entry A builds a static target and branches into entries B and C. Both are
+  // separately launchable kernels, so their externally supplied s[8:9] values
+  // must participate in the joins with A's concrete builder. Supply the entry
+  // offsets out of order with a duplicate to exercise the ordered merge.
   std::vector<uint32_t> words = {
       pack_sop1(0x1c, kPcSreg, 0),                         // 0x00: s_getpc_b64.
       pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x04: s_add_u32.
-      24,                                                  // 0x08: 0x04 + 24 = 0x1c.
+      32,                                                  // 0x08: 0x04 + 32 = 0x24.
       pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c: s_addc_u32.
-      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4),         // 0x10 -> entry B at 0x18.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x14: skipped.
+      pack_sopp(5, 2),                                     // 0x10: cbranch -> entry C at 0x1c.
+      build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> entry B at 0x18.
       pack_sop1(0x1d, 0, kPcSreg),                         // 0x18: entry B setpc.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x1c: A's target.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x1c: entry C setpc.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x20: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x24: A's target.
   };
 
   TestCodeObject co(std::move(words));
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  constexpr std::array<uint64_t, 1> extra_leaders{24};
+  constexpr std::array<uint64_t, 3> extra_leaders{28, 24, 28};
   auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
 
-  auto *consumer = block_starting_at(blocks, 24);
-  ASSERT_NE(consumer, nullptr);
-  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
-  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 28u);
-  EXPECT_TRUE(consumer->static_indirect_call_fixups()[0].source_incomplete)
-      << "an independently launchable entry must include unconstrained external SGPR state";
+  for (uint64_t consumer_offset : {uint64_t{24}, uint64_t{28}}) {
+    auto *consumer = block_starting_at(blocks, consumer_offset);
+    ASSERT_NE(consumer, nullptr);
+    ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+    EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 36u);
+    EXPECT_TRUE(consumer->static_indirect_call_fixups()[0].source_incomplete)
+        << "each independently launchable entry must include unconstrained external SGPR state";
+  }
 }
 
 TEST(CfgAnalysis, RocrAbortTrapStopsTemporaryPcBuilderCfg) {
@@ -915,6 +1333,305 @@ TEST(CfgAnalysis, DirectCallEdgeUsesTerminatorOffset) {
   EXPECT_EQ(edge.callee, callee);
   EXPECT_EQ(edge.continuation, continuation);
   EXPECT_EQ(edge.source_call_offset, 4u);
+  EXPECT_TRUE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, caller));
+}
+
+TEST(BinaryTranslatorInternal, ScopeRootsRejectRelocationTableCallee) {
+  // A returning direct call makes the callee at 0x0c a call-edge target with no
+  // ordinary in-scope predecessor, i.e. an external root that the whole-scope
+  // stale-PC proof must classify. The caller (0x00) is the kernel entry.
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 1),         // 0x00 -> callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x04 continuation.
+      pack_sop1(0x1d, 0, kReturnSreg),          // 0x08 callee return.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *callee = block_starting_at(blocks, 8);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(callee, nullptr);
+  ASSERT_EQ(caller->call_edges().size(), 1u);
+  ASSERT_EQ(caller->call_edges()[0].callee, callee);
+
+  const auto scope = block_scope(blocks);
+  const std::unordered_set<uint64_t> hardware_entries{caller->start_offset()};
+
+  // With no relocation-table roots, the callee is a getpc-recovered call target
+  // and the entry is a hardware root, so the scope is accepted.
+  EXPECT_TRUE(rocjitsu::internal::scope_roots_are_entry_state(scope, hardware_entries, {}));
+
+  // Marking the callee a relocation-table dispatch target makes it an
+  // unconstrained root: a dispatched callee receives arbitrary caller-supplied
+  // SGPR arguments, so the gate must fail closed even though it has a CallEdge.
+  const std::unordered_set<uint64_t> table_callees{callee->start_offset()};
+  EXPECT_FALSE(
+      rocjitsu::internal::scope_roots_are_entry_state(scope, hardware_entries, table_callees));
+
+  // A non-hardware, non-call, non-table external root is also rejected: drop the
+  // entry from the hardware set and the caller itself becomes unconstrained.
+  EXPECT_FALSE(rocjitsu::internal::scope_roots_are_entry_state(scope, {}, {}));
+}
+
+TEST(CfgAnalysis, DirectCallToNonreturningTargetDropsFallthrough) {
+  constexpr uint16_t kReturnSreg = 30;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 1),         // 0x00 -> target at 0x08.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4), // 0x04 unreachable padding.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x08 non-returning target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  auto *target = block_starting_at(blocks, 8);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  EXPECT_TRUE(caller->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*caller, target->start_offset()));
+  EXPECT_FALSE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_FALSE(has_predecessor(*continuation, caller));
+}
+
+TEST(CfgAnalysis, DirectCallWithCopiedReturnPairKeepsFallthrough) {
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint16_t kCopiedReturnSreg = 34;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 1),             // 0x00 -> callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),     // 0x04 live continuation.
+      pack_sop1(1, kCopiedReturnSreg, kReturnSreg), // 0x08: s_mov_b64.
+      pack_sop1(0x1d, 0, kCopiedReturnSreg),        // 0x0c: copied-pair return.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  auto *callee = block_starting_at(blocks, 8);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(callee, nullptr);
+
+  EXPECT_TRUE(caller->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_TRUE(has_successor_start(*caller, callee->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, caller));
+}
+
+TEST(CfgAnalysis, DirectCallWithUnrecoveredTailExitKeepsFallthrough) {
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint16_t kUnknownTargetSreg = 0;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 1),         // 0x00 -> callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x04 live continuation.
+      pack_sop1(0x1d, 0, kUnknownTargetSreg),   // 0x08: unrecovered tail exit.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  auto *callee = block_starting_at(blocks, 8);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(callee, nullptr);
+
+  EXPECT_TRUE(caller->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_TRUE(has_successor_start(*caller, callee->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, caller));
+}
+
+TEST(CfgAnalysis, DirectCallCrossingScopeBoundaryKeepsFallthrough) {
+  constexpr uint16_t kReturnSreg = 30;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 1),            // 0x00 -> callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x04 live continuation.
+      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4), // 0x08 -> leader at 0x10.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),    // 0x0c skipped.
+      pack_sop1(0x1d, 0, kReturnSreg),             // 0x10: return across boundary.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 1> extra_leaders{16};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  auto *callee = block_starting_at(blocks, 8);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(callee, nullptr);
+
+  EXPECT_TRUE(caller->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_TRUE(has_successor_start(*caller, callee->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, caller));
+}
+
+TEST(CfgAnalysis, NestedReturningCallMayReturnThroughOuterPair) {
+  constexpr uint16_t kOuterReturnSreg = 30;
+  constexpr uint16_t kInnerReturnSreg = 28;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kOuterReturnSreg, 1),    // 0x00 -> outer callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x04 outer continuation.
+      build_s_call_b64(kInnerReturnSreg, 1),    // 0x08 -> inner callee at 0x10.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x0c inner continuation.
+      pack_sopp(5, 1),                          // 0x10 -> outer return at 0x18.
+      pack_sop1(0x1d, 0, kInnerReturnSreg),     // 0x14: normal inner return.
+      pack_sop1(0x1d, 0, kOuterReturnSreg),     // 0x18: direct outer return.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *outer = block_starting_at(blocks, 0);
+  auto *outer_continuation = block_starting_at(blocks, 4);
+  ASSERT_NE(outer, nullptr);
+  ASSERT_NE(outer_continuation, nullptr);
+
+  ASSERT_EQ(outer->call_edges().size(), 1u);
+  EXPECT_EQ(outer->call_edges()[0].continuation, outer_continuation);
+  EXPECT_TRUE(has_successor_start(*outer, outer_continuation->start_offset()));
+  EXPECT_TRUE(has_predecessor(*outer_continuation, outer));
+}
+
+TEST(CfgAnalysis, NestedNonreturningCallsDropBothFallthroughs) {
+  constexpr uint16_t kOuterReturnSreg = 30;
+  constexpr uint16_t kInnerReturnSreg = 28;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kOuterReturnSreg, 1),    // 0x00 -> outer callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x04 outer continuation.
+      build_s_call_b64(kInnerReturnSreg, 1),    // 0x08 -> inner target at 0x10.
+      pack_sop1(0x1d, 0, kOuterReturnSreg),     // 0x0c dead inner continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x10 non-returning target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *outer = block_starting_at(blocks, 0);
+  auto *outer_continuation = block_starting_at(blocks, 4);
+  auto *inner = block_starting_at(blocks, 8);
+  auto *inner_continuation = block_starting_at(blocks, 12);
+  auto *target = block_starting_at(blocks, 16);
+  ASSERT_NE(outer, nullptr);
+  ASSERT_NE(outer_continuation, nullptr);
+  ASSERT_NE(inner, nullptr);
+  ASSERT_NE(inner_continuation, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  EXPECT_TRUE(outer->call_edges().empty());
+  EXPECT_TRUE(inner->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*outer, inner->start_offset()));
+  EXPECT_FALSE(has_successor_start(*outer, outer_continuation->start_offset()));
+  EXPECT_TRUE(has_successor_start(*inner, target->start_offset()));
+  EXPECT_FALSE(has_successor_start(*inner, inner_continuation->start_offset()));
+}
+
+TEST(CfgAnalysis, CyclicCallGraphKeepsConservativeFallthrough) {
+  constexpr uint16_t kOuterReturnSreg = 30;
+  constexpr uint16_t kRecursiveReturnSreg = 28;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kOuterReturnSreg, 1),      // 0x00 -> callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),   // 0x04 outer continuation.
+      build_s_call_b64(kRecursiveReturnSreg, -1), // 0x08 -> itself.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),   // 0x0c recursive continuation.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+
+  EXPECT_TRUE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, caller));
+}
+
+TEST(CfgAnalysis, CallToInfiniteLoopDropsFallthrough) {
+  constexpr uint16_t kReturnSreg = 30;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 1),             // 0x00 -> callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),     // 0x04 dead continuation.
+      build_s_branch(-1, ROCJITSU_CODE_ARCH_CDNA4), // 0x08 -> itself.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  auto *callee = block_starting_at(blocks, 8);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(callee, nullptr);
+
+  EXPECT_TRUE(has_successor_start(*caller, callee->start_offset()));
+  EXPECT_FALSE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_FALSE(has_predecessor(*continuation, caller));
+}
+
+TEST(CfgAnalysis, ZeroDeltaCallToNonreturningTargetKeepsSingleEdge) {
+  constexpr uint16_t kReturnSreg = 30;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 0),         // 0x00 -> target/continuation at 0x04.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x04 non-returning target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *target = block_starting_at(blocks, 4);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  ASSERT_EQ(caller->successors().size(), 1u);
+  EXPECT_EQ(caller->successors()[0], target);
+  ASSERT_EQ(target->predecessors().size(), 1u);
+  EXPECT_EQ(target->predecessors()[0], caller);
 }
 
 TEST(CfgAnalysis, DirectCallKillsCarriedPcBuilderFacts) {
@@ -954,7 +1671,7 @@ TEST(CfgAnalysis, DirectCallKillsCarriedPcBuilderFacts) {
   EXPECT_FALSE(has_successor_start(*continuation, stale_target->start_offset()));
 }
 
-TEST(CfgAnalysis, KillPredecessorPreventsRecoveredConsumer) {
+TEST(CfgAnalysis, EitherHalfKillPredecessorPreventsRecoveredConsumer) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint32_t kLiteralOperand = 255;
   constexpr uint32_t kInlineInt0 = 128;
@@ -963,39 +1680,43 @@ TEST(CfgAnalysis, KillPredecessorPreventsRecoveredConsumer) {
   // Two paths reach the same setpc consumer:
   //
   //   * the fallthrough path builds a concrete PC target in s[8:9]
-  //   * the branch path writes s8 through ordinary scalar code, killing that
-  //     pair for this analysis
+  //   * the branch path writes either s8 or s9 through ordinary scalar code,
+  //     killing that pair for this analysis
   //
   // The concrete builder path alone is not enough to recover the consumer. A
   // real unmodeled write reaches the join, so the analysis must fail closed and
   // leave the setpc for the later DBT diagnostic.
-  std::vector<uint32_t> words = {
-      pack_sopp(5, 5),                                     // 0x00 -> kill path at 0x18.
-      pack_sop1(0x1c, kPcSreg, 0),                         // 0x04: s_getpc_b64.
-      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
-      kOriginalGetpcDelta,                                 // 0x0c: target delta.
-      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
-      build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> consumer at 0x20.
-      pack_sop2(0, kPcSreg, kPcSreg, kInlineInt0),         // 0x18: unmodeled write.
-      build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4),         // 0x1c -> consumer at 0x20.
-      pack_sop1(0x1d, 0, kPcSreg),                         // 0x20: joined consumer.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x24: not a target.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x28: builder target.
-  };
+  constexpr std::array<uint16_t, 2> clobbered_sregs{kPcSreg, kPcSreg + 1};
+  for (uint16_t clobbered_sreg : clobbered_sregs) {
+    SCOPED_TRACE(clobbered_sreg);
+    std::vector<uint32_t> words = {
+        pack_sopp(5, 5),                                           // 0x00 -> kill path at 0x18.
+        pack_sop1(0x1c, kPcSreg, 0),                               // 0x04: s_getpc_b64.
+        pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),           // 0x08: s_add_u32.
+        kOriginalGetpcDelta,                                       // 0x0c: target delta.
+        pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0),       // 0x10: s_addc_u32.
+        build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA4),               // 0x14 -> consumer at 0x20.
+        pack_sop2(0, clobbered_sreg, clobbered_sreg, kInlineInt0), // 0x18: write.
+        build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4),               // 0x1c -> consumer.
+        pack_sop1(0x1d, 0, kPcSreg),                               // 0x20: consumer.
+        build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                  // 0x24: not a target.
+        build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                  // 0x28: target.
+    };
 
-  TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-  ASSERT_NE(decoder, nullptr);
-  constexpr std::array<uint64_t, 1> extra_leaders{40};
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+    TestCodeObject co(std::move(words));
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NE(decoder, nullptr);
+    constexpr std::array<uint64_t, 1> extra_leaders{40};
+    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
 
-  auto *consumer = block_starting_at(blocks, 32);
-  auto *target = block_starting_at(blocks, 40);
-  ASSERT_NE(consumer, nullptr);
-  ASSERT_NE(target, nullptr);
+    auto *consumer = block_starting_at(blocks, 32);
+    auto *target = block_starting_at(blocks, 40);
+    ASSERT_NE(consumer, nullptr);
+    ASSERT_NE(target, nullptr);
 
-  EXPECT_TRUE(consumer->static_indirect_call_fixups().empty());
-  EXPECT_FALSE(has_successor_start(*consumer, target->start_offset()));
+    EXPECT_TRUE(consumer->static_indirect_call_fixups().empty());
+    EXPECT_FALSE(has_successor_start(*consumer, target->start_offset()));
+  }
 }
 
 TEST(CfgAnalysis, RecoversSignedDeltaTemplateConsumers) {
@@ -1092,6 +1813,87 @@ TEST(CfgAnalysis, KeepsDistinctBuildersReachingSameTarget) {
   EXPECT_EQ(getpc_offsets, (std::vector<uint64_t>{4u, 20u}));
 }
 
+TEST(CfgAnalysis, RecoveredSwappcToNonreturningTargetDropsFallthrough) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x00: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x04: s_add_u32.
+      20,                                                  // 0x08: target at 0x18.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c: s_addc_u32.
+      pack_sop1(0x1e, kReturnSreg, kPcSreg),               // 0x10: s_swappc_b64.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x14: dead continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x18: terminal target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *consumer = block_starting_at(blocks, 16);
+  auto *continuation = block_starting_at(blocks, 20);
+  auto *target = block_starting_at(blocks, 24);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_TRUE(consumer->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*consumer, target->start_offset()));
+  EXPECT_FALSE(has_successor_start(*consumer, continuation->start_offset()));
+  EXPECT_FALSE(has_predecessor(*continuation, consumer));
+}
+
+TEST(CfgAnalysis, MixedSwappcTargetsKeepSharedContinuation) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+
+  // Two paths build different finite targets for one swappc consumer. The
+  // first target returns through the saved pair; the second terminates.
+  std::vector<uint32_t> words = {
+      pack_sopp(5, 4),                                 // 0x00 -> builder B at 0x14.
+      pack_sop1(0x1c, kPcSreg, 0),                     // 0x04: builder A getpc.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand), // 0x08: s_add_u32.
+      0x20u,                                           // 0x0c: target A at 0x28.
+      build_s_branch(3, ROCJITSU_CODE_ARCH_CDNA4),     // 0x10 -> consumer at 0x20.
+      pack_sop1(0x1c, kPcSreg, 0),                     // 0x14: builder B getpc.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand), // 0x18: s_add_u32.
+      0x14u,                                           // 0x1c: target B at 0x2c.
+      pack_sop1(0x1e, kReturnSreg, kPcSreg),           // 0x20: s_swappc_b64.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),        // 0x24: continuation.
+      pack_sop1(0x1d, 0, kReturnSreg),                 // 0x28: returning target A.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),        // 0x2c: non-returning target B.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *consumer = block_starting_at(blocks, 32);
+  auto *continuation = block_starting_at(blocks, 36);
+  auto *returning_target = block_starting_at(blocks, 40);
+  auto *nonreturning_target = block_starting_at(blocks, 44);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(returning_target, nullptr);
+  ASSERT_NE(nonreturning_target, nullptr);
+
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 2u);
+  ASSERT_EQ(consumer->call_edges().size(), 1u);
+  EXPECT_EQ(consumer->call_edges()[0].callee, returning_target);
+  EXPECT_EQ(consumer->call_edges()[0].continuation, continuation);
+  EXPECT_TRUE(has_successor_start(*consumer, continuation->start_offset()));
+  EXPECT_TRUE(has_successor_start(*consumer, nonreturning_target->start_offset()));
+  EXPECT_FALSE(has_successor_start(*consumer, returning_target->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, consumer));
+}
+
 TEST(CfgAnalysis, Gfx1250RecoversSignedDeltaTemplateWithPrefetch) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint16_t kTmpSreg = 12;
@@ -1159,10 +1961,91 @@ TEST(CfgAnalysis, Gfx1250RecoversSignedDeltaTemplateWithPrefetch) {
   ASSERT_EQ(sub_consumer->static_indirect_call_fixups().size(), 1u);
   EXPECT_EQ(sub_consumer->static_indirect_call_fixups()[0].source_target_offset, 76u);
   EXPECT_TRUE(has_successor_start(*sub_consumer, target->start_offset()));
+  EXPECT_FALSE(sub_consumer->static_indirect_call_fixups()[0].source_requires_xcnt_drain);
 
   ASSERT_EQ(add_consumer->static_indirect_call_fixups().size(), 1u);
   EXPECT_EQ(add_consumer->static_indirect_call_fixups()[0].source_target_offset, 76u);
   EXPECT_TRUE(has_successor_start(*add_consumer, target->start_offset()));
+  EXPECT_FALSE(add_consumer->static_indirect_call_fixups()[0].source_requires_xcnt_drain);
+}
+
+TEST(CfgAnalysis, Gfx1250RecoversSignedDeltaTemplateWithXcntWaitAndPrefetch) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kTmpSreg = 12;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kInlineInt4 = 132;
+  constexpr uint32_t kSignedDeltaLiteral = 68;
+
+  // gfx1250 compiler output drains XCNT immediately before each instruction
+  // prefetch. These waits and prefetches do not modify the PC pair or temporary,
+  // and must remain in the translated body while the two set-PC consumers are
+  // recovered to their common static target.
+  std::vector<uint32_t> words = {
+      gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1,
+                          {.ssrc0 = 0, .sdst = kPcSreg})[0], // 0x00: s_get_pc_i64 s[8:9].
+      gfx1250::build_sop2(gfx1250::kSAddCoI32Sop2,
+                          {.ssrc0 = kLiteralOperand, .ssrc1 = kInlineInt4, .sdst = kTmpSreg})[0],
+      // 0x04: s_add_co_i32.
+      kSignedDeltaLiteral, // 0x08: literal.
+      gfx1250::build_sopc(gfx1250::kSCmpGeI32Sopc,
+                          {.ssrc0 = kTmpSreg, .ssrc1 = kInlineInt0})[0], // 0x0c: s_cmp_ge_i32.
+      gfx1250::build_sopp(gfx1250::kSCbranchScc1Sopp, {.simm16 = 7})[0],
+      // 0x10 -> add half at 0x30.
+      gfx1250::build_sopp(gfx1250::kSWaitXcntSopp, {.simm16 = 0})[0],
+      // 0x14: s_wait_xcnt 0.
+      0xF404A000u,
+      0x1C000000u, // 0x18: s_prefetch_inst_pc_rel.
+      gfx1250::build_sop1(gfx1250::kSAbsI32Sop1,
+                          {.ssrc0 = kTmpSreg, .sdst = kTmpSreg})[0], // 0x20: s_abs_i32.
+      gfx1250::build_sop2(gfx1250::kSSubCoU32Sop2,
+                          {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
+      // 0x24: s_sub_co_u32.
+      gfx1250::build_sop2(gfx1250::kSSubCoCiU32Sop2,
+                          {.ssrc0 = kPcSreg + 1, .ssrc1 = kInlineInt0, .sdst = kPcSreg + 1})[0],
+      // 0x28: s_sub_co_ci_u32.
+      gfx1250::build_sop1(gfx1250::kSSetPcI64Sop1,
+                          {.ssrc0 = kPcSreg, .sdst = 0})[0], // 0x2c: subtract consumer.
+      gfx1250::build_sopp(gfx1250::kSWaitXcntSopp, {.simm16 = 0})[0],
+      // 0x30: s_wait_xcnt 0.
+      0xF404A000u,
+      0x1C000000u, // 0x34: s_prefetch_inst_pc_rel.
+      gfx1250::build_sop2(gfx1250::kSAddCoU32Sop2,
+                          {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
+      // 0x3c: s_add_co_u32.
+      gfx1250::build_sop2(gfx1250::kSAddCoCiU32Sop2,
+                          {.ssrc0 = kPcSreg + 1, .ssrc1 = kInlineInt0, .sdst = kPcSreg + 1})[0],
+      // 0x40: s_add_co_ci_u32.
+      gfx1250::build_sop1(gfx1250::kSSetPcI64Sop1,
+                          {.ssrc0 = kPcSreg, .sdst = 0})[0], // 0x44: add consumer.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),            // 0x48: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),            // 0x4c: shared target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  auto *sub_consumer = block_starting_at(blocks, 44);
+  auto *add_consumer = block_starting_at(blocks, 68);
+  auto *target = block_starting_at(blocks, 76);
+  ASSERT_NE(sub_consumer, nullptr);
+  ASSERT_NE(add_consumer, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  ASSERT_EQ(sub_consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(sub_consumer->static_indirect_call_fixups()[0].source_target_offset, 76u);
+  EXPECT_TRUE(has_successor_start(*sub_consumer, target->start_offset()));
+
+  ASSERT_EQ(add_consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(add_consumer->static_indirect_call_fixups()[0].source_target_offset, 76u);
+  EXPECT_TRUE(has_successor_start(*add_consumer, target->start_offset()));
+
+  // The subtract half's drain is inside the range relocation overwrites, so
+  // both consumers of that shared range must ask the rewrite to reproduce it.
+  EXPECT_TRUE(sub_consumer->static_indirect_call_fixups()[0].source_requires_xcnt_drain);
+  EXPECT_TRUE(add_consumer->static_indirect_call_fixups()[0].source_requires_xcnt_drain);
 }
 
 TEST(CfgAnalysis, Gfx1250SignedDeltaRejectsMoveClobberingTemporary) {
@@ -2031,7 +2914,24 @@ TEST(LivenessAnalysis, UnavailableQueriesFailClosed) {
   const TestInstruction instruction("query");
   const LivenessAnalysis liveness = LivenessAnalysis::unavailable();
 
+  EXPECT_THROW((void)liveness.has_live_before(instruction), std::logic_error);
   EXPECT_THROW((void)liveness.live_before(instruction), std::logic_error);
+  EXPECT_THROW((void)liveness.find_globally_unused_vgpr_run(&instruction, 1), std::logic_error);
+}
+
+TEST(LivenessAnalysis, ReportsWhetherLiveBeforeSnapshotWasMaterialized) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  const Instruction &use = *blocks.front()->instructions().begin();
+  const TestInstruction outside_scope("outside_scope");
+  const LivenessAnalysis liveness = analyze_scope(blocks);
+
+  EXPECT_TRUE(liveness.has_live_before(use));
+  EXPECT_FALSE(liveness.has_live_before(outside_scope));
+  EXPECT_TRUE(liveness.is_live_before(use, {RegClass::SGPR, 4, 1}))
+      << "the materialized snapshot must contain the register used here";
+  EXPECT_FALSE(liveness.is_live_before(outside_scope, {RegClass::SGPR, 4, 1}))
+      << "a missing snapshot reads as nothing-live, so callers must check "
+         "has_live_before first";
 }
 
 TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {
@@ -2066,15 +2966,430 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbResolvesPhysicalRegisterBank) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
   EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 2);
   EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), 1)
+      << "a known bank-2 access must not make the raw low-bank tuple look used";
   EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}));
   EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDestinationBank) {
+  // v_mov_b16 is a partial (16-bit) write, so it read-modify-preserves its full
+  // destination VGPR. That preserve-read is reported through
+  // implicit_use_operands() with the destination's Dst VGPR-MSB role. Set DST
+  // bank 2 (byte {DST[7:6],SRC2,SRC1,SRC0} = 2<<6 = 0x80) and write vdst v1: the
+  // architectural register read is physical v513, so it must be live before the
+  // move. If the implicit read stayed at low-bank v1, liveness would treat v513
+  // as dead and a scratch borrow could clobber it.
+  constexpr auto set_dst_bank_two =
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x80});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB16Vop1, {.src0 = 128, .vdst = 1});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({set_dst_bank_two[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}))
+      << "implicit RMW read of the destination must resolve to the DST bank";
+  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}))
+      << "the low-bank alias must not be treated as the read register";
+}
+
+TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDespiteExplicitBank0Alias) {
+  // Aliasing case: v_mov_b16 v1, v1 reads v1 as an explicit SRC0 (bank 0) and
+  // also preserve-reads its destination v1 in DST bank 2 (physical v513). A
+  // "newly-added bits" recovery would miss v513 because raw v1 is already present
+  // from the explicit source; the per-operand path must add v513 regardless.
+  // 0x80 selects DST bank 2, SRC0 bank 0.
+  constexpr auto set_dst_bank_two =
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x80});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB16Vop1, {.src0 = 256 + 1, .vdst = 1});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({set_dst_bank_two[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}))
+      << "the DST-bank preserve-read must be added even though raw v1 is already an explicit use";
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}))
+      << "the explicit SRC0 bank-0 read of v1 is still live";
+}
+
+TEST(LivenessAnalysis, Gfx1250SwapImplicitReadsResolvePerRole) {
+  // v_swap_b16 preserve-reads BOTH operands, each in its own role: vdst in the
+  // DST bank and src0 in the SRC0 bank. With SRC0 bank 1 and DST bank 2, vdst=v1
+  // reads physical v513 (Dst) and src0=v2 reads physical v258 (Src0). Assigning
+  // both implicit reads the DST bank would mislocate the src0 read.
+  // Byte {DST[7:6],SRC2,SRC1,SRC0}: DST bank 2 (0x80) | SRC0 bank 1 (0x01) = 0x81.
+  constexpr auto set_banks = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x81});
+  constexpr auto swap = gfx1250::build_vop1(gfx1250::kVSwapB16Vop1, {.src0 = 256 + 2, .vdst = 1});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({set_banks[0], swap[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 1);
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}))
+      << "vdst preserve-read must resolve to the DST bank (v1 -> v513)";
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 258, 1}))
+      << "src0 preserve-read must resolve to the SRC0 bank (v2 -> v258)";
+  // The mixed-role signature: resolving the hook-added src0 entry with the DST
+  // bank puts raw v2 at 2 + 2*256 = v514. v513/v258 above stay live either way
+  // (the destination supplies v513, the explicit source supplies v258), so v514
+  // is the only assertion that actually fails when the roles are conflated.
+  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 514, 1}))
+      << "src0 must not be mislocated to the DST bank (v2 under DST bank 2 -> v514)";
+}
+
+TEST(LivenessAnalysis, Gfx1250DppPreserveReadResolvesToDstBank) {
+  // Covers the ENCODING-level preserved-destination hook, the other half of the
+  // implicit-operand surface: the v_mov_b16 cases above exercise the
+  // per-instruction partial-def path, while a partial-DPP write reaches
+  // implicit_use_operands() through the shared SDWA/DPP predicate on the VOP1
+  // encoding base. Because InstDefUse strips the VGPR class from the flat
+  // implicit_uses() result on gfx1250, dropping the encoding-level operand push
+  // would leave this read with no live destination at all rather than a wrong
+  // one -- a silent liveness hole, so it needs its own regression.
+  //
+  // DST bank 2 (0x80), then v_mov_b32_dpp vdst=v5 with row_mask=0x7 (partial),
+  // so the unwritten rows preserve the destination: raw v5 reads physical
+  // 5 + 2*256 = v517.
+  constexpr auto set_banks = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x80});
+  // VOP1 word0: enc[31:25]=0x3F, vdst[24:17]=5, op[15:9]=kVMovB32Vop1,
+  // src0[8:0]=SRC_DPP. DPP word1: row_mask[31:28]=0x7 (partial),
+  // bank_mask[27:24]=0xF, vsrc0[7:0]=2.
+  constexpr uint32_t kDppMovWord0 =
+      (0x3Fu << 25) | (5u << 17) | (uint32_t{gfx1250::kVMovB32Vop1} << 9) | amdgpu::SRC_DPP;
+  constexpr uint32_t kDppWord1Partial = (0x7u << 28) | (0xFu << 24) | 2u;
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({set_banks[0], kDppMovWord0, kDppWord1Partial, end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 517, 1}))
+      << "the partial-DPP preserve-read must resolve to the DST bank (v5 -> v517)";
+  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 5, 1}))
+      << "the unbanked raw index must not be marked live in place of v517";
+}
+
+TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseUnknownBankReadsEveryCandidate) {
+  // A dynamic MODE write leaves the DST bank ambiguous. The implicit preserve-read
+  // of v_mov_b16 vdst=v1 must then may-read all four candidate tuples, so v1,
+  // v257, v513, and v769 are all live before the move (the sound fallback).
+  constexpr uint16_t kModeAllBanksHwreg = 1u | (12u << 6) | (7u << 11);
+  constexpr auto setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregB32Sopk, {.simm16 = kModeAllBanksHwreg, .sdst = 0});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB16Vop1, {.src0 = 128, .vdst = 1});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({setreg[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), std::nullopt);
+  for (uint16_t bank = 0; bank < 4; ++bank)
+    EXPECT_TRUE(liveness.is_live_before(*instruction,
+                                        {RegClass::VGPR, static_cast<uint16_t>(1 + bank * 256), 1}))
+        << "unknown-bank implicit read must may-read candidate bank " << bank;
+}
+
+TEST(LivenessAnalysis, Gfx1250UnknownBankDefMakesEveryCandidateGloballyUsed) {
+  // A dynamic MODE write leaves the destination bank ambiguous. Whole-kernel
+  // usage must reserve all four candidate tuples, while backward liveness must
+  // not pretend the one physical write kills all four.
+  constexpr uint16_t kModeAllBanksHwreg = 1u | (12u << 6) | (7u << 11);
+  constexpr auto setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregB32Sopk, {.simm16 = kModeAllBanksHwreg, .sdst = 0});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 128, .vdst = 1});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({setreg[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), std::nullopt);
+  for (uint16_t bank = 0; bank < 4; ++bank) {
+    const uint16_t candidate = static_cast<uint16_t>(1 + bank * 256);
+    EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, candidate, 1,
+                                                     static_cast<uint16_t>(candidate + 1)),
+              std::nullopt)
+        << "unknown-bank definition must reserve candidate bank " << bank;
+  }
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 0, 1, 4), 0);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 2, 1, 4), 2);
+
+  const BlockLiveness &state = liveness.block_liveness(*blocks.front());
+  EXPECT_FALSE(state.kill.contains({RegClass::VGPR, 1, 1}));
+  EXPECT_FALSE(state.kill.contains({RegClass::VGPR, 257, 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250RelativeVgprAccessDisablesGlobalUnusedQuery) {
+  // M0 can redirect the encoded v0 source to any relative tuple, including v1
+  // which would otherwise appear globally unused.
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovrelsB32Vop1, {.src0 = 0, .vdst = 2});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  const Instruction &instruction = *blocks.front()->instructions().begin();
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&instruction, 1, 1, 1, 2), std::nullopt);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+}
+
+TEST(LivenessAnalysis, Gfx1250SwaprelDisablesGlobalUnusedQuery) {
+  constexpr auto swap = gfx1250::build_vop1(gfx1250::kVSwaprelB32Vop1, {.src0 = 0, .vdst = 2});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({swap[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  const Instruction &instruction = *blocks.front()->instructions().begin();
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&instruction, 1, 1, 1, 2), std::nullopt);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+}
+
+TEST(LivenessAnalysis, Gfx1250GprIndexModeWriteDisablesGlobalUnusedQuery) {
+  // A runtime MODE[27] write can enable GPR indexing, after which ordinary
+  // encoded operands may access M0-offset VGPRs.
+  constexpr uint16_t kModeGprIdxEnableHwreg = 1u | (27u << 6);
+  constexpr auto setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregB32Sopk, {.simm16 = kModeGprIdxEnableHwreg, .sdst = 0});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 256, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({setreg[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), std::nullopt);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+}
+
+TEST(LivenessAnalysis, Gfx1250ImmediateGprIndexModeWriteUsesLiteralValue) {
+  constexpr uint16_t kModeGprIdxEnableHwreg = 1u | (27u << 6);
+  constexpr auto setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kModeGprIdxEnableHwreg});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 256, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+
+  for (uint32_t literal : {0u, 1u}) {
+    SCOPED_TRACE(literal);
+    TestCodeObject co({setreg[0], literal, move[0], end[0]});
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_NE(decoder, nullptr);
+    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_EQ(blocks.size(), 1u);
+    auto scope = block_scope(blocks);
+
+    LivenessAnalysisOptions options;
+    options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+    options.entry_block = scope.front();
+    options.text = text_span(co);
+    const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+    LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                              options);
+
+    auto instruction = blocks.front()->instructions().begin();
+    ++instruction;
+    ASSERT_NE(instruction, blocks.front()->instructions().end());
+    const auto unused = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2);
+    if (literal == 0)
+      EXPECT_EQ(unused, 1);
+    else
+      EXPECT_EQ(unused, std::nullopt);
+    EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+  }
+}
+
+TEST(LivenessAnalysis, Cdna4DynamicGprIndexModeWriteDisablesGlobalUnusedQuery) {
+  constexpr uint16_t kModeGprIdxEnableHwreg = 1u | (27u << 6);
+  constexpr auto setreg =
+      cdna4::build_sopk(cdna4::kSSetregB32Sopk, {.simm16 = kModeGprIdxEnableHwreg, .sdst = 0});
+  constexpr auto move = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 256, .vdst = 0});
+  constexpr auto end = cdna4::build_sopp(cdna4::kSEndpgmSopp);
+  TestCodeObject co({setreg[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), std::nullopt);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+}
+
+TEST(LivenessAnalysis, Cdna4ImmediateGprIndexModeWriteUsesLiteralValue) {
+  constexpr uint16_t kModeGprIdxEnableHwreg = 1u | (27u << 6);
+  constexpr auto setreg =
+      cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = kModeGprIdxEnableHwreg});
+  constexpr auto move = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 256, .vdst = 0});
+  constexpr auto end = cdna4::build_sopp(cdna4::kSEndpgmSopp);
+
+  for (uint32_t literal : {0u, 1u}) {
+    SCOPED_TRACE(literal);
+    TestCodeObject co({setreg[0], literal, move[0], end[0]});
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NE(decoder, nullptr);
+    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_EQ(blocks.size(), 1u);
+    auto scope = block_scope(blocks);
+
+    LivenessAnalysisOptions options;
+    options.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    options.text = text_span(co);
+    const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+    LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                              options);
+
+    auto instruction = blocks.front()->instructions().begin();
+    ++instruction;
+    ASSERT_NE(instruction, blocks.front()->instructions().end());
+    const auto unused = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2);
+    if (literal == 0)
+      EXPECT_EQ(unused, 1);
+    else
+      EXPECT_EQ(unused, std::nullopt);
+    EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+  }
 }
 
 TEST(LivenessAnalysis, Gfx1250DynamicModeWriteConservativelyUsesEveryBank) {
@@ -2094,7 +3409,9 @@ TEST(LivenessAnalysis, Gfx1250DynamicModeWriteConservativelyUsesEveryBank) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -2127,7 +3444,9 @@ TEST(LivenessAnalysis, Gfx1250FullLiteralModeWriteRecoversKnownBank) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
 
   auto instruction = blocks.front()->instructions().begin();
   std::advance(instruction, 2);
@@ -2168,7 +3487,9 @@ TEST(LivenessAnalysis, Gfx1250TruncatedLiteralModeWriteMarksBanksAmbiguous) {
   // literal at offset 8.
   const auto full = text_span(co);
   options.text = full.subspan(0, 8);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
 
   auto instruction = blocks.front()->instructions().begin();
   std::advance(instruction, 2);
@@ -2197,7 +3518,9 @@ TEST(LivenessAnalysis, Gfx1250PartialLiteralModeWriteUsesUnmaskedVgprFields) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
 
   auto instruction = blocks.front()->instructions().begin();
   std::advance(instruction, 2);
@@ -2229,7 +3552,9 @@ TEST(LivenessAnalysis, Gfx1250ImmediateModeWriteRecoversBanksOutsideRequestedSli
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
 
   auto instruction = blocks.front()->instructions().begin();
   std::advance(instruction, 2);
@@ -2256,7 +3581,9 @@ TEST(LivenessAnalysis, Gfx1250LiteralModeWriteTracksEveryRole) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -2284,7 +3611,9 @@ TEST(LivenessAnalysis, Gfx1250ImmediateNonModeWriteDoesNotChangeBanks) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -2315,7 +3644,9 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinRequiresPredecessorsToAgree) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
 
   const Instruction &joined_move = *join->instructions().begin();
   EXPECT_EQ(liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0), std::nullopt);
@@ -2343,7 +3674,9 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinPreservesAgreeingBank) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
 
   const Instruction &joined_move = *join->instructions().begin();
   EXPECT_EQ(liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0), 2);
@@ -2380,7 +3713,9 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbJoinExcludesUnreachablePredecessor) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
 
   const Instruction *joined_move = nullptr;
   for (const auto &block : blocks) {
@@ -2392,6 +3727,442 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbJoinExcludesUnreachablePredecessor) {
   ASSERT_NE(joined_move, nullptr);
   EXPECT_EQ(liveness.vgpr_msb_bank_before(*joined_move, amdgpu::VgprMsbRole::Src0), 2);
   EXPECT_TRUE(liveness.is_live_before(*joined_move, {RegClass::VGPR, 513, 1}));
+}
+
+// Collect a block's instructions in order for index-based assertions.
+std::vector<const Instruction *> insts_of(BasicBlock &block) {
+  std::vector<const Instruction *> out;
+  for (const auto &inst : block.instructions())
+    out.push_back(&inst);
+  return out;
+}
+
+// Decode real CDNA4 instruction words into a CFG with the production decoder.
+std::vector<std::unique_ptr<BasicBlock>> build_cdna4_blocks(std::vector<uint32_t> words) {
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  return BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+}
+
+// Full end-to-end on real decoded instructions: `s_mov_b64 exec, -1` makes EXEC
+// provably all-ones, so the following EXEC-masked VGPR def overwrites every lane
+// and becomes a real kill — the defined VGPR is dead immediately before it. This
+// exercises the whole chain: decode -> to_register_ref (EXEC dest) + const_value
+// (-1 -> all-ones) -> ExecMaskAnalysis (Full) -> liveness kill.
+TEST(ExecFlagsRealDecode, Cdna4SMovExecAllOnesPromotesVgprDefToKill) {
+  // s_mov_b64 exec, -1 ; v_mov_b32 v0, s0 ; v_mov_b32 v2, v0 ; s_endpgm
+  auto blocks = build_cdna4_blocks({0xBEFE01C1u, 0x7E000200u, 0x7E040300u, 0xBF810000u});
+  ASSERT_FALSE(blocks.empty());
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 3u);
+
+  // Sanity-check the decode so an encoding typo fails loudly.
+  EXPECT_EQ(insts[0]->mnemonic(), "s_mov_b64");
+  const Instruction &def = *insts[1];
+  EXPECT_TRUE(def.mnemonic().starts_with("v_mov_b32"));
+  ASSERT_NE(def.dst_operand(0), nullptr);
+  auto def_ref = def.dst_operand(0)->to_register_ref();
+  ASSERT_TRUE(def_ref.has_value());
+  EXPECT_EQ(*def_ref, (RegisterRef{RegClass::VGPR, 0, 1}));
+
+  // Proving EXEC=Full from `s_mov exec, -1` needs the s_mov to carry RESULT_COPY,
+  // which only exists once the ISA is regenerated with the combinator metadata.
+  ASSERT_TRUE(insts[0]->flags() & RESULT_COPY)
+      << "s_mov lacks RESULT_COPY; regenerate ISA to enable EXEC-Full tracking";
+
+  // EXEC is provably full at the def, so its vector write is a real kill.
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+  EXPECT_EQ(exec.before(def), ExecState::Full);
+
+  LivenessAnalysis liveness = analyze_scope(blocks);
+  EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+}
+
+// Contrast: without the all-ones EXEC write, EXEC stays Unknown at the def, so
+// the same vector def is not promoted to a kill and the VGPR remains live.
+TEST(ExecFlagsRealDecode, Cdna4VgprDefStaysLiveWithoutFullExec) {
+  // v_mov_b32 v0, s0 ; v_mov_b32 v2, v0 ; s_endpgm
+  auto blocks = build_cdna4_blocks({0x7E000200u, 0x7E040300u, 0xBF810000u});
+  ASSERT_FALSE(blocks.empty());
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 2u);
+  const Instruction &def = *insts[0];
+  EXPECT_TRUE(def.mnemonic().starts_with("v_mov_b32"));
+
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+  EXPECT_EQ(exec.before(def), ExecState::Unknown);
+
+  LivenessAnalysis liveness = analyze_scope(blocks);
+  EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+}
+
+// v_writelane_b32 writes a single lane, so even under Full EXEC it is a
+// read-modify-write of its destination and must not be promoted to a kill.
+TEST(ExecFlagsRealDecode, Cdna4WritelaneDestStaysLiveUnderFullExec) {
+  // s_mov_b64 exec, -1 ; v_writelane_b32 v5, s4, s2 ; v_mov_b32 v2, v5 ; s_endpgm
+  auto blocks =
+      build_cdna4_blocks({0xBEFE01C1u, 0xD28A0005u, 0x00000404u, 0x7E040305u, 0xBF810000u});
+  ASSERT_FALSE(blocks.empty());
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 3u);
+
+  // Sanity-check the decode so an encoding typo fails loudly.
+  EXPECT_EQ(insts[0]->mnemonic(), "s_mov_b64");
+  const Instruction &writelane = *insts[1];
+  EXPECT_EQ(writelane.mnemonic(), "v_writelane_b32");
+  ASSERT_NE(writelane.dst_operand(0), nullptr);
+  auto dst_ref = writelane.dst_operand(0)->to_register_ref();
+  ASSERT_TRUE(dst_ref.has_value());
+  EXPECT_EQ(*dst_ref, (RegisterRef{RegClass::VGPR, 5, 1}));
+
+  // Full-EXEC tracking needs the regenerated s_mov RESULT_COPY metadata.
+  ASSERT_TRUE(insts[0]->flags() & RESULT_COPY)
+      << "s_mov lacks RESULT_COPY; regenerate ISA to enable EXEC-Full tracking";
+
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+  EXPECT_EQ(exec.before(writelane), ExecState::Full);
+
+  // Contrast Cdna4SMovExecAllOnesPromotesVgprDefToKill: the RMW dst stays live.
+  LivenessAnalysis liveness = analyze_scope(blocks);
+  EXPECT_TRUE(liveness.is_live_before(writelane, {RegClass::VGPR, 5, 1}));
+}
+
+TEST(ExecMaskAnalysis, EntryIsUnknownAllOnesIsFullNarrowingIsUnknown) {
+  // exec=all-ones; v0=...; exec=narrow; v0=...; end
+  auto blocks =
+      build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::DefVgpr0,
+                         TestOpcode::WriteExecNarrow, TestOpcode::DefVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_EQ(insts.size(), 5u);
+  EXPECT_EQ(exec.before(*insts[0]), ExecState::Unknown); // kernel entry
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Full);    // after exec=all-ones
+  EXPECT_EQ(exec.before(*insts[2]), ExecState::Full);    // narrowing not yet applied
+  EXPECT_EQ(exec.before(*insts[3]), ExecState::Unknown); // after narrowing write
+}
+
+TEST(ExecMaskAnalysis, LoopHeaderEntryWithBackedgeIsPinnedUnknown) {
+  // block0 @0: End -- a predecessor-less natural entry, so the scope-leader
+  // fallback does not fire. block1 @4: a self-looping "kernel entry" that writes
+  // EXEC all-ones and conditionally branches back to itself; its only in-scope
+  // predecessor is that backedge. Without pinning it, the forward meet carries
+  // the backedge's Full state into the header and wrongly derives Full there.
+  auto blocks = build_test_blocks({TestOpcode::End, TestOpcode::WriteExecFull,
+                                   TestOpcode::CBranchBackToUseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  BasicBlock *header = block_starting_at(blocks, 4);
+  ASSERT_NE(header, nullptr);
+  ASSERT_TRUE(has_predecessor(*header, header)) << "header must have its own backedge";
+  const Instruction &header_first = *insts_of(*header).front();
+  EXPECT_TRUE(header_first.mnemonic().starts_with("test_write_exec_full"));
+
+  // Without pinning, the backedge makes the header wrongly Full.
+  ExecMaskAnalysis unpinned{KernelBlockScope(scope), 64};
+  EXPECT_EQ(unpinned.before(header_first), ExecState::Full);
+
+  // Pinning the real entry keeps it Unknown, as at any kernel entry.
+  const BasicBlock *const entries[] = {header};
+  ExecMaskAnalysis pinned{KernelBlockScope(scope), 64, /*extra_edges=*/{}, entries};
+  EXPECT_EQ(pinned.before(header_first), ExecState::Unknown);
+}
+
+TEST(ExecMaskAnalysis, SecondHardwareEntryReachedAfterFullIsPinnedUnknown) {
+  // Models a kernel with two hardware entries (descriptor entry + kernarg-preload
+  // firmware entry): block0 @0 establishes Full and falls through to block1 @4, a
+  // second entry (forced to be a leader). block1 is reachable with Full via the
+  // ordinary path, but hardware may enter it directly with unknown EXEC, so both
+  // entries must be seeded -- unlike the single-entry tests above.
+  const uint64_t firmware_leader[] = {4};
+  auto blocks = build_test_blocks(
+      {TestOpcode::WriteExecFull, TestOpcode::DefVgpr0, TestOpcode::End}, firmware_leader);
+  auto scope = block_scope(blocks);
+  BasicBlock *firmware = block_starting_at(blocks, 4);
+  ASSERT_NE(firmware, nullptr);
+  ASSERT_TRUE(has_predecessor(*firmware, blocks.front().get()));
+  const Instruction &firmware_first = *insts_of(*firmware).front();
+
+  // Without pinning, the ordinary fallthrough carries Full into the second entry.
+  ExecMaskAnalysis unpinned{KernelBlockScope(scope), 64};
+  EXPECT_EQ(unpinned.before(firmware_first), ExecState::Full);
+
+  // Seeding both entries keeps the second Unknown despite the incoming Full.
+  const BasicBlock *const entries[] = {blocks.front().get(), firmware};
+  ExecMaskAnalysis pinned{KernelBlockScope(scope), 64, /*extra_edges=*/{}, entries};
+  EXPECT_EQ(pinned.before(firmware_first), ExecState::Unknown);
+}
+
+TEST(ExecMaskAnalysis, OrWithAllOnesConstantIsFull) {
+  // exec = exec | -1 -> all-ones regardless of the prior EXEC (RESULT_OR with an
+  // all-ones source operand).
+  auto blocks =
+      build_test_blocks({TestOpcode::WriteExecOrAllOnes, TestOpcode::DefVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 2u);
+  EXPECT_EQ(exec.before(*insts[0]), ExecState::Unknown); // entry
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Full);    // after exec = exec | -1
+}
+
+TEST(ExecMaskAnalysis, AndSaveexecWithAllOnesStaysUnknown) {
+  // s_and_saveexec exec, -1: exec = exec & -1 = exec, NOT all-ones. The all-ones
+  // source must not be mistaken for an all-ones result (regression guard).
+  auto blocks =
+      build_test_blocks({TestOpcode::WriteExecAndSaveexec, TestOpcode::DefVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 2u);
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Unknown); // after and-saveexec
+}
+
+TEST(ExecMaskAnalysis, PartialAllOnesWritePreservesButDoesNotEstablishFull) {
+  // s_mov_b32 exec_lo, -1 on Wave64 sets only the low half to all-ones.
+  // Keeps an already-Full mask Full
+  {
+    auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::WriteExecLoHalf,
+                                     TestOpcode::DefVgpr0, TestOpcode::End});
+    auto scope = block_scope(blocks);
+    ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+    auto insts = insts_of(*blocks[0]);
+    ASSERT_GE(insts.size(), 3u);
+    EXPECT_EQ(exec.before(*insts[1]), ExecState::Full); // entering the half write
+    EXPECT_EQ(exec.before(*insts[2]), ExecState::Full); // half all-ones preserved Full
+  }
+  // ...Cannot establish Full from Unknown (exec_hi stays unknown).
+  {
+    auto blocks =
+        build_test_blocks({TestOpcode::WriteExecLoHalf, TestOpcode::DefVgpr0, TestOpcode::End});
+    auto scope = block_scope(blocks);
+    ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+    auto insts = insts_of(*blocks[0]);
+    ASSERT_GE(insts.size(), 2u);
+    EXPECT_EQ(exec.before(*insts[1]), ExecState::Unknown);
+  }
+}
+
+TEST(ExecMaskAnalysis, Wave32ExecLoWriteCoversFullMask) {
+  // On Wave32, exec_lo is the entire EXEC, so an all-ones exec_lo write is Full.
+  auto blocks =
+      build_test_blocks({TestOpcode::WriteExecLoHalf, TestOpcode::DefVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 32};
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 2u);
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Full);
+}
+
+TEST(ExecMaskAnalysis, ExecHiWriteNeverEstablishesFull) {
+  // s_mov_b32 exec_hi, -1 writes bits [32,64), which never cover the active
+  // lanes. It must not establish Full from Unknown on either wave size — on
+  // Wave32 the written bits lie entirely outside the mask, on Wave64 they are a
+  // partial upper half.
+  for (uint8_t wave_size : {uint8_t{32}, uint8_t{64}}) {
+    auto blocks =
+        build_test_blocks({TestOpcode::WriteExecHiHalf, TestOpcode::DefVgpr0, TestOpcode::End});
+    auto scope = block_scope(blocks);
+    ExecMaskAnalysis exec{KernelBlockScope(scope), wave_size};
+    auto insts = insts_of(*blocks[0]);
+    ASSERT_GE(insts.size(), 2u);
+    EXPECT_EQ(exec.before(*insts[1]), ExecState::Unknown);
+  }
+}
+
+TEST(ExecMaskAnalysis, ExecHiWritePreservesButDoesNotNarrowFull) {
+  // From an already-Full mask, an all-ones exec_hi write keeps Full (it only
+  // rewrites in-range or upper bits with ones), the same as an exec_lo half.
+  auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::WriteExecHiHalf,
+                                   TestOpcode::DefVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 3u);
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Full); // entering the hi write
+  EXPECT_EQ(exec.before(*insts[2]), ExecState::Full); // hi all-ones preserved Full
+}
+
+TEST(ExecMaskAnalysis, Wave32ExecHiZeroWritePreservesFull) {
+  // On Wave32 exec_hi lies outside the active mask, so an exec_hi write preserves
+  // the current state even for a non-all-ones value like `s_mov_b32 exec_hi, 0`
+  // (which previously narrowed an established Full to Unknown).
+  auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::WriteExecHiHalfZero,
+                                   TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 32};
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 4u);
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Full); // entering the exec_hi=0 write
+  EXPECT_EQ(exec.before(*insts[2]), ExecState::Full); // exec_hi=0 preserved Full
+
+  const ExecMaskAnalysis exec_for_liveness{KernelBlockScope(scope), /*wave_size=*/32};
+  const LivenessAnalysis liveness{KernelBlockScope(scope),
+                                  std::make_unique<ExecMaskAnalysis>(exec_for_liveness)};
+  EXPECT_FALSE(liveness.is_live_before(*insts[2], {RegClass::VGPR, 0, 1}));
+}
+
+TEST(LivenessAnalysis, ExecFullPromotesVgprDefToKill) {
+  // exec=all-ones; def v0; use v0; end. Under full EXEC the def overwrites every
+  // lane, so v0 is dead immediately before the def.
+  auto blocks = build_test_blocks(
+      {TestOpcode::WriteExecFull, TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  const Instruction &def = *insts_of(*blocks[0])[1];
+  EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(liveness.find_free_run(&def, 1), 0u);
+}
+
+TEST(LivenessAnalysis, ExecFullViaInlineConstantPromotesVgprDefToKill) {
+  // The all-ones source here is an inline constant (`s_mov exec, -1` style):
+  // it exposes const_value() but not literal64_value(), so this exercises the
+  // const_value() path the analysis relies on.
+  auto blocks = build_test_blocks({TestOpcode::WriteExecFullInline, TestOpcode::DefVgpr0,
+                                   TestOpcode::UseVgpr0, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  const Instruction &def = *insts_of(*blocks[0])[1];
+  EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(liveness.find_free_run(&def, 1), 0u);
+}
+
+TEST(LivenessAnalysis, NarrowingExecWriteDoesNotPromoteVgprDefToKill) {
+  // Same shape but EXEC is only narrowed (unknown), so the def stays a
+  // non-kill and v0 remains live before it.
+  auto blocks = build_test_blocks(
+      {TestOpcode::WriteExecNarrow, TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  const Instruction &def = *insts_of(*blocks[0])[1];
+  EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+
+  auto free_vgpr = liveness.find_free_run(&def, 1);
+  ASSERT_TRUE(free_vgpr.has_value());
+  EXPECT_NE(*free_vgpr, 0u);
+}
+
+TEST(ExecMaskAnalysis, CfgJoinMeetsToUnknownUnlessAllPredecessorsFull) {
+  // Branch byte layout (4 bytes/inst); target = block-end + delta:
+  //   0:  WriteExecFull
+  //   4:  CBranchToElse (delta +4; block ends at 8 -> target 12, skips block@8)
+  //   8:  WriteExecNarrow   (fallthrough block)
+  //   12: DefVgpr0          (join: reached from the Full branch path and the
+  //   16: UseVgpr0           Unknown fallthrough path -> meet is Unknown, so the
+  //   20: End                def must not be promoted to a kill)
+  auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::CBranchToElse,
+                                   TestOpcode::WriteExecNarrow, TestOpcode::DefVgpr0,
+                                   TestOpcode::UseVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+
+  BasicBlock *join = block_starting_at(blocks, 12);
+  ASSERT_NE(join, nullptr);
+  const Instruction &def = *join->instructions().begin();
+  EXPECT_EQ(exec.before(def), ExecState::Unknown);
+
+  LivenessAnalysis liveness = analyze_scope(blocks);
+  EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+}
+
+// Regression: EXEC must flow across the scoped caller->callee edge like liveness
+// does. Without the edge the callee looks like a scope entry (Unknown) and its
+// vector def is wrongly left a non-kill; with it EXEC is Full and the def kills.
+TEST(ExecMaskAnalysis, CallEdgeFlowsExecFullIntoCallee) {
+  // Caller: exec=all-ones; end.   Callee: def v0; use v0; end. The caller's End
+  // splits the callee into its own block, reachable only via the scoped edge.
+  auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::End, TestOpcode::DefVgpr0,
+                                   TestOpcode::UseVgpr0, TestOpcode::End});
+  ASSERT_EQ(blocks.size(), 2u);
+  BasicBlock *caller = blocks[0].get();
+  BasicBlock *callee = blocks[1].get();
+  const Instruction &def = *callee->instructions().begin();
+
+  const std::array<ScopedCfgEdge, 1> edges{ScopedCfgEdge{.from = caller, .to = callee}};
+  auto scope = block_scope(blocks);
+
+  // No edge: callee is a scope entry, EXEC Unknown, def stays live.
+  {
+    ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+    EXPECT_EQ(exec.before(def), ExecState::Unknown);
+    LivenessAnalysis liveness = analyze_scope(blocks);
+    EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  }
+
+  // Same edge in both: EXEC Full at the def, so it overwrites every lane and kills v0.
+  {
+    ExecMaskAnalysis exec{KernelBlockScope(scope), 64, edges};
+    EXPECT_EQ(exec.before(def), ExecState::Full);
+    LivenessAnalysis liveness = analyze_scope_with_edges(blocks, edges);
+    EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  }
+}
+
+// Regression: a scoped return->continuation edge must pull the continuation to
+// Unknown when the returning path narrowed EXEC. Omitting it from exec leaves the
+// continuation looking Full (from its local branch pred) and unsoundly kills.
+TEST(ExecMaskAnalysis, ReturnEdgeToContinuationMeetsToUnknown) {
+  //   0:  WriteExecFull         (P0)
+  //   4:  CBranchToElseAfterTwo (delta +8 -> branch target 16)
+  //   8:  WriteExecNarrow       (P1) return block: narrows EXEC
+  //   12: End                    P1 terminates -> reaches cont only via the edge
+  //   16: DefVgpr0              (cont) branch target of P0; 20: UseVgpr0; 24: End
+  auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::CBranchToElseAfterTwo,
+                                   TestOpcode::WriteExecNarrow, TestOpcode::End,
+                                   TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::End});
+  BasicBlock *ret_block = block_starting_at(blocks, 8);
+  BasicBlock *cont = block_starting_at(blocks, 16);
+  ASSERT_NE(ret_block, nullptr);
+  ASSERT_NE(cont, nullptr);
+  const Instruction &def = *cont->instructions().begin();
+
+  const std::array<ScopedCfgEdge, 1> edges{ScopedCfgEdge{.from = ret_block, .to = cont}};
+  auto scope = block_scope(blocks);
+
+  // No edge: cont sees only its Full branch pred, so EXEC looks Full and def kills.
+  {
+    ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+    EXPECT_EQ(exec.before(def), ExecState::Full);
+    LivenessAnalysis liveness = analyze_scope(blocks);
+    EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  }
+
+  // With edge: meet of the Full branch and the narrowed return path is Unknown,
+  // so the def is not a kill and v0 stays live.
+  {
+    ExecMaskAnalysis exec{KernelBlockScope(scope), 64, edges};
+    EXPECT_EQ(exec.before(def), ExecState::Unknown);
+    LivenessAnalysis liveness = analyze_scope_with_edges(blocks, edges);
+    EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  }
+}
+
+// Regression: a back-edge into the scope entry gives block 0 a predecessor, but
+// EXEC at kernel entry is set by dispatch and must stay Unknown -- the loop
+// back-edge must not let interior blocks' optimistic `Full` seed leak in. Guards
+// the `i == 0` pin in the predecessor-based entry detection.
+TEST(ExecMaskAnalysis, BackEdgeIntoScopeEntryStaysUnknown) {
+  //   0: CBranchToElse (+4)    header/entry: loop or exit at 8
+  //   4: BranchBackToStart(-8) latch: unconditional back-edge to offset 0
+  //   8: End                   loop exit
+  auto blocks = build_test_blocks(
+      {TestOpcode::CBranchToElse, TestOpcode::BranchBackToStart, TestOpcode::End});
+  BasicBlock *entry = blocks[0].get();
+  BasicBlock *latch = block_starting_at(blocks, 4);
+  ASSERT_NE(latch, nullptr);
+
+  // The latch back-edges into the entry, so it is not caught by the empty-pred
+  // case -- only the i==0 pin keeps it an entry.
+  EXPECT_TRUE(has_predecessor(*entry, latch));
+
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+  EXPECT_EQ(exec.before(*entry->instructions().begin()), ExecState::Unknown);
 }
 
 TEST(LivenessAnalysis, FindsDeadSgprAfterLiveSgpr) {
@@ -2435,7 +4206,9 @@ TEST(LivenessAnalysis, MinFreeVgprForcesScratchAllocationAboveFloor) {
   LivenessAnalysisOptions options;
   options.min_free_vgpr = 4;
 
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
 
   const Instruction &use = *blocks[0]->instructions().begin();
   EXPECT_FALSE(liveness.is_live_before(use, {RegClass::VGPR, 0, 4}));
@@ -2444,20 +4217,63 @@ TEST(LivenessAnalysis, MinFreeVgprForcesScratchAllocationAboveFloor) {
   EXPECT_EQ(liveness.find_free_run(&use, 1, 7), 7);
 }
 
+TEST(LivenessAnalysis, GloballyUnusedRunHonorsMinFreeVgprFloor) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  LivenessAnalysisOptions options;
+  options.min_free_vgpr = 4;
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&use, 1, 0, 1, 8), 4);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&use, 1, 0, 1, 4), std::nullopt);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+}
+
+TEST(LivenessAnalysis, FindsGloballyUnusedRunBeforeSiteDeadFallback) {
+  auto blocks = build_test_blocks({TestOpcode::UseVgpr0, TestOpcode::Nop, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
+  const LivenessAnalysis liveness{KernelBlockScope(scope),
+                                  std::make_unique<ExecMaskAnalysis>(exec)};
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 0, 1, 4), 1);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 2, 0, 2, 4), 2);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 2, 0, 1, 1), std::nullopt);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 0, 1, 0), std::nullopt);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+  EXPECT_EQ(liveness.find_free_run(&*instruction, 1), 0)
+      << "v0 is dead at this site but is not globally unused";
+  EXPECT_TRUE(liveness.has_materialized_cfg_liveness());
+
+  Instruction outside_scope("outside_scope", nullptr);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&outside_scope, 1, 0, 1, 4), std::nullopt);
+}
+
 TEST(LivenessAnalysis, FreeVgprAllocationHonorsDestinationLimit) {
   auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
   auto scope = block_scope(blocks);
   const Instruction &use = *blocks[0]->instructions().begin();
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
 
   LivenessAnalysisOptions limited_options;
   limited_options.min_free_vgpr = 256;
-  LivenessAnalysis limited(KernelBlockScope(scope), limited_options);
+  LivenessAnalysis limited(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                           limited_options);
   EXPECT_EQ(limited.find_free_run(&use, 1), std::nullopt);
 
   LivenessAnalysisOptions gfx1250_options;
   gfx1250_options.min_free_vgpr = 256;
   gfx1250_options.max_free_vgpr = 1024;
-  LivenessAnalysis gfx1250(KernelBlockScope(scope), gfx1250_options);
+  LivenessAnalysis gfx1250(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                           gfx1250_options);
   EXPECT_EQ(gfx1250.find_free_run(&use, 1), 256);
 }
 
@@ -2468,7 +4284,9 @@ TEST(LivenessAnalysis, FindFreeRunHonorsBaseAlignment) {
   LivenessAnalysisOptions options;
   options.min_free_vgpr = 93;
 
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
 
   const Instruction &use = *blocks[0]->instructions().begin();
   EXPECT_EQ(liveness.find_free_run(&use, 4, 0, 2), 94);
@@ -2581,7 +4399,9 @@ TEST(LivenessAnalysis, ExplicitBlockSubsetIgnoresOutsideSuccessors) {
   EXPECT_TRUE(all_decoded_liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
 
   std::vector<BasicBlock *> kernel_blocks{kernel0};
-  LivenessAnalysis kernel_liveness{KernelBlockScope(kernel_blocks)};
+  const ExecMaskAnalysis kernel_exec(KernelBlockScope(kernel_blocks), /*wave_size=*/64);
+  LivenessAnalysis kernel_liveness{KernelBlockScope(kernel_blocks),
+                                   std::make_unique<ExecMaskAnalysis>(kernel_exec)};
   EXPECT_FALSE(kernel_liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
 }
 
@@ -2606,7 +4426,8 @@ TEST(InstDefUse, RWSgpr) {
 
 TEST(InstDefUse, PartialDefIsAlsoUse) {
   const TestInstruction test_inst("test_partial_def_s4", {{RegClass::SGPR, 4, 1}}, {}, 0,
-                                  std::nullopt, {}, /*def_size_bits=*/16);
+                                  std::nullopt, {}, std::nullopt, std::nullopt,
+                                  /*def_size_bits=*/16);
   InstDefUse idu(test_inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 4, 1}));
   EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 4, 1}));
@@ -2614,7 +4435,7 @@ TEST(InstDefUse, PartialDefIsAlsoUse) {
 
 TEST(InstDefUse, FullWidthDefIsNotUse) {
   const TestInstruction test_inst("test_def_s4", {{RegClass::SGPR, 4, 1}}, {}, 0, std::nullopt, {},
-                                  /*def_size_bits=*/32);
+                                  std::nullopt, std::nullopt, /*def_size_bits=*/32);
   InstDefUse idu(test_inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 4, 1}));
   EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 4, 1}));
@@ -2750,15 +4571,15 @@ TEST(GeneratedInstDefUse, DppBoundCtrlZeroRotateDoesNotReadDestination) {
 }
 
 TEST(GeneratedInstDefUse, Vop1DppPartialMaskReadsFullWidthDestination) {
-  // v_rcp_f64_e32 writes a VGPR pair (v[6:7]). A partial DPP row mask preserves
-  // the whole 64-bit destination, so the implicit use must match the width-2
-  // def -- not just the low dword.
-  // CDNA4 VOP1 word0: encoding[31:25]=0x3F, vdst[24:17]=6, op[16:9]=37
-  // (v_rcp_f64), src0[8:0]=250 (SRC_DPP).
-  constexpr uint32_t kVop1RcpF64Word0Dpp = (0x3Fu << 25) | (6u << 17) | (37u << 9) | 250u;
-  auto inst = decode_cdna4({kVop1RcpF64Word0Dpp, (0x7u << 28) | (0xFu << 24) | 2u});
+  // v_cvt_f64_i32_e32 writes a VGPR pair (v[6:7]). A partial DPP row mask
+  // preserves the whole 64-bit destination, so the implicit use must match the
+  // width-2 def -- not just the low dword.
+  // CDNA4 VOP1 word0: encoding[31:25]=0x3F, vdst[24:17]=6, op[16:9]=4
+  // (v_cvt_f64_i32), src0[8:0]=250 (SRC_DPP).
+  constexpr uint32_t kVop1CvtF64I32Word0Dpp = (0x3Fu << 25) | (6u << 17) | (4u << 9) | 250u;
+  auto inst = decode_cdna4({kVop1CvtF64I32Word0Dpp, (0x7u << 28) | (0xFu << 24) | 2u});
   ASSERT_NE(inst, nullptr);
-  ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 9), "v_rcp_f64");
+  ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 13), "v_cvt_f64_i32");
 
   InstDefUse idu(*inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 6, 2}));
@@ -2920,15 +4741,15 @@ TEST(GeneratedInstDefUse, Vop3CmpDppPartialRowMaskDoesNotReadDestination) {
 }
 
 TEST(GeneratedInstDefUse, Vop3pDppPartialRowMaskReadsDestination) {
-  // v_pk_add_u16 (VOP3P, VGPR vdst=6). VOP3P gained DPP on gfx11+ and has no
-  // SDWA, so a partial row mask preserves the packed VGPR dst.
-  // RDNA4 VOP3P word0: encoding[31:24]=204, op[22:16]=10 (v_pk_add_u16),
+  // v_dot2_f32_f16 (VOP3P, VGPR vdst=6) has an explicit DPP encoding. A
+  // partial row mask preserves the packed VGPR destination.
+  // RDNA4 VOP3P word0: encoding[31:24]=204, op[22:16]=19 (v_dot2_f32_f16),
   // vdst[7:0]=6. word1: src0[8:0]=250 (SRC_DPP), src1[17:9]=3 (VGPR3).
-  constexpr uint32_t kVop3pAddU16Word0 = (204u << 24) | (10u << 16) | 6u;
+  constexpr uint32_t kVop3pDot2Word0 = (204u << 24) | (19u << 16) | 6u;
   constexpr uint32_t kVop3pDppWord1 = (3u << 9) | 250u;
-  auto inst = decode_rdna4({kVop3pAddU16Word0, kVop3pDppWord1, (0x7u << 28) | (0xFu << 24) | 2u});
+  auto inst = decode_rdna4({kVop3pDot2Word0, kVop3pDppWord1, (0x7u << 28) | (0xFu << 24) | 2u});
   ASSERT_NE(inst, nullptr);
-  ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 12), "v_pk_add_u16");
+  ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 14), "v_dot2_f32_f16");
 
   InstDefUse idu(*inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 6, 1}));
@@ -2953,6 +4774,33 @@ TEST(GeneratedInstDefUse, Vop3SdstEncDppPartialRowMaskReadsOnlyVgprResult) {
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 8, 2}));
   EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 6, 1}));
   EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 8, 2}));
+}
+
+// v_writelane_b32 writes one lane and preserves the rest of vdst, so it reads
+// the old value. On CDNA4/gfx1250 (XML marks vdst output-only) that read is
+// surfaced via implicit_uses. word0 = VOP3 writelane opcode, vdst=5; word1 =
+// src0=s4, src1=s2 (2 << 9).
+TEST(GeneratedInstDefUse, WritelaneReadsDestinationCdna4) {
+  auto inst = decode_cdna4({0xD28A0005U, 0x00000404U}); // v_writelane_b32 v5, s4, s2
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_writelane_b32");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, WritelaneReadsDestinationGfx1250) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::array<uint32_t, 4> words{0xD7610005U, 0x00000404U, 0U, 0U};
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_writelane_b32");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
 } // namespace
