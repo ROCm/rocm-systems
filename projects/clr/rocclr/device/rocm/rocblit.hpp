@@ -249,6 +249,10 @@ class DmaBlitManager : public device::HostBlitManager {
       const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
       std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
 
+  //! Attempts to pin host memory without falling back to the staging ring.
+  bool TryPinBuffer(const_address host_mem, size_t size, bool first_transfer,
+                    BufferState& buffer_state) const;
+
   // Get Pinned Host Memory or Staging Buffer
   void getBuffer(const_address hostMem,  //!< Host Mem Address
                  size_t size,            //!< Transfer Size

@@ -1038,6 +1038,38 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 }
 
 // ================================================================================================
+bool DmaBlitManager::TryPinBuffer(const_address host_mem, size_t size, bool first_transfer,
+                                  DmaBlitManager::BufferState& buffer_state) const {
+  size_t transfer_size = std::min(size, PinXferSize);
+  const char* const host_address = reinterpret_cast<const char*>(host_mem);
+  char* aligned_host = const_cast<char*>(host_address);
+  size_t pin_offset = 0;
+  size_t host_offset = 0;
+  if (transfer_size > PinXferSize && first_transfer) {
+    aligned_host = const_cast<char*>(amd::alignDown(host_address, PinnedMemoryAlignment));
+    host_offset = host_address - aligned_host;
+    const size_t aligned_size =
+        amd::alignUp(PinXferSize + host_offset, PinnedMemoryAlignment);
+    transfer_size = std::min(aligned_size - host_offset, size);
+  }
+
+  amd::Memory* const pinned_memory = pinHostMemory(aligned_host, transfer_size, pin_offset);
+  if (pinned_memory == nullptr) {
+    LogWarning("DmaBlitManager::TryPinBuffer failed to pin a resource!");
+    return false;
+  }
+
+  Memory* const device_memory = dev().getRocMemory(pinned_memory);
+  const address pinned_address = device_memory->getDeviceMemory();
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "HSA Copy Using Pinned resource size %zu",
+          transfer_size);
+  buffer_state.copySize_ = transfer_size;
+  buffer_state.buffer_ = pinned_address + pin_offset + host_offset;
+  buffer_state.pinnedMem_ = pinned_memory;
+  return true;
+}
+
+// ================================================================================================
 // Get Staging or Pinned memory buffer
 void DmaBlitManager::getBuffer(const_address hostMem, size_t size, bool enablePin, bool first_tx,
                                DmaBlitManager::BufferState& buffState) const {
@@ -1045,31 +1077,8 @@ void DmaBlitManager::getBuffer(const_address hostMem, size_t size, bool enablePi
   size_t copyChunkSize = doHostPinning ? PinXferSize : StagingXferSize;
   size_t xferSize = std::min(size, copyChunkSize);
 
-  if (doHostPinning) {  // Pin host Memory
-    char* alignedHost = reinterpret_cast<char*>(const_cast<unsigned char*>(hostMem));
-    size_t partial1 = 0;
-    size_t partial2 = 0;
-    if (xferSize > PinXferSize && first_tx) {
-      // Align to 4K boundary
-      alignedHost = const_cast<char*>(
-          amd::alignDown(reinterpret_cast<const char*>(hostMem), PinnedMemoryAlignment));
-      // Find partial size of unaligned copy
-      partial2 = reinterpret_cast<const char*>(hostMem) - alignedHost;
-      size_t tmpSize = amd::alignUp(PinXferSize + partial2, PinnedMemoryAlignment);
-      xferSize = std::min(tmpSize - partial2, size);
-    }
-    amd::Memory* pinnedMem = pinHostMemory(alignedHost, xferSize, partial1);
-    if (pinnedMem != nullptr) {
-      Memory* pinnedMemory = dev().getRocMemory(pinnedMem);
-      address pinBuffer = pinnedMemory->getDeviceMemory();
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "HSA Copy Using Pinned resource size %d",
-              xferSize);
-      buffState.copySize_ = xferSize;
-      buffState.buffer_ = pinBuffer + partial1 + partial2;
-      buffState.pinnedMem_ = pinnedMem;
-      return;
-    }
-    LogWarning("DmaBlitManager::getBuffer failed to pin a resource!");
+  if (doHostPinning && TryPinBuffer(hostMem, size, first_tx, buffState)) {
+    return;
   }
   // If Memory Pinning fails, failback to staging buffer
   xferSize = std::min(xferSize, StagingXferSize);
@@ -2928,22 +2937,30 @@ bool KernelBlitManager::WriteBufferBatch(
         op.metadata.srcAccessOrder_ != amd::CopyMetadata::kSrcAccessOrderDuringApiCall;
 
     while (remaining_size > 0) {
-      const size_t max_staging_size = std::min(remaining_size, StagingXferSize);
-      // Flush before getBuffer can rotate the staging pool past queued copies that still use it.
-      if ((staging_batch_size + max_staging_size) > StagingXferSize) {
-        const bool result = ShaderCopyBufferBatchRaw(staging_copy_ops);
-        staging_copy_ops.clear();
-        staging_batch_size = 0;
-        if (!result) {
-          gpu().releaseGpuMemoryFence();
-          gpu().command()->ReleasePinnedMemory();
-          return false;
-        }
-      }
-
       BufferState buffer_state = {0};
-      getBuffer(static_cast<const_address>(src_addr + copy_offset), remaining_size, enable_pin,
-                first_transfer, buffer_state);
+      const bool should_pin = enable_pin && (remaining_size > MinSizeForPinnedXfer);
+      const bool pinned =
+          should_pin &&
+          TryPinBuffer(static_cast<const_address>(src_addr + copy_offset), remaining_size,
+                       first_transfer, buffer_state);
+      if (!pinned) {
+        const size_t staging_request_size =
+            should_pin ? std::min(remaining_size, PinXferSize) : remaining_size;
+        const size_t max_staging_size = std::min(staging_request_size, StagingXferSize);
+        // Flush before staging allocation can rotate past queued copies that still use the pool.
+        if ((staging_batch_size + max_staging_size) > StagingXferSize) {
+          const bool result = ShaderCopyBufferBatchRaw(staging_copy_ops);
+          staging_copy_ops.clear();
+          staging_batch_size = 0;
+          if (!result) {
+            gpu().releaseGpuMemoryFence();
+            gpu().command()->ReleasePinnedMemory();
+            return false;
+          }
+        }
+        getBuffer(static_cast<const_address>(src_addr + copy_offset), staging_request_size, false,
+                  first_transfer, buffer_state);
+      }
       const size_t copy_size = buffer_state.copySize_;
       if (buffer_state.buffer_ == 0 || copy_size == 0) {
         LogWarning("KernelBlitManager::WriteBufferBatch: Buffer creation failed!");
@@ -3033,25 +3050,35 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
     bool first_transfer = true;
 
     while (remaining_size > 0) {
-      const size_t max_staging_size = std::min(remaining_size, StagingXferSize);
-      if ((staging_batch_size + max_staging_size) > StagingXferSize) {
-        if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
-          gpu().releaseGpuMemoryFence();
-          gpu().command()->ReleasePinnedMemory();
-          return false;
+      BufferState buffer_state = {0};
+      const bool should_pin = remaining_size > MinSizeForPinnedXfer;
+      const bool pinned =
+          should_pin &&
+          TryPinBuffer(static_cast<const_address>(dst_addr + copy_offset), remaining_size,
+                       first_transfer, buffer_state);
+      if (!pinned) {
+        const size_t staging_request_size =
+            should_pin ? std::min(remaining_size, PinXferSize) : remaining_size;
+        const size_t max_staging_size = std::min(staging_request_size, StagingXferSize);
+        // Flush before staging allocation can rotate past queued copies that still use the pool.
+        if ((staging_batch_size + max_staging_size) > StagingXferSize) {
+          if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
+            gpu().releaseGpuMemoryFence();
+            gpu().command()->ReleasePinnedMemory();
+            return false;
+          }
+          gpu().Barriers().WaitCurrent();
+          for (const StagingReadBack& read_back : staging_read_backs) {
+            memcpy(read_back.dst, read_back.staging, read_back.size);
+          }
+          staging_copy_ops.clear();
+          staging_read_backs.clear();
+          staging_batch_size = 0;
         }
-        gpu().Barriers().WaitCurrent();
-        for (const StagingReadBack& read_back : staging_read_backs) {
-          memcpy(read_back.dst, read_back.staging, read_back.size);
-        }
-        staging_copy_ops.clear();
-        staging_read_backs.clear();
-        staging_batch_size = 0;
+        getBuffer(static_cast<const_address>(dst_addr + copy_offset), staging_request_size, false,
+                  first_transfer, buffer_state);
       }
 
-      BufferState buffer_state = {0};
-      getBuffer(static_cast<const_address>(dst_addr + copy_offset), remaining_size, true,
-                first_transfer, buffer_state);
       const size_t copy_size = buffer_state.copySize_;
       if (buffer_state.buffer_ == 0 || copy_size == 0) {
         LogWarning("KernelBlitManager::ReadBufferBatch: Buffer creation failed!");
