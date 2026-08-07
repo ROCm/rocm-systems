@@ -95,8 +95,7 @@ public:
   [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text,
                                   std::span<const TextOffsetRelocation> text_relocations = {},
                                   std::span<const PcRelativeDataRelocation> data_relocations = {},
-                                  std::span<const PcRelativeTextRelocation> code_relocations = {},
-                                  bool require_every_text_symbol_mapped = false);
+                                  std::span<const PcRelativeTextRelocation> code_relocations = {});
 
   /// @brief True if any relocation's place (r_offset) falls inside .text.
   ///

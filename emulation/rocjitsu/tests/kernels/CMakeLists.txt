@@ -190,6 +190,7 @@ if(CLANG_OFFLOAD_BUNDLER)
             relocation_function_table_dispatch
             gfx1250
             OUTPUT_NAME relocation_function_table_dispatch_gfx1250
+            COMPILE_OPTIONS -g
         )
         set(HAS_GFX1250_DBT_FIXTURE TRUE)
         set(RJ_GFX1250_DBT_FIXTURE_TARGET

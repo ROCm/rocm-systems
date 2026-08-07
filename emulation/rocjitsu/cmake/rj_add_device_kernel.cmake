@@ -55,7 +55,8 @@ endfunction()
 # AMDCXX, ROCM_PATH, CLANG_OFFLOAD_BUNDLER, and KERNEL_OUTPUT_DIR must be set
 # before calling this function.
 #
-# Usage: rj_add_probe_object(<name> <offload_arch> [OUTPUT_NAME <output_name>])
+# Usage: rj_add_probe_object(<name> <offload_arch>
+#                            [OUTPUT_NAME <output_name>] [COMPILE_OPTIONS <option>...])
 #   name         - base name of the .hip source (without extension)
 #   offload_arch - GPU target (e.g. gfx90a)
 #   OUTPUT_NAME  - optional; basename of the output .hsaco (default: ${name}).
@@ -64,7 +65,14 @@ endfunction()
 # ${KERNEL_OUTPUT_DIR}/${output_name}.hsaco.
 function(rj_add_probe_object name offload_arch)
     set(oneValueArgs OUTPUT_NAME)
-    cmake_parse_arguments(RJ_PROBE "" "${oneValueArgs}" "" ${ARGN})
+    set(multiValueArgs COMPILE_OPTIONS)
+    cmake_parse_arguments(
+        RJ_PROBE
+        ""
+        "${oneValueArgs}"
+        "${multiValueArgs}"
+        ${ARGN}
+    )
 
     set(output_name "${name}")
     if(RJ_PROBE_OUTPUT_NAME)
@@ -81,8 +89,8 @@ function(rj_add_probe_object name offload_arch)
         OUTPUT ${bundle}
         COMMAND
             ${AMDCXX} -x hip --offload-arch=${offload_arch}
-            --rocm-path=${ROCM_PATH} -fgpu-rdc --cuda-device-only -O2 -o
-            ${bundle} ${src}
+            --rocm-path=${ROCM_PATH} -fgpu-rdc --cuda-device-only -O2
+            ${RJ_PROBE_COMPILE_OPTIONS} -o ${bundle} ${src}
         DEPENDS ${src}
         COMMENT
             "Compiling probe object (device-only): ${output_name} (${offload_arch})"
