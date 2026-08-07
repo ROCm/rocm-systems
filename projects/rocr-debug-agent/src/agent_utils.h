@@ -31,9 +31,13 @@
 #ifndef ROCM_DEBUG_AGENT_UTILS_H
 #define ROCM_DEBUG_AGENT_UTILS_H
 
+#include "logging.h"
+
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace amd::debug_agent
@@ -58,6 +62,26 @@ struct parsed_uri_t
 parsed_uri_t parse_code_object_uri (const std::string &uri);
 
 std::string sanitize_uri_for_filename (const std::string &uri);
+
+/* Debug agent options parsing. */
+
+struct debug_agent_options_t
+{
+  bool all_wavefronts = false;
+  bool disable_sigquit = false;
+  bool precise_memory = false;
+  bool precise_alu_exceptions = false;
+  bool lazy = true;
+  bool delay_loading = false;
+  std::optional<std::string> code_objects_dir;
+  std::optional<std::string> output_file;
+  log_level_t log_level = log_level_t::warning;
+};
+
+void print_usage ();
+
+std::variant<std::string, debug_agent_options_t>
+parse_debug_agent_options (const char *env_options);
 
 } /* namespace amd::debug_agent */
 
