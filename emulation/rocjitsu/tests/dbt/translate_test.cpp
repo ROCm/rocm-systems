@@ -454,7 +454,8 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
     const std::vector<uint32_t> &text_words,
     std::optional<size_t> text_function_words = std::nullopt, size_t text_function_offset_words = 0,
     std::optional<size_t> function_pointer_table_target_words = std::nullopt,
-    bool name_function_pointer_table_with_symbol = true) {
+    bool name_function_pointer_table_with_symbol = true,
+    uint8_t descriptor_binding = kElfSymbolBindGlobal) {
   if (text_function_words && text_function_offset_words + *text_function_words > text_words.size())
     throw std::invalid_argument("text function extent exceeds .text fixture");
   if (function_pointer_table_target_words &&
@@ -566,7 +567,7 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
 
   std::vector<Elf64_Sym> syms(sym_count);
   syms[1].st_name = kd_symbol_name;
-  syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
+  syms[1].st_info = elf_symbol_info(descriptor_binding, kElfSymbolTypeObject);
   syms[1].st_shndx = 2;
   syms[1].st_value = rodata_vaddr;
   syms[1].st_size = kKernelDescriptorSize;
@@ -14942,6 +14943,25 @@ TEST(KernelDescriptorTranslator, Gfx1250UsesWave32SixteenVgprGranularity) {
   EXPECT_EQ(translations[0].guest_vgpr_count, 1024u);
   EXPECT_EQ(translations[0].target_vgpr_count, 1024u);
   EXPECT_EQ(translations[0].target_vgpr_granulated, 63u);
+}
+
+TEST(KernelDescriptorTranslator, DiscoversWeakKernelDescriptorSymbols) {
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250)}, std::nullopt, 0, std::nullopt, true,
+      rocjitsu::kElfSymbolBindWeak);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *text = rocjitsu::find_section(layout, ".text");
+  ASSERT_NE(text, nullptr);
+
+  rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_GFX1250,
+                                                  ROCJITSU_CODE_ARCH_GFX1250);
+  const auto translations = translator.translate_image(
+      image, text->sectionOffset(), text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
+
+  ASSERT_EQ(translations.size(), 1u);
+  EXPECT_EQ(translations[0].kernel_name, "kernel");
+  EXPECT_TRUE(translations[0].supported);
 }
 
 TEST(KernelDescriptorTranslator, Gfx1250AcceptsLdsAboveTcpPartitionSize) {

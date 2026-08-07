@@ -188,10 +188,13 @@ kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t s
   if (sym.st_size != sizeof(KD))
     return std::nullopt;
 
-  // AMDHSA kernel descriptors are global object symbols. Size alone is not a
-  // durable signal because unrelated data objects can also be 64 bytes.
+  // AMDHSA kernel descriptors are externally visible object symbols. OpenMP
+  // emits weak descriptors so duplicate offload entries can be coalesced.
+  // Size alone is not a durable signal because unrelated data objects can also
+  // be 64 bytes.
+  const uint8_t binding = elf_symbol_bind(sym.st_info);
   if (elf_symbol_type(sym.st_info) != kElfSymbolTypeObject ||
-      elf_symbol_bind(sym.st_info) != kElfSymbolBindGlobal)
+      (binding != kElfSymbolBindGlobal && binding != kElfSymbolBindWeak))
     return std::nullopt;
 
   // AMDHSA descriptors are named "<kernel>.kd". An unnamed 64-byte global

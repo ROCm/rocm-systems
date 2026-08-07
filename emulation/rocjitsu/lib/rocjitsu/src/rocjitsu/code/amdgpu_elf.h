@@ -183,6 +183,7 @@ inline constexpr uint32_t R_AMDGPU_RELATIVE64 = 13;
 
 inline constexpr uint8_t kElfSymbolBindLocal = 0;
 inline constexpr uint8_t kElfSymbolBindGlobal = 1;
+inline constexpr uint8_t kElfSymbolBindWeak = 2;
 inline constexpr uint8_t kElfSymbolTypeNone = 0;    // STT_NOTYPE
 inline constexpr uint8_t kElfSymbolTypeObject = 1;  // STT_OBJECT
 inline constexpr uint8_t kElfSymbolTypeFunc = 2;    // STT_FUNC

@@ -568,9 +568,9 @@ TEST_F(HsaHotswapHookTest, TranslationFailureDoesNotLoadOrRetain) {
 
 TEST_F(HsaHotswapHookTest, RendersTranslatorDiagnosticsAndDumpsFailedSource) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
-  constexpr auto conversion =
-      rocjitsu::gfx1250::build_vop3(rocjitsu::gfx1250::kVCvtPkFp8F32Vop3,
-                                    {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2});
+  constexpr auto conversion = rocjitsu::gfx1250::build_vds(
+      rocjitsu::gfx1250::kDsStore2addrStride64B64Vds,
+      {.offset0 = 255, .offset1 = 255, .addr = 20, .data0 = 30, .data1 = 40});
   constexpr uint32_t kEndpgm = 0xBFB00000u;
   const std::array<uint32_t, 3> text = {conversion[0], conversion[1], kEndpgm};
   const auto source = rocjitsu::test_support::make_gfx1250_code_object(text);
@@ -591,11 +591,13 @@ TEST_F(HsaHotswapHookTest, RendersTranslatorDiagnosticsAndDumpsFailedSource) {
   EXPECT_EQ(g_load_agent_calls, 0);
   EXPECT_NE(log_text.find("[hsa-hotswap-rj] error: translation diagnostic "), std::string::npos)
       << log_text;
-  EXPECT_NE(log_text.find(" severity=error kind=translator-expand-missing "), std::string::npos)
+  EXPECT_NE(log_text.find(" severity=error kind=translator-expand-failed "), std::string::npos)
       << log_text;
-  EXPECT_NE(log_text.find(" guest_offset=.text+0x0 mnemonic=v_cvt_pk_fp8_f32 "), std::string::npos)
+  EXPECT_NE(log_text.find(" guest_offset=.text+0x0 mnemonic=ds_store_2addr_stride64_b64 "),
+            std::string::npos)
       << log_text;
-  EXPECT_NE(log_text.find(" required=Add a semantic expansion rule for this mnemonic."),
+  EXPECT_NE(log_text.find(" required=Use a scratch-address lowering for DS2 offsets larger than "
+                          "65535 bytes."),
             std::string::npos)
       << log_text;
   expect_failure_dump(log_text, source);
