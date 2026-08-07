@@ -37,7 +37,6 @@ endif()
 # (rocm-systems#9583) resolves NUMA internally, so the first attempt already
 # succeeds and this whole block is skipped, deferring entirely to rocSHMEM.
 if(NOT TARGET roc::rocshmem)
-    # Discover the sysdeps NUMA location only if the user did not provide one.
     if(NOT NUMA_DIR)
         foreach(_rocm_root ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm)
             if(EXISTS "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA/numa-config.cmake")
