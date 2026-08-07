@@ -1123,6 +1123,10 @@ class Parser:
             inst_name_node = xs.get_node(inst_node, xs.INST_NAME)
             inst_encs_node = xs.get_node(inst_node, xs.INST_ENCODINGS)
             inst_name = inst_name_node.text
+            # Preserve condition-gated alternate encodings as instruction-level
+            # legality provenance. In particular, CDNA4 DPP and SDWA entries may
+            # be skipped below for class emission while still proving that the
+            # instruction supports that modifier form.
             available_encodings = frozenset(
                 xs.get_node_text(xs.get_node(inst_enc_node, xs.ENCODING_NAME))
                 for inst_enc_node in inst_encs_node
