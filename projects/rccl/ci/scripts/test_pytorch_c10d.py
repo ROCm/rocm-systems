@@ -34,6 +34,7 @@ from rccl_ci_utils import (
     send_email_report,
     send_teams_webhook,
     set_github_output,
+    setup_kpack_device_code,
     write_github_summary,
 )
 
@@ -536,6 +537,10 @@ def main() -> None:
     # Step 4c: Dump device code object symbols for debugging host↔device
     # kernel name mismatches (e.g., <4096> vs <5120> in mangled names)
     dump_device_code_object_symbols(rccl_lib)
+
+    # Step 4d: Configure kpack device code loading — TheRock-built libraries
+    # have device code stripped into separate .kpack archives per GPU arch
+    setup_kpack_device_code(args.artifact_dir)
 
     setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
 
