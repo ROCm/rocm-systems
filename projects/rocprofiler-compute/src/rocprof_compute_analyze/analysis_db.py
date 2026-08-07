@@ -475,7 +475,7 @@ class db_analysis(OmniAnalyze_Base):
 
         instruction_line = orm.InstructionLine(
             code_object_offset=line.code_object_offset,
-            comment=line.comment,
+            source=line.source,
             instruction=line.instruction,
             kernel_symbol=db_analysis._get_or_create_kernel_symbol(
                 code_object_store, kernel, kernel_symbols
@@ -608,7 +608,7 @@ class db_analysis(OmniAnalyze_Base):
             Database.get_session().add(
                 orm.InstructionLine(
                     code_object_offset=code_object_offset,
-                    comment=instruction.comment,
+                    source=instruction.source,
                     instruction=instruction.instruction,
                     kernel_symbol=kernel_symbol,
                 )

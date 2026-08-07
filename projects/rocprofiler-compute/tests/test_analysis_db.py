@@ -1016,6 +1016,17 @@ def test_add_pc_sampling_data_no_tool_data_is_noop(db_session):
     assert db_session.query(orm.InstructionLine).count() == 0
 
 
+def test_run_analysis_writes_schema_version_2_1_1(
+    db_session,
+    tmp_path: Path,
+) -> None:
+    analyzer = make_pc_sampling_only_database_analyzer(str(tmp_path), [])
+
+    run_analysis_with_materialized_views(analyzer)
+
+    assert db_session.query(orm.Metadata).one().schema_version == "2.1.1"
+
+
 def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
     """Instruction lines use the workload kernels and transient store registry."""
     workload_path = "/fake/workload"
@@ -1184,7 +1195,7 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     assert len({line.instruction_uuid for line in instruction_lines}) == 2
     assert len({line.kernel_symbol.code_object_uuid for line in instruction_lines}) == 2
     assert {
-        (line.code_object_offset, line.instruction, line.comment)
+        (line.code_object_offset, line.instruction, line.source)
         for line in instruction_lines
     } == {(0x10, "v_mov", "/s/shared.cpp:7")}
 
@@ -1249,7 +1260,7 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
     assert len({line.kernel_symbol.code_object_uuid for line in instruction_lines}) == 2
     assert {line.code_object_offset for line in instruction_lines} == {0x10}
     assert {line.instruction for line in instruction_lines} == {"v_mov"}
-    assert {line.comment for line in instruction_lines} == {"/s/shared.cpp:7"}
+    assert {line.source for line in instruction_lines} == {"/s/shared.cpp:7"}
 
     instruction_by_process_id = {
         line.kernel_symbol.code_object_store.pid: line for line in instruction_lines

@@ -38,7 +38,7 @@ from sqlalchemy.sql import Select
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "2.1.0"
+SCHEMA_VERSION = "2.1.1"
 
 
 Base = declarative_base()
@@ -237,7 +237,7 @@ class InstructionLine(Base):
         nullable=True,
     )
     code_object_offset = Column(Integer)
-    comment = Column(Text)
+    source = Column(Text)
     instruction = Column(Text)
 
     # Instruction line belongs to one kernel symbol
@@ -711,7 +711,7 @@ class Database:
                 Kernel.kernel_name,
                 InstructionLine.code_object_offset.label("offset"),
                 InstructionLine.instruction,
-                InstructionLine.comment.label("source"),
+                InstructionLine.source.label("source"),
                 PCSampleState.total_count.label("count"),
                 PCSampleState.issue_count.label("count_issue"),
                 PCSampleState.stall_count.label("count_stall"),

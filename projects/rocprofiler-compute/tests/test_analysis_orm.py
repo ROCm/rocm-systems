@@ -111,7 +111,7 @@ def add_pc_sampling_state(
     )
     instruction_line = InstructionLine(
         code_object_offset=offset,
-        comment=source,
+        source=source,
         instruction=instruction,
         kernel_symbol=KernelSymbol(code_object_store=code_object, kernel=kernel),
     )
@@ -233,13 +233,13 @@ def test_duplicate_instruction_identity_under_same_symbol_rejected(db_session):
     db_session.add_all([
         InstructionLine(
             code_object_offset=0x10,
-            comment="/s/a.cpp:1",
+            source="/s/a.cpp:1",
             instruction="v_mov",
             kernel_symbol=kernel_symbol,
         ),
         InstructionLine(
             code_object_offset=0x10,
-            comment="/s/a.cpp:1",
+            source="/s/a.cpp:1",
             instruction="v_mov",
             kernel_symbol=kernel_symbol,
         ),
@@ -376,13 +376,13 @@ def test_equal_identities_under_distinct_parent_chains_get_distinct_uuids(
     second_symbol = KernelSymbol(code_object_store=second_code_object, kernel=kernel)
     first_instruction = InstructionLine(
         code_object_offset=0x10,
-        comment="/s/a.cpp:1",
+        source="/s/a.cpp:1",
         instruction="v_mov",
         kernel_symbol=first_symbol,
     )
     second_instruction = InstructionLine(
         code_object_offset=0x10,
-        comment="/s/a.cpp:1",
+        source="/s/a.cpp:1",
         instruction="v_mov",
         kernel_symbol=second_symbol,
     )

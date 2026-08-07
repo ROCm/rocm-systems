@@ -584,7 +584,7 @@ def test_load_aggregated_pc_sampling_happy_path() -> None:
     line = load_aggregated_pc_sampling(tool_data)[0].instruction_lines[0]
     assert line.total_count == 1
     assert line.instruction == "v_mov"
-    assert line.comment == "/s/a.cpp:1"
+    assert line.source == "/s/a.cpp:1"
     assert line.kernel_name == "vecCopy"
 
 
