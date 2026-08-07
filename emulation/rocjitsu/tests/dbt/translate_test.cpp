@@ -16295,109 +16295,147 @@ TEST(BinaryTranslatorE2E, Gfx1250RewritesVop3SelectorButKeepsCollidingLiteralFor
 
 namespace {
 
-/// @brief Run one gfx1250 B0-to-A0 translation and return what it wrote to
-/// stderr. The deferred-family warning goes through util::Logger, which emits
-/// to std::cerr with no redirection hook, so the buffer is swapped instead.
-[[nodiscard]] std::string translate_gfx1250_b0_to_a0_capturing_stderr(std::vector<uint32_t> words) {
+/// @brief Mnemonics reported once per translation for a deferred family, in the
+/// order the translation reported them.
+///
+/// The report is an ordinary translation diagnostic, so it reaches the library
+/// callback and the hotswap renderer alongside every other one. Reading it back
+/// off the result needs no stream redirection.
+[[nodiscard]] std::vector<std::string>
+deferred_family_reports(const rocjitsu::TranslatedCodeObject &result) {
+  std::vector<std::string> reported;
+  for (const auto &diagnostic : result.diagnostics) {
+    if (diagnostic.severity == rocjitsu::DiagnosticSeverity::Warning &&
+        diagnostic.kind == rocjitsu::DiagnosticKind::Legalization &&
+        diagnostic.message.find("target-specific handling is not yet implemented") !=
+            std::string::npos) {
+      reported.push_back(diagnostic.mnemonic);
+    }
+  }
+  return reported;
+}
+
+/// @brief Translate a single-kernel gfx1250 object with the B0-to-A0 profile.
+[[nodiscard]] rocjitsu::TranslatedCodeObject
+translate_gfx1250_b0_to_a0_result(rocjitsu::BinaryTranslator &translator,
+                                  std::vector<uint32_t> words) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   words.push_back(kGfx1250SEndpgm);
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  auto result = translator.translate(source);
+  EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  return result;
+}
 
-  rocjitsu::BinaryTranslator translator(
+[[nodiscard]] rocjitsu::BinaryTranslator make_gfx1250_b0_to_a0_translator() {
+  return rocjitsu::BinaryTranslator(
       ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
       gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
                                rocjitsu::ProcessorRevision::Gfx1250A0));
-
-  std::ostringstream captured;
-  std::streambuf *previous = std::cerr.rdbuf(captured.rdbuf());
-  const auto result = translator.translate(source);
-  std::cerr.rdbuf(previous);
-  EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
-                                                          : result.diagnostics.front().message);
-  return captured.str();
 }
 
-/// @brief Count non-overlapping occurrences of @p needle in @p haystack.
-[[nodiscard]] size_t count_occurrences(std::string_view haystack, std::string_view needle) {
-  size_t count = 0;
-  for (size_t pos = haystack.find(needle); pos != std::string_view::npos;
-       pos = haystack.find(needle, pos + needle.size())) {
-    ++count;
-  }
-  return count;
+/// @brief An s_monitor_sleep, whose A0 handling is deferred (DEGFXMI400-12268).
+[[nodiscard]] uint32_t gfx1250_deferred_word() {
+  return gfx1250::build_sopp(gfx1250::kSMonitorSleepSopp, {.simm16 = 1})[0];
 }
 
 } // namespace
 
-// A deferred family passes through unchanged and warns so the gap stays
-// visible. The warning describes the mnemonic, not the site, so repeating it
-// per instruction adds nothing: one RCCL all_reduce run emitted 104,831 copies.
-TEST(BinaryTranslatorE2E, Gfx1250WarnsOncePerDeferredMnemonicWithinOneTranslation) {
-  const uint32_t sleep = gfx1250::build_sopp(gfx1250::kSSleepSopp, {.simm16 = 1})[0];
-  const std::string log =
-      translate_gfx1250_b0_to_a0_capturing_stderr({sleep, sleep, sleep, sleep, sleep});
+// A deferred family passes through unchanged and is reported so the gap stays
+// visible. The report describes the mnemonic, not the site, so repeating it per
+// instruction adds nothing: one RCCL all_reduce run emitted 104,831 copies.
+TEST(BinaryTranslatorE2E, Gfx1250ReportsOncePerDeferredMnemonicWithinOneTranslation) {
+  const uint32_t deferred = gfx1250_deferred_word();
+  auto translator = make_gfx1250_b0_to_a0_translator();
+  const auto result = translate_gfx1250_b0_to_a0_result(
+      translator, {deferred, deferred, deferred, deferred, deferred});
 
-  EXPECT_EQ(count_occurrences(log, "'s_sleep'"), 1u)
-      << "five s_sleep instructions must produce one warning, not five:\n"
-      << log;
+  EXPECT_EQ(deferred_family_reports(result), (std::vector<std::string>{"s_monitor_sleep"}))
+      << "five deferred instructions must produce one diagnostic, not five";
 }
 
 // Distinct deferred mnemonics are distinct gaps, so suppressing one must not
 // suppress another.
-TEST(BinaryTranslatorE2E, Gfx1250WarnsSeparatelyForEachDeferredMnemonic) {
-  const uint32_t sleep = gfx1250::build_sopp(gfx1250::kSSleepSopp, {.simm16 = 1})[0];
-  const uint32_t monitor_sleep = gfx1250::build_sopp(gfx1250::kSMonitorSleepSopp, {.simm16 = 1})[0];
-  const std::string log =
-      translate_gfx1250_b0_to_a0_capturing_stderr({sleep, monitor_sleep, sleep, monitor_sleep});
+TEST(BinaryTranslatorE2E, Gfx1250ReportsSeparatelyForEachDeferredMnemonic) {
+  const uint32_t deferred = gfx1250_deferred_word();
+  const uint32_t barrier_state =
+      gfx1250::build_sop1(gfx1250::kSGetBarrierStateSop1, {.ssrc0 = 0, .sdst = 0})[0];
+  auto translator = make_gfx1250_b0_to_a0_translator();
+  const auto result = translate_gfx1250_b0_to_a0_result(
+      translator, {deferred, barrier_state, deferred, barrier_state});
 
-  EXPECT_EQ(count_occurrences(log, "'s_sleep'"), 1u) << log;
-  EXPECT_EQ(count_occurrences(log, "'s_monitor_sleep'"), 1u) << log;
+  auto reported = deferred_family_reports(result);
+  std::ranges::sort(reported);
+  EXPECT_EQ(reported, (std::vector<std::string>{"s_get_barrier_state", "s_monitor_sleep"}));
 }
 
 // The suppression is scoped to one translation. Process-wide state would let
 // the first code object that uses a deferred mnemonic hide the same gap in
 // every object loaded afterwards, which is exactly how HotSwap runs: many code
 // objects translated in one process.
-TEST(BinaryTranslatorE2E, Gfx1250WarnsAgainForEachSeparateTranslation) {
-  const uint32_t sleep = gfx1250::build_sopp(gfx1250::kSSleepSopp, {.simm16 = 1})[0];
-  const std::string first = translate_gfx1250_b0_to_a0_capturing_stderr({sleep, sleep});
-  const std::string second = translate_gfx1250_b0_to_a0_capturing_stderr({sleep, sleep});
+TEST(BinaryTranslatorE2E, Gfx1250ReportsAgainForEachSeparateTranslation) {
+  const uint32_t deferred = gfx1250_deferred_word();
+  auto first_translator = make_gfx1250_b0_to_a0_translator();
+  auto second_translator = make_gfx1250_b0_to_a0_translator();
+  const auto first = translate_gfx1250_b0_to_a0_result(first_translator, {deferred, deferred});
+  const auto second = translate_gfx1250_b0_to_a0_result(second_translator, {deferred, deferred});
 
-  EXPECT_EQ(count_occurrences(first, "'s_sleep'"), 1u) << first;
-  EXPECT_EQ(count_occurrences(second, "'s_sleep'"), 1u)
-      << "a second code object must report the gap independently:\n"
-      << second;
+  EXPECT_EQ(deferred_family_reports(first), (std::vector<std::string>{"s_monitor_sleep"}));
+  EXPECT_EQ(deferred_family_reports(second), (std::vector<std::string>{"s_monitor_sleep"}))
+      << "a second code object must report the gap independently";
 }
 
 // A translator instance reused across code objects must behave the same way,
 // since the state lives on the translator rather than in a local.
-TEST(BinaryTranslatorE2E, Gfx1250WarnsAgainWhenOneTranslatorIsReused) {
-  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
-  const uint32_t sleep = gfx1250::build_sopp(gfx1250::kSSleepSopp, {.simm16 = 1})[0];
-  auto image =
-      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({sleep, sleep, kGfx1250SEndpgm});
-  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+TEST(BinaryTranslatorE2E, Gfx1250ReportsAgainWhenOneTranslatorIsReused) {
+  const uint32_t deferred = gfx1250_deferred_word();
+  auto translator = make_gfx1250_b0_to_a0_translator();
+  const auto first = translate_gfx1250_b0_to_a0_result(translator, {deferred, deferred});
+  const auto second = translate_gfx1250_b0_to_a0_result(translator, {deferred, deferred});
 
-  rocjitsu::BinaryTranslator translator(
-      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
-      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
-                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  EXPECT_EQ(deferred_family_reports(first), (std::vector<std::string>{"s_monitor_sleep"}));
+  EXPECT_EQ(deferred_family_reports(second), (std::vector<std::string>{"s_monitor_sleep"}))
+      << "translate() must reset the per-translation suppression state";
+}
 
-  std::array<std::string, 2> logs;
-  for (std::string &log : logs) {
-    std::ostringstream captured;
-    std::streambuf *previous = std::cerr.rdbuf(captured.rdbuf());
-    const auto result = translator.translate(source);
-    std::cerr.rdbuf(previous);
-    EXPECT_TRUE(result.ok());
-    log = captured.str();
+// The report points at the first instruction of the family so a reader can find
+// one, and carries the mnemonic so callback consumers can group by gap.
+TEST(BinaryTranslatorE2E, Gfx1250DeferredFamilyReportCarriesOffsetAndMnemonic) {
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  const uint32_t deferred = gfx1250_deferred_word();
+  auto translator = make_gfx1250_b0_to_a0_translator();
+  const auto result =
+      translate_gfx1250_b0_to_a0_result(translator, {kGfx1250SNop, deferred, deferred});
+
+  const auto reported = std::ranges::find_if(result.diagnostics, [](const auto &diagnostic) {
+    return diagnostic.mnemonic == "s_monitor_sleep";
+  });
+  ASSERT_NE(reported, result.diagnostics.end());
+  EXPECT_EQ(reported->severity, rocjitsu::DiagnosticSeverity::Warning);
+  EXPECT_EQ(reported->guest_offset, std::optional<uint64_t>(sizeof(uint32_t)))
+      << "the offset must name the first deferred instruction, not the s_nop before it";
+}
+
+// s_sleep and s_sleep_var behave identically on A0 and B0. The only sleep-family
+// A0 erratum, DEGFXMI400-12268, is specific to s_monitor_sleep('forever') with
+// MWAIT=0. Copying a plain sleep through is therefore the correct translation,
+// not an unimplemented one, and reporting it drowned the reports that do name a
+// real gap: one RCCL all_reduce run emitted 104,831 of them.
+TEST(BinaryTranslatorE2E, Gfx1250CopiesPlainSleepWithoutReportingAGap) {
+  const std::vector<uint32_t> sleeps = {
+      gfx1250::build_sopp(gfx1250::kSSleepSopp, {.simm16 = 1})[0],
+      gfx1250::build_sop1(gfx1250::kSSleepVarSop1, {.ssrc0 = 0})[0],
+  };
+  auto translator = make_gfx1250_b0_to_a0_translator();
+  const auto result = translate_gfx1250_b0_to_a0_result(translator, sleeps);
+
+  EXPECT_TRUE(deferred_family_reports(result).empty())
+      << "a plain sleep translates correctly and must not be reported as a gap";
+  for (const auto &diagnostic : result.diagnostics) {
+    EXPECT_EQ(diagnostic.severity, rocjitsu::DiagnosticSeverity::Warning) << diagnostic.message;
   }
-
-  EXPECT_EQ(count_occurrences(logs[0], "'s_sleep'"), 1u) << logs[0];
-  EXPECT_EQ(count_occurrences(logs[1], "'s_sleep'"), 1u)
-      << "translate() must reset the per-translation suppression state:\n"
-      << logs[1];
 }
 
 // A vector 64-bit read cannot name the selector on A0, so the base is moved

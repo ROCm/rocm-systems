@@ -1284,13 +1284,14 @@ bool BinaryTranslator::is_gfx1250_b0_to_a0() const {
          options_.output_revision == ProcessorRevision::Gfx1250A0;
 }
 
-const InstructionLegalization *BinaryTranslator::lookup_legalization(const Instruction &inst) {
+const InstructionLegalization *
+BinaryTranslator::lookup_legalization(const Instruction &inst) const {
   // gfx1250 B0 and A0 have the same structural ISA, so the generated cross-ISA
   // tables cannot express their revision-specific behavior. Instructions in
   // the B0-to-A0 profile use handwritten legalization; everything else follows
   // the raw same-ISA copy path.
   if (is_gfx1250_b0_to_a0())
-    return gfx1250_b0_to_a0_legalization(inst, &reported_deferred_families_);
+    return gfx1250_b0_to_a0_legalization(inst);
 
   return legalization_lookup_ ? legalization_lookup_(inst.encoding_id(), inst.opcode()) : nullptr;
 }
@@ -2798,6 +2799,22 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         }
 
         const InstructionLegalization *leg = lookup_legalization(inst);
+
+        // A deferred gfx1250 family has no A0 handling yet and stays on the copy
+        // path, so the omission is reported rather than left silent. The report
+        // describes the mnemonic, not the site, so one per mnemonic per
+        // translation says everything a second copy would: an earlier RCCL
+        // all_reduce run emitted 104,831 identical lines, burying the
+        // diagnostics that do name a specific instruction. The record is
+        // per-translation, so each code object still reports its own gaps.
+        if (leg == nullptr && is_gfx1250_b0_to_a0() &&
+            gfx1250_b0_to_a0_is_deferred_family(inst.mnemonic()) &&
+            reported_deferred_families_.emplace(inst.mnemonic()).second) {
+          append_warning(result.diagnostics, DiagnosticKind::Legalization,
+                         "gfx1250 translation passes through '" + std::string(inst.mnemonic()) +
+                             "' unchanged; target-specific handling is not yet implemented",
+                         offset, std::string(inst.mnemonic()));
+        }
 
         const uint16_t dst_opcode = leg ? leg->target_opcode : inst.opcode();
 

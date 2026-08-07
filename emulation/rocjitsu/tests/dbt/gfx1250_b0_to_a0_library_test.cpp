@@ -112,9 +112,10 @@ TEST(Gfx1250B0ToA0Library, ReportsInvalidCodeObjectDiagnostic) {
 // BinaryTranslatorE2E.ExpandLegalizationWithoutSemanticRuleFails (cdna4-to-cdna3,
 // tests/dbt/translate_test.cpp), where an Expand legalization without a rule is
 // reachable, and the reported kind and its required-work field by
-// HsaHotswapHookTest.RendersRequiredWorkDiagnostic, which feeds a synthetic
-// diagnostic straight through the rendering seam. Add a fixture here if a
-// gfx1250 mnemonic is ever classified fail-closed ahead of its rule.
+// FansOutRequiredWorkAsCallbackViews below and
+// HsaHotswapHookTest.RendersRequiredWorkDiagnostic, both of which feed a
+// synthetic diagnostic straight through the reporting seam. Add a fixture here
+// if a gfx1250 mnemonic is ever classified fail-closed ahead of its rule.
 TEST(Gfx1250B0ToA0Library, ReportsTranslatorDiagnostics) {
   rocjitsu::gfx1250::Vop3VopDpp16MachineInst dpp{};
   dpp.vdst = 30;
@@ -222,6 +223,44 @@ TEST(Gfx1250B0ToA0Library, FansOutRequiredWorkAsCallbackViews) {
   }
   EXPECT_EQ(captured[1].message, "first required step");
   EXPECT_EQ(captured[2].message, "second required step");
+}
+
+// Diagnostics are not only a failure channel. A translation can succeed and
+// still have something to report -- here a family passed through unchanged
+// because its A0 handling is not implemented yet -- and reporting only on the
+// undispatchable path would drop it. That gap is what someone triaging a
+// misbehaving kernel reads these diagnostics for, so it has to reach the
+// callback on the success path too.
+TEST(Gfx1250B0ToA0Library, ReportsDeferredFamilyDiagnosticOnSuccessfulTranslation) {
+  constexpr auto deferred =
+      rocjitsu::gfx1250::build_sopp(rocjitsu::gfx1250::kSMonitorSleepSopp, {.simm16 = 1});
+  constexpr uint32_t kEndpgm = 0xBFB00000u;
+  const std::array<uint32_t, 3> text = {deferred[0], deferred[0], kEndpgm};
+  const auto source = rocjitsu::test_support::make_gfx1250_code_object(text);
+  uint8_t *output = nullptr;
+  size_t output_size = 0;
+  rj_gfx1250_b0_to_a0_translation_info_t info{};
+  std::vector<CapturedDiagnostic> diagnostics;
+
+  ASSERT_EQ(rj_gfx1250_b0_to_a0_translate(source.data(), source.size(), &output, &output_size,
+                                          &info, capture_diagnostic, &diagnostics),
+            ROCJITSU_STATUS_SUCCESS);
+  EXPECT_NE(output, nullptr);
+  rj_gfx1250_b0_to_a0_free(output);
+
+  const auto reported = std::find_if(diagnostics.begin(), diagnostics.end(), [](const auto &item) {
+    return item.severity == "warning" && item.kind == "translator-legalization" &&
+           item.mnemonic == "s_monitor_sleep";
+  });
+  ASSERT_NE(reported, diagnostics.end())
+      << "a successful translation must still report the pass-through gap";
+  EXPECT_NE(reported->message.find("not yet implemented"), std::string::npos);
+
+  // Two instructions, one report: the gap is a property of the mnemonic.
+  const auto count = std::count_if(diagnostics.begin(), diagnostics.end(), [](const auto &item) {
+    return item.mnemonic == "s_monitor_sleep";
+  });
+  EXPECT_EQ(count, 1);
 }
 
 #ifdef GFX1250_B0_TO_A0_FIXTURE
