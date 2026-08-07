@@ -9649,22 +9649,20 @@ class CodeGenerator:
                                     # operand-local fallback only for marker
                                     # combinations it did not already reject.
                                     if not _rejected_dpp_markers:
-                                        unsupported_dpp_label = (
-                                            unsupported_dpp_markers[0][1]
-                                            if len(unsupported_dpp_markers) == 1
-                                            else 'DPP'
-                                        )
-                                        qualified_dpp_markers = [
-                                            marker.replace(
-                                                'OpEncoding', factory_op_encoding
+                                        for (
+                                            unsupported_marker,
+                                            unsupported_label,
+                                        ) in unsupported_dpp_markers:
+                                            qualified_dpp_marker = (
+                                                unsupported_marker.replace(
+                                                    'OpEncoding', factory_op_encoding
+                                                )
                                             )
-                                            for marker, _ in unsupported_dpp_markers
-                                        ]
-                                        factory_validation_parts.append(
-                                            f'if ({" || ".join(qualified_dpp_markers)}) '
-                                            f'[[unlikely]] return emit_error.emit() << "{inst.name} does not support '
-                                            f'{unsupported_dpp_label}";'
-                                        )
+                                            factory_validation_parts.append(
+                                                f'if ({qualified_dpp_marker}) '
+                                                f'[[unlikely]] return emit_error.emit() << "{inst.name} does not support '
+                                                f'{unsupported_label}";'
+                                            )
                                 elif (
                                     _dpp_struct
                                     and _supports_dpp_encoding

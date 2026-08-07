@@ -3816,6 +3816,21 @@ def test_split_execution_ids_name_and_match_callbacks(
         assert sorted(selected_ids) == sorted(callbacks)
 
 
+def test_rdna4_generated_vopc_dpp_availability_is_instruction_specific(
+    rdna4_generated_root: Path,
+):
+    vopc = (rdna4_generated_root / 'vopc.cpp').read_text()
+
+    supported = _generated_constructor_body(vopc, 'VCmpEqU32Vopc')
+    unsupported = _generated_decode_body(vopc, 'VCmpEqF64Vopc')
+
+    assert 'reinterpret_cast<const VopcVopDpp16MachineInst *>' in supported
+    assert 'reinterpret_cast<const VopcVopDpp8MachineInst *>' in supported
+    assert 'V_CMP_EQ_U32 does not support DPP' not in supported
+    assert 'emit_error.emit() << "V_CMP_EQ_F64 does not support DPP"' in unsupported
+    assert 'emit_error.emit() << "V_CMP_EQ_F64 does not support DPP8"' in unsupported
+
+
 def test_generated_vop_execution_has_no_instruction_storage_bypass(
     amdgpu_generated_root: Path,
 ):
