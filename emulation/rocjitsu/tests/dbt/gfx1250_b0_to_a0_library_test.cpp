@@ -138,6 +138,46 @@ TEST(Gfx1250B0ToA0Library, ReportsTranslatorDiagnostics) {
   EXPECT_NE(primary->message.find("does not support DPP"), std::string::npos);
 }
 
+// The diagnostic above carries no required work. This one does, so it covers
+// the fan-out through the public C entry point rather than the emit helper
+// exercised by FansOutRequiredWorkAsCallbackViews.
+TEST(Gfx1250B0ToA0Library, ReportsTranslatorExpandFailedAndRequiredWork) {
+  constexpr auto conversion =
+      rocjitsu::gfx1250::build_sop1(rocjitsu::gfx1250::kSBarrierSignalIsfirstSop1, {.ssrc0 = 195});
+  constexpr uint32_t kEndpgm = 0xBFB00000u;
+  const std::array<uint32_t, 2> text = {conversion[0], kEndpgm};
+  const auto source = rocjitsu::test_support::make_gfx1250_code_object(text);
+  uint8_t *output = nullptr;
+  size_t output_size = 0;
+  rj_gfx1250_b0_to_a0_translation_info_t info{};
+  std::vector<CapturedDiagnostic> diagnostics;
+
+  EXPECT_EQ(rj_gfx1250_b0_to_a0_translate(source.data(), source.size(), &output, &output_size,
+                                          &info, capture_diagnostic, &diagnostics),
+            ROCJITSU_STATUS_INVALID_CODE_OBJECT);
+  EXPECT_EQ(output, nullptr);
+  EXPECT_EQ(output_size, 0u);
+  ASSERT_FALSE(diagnostics.empty());
+
+  const auto primary = std::find_if(diagnostics.begin(), diagnostics.end(), [](const auto &item) {
+    return !item.required_work && item.severity == "error" &&
+           item.kind == "translator-expand-failed";
+  });
+  ASSERT_NE(primary, diagnostics.end());
+  EXPECT_TRUE(primary->has_guest_offset);
+  EXPECT_EQ(primary->guest_offset, 0u);
+  EXPECT_EQ(primary->mnemonic, "s_barrier_signal_isfirst");
+
+  const auto required = std::find_if(diagnostics.begin(), diagnostics.end(), [](const auto &item) {
+    return item.required_work && item.kind == "translator-expand-failed";
+  });
+  ASSERT_NE(required, diagnostics.end());
+  EXPECT_TRUE(required->has_guest_offset);
+  EXPECT_EQ(required->guest_offset, 0u);
+  EXPECT_EQ(required->mnemonic, "s_barrier_signal_isfirst");
+  EXPECT_NE(required->message.find("different barrier id"), std::string::npos);
+}
+
 TEST(Gfx1250B0ToA0Library, FansOutRequiredWorkAsCallbackViews) {
   const std::vector<rocjitsu::TranslationDiagnostic> source = {{
       .severity = rocjitsu::DiagnosticSeverity::Error,
