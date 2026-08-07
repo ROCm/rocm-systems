@@ -582,7 +582,7 @@ def set_python_hints_from_cmake_args(cmake_args):
 # already replaced every non-XML-safe control byte (including the ESC byte
 # that starts each compiler color code) with the literal text
 # "[NON-XML-CHAR-0xNN]". Build failures therefore need XML recovery instead
-# of a raw-log read; configure/test do not.
+# of a raw-log read; configure does not.
 # ---------------------------------------------------------------------------
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -671,6 +671,39 @@ def _read_build_xml_failures(args):
     return blocks
 
 
+def _read_test_xml_failures(args):
+    """Recover the captured output of each failed test from CTest's test
+    report (Testing/<TAG>/Test.xml). Returns a list of (name, output) pairs,
+    empty if Test.xml doesn't exist or recorded no failures.
+
+    LastTest.log holds every test's output, passing ones included, so printing
+    it raw buries the failures in the whole suite. Test.xml keeps the output
+    attributed per test, which is what makes filtering possible.
+    """
+    tag_dir = _current_run_tag_dir(args)
+    if tag_dir is None:
+        return []
+    path = os.path.join(tag_dir, "Test.xml")
+    if not os.path.isfile(path):
+        return []
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError:
+        return []
+
+    failures = []
+    for test in root.iter("Test"):
+        if test.get("Status") != "failed":
+            continue
+        output = "\n".join(
+            _restore_non_xml_chars(_decode_ctest_value(value))
+            for measurement in test.iter("Measurement")
+            for value in measurement.findall("Value")
+        )
+        failures.append((test.findtext("Name") or "<unknown>", output))
+    return failures
+
+
 def _print_log_group(title: str, content: str) -> None:
     if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb":
         content = _strip_ansi(content)
@@ -688,6 +721,13 @@ def print_failure_log(args, stage_label: str) -> None:
             return
         _print_log_group("build log: Build.xml (recovered)", "\n".join(blocks))
         return
+
+    if stage_label == "test":
+        failures = _read_test_xml_failures(args)
+        if failures:
+            for name, output in failures:
+                _print_log_group(f"test log: {name} (failed)", output)
+            return
 
     content = _read_raw_stage_log(args, stage_label)
     if content is None:
