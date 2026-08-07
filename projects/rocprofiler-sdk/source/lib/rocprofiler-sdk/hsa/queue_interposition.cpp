@@ -450,12 +450,6 @@ async_signal_handler(hsa_signal_t                            completion_signal,
         std::this_thread::sleep_for(std::chrono::microseconds{delay_us});
     }
 
-    // Finalization can end the wait above while the kernel is still live, and
-    // everything below assumes it finished: the profiling interval would be
-    // half-written, a released pooled signal could still be decremented by the
-    // GPU, and subtracting an app signal would let the app observe completion
-    // early. So abandon the batch -- emit nothing, touch no signal. Process
-    // teardown owns the signals and correlation-id references at this point.
     if(!completed)
     {
         ROCP_WARNING << fmt::format(
@@ -584,7 +578,7 @@ complete_signal_less_dispatch(kfd::signal_less_hub_t::proven&& proven)
     static auto _warned = std::atomic<int>{0};
     if(_warned.fetch_add(1, std::memory_order_relaxed) < 10)
     {
-        ROCP_WARNING << fmt::format(
+        ROCP_INFO << fmt::format(
             "KFD dispatch-log: no timing for dispatch (reason={}, gpu={} slot={} idx={} gen={})",
             kfd::finalize_reason_name(_detail.reason),
             proven.key.gpu_id,
@@ -912,14 +906,8 @@ write_interceptor(Queue*                                queue,
             // create a reference for short hand access
             auto& kernel_packet = _packet_data.kernel_packet;
 
-            // Inline path is strict 1:1 forwarding, so the write index of packet i is
-            // base + i, whose low 32 bits match the firmware dispatch_id.
-            //
-            // ASSUMPTION: that holds only while this SDK is the sole packet-modifying
-            // layer on the queue. Any agent that injects, drops or reorders packets
-            // shifts the true hardware slot away from base + i and this dispatch will
-            // mis-correlate. If that becomes possible, derive the index from the actual
-            // wrapped-queue submit position instead.
+            // base + i assumes we are the only packet-modifying layer; another agent
+            // injecting, dropping or reordering packets would misalign the index.
             _packet_data.kfd_dispatch_idx_low32 =
                 static_cast<uint32_t>((_base_pkt_index + i) & 0xFFFFFFFFULL);
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
@@ -945,8 +933,6 @@ write_interceptor(Queue*                                queue,
                 return nullptr;
             };
 
-            // P3: a signal-less batch does not touch the packet's completion signal,
-            // app-provided or not.
             if(!_signal_less_batch)
             {
                 // No barrier packet: borrow a pooled signal if needed, then bump value by 1.
@@ -1028,12 +1014,6 @@ write_interceptor(Queue*                                queue,
                 thr_id,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
 
-            // Signal-less: stage this dispatch's owned pending entry. The payload
-            // holds value data and stable ids only -- no Queue&, no signal handle.
-            //
-            // Staged HERE, after the enqueue callbacks and after external correlation
-            // ids are mapped: an earlier snapshot carries ids never mapped for this
-            // dispatch, and the record built from it would be wrong.
             if(_signal_less_batch && _signal_less_keys[i].has_value())
             {
                 auto _reg           = kfd::signal_less_hub_t::registration{};

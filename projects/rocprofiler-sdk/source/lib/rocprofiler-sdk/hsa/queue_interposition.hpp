@@ -214,9 +214,9 @@ create_queue_state(const hsa_queue_t* queue, bool overwrite = false);
 void
 destroy_queue_state(const hsa_queue_t* queue);
 
-// Wait out any in-flight process_doorbell_impl() for this queue by taking and
-// releasing its gate_lock. The caller MUST hold no hub or owner-registry lock:
-// the enqueue path holds gate_lock while taking those, so the reverse deadlocks.
+// Acquiring the gate drains any in-flight doorbell processing; new admission is
+// already blocked by the earlier close step. The caller MUST hold no hub or
+// owner-registry lock: the enqueue path holds gate_lock while taking those.
 void
 fence_queue_gate(const hsa_queue_t* queue);
 

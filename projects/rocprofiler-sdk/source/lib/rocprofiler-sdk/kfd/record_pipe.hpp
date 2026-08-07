@@ -31,7 +31,8 @@
 #include <vector>
 
 // Bounded SPSC handoff of copied record batches, from the ring-copier to the
-// record processor.
+// record processor. The split is load-bearing: a single thread doing both the
+// copy and the pairing fell behind and overran the firmware ring.
 //
 // The slots ARE the buffer pool: each holds a vector whose capacity is reused,
 // so steady state allocates nothing.

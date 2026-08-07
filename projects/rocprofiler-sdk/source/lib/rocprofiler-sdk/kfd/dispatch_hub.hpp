@@ -119,13 +119,10 @@ public:
 
     // --- enqueue side -----------------------------------------------------
 
-    // Whole-batch atomic: validates every entry first and inserts all or none.
-    // No overwrite semantics anywhere. The caller must fall back to the signal
-    // path for the WHOLE batch on false.
-    // NO session-mode gate: eligibility already committed this batch to the
-    // signal-less path, so refusing it here would leave dispatches that have
-    // skipped their completion signals with nothing to complete them. Teardown
-    // step 5 leaks anything that registers late, which retires nothing.
+    // Validates and inserts a whole batch, all or none; caller falls back to the
+    // signal path on false. Not mode-gated: eligibility already committed this
+    // batch, so refusing here would leave dispatches that skipped their signals
+    // with nothing to complete them.
     bool register_batch(std::vector<registration>&& batch)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
