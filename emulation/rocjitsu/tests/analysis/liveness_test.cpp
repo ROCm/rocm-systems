@@ -3037,7 +3037,7 @@ TEST(LivenessAnalysis, Gfx1250D16LoadImplicitUseResolvesDestinationBank) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), nullptr, options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
