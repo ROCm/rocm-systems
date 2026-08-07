@@ -1335,4 +1335,49 @@ TEST(Cdna4DecodeTest, MfmaScaleF8f6f4ConsumesVop3px2Prefix) {
   EXPECT_EQ(inst->size(), sizeof(words));
 }
 
+// v_accvgpr_read's 9-bit src0 field encodes accumulator N as 256 + N, which the
+// decoder shifts into the OPR_SRC_ACCVGPR range [768, 1023]. A raw field below 256 is
+// malformed and must be left unshifted; adding the shift pushes it into [512, 767],
+// which vgpr_index() reads directly as an out-of-range physical VGPR. word[0] is fixed
+// (opcode + vdst=v3); word[1]'s low bits carry src0 (base 0x18000000 | 256 reproduces
+// the known-good "a0" encoding). CDNA3 and CDNA4 both generate the shift. Reverting
+// its `>= 256` guard makes these malformed cases resolve to 512, 517, 640, and 767.
+TEST(AccVgprSrcCanonicalizationTest, MalformedRawSrcBelow256StaysInUnifiedRange) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (uint32_t raw : {0u, 5u, 128u, 255u}) {
+      const uint32_t words[] = {0xD3D84003u, 0x18000000u | raw};
+      std::unique_ptr<Instruction> inst(decoder->decode(words));
+      ASSERT_NE(inst, nullptr);
+      EXPECT_EQ(inst->mnemonic(), "v_accvgpr_read");
+      ASSERT_EQ(inst->num_src_operands(), 1);
+      const Operand *src0 = inst->src_operand(0);
+      ASSERT_NE(src0, nullptr);
+      EXPECT_EQ(src0->encoding_value(), static_cast<int>(raw))
+          << "arch=" << arch << " raw src0 " << raw << " was canonicalized in place";
+      EXPECT_LT(src0->encoding_value(), 512)
+          << "arch=" << arch << " raw src0 " << raw << " escaped into [512, 767]";
+    }
+  }
+}
+
+// A legal accumulator field (256 + N) resolves to the unified AccVGPR index 256 + N.
+TEST(AccVgprSrcCanonicalizationTest, LegalRawSrcResolvesToUnifiedAccIndex) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (uint32_t n : {0u, 1u, 63u}) {
+      const uint32_t words[] = {0xD3D84003u, 0x18000000u | (256u + n)};
+      std::unique_ptr<Instruction> inst(decoder->decode(words));
+      ASSERT_NE(inst, nullptr);
+      EXPECT_EQ(inst->mnemonic(), "v_accvgpr_read");
+      ASSERT_EQ(inst->num_src_operands(), 1);
+      const Operand *src0 = inst->src_operand(0);
+      ASSERT_NE(src0, nullptr);
+      EXPECT_EQ(src0->unified_vgpr_index(), 256u + n);
+    }
+  }
+}
+
 } // namespace

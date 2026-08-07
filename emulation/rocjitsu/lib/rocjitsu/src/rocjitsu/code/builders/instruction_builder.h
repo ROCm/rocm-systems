@@ -2,23 +2,37 @@
 // SPDX-License-Identifier: MIT
 
 /// @file instruction_builder.h
-/// @brief ISA-parameterized instruction encoding helpers for code patching.
-/// @brief Builder functions for constructing common AMDGPU instructions.
+/// @brief Arch-parameterized encoders for the AMDGPU scalar instructions the DBT
+///        and DBI patchers emit.
 ///
-/// @details Provides helpers for encoding frequently-used instructions
-/// (s_branch, s_nop) in the DBT and DBI layers. The SOPP encoding
-/// format is identical across all AMDGPU ISA generations:
+/// @details These helpers turn a target ISA (rj_code_arch_t) plus operands into
+/// the raw instruction word(s) that code patching splices into a kernel. The scope
+/// is the scalar (SOP*) instruction families used by the trampoline envelope and
+/// inline patches, plus the scalar-operand and inline-constant codes they
+/// reference. Vector, scratch, lane, and waitcnt encoders live in spill_builders.h.
+///
+/// There are two layers. The pack_* helpers are pure field packers for one fixed
+/// encoding format (SOPP, SOP1, SOP2, SOPC, or SOPK) and do not depend on the
+/// generation. The build_* helpers are arch-parameterized front ends: they pick
+/// the per-generation opcode and prefix, then delegate to the packers or to the
+/// generated per-arch builders.
+///
+/// The encoding format of a family is stable across generations, but the opcodes
+/// are not. For example, s_branch is opcode 2 on GFX9 (CDNA1-4) and 32 on GFX12
+/// (RDNA4). Every build_* therefore takes rj_code_arch_t and throws
+/// util::UnimplementedInst for an arch it does not model. Scalar-operand codes
+/// (VCC, EXEC, M0) and inline constants come from the generated operand tables
+/// (operand_types.h); see scalar_operand_m0 / scalar_operand_vcc_lo /
+/// scalar_operand_exec_lo.
+///
+/// The SOPP format, for reference:
 ///   bits[31:23] = SOPP encoding selector
 ///   bits[22:16] = op (7-bit opcode)
 ///   bits[15:0]  = simm16 (16-bit signed/unsigned immediate)
-///
-/// IMPORTANT: While the SOPP *format* is consistent across ISAs, the
-/// *opcodes* for specific instructions differ between generations.
-/// s_branch is opcode 2 on GFX9 (CDNA1-4) but opcode 32 on GFX12 (RDNA4).
-/// These builders are parameterized by target ISA via rj_code_arch_t.
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -30,25 +44,35 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna1/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna2/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna1/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna2/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3_5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/operand_types.h"
 #include "util/except.h"
 
 namespace rocjitsu {
@@ -295,6 +319,134 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 /// @brief Scalar source operand encoding for a non-negative inline integer.
 [[nodiscard]] inline constexpr uint16_t scalar_positive_inline_u32(uint16_t value) {
   return static_cast<uint16_t>(kScalarPositiveInlineBase + value);
+}
+
+/// @brief Scalar-operand code for M0 on @p arch.
+///
+/// M0 is operand 124 on gfx9 / gfx10.x (CDNA1-4, RDNA1/2) but was moved to 125
+/// on gfx11+ (RDNA3/3.5/4, gfx1250), where 124 became NULL. Each case returns
+/// that arch's generated OPR_SDST_M0 code so the value tracks the operand table.
+[[nodiscard]] inline constexpr uint16_t scalar_operand_m0(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::OPR_SDST_M0;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::OPR_SDST_M0;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::OPR_SDST_M0;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::OPR_SDST_M0;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::OPR_SDST_M0;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::OPR_SDST_M0;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::OPR_SDST_M0;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::OPR_SDST_M0;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::OPR_SDST_M0;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::OPR_SDST_M0;
+  default:
+    throw util::UnimplementedInst("M0 operand code for target architecture");
+  }
+}
+
+/// @brief Scalar-operand code for VCC_LO on @p arch.
+///
+/// VCC_LO is operand 106 on every modeled AMDGPU generation; each case still
+/// returns that arch's generated OPR_SDST_VCC_LO so the value tracks the operand
+/// table rather than a hard-coded constant.
+[[nodiscard]] inline constexpr uint16_t scalar_operand_vcc_lo(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::OPR_SDST_VCC_LO;
+  default:
+    throw util::UnimplementedInst("VCC_LO operand code for target architecture");
+  }
+}
+
+/// @brief Scalar-operand code for EXEC_LO on @p arch.
+///
+/// EXEC_LO is operand 126 on every modeled AMDGPU generation; each case still
+/// returns that arch's generated OPR_SDST_EXEC_LO so the value tracks the operand
+/// table rather than a hard-coded constant.
+[[nodiscard]] inline constexpr uint16_t scalar_operand_exec_lo(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::OPR_SDST_EXEC_LO;
+  default:
+    throw util::UnimplementedInst("EXEC_LO operand code for target architecture");
+  }
+}
+
+/// @brief Inline-constant scalar source for -1 (all bits set) on @p arch.
+///
+/// A b64 source sign-extends to all ones, so `s_mov_b64 exec, -1` = all lanes
+/// active. Code 193 on every modeled generation; each case returns that arch's
+/// generated code so the value tracks the operand table.
+[[nodiscard]] inline constexpr uint16_t scalar_inline_neg_one(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::OPR_SRC_NEG_INT_MIN;
+  default:
+    throw util::UnimplementedInst("inline -1 source code for target architecture");
+  }
 }
 
 /// @brief Compute the SOPP simm16 dword field for a branch from @p branch_pc
@@ -547,6 +699,15 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   }
 }
 
+/// @brief Get the s_mov_b64 opcode for a target ISA.
+[[nodiscard]] inline constexpr uint32_t sop1_op_mov_b64(rj_code_arch_t arch) {
+  switch (arch) {
+    ROCJITSU_COMMON_OPCODE_CASES(kSMovB64Sop1);
+  default:
+    throw util::UnimplementedInst("s_mov_b64 for target architecture");
+  }
+}
+
 /// @brief SOP2 opcode for s_cselect_b32 on @p arch.
 [[nodiscard]] inline constexpr uint32_t sop2_op_cselect_b32(rj_code_arch_t arch) {
   switch (arch) {
@@ -667,6 +828,12 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
   return build_sop1_encoding(arch, sop1_op_mov_b32(arch), sdst, ssrc0);
 }
 
+/// @brief Encode s_mov_b64 for the given target ISA (SGPR pair or EXEC/VCC).
+[[nodiscard]] inline constexpr uint32_t build_s_mov_b64(uint16_t sdst, uint16_t ssrc0,
+                                                        rj_code_arch_t arch) {
+  return build_sop1_encoding(arch, sop1_op_mov_b64(arch), sdst, ssrc0);
+}
+
 /// @brief Encode s_lshl_b32 for the given target ISA.
 [[nodiscard]] inline constexpr uint32_t build_s_lshl_b32(uint16_t sdst, uint16_t ssrc0,
                                                          uint16_t ssrc1, rj_code_arch_t arch) {
@@ -703,6 +870,19 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 [[nodiscard]] inline constexpr uint32_t build_s_cmp_lg_u32(uint16_t ssrc0, uint16_t ssrc1,
                                                            rj_code_arch_t arch) {
   return build_sopc_encoding(arch, sopc_op_cmp_lg_u32(arch), ssrc0, ssrc1);
+}
+
+// VOP3 src-operand encoders used by the DBI register-spilling primitives, whose
+// ISA-dispatch builders live in spill_builders.h.
+
+/// @brief VOP3 src encoding for a VGPR (256 + index).
+[[nodiscard]] inline constexpr uint16_t vop3_vgpr_src(uint16_t vgpr) {
+  return static_cast<uint16_t>(256u + vgpr);
+}
+
+/// @brief VOP3 src encoding for a non-negative inline integer (lane selector).
+[[nodiscard]] inline constexpr uint16_t vop3_inline_uint(uint16_t value) {
+  return static_cast<uint16_t>(kScalarPositiveInlineBase + value);
 }
 
 } // namespace rocjitsu
