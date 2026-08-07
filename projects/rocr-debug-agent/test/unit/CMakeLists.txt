@@ -52,12 +52,14 @@ add_executable(
     rocm-debug-agent-unit-tests
     test_uri.cpp
     test_formatting.cpp
+    test_options.cpp
 )
 
 # Link directly to source files (not the .so).
 target_sources(
     rocm-debug-agent-unit-tests
     PRIVATE
+        ${PROJECT_SOURCE_DIR}/../src/agent_config.cpp
         ${PROJECT_SOURCE_DIR}/../src/agent_utils.cpp
         ${PROJECT_SOURCE_DIR}/../src/logging.cpp
 )
