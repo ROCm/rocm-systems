@@ -35,16 +35,14 @@
 #include "palSysMemory.h"
 #include "palDbgPrint.h"
 
-/* PAL_INTERFACE_MAJOR_VERSION and the version table have moved to inc/util/palVersion.h!
-
-*/
-
 namespace Pal
 {
 
 // Forward declarations
 class      IPlatform;
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 987
+/// @deprecated Use AsicRevision instead.
 /// This is a list of GPUs that the NULL OS layer can compile shaders to in offline mode.
 enum class NullGpuId : uint32
 {
@@ -74,7 +72,9 @@ enum class NullGpuId : uint32
     Max,           ///< The maximum count of null devices.
     All,           ///< If you want to enumerate all null devices.
 };
+#endif
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 989
 /// Specifies which graphics IP level (GFXIP) this device has.
 enum class GfxIpLevel : uint32
 {
@@ -91,56 +91,214 @@ enum class GfxIpLevel : uint32
     GfxIp11_5,     ///< GFXIP 11.5 (Strix)
     GfxIp12,       ///< GFXIP 12.0 (Navi4x)
 };
+#endif
 
-/// Specifies the hardware revision. Some AMD tools hard-code these values so we cannot change them. New ASICs should
-/// be added at the end of the list and be given the next highest value.
-enum class AsicRevision : uint32
+/// The version of a particular hardware IP in a specific ASIC.
+///
+/// @note The fields are purposefully ordered such that the uint32() operator compiles to a single "MOV" instruction
+///       on little-endian platforms.
+struct IpTriple
 {
-    Unknown          = 0x00,
-    Navi10           = 0x1F, ///< 10.1.0
-    Navi12           = 0x21, ///< 10.1.1
-    Navi14           = 0x23, ///< 10.1.2
-    Navi21           = 0x24, ///< 10.3.0
-    Navi22           = 0x25, ///< 10.3.1
-    Navi23           = 0x26, ///< 10.3.2
-    Navi24           = 0x27, ///< 10.3.4
-    Navi31           = 0x2C, ///< 11.0.0
-    Navi32           = 0x2D, ///< 11.0.1
-    Navi33           = 0x2E, ///< 11.0.2
-    Rembrandt        = 0x2F, ///< 10.3.5
-    Strix1           = 0x33, ///< 11.5.0
-    Raphael          = 0x34, ///< 10.3.6
-    Phoenix1         = 0x35, ///< 11.0.3
-    Phoenix2         = 0x38, ///< 11.0.3
-    HawkPoint1       = 0x39, ///< 11.0.3
-    HawkPoint2       = 0x3A, ///< 11.0.3
-    Krackan1         = 0x3B, ///< 11.5.2
-    StrixHalo        = 0x3C, ///< 11.5.1
-    Navi44           = 0x3D, ///< 12.0.0
-    Navi48           = 0x3E, ///< 12.0.1
-    Krackan2         = 0x3F, ///< 11.5.3
+    uint32 stepping : 16; ///< Stepping value
+    uint32 minor    : 8;  ///< Minor revision value
+    uint32 major    : 8;  ///< Major revision value
+
+    /// We define a custom constructor solely to avoid using designated initializers, which force us to declare const
+    /// IpTriples in field order, which is too confusing. For example: IpTriple{.stepping = 1, .minor = 5, .major = 11}
+    ///
+    /// Note that C++'s arcane rules cause "IpTriple{11, 5, 1}" to call this constructor with major = 11. minor = 5,
+    /// and stepping = 1. So if you see code that looks like classic aggregate initialization, you don't need to worry
+    /// that it might actually be setting the values backwards.
+    constexpr IpTriple(uint32 major, uint32 minor, uint32 stepping) : stepping{stepping}, minor{minor}, major{major} {}
+
+    /// And this custom zeroing constructor guarantees that "IpTriple{}" still zeros all fields.
+    constexpr IpTriple() : IpTriple(0, 0, 0) {}
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 982
+    /// These constructors only exist for backcompat, where clients are using partial aggregate initialization.
+    /// This is typically done where they're using IpTriple to express a GfxIpLevel which is a misuse of IpTriple.
+    /// The new IpLevel struct declared below should be used instead going forwards.
+    constexpr IpTriple(uint32 major, uint32 minor) : IpTriple(major, minor, 0) {}
+    constexpr IpTriple(uint32 major) : IpTriple(major, 0, 0) {}
+#endif
+
+    /// This conversion is designed such that logically higher version numbers will always convert into higher values.
+    /// For example, this should evaluate to true: uint32(IpTriple(12, 0, 1)) > uint32(IpTriple(11, 5, 0))
+    ///
+    /// @returns A single uint32 which uniquely represents this IpTriple.
+    constexpr uint32 Bits() const { return stepping | (minor << 16) | (major << 24); }
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 989
+    constexpr operator uint32() const { return Bits(); }
+#endif
 };
 
+///@{
+/// Some convenient "IpTriple <> IpTriple" comparison overloads. The inequality operators have been excluded because:
+/// 1. Steppings are more like identifiers than ordered verison numbers so it's not intuitive why one ASIC's stepping
+///    would sort higher than another's stepping.
+/// 2. We want to prevent people from writing code like "if (gfxTriple >= IpTriple(11, 5, 0))", which would result in
+///    incorrect behavior if the author actually meant "if (gfxTriple >= IpLevel(11, 5))".
+/// So the risk/reward ratio doesn't make IpTriple inequalities seem worth supporting at the moment.
+///
+/// The definition of the "Bits()" conversion was designed such that these operators should compile to the minimal
+/// number of instructions: a CMP + SET pair.
+///
+/// @param [in] lhs  The left IpTriple in the comparison.
+/// @param [in] rhs  The right IpTriple in the comparison.
+///
+/// @returns True if the comparison is satisfied.
+constexpr bool operator==(IpTriple lhs, IpTriple rhs) { return lhs.Bits() == rhs.Bits(); }
+constexpr bool operator!=(IpTriple lhs, IpTriple rhs) { return lhs.Bits() != rhs.Bits(); }
+///@}
+
+/// The version of a particular hardware IP across a group of ASICs which only differ by stepping values.
+///
+/// @note The fields are purposefully ordered such that the uint32() operator compiles to a single "MOV" instruction
+///       on little-endian platforms. The @ref reserved field is required to make comparisons between IpLevel and
+///       @ref IpTriple as trivial as possible.
+struct IpLevel
+{
+    uint32 reserved : 16; ///< Reserved. Must *always* be set to zero!
+    uint32 minor    : 8;  ///< Minor revision value
+    uint32 major    : 8;  ///< Major revision value
+
+    /// We define a custom constructor solely to avoid using designated initializers, which force us to declare const
+    /// IpLevels in field order, which is too confusing. For example: IpLevel{.minor = 5, .major = 11}
+    ///
+    /// Note that C++'s arcane rules cause "IpLevel{11, 5}" to call this constructor with major = 11. minor = 5. So if
+    /// you see code that looks like classic aggregate initialization, you don't need to worry that it might actually
+    /// be setting the values backwards.
+    constexpr IpLevel(uint32 major, uint32 minor) : reserved{0}, minor{minor}, major{major} {}
+
+    /// And this custom zeroing constructor guarantees that "IpLevel{}" still zeros all fields.
+    constexpr IpLevel() : IpLevel(0, 0) {}
+
+    /// This converting constructor is purposefully marked explicit to avoid accidental conversions.
+    constexpr explicit IpLevel(IpTriple triple) : IpLevel(triple.major, triple.minor) {}
+
+    /// This conversion is designed such that logically higher version numbers will always convert into higher values.
+    /// For example, this should evaluate to true: uint32(IpLevel(12, 0)) > uint32(IpLevel(11, 5)).
+    ///
+    /// @returns A single uint32 which uniquely represents this IpLevel.
+    constexpr uint32 Bits() const { return reserved | (minor << 16) | (major << 24); }
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 989
+    constexpr operator uint32() const { return Bits(); }
+#endif
+};
+
+///@{
+/// Some convenient "IpLevel <> IpLevel" comparison overloads.
+///
+/// The definition of the "Bits()" conversion was designed such that these operators should compile to the minimal
+/// number of instructions: a CMP + SET pair.
+///
+/// @param [in] lhs  The left IpLevel in the comparison.
+/// @param [in] rhs  The right IpLevel in the comparison.
+///
+/// @returns True if the comparison is satisfied.
+constexpr bool operator<(IpLevel lhs, IpLevel rhs)  { return lhs.Bits() < rhs.Bits(); }
+constexpr bool operator>(IpLevel lhs, IpLevel rhs)  { return lhs.Bits() > rhs.Bits(); }
+constexpr bool operator<=(IpLevel lhs, IpLevel rhs) { return lhs.Bits() <= rhs.Bits(); }
+constexpr bool operator>=(IpLevel lhs, IpLevel rhs) { return lhs.Bits() >= rhs.Bits(); }
+constexpr bool operator==(IpLevel lhs, IpLevel rhs) { return lhs.Bits() == rhs.Bits(); }
+constexpr bool operator!=(IpLevel lhs, IpLevel rhs) { return lhs.Bits() != rhs.Bits(); }
+///@}
+
+///@{
+/// Some convenient "IpTriple <> IpLevel" comparison overloads. These are specifically intended for cases like
+/// "if (triple >= IpLevel(11, 5))" where we have a dynamic IpTriple that we want to test against hard-coded levels.
+///
+/// The definitions of both structs' "Bits()" conversions were designed such that these operators should compile to
+/// the minimal number of instructions; at most one ALU and a CMP + SET pair. If the @ref level parameter is a
+/// compile-time constant the ALU should be eliminated from all inequalities.
+///
+/// @param [in] triple  The left IpTriple in the comparison.
+/// @param [in] level   The right IpLevel in the comparison.
+///
+/// @returns True if the comparison is satisfied.
+constexpr bool operator<(IpTriple triple, IpLevel level)  { return triple.Bits() <  level.Bits(); }
+constexpr bool operator>=(IpTriple triple, IpLevel level) { return triple.Bits() >= level.Bits(); }
+constexpr bool operator>(IpTriple triple, IpLevel level)  { return triple.Bits() >  (level.Bits() | 0xFFFFu); }
+constexpr bool operator<=(IpTriple triple, IpLevel level) { return triple.Bits() <= (level.Bits() | 0xFFFFu); }
+constexpr bool operator==(IpTriple triple, IpLevel level) { return (triple.Bits() & ~0xFFFFu) == level.Bits(); }
+constexpr bool operator!=(IpTriple triple, IpLevel level) { return (triple.Bits() & ~0xFFFFu) != level.Bits(); }
+constexpr bool operator<(IpLevel level, IpTriple triple)  { return triple > level; }
+constexpr bool operator>=(IpLevel level, IpTriple triple) { return triple <= level; }
+constexpr bool operator>(IpLevel level, IpTriple triple)  { return triple < level; }
+constexpr bool operator<=(IpLevel level, IpTriple triple) { return triple >= level; }
+constexpr bool operator==(IpLevel level, IpTriple triple) { return triple == level; }
+constexpr bool operator!=(IpLevel level, IpTriple triple) { return triple != level; }
+///@}
+
+// The comparisons above only work if both structs are perfectly arranged in a uint32.
+static_assert(sizeof(IpTriple) == sizeof(uint32));
+static_assert(sizeof(IpLevel)  == sizeof(uint32));
+
+/// Specifies the hardware revision. Values in this enum are intentionally dense so they can be used as direct table
+/// indices for null-backend GPU info.
+enum class AsicRevision : uint32
+{
+    Unknown = 0,
+    Navi10,               ///< 10.1.0
+    Navi12,               ///< 10.1.1
+    Navi14,               ///< 10.1.2
+    Navi21,               ///< 10.3.0
+    Navi22,               ///< 10.3.1
+    Navi23,               ///< 10.3.2
+    Navi24,               ///< 10.3.4
+    Navi31,               ///< 11.0.0
+    Navi32,               ///< 11.0.1
+    Navi33,               ///< 11.0.2
+    Rembrandt,            ///< 10.3.5
+    Strix1,               ///< 11.5.0
+    Raphael,              ///< 10.3.6
+    Phoenix1,             ///< 11.0.3
+    Phoenix2,             ///< 11.0.3
+    HawkPoint1,           ///< 11.0.3
+    HawkPoint2,           ///< 11.0.3
+    StrixHalo,            ///< 11.5.1
+    Krackan1,             ///< 11.5.2
+    Krackan2,             ///< 11.5.3
+    Navi44,               ///< 12.0.0
+    Navi48,               ///< 12.0.1
+    Count,
+// These are not included in Count, since Count is the number of unique entries
+};
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 987
+/// @deprecated Use GpuInfo directly.
 /// Maps a null GPU ID to its associated text name.
 struct NullGpuInfo
 {
     NullGpuId   nullGpuId;  ///< ID of an ASIC that PAL supports for override purposes
     const char* pGpuName;   ///< Text name of the ASIC specified by nullGpuId
 };
+#endif
 
 /// Various IDs and info associated with a particular GPU.
 struct GpuInfo
 {
     AsicRevision asicRev;     ///< PAL specific ASIC revision identifier.
-    NullGpuId    nullId;      ///< PAL specific GPU ID supported by the NULL OS layer.
-    GfxIpLevel   gfxIpLevel;  ///< PAL specific identifier for the device's graphics IP level (GFXIP).
+    IpTriple     gfxTriple;   ///< Full GFX IP version (major.minor.stepping) of this GPU.
     uint32       familyId;    ///< Hardware family ID. Driver-defined identifier for a particular family of devices.
     uint32       eRevId;      ///< GPU emulation/internal revision ID.
     uint32       revisionId;  ///< GPU revision. HW-specific value differentiating between different SKUs or revisions.
     uint32       gfxEngineId; ///< Coarse-grain GFX engine ID (R800, SI, etc.).
     uint32       deviceId;    ///< PCI device ID (e.g., Hawaii XT = 0x67B0).
     const char*  pGpuName;    ///< ASIC name and AMDGPU target name (e.g., "NAVI31:gfx1100").
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 987
+    NullGpuId    nullId;      ///< @deprecated PAL specific GPU ID supported by the NULL OS layer.
+    GfxIpLevel   gfxIpLevel;  ///< @deprecated Use gfxTriple instead.
+#endif
 };
+
+/// Table of null-device GPU information indexed by AsicRevision.
+/// Entries with nullptr pGpuName are unsupported for null device use.
+extern const GpuInfo NullGpuInfoTable[static_cast<uint32>(AsicRevision::Count)];
+
+/// Default ASIC revision used when AsicRevision::Unknown is passed to CreateNullDevice.
+/// Matches the legacy NullGpuId::Default behavior (Navi31 was the first device in the old lookup table).
+constexpr AsicRevision DefaultNullDeviceRevision = AsicRevision::Navi31;
 
 /// The client UMD must identify its API using this enum. Some UMD builds may implement multiple APIs so they must
 /// specify which API they're implementing at runtime. Note that the PAL_CLIENT macros are the preferred way to
@@ -172,10 +330,13 @@ struct PlatformCreateInfo
         {
             uint32 disableGpuTimeout              :  1; ///< Disables GPU timeout detection (Windows only)
             uint32 force32BitVaSpace              :  1; ///< Forces 32bit VA space for the flat address with 32bit ISA
-            uint32 createNullDevice               :  1; ///< Set to create a null device, so "nullGpuId" below for the
-                                                        ///  ID of the GPU the created device will be based on.  Null
-                                                        ///  devices operate in IFH mode; useful for off-line shader
-                                                        ///  compilations.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 987
+            uint32 useNullBackend                 :  1; ///< Set to use the null backend. EnumerateDevices() returns
+                                                        ///  Result::Unsupported. Use IPlatform::CreateNullDevice()
+                                                        ///  to create specific null devices for offline compilation.
+#else
+            uint32 createNullDevice               :  1; ///< @deprecated Use useNullBackend instead.
+#endif
             uint32 enableSvmMode                  :  1; ///< Enable SVM mode. When this bit is set, PAL will reserve
                                                         ///  cpu va range with size "maxSvmSize", and allow client to
                                                         ///  to create gpu or pinned memory for use of Svm.
@@ -198,7 +359,10 @@ struct PlatformCreateInfo
     } flags;                                            ///< Platform-wide creation flags.
 
     ClientApi clientApiId; ///< Client API ID.
-    NullGpuId nullGpuId;   ///< ID for the null device. Ignored unless the above flags.createNullDevice bit is set.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 987
+    NullGpuId nullGpuId;   ///< @deprecated ID for the null device. Ignored unless the above flags.createNullDevice
+                           ///  bit is set. Use IPlatform::CreateNullDevice(AsicRevision) instead.
+#endif
     uint16    apiMajorVer; ///< Major API version number to be used by RGP. Should be set by client based on their
                            ///  contract with RGP.
     uint16    apiMinorVer; ///< Minor API version number to be used by RGP. Should be set by client based on their
@@ -255,11 +419,12 @@ Result PAL_STDCALL CreatePlatform(
     void*                       pPlacementAddr,
     IPlatform**                 ppPlatform);
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 987
 /**
  ***********************************************************************************************************************
- * @brief Provides an association of NULL devices and their associated text name.  NULL devices operate in IFH mode
- *        and are primarily intended for off-line shader compilation mode.  The text name is provided for end-user
- *        identification of the GPU device being created.
+ * @brief @deprecated Provides an association of NULL devices and their associated text name.
+ *
+ * @deprecated Use NullGpuInfoTable indexed by AsicRevision instead.
  *
  * @param [in,out] pNullDeviceCount   On input, this is the size of the "pNullDevices" array.  On output, this
  *                                    reflects the number of valid entries in the "pNullDevices" array.
@@ -278,7 +443,9 @@ Result PAL_STDCALL EnumerateNullDevices(
 
 /**
  ***********************************************************************************************************************
- * @brief Provides the NULL device GpuInfo data for the specified NullGpuId.
+ * @brief @deprecated Provides the NULL device GpuInfo data for the specified NullGpuId.
+ *
+ * @deprecated Use NullGpuInfoTable[static_cast<uint32>(asicRevision)] instead.
  *
  * @param [in]  nullGpuId Null GPU ID to lookup.
  * @param [out] pGpuInfo  GpuInfo data on successful lookup. Must not be null.
@@ -292,18 +459,11 @@ Result PAL_STDCALL GetNullGpuInfoForNullGpuId(
     NullGpuId nullGpuId,
     GpuInfo*  pGpuInfo);
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 933
-inline Result PAL_STDCALL GetGpuInfoForNullGpuId(
-    NullGpuId nullGpuId,
-    GpuInfo*  pGpuInfo)
-{
-    return GetNullGpuInfoForNullGpuId(nullGpuId, pGpuInfo);
-}
-#endif
-
 /**
  ***********************************************************************************************************************
- * @brief Provides the NULL device GpuInfo data for the specified GPU name string.
+ * @brief @deprecated Provides the NULL device GpuInfo data for the specified GPU name string.
+ *
+ * @deprecated Use NullGpuInfoTable and iterate over entries with non-null pGpuName instead.
  *
  * @param [in]  pGpuName Name string of the GPU to lookup (e.g., "NAVI10").
  * @param [out] pGpuInfo GpuInfo data on successful lookup. Must not be null.
@@ -317,18 +477,11 @@ Result PAL_STDCALL GetNullGpuInfoForName(
     const char* pGpuName,
     GpuInfo*    pGpuInfo);
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 933
-inline Result PAL_STDCALL GetGpuInfoForName(
-    const char* pGpuName,
-    GpuInfo*    pGpuInfo)
-{
-    return GetNullGpuInfoForName(pGpuName, pGpuInfo);
-}
-#endif
-
 /**
  ***********************************************************************************************************************
- * @brief Provides the NULL device GpuInfo data for the specified hardware revision.
+ * @brief @deprecated Provides the NULL device GpuInfo data for the specified hardware revision.
+ *
+ * @deprecated Use NullGpuInfoTable[static_cast<uint32>(asicRevision)] instead.
  *
  * @param [in]  asicRevision Hardware revision to lookup.
  * @param [out] pGpuInfo     GpuInfo data on successful lookup. Must not be null.
@@ -341,14 +494,6 @@ inline Result PAL_STDCALL GetGpuInfoForName(
 Result PAL_STDCALL GetNullGpuInfoForAsicRevision(
     AsicRevision asicRevision,
     GpuInfo*     pGpuInfo);
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 933
-inline Result PAL_STDCALL GetGpuInfoForAsicRevision(
-    AsicRevision asicRevision,
-    GpuInfo*     pGpuInfo)
-{
-    return GetNullGpuInfoForAsicRevision(asicRevision, pGpuInfo);
-}
 #endif
 
 /**
@@ -374,7 +519,7 @@ inline Result PAL_STDCALL GetGpuInfoForAsicRevision(
  *
  * After a successful call to CreatePlatform(), the client should call @ref IPlatform::EnumerateDevices() in order to
  * get a list of supported devices attached to the system.  This function returns an array of @ref IDevice objects
- * which are used by the client to query properties of the devices and eventually execute work on those devices.
+ * which are used by the client to query properties of the devicess and eventually execute work on those devices.
  * IPlatform::EnumerateDevices() is not available to util-only clients (PAL_BUILD_CORE=0).
  *
  * The client may re-enumerate devices at any time by calling IPlatform::EnumerateDevices().  The client must make sure

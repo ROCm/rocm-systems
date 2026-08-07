@@ -42,6 +42,33 @@ TEST(MxFloatNarrow, DeepestSubnormalBoundary) {
                                     util::f32_to_bf6_e3m2_sr);
 }
 
+TEST(Fp16OvflMode, F32ToF16ClampsFiniteOverflowOnly) {
+  EXPECT_EQ(util::f32_to_f16_mode(70000.0f, false), 0x7C00);
+  EXPECT_EQ(util::f32_to_f16_mode(70000.0f, true), 0x7BFF);
+  EXPECT_EQ(util::f32_to_f16_mode(-70000.0f, false), 0xFC00);
+  EXPECT_EQ(util::f32_to_f16_mode(-70000.0f, true), 0xFBFF);
+  EXPECT_EQ(util::f32_to_f16_mode(std::numeric_limits<float>::infinity(), true), 0x7C00);
+}
+
+TEST(Fp16OvflMode, F32ToF16SrClampsFiniteOverflowOnly) {
+  constexpr uint32_t kOverflowSeed = 0xFFFFFFFFu;
+  EXPECT_EQ(util::f32_to_f16_sr_mode(70000.0f, kOverflowSeed, false), 0x7C00);
+  EXPECT_EQ(util::f32_to_f16_sr_mode(70000.0f, kOverflowSeed, true), 0x7BFF);
+  EXPECT_EQ(util::f32_to_f16_sr_mode(-70000.0f, kOverflowSeed, false), 0xFC00);
+  EXPECT_EQ(util::f32_to_f16_sr_mode(-70000.0f, kOverflowSeed, true), 0xFBFF);
+  EXPECT_EQ(util::f32_to_f16_sr_mode(std::numeric_limits<float>::infinity(), kOverflowSeed, true),
+            0x7C00);
+}
+
+TEST(Fp16OvflMode, F32ToBf16RneAndSrClampRoundedFiniteOverflowOnly) {
+  const float max_f32 = std::numeric_limits<float>::max();
+  EXPECT_EQ(util::f32_to_bf16_rne_mode(max_f32, false), 0x7F80);
+  EXPECT_EQ(util::f32_to_bf16_rne_mode(max_f32, true), 0x7F7F);
+  EXPECT_EQ(util::f32_to_bf16_sr_mode(max_f32, 0xFFFFFFFFu, false), 0x7F80);
+  EXPECT_EQ(util::f32_to_bf16_sr_mode(max_f32, 0xFFFFFFFFu, true), 0x7F7F);
+  EXPECT_EQ(util::f32_to_bf16_rne_mode(std::numeric_limits<float>::infinity(), true), 0x7F80);
+}
+
 // ---- FP4 E2M1 (exhaustive — 16 values) ----
 
 // Hardcoded truth table for positive FP4 E2M1 codes (independent of data_types.h).
@@ -271,13 +298,41 @@ TEST(Fp8E4M3Fnuz, SrNarrow) {
   }
 }
 
+TEST(Fp8E4M3Fnuz, Fp16OvflModeControlsOverflow) {
+  // FP16_OVFL follows rounded overflow: just-above-max finite values that
+  // round back to max remain finite, while deeper overflow is mode-controlled.
+  const float rne_overflow_tie = 248.0f;
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(240.0f, false), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(241.0f, false), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(247.9f, false), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(std::nextafter(rne_overflow_tie, 0.0f), false),
+            0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(rne_overflow_tie, false), 0x80);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(rne_overflow_tie, true), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(-std::nextafter(rne_overflow_tie, 0.0f), false),
+            0xFF);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(-rne_overflow_tie, false), 0x80);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(-rne_overflow_tie, true), 0xFF);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(300.0f, false), 0x80);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(300.0f, true), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(-300.0f, false), 0x80);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(-300.0f, true), 0xFF);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr_mode(300.0f, 0, false), 0x80);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr_mode(300.0f, 0xFFFFFFFFu, false), 0x80);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr_mode(300.0f, 0, true), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr_mode(-300.0f, 0, false), 0x80);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr_mode(-300.0f, 0, true), 0xFF);
+}
+
 TEST(Fp8E4M3, RneNarrow) {
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(std::numeric_limits<float>::quiet_NaN()), 0x7F);
-  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(std::numeric_limits<float>::infinity()), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(std::numeric_limits<float>::infinity()), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(-std::numeric_limits<float>::infinity()), 0xFF);
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(0.0f), 0x00);
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(1.0f), 0x38);
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(448.0f), 0x7E);
-  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(500.0f), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(500.0f), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(-500.0f), 0xFF);
   // Denorm overflow: largest denorm (code 7 = 7*2^-9) rounds up to
   // smallest normal (code 8 = 2^-6) for values just above midpoint.
   float largest_denorm = util::fp8_e4m3_to_f32(0x07);
@@ -300,9 +355,14 @@ TEST(Fp8E4M3, RneExp15) {
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(280.0f), 0x79);
   // 304.0 is midpoint between 288 (m=1) and 320 (m=2) — RNE to even (m=2)
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(304.0f), 0x7A);
-  // Values above 448 saturate to 0x7E (max finite, not NaN 0x7F)
+  // Overflow is classified after rounding. The midpoint between max finite
+  // 448 and the reserved 480 encoding ties to even, so it stays finite.
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(449.0f), 0x7E);
-  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(1000.0f), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(464.0f), 0x7E);
+  EXPECT_EQ(
+      util::f32_to_fp8_e4m3_rne(std::nextafter(464.0f, std::numeric_limits<float>::infinity())),
+      0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(1000.0f), 0x7F);
 }
 
 TEST(Fp8E4M3, SrExp15) {
@@ -312,16 +372,23 @@ TEST(Fp8E4M3, SrExp15) {
     uint8_t code = 0x78 | m;
     EXPECT_EQ(util::f32_to_fp8_e4m3_sr(kExp15Values[m], 0), code) << "sr m=" << m;
   }
-  // Values above max saturate to 0x7E
-  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(500.0f, 0), 0x7E);
-  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(500.0f, 0xFFFFFFFF), 0x7E);
+  // Near max finite, stochastic rounding can either remain finite or round
+  // into the reserved NaN encoding depending on the seed.
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(449.0f, 0), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(449.0f, 0xFFFFFFFF), 0x7F);
+  // Deep overflow produces NaN for every seed.
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(500.0f, 0), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(500.0f, 0xFFFFFFFF), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(-500.0f, 0), 0xFF);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(-500.0f, 0xFFFFFFFF), 0xFF);
 }
 
 TEST(Fp8E4M3, SrNarrow) {
   uint8_t r = util::f32_to_fp8_e4m3_sr(1.0f, 0);
   EXPECT_EQ(r, 0x38);
   EXPECT_EQ(util::f32_to_fp8_e4m3_sr(std::numeric_limits<float>::quiet_NaN(), 0), 0x7F);
-  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(std::numeric_limits<float>::infinity(), 0), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(std::numeric_limits<float>::infinity(), 0), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(-std::numeric_limits<float>::infinity(), 0), 0xFF);
 }
 
 TEST(Fp8E4M3, SrDenormRoundTrip) {
@@ -330,6 +397,27 @@ TEST(Fp8E4M3, SrDenormRoundTrip) {
     uint8_t narrow = util::f32_to_fp8_e4m3_sr(val, 0);
     EXPECT_EQ(narrow, code) << "code=" << int(code) << " val=" << val;
   }
+}
+
+TEST(Fp8E4M3, Fp16OvflModeControlsOverflow) {
+  // 449.0f is greater than max finite but rounds back to 448.0f, so it stays
+  // finite regardless of FP16_OVFL. 500.0f rounds into the terminal NaN code.
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_mode(449.0f, false), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_mode(449.0f, true), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_mode(500.0f, false), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_mode(500.0f, true), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_mode(-500.0f, false), 0xFF);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_mode(-500.0f, true), 0xFE);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_mode(std::numeric_limits<float>::infinity(), false), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_mode(std::numeric_limits<float>::infinity(), true), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_mode(std::numeric_limits<float>::quiet_NaN(), true), 0x7F);
+
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr_mode(449.0f, 0xFFFFFFFFu, false), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr_mode(449.0f, 0, false), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr_mode(449.0f, 0xFFFFFFFFu, true), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr_mode(-449.0f, 0xFFFFFFFFu, false), 0xFF);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr_mode(-449.0f, 0, false), 0xFE);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr_mode(-449.0f, 0xFFFFFFFFu, true), 0xFE);
 }
 
 // ---- OCP-MX E8M0 unsigned exponent scale ----
@@ -407,6 +495,21 @@ TEST(Fp8E5M3, SrUsesSeedForNormalAndSubnormalRounding) {
   EXPECT_EQ(util::f32_to_fp8_e5m3_sr(subnormal_quarter, 0xFFFFFFFFu), 0x03);
 }
 
+TEST(Fp8E5M3, Fp16OvflModeControlsOverflow) {
+  const float just_above_max = std::nextafter(114688.0f, std::numeric_limits<float>::infinity());
+  const float exponent_overflow = std::ldexp(1.0f, 17);
+  // The gfx1250 E5M3 mode helper follows rounded overflow like the FP8/BF8
+  // helpers above.
+  EXPECT_EQ(util::f32_to_fp8_e5m3_rne_mode(just_above_max, false), 0xFE);
+  EXPECT_EQ(util::f32_to_fp8_e5m3_rne_mode(just_above_max, true), 0xFE);
+  EXPECT_EQ(util::f32_to_fp8_e5m3_rne_mode(exponent_overflow, false), 0xFF);
+  EXPECT_EQ(util::f32_to_fp8_e5m3_rne_mode(exponent_overflow, true), 0xFE);
+  EXPECT_EQ(util::f32_to_fp8_e5m3_rne_mode(std::numeric_limits<float>::infinity(), true), 0xFE);
+  EXPECT_EQ(util::f32_to_fp8_e5m3_sr_mode(120000.0f, 0xFFFFFFFFu, false), 0xFF);
+  EXPECT_EQ(util::f32_to_fp8_e5m3_sr_mode(120000.0f, 0, false), 0xFE);
+  EXPECT_EQ(util::f32_to_fp8_e5m3_sr_mode(120000.0f, 0xFFFFFFFFu, true), 0xFE);
+}
+
 // ---- BF8 E5M2 ----
 
 TEST(Bf8E5M2, KeyValues) {
@@ -476,6 +579,31 @@ TEST(Bf8E5M2Fnuz, SrNarrow) {
   }
 }
 
+TEST(Bf8E5M2Fnuz, Fp16OvflModeControlsOverflow) {
+  // Just-above-max finite BF8 values round back to max; deeper rounded
+  // overflow is mode-controlled.
+  const float rne_overflow_tie = 61440.0f;
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(57344.0f, false), 0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(57345.0f, false), 0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(std::nextafter(rne_overflow_tie, 0.0f), false),
+            0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(rne_overflow_tie, false), 0x80);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(rne_overflow_tie, true), 0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(-std::nextafter(rne_overflow_tie, 0.0f), false),
+            0xFF);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(-rne_overflow_tie, false), 0x80);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(-rne_overflow_tie, true), 0xFF);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(70000.0f, false), 0x80);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(70000.0f, true), 0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(-70000.0f, false), 0x80);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(-70000.0f, true), 0xFF);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr_mode(70000.0f, 0, false), 0x80);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr_mode(70000.0f, 0xFFFFFFFFu, false), 0x80);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr_mode(70000.0f, 0, true), 0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr_mode(-70000.0f, 0, false), 0x80);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr_mode(-70000.0f, 0, true), 0xFF);
+}
+
 TEST(Bf8E5M2, RneNarrow) {
   EXPECT_EQ(util::f32_to_bf8_e5m2_rne(std::numeric_limits<float>::quiet_NaN()), 0x7F);
   EXPECT_EQ(util::f32_to_bf8_e5m2_rne(std::numeric_limits<float>::infinity()), 0x7C);
@@ -495,6 +623,26 @@ TEST(Bf8E5M2, SrDenormRoundTrip) {
     uint8_t narrow = util::f32_to_bf8_e5m2_sr(val, 0);
     EXPECT_EQ(narrow, code) << "code=" << int(code) << " val=" << val;
   }
+}
+
+TEST(Bf8E5M2, Fp16OvflModeControlsOverflow) {
+  // 57345.0f rounds back to max finite, while infinity reaches the terminal
+  // infinity code and is clamped only when FP16_OVFL is set.
+  EXPECT_EQ(util::f32_to_bf8_e5m2_rne_mode(57345.0f, false), 0x7B);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_rne_mode(57345.0f, true), 0x7B);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_rne_mode(-57345.0f, false), 0xFB);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_rne_mode(-57345.0f, true), 0xFB);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_rne_mode(std::numeric_limits<float>::infinity(), false), 0x7C);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_rne_mode(std::numeric_limits<float>::infinity(), true), 0x7B);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_rne_mode(-std::numeric_limits<float>::infinity(), false), 0xFC);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_rne_mode(-std::numeric_limits<float>::infinity(), true), 0xFB);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_rne_mode(std::numeric_limits<float>::quiet_NaN(), true), 0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_sr_mode(57345.0f, 0, false), 0x7B);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_sr_mode(std::numeric_limits<float>::infinity(), 0, true), 0x7B);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_sr_mode(-57345.0f, 0, false), 0xFB);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_sr_mode(-57345.0f, 0xFFFFFFFFu, false), 0xFC);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_sr_mode(-57345.0f, 0xFFFFFFFFu, true), 0xFB);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_sr_mode(-std::numeric_limits<float>::infinity(), 0, true), 0xFB);
 }
 
 // ---- FP16 ----

@@ -11,7 +11,9 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "simdojo/sim/simulation.h"
+#include "util/unique_handle.h"
 
 #include <gtest/gtest.h>
 
@@ -28,6 +30,8 @@
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <functional>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -55,7 +59,7 @@ uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
   engine.topology().set_root(std::move(vm));
   loaded.wire_links(engine.topology());
   soc->wire_backing(engine.topology());
-  engine.build();
+  engine.create();
   engine.register_as_primary();
 
   driver->setup_topology(loaded.device, num_xcds);
@@ -92,7 +96,7 @@ protected:
     engine_->topology().set_root(std::move(vm));
     loaded_.wire_links(engine_->topology());
     soc->wire_backing(engine_->topology());
-    engine_->build();
+    engine_->create();
     engine_->register_as_primary();
 
     driver_->setup_topology(loaded_.device, num_xcds);
@@ -723,6 +727,85 @@ TEST_F(KfdIoctlTest, DbgTrapEnableOversizedRuntimeInfoPreservesTailInDaemonMode)
   EXPECT_EQ(daemon_driver.close(process_id), 0);
 }
 
+// Serializing an ioctl with an embedded input array grows the request vector.
+// Capture the application pointer before that resize: pointers into the vector's
+// copied argument area are invalidated when its storage is reallocated.
+TEST(RemoteDriverEmbeddedArrayTest, MapMemorySerializesDeviceIdsAcrossBufferGrowth) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+
+  constexpr std::array<uint32_t, 2> device_ids{38144, 38145};
+  std::jthread server([server_fd = sv[1], device_ids] {
+    rocjitsu::RpcHeader hdr{};
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &hdr, sizeof(hdr)));
+    ASSERT_EQ(hdr.opcode, rocjitsu::RPC_IOCTL);
+    std::vector<uint8_t> payload(hdr.payload_bytes);
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, payload.data(), payload.size()));
+
+    const auto *request = reinterpret_cast<const rocjitsu::RpcIoctlRequest *>(payload.data());
+    EXPECT_EQ(request->ioctl_cmd, AMDKFD_IOC_MAP_MEMORY_TO_GPU);
+    const auto *args = reinterpret_cast<const kfd_ioctl_map_memory_to_gpu_args *>(payload.data() +
+                                                                                  sizeof(*request));
+    const auto *inline_ids =
+        reinterpret_cast<const uint32_t *>(payload.data() + sizeof(*request) + sizeof(*args));
+    ASSERT_EQ(args->n_devices, device_ids.size());
+    EXPECT_TRUE(std::equal(device_ids.begin(), device_ids.end(), inline_ids));
+
+    rocjitsu::RpcHeader response{};
+    response.opcode = rocjitsu::RPC_IOCTL;
+    response.request_id = hdr.request_id;
+    response.result = -EINVAL;
+    ASSERT_TRUE(rocjitsu::rpc_send_exact(server_fd, &response, sizeof(response)));
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver driver(sv[0]);
+  kfd_ioctl_map_memory_to_gpu_args args{};
+  args.device_ids_array_ptr = reinterpret_cast<uint64_t>(device_ids.data());
+  args.n_devices = device_ids.size();
+  EXPECT_EQ(driver.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &args), -EINVAL);
+}
+
+TEST(RemoteDriverEmbeddedArrayTest, WaitEventsSerializesEventsAcrossBufferGrowth) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+
+  std::array<kfd_event_data, 2> events{};
+  events[0].event_id = 17;
+  events[1].event_id = 29;
+  std::jthread server([server_fd = sv[1]] {
+    rocjitsu::RpcHeader hdr{};
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &hdr, sizeof(hdr)));
+    ASSERT_EQ(hdr.opcode, rocjitsu::RPC_IOCTL);
+    std::vector<uint8_t> payload(hdr.payload_bytes);
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, payload.data(), payload.size()));
+
+    const auto *request = reinterpret_cast<const rocjitsu::RpcIoctlRequest *>(payload.data());
+    EXPECT_EQ(request->ioctl_cmd, AMDKFD_IOC_WAIT_EVENTS);
+    const auto *args =
+        reinterpret_cast<const kfd_ioctl_wait_events_args *>(payload.data() + sizeof(*request));
+    const auto *inline_events =
+        reinterpret_cast<const kfd_event_data *>(payload.data() + sizeof(*request) + sizeof(*args));
+    ASSERT_EQ(args->num_events, 2u);
+    EXPECT_EQ(inline_events[0].event_id, 17u);
+    EXPECT_EQ(inline_events[1].event_id, 29u);
+
+    rocjitsu::RpcHeader response{};
+    response.opcode = rocjitsu::RPC_IOCTL;
+    response.request_id = hdr.request_id;
+    response.result = -EINVAL;
+    ASSERT_TRUE(rocjitsu::rpc_send_exact(server_fd, &response, sizeof(response)));
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver driver(sv[0]);
+  kfd_ioctl_wait_events_args args{};
+  args.events_ptr = reinterpret_cast<uint64_t>(events.data());
+  args.num_events = events.size();
+  args.timeout = 1;
+  EXPECT_EQ(driver.ioctl(AMDKFD_IOC_WAIT_EVENTS, &args), -EINVAL);
+}
+
 // --- Daemon-mode DBG_TRAP notifier-fd transfer via SCM_RIGHTS ---
 //
 // In daemon mode the debugger's dbg_fd is a number in the *client's* fd table
@@ -1023,6 +1106,136 @@ TEST_F(DbgTrapDaemonTest, ForeignClientCannotDriveAnothersSession) {
   EXPECT_EQ(disable(), 0); // A tears down its session (closes the notifier)
 }
 
+// GET_DEVICE_SNAPSHOT through the production daemon dispatch, over the same
+// cases the local path pins (count probe, zero stride, null buffer, an entry at
+// the struct stride, and more entries than devices).
+//
+// The RemoteDriverDbgSnapshotTest suite answers with serve_one_ioctl_reply(), a
+// stand-in that never runs reconstruct_embedded_pointers(): it echoes the arg
+// struct and whatever tail the test tells it to. That is the right tool for
+// pinning what the *client* does with a reply, but it can agree with a daemon
+// that does not exist. rj_vm_execute_as() is the real thing -- it repoints
+// snapshot_buf_ptr at the inline tail and hands the request to SimulatedKfd --
+// so running the local contract through it is what makes the two transports
+// comparable rather than separately self-consistent.
+TEST_F(DbgTrapDaemonTest, DeviceSnapshotDispatchMatchesTheLocalContract) {
+  int notifier = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(notifier, 0);
+  ASSERT_EQ(enable_with_notifier(notifier, nullptr), 0);
+
+  constexpr uint32_t kEntryBytes = sizeof(kfd_dbg_device_info_entry);
+  constexpr uint32_t kDeviceTotal = 1; // the fixture config declares one GPU
+  constexpr uint8_t kSentinel = 0xAB;
+
+  // Lay the request out the way the transport does: the arg struct followed by
+  // the inline tail that stands in for the caller's snapshot buffer. A tail is
+  // what triggers the daemon's pointer reconstruction, so `tail_bytes == 0`
+  // models the requests the client sends without one (count probe, zero
+  // stride) -- there snapshot_buf_ptr survives as the client gave it, which is
+  // why those cases pass a real buffer and assert it stays untouched.
+  struct SnapshotResult {
+    int rc;
+    kfd_ioctl_dbg_trap_args args;
+    std::vector<uint8_t> tail;
+  };
+  auto run_snapshot = [&](uint32_t num_devices, uint32_t entry_size, size_t tail_bytes,
+                          uint64_t buf_ptr) {
+    std::vector<uint8_t> payload(sizeof(kfd_ioctl_dbg_trap_args) + tail_bytes, kSentinel);
+    kfd_ioctl_dbg_trap_args snap{};
+    snap.pid = static_cast<uint32_t>(kClientPid);
+    snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+    snap.device_snapshot.num_devices = num_devices;
+    snap.device_snapshot.entry_size = entry_size;
+    snap.device_snapshot.snapshot_buf_ptr = buf_ptr;
+    std::memcpy(payload.data(), &snap, sizeof(snap));
+
+    SnapshotResult result{};
+    result.rc = execute(AMDKFD_IOC_DBG_TRAP, payload.data(), payload.size(), -1, nullptr);
+    std::memcpy(&result.args, payload.data(), sizeof(result.args));
+    result.tail.assign(payload.begin() + sizeof(kfd_ioctl_dbg_trap_args), payload.end());
+    return result;
+  };
+  auto all_sentinel = [](const std::vector<uint8_t> &bytes, size_t from, size_t to) {
+    return std::all_of(bytes.begin() + from, bytes.begin() + to,
+                       [](uint8_t byte) { return byte == kSentinel; });
+  };
+
+  // A null buffer is rejected before any output is written, exactly as
+  // DbgTrapDeviceSnapshotRejectsNullBufferWithoutWritingOutputs pins locally.
+  // No tail, so the reconstruction leaves the null in place for the driver to
+  // find -- this is the case the RemoteDriver rejects client-side, because on
+  // the wire a null pointer would otherwise arrive as a reconstructed tail.
+  {
+    constexpr uint32_t kRequested = 2;
+    constexpr uint32_t kStride = kEntryBytes + 16;
+    auto null_buf = run_snapshot(kRequested, kStride, 0, 0);
+    EXPECT_EQ(null_buf.rc, -EINVAL);
+    EXPECT_EQ(null_buf.args.device_snapshot.num_devices, kRequested);
+    EXPECT_EQ(null_buf.args.device_snapshot.entry_size, kStride);
+  }
+
+  // Count-only probe: no capacity, so the total is reported and nothing is
+  // written.
+  {
+    std::array<uint8_t, kEntryBytes> caller_buf{};
+    caller_buf.fill(kSentinel);
+    auto probe = run_snapshot(0, kEntryBytes, 0, reinterpret_cast<uint64_t>(caller_buf.data()));
+    EXPECT_EQ(probe.rc, 0);
+    EXPECT_EQ(probe.args.device_snapshot.num_devices, kDeviceTotal);
+    EXPECT_EQ(probe.args.device_snapshot.entry_size, kEntryBytes);
+    EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(),
+                            [](uint8_t byte) { return byte == kSentinel; }));
+  }
+
+  // Zero stride: success, the total reported, entry_size(OUT) zero, no bytes
+  // written -- DbgTrapDeviceSnapshotZeroStrideReportsCountAndWritesNothing.
+  {
+    std::array<uint8_t, kEntryBytes> caller_buf{};
+    caller_buf.fill(kSentinel);
+    auto zero_stride =
+        run_snapshot(kDeviceTotal, 0, 0, reinterpret_cast<uint64_t>(caller_buf.data()));
+    EXPECT_EQ(zero_stride.rc, 0);
+    EXPECT_EQ(zero_stride.args.device_snapshot.num_devices, kDeviceTotal);
+    EXPECT_EQ(zero_stride.args.device_snapshot.entry_size, 0u);
+    EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(),
+                            [](uint8_t byte) { return byte == kSentinel; }));
+  }
+
+  // One entry at the compact stride the client transmits: the agent lands in
+  // the tail, which is the buffer the client scatters into the caller's slots.
+  {
+    auto filled = run_snapshot(kDeviceTotal, kEntryBytes, kEntryBytes, 0xDEADBEEF);
+    ASSERT_EQ(filled.rc, 0);
+    EXPECT_EQ(filled.args.device_snapshot.num_devices, kDeviceTotal);
+    EXPECT_EQ(filled.args.device_snapshot.entry_size, kEntryBytes);
+    ASSERT_EQ(filled.tail.size(), kEntryBytes);
+    kfd_dbg_device_info_entry entry{};
+    std::memcpy(&entry, filled.tail.data(), sizeof(entry));
+    EXPECT_EQ(entry.gpu_id, kGpuId);
+    // The same fields rocdbgapi's agent_snapshot fatal-errors on if zero.
+    EXPECT_NE(entry.simd_count, 0u);
+    EXPECT_NE(entry.max_waves_per_simd, 0u);
+    EXPECT_NE(entry.array_count, 0u);
+    EXPECT_NE(entry.num_xcc, 0u);
+  }
+
+  // Capacity beyond the device total: the driver fills what exists and leaves
+  // the rest of the buffer as the caller left it.
+  {
+    auto oversized = run_snapshot(kDeviceTotal + 1, kEntryBytes, 2 * kEntryBytes, 0xDEADBEEF);
+    ASSERT_EQ(oversized.rc, 0);
+    EXPECT_EQ(oversized.args.device_snapshot.num_devices, kDeviceTotal);
+    ASSERT_EQ(oversized.tail.size(), 2 * kEntryBytes);
+    kfd_dbg_device_info_entry entry{};
+    std::memcpy(&entry, oversized.tail.data(), sizeof(entry));
+    EXPECT_EQ(entry.gpu_id, kGpuId);
+    EXPECT_TRUE(all_sentinel(oversized.tail, kEntryBytes, 2 * kEntryBytes))
+        << "the daemon wrote past the devices it enumerated";
+  }
+
+  EXPECT_EQ(disable(), 0);
+}
+
 // --- RemoteDriver DBG_TRAP GET_DEVICE_SNAPSHOT response copy-back ---
 //
 // The client saves the caller's snapshot buffer pointer and capacity
@@ -1031,11 +1244,29 @@ TEST_F(DbgTrapDaemonTest, ForeignClientCannotDriveAnothersSession) {
 // against a failed op (e.g. -ENOSYS) mutating caller memory and against a
 // daemon-returned count larger than the caller's buffer.
 
+// Closes an fd however the enclosing scope exits. A daemon stand-in that
+// returns early without closing leaves the client blocked in rpc_recv_msg()
+// waiting for an EOF that never arrives, which hangs the run instead of
+// failing the test. util::UniqueHandle already owns a POSIX fd exactly this
+// way, so there is nothing to hand-roll.
+using CloseOnScopeExit = util::UniqueHandle;
+
+// Inspect the request header and rewrite the arg struct the reply echoes back,
+// so one stand-in can model a daemon that reports different outputs than the
+// caller requested.
+using IoctlReplyPatch =
+    std::function<void(const rocjitsu::RpcHeader &request, kfd_ioctl_dbg_trap_args &echoed)>;
+
+// Lay out the reply's inline tail by hand instead of flooding it with `poison`,
+// for tests that must tell one returned entry from another.
+using IoctlReplyTailFill = std::function<void(uint8_t *tail, size_t bytes)>;
+
 // One-shot daemon stand-in: read a single RPC_IOCTL, then reply with `result`
 // and a response whose inline tail (after the echoed arg struct) is
 // `extra_bytes` of `poison`. Does not close `server_fd` (caller owns it).
 void serve_one_ioctl_reply(int server_fd, int32_t result, size_t arg_struct_size,
-                           size_t extra_bytes, uint8_t poison) {
+                           size_t extra_bytes, uint8_t poison, const IoctlReplyPatch &patch = {},
+                           const IoctlReplyTailFill &fill_tail = {}) {
   rocjitsu::RpcHeader hdr{};
   int in_fds[1] = {-1};
   size_t num_in = 1;
@@ -1052,7 +1283,17 @@ void serve_one_ioctl_reply(int server_fd, int32_t result, size_t arg_struct_size
   // inline snapshot data to write into the caller's snapshot buffer.
   std::vector<uint8_t> out(arg_struct_size + extra_bytes);
   std::memcpy(out.data(), req.data() + sizeof(rocjitsu::RpcIoctlRequest), arg_struct_size);
-  std::memset(out.data() + arg_struct_size, poison, extra_bytes);
+  if (fill_tail)
+    fill_tail(out.data() + arg_struct_size, extra_bytes);
+  else
+    std::memset(out.data() + arg_struct_size, poison, extra_bytes);
+
+  if (patch && arg_struct_size >= sizeof(kfd_ioctl_dbg_trap_args)) {
+    kfd_ioctl_dbg_trap_args echoed{};
+    std::memcpy(&echoed, out.data(), sizeof(echoed));
+    patch(hdr, echoed);
+    std::memcpy(out.data(), &echoed, sizeof(echoed));
+  }
 
   rocjitsu::RpcHeader resp{};
   resp.opcode = rocjitsu::RPC_IOCTL;
@@ -1144,6 +1385,355 @@ TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotClampsCopyToCallerCapacity) 
   server.join();
 }
 
+// Daemon mode must reach the same verdict as the local path when the caller
+// supplies no snapshot buffer, and only the client can deliver it: the daemon
+// rewrites snapshot_buf_ptr to its own inline tail before replaying the ioctl
+// (rj_vm.cpp, reconstruct_embedded_pointers), so SimulatedKfd never sees the
+// null and answers with success plus a device total -- the opposite of the
+// -EINVAL DbgTrapDeviceSnapshotRejectsNullBufferWithoutWritingOutputs pins for
+// the local path. So the request must never reach the wire at all, and the
+// caller's num_devices/entry_size must come back exactly as they went in.
+TEST(RemoteDriverDbgSnapshotTest, NullSnapshotBufferIsNeverWrittenThrough) {
+  constexpr uint32_t kNumDevices = 2;
+  constexpr uint32_t kEntryBytes = sizeof(kfd_dbg_device_info_entry);
+
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+  const CloseOnScopeExit server_closer{sv[1]};
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = 4242;
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.num_devices = kNumDevices;
+  snap.device_snapshot.entry_size = kEntryBytes;
+  snap.device_snapshot.snapshot_buf_ptr = 0;
+
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), -EINVAL);
+  EXPECT_EQ(snap.device_snapshot.snapshot_buf_ptr, 0u);
+  EXPECT_EQ(snap.device_snapshot.num_devices, kNumDevices)
+      << "a rejected request must not report a device total";
+  EXPECT_EQ(snap.device_snapshot.entry_size, kEntryBytes);
+
+  // Nothing was transmitted, so the daemon side of the pair is still empty.
+  uint8_t byte = 0;
+  EXPECT_EQ(::recv(sv[1], &byte, 1, MSG_DONTWAIT), -1)
+      << "a request with no output buffer reached the wire";
+  EXPECT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK) << ::strerror(errno);
+}
+
+// A zero entry_size reserves no inline tail whatever the device count is, so
+// the transmitted num_devices must survive the request clamp untouched.
+// num_devices(IN) is what the driver clamps its fill count against, so
+// rewriting it to zero would hand the daemon a different request than the
+// caller made -- the count-only probe rather than a fill of zero-byte entries.
+//
+// The stand-in answers the way the driver does, which
+// DbgTrapDeviceSnapshotZeroStrideReportsCountAndWritesNothing pins locally:
+// success, the device total reported, entry_size(OUT) zero, nothing written.
+TEST(RemoteDriverDbgSnapshotTest, ZeroStrideSnapshotKeepsTheRequestedDeviceCount) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr uint32_t kRequested = 1;
+  constexpr uint32_t kDeviceTotal = 1;
+  constexpr uint8_t kSentinel = 0xAB;
+  const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
+
+  std::array<uint8_t, sizeof(kfd_dbg_device_info_entry)> caller_buf{};
+  caller_buf.fill(kSentinel);
+  std::atomic<uint32_t> observed_num_devices{0};
+
+  std::jthread server([&, server_fd = sv[1]] {
+    const CloseOnScopeExit closer{server_fd};
+    serve_one_ioctl_reply(server_fd, 0, arg_struct_size, 0, 0,
+                          [&](const rocjitsu::RpcHeader &, kfd_ioctl_dbg_trap_args &echoed) {
+                            observed_num_devices = echoed.device_snapshot.num_devices;
+                            echoed.device_snapshot.num_devices = kDeviceTotal;
+                            echoed.device_snapshot.entry_size = 0;
+                          });
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = 4242;
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.num_devices = kRequested;
+  snap.device_snapshot.entry_size = 0;
+  snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
+
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+  server.join();
+
+  EXPECT_EQ(observed_num_devices.load(), kRequested)
+      << "a zero stride was clamped into the count-only probe";
+  EXPECT_EQ(snap.device_snapshot.num_devices, kDeviceTotal);
+  EXPECT_EQ(snap.device_snapshot.entry_size, 0u);
+  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(), [](uint8_t b) {
+    return b == kSentinel;
+  })) << "a zero-stride snapshot wrote entry bytes";
+}
+
+// Reply patch modelling a daemon that enumerates fewer GPUs than the caller
+// asked for: report the true device total and the driver's clamped entry size.
+IoctlReplyPatch snapshot_outputs(uint32_t out_num_devices, uint32_t out_entry_size) {
+  return [out_num_devices, out_entry_size](const rocjitsu::RpcHeader &,
+                                           kfd_ioctl_dbg_trap_args &echoed) {
+    echoed.device_snapshot.num_devices = out_num_devices;
+    echoed.device_snapshot.entry_size = out_entry_size;
+  };
+}
+
+// entry_size(IN) is the caller's buffer stride, and the uapi lets it exceed the
+// current struct (kfd_ioctl.h), so a caller may legally declare a stride wider
+// than the whole RPC payload budget. Transmitting it verbatim left room for no
+// entries at all, and the count-only request that produced came back as success
+// over an untouched buffer -- where local mode fills the entry. The wire stride
+// is the struct instead, and the packed reply is scattered into the caller's
+// own slots.
+TEST(RemoteDriverDbgSnapshotTest, StrideWiderThanThePayloadLimitStillFillsEntries) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr uint32_t kEntryBytes = sizeof(kfd_dbg_device_info_entry);
+  // A stride the request could never carry: wider than the payload ceiling.
+  constexpr size_t kCallerStride = static_cast<size_t>(rocjitsu::kMaxPayloadBytes) + 4096;
+  constexpr uint8_t kSentinel = 0xAB;
+  constexpr uint8_t kPoison = 0xCD;
+  const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
+
+  std::vector<uint8_t> caller_buf(kCallerStride, kSentinel);
+  std::atomic<uint32_t> observed_stride{0};
+  std::atomic<uint32_t> observed_devices{0};
+  std::atomic<uint32_t> observed_payload{0};
+
+  std::jthread server([&, server_fd = sv[1]] {
+    const CloseOnScopeExit closer{server_fd};
+    serve_one_ioctl_reply(server_fd, 0, arg_struct_size, kEntryBytes, kPoison,
+                          [&](const rocjitsu::RpcHeader &hdr, kfd_ioctl_dbg_trap_args &echoed) {
+                            observed_payload = hdr.payload_bytes;
+                            observed_stride = echoed.device_snapshot.entry_size;
+                            observed_devices = echoed.device_snapshot.num_devices;
+                            echoed.device_snapshot.num_devices = 1;
+                            echoed.device_snapshot.entry_size = kEntryBytes;
+                          });
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = 4242;
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.num_devices = 1;
+  snap.device_snapshot.entry_size = static_cast<uint32_t>(kCallerStride);
+  snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
+
+  ASSERT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+  server.join();
+
+  EXPECT_EQ(observed_stride.load(), kEntryBytes) << "caller stride was transmitted verbatim";
+  EXPECT_EQ(observed_devices.load(), 1u) << "the fill request degraded to a count-only probe";
+  EXPECT_LE(observed_payload.load(), rocjitsu::kMaxPayloadBytes);
+
+  EXPECT_EQ(snap.device_snapshot.num_devices, 1u);
+  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.begin() + kEntryBytes, [](uint8_t b) {
+    return b == kPoison;
+  })) << "the entry did not reach the caller's buffer";
+  EXPECT_TRUE(std::all_of(caller_buf.begin() + kEntryBytes, caller_buf.end(), [](uint8_t b) {
+    return b == kSentinel;
+  })) << "copy-back wrote past the one entry the daemon returned";
+}
+
+// libhsakmt's hsaKmtDbgGetDeviceDataCtx() asks for UINT32_MAX devices and lets
+// the driver report the real total. Serialized literally that reserves
+// UINT32_MAX * sizeof(kfd_dbg_device_info_entry) (~480 GiB) and kills the
+// process on std::bad_alloc. The request must be clamped to what the transport
+// can carry, and the reply must still land in the caller's buffer.
+TEST(RemoteDriverDbgSnapshotTest, OversizedSnapshotRequestIsClampedToPayloadLimit) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr uint32_t kEntryBytes = sizeof(kfd_dbg_device_info_entry);
+  constexpr uint32_t kActualDevices = 1;
+  constexpr size_t kGuard = 32;
+  constexpr uint8_t kSentinel = 0xAB;
+  constexpr uint8_t kPoison = 0xCD;
+  const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
+
+  std::vector<uint8_t> caller_buf(kEntryBytes + kGuard, kSentinel);
+  std::atomic<uint32_t> observed_payload_bytes{0};
+  std::atomic<uint32_t> observed_num_devices{0};
+
+  std::jthread server([&, server_fd = sv[1]] {
+    // Close unconditionally: an early return that leaves the socket open would
+    // hang the client in rpc_recv_msg() instead of failing the test.
+    const CloseOnScopeExit closer{server_fd};
+    // Report the true device total and return only the entries that exist —
+    // exactly what a daemon with one GPU does.
+    serve_one_ioctl_reply(server_fd, 0, arg_struct_size, kEntryBytes, kPoison,
+                          [&](const rocjitsu::RpcHeader &request, kfd_ioctl_dbg_trap_args &echoed) {
+                            observed_payload_bytes = request.payload_bytes;
+                            observed_num_devices = echoed.device_snapshot.num_devices;
+                            echoed.device_snapshot.num_devices = kActualDevices;
+                            echoed.device_snapshot.entry_size = kEntryBytes;
+                          });
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = 4242;
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.num_devices = std::numeric_limits<uint32_t>::max();
+  snap.device_snapshot.entry_size = kEntryBytes;
+  snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
+
+  ASSERT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+  server.join();
+
+  EXPECT_LE(observed_payload_bytes.load(), rocjitsu::kMaxPayloadBytes)
+      << "request exceeded the payload limit the daemon enforces";
+  EXPECT_LT(observed_num_devices.load(), std::numeric_limits<uint32_t>::max())
+      << "UINT32_MAX device count was transmitted verbatim";
+  // The clamp is the transport's capacity, so it must still comfortably exceed
+  // any device count a daemon could enumerate.
+  EXPECT_GT(observed_num_devices.load(), 1000u);
+
+  EXPECT_EQ(snap.device_snapshot.num_devices, kActualDevices) << "true device total not reported";
+  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.begin() + kEntryBytes, [](uint8_t b) {
+    return b == kPoison;
+  })) << "the enumerated entry did not reach the caller";
+  EXPECT_TRUE(std::all_of(caller_buf.begin() + kEntryBytes, caller_buf.end(), [](uint8_t b) {
+    return b == kSentinel;
+  })) << "copy-back wrote past the entries the daemon returned";
+}
+
+// num_devices and entry_size are inputs the request rewrites to the compact
+// wire values, and the daemon echoes back whatever it was sent. On a failed op
+// the caller must get its own values back, not those internals: the local path
+// validates before writing any output, so it leaves both untouched. Uses the
+// production shape -- UINT32_MAX devices at a stride wider than the struct --
+// because that is where the mutation is visible: the clamp rewrites the count
+// to 4096 and the stride down to the struct size.
+TEST(RemoteDriverDbgSnapshotTest, FailedOversizedSnapshotLeavesTheRequestFieldsUntouched) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr uint32_t kRequested = std::numeric_limits<uint32_t>::max();
+  constexpr uint32_t kStride = sizeof(kfd_dbg_device_info_entry) + 136;
+  constexpr uint8_t kSentinel = 0xAB;
+  const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
+
+  std::vector<uint8_t> caller_buf(kStride, kSentinel);
+  std::atomic<uint32_t> observed_num_devices{0};
+  std::atomic<uint32_t> observed_entry_size{0};
+
+  std::jthread server([&, server_fd = sv[1]] {
+    const CloseOnScopeExit closer{server_fd};
+    // A daemon that fails the op after the clamp has already rewritten the two
+    // fields, echoing the wire values back in the reply's arg struct.
+    serve_one_ioctl_reply(server_fd, -ENOSYS, arg_struct_size, 0, 0,
+                          [&](const rocjitsu::RpcHeader &, kfd_ioctl_dbg_trap_args &echoed) {
+                            observed_num_devices = echoed.device_snapshot.num_devices;
+                            observed_entry_size = echoed.device_snapshot.entry_size;
+                          });
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = 4242;
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.num_devices = kRequested;
+  snap.device_snapshot.entry_size = kStride;
+  snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
+
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), -ENOSYS);
+  server.join();
+
+  // The rewrite did happen on the wire -- otherwise this test would pass for
+  // the wrong reason, having never produced the values it guards against.
+  EXPECT_LT(observed_num_devices.load(), kRequested) << "the count was transmitted verbatim";
+  EXPECT_EQ(observed_entry_size.load(), sizeof(kfd_dbg_device_info_entry))
+      << "the caller's stride was transmitted verbatim";
+
+  EXPECT_EQ(snap.device_snapshot.num_devices, kRequested)
+      << "failed snapshot overwrote num_devices(IN) with the clamped wire count";
+  EXPECT_EQ(snap.device_snapshot.entry_size, kStride)
+      << "failed snapshot overwrote entry_size(IN) with the compact wire stride";
+  EXPECT_EQ(snap.device_snapshot.snapshot_buf_ptr, reinterpret_cast<uint64_t>(caller_buf.data()));
+  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(), [](uint8_t b) {
+    return b == kSentinel;
+  })) << "failed snapshot mutated caller memory";
+}
+
+// Daemon mode must reproduce the driver's strided write, not overwrite the
+// caller's whole declared capacity: amdkfd fills min(num_devices(IN), total)
+// entries of entry_size(OUT) bytes at entry_size(IN) stride, so entries past
+// the device total and the padding inside each entry stay as the caller left
+// them. This is what SimulatedKfd does on the local path.
+TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotLeavesUnfilledEntriesAndPaddingIntact) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr uint32_t kRequested = 4;
+  constexpr uint32_t kReturned = 2; // daemon enumerates fewer GPUs than asked
+  constexpr uint32_t kEntryBytes = sizeof(kfd_dbg_device_info_entry);
+  constexpr uint32_t kStride = kEntryBytes + 16; // caller pads each entry
+  constexpr size_t kCap = static_cast<size_t>(kRequested) * kStride;
+  constexpr uint8_t kSentinel = 0xAB;
+  constexpr uint8_t kUnwritten = 0;
+  // Distinct per-entry contents, so scattering the packed tail into the
+  // caller's wider slots at the wrong pitch shows up as the wrong entry rather
+  // than as identical bytes.
+  const auto entry_byte = [](uint32_t i) { return static_cast<uint8_t>(0xC0 + i); };
+  const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
+
+  std::vector<uint8_t> caller_buf(kCap, kSentinel);
+
+  std::jthread server([&, server_fd = sv[1]] {
+    const CloseOnScopeExit closer{server_fd};
+    // Mirror what SimulatedKfd writes into the daemon's tail. The client
+    // transmits the compact stride, not the caller's, so the daemon lays
+    // kReturned entries down back to back at kEntryBytes.
+    serve_one_ioctl_reply(
+        server_fd, 0, arg_struct_size, kCap, kUnwritten, snapshot_outputs(kReturned, kEntryBytes),
+        [&](uint8_t *tail, size_t bytes) {
+          std::memset(tail, kUnwritten, bytes);
+          for (uint32_t i = 0; i < kReturned; ++i)
+            std::memset(tail + static_cast<size_t>(i) * kEntryBytes, entry_byte(i), kEntryBytes);
+        });
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = 4242;
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.num_devices = kRequested;
+  snap.device_snapshot.entry_size = kStride;
+  snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
+
+  ASSERT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+  EXPECT_EQ(snap.device_snapshot.num_devices, kReturned);
+
+  for (uint32_t i = 0; i < kRequested; ++i) {
+    const auto entry = caller_buf.begin() + static_cast<size_t>(i) * kStride;
+    const bool filled = i < kReturned;
+    const uint8_t want = filled ? entry_byte(i) : kSentinel;
+    EXPECT_TRUE(std::all_of(entry, entry + kEntryBytes, [&](uint8_t b) { return b == want; }))
+        << "entry " << i
+        << (filled ? " holds the wrong entry's bytes" : " was written past the device total");
+    EXPECT_TRUE(
+        std::all_of(entry + kEntryBytes, entry + kStride, [](uint8_t b) { return b == kSentinel; }))
+        << "entry " << i << " padding was clobbered";
+  }
+
+  server.join();
+}
+
 // A closed but positive notifier fd cannot be transferred over SCM_RIGHTS:
 // sendmsg() rejects it with EBADF at the client. send_ioctl() must surface that
 // errno so the interposer reports EBADF, not the EPERM a bare -1 becomes
@@ -1215,6 +1805,175 @@ TEST(RemoteDriverDbgEnableTest, FailedEnableLeavesCallerRuntimeInfoUntouched) {
 
   ::close(notifier_fd);
   server.join();
+}
+
+// --- RemoteDriver RPC stream poisoning ---
+//
+// Every exchange on the socket is length-framed, so a request that stops
+// mid-write, or a reply that is not consumed whole, leaves the two ends
+// disagreeing about where the next frame starts. From then on any call would
+// decode its result -- and the bytes it copies into caller memory -- out of some
+// other exchange's remains. The client marks the connection terminal instead,
+// and every entry point has to honour that mark, not just the one that tripped
+// over it: ioctl, mmap and munmap all share the one stream.
+
+// Framed size of an RPC_IOCTL request carrying `arg_bytes` of ioctl args and no
+// inline tail.
+constexpr size_t framed_ioctl_request_bytes(size_t arg_bytes) {
+  return sizeof(rocjitsu::RpcHeader) + sizeof(rocjitsu::RpcIoctlRequest) + arg_bytes;
+}
+
+// A reply header cut in half, then EOF on the daemon's write half. The client's
+// receive asks for MSG_WAITALL but comes back short — the same desync a
+// signal-interrupted wait produces, without having to time a signal. Queued
+// before the client sends anything: the two directions are independent, so the
+// reply can already be waiting when the request goes out.
+TEST(RemoteDriverStreamPoisonTest, TruncatedIoctlReplyMakesEveryLaterCallFailFast) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+  const CloseOnScopeExit server_closer{sv[1]};
+
+  const std::vector<uint8_t> half_header(sizeof(rocjitsu::RpcHeader) / 2, 0xA5);
+  ASSERT_TRUE(rocjitsu::rpc_send_exact(sv[1], half_header.data(), half_header.size()));
+  ASSERT_EQ(::shutdown(sv[1], SHUT_WR), 0) << ::strerror(errno);
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_get_version_args version{};
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_GET_VERSION, &version), -EPROTO);
+
+  // Drain the one request that did go out, so anything still readable afterwards
+  // is a write the poisoned client should never have made.
+  std::vector<uint8_t> request_seen(framed_ioctl_request_bytes(sizeof(version)));
+  ASSERT_TRUE(rocjitsu::rpc_recv_exact(sv[1], request_seen.data(), request_seen.size()));
+
+  kfd_ioctl_get_version_args after{};
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_GET_VERSION, &after), -EPROTO);
+  EXPECT_EQ(rd.munmap(reinterpret_cast<void *>(0x1000), 0x1000), -EPROTO);
+  errno = 0;
+  EXPECT_EQ(rd.mmap(nullptr, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, 0), MAP_FAILED);
+  EXPECT_EQ(errno, EPROTO);
+
+  // Nothing more on the wire, and the socket is shut down rather than merely
+  // idle: recv() reports EOF instead of blocking or handing back another frame.
+  uint8_t unexpected = 0;
+  EXPECT_EQ(::recv(sv[1], &unexpected, sizeof(unexpected), MSG_DONTWAIT), 0)
+      << "a poisoned client kept talking to the daemon";
+}
+
+// The daemon frames every mmap reply as header + RpcMmapResponse. A reply that
+// stops after the header must be refused: reading result out of it takes the
+// value from whatever the client's receive buffer happened to hold, so the
+// caller could be handed a mapping — or a failure — decided by stack garbage.
+TEST(RemoteDriverStreamPoisonTest, ShortMmapReplyIsRejectedRatherThanReadOffTheStack) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+  const CloseOnScopeExit server_closer{sv[1]};
+
+  rocjitsu::RpcHeader reply{};
+  reply.opcode = rocjitsu::RPC_MMAP;
+  reply.payload_bytes = sizeof(rocjitsu::RpcMmapResponse);
+  ASSERT_TRUE(rocjitsu::rpc_send_exact(sv[1], &reply, sizeof(reply)));
+  ASSERT_EQ(::shutdown(sv[1], SHUT_WR), 0) << ::strerror(errno);
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  // This is the call that TRIPS the poison, not one that finds the connection
+  // already dead, so it is the one whose errno the documented contract is
+  // easiest to break: nothing on the path to MAP_FAILED sets errno as a side
+  // effect (the receive succeeded -- it just came back short -- and the
+  // shutdown that poisons the stream succeeds too).
+  errno = 0;
+  EXPECT_EQ(rd.mmap(nullptr, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, 0), MAP_FAILED);
+  EXPECT_EQ(errno, EPROTO) << "a failed mmap left errno for the caller to guess at";
+
+  // The mmap and ioctl paths share one stream, so a desync noticed by one is
+  // terminal for the other.
+  kfd_ioctl_get_version_args version{};
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_GET_VERSION, &version), -EPROTO);
+}
+
+// The daemon's own failure has to reach the caller as its errno too, and EPERM
+// is the value that tests the encoding rather than the plumbing: EPERM is 1, so
+// a daemon result of -EPERM is the bit pattern -1, which the transport used to
+// hand back as its "no usable errno" sentinel. Anything that special-cases -1
+// on the way out swallows exactly this reply and leaves the caller reading a
+// stale errno, which is why the sentinel was removed rather than exempted.
+TEST(RemoteDriverStreamPoisonTest, DaemonReportedEpermReachesTheCallerAsEperm) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+  const CloseOnScopeExit server_closer{sv[1]};
+
+  // A complete, well-formed mmap reply -- header plus RpcMmapResponse -- that
+  // simply reports failure. Nothing here is a framing error.
+  rocjitsu::RpcHeader reply{};
+  reply.opcode = rocjitsu::RPC_MMAP;
+  reply.payload_bytes = sizeof(rocjitsu::RpcMmapResponse);
+  reply.result = -EPERM;
+  rocjitsu::RpcMmapResponse body{};
+  ASSERT_TRUE(rocjitsu::rpc_send_exact(sv[1], &reply, sizeof(reply)));
+  ASSERT_TRUE(rocjitsu::rpc_send_exact(sv[1], &body, sizeof(body)));
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  // A sentinel no errno takes, so "left untouched" is distinguishable from
+  // "reported as 0".
+  errno = 12345;
+  EXPECT_EQ(rd.mmap(nullptr, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, 0), MAP_FAILED);
+  EXPECT_EQ(errno, EPERM) << "the daemon's EPERM was mistaken for an absent errno";
+}
+
+// A munmap whose reply never arrives has already put its request on the wire, so
+// the client cannot know where the next frame begins either. It must not unmap
+// on the strength of a reply it never read, and must not leave the connection
+// looking usable.
+TEST(RemoteDriverStreamPoisonTest, UnansweredMunmapPoisonsTheConnection) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+  const CloseOnScopeExit server_closer{sv[1]};
+
+  ASSERT_EQ(::shutdown(sv[1], SHUT_WR), 0) << ::strerror(errno);
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+  EXPECT_EQ(rd.munmap(reinterpret_cast<void *>(0x1000), 0x1000), -EPROTO);
+
+  kfd_ioctl_get_version_args version{};
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_GET_VERSION, &version), -EPROTO);
+}
+
+// The other half of the framing contract: a request that stops part way through
+// leaves the daemon holding the front of a frame whose tail never comes, and it
+// will read the next request as that tail. A send buffer far smaller than the
+// request, on a socket that returns instead of blocking once the buffer fills,
+// produces exactly that without any timing dependence.
+TEST(RemoteDriverStreamPoisonTest, PartiallyWrittenRequestPoisonsTheConnection) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+  const CloseOnScopeExit server_closer{sv[1]};
+
+  int send_buffer_bytes = 4096;
+  ASSERT_EQ(
+      ::setsockopt(sv[0], SOL_SOCKET, SO_SNDBUF, &send_buffer_bytes, sizeof(send_buffer_bytes)), 0)
+      << ::strerror(errno);
+  int socket_flags = ::fcntl(sv[0], F_GETFL, 0);
+  ASSERT_NE(socket_flags, -1) << ::strerror(errno);
+  ASSERT_EQ(::fcntl(sv[0], F_SETFL, socket_flags | O_NONBLOCK), 0) << ::strerror(errno);
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  // Device ids are serialized inline after the arg struct, so this is a request
+  // two orders of magnitude larger than the send buffer. Nothing on the daemon
+  // side reads, so the buffer cannot drain mid-write.
+  std::vector<uint32_t> device_ids(64 * 1024, kGpuId);
+  kfd_ioctl_map_memory_to_gpu_args map_args{};
+  map_args.handle = 1;
+  map_args.n_devices = static_cast<uint32_t>(device_ids.size());
+  map_args.device_ids_array_ptr = reinterpret_cast<uint64_t>(device_ids.data());
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map_args), -EPROTO);
+
+  kfd_ioctl_get_version_args version{};
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_GET_VERSION, &version), -EPROTO);
+  EXPECT_EQ(rd.munmap(reinterpret_cast<void *>(0x1000), 0x1000), -EPROTO);
 }
 
 // Deterministic regression for the close()-vs-in-flight-ioctl teardown ordering.
@@ -1298,6 +2057,265 @@ TEST_F(KfdIoctlTest, DestructorDrainsMultiplyOpenedProcess) {
   }
   // No crash / no leak reported == pass. (pid intentionally unused past scope.)
   (void)pid;
+}
+
+TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = make_debug_fd();
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  // First call learns the total device count. rocdbgapi's
+  // kfd_snapshots::fetch() probes with a real one-entry buffer rather than a
+  // null pointer, so model that: the count comes back in num_devices(OUT)
+  // whether or not the buffer was big enough.
+  kfd_dbg_device_info_entry probe_entry{};
+  kfd_ioctl_dbg_trap_args count{};
+  count.pid = static_cast<uint32_t>(getpid());
+  count.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  count.device_snapshot.entry_size = sizeof(kfd_dbg_device_info_entry);
+  count.device_snapshot.num_devices = 1;
+  count.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&probe_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &count), 0);
+  ASSERT_EQ(count.device_snapshot.num_devices, 1u);
+  EXPECT_EQ(count.device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry));
+
+  // Second call fills one entry.
+  kfd_dbg_device_info_entry entry{};
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = static_cast<uint32_t>(getpid());
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.entry_size = sizeof(entry);
+  snap.device_snapshot.num_devices = 1;
+  snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+
+  const rocjitsu::kmd::DebugTopology topology = rocjitsu::kmd::effective_topology_for(
+      loaded_.device.gfx_target_version, loaded_.device.capability, loaded_.device.capability2,
+      loaded_.device.debug_prop, loaded_.device.revision_id);
+  EXPECT_EQ(entry.gpu_id, kGpuId);
+  EXPECT_EQ(entry.gfx_target_version, 90500u); // gfx950 fixture config
+  EXPECT_EQ(entry.subsystem_vendor_id, loaded_.device.vendor_id);
+  EXPECT_EQ(entry.subsystem_device_id, loaded_.device.device_id);
+  EXPECT_EQ(entry.capability, topology.capability);
+  EXPECT_EQ(entry.debug_prop, topology.debug_prop);
+  // rocm-dbgapi's agent_snapshot fatal-errors if any of these are zero.
+  EXPECT_NE(entry.simd_count, 0u);
+  EXPECT_NE(entry.max_waves_per_simd, 0u);
+  EXPECT_NE(entry.array_count, 0u);
+  // Fatal: the shader-engine check below divides by this.
+  ASSERT_NE(entry.simd_arrays_per_engine, 0u);
+
+  // The snapshot reports shader arrays per XCC, as amdkfd does. rocdbgapi turns
+  // that back into shader engines and uses the result for CWSR and scratch
+  // addressing, so it has to agree with the SoC the simulator actually runs —
+  // non-zero is not enough.
+  uint32_t simulated_shader_engines = 0;
+  for (uint32_t i = 0; i < soc_->num_xcds(); ++i)
+    simulated_shader_engines += soc_->xcd(i)->num_shader_engines();
+  EXPECT_EQ(entry.array_count * entry.num_xcc / entry.simd_arrays_per_engine,
+            simulated_shader_engines);
+  EXPECT_EQ(entry.num_xcc, soc_->num_xcds());
+}
+
+// kfd_dbg_trap_device_snapshot() validates its arguments before it writes any
+// of them: a null snapshot buffer is a malformed request, rejected with -EINVAL
+// and with the caller's num_devices/entry_size left exactly as they were. A
+// caller cannot read a device total off a call that failed this way.
+TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotRejectsNullBufferWithoutWritingOutputs) {
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = make_debug_fd();
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  // Ask for more devices than exist, at a wider stride than the struct, so a
+  // written-back output would differ from the input and the assertions can tell
+  // "reported" apart from "left as the caller set it".
+  constexpr uint32_t kRequestedDevices = 2;
+  constexpr uint32_t kRequestedStride = sizeof(kfd_dbg_device_info_entry) + 16;
+  kfd_ioctl_dbg_trap_args null_buf{};
+  null_buf.pid = static_cast<uint32_t>(getpid());
+  null_buf.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  null_buf.device_snapshot.num_devices = kRequestedDevices;
+  null_buf.device_snapshot.entry_size = kRequestedStride;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &null_buf), -EINVAL);
+  EXPECT_EQ(null_buf.device_snapshot.snapshot_buf_ptr, 0u);
+  EXPECT_EQ(null_buf.device_snapshot.num_devices, kRequestedDevices)
+      << "a rejected request must not report a device total";
+  EXPECT_EQ(null_buf.device_snapshot.entry_size, kRequestedStride);
+}
+
+// A zero stride is not an error. The driver's per-entry copy_to_user() moves
+// entry_size(OUT) == 0 bytes and succeeds, so the call reports the device total
+// and writes nothing -- the caller learns the count without providing room for
+// a single entry.
+TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotZeroStrideReportsCountAndWritesNothing) {
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = make_debug_fd();
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  constexpr uint8_t kSentinel = 0xAB;
+  std::array<uint8_t, sizeof(kfd_dbg_device_info_entry)> buffer{};
+  buffer.fill(kSentinel);
+
+  kfd_ioctl_dbg_trap_args zero_stride{};
+  zero_stride.pid = static_cast<uint32_t>(getpid());
+  zero_stride.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  zero_stride.device_snapshot.num_devices = 1;
+  zero_stride.device_snapshot.entry_size = 0;
+  zero_stride.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(buffer.data());
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &zero_stride), 0);
+  EXPECT_EQ(zero_stride.device_snapshot.num_devices, 1u);
+  EXPECT_EQ(zero_stride.device_snapshot.entry_size, 0u);
+  EXPECT_TRUE(std::all_of(buffer.begin(), buffer.end(), [](uint8_t byte) {
+    return byte == kSentinel;
+  })) << "zero-stride snapshot wrote into the caller's buffer";
+}
+
+TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesMultipleAgentsWithCallerStride) {
+  constexpr uint32_t kSecondGpuId = kGpuId + 1;
+  rocjitsu::SimulatedKfd multi_gpu_driver({soc_, soc_}, {kGpuId, kSecondGpuId});
+  std::vector<rocjitsu::config::KfdDeviceConfig> devices(2, loaded_.device);
+  devices[1].gpu_id = kSecondGpuId;
+  devices[1].location_id++;
+  devices[1].drm_render_minor++;
+  multi_gpu_driver.setup_topology(devices, soc_->num_xcds());
+  ASSERT_GE(multi_gpu_driver.open(), 0);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = make_debug_fd();
+  ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  constexpr uint32_t kEntryStride = sizeof(kfd_dbg_device_info_entry) + 16;
+  std::array<uint8_t, kEntryStride * 2> buffer{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snapshot.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(buffer.data());
+  snapshot.device_snapshot.num_devices = 1;
+  snapshot.device_snapshot.entry_size = kEntryStride;
+  ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+  EXPECT_EQ(snapshot.device_snapshot.num_devices, 2u);
+  EXPECT_EQ(snapshot.device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry));
+  kfd_dbg_device_info_entry first{};
+  std::memcpy(&first, buffer.data(), sizeof(first));
+  EXPECT_EQ(first.gpu_id, kGpuId);
+  EXPECT_TRUE(std::all_of(buffer.begin() + sizeof(first), buffer.end(),
+                          [](uint8_t byte) { return byte == 0; }));
+
+  snapshot.device_snapshot.num_devices = 2;
+  snapshot.device_snapshot.entry_size = kEntryStride;
+  ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+  kfd_dbg_device_info_entry second{};
+  std::memcpy(&first, buffer.data(), sizeof(first));
+  std::memcpy(&second, buffer.data() + kEntryStride, sizeof(second));
+  EXPECT_EQ(first.gpu_id, kGpuId);
+  EXPECT_EQ(second.gpu_id, kSecondGpuId);
+  EXPECT_EQ(second.location_id, devices[1].location_id);
+
+  std::array<kfd_process_device_apertures, 2> apertures{};
+  kfd_ioctl_get_process_apertures_new_args aperture_args{};
+  aperture_args.kfd_process_device_apertures_ptr = reinterpret_cast<uint64_t>(apertures.data());
+  aperture_args.num_of_nodes = apertures.size();
+  ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, &aperture_args), 0);
+  EXPECT_EQ(aperture_args.num_of_nodes, 2u);
+  EXPECT_EQ(first.lds_base, apertures[0].lds_base);
+  EXPECT_EQ(first.scratch_base, apertures[0].scratch_base);
+  EXPECT_EQ(first.gpuvm_base, apertures[0].gpuvm_base);
+  EXPECT_EQ(second.lds_base, apertures[1].lds_base);
+  EXPECT_EQ(second.scratch_base, apertures[1].scratch_base);
+  EXPECT_EQ(second.gpuvm_base, apertures[1].gpuvm_base);
+
+  multi_gpu_driver.close();
+}
+
+// Only devices the snapshot can actually describe are enumerable, so the device
+// total is clamped to the per-GPU metadata captured by setup_topology, not to
+// the number of SoCs the driver was built over. An embedder is free to skip
+// setup_topology entirely, or to call the single-device overload on a driver
+// holding several SoCs, and both leave fewer descriptions than GPUs.
+//
+// Reporting the GPU count regardless would look like the obvious
+// simplification, and every other test in this file keeps passing when you make
+// it -- the fill loop then indexes gpu_infos_ past its end and the process dies
+// on the first snapshot with no metadata (verified: substituting gpus_.size()
+// here turns this test into a SIGSEGV). Short of the crash, a partially
+// described set would hand rocdbgapi entries with simd_count or array_count
+// zero, which its agent_snapshot treats as fatal rather than as a bad ioctl.
+TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesOnlyDescribableDevices) {
+  constexpr uint32_t kSecondGpuId = kGpuId + 1;
+  constexpr uint32_t kEntryBytes = sizeof(kfd_dbg_device_info_entry);
+  constexpr uint8_t kSentinel = 0xAB;
+
+  // Two GPUs, and a snapshot request with room for both, in every case below.
+  auto snapshot_two = [&](rocjitsu::SimulatedKfd &driver, std::array<uint8_t, kEntryBytes * 2> &buf,
+                          kfd_ioctl_dbg_trap_args &snapshot) {
+    ASSERT_GE(driver.open(), 0);
+    kfd_ioctl_dbg_trap_args enable{};
+    enable.pid = static_cast<uint32_t>(getpid());
+    enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+    enable.enable.dbg_fd = make_debug_fd();
+    ASSERT_EQ(driver.ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+    buf.fill(kSentinel);
+    snapshot = {};
+    snapshot.pid = static_cast<uint32_t>(getpid());
+    snapshot.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+    snapshot.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(buf.data());
+    snapshot.device_snapshot.num_devices = 2;
+    snapshot.device_snapshot.entry_size = kEntryBytes;
+    ASSERT_EQ(driver.ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+  };
+
+  // No metadata at all: the request succeeds and reports nothing to describe,
+  // rather than handing back two zero-filled entries.
+  {
+    SCOPED_TRACE("setup_topology never called");
+    rocjitsu::SimulatedKfd driver({soc_, soc_}, {kGpuId, kSecondGpuId});
+    std::array<uint8_t, kEntryBytes * 2> buf{};
+    kfd_ioctl_dbg_trap_args snapshot{};
+    snapshot_two(driver, buf, snapshot);
+    EXPECT_EQ(snapshot.device_snapshot.num_devices, 0u);
+    EXPECT_EQ(snapshot.device_snapshot.entry_size, kEntryBytes);
+    EXPECT_TRUE(std::all_of(buf.begin(), buf.end(), [](uint8_t byte) { return byte == kSentinel; }))
+        << "an undescribable device was written out anyway";
+    driver.close();
+  }
+
+  // Metadata for one of the two: the described GPU is enumerated, the other is
+  // not, and its slot is left as the caller had it.
+  {
+    SCOPED_TRACE("single-device setup_topology on a two-GPU driver");
+    rocjitsu::SimulatedKfd driver({soc_, soc_}, {kGpuId, kSecondGpuId});
+    driver.setup_topology(loaded_.device, soc_->num_xcds());
+    std::array<uint8_t, kEntryBytes * 2> buf{};
+    kfd_ioctl_dbg_trap_args snapshot{};
+    snapshot_two(driver, buf, snapshot);
+    EXPECT_EQ(snapshot.device_snapshot.num_devices, 1u);
+    kfd_dbg_device_info_entry first{};
+    std::memcpy(&first, buf.data(), sizeof(first));
+    EXPECT_EQ(first.gpu_id, kGpuId);
+    EXPECT_NE(first.simd_count, 0u);
+    EXPECT_NE(first.array_count, 0u);
+    EXPECT_TRUE(std::all_of(buf.begin() + kEntryBytes, buf.end(), [](uint8_t byte) {
+      return byte == kSentinel;
+    })) << "the undescribed second GPU was enumerated";
+    driver.close();
+  }
+}
+
+TEST(KfdTopologyTest, EffectiveTopologyDerivesGfx121Capability2) {
+  const rocjitsu::kmd::DebugTopology topology =
+      rocjitsu::kmd::effective_topology_for(120100u, 0, 0, 0, 0);
+
+  EXPECT_NE(topology.capability & HSA_CAP_ATS_PRESENT, 0u);
+  EXPECT_NE(topology.capability2 & HSA_CAP2_TRAP_DEBUG_LDS_OUT_OF_ADDR_RANGE_SUPPORTED, 0u);
 }
 
 } // namespace

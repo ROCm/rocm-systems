@@ -84,19 +84,17 @@ mpirun -np 2 rocprof-sys-run -- ./mpi-example
 | `ROCPROFSYS_USE_SAMPLING` | `ON` | Enable sampling |
 
 ```bash
-mpirun -np 2 rocprof-sys-run \
-    -e ROCPROFSYS_USE_MPIP=ON \
-    -e ROCPROFSYS_TRACE=true \
-    -- ./mpi-example
+ROCPROFSYS_USE_MPIP=ON \
+ROCPROFSYS_TRACE=true \
+mpirun -np 2 rocprof-sys-run -- ./mpi-example
 ```
 
 For flat profiling with collapsed processes/threads:
 
 ```bash
-mpirun -np 2 rocprof-sys-run \
-    -e ROCPROFSYS_USE_MPIP=ON \
-    -e ROCPROFSYS_FLAT_PROFILE=ON \
-    -e ROCPROFSYS_COLLAPSE_PROCESSES=ON \
-    -e ROCPROFSYS_COLLAPSE_THREADS=ON \
-    -- ./mpi-example
+ROCPROFSYS_USE_MPIP=ON \
+ROCPROFSYS_FLAT_PROFILE=ON \
+ROCPROFSYS_COLLAPSE_PROCESSES=ON \
+ROCPROFSYS_COLLAPSE_THREADS=ON \
+mpirun -np 2 rocprof-sys-run -- ./mpi-example
 ```

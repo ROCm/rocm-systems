@@ -17,6 +17,8 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "drm/amdgpu_drm.h"
+#include "drm/drm.h"
 #include "linux/uapi/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
@@ -27,6 +29,7 @@ RJ_DIAGNOSTIC_POP
 #include <chrono>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <thread>
 #include <unistd.h>
 
@@ -287,4 +290,445 @@ TEST(InterposerDupTest, SerializedReopenUnderContentionStaysRoutable) {
     EXPECT_EQ(close(primary), 0);
   }
   EXPECT_EQ(close(keeper), 0);
+}
+
+namespace {
+
+// Open the synthetic DRM render node the interposer exposes for the simulated GPU
+// (render minor 128 in the KMD test configs). Requires the KFD driver to be up, so
+// callers open /dev/kfd first.
+int open_drm_render() { return open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC); }
+
+// Create an mmap-able, sized stand-in for a dmabuf export fd. PRIME_FD_TO_HANDLE
+// fstats the fd for the BO size and later MAP mmaps it, so the fd must be a real
+// sized, mappable object; a memfd satisfies both without a KFD allocation.
+int make_sized_memfd(size_t size) {
+  int fd = memfd_create("rocjitsu_gem_test", MFD_CLOEXEC);
+  if (fd < 0)
+    return -1;
+  if (ftruncate(fd, static_cast<off_t>(size)) != 0) {
+    close(fd);
+    return -1;
+  }
+  return fd;
+}
+
+// Mint a stable GEM handle for a dmabuf fd via PRIME_FD_TO_HANDLE on the DRM fd.
+bool prime_import(int drm_fd, int dmabuf_fd, uint32_t *handle) {
+  drm_prime_handle prime{};
+  prime.fd = dmabuf_fd;
+  if (ioctl(drm_fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &prime) != 0)
+    return false;
+  *handle = prime.handle;
+  return true;
+}
+
+// DRM_AMDGPU_GEM_VA is a DRM_COMMAND-relative ioctl; build the request number the
+// same way libdrm_amdgpu does. Wrapped in a function so the test reads cleanly.
+unsigned long DRM_AMDGPU_GEM_VA_request() {
+  return DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_GEM_VA, drm_amdgpu_gem_va);
+}
+
+int gem_close(int drm_fd, uint32_t handle) {
+  drm_gem_close gc{};
+  gc.handle = handle;
+  return ioctl(drm_fd, DRM_IOCTL_GEM_CLOSE, &gc);
+}
+
+} // namespace
+
+// A dmabuf export fd number that is closed and then recycled by a second export
+// must resolve to a DISTINCT, stable GEM handle — never one derived from the fd
+// number. Two concurrently-live BOs whose export fds happened to reuse the same
+// integer must keep independent handles and independent GPU mappings, and closing
+// one handle must not disturb the other. This pins the fix for the old
+// handle = dmabuf_fd + 1 scheme, under which a recycled fd tore down a live BO.
+TEST(InterposerGemTest, ReusedDmabufFdMintsDistinctHandles) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  constexpr size_t kBoSize = 0x1000;
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  const uint64_t va_a = 0x1000000000ULL;
+  const uint64_t va_b = 0x1000100000ULL;
+
+  // First BO: import and map it (the export fd must stay open across MAP, which
+  // lazily mmaps the backing pages — mirrors ROCr, which closes the export fd only
+  // AFTER access setup). Then close the export fd so its number becomes free.
+  int dmabuf_a = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf_a, 0);
+  uint32_t handle_a = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf_a, &handle_a));
+  ASSERT_NE(handle_a, 0u);
+
+  drm_amdgpu_gem_va map_a{};
+  map_a.handle = handle_a;
+  map_a.operation = AMDGPU_VA_OP_MAP;
+  map_a.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map_a.va_address = va_a;
+  map_a.map_size = kBoSize;
+  ASSERT_EQ(ioctl(drm, gem_va, &map_a), 0);
+
+  const int reused_number = dmabuf_a;
+  ASSERT_EQ(close(dmabuf_a), 0); // A's mapping stays live; the handle owns it now.
+
+  // Second BO: force a fresh memfd onto the SAME fd number A's export used, then
+  // import + map it. Under the old handle = dmabuf_fd + 1 scheme this PRIME would
+  // collide with A's still-live handle and tear down A's BO; with stable handles it
+  // must mint a distinct handle and leave A untouched.
+  int tmp = make_sized_memfd(kBoSize);
+  ASSERT_GE(tmp, 0);
+  int dmabuf_b = reused_number;
+  // If make_sized_memfd already recycled the freed number for `tmp`, it is already
+  // the reused number — dup2 onto itself then close would leave it closed, so just
+  // use it directly. Otherwise move it onto the reused number.
+  if (tmp != dmabuf_b) {
+    ASSERT_EQ(dup2(tmp, dmabuf_b), dmabuf_b);
+    ASSERT_EQ(close(tmp), 0);
+  }
+  uint32_t handle_b = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf_b, &handle_b));
+  ASSERT_NE(handle_b, 0u);
+  EXPECT_NE(handle_a, handle_b)
+      << "a recycled dmabuf fd number must not collide with a live handle";
+
+  drm_amdgpu_gem_va map_b{};
+  map_b.handle = handle_b;
+  map_b.operation = AMDGPU_VA_OP_MAP;
+  map_b.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map_b.va_address = va_b;
+  map_b.map_size = kBoSize;
+  ASSERT_EQ(ioctl(drm, gem_va, &map_b), 0);
+  close(dmabuf_b); // B's mapping stays live via its handle.
+
+  // A must still be fully live despite B reusing its export fd number: A's own
+  // UNMAP through A's handle must still succeed (proving B's PRIME did not tear
+  // down A's mapping).
+  drm_amdgpu_gem_va unmap_a{};
+  unmap_a.handle = handle_a;
+  unmap_a.operation = AMDGPU_VA_OP_UNMAP;
+  unmap_a.va_address = va_a;
+  unmap_a.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap_a), 0)
+      << "reusing A's export fd number for B must not tear down A's mapping";
+
+  // Closing A's handle must not disturb B: B's UNMAP through its own handle must
+  // still succeed afterward.
+  EXPECT_EQ(gem_close(drm, handle_a), 0);
+  drm_amdgpu_gem_va unmap_b{};
+  unmap_b.handle = handle_b;
+  unmap_b.operation = AMDGPU_VA_OP_UNMAP;
+  unmap_b.va_address = va_b;
+  unmap_b.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap_b), 0)
+      << "closing the recycled-fd sibling handle must not tear down this BO's mapping";
+
+  EXPECT_EQ(gem_close(drm, handle_b), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// UNMAP with a handle that does not own the exact range must fail rather than
+// tear down another handle's PTEs or report a phantom success.
+TEST(InterposerGemTest, UnmapWithWrongHandleFails) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  constexpr size_t kBoSize = 0x1000;
+  int dmabuf_a = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf_a, 0);
+  int dmabuf_b = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf_b, 0);
+  uint32_t handle_a = 0, handle_b = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf_a, &handle_a));
+  ASSERT_TRUE(prime_import(drm, dmabuf_b, &handle_b));
+
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  const uint64_t va_a = 0x1000000000ULL;
+  drm_amdgpu_gem_va map_a{};
+  map_a.handle = handle_a;
+  map_a.operation = AMDGPU_VA_OP_MAP;
+  map_a.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map_a.va_address = va_a;
+  map_a.map_size = kBoSize;
+  ASSERT_EQ(ioctl(drm, gem_va, &map_a), 0);
+
+  // UNMAP of A's range through B's handle must fail (B does not own it) and leave
+  // A's mapping intact, so A's own UNMAP then succeeds.
+  drm_amdgpu_gem_va bad_unmap{};
+  bad_unmap.handle = handle_b;
+  bad_unmap.operation = AMDGPU_VA_OP_UNMAP;
+  bad_unmap.va_address = va_a;
+  bad_unmap.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &bad_unmap), -1);
+
+  drm_amdgpu_gem_va good_unmap{};
+  good_unmap.handle = handle_a;
+  good_unmap.operation = AMDGPU_VA_OP_UNMAP;
+  good_unmap.va_address = va_a;
+  good_unmap.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &good_unmap), 0)
+      << "A's mapping must survive a wrong-handle UNMAP attempt";
+
+  EXPECT_EQ(gem_close(drm, handle_a), 0);
+  EXPECT_EQ(gem_close(drm, handle_b), 0);
+  EXPECT_EQ(close(dmabuf_a), 0);
+  EXPECT_EQ(close(dmabuf_b), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// PRIME_FD_TO_HANDLE dups the export fd internally, so the caller may close its
+// export fd BEFORE GEM_VA MAP and the deferred lazy backing mmap must still succeed
+// (the handle owns a private dup of the dmabuf that outlives the caller's fd).
+TEST(InterposerGemTest, MapSucceedsAfterExportFdClosed) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  constexpr size_t kBoSize = 0x1000;
+  int dmabuf = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf, 0);
+  uint32_t handle = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &handle));
+  ASSERT_NE(handle, 0u);
+
+  // Close the export fd BEFORE mapping. Under the old scheme (store the raw fd for a
+  // later lazy mmap) this would either fail or map an unrelated recycled fd. Force a
+  // recycle of the number so a lingering raw-fd dependency would be caught.
+  const int reused_number = dmabuf;
+  ASSERT_EQ(close(dmabuf), 0);
+  int filler = make_sized_memfd(kBoSize);
+  ASSERT_GE(filler, 0);
+  if (filler != reused_number) {
+    ASSERT_EQ(dup2(filler, reused_number), reused_number);
+    ASSERT_EQ(close(filler), 0);
+  }
+
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  const uint64_t va = 0x1000000000ULL;
+  drm_amdgpu_gem_va map{};
+  map.handle = handle;
+  map.operation = AMDGPU_VA_OP_MAP;
+  map.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map.va_address = va;
+  map.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &map), 0)
+      << "GEM_VA MAP must succeed via the handle's private dmabuf dup after the "
+         "caller closed (and recycled) its export fd";
+
+  drm_amdgpu_gem_va unmap{};
+  unmap.handle = handle;
+  unmap.operation = AMDGPU_VA_OP_UNMAP;
+  unmap.va_address = va;
+  unmap.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap), 0);
+  EXPECT_EQ(gem_close(drm, handle), 0);
+  EXPECT_EQ(close(reused_number), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// AMDGPU_VA_OP_REPLACE at a VA that overlaps an existing mapping of a DIFFERENT size
+// must evict the old mapping (by its own extent), not silently install overlapping
+// PTEs. After a REPLACE, the old owner's stale range must be gone: its handle's UNMAP
+// of the original range must fail, and no double-unmap can occur.
+TEST(InterposerGemTest, ReplaceEvictsOverlappingDifferentSizeRange) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  constexpr size_t kBigBo = 0x4000;
+  constexpr size_t kSmallBo = 0x1000;
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  const uint64_t va = 0x1000000000ULL;
+
+  int dmabuf_a = make_sized_memfd(kBigBo);
+  ASSERT_GE(dmabuf_a, 0);
+  int dmabuf_b = make_sized_memfd(kSmallBo);
+  ASSERT_GE(dmabuf_b, 0);
+  uint32_t handle_a = 0, handle_b = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf_a, &handle_a));
+  ASSERT_TRUE(prime_import(drm, dmabuf_b, &handle_b));
+
+  // A maps a large range at va.
+  drm_amdgpu_gem_va map_a{};
+  map_a.handle = handle_a;
+  map_a.operation = AMDGPU_VA_OP_MAP;
+  map_a.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map_a.va_address = va;
+  map_a.map_size = kBigBo;
+  ASSERT_EQ(ioctl(drm, gem_va, &map_a), 0);
+
+  // B REPLACEs a SMALLER range at the same base va. This overlaps A's range but is
+  // not identical; it must still evict A's mapping.
+  drm_amdgpu_gem_va replace_b{};
+  replace_b.handle = handle_b;
+  replace_b.operation = AMDGPU_VA_OP_REPLACE;
+  replace_b.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  replace_b.va_address = va;
+  replace_b.map_size = kSmallBo;
+  EXPECT_EQ(ioctl(drm, gem_va, &replace_b), 0)
+      << "REPLACE overlapping a different-size range must succeed and evict it";
+
+  // A's original range is gone: A's UNMAP of it must now fail (the record was evicted
+  // by the overlap-aware REPLACE, so A cannot double-unmap B's new PTEs).
+  drm_amdgpu_gem_va unmap_a{};
+  unmap_a.handle = handle_a;
+  unmap_a.operation = AMDGPU_VA_OP_UNMAP;
+  unmap_a.va_address = va;
+  unmap_a.map_size = kBigBo;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap_a), -1)
+      << "A's overlapping range must have been evicted by B's REPLACE";
+
+  // B's new range is live and its UNMAP succeeds exactly once.
+  drm_amdgpu_gem_va unmap_b{};
+  unmap_b.handle = handle_b;
+  unmap_b.operation = AMDGPU_VA_OP_UNMAP;
+  unmap_b.va_address = va;
+  unmap_b.map_size = kSmallBo;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap_b), 0);
+
+  EXPECT_EQ(gem_close(drm, handle_a), 0);
+  EXPECT_EQ(gem_close(drm, handle_b), 0);
+  EXPECT_EQ(close(dmabuf_a), 0);
+  EXPECT_EQ(close(dmabuf_b), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// After B REPLACEs A's range, closing A must NOT tear down B's PTEs: the REPLACE
+// transferred ownership of the VA to B, so A's teardown has nothing to unmap there
+// and B's mapping stays live (its own UNMAP still succeeds afterward).
+TEST(InterposerGemTest, ReplaceTransfersOwnershipAcrossOldOwnerClose) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  constexpr size_t kBoSize = 0x1000;
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  const uint64_t va = 0x1000000000ULL;
+
+  int dmabuf_a = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf_a, 0);
+  int dmabuf_b = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf_b, 0);
+  uint32_t handle_a = 0, handle_b = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf_a, &handle_a));
+  ASSERT_TRUE(prime_import(drm, dmabuf_b, &handle_b));
+
+  drm_amdgpu_gem_va map_a{};
+  map_a.handle = handle_a;
+  map_a.operation = AMDGPU_VA_OP_MAP;
+  map_a.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map_a.va_address = va;
+  map_a.map_size = kBoSize;
+  ASSERT_EQ(ioctl(drm, gem_va, &map_a), 0);
+
+  drm_amdgpu_gem_va replace_b = map_a;
+  replace_b.handle = handle_b;
+  replace_b.operation = AMDGPU_VA_OP_REPLACE;
+  ASSERT_EQ(ioctl(drm, gem_va, &replace_b), 0);
+
+  // Ownership of the VA transferred to B: A must no longer own the range, so A's
+  // UNMAP of it fails. This is the load-bearing assertion — gem_va_unmap() reports
+  // success purely on process existence, not PTE presence, so without this negative
+  // check the later "B's UNMAP succeeds" alone could pass even if REPLACE had failed
+  // to evict A's record (A's close would then quietly tear down the shared PTE while
+  // B's bookkeeping stayed intact).
+  drm_amdgpu_gem_va unmap_a{};
+  unmap_a.handle = handle_a;
+  unmap_a.operation = AMDGPU_VA_OP_UNMAP;
+  unmap_a.va_address = va;
+  unmap_a.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap_a), -1)
+      << "A must not own the range after REPLACE transferred it to B";
+
+  // Close A entirely. Its GEM_CLOSE reap must not unmap va — B owns it now.
+  EXPECT_EQ(gem_close(drm, handle_a), 0);
+  EXPECT_EQ(close(dmabuf_a), 0);
+
+  // B's mapping is still live: its UNMAP through its own handle succeeds.
+  drm_amdgpu_gem_va unmap_b{};
+  unmap_b.handle = handle_b;
+  unmap_b.operation = AMDGPU_VA_OP_UNMAP;
+  unmap_b.va_address = va;
+  unmap_b.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap_b), 0)
+      << "B's mapping must survive A's close after REPLACE transferred ownership";
+
+  EXPECT_EQ(gem_close(drm, handle_b), 0);
+  EXPECT_EQ(close(dmabuf_b), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// AMDGPU_VA_OP_CLEAR tears down a range's PTEs and updates the owning handle's
+// bookkeeping, so a later GEM_CLOSE of that handle does not double-unmap the range.
+// A UNMAP of the cleared range must fail (it is gone), and GEM_CLOSE must still
+// succeed cleanly.
+TEST(InterposerGemTest, ClearUpdatesOwnerBookkeeping) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  constexpr size_t kBoSize = 0x1000;
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  const uint64_t va = 0x1000000000ULL;
+
+  int dmabuf = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf, 0);
+  uint32_t handle = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &handle));
+
+  drm_amdgpu_gem_va map{};
+  map.handle = handle;
+  map.operation = AMDGPU_VA_OP_MAP;
+  map.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map.va_address = va;
+  map.map_size = kBoSize;
+  ASSERT_EQ(ioctl(drm, gem_va, &map), 0);
+
+  // CLEAR is handle-agnostic; it uses handle 0 and tears down whatever owns the VA.
+  drm_amdgpu_gem_va clear{};
+  clear.handle = 0;
+  clear.operation = AMDGPU_VA_OP_CLEAR;
+  clear.va_address = va;
+  clear.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &clear), 0) << "CLEAR of a mapped range must succeed";
+
+  // The range is gone from the owner's bookkeeping: an UNMAP now fails.
+  drm_amdgpu_gem_va unmap{};
+  unmap.handle = handle;
+  unmap.operation = AMDGPU_VA_OP_UNMAP;
+  unmap.va_address = va;
+  unmap.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap), -1) << "CLEAR must have removed the range record";
+
+  // GEM_CLOSE must not double-unmap the already-cleared range.
+  EXPECT_EQ(gem_close(drm, handle), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
 }

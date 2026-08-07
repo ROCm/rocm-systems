@@ -9,14 +9,18 @@
 
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/execution_backend.h"
 #include "util/arena_alloc.h"
 
 #include <cstdint>
 #include <memory>
+#include <string_view>
 
 namespace rocjitsu {
 
 class Instruction;
+class IsaTargetRegistry;
+struct IsaExecutionBackend;
 
 /// @brief Instruction decoder with optional pool allocator.
 ///
@@ -48,6 +52,13 @@ public:
   /// @brief Create a decoder for the given architecture.
   static std::unique_ptr<Decoder> create(rj_code_arch_t arch);
 
+  /// @brief Create a decoder from an explicitly scoped registry and open ID.
+  static std::unique_ptr<Decoder> create(const IsaTargetRegistry &registry,
+                                         std::string_view target_id);
+
+  /// @brief Create a decoder from a built-in architecture in a scoped registry.
+  static std::unique_ptr<Decoder> create(const IsaTargetRegistry &registry, rj_code_arch_t arch);
+
   /// @brief Enable pool allocation for decoded instructions.
   ///
   /// When active, Instruction::operator new/delete route through the
@@ -78,10 +89,17 @@ template <typename Isa> class IsaDecoder final : public Decoder {
 public:
   using Decoder::decode;
 
+  explicit IsaDecoder(const IsaExecutionBackend *execution_backend = nullptr)
+      : execution_backend_(execution_backend) {}
+
   Instruction *decode(const rj_code_binary_inst_t *inst) override {
+    ScopedIsaExecutionBackend scope(execution_backend_);
     auto result = Isa::Decoder::decode(inst);
     return result.release();
   }
+
+private:
+  const IsaExecutionBackend *execution_backend_;
 };
 
 } // namespace rocjitsu

@@ -724,10 +724,10 @@ def process_table_data(
     return result_df
 
 
-def _gfx115_mem_chart_heading(panel: Optional[dict[str, Any]], normal_unit: str) -> str:
+def _mem_chart_heading(panel_id: int, normal_unit: str) -> str:
     """Section number from ``panel id // 100`` (panel 300 → ``3. Memory Chart``)."""
-    panel_id = int((panel or {}).get("id", 300))
-    return mem_chart_gfx11.format_mem_chart_heading(normal_unit, panel_id=panel_id)
+    section = max(0, int(panel_id)) // 100
+    return f"{section}. Memory Chart (Normalization: {normal_unit})"
 
 
 def _panel_is_mem_chart_only(panel: dict[str, Any]) -> bool:
@@ -822,14 +822,25 @@ def format_table_output(
         if is_gfx115x(gpu_arch):
             content += (
                 mem_chart_gfx11.plot_mem_chart(
-                    args.normal_unit,
                     mem_data,
-                    chart_title=_gfx115_mem_chart_heading(None, args.normal_unit),
+                    chart_title=_mem_chart_heading(
+                        int(table_config["id"]),
+                        args.normal_unit,
+                    ),
                 )
                 + "\n"
             )
         else:
-            content += mem_chart_gfx9.plot_mem_chart(args.normal_unit, mem_data) + "\n"
+            content += (
+                mem_chart_gfx9.plot_mem_chart(
+                    mem_data,
+                    chart_title=_mem_chart_heading(
+                        int(table_config["id"]),
+                        args.normal_unit,
+                    ),
+                )
+                + "\n"
+            )
     else:
         content += (
             get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
@@ -1010,10 +1021,12 @@ def show_all(
 
         # Emit merged gfx115x mem_chart for the panel
         if mem_chart_data and not _tty_view_is_table(args):
-            heading = _gfx115_mem_chart_heading(panel, args.normal_unit)
+            heading = _mem_chart_heading(
+                int((panel or {}).get("id", 300)),
+                args.normal_unit,
+            )
             panel_content += (
                 mem_chart_gfx11.plot_mem_chart(
-                    args.normal_unit,
                     mem_chart_data,
                     chart_title=heading,
                 )
