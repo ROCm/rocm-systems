@@ -95,10 +95,9 @@ TEST(Gfx1250B0ToA0Library, ReportsInvalidCodeObjectDiagnostic) {
   EXPECT_NE(matching, diagnostics.end());
 }
 
-TEST(Gfx1250B0ToA0Library, ReportsTranslatorDiagnosticsAndRequiredWork) {
-  constexpr auto conversion =
-      rocjitsu::gfx1250::build_vop3(rocjitsu::gfx1250::kVCvtPkFp8F32Vop3,
-                                    {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2});
+TEST(Gfx1250B0ToA0Library, ReportsTranslatorDiagnostics) {
+  constexpr auto conversion = rocjitsu::gfx1250::build_vop3(
+      rocjitsu::gfx1250::kVCvtPkFp8F32Vop3, {.vdst = 30, .clamp = 1, .src0 = 233, .src1 = 256 + 2});
   constexpr uint32_t kEndpgm = 0xBFB00000u;
   const std::array<uint32_t, 3> text = {conversion[0], conversion[1], kEndpgm};
   const auto source = rocjitsu::test_support::make_gfx1250_code_object(text);
@@ -112,25 +111,17 @@ TEST(Gfx1250B0ToA0Library, ReportsTranslatorDiagnosticsAndRequiredWork) {
             ROCJITSU_STATUS_INVALID_CODE_OBJECT);
   EXPECT_EQ(output, nullptr);
   EXPECT_EQ(output_size, 0u);
-  ASSERT_GE(diagnostics.size(), 2u);
+  ASSERT_FALSE(diagnostics.empty());
 
   const auto primary = std::find_if(diagnostics.begin(), diagnostics.end(), [](const auto &item) {
     return !item.required_work && item.severity == "error" &&
-           item.kind == "translator-expand-missing";
+           item.kind == "translator-expand-failed";
   });
   ASSERT_NE(primary, diagnostics.end());
   EXPECT_TRUE(primary->has_guest_offset);
   EXPECT_EQ(primary->guest_offset, 0u);
   EXPECT_EQ(primary->mnemonic, "v_cvt_pk_fp8_f32");
-
-  const auto required = std::find_if(diagnostics.begin(), diagnostics.end(), [](const auto &item) {
-    return item.required_work && item.kind == "translator-expand-missing";
-  });
-  ASSERT_NE(required, diagnostics.end());
-  EXPECT_TRUE(required->has_guest_offset);
-  EXPECT_EQ(required->guest_offset, 0u);
-  EXPECT_EQ(required->mnemonic, "v_cvt_pk_fp8_f32");
-  EXPECT_NE(required->message.find("semantic expansion rule"), std::string::npos);
+  EXPECT_NE(primary->message.find("does not support DPP"), std::string::npos);
 }
 
 #ifdef GFX1250_B0_TO_A0_FIXTURE
