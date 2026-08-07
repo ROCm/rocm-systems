@@ -39,6 +39,16 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
   )
 
+  # CPU-only unit test: guards the pure-Python assembly-extraction, resource-
+  # aggregation, dispatcher-patching, and flag-parsing logic in
+  # tools/rccl-device-compile (the device-image-unification driver). Needs no
+  # GPU, no built library, and no amdclang++/ld.lld.
+  add_test(
+    NAME rccl-device-compile-unittest
+    COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/tools/test_rccl_device_compile.py"
+  )
+
   # The kernel-count leak guards and the __hip_atomic_* poison probe
   # (src/include/test_poison_hip_atomics.py) are intentionally NOT registered as
   # ctest cases here: nothing in RCCL CI runs `ctest`, so an add_test() would
