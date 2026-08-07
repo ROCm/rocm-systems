@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/env_vars.hpp"
-#include "common/environment.hpp"
 #include "core/config.hpp"
 #include "core/rocprofiler-sdk.hpp"
 #include "rocprof-sys/library/rocprofiler-sdk/spm.hpp"
@@ -12,38 +11,14 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace
 {
 using rocprofsys::rocprofiler_sdk::spm::is_config_valid;
-using rocprofsys::rocprofiler_sdk::spm::is_spm_enabled_for_sdk;
 using rocprofsys::rocprofiler_sdk::spm::request;
-
-constexpr auto sdk_spm_beta_env = "ROCPROFILER_SPM_BETA_ENABLED";
-
-struct fake_env
-{
-    inline static std::unordered_map<std::string, std::string> store;
-
-    static int setenv(const char* name, const char* value, int overwrite)
-    {
-        if(!overwrite && store.count(name) > 0) return 0;
-        store[name] = value;
-        return 0;
-    }
-
-    static char* getenv(const char* name)
-    {
-        auto it = store.find(name);
-        return it != store.end() ? it->second.data() : nullptr;
-    }
-
-    static void reset() { store.clear(); }
-};
-
-using fake_environment = rocprofsys::common::environment<fake_env>;
+namespace spm_detail = rocprofsys::rocprofiler_sdk::spm::detail;
 
 void
 ensure_spm_settings_registered()
@@ -84,17 +59,19 @@ protected:
     std::optional<std::uint64_t> previous_sample_interval = std::nullopt;
 };
 
-class beta_opt_in_test : public ::testing::Test
-{
-protected:
-    void SetUp() override { fake_env::reset(); }
-    void TearDown() override { fake_env::reset(); }
-};
-
 request
 make_valid_requested_spm_request()
 {
     return request{ { "SQ_WAVES" }, 4200 };
+}
+
+void
+expect_requested_counter(const spm_detail::requested_counter& counter,
+                         const std::string&                   expected_name,
+                         std::optional<std::uint64_t>         expected_device_id)
+{
+    EXPECT_EQ(counter.name, expected_name);
+    EXPECT_EQ(counter.device_id, expected_device_id);
 }
 }  // namespace
 
@@ -124,6 +101,59 @@ TEST(spm_request, requested_reflects_events)
     EXPECT_TRUE(event_request.requested());
 }
 
+TEST(spm_request_parsing, parse_device_id_accepts_only_complete_unsigned_values)
+{
+    EXPECT_EQ(spm_detail::parse_device_id("0"), std::optional<std::uint64_t>{ 0 });
+    EXPECT_EQ(spm_detail::parse_device_id("42"), std::optional<std::uint64_t>{ 42 });
+    EXPECT_EQ(spm_detail::parse_device_id(""), std::nullopt);
+    EXPECT_EQ(spm_detail::parse_device_id("abc"), std::nullopt);
+    EXPECT_EQ(spm_detail::parse_device_id("1abc"), std::nullopt);
+    EXPECT_EQ(spm_detail::parse_device_id("-1"), std::nullopt);
+}
+
+TEST(spm_request_parsing, parse_counter_name_trims_and_removes_device_qualifier)
+{
+    EXPECT_EQ(spm_detail::parse_counter_name(" SQ_WAVES "), "SQ_WAVES");
+    EXPECT_EQ(spm_detail::parse_counter_name(" SQ_WAVES:device=0 "), "SQ_WAVES");
+    EXPECT_EQ(spm_detail::parse_counter_name(":device=0"), "");
+}
+
+TEST(spm_request_parsing, parse_requested_counters_skips_empty_and_invalid_entries)
+{
+    const auto parsed = spm_detail::parse_requested_counters(request{
+        { " SQ_WAVES:device=0 ", "", "TD_TD_BUSY", "BAD:device=abc", ":device=1" },
+        4200 });
+
+    ASSERT_EQ(parsed.size(), 2);
+    expect_requested_counter(parsed.at(0), "SQ_WAVES", std::uint64_t{ 0 });
+    expect_requested_counter(parsed.at(1), "TD_TD_BUSY", std::nullopt);
+}
+
+TEST(spm_request_parsing, requested_counters_for_device_keeps_unqualified_and_matching)
+{
+    const auto parsed = spm_detail::parse_requested_counters(
+        request{ { "SQ_WAVES:device=0", "TD_TD_BUSY:device=1", "TCC_HIT" }, 4200 });
+
+    const auto device_zero = spm_detail::requested_counters_for_device(parsed, 0);
+    ASSERT_EQ(device_zero.size(), 2);
+    expect_requested_counter(device_zero.at(0), "SQ_WAVES", std::uint64_t{ 0 });
+    expect_requested_counter(device_zero.at(1), "TCC_HIT", std::nullopt);
+
+    const auto device_one = spm_detail::requested_counters_for_device(parsed, 1);
+    ASSERT_EQ(device_one.size(), 2);
+    expect_requested_counter(device_one.at(0), "TD_TD_BUSY", std::uint64_t{ 1 });
+    expect_requested_counter(device_one.at(1), "TCC_HIT", std::nullopt);
+}
+
+TEST(spm_request_parsing, requested_counter_names_deduplicates_parsed_names)
+{
+    const auto parsed = spm_detail::parse_requested_counters(
+        request{ { "SQ_WAVES:device=0", "SQ_WAVES:device=1", "TD_TD_BUSY" }, 4200 });
+
+    const auto names = spm_detail::requested_counter_names(parsed);
+    EXPECT_EQ(names, (std::unordered_set<std::string>{ "SQ_WAVES", "TD_TD_BUSY" }));
+}
+
 TEST_F(spm_settings_test, events_request_spm_but_default_interval_is_invalid)
 {
     ASSERT_TRUE(rocprofsys::config::set_setting_value(
@@ -142,6 +172,11 @@ TEST_F(spm_settings_test, events_request_spm_but_default_interval_is_invalid)
 TEST(spm_config_validation, accepts_when_spm_is_not_requested)
 {
     EXPECT_TRUE(is_config_valid(request{}, {}, {}));
+}
+
+TEST(spm_config_validation, accepts_sample_interval_without_events)
+{
+    EXPECT_TRUE(is_config_valid(request{ {}, 4200 }, {}, {}));
 }
 
 TEST(spm_config_validation, rejects_rocm_dispatch_counter_conflict)
@@ -171,23 +206,4 @@ TEST(spm_config_validation, accepts_valid_requested_spm_request)
     const auto request = make_valid_requested_spm_request();
 
     EXPECT_TRUE(is_config_valid(request, {}, {}));
-}
-
-TEST_F(beta_opt_in_test, accepts_when_spm_is_not_requested)
-{
-    EXPECT_TRUE(is_spm_enabled_for_sdk<fake_environment>(request{}));
-}
-
-TEST_F(beta_opt_in_test, rejects_requested_spm_without_sdk_beta_env)
-{
-    EXPECT_FALSE(
-        is_spm_enabled_for_sdk<fake_environment>(make_valid_requested_spm_request()));
-}
-
-TEST_F(beta_opt_in_test, accepts_requested_spm_with_sdk_beta_env)
-{
-    fake_env::setenv(sdk_spm_beta_env, "ON", 1);
-
-    EXPECT_TRUE(
-        is_spm_enabled_for_sdk<fake_environment>(make_valid_requested_spm_request()));
 }

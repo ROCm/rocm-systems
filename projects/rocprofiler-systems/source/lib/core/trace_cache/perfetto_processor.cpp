@@ -1457,8 +1457,6 @@ perfetto_processor_t::handle([[maybe_unused]] const spm_sample& _spm)
                           sample.timestamp, value.value);
         }
     }
-#else
-    (void) _spm;
 #endif
 }
 

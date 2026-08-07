@@ -6,12 +6,22 @@
 
 #include "library/rocprofiler-sdk/spm.hpp"
 
+#include "common/span.hpp"
+#include "core/utility.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cstdint>
+#include <iterator>
+#include <optional>
+#include <string>
 #include <string_view>
+#include <system_error>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 // SPM runtime compilation is controlled by two inputs:
 //
@@ -26,12 +36,8 @@
 //
 // ROCPROFSYS_COMPILE_SPM_RUNTIME resolves those inputs into the single local
 // condition this file branches on. Keeping this derived gate avoids repeating the
-// compound condition at each #if site. The __has_include check protects against
-// CMake reporting SPM support when the compiler cannot include the experimental
-// header.
-#if defined(ROCPROFSYS_DISABLE_SPM_RUNTIME)
-#    define ROCPROFSYS_COMPILE_SPM_RUNTIME 0
-#elif ROCPROFSYS_USE_SPM && __has_include(<rocprofiler-sdk/experimental/spm.h>)
+// compound condition at each #if site.
+#if ROCPROFSYS_USE_SPM && !defined(ROCPROFSYS_DISABLE_SPM_RUNTIME)
 #    define ROCPROFSYS_COMPILE_SPM_RUNTIME 1
 #else
 #    define ROCPROFSYS_COMPILE_SPM_RUNTIME 0
@@ -52,17 +58,9 @@
 
 #    include <array>
 #    include <atomic>
-#    include <charconv>
 #    include <functional>
-#    include <iterator>
 #    include <numeric>
-#    include <optional>
-#    include <string>
-#    include <system_error>
 #    include <unordered_map>
-#    include <unordered_set>
-#    include <utility>
-#    include <vector>
 #endif
 
 namespace rocprofsys
@@ -71,16 +69,6 @@ namespace rocprofiler_sdk
 {
 namespace spm
 {
-namespace
-{
-bool
-has_configured_event_string(std::string_view events)
-{
-    return std::any_of(events.begin(), events.end(),
-                       [](unsigned char itr) { return std::isspace(itr) == 0; });
-}
-}  // namespace
-
 bool
 request::requested() const noexcept
 {
@@ -95,7 +83,17 @@ is_config_valid(const request&                  req,
     // Backstop for direct library load paths. Tool initialization must reject
     // SPM requests when the required interval or mutual-exclusion constraints
     // are not satisfied.
-    if(!req.requested()) return true;
+    if(!req.requested())
+    {
+        if(req.sample_interval > 0)
+        {
+            LOG_WARNING("ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL is set but "
+                        "ROCPROFSYS_ROCM_SPM_EVENTS is empty; no SPM counters will be "
+                        "collected. Set ROCPROFSYS_ROCM_SPM_EVENTS or pass --spm-events "
+                        "to request SPM collection.");
+        }
+        return true;
+    }
 
     if(!dispatch_counter_events.empty())
     {
@@ -106,7 +104,8 @@ is_config_valid(const request&                  req,
 
     // ROCPROFSYS_GPU_PERF_COUNTERS is kept as a raw setting string here. Treat
     // any non-whitespace value as a requested device-counting collection.
-    if(has_configured_event_string(gpu_perf_counter_events))
+    if(std::any_of(gpu_perf_counter_events.begin(), gpu_perf_counter_events.end(),
+                   [](unsigned char itr) { return std::isspace(itr) == 0; }))
     {
         LOG_ERROR("Invalid SPM configuration: SPM counter collection is mutually "
                   "exclusive with ROCPROFSYS_GPU_PERF_COUNTERS");
@@ -126,85 +125,11 @@ is_config_valid(const request&                  req,
     return true;
 }
 
-#if ROCPROFSYS_COMPILE_SPM_RUNTIME
+namespace detail
+{
 namespace
 {
-constexpr auto invalid_context_handle = 0UL;
-constexpr auto device_qualifier       = std::string_view{ ":device=" };
-
-struct requested_counter
-{
-    std::string                  name      = {};
-    std::optional<std::uint64_t> device_id = std::nullopt;
-};
-
-struct resolved_counter
-{
-    rocprofiler_counter_id_t                               id           = {};
-    std::vector<trace_cache::info::spm_counter_name_entry> name_entries = {};
-};
-
-using spm_available_config_vec_t = std::vector<rocprofiler_spm_available_configuration_t>;
-using spm_counter_id_vec_t       = std::vector<rocprofiler_counter_id_t>;
-using resolved_counter_vec_t     = std::vector<resolved_counter>;
-using requested_counter_vec_t    = std::vector<requested_counter>;
-namespace gpu_perf_counter       = pmc::collectors::gpu_perf_counter;
-using counter_detail_backend     = ::rocprofsys::backends::rocprofiler_sdk::backend<
-        ::rocprofsys::rocprofiler_sdk::backend>;
-
-enum class spm_status
-{
-    success,
-    skipped,
-    failed,
-};
-
-struct counter_query_result
-{
-    spm_status             status   = spm_status::failed;
-    resolved_counter_vec_t counters = {};
-};
-
-struct agent_config_result
-{
-    spm_status                      status = spm_status::failed;
-    rocprofiler_counter_config_id_t config = {};
-};
-
-struct counter_config_data
-{
-    spm_counter_id_vec_t                                   counter_ids  = {};
-    std::vector<trace_cache::info::spm_counter_name_entry> name_entries = {};
-};
-
-rocprofiler_status_t
-spm_configurations_callback(const rocprofiler_spm_available_configuration_t** configs,
-                            size_t num_configs, void* user_data)
-{
-    auto* output = static_cast<spm_available_config_vec_t*>(user_data);
-    if(output == nullptr || (configs == nullptr && num_configs > 0))
-        return ROCPROFILER_STATUS_ERROR;
-
-    output->reserve(num_configs);
-    for(size_t i = 0; i < num_configs; ++i)
-    {
-        if(configs[i] != nullptr) output->emplace_back(*configs[i]);
-    }
-    return ROCPROFILER_STATUS_SUCCESS;
-}
-
-rocprofiler_status_t
-spm_supported_counters_callback(rocprofiler_agent_id_t /*agent_id*/,
-                                rocprofiler_counter_id_t* counters, size_t num_counters,
-                                void* user_data)
-{
-    auto* output = static_cast<spm_counter_id_vec_t*>(user_data);
-    if(output == nullptr || (counters == nullptr && num_counters > 0))
-        return ROCPROFILER_STATUS_ERROR;
-
-    if(num_counters == 0) return ROCPROFILER_STATUS_SUCCESS;
-    output->assign(counters, counters + num_counters);
-    return ROCPROFILER_STATUS_SUCCESS;
+constexpr auto device_qualifier = std::string_view{ ":device=" };
 }
 
 std::optional<std::uint64_t>
@@ -262,28 +187,6 @@ parse_requested_counters(const request& req)
     return counters;
 }
 
-bool
-sample_interval_supported(rocprofiler_agent_id_t agent_id, const request& req)
-{
-    auto configs = spm_available_config_vec_t{};
-    auto status  = rocprofiler_spm_query_agent_configurations(
-        agent_id, spm_configurations_callback, &configs);
-    if(status != ROCPROFILER_STATUS_SUCCESS)
-    {
-        LOG_WARNING("Failed to query SPM configurations for agent {}: {} ({})",
-                    agent_id.handle, static_cast<int>(status),
-                    rocprofiler_get_status_string(status));
-        return false;
-    }
-
-    return std::any_of(configs.begin(), configs.end(), [&req](const auto& config) {
-        return config.type ==
-                   ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES &&
-               config.interval.min_interval <= req.sample_interval &&
-               config.interval.max_interval >= req.sample_interval;
-    });
-}
-
 requested_counter_vec_t
 requested_counters_for_device(const requested_counter_vec_t& all_requested,
                               std::uint64_t                  device_id)
@@ -305,6 +208,119 @@ requested_counter_names(const requested_counter_vec_t& requested)
     for(const auto& itr : requested)
         requested_names.emplace(itr.name);
     return requested_names;
+}
+}  // namespace detail
+
+#if ROCPROFSYS_COMPILE_SPM_RUNTIME
+namespace
+{
+constexpr auto invalid_context_handle = 0UL;
+
+struct resolved_counter
+{
+    rocprofiler_counter_id_t                               id           = {};
+    std::vector<trace_cache::info::spm_counter_name_entry> name_entries = {};
+};
+
+using spm_available_config_vec_t = std::vector<rocprofiler_spm_available_configuration_t>;
+using spm_counter_id_vec_t       = std::vector<rocprofiler_counter_id_t>;
+using resolved_counter_vec_t     = std::vector<resolved_counter>;
+using requested_counter_vec_t    = detail::requested_counter_vec_t;
+namespace gpu_perf_counter       = pmc::collectors::gpu_perf_counter;
+using counter_detail_backend     = ::rocprofsys::backends::rocprofiler_sdk::backend<
+        ::rocprofsys::rocprofiler_sdk::backend>;
+
+enum class spm_status
+{
+    success,
+    skipped,
+    failed,
+};
+
+struct counter_query_result
+{
+    spm_status             status   = spm_status::failed;
+    resolved_counter_vec_t counters = {};
+};
+
+struct agent_config_result
+{
+    spm_status                      status = spm_status::failed;
+    rocprofiler_counter_config_id_t config = {};
+};
+
+struct counter_config_data
+{
+    spm_counter_id_vec_t                                   counter_ids  = {};
+    std::vector<trace_cache::info::spm_counter_name_entry> name_entries = {};
+};
+
+void
+log_sdk_status_failure(std::string_view message, rocprofiler_status_t status)
+{
+    if(status == ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED)
+    {
+        LOG_WARNING("{}: {} ({}). Set ROCPROFILER_SPM_BETA_ENABLED=ON to acknowledge "
+                    "the beta risk and enable SDK SPM collection",
+                    message, static_cast<int>(status),
+                    rocprofiler_get_status_string(status));
+        return;
+    }
+
+    LOG_WARNING("{}: {} ({})", message, static_cast<int>(status),
+                rocprofiler_get_status_string(status));
+}
+
+rocprofiler_status_t
+spm_configurations_callback(const rocprofiler_spm_available_configuration_t** configs,
+                            size_t num_configs, void* user_data)
+{
+    auto* output = static_cast<spm_available_config_vec_t*>(user_data);
+    if(output == nullptr || (configs == nullptr && num_configs > 0))
+        return ROCPROFILER_STATUS_ERROR;
+
+    output->reserve(num_configs);
+    for(size_t i = 0; i < num_configs; ++i)
+    {
+        if(configs[i] != nullptr) output->emplace_back(*configs[i]);
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+spm_supported_counters_callback(rocprofiler_agent_id_t /*agent_id*/,
+                                rocprofiler_counter_id_t* counters, size_t num_counters,
+                                void* user_data)
+{
+    auto* output = static_cast<spm_counter_id_vec_t*>(user_data);
+    if(output == nullptr || (counters == nullptr && num_counters > 0))
+        return ROCPROFILER_STATUS_ERROR;
+
+    if(num_counters == 0) return ROCPROFILER_STATUS_SUCCESS;
+    output->assign(counters, counters + num_counters);
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+bool
+sample_interval_supported(rocprofiler_agent_id_t agent_id, const request& req)
+{
+    auto configs = spm_available_config_vec_t{};
+    auto status  = rocprofiler_spm_query_agent_configurations(
+        agent_id, spm_configurations_callback, &configs);
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        LOG_WARNING("Failed to query SPM configurations for agent {}: {} ({})",
+                    agent_id.handle, static_cast<int>(status),
+                    rocprofiler_get_status_string(status));
+        return false;
+    }
+
+    return std::any_of(configs.begin(), configs.end(), [&req](const auto& config) {
+        return config.type ==
+                   ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES &&
+               config.interval.min_interval <= req.sample_interval &&
+               config.interval.max_interval >= req.sample_interval;
+    });
 }
 
 counter_config_data
@@ -430,10 +446,10 @@ create_sdk_spm_counter_config(rocprofiler_agent_id_t agent_id, std::uint64_t dev
                                               params.data(), params.size(), &config);
     if(status != ROCPROFILER_STATUS_SUCCESS)
     {
-        LOG_WARNING("Failed to create SPM counter config for device {} (agent {}): {} "
-                    "({})",
-                    device_id, agent_id.handle, static_cast<int>(status),
-                    rocprofiler_get_status_string(status));
+        log_sdk_status_failure(
+            fmt::format("Failed to create SPM counter config for device {} (agent {})",
+                        device_id, agent_id.handle),
+            status);
         return std::nullopt;
     }
 
@@ -444,7 +460,7 @@ agent_config_result
 create_agent_spm_config(rocprofiler_agent_id_t agent_id, std::uint64_t device_id,
                         const request& req, const requested_counter_vec_t& requested)
 {
-    const auto requested_names = requested_counter_names(requested);
+    const auto requested_names = detail::requested_counter_names(requested);
     auto counters = query_supported_spm_counters(agent_id, requested_names, device_id);
     if(counters.status != spm_status::success) return { counters.status, {} };
 
@@ -478,7 +494,7 @@ configure_agent_spm_configs(client_data& data, const request& req)
         return false;
     }
 
-    const auto all_requested = parse_requested_counters(req);
+    const auto all_requested = detail::parse_requested_counters(req);
 
     return data.agent_spm_counter_configs.wlock([&](auto& configs) {
         configs.clear();
@@ -489,7 +505,7 @@ configure_agent_spm_configs(client_data& data, const request& req)
             if(agent.agent == nullptr) continue;
             const auto device_id = agent.device_id;
             const auto requested =
-                requested_counters_for_device(all_requested, device_id);
+                detail::requested_counters_for_device(all_requested, device_id);
             if(requested.empty())
             {
                 LOG_DEBUG("No SPM counters requested for device {}", device_id);
@@ -579,9 +595,8 @@ spm_record_callback(const rocprofiler_spm_dispatch_counting_service_data_t* disp
 {
     if(dispatch_data == nullptr) return;
 
-    // The SDK sends a dispatch-complete notification with no SPM records.
-    // rocprofv3 handles this before data/data-loss flags, so keep the same
-    // ordering here.
+    // Dispatch-complete notifications do not carry SPM records, even if other
+    // flags are set. Handle them before record/data-loss processing.
     if((flags & ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END) != 0) return;
 
     if(records == nullptr) return;
@@ -605,11 +620,10 @@ spm_record_callback(const rocprofiler_spm_dispatch_counting_service_data_t* disp
     samples.reserve(record_count);
     counter_info_indices.reserve(record_count);
     sample_indices.reserve(record_count);
-    for(size_t i = 0; i < record_count; ++i)
+    for(const auto* record : rocprofsys::span<const rocprofiler_spm_counter_record_t*>{
+            records, record_count })
     {
-        if(records[i] == nullptr) continue;
-
-        const auto* record                   = records[i];
+        if(record == nullptr) continue;
         auto [counter_itr, inserted_counter] = counter_info_indices.emplace(
             record->id, static_cast<std::uint32_t>(counters.size()));
         if(inserted_counter)
@@ -681,18 +695,24 @@ configure_runtime(client_data* data, const request& req)
         data->spm_ctx, spm_dispatch_callback, data, spm_record_callback, data);
     if(status != ROCPROFILER_STATUS_SUCCESS)
     {
-        LOG_WARNING("Failed to configure SPM callback dispatch service: {} ({})",
-                    static_cast<int>(status), rocprofiler_get_status_string(status));
+        log_sdk_status_failure("Failed to configure SPM callback dispatch service",
+                               status);
         return false;
     }
 
+    LOG_WARNING(
+        "ROCm SPM counter collection is enabled as a beta feature. Kernel dispatches "
+        "are serialized while SPM is active, so timings in the trace will differ from "
+        "an uninstrumented run. SPM can also affect system stability and in rare cases "
+        "trigger a GPU or system reset. See the SPM section of the Systems Profiler "
+        "documentation for supported hardware and driver requirements.");
     LOG_DEBUG("Configured SPM callback dispatch service on spm_ctx={}",
               data->spm_ctx.handle);
     return true;
 }
 
 void
-report_runtime_summary(client_data* data)
+log_data_loss(client_data* data)
 {
     if(data == nullptr) return;
 
@@ -718,7 +738,7 @@ configure_runtime(client_data*, const request& req)
 }
 
 void
-report_runtime_summary(client_data*)
+log_data_loss(client_data*)
 {}
 #endif
 }  // namespace spm

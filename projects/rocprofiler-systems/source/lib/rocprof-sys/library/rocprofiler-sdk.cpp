@@ -2488,7 +2488,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     auto* _data        = as_client_data(user_data);
     _data->client_fini = fini_func;
 
-    // SPM gate, stage 1 of 3: reject invalid user configuration. This is the only
+    // SPM gate, stage 1 of 2: reject invalid user configuration. This is the only
     // SPM check that is fatal; conflicting counter modes or a missing interval are
     // explicit user errors.
     if(!rocprofiler_sdk::spm::is_config_valid(_spm_request, _counter_events,
@@ -2519,14 +2519,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     if(_spm_request.requested())
     {
-        // SPM gate, stages 2 and 3: require SDK beta opt-in, then attempt SDK/hardware
-        // runtime setup. Unlike stage 1, these checks warn and continue without SPM.
-        const auto _spm_enabled_for_sdk =
-            rocprofiler_sdk::spm::is_spm_enabled_for_sdk<common::environment<>>(
-                _spm_request);
-
-        if(_spm_enabled_for_sdk &&
-           !rocprofiler_sdk::spm::configure_runtime(_data, _spm_request))
+        // SPM gate, stage 2 of 2: attempt SDK/hardware runtime setup. SDK-side
+        // capability and opt-in failures warn and continue without SPM.
+        if(!rocprofiler_sdk::spm::configure_runtime(_data, _spm_request))
         {
             // SPM being unavailable on this SDK/hardware/runtime path must not abort tool
             // initialization. configure_runtime() already logged the specific reason.
@@ -2891,7 +2886,7 @@ tool_fini(void* callback_data)
     }
 
     auto* _data = as_client_data(callback_data);
-    rocprofiler_sdk::spm::report_runtime_summary(_data);
+    rocprofiler_sdk::spm::log_data_loss(_data);
     _data->client_id   = nullptr;
     _data->client_fini = nullptr;
     delete tool_data;
