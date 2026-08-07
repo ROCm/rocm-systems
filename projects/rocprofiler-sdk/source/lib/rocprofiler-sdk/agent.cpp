@@ -57,6 +57,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <iomanip>
 #include <limits>
@@ -318,30 +319,29 @@ using unique_agent_t = ::rocprofiler::platform::unique_agent_t;
 //
 // Windows builds collapse to a single candidate (platform::windows).
 
-std::vector<unique_agent_t>
-enumerate_platform_agents()
+enum class platform_kind
+{
+    gnulinux = 0,
+    wsl,
+    windows,
+};
+
+// The selection above, as a value. Split out from the dispatch below so that
+// construct_agent_cache() can ask which enumerator produced the agent list
+// without a global recording the answer. It depends only on the environment,
+// which does not change between the two calls, so the two cannot disagree.
+platform_kind
+select_platform()
 {
     const auto forced = common::get_env("ROCPROFILER_FORCE_PLATFORM", std::string{});
     if(!forced.empty())
     {
 #ifndef _WIN32
-        if(forced == "gnulinux")
-        {
-            ROCP_INFO << "agent topology: forced gnulinux via ROCPROFILER_FORCE_PLATFORM";
-            return platform::gnulinux::enumerate();
-        }
-        if(forced == "wsl")
-        {
-            ROCP_INFO << "agent topology: forced wsl via ROCPROFILER_FORCE_PLATFORM";
-            return platform::wsl::enumerate();
-        }
+        if(forced == "gnulinux") return platform_kind::gnulinux;
+        if(forced == "wsl") return platform_kind::wsl;
 #endif
 #ifdef _WIN32
-        if(forced == "windows")
-        {
-            ROCP_INFO << "agent topology: forced windows via ROCPROFILER_FORCE_PLATFORM";
-            return platform::windows::enumerate();
-        }
+        if(forced == "windows") return platform_kind::windows;
 #endif
         ROCP_WARNING << fmt::format(
             "agent topology: ROCPROFILER_FORCE_PLATFORM='{}' is not built into this binary "
@@ -350,19 +350,27 @@ enumerate_platform_agents()
     }
 
 #ifndef _WIN32
-    if(platform::gnulinux::is_available())
+    if(platform::gnulinux::is_available()) return platform_kind::gnulinux;
+    if(platform::wsl::is_available()) return platform_kind::wsl;
+    return platform_kind::gnulinux;
+#else
+    return platform_kind::windows;
+#endif
+}
+
+std::vector<unique_agent_t>
+enumerate_platform_agents()
+{
+#ifndef _WIN32
+    switch(select_platform())
     {
-        ROCP_INFO << "agent topology: selected " << platform::gnulinux::name << " (sysfs present)";
-        return platform::gnulinux::enumerate();
+        case platform_kind::wsl:
+            ROCP_INFO << "agent topology: selected " << platform::wsl::name;
+            return platform::wsl::enumerate();
+        case platform_kind::gnulinux:
+        case platform_kind::windows: break;
     }
-    if(platform::wsl::is_available())
-    {
-        ROCP_INFO << "agent topology: selected " << platform::wsl::name
-                  << " (libdxcore.so present)";
-        return platform::wsl::enumerate();
-    }
-    ROCP_WARNING << "agent topology: no platform matched; falling back to "
-                 << platform::gnulinux::name << " (will return empty)";
+    ROCP_INFO << "agent topology: selected " << platform::gnulinux::name;
     return platform::gnulinux::enumerate();
 #else
     if(platform::windows::is_available())
@@ -678,6 +686,40 @@ construct_agent_cache(::HsaApiTable* table)
     }
 
     ROCP_CI_LOG_IF(ERROR, hsa_agents.empty()) << fmt::format("Did not detect any HSA agents");
+
+    // On WSL the agent records come from librocdxg, and the HSA runtime loads
+    // the very same library. A thunk too old to export the topology ABI leaves
+    // rocprofiler with no GPU agents while HSA still reports them, which the
+    // consistency checks below read as a fatal internal inconsistency. It is
+    // not: it is an unsupported environment, and aborting the application the
+    // user asked us to profile is the wrong response. Report what to install
+    // and leave the agent cache empty so GPU profiling is simply unavailable.
+    //
+    // Deliberately confined to WSL. On bare metal a rocprofiler/HSA mismatch
+    // really is an internal inconsistency and still aborts.
+#ifndef _WIN32
+    if(select_platform() == platform_kind::wsl)
+    {
+        auto count_gpus = [](const auto& agents) {
+            return std::count_if(agents.begin(), agents.end(), [](const auto* itr) {
+                return itr->type == ROCPROFILER_AGENT_TYPE_GPU;
+            });
+        };
+
+        if(count_gpus(rocp_agents) == 0 && hsa_agents.size() > rocp_agents.size())
+        {
+            ROCP_ERROR << fmt::format(
+                "rocprofiler-sdk could not read the WSL GPU topology: {} HSA agents are present "
+                "but no GPU agent could be built. This build requires a librocdxg that exports "
+                "the DxgAbiCheck/DxgGetNodeTopology topology ABI (see the earlier 'wsl topology:' "
+                "diagnostics for the exact symbol or ABI version that was rejected). Update the "
+                "WSL ROCm runtime package to a version matching this rocprofiler-sdk. GPU "
+                "profiling is disabled for this process; the application continues unprofiled.",
+                hsa_agents.size());
+            return;
+        }
+    }
+#endif
 
     auto rocp_hsa_agent_node_ids = std::set<uint32_t>{};
     if(rocp_agents.size() != hsa_agents.size())

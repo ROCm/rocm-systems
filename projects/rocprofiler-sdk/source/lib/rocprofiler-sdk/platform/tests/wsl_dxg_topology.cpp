@@ -33,11 +33,17 @@
 
 #include <cstdlib>
 #include <limits>
+#include <set>
 #include <vector>
 
 namespace
 {
 using rocprofiler::platform::wsl::DxgNodeTopology;
+using rocprofiler::platform::wsl::match_node_to_adapter;
+
+// The matcher is called once per adapter with a growing consumed set; the tests
+// below spell that set out explicitly, so shorten the call.
+constexpr auto& match = match_node_to_adapter;
 
 // A gfx1150 (RDNA 3.5) node as the DXG thunk reports it: 1 shader engine, 2
 // SIMD arrays per engine, 2 SIMDs per CU.
@@ -47,6 +53,7 @@ make_gfx1150_node()
     auto node                      = DxgNodeTopology{};
     node.StructSize                = sizeof(DxgNodeTopology);
     node.AbiVersion                = rocprofiler::platform::wsl::kDxgNodeTopologyAbiVersion;
+    node.NodeId                    = 1;  // KMT node 0 is the CPU
     node.NumFComputeCores          = 32;
     node.NumSIMDPerCU              = 2;
     node.NumShaderBanks            = 1;
@@ -117,6 +124,7 @@ TEST(wsl_dxg_topology, array_count_is_a_total_across_shader_engines)
     node.NumShaderBanks   = 4;
     node.NumArrays        = 2;
     node.NumFComputeCores = 256;
+    node.NumCUPerArray    = 16;
 
     auto info = rocprofiler::common::init_public_api_struct(rocprofiler_agent_t{});
     ASSERT_TRUE(rocprofiler::platform::wsl::apply_node_topology(node, info));
@@ -225,23 +233,30 @@ TEST(wsl_dxg_topology, gfx_name_precedence)
 TEST(wsl_dxg_topology, adapter_matching_prefers_luid)
 {
     auto first         = make_gfx1150_node();
+    first.NodeId       = 1;
     first.LuidLowPart  = 1;
     first.LuidHighPart = 0;
     first.DeviceId     = 0x7480;
 
     auto second         = make_gfx1150_node();
+    second.NodeId       = 2;
     second.LuidLowPart  = 2;
     second.LuidHighPart = 0;
     second.DeviceId     = 0x7480;
 
     const auto nodes = std::vector<DxgNodeTopology>{first, second};
+    const auto none  = std::set<uint32_t>{};
 
     // Identical device ids: only the LUID disambiguates the two adapters.
-    EXPECT_EQ(rocprofiler::platform::wsl::match_node_to_adapter(nodes, 2, 0, 0x7480), &nodes[1]);
-    EXPECT_EQ(rocprofiler::platform::wsl::match_node_to_adapter(nodes, 1, 0, 0x7480), &nodes[0]);
+    EXPECT_EQ(match(nodes, none, 2, 0, 0x7480).node, &nodes[1]);
+    EXPECT_EQ(match(nodes, none, 1, 0, 0x7480).node, &nodes[0]);
 
-    // A LUID neither node reports is not silently downgraded to a device-id match.
-    EXPECT_EQ(rocprofiler::platform::wsl::match_node_to_adapter(nodes, 3, 0, 0x7480), nullptr);
+    // A LUID neither node reports is not silently downgraded to a device-id
+    // match, and it is not ambiguity either - the LUIDs say these are other
+    // GPUs.
+    const auto unmatched = match(nodes, none, 3, 0, 0x7480);
+    EXPECT_EQ(unmatched.node, nullptr);
+    EXPECT_FALSE(unmatched.ambiguous);
 }
 
 TEST(wsl_dxg_topology, adapter_matching_falls_back_to_device_id)
@@ -252,8 +267,127 @@ TEST(wsl_dxg_topology, adapter_matching_falls_back_to_device_id)
     node.DeviceId     = 0x150e;
 
     const auto nodes = std::vector<DxgNodeTopology>{node};
+    const auto none  = std::set<uint32_t>{};
 
-    EXPECT_EQ(rocprofiler::platform::wsl::match_node_to_adapter(nodes, 7, 0, 0x150e), &nodes[0]);
-    EXPECT_EQ(rocprofiler::platform::wsl::match_node_to_adapter(nodes, 0, 0, 0x7480), nullptr);
-    EXPECT_EQ(rocprofiler::platform::wsl::match_node_to_adapter(nodes, 0, 0, 0), nullptr);
+    EXPECT_EQ(match(nodes, none, 7, 0, 0x150e).node, &nodes[0]);
+    EXPECT_EQ(match(nodes, none, 0, 0, 0x7480).node, nullptr);
+    EXPECT_EQ(match(nodes, none, 0, 0, 0).node, nullptr);
+}
+
+TEST(wsl_dxg_topology, identical_device_ids_with_distinct_luids_do_not_alias)
+{
+    auto first         = make_gfx1150_node();
+    first.NodeId       = 1;
+    first.LuidLowPart  = 0x1111;
+    first.LuidHighPart = 0;
+    first.DeviceId     = 0x7480;
+
+    auto second         = make_gfx1150_node();
+    second.NodeId       = 2;
+    second.LuidLowPart  = 0x2222;
+    second.LuidHighPart = 0;
+    second.DeviceId     = 0x7480;
+
+    const auto nodes    = std::vector<DxgNodeTopology>{first, second};
+    auto       consumed = std::set<uint32_t>{};
+
+    const auto a = match(nodes, consumed, 0x2222, 0, 0x7480);
+    ASSERT_NE(a.node, nullptr);
+    EXPECT_EQ(a.node->NodeId, 2u);
+    consumed.emplace(a.node->NodeId);
+
+    const auto b = match(nodes, consumed, 0x1111, 0, 0x7480);
+    ASSERT_NE(b.node, nullptr);
+    EXPECT_EQ(b.node->NodeId, 1u);
+}
+
+TEST(wsl_dxg_topology, identical_device_ids_without_luids_are_ambiguous)
+{
+    auto first        = make_gfx1150_node();
+    first.NodeId      = 1;
+    first.LuidLowPart = 0;
+    first.DeviceId    = 0x7480;
+
+    auto second        = make_gfx1150_node();
+    second.NodeId      = 2;
+    second.LuidLowPart = 0;
+    second.DeviceId    = 0x7480;
+
+    const auto nodes = std::vector<DxgNodeTopology>{first, second};
+
+    // Two indistinguishable candidates: report it rather than picking one and
+    // attributing this adapter's counters to the wrong GPU.
+    const auto ambiguous = match(nodes, std::set<uint32_t>{}, 0, 0, 0x7480);
+    EXPECT_EQ(ambiguous.node, nullptr);
+    EXPECT_TRUE(ambiguous.ambiguous);
+
+    // Once the first is claimed, only one candidate is left and it resolves.
+    const auto resolved = match(nodes, std::set<uint32_t>{1}, 0, 0, 0x7480);
+    EXPECT_FALSE(resolved.ambiguous);
+    ASSERT_NE(resolved.node, nullptr);
+    EXPECT_EQ(resolved.node->NodeId, 2u);
+}
+
+TEST(wsl_dxg_topology, a_consumed_node_is_never_matched_twice)
+{
+    auto node         = make_gfx1150_node();
+    node.NodeId       = 4;
+    node.LuidLowPart  = 0x99;
+    node.LuidHighPart = 0;
+
+    const auto nodes = std::vector<DxgNodeTopology>{node};
+
+    EXPECT_EQ(match(nodes, std::set<uint32_t>{}, 0x99, 0, node.DeviceId).node, &nodes[0]);
+
+    const auto second = match(nodes, std::set<uint32_t>{4}, 0x99, 0, node.DeviceId);
+    EXPECT_EQ(second.node, nullptr);
+    EXPECT_FALSE(second.ambiguous);
+}
+
+TEST(wsl_dxg_topology, cu_per_simd_array_is_derived_across_shader_engines)
+{
+    // 128 CU on 4 shader engines with 2 arrays each is 16 CU per array. A
+    // producer that divided by the per-engine array count alone would say 64.
+    auto node             = make_gfx1150_node();
+    node.NumShaderBanks   = 4;
+    node.NumArrays        = 2;
+    node.NumSIMDPerCU     = 2;
+    node.NumFComputeCores = 256;
+    node.NumCUPerArray    = 64;
+
+    auto info = rocprofiler::common::init_public_api_struct(rocprofiler_agent_t{});
+    ASSERT_TRUE(rocprofiler::platform::wsl::apply_node_topology(node, info));
+
+    EXPECT_EQ(info.cu_count, 128u);
+    EXPECT_EQ(info.array_count, 8u);
+    EXPECT_EQ(info.cu_per_simd_array, 16u);
+}
+
+TEST(wsl_dxg_topology, a_consistent_producer_is_reproduced_exactly)
+{
+    auto node             = make_gfx1150_node();
+    node.NumShaderBanks   = 4;
+    node.NumArrays        = 2;
+    node.NumSIMDPerCU     = 2;
+    node.NumFComputeCores = 256;
+    node.NumCUPerArray    = 16;  // what a corrected producer reports
+
+    auto info = rocprofiler::common::init_public_api_struct(rocprofiler_agent_t{});
+    ASSERT_TRUE(rocprofiler::platform::wsl::apply_node_topology(node, info));
+
+    EXPECT_EQ(info.cu_per_simd_array, node.NumCUPerArray);
+}
+
+TEST(wsl_dxg_topology, kmt_node_id_survives_the_transform)
+{
+    auto node   = make_gfx1150_node();
+    node.NodeId = 7;
+
+    const auto nodes = std::vector<DxgNodeTopology>{node};
+    const auto found = match(nodes, std::set<uint32_t>{}, node.LuidLowPart, 0x11, node.DeviceId);
+
+    ASSERT_NE(found.node, nullptr);
+    EXPECT_EQ(found.node->NodeId, 7u)
+        << "the enumerator publishes this as rocprofiler_agent_t::node_id, so it must not be "
+           "replaced by a compacted ordinal";
 }

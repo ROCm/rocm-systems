@@ -47,6 +47,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -549,6 +550,11 @@ enumerate()
     // logical_node_type_id, so the first GPU must be 0 here regardless of the CPU.
     uint32_t gpu_type_index = 0;
 
+    // KMT nodes already paired with an adapter. Matching is stateless, so
+    // without this two adapters that cannot be distinguished by LUID would both
+    // resolve to the first node reporting their device id.
+    auto consumed_nodes = std::set<uint32_t>{};
+
     for(uint32_t i = 0; i < e.NumAdapters; ++i)
     {
         const auto& a = infos[i];
@@ -632,8 +638,26 @@ enumerate()
         // contributes the adapter identity, its marketing string and the
         // dedicated VRAM size (which the WSL thunk reports as a memory bank
         // rather than in the node record).
-        const auto* node = match_node_to_adapter(
-            gpu_nodes, a.AdapterLuid.LowPart, a.AdapterLuid.HighPart, devids.DeviceIds.DeviceID);
+        const auto match = match_node_to_adapter(gpu_nodes,
+                                                 consumed_nodes,
+                                                 a.AdapterLuid.LowPart,
+                                                 a.AdapterLuid.HighPart,
+                                                 devids.DeviceIds.DeviceID);
+        if(match.ambiguous)
+        {
+            ROCP_WARNING << fmt::format(
+                "wsl::enumerate: discarding adapter {} (vendor=0x{:04x} device=0x{:04x}): several "
+                "DXG topology nodes report this device id and neither they nor the adapter carry "
+                "a LUID, so this adapter cannot be told apart from an identical one. Guessing "
+                "would attribute one GPU's counters to another. A librocdxg that reports adapter "
+                "LUIDs resolves this",
+                i,
+                devids.DeviceIds.VendorID,
+                devids.DeviceIds.DeviceID);
+            continue;
+        }
+
+        const auto* node = match.node;
         if(node == nullptr)
         {
             ROCP_WARNING << fmt::format(
@@ -671,9 +695,16 @@ enumerate()
             continue;
         }
 
-        info.type                 = ROCPROFILER_AGENT_TYPE_GPU;
+        // Claim the node so a later adapter cannot be paired with it too.
+        consumed_nodes.emplace(node->NodeId);
+
+        info.type = ROCPROFILER_AGENT_TYPE_GPU;
+        // logical_node_id is rocprofiler's own dense ordinal across all agent
+        // types; node_id is the driver's. Keeping the KMT node id here rather
+        // than reusing the ordinal means a skipped adapter shifts the ordinals
+        // without renaming the GPUs that were published.
         info.logical_node_id      = logical;
-        info.node_id              = static_cast<uint32_t>(logical);
+        info.node_id              = node->NodeId;
         info.id.handle            = logical + offset;
         info.logical_node_type_id = gpu_type_index;
         ++logical;

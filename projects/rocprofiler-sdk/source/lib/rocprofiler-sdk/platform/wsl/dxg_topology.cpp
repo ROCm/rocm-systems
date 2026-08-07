@@ -222,30 +222,49 @@ read_dxg_gpu_topology()
     return out;
 }
 
-const DxgNodeTopology*
+NodeMatch
 match_node_to_adapter(const std::vector<DxgNodeTopology>& nodes,
+                      const std::set<uint32_t>&           consumed_node_ids,
                       uint32_t                            luid_low,
                       int32_t                             luid_high,
                       uint32_t                            device_id)
 {
     const bool adapter_has_luid = (luid_low != 0 || luid_high != 0);
 
-    for(const auto& node : nodes)
-    {
-        const bool node_has_luid = (node.LuidLowPart != 0 || node.LuidHighPart != 0);
+    auto available = [&consumed_node_ids](const DxgNodeTopology& node) {
+        return consumed_node_ids.count(node.NodeId) == 0;
+    };
+    auto has_luid = [](const DxgNodeTopology& node) {
+        return node.LuidLowPart != 0 || node.LuidHighPart != 0;
+    };
 
-        if(node_has_luid && adapter_has_luid)
+    if(adapter_has_luid)
+    {
+        for(const auto& node : nodes)
         {
+            if(!available(node) || !has_luid(node)) continue;
             if(node.LuidLowPart == luid_low &&
                node.LuidHighPart == static_cast<uint32_t>(luid_high))
-                return &node;
-            continue;
+                return NodeMatch{&node, false};
         }
-
-        if(device_id != 0 && node.DeviceId == device_id) return &node;
     }
 
-    return nullptr;
+    if(device_id == 0) return NodeMatch{};
+
+    // Only nodes a LUID cannot already speak for are eligible. If both sides
+    // report LUIDs and they did not match above, they are different GPUs and
+    // the shared device id says nothing.
+    const DxgNodeTopology* candidate = nullptr;
+    for(const auto& node : nodes)
+    {
+        if(!available(node) || node.DeviceId != device_id) continue;
+        if(adapter_has_luid && has_luid(node)) continue;
+
+        if(candidate != nullptr) return NodeMatch{nullptr, true};
+        candidate = &node;
+    }
+
+    return NodeMatch{candidate, false};
 }
 
 std::string
@@ -286,15 +305,33 @@ apply_node_topology(const DxgNodeTopology& node, rocprofiler_agent_t& info)
     info.num_shader_banks       = node.NumShaderBanks;
     info.simd_arrays_per_engine = node.NumArrays;
     info.array_count            = node.NumShaderBanks * node.NumArrays;
-    info.cu_per_simd_array      = node.NumCUPerArray;
     info.cu_per_engine          = info.cu_count / node.NumShaderBanks;
-    info.wave_front_size        = node.WaveFrontSize;
-    info.max_waves_per_simd     = node.MaxWavesPerSIMD;
-    info.max_waves_per_cu       = node.NumSIMDPerCU * node.MaxWavesPerSIMD;
-    info.max_slots_scratch_cu   = node.MaxSlotsScratchCU;
-    info.lds_size_in_kb         = node.LDSSizeInKB;
-    info.gds_size_in_kb         = node.GDSSizeInKB;
-    info.num_gws                = node.NumGws;
+
+    // Derived rather than copied from NumCUPerArray. The two must agree, but
+    // this record is published as immutable and counter collection divides by
+    // it, so it is defined here by the same relation the rest of these fields
+    // satisfy instead of inherited from whatever the thunk computed. A thunk
+    // that disagrees is reporting a bug in itself; say so and keep going with
+    // the self-consistent value.
+    info.cu_per_simd_array = info.cu_count / info.array_count;
+    if(node.NumCUPerArray != info.cu_per_simd_array)
+        ROCP_WARNING << fmt::format(
+            "wsl topology: node {} reports NumCUPerArray={} but {} compute units across {} shader "
+            "arrays ({} engines x {}) is {} per array; using the derived value",
+            node.NodeId,
+            node.NumCUPerArray,
+            info.cu_count,
+            info.array_count,
+            node.NumShaderBanks,
+            node.NumArrays,
+            info.cu_per_simd_array);
+    info.wave_front_size      = node.WaveFrontSize;
+    info.max_waves_per_simd   = node.MaxWavesPerSIMD;
+    info.max_waves_per_cu     = node.NumSIMDPerCU * node.MaxWavesPerSIMD;
+    info.max_slots_scratch_cu = node.MaxSlotsScratchCU;
+    info.lds_size_in_kb       = node.LDSSizeInKB;
+    info.gds_size_in_kb       = node.GDSSizeInKB;
+    info.num_gws              = node.NumGws;
     // Every GPU has at least one XCC and aqlprofile divides instance counts by
     // it, so treat an unreported value the way the KFD path treats a missing
     // num_xcc sysfs property.

@@ -64,12 +64,33 @@ required and no separate link dependency exists. Pre-HSA consumers such as
 profiling run: agent records are built once, at enumeration time, and are never
 modified afterwards.
 
-Each adapter is paired with its KMT node by Windows LUID, falling back to the
-PCI device id only when one of the two sides does not report a LUID. An adapter
-with no matching node, or whose node reports an incomplete topology, is logged
-and omitted rather than published with placeholder values — GPU operation
-through the HSA runtime requires the same thunk, so a GPU that cannot be
-described here could not be profiled anyway.
+Each adapter is paired with its KMT node by Windows LUID. The PCI device id is
+only a fallback for the nodes a LUID cannot speak for, and it has to identify
+exactly one of them: two identical GPUs that report no LUID cannot be told
+apart, so both are omitted with a diagnostic rather than one being guessed at.
+Each node is claimed by at most one adapter. An adapter with no matching node,
+or whose node reports an incomplete topology, is likewise logged and omitted
+rather than published with placeholder values.
+
+Version requirement
+-------------------
+
+The topology ABI (``DxgAbiCheck``, ``DxgAcquireTopologySnapshot``,
+``DxgGetNodeTopology``, ``DxgReleaseTopologySnapshot``) is a hard requirement,
+not a preference. There is no fallback to the older ``hsaKmtGetNodeProperties``
+path: that call exchanges a full ``HsaNodeProperties``, whose layout is not
+version-stable, so calling it across a package boundary is exactly the
+mismatch ``DxgAbiCheck`` exists to prevent.
+
+A ``librocdxg`` that predates this ABI, or one that rejects the handshake,
+therefore yields **no GPU agents at all**. That is not harmless: the HSA runtime
+loads the same thunk and still reports its GPUs, so rocprofiler-SDK and HSA
+disagree about which agents exist. On WSL that disagreement is reported as an
+unsupported environment and GPU profiling is disabled, and the application under
+test keeps running unprofiled — it is not treated as the fatal internal
+inconsistency the equivalent mismatch means on bare metal. The log names the
+symbol or ABI version that was rejected; the fix is to update the WSL ROCm
+runtime package to one matching this rocprofiler-SDK.
 
 Environment variables
 ======================

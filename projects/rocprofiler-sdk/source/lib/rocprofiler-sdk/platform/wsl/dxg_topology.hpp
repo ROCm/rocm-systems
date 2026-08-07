@@ -26,6 +26,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -55,7 +56,7 @@ namespace wsl
 inline constexpr int32_t kHsaKmtStatusSuccess             = 0;
 inline constexpr int32_t kHsaKmtStatusKernelAlreadyOpened = 22;
 
-inline constexpr uint32_t kDxgNodeTopologyAbiVersion = 1;
+inline constexpr uint32_t kDxgNodeTopologyAbiVersion = 2;
 inline constexpr uint32_t kDxgNodeTopologyMinSize    = 8;
 
 // Mirror of HsaStructureSizes. DxgAbiCheck only reads it - and validates its
@@ -115,7 +116,7 @@ struct DxgNodeTopology
     uint32_t LuidLowPart;
     uint32_t LuidHighPart;
     uint32_t Integrated;
-    uint32_t Reserved32;
+    uint32_t NodeId;  // KMT node this record describes
 
     uint64_t UniqueID;
     uint64_t HiveID;
@@ -126,7 +127,7 @@ struct DxgNodeTopology
 static_assert(sizeof(DxgNodeTopology) == 192, "HsaDxgNodeTopology ABI mismatch");
 static_assert(offsetof(DxgNodeTopology, NumCPUCores) == kDxgNodeTopologyMinSize,
               "HsaDxgNodeTopology ABI mismatch");
-static_assert(offsetof(DxgNodeTopology, Reserved32) == 156, "HsaDxgNodeTopology ABI mismatch");
+static_assert(offsetof(DxgNodeTopology, NodeId) == 156, "HsaDxgNodeTopology ABI mismatch");
 static_assert(offsetof(DxgNodeTopology, UniqueID) == 160, "HsaDxgNodeTopology ABI mismatch");
 static_assert(offsetof(DxgNodeTopology, WallClockKHz) == 184, "HsaDxgNodeTopology ABI mismatch");
 
@@ -135,14 +136,32 @@ static_assert(offsetof(DxgNodeTopology, WallClockKHz) == 184, "HsaDxgNodeTopolog
 std::vector<DxgNodeTopology>
 read_dxg_gpu_topology();
 
+// Outcome of pairing one DXCore adapter with a KMT topology node.
+//
+// `ambiguous` distinguishes "this adapter has no node" from "several nodes
+// could be this adapter and nothing can tell them apart". The two need
+// different diagnostics, and the second must never be resolved by picking one:
+// on a machine with two identical GPUs that would attribute one GPU's counters
+// to the other.
+struct NodeMatch
+{
+    const DxgNodeTopology* node      = nullptr;
+    bool                   ambiguous = false;
+};
+
 // Find the KMT node describing a DXCore adapter.
 //
 // LUID is the multi-GPU-safe key: the thunk reports the same Windows adapter
-// LUID that D3DKMTQueryAdapterInfo returns. Only when one of the two sides does
-// not carry a LUID does this fall back to the PCI device id, which is ambiguous
-// across identical GPUs and therefore never used when a LUID pair is available.
-const DxgNodeTopology*
+// LUID that D3DKMTQueryAdapterInfo returns, so when both sides carry one the
+// pairing is exact. The PCI device id is only a fallback for the nodes a LUID
+// cannot speak for, and it has to identify exactly one of them.
+//
+// `consumed_node_ids` holds the NodeId of every node already claimed by an
+// earlier adapter. Matching is otherwise stateless, so without it two adapters
+// would happily claim the same node.
+NodeMatch
 match_node_to_adapter(const std::vector<DxgNodeTopology>& nodes,
+                      const std::set<uint32_t>&           consumed_node_ids,
                       uint32_t                            luid_low,
                       int32_t                             luid_high,
                       uint32_t                            device_id);
