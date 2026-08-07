@@ -368,6 +368,16 @@ make_event_id(reader_types::event_type_t type, size_t ordinal)
     return reader_types::detail::event_id_access::make(type, ordinal - 1);
 }
 
+// Mint the handle for a SQL-seeded fixture row by its EXPLICIT id. Unlike the
+// writer's 0-based autoincrementer (see make_event_id above), synthetic SQL
+// fixtures assign explicit 1-based ids (e.g. rocpd_sample.id = 1), so no
+// ordinal->raw shift applies — the db_id passed here IS the raw id (DL-015/069).
+reader_types::event_id_t
+make_sql_event_id(reader_types::event_type_t type, size_t db_id)
+{
+    return reader_types::detail::event_id_access::make(type, db_id);
+}
+
 reader_types::event_type_t
 type_of(const reader_types::event_id_t& id)
 {
@@ -2422,6 +2432,221 @@ TEST_F(reader_v4_kd_pmc_test, v4_get_scalar_track_returns_empty_for_kd_pmc)
                     profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
     ASSERT_GE(tracks.size(), 1U);
     ASSERT_TRUE(m_reader->get_scalar_track(tracks.front()->id).empty());
+}
+
+// ============================================================================
+// Track-scoped API tests — v4.0 synthetic counter fixture (rocpd_v4_counter.db)
+// Built at configure time from committed SQL. Exists solely to exercise the
+// v4.0 scalar/counter path (get_scalar_track / get_event_info), which no
+// real v4.0 capture available to the project contains (no rocpd_sample rows).
+// ============================================================================
+
+class reader_v4_counter_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        m_storage = std::make_unique<profiler_hub::storage_t>(m_database_path, "");
+        m_reader  = std::make_shared<profiler_hub::reader_t>(std::move(m_storage));
+    }
+
+    void TearDown() override
+    {
+        m_reader.reset();
+        m_storage.reset();
+    }
+
+    std::string                              m_database_path{ ROCPD_DB_V4_COUNTER_PATH };
+    std::unique_ptr<profiler_hub::storage_t> m_storage;
+    std::shared_ptr<profiler_hub::reader_t>  m_reader;
+};
+
+TEST_F(reader_v4_counter_test, v4_counter_track_classified_named_and_agent_scoped)
+{
+    auto tracks = m_reader->get_tracks();
+    // Two tracks: the counter track (sample-referenced) and a bare cpu_thread.
+    auto counter =
+        find_first_track(tracks, profiler_hub::reader_types::track_type_t::counter);
+    ASSERT_NE(counter, nullptr);
+
+    // Q9: counter track display name is the PMC name.
+    ASSERT_EQ(counter->name, "GRBM_COUNT");
+    // Q10: v4 counter track carries agent_info (its rocpd_track row has agent_id).
+    ASSERT_NE(counter->agent_info, nullptr);
+    ASSERT_NE(counter->thread_info, nullptr);
+
+    // v4.0 has one pmc per event (no event_id fan-out), so it is unaffected by the
+    // v3-only deterministic disambiguation (005B-4-fix-1-fix-1): the single track must
+    // still resolve to the GRBM_COUNT pmc, with name/agent consistent with the track.
+    ASSERT_NE(counter->pmc_info, nullptr);
+    ASSERT_EQ(counter->pmc_info->name, "GRBM_COUNT");
+    // 005B-4-fix-1-fix-2: numeric pmc_id exposed on pmc_info; GRBM_COUNT is pmc 1 here.
+    ASSERT_EQ(counter->pmc_info->pmc_id, 1U);
+    ASSERT_EQ(counter->name, counter->pmc_info->name);
+    ASSERT_NE(counter->pmc_info->agent_info, nullptr);
+    ASSERT_EQ(counter->pmc_info->agent_info->agent_type, "GPU");
+    ASSERT_EQ(counter->pmc_info->agent_info->type_index, 0U);
+}
+
+TEST_F(reader_v4_counter_test, v4_get_scalar_track_returns_timestamp_ordered_values)
+{
+    auto tracks = m_reader->get_tracks();
+    auto counter =
+        find_first_track(tracks, profiler_hub::reader_types::track_type_t::counter);
+    ASSERT_NE(counter, nullptr);
+
+    auto samples = m_reader->get_scalar_track(counter->id);
+    // 3 samples, returned in ascending-timestamp order despite row-id order differing.
+    ASSERT_EQ(samples.size(), 3);
+    ASSERT_TRUE(is_timestamp_sorted(samples));
+
+    ASSERT_EQ(row_id_of(samples[0].id), 2U);
+    ASSERT_EQ(samples[0].timestamp, 1000);
+    ASSERT_DOUBLE_EQ(samples[0].value, 10.5);
+
+    ASSERT_EQ(row_id_of(samples[1].id), 3U);
+    ASSERT_EQ(samples[1].timestamp, 2000);
+    ASSERT_DOUBLE_EQ(samples[1].value, 20.5);
+
+    ASSERT_EQ(row_id_of(samples[2].id), 1U);
+    ASSERT_EQ(samples[2].timestamp, 3000);
+    ASSERT_DOUBLE_EQ(samples[2].value, 30.5);
+}
+
+TEST_F(reader_v4_counter_test, v4_get_event_info_resolves_sample_point_event)
+{
+    // sample row id 1 -> timestamp 3000. The scalar handle encodes the sample event
+    // type; get_event_info resolves it as a point event (te == nullopt). The counter
+    // name + value payload is asserted separately below (§7, task 052).
+    auto details = m_reader->get_event_info(
+        make_sql_event_id(profiler_hub::reader_types::event_type_t::sample, 1));
+    ASSERT_TRUE(details.has_value());
+    ASSERT_EQ(details->ts, 3000U);
+    ASSERT_FALSE(details->te.has_value());
+}
+
+TEST_F(reader_v4_counter_test, v4_get_event_info_counter_sample_carries_name_and_value)
+{
+    // §7 (task 052, v4 backend): sample row id 1 -> track 1 "GRBM_COUNT", value 30.5.
+    // Resolved through the unified get_event_info the counter sample carries the counter
+    // name (from the track) + value (as a double property). Pre-052 this arm returned a
+    // bare timestamp, dropping name+value (guard-bite).
+    auto details = m_reader->get_event_info(
+        make_sql_event_id(profiler_hub::reader_types::event_type_t::sample, 1));
+    ASSERT_TRUE(details.has_value());
+    ASSERT_EQ(details->name, "GRBM_COUNT");
+
+    auto* value = find_prop(*details, "value");
+    ASSERT_NE(value, nullptr);
+    ASSERT_TRUE(std::holds_alternative<double>(*value));
+    ASSERT_DOUBLE_EQ(std::get<double>(*value), 30.5);
+}
+
+TEST_F(reader_v4_counter_test, v4_get_event_info_pmc_event_carries_value)
+{
+    // A pmc_event point handle minted from a known rocpd_pmc_event.id resolves through
+    // the unified detail path: it is a point event (te == nullopt) whose "value" property
+    // carries the counter value as a double. pmc_event id=1 -> event_id=1 -> sample
+    // timestamp 3000, value 30.5. (Reader-minted pmc_event handles on kernel_dispatch_pmc
+    // tracks carry a kernel_dispatch id and route to the interval path, so the point
+    // detail path is exercised here with a directly-minted pmc_event.id handle.)
+    auto details = m_reader->get_event_info(
+        make_sql_event_id(profiler_hub::reader_types::event_type_t::pmc_event, 1));
+    ASSERT_TRUE(details.has_value());
+    ASSERT_EQ(details->ts, 3000U);
+    ASSERT_FALSE(details->te.has_value());
+    auto* value = find_prop(*details, "value");
+    ASSERT_NE(value, nullptr);
+    ASSERT_TRUE(std::holds_alternative<double>(*value));
+    ASSERT_DOUBLE_EQ(std::get<double>(*value), 30.5);
+}
+
+TEST_F(reader_v4_counter_test, v4_get_interval_track_on_counter_returns_empty)
+{
+    // Q7: interval query against the counter track returns empty.
+    auto tracks = m_reader->get_tracks();
+    auto counter =
+        find_first_track(tracks, profiler_hub::reader_types::track_type_t::counter);
+    ASSERT_NE(counter, nullptr);
+    ASSERT_TRUE(m_reader->get_interval_track(counter->id).empty());
+}
+
+TEST_F(reader_v4_counter_test, v4_get_scalar_track_on_non_counter_returns_empty)
+{
+    // Q7: scalar query against the bare cpu_thread track (no samples) returns empty.
+    auto tracks = m_reader->get_tracks();
+    auto cpu =
+        find_first_track(tracks, profiler_hub::reader_types::track_type_t::cpu_thread);
+    ASSERT_NE(cpu, nullptr);
+    ASSERT_TRUE(m_reader->get_scalar_track(cpu->id).empty());
+}
+
+TEST_F(reader_v4_counter_test, v4_get_track_stats_counter_matches_scalar_slice)
+{
+    // v4.0 scalar stats resolve MIN/MAX through the timestamp spine. Known oracle:
+    // 3 samples at timestamps 1000/2000/3000 -> min 1000, max 3000, count 3.
+    auto tracks = m_reader->get_tracks();
+    auto counter =
+        find_first_track(tracks, profiler_hub::reader_types::track_type_t::counter);
+    ASSERT_NE(counter, nullptr);
+
+    auto samples = m_reader->get_scalar_track(counter->id);
+    auto stats   = m_reader->get_track_stats(counter->id);
+    expect_stats_match_scalars(stats, samples);
+    ASSERT_EQ(stats.count, 3U);
+    ASSERT_EQ(stats.min_ts.value(), 1000U);
+    ASSERT_EQ(stats.max_ts.value(), 3000U);
+}
+
+TEST_F(reader_v4_counter_test, v4_get_track_stats_bare_cpu_thread_is_empty)
+{
+    // The bare cpu_thread track has no region rows: count 0, nullopt bounds — the
+    // honest "empty track" signal (SQL MIN/MAX over an empty set), not an error.
+    auto tracks = m_reader->get_tracks();
+    auto cpu =
+        find_first_track(tracks, profiler_hub::reader_types::track_type_t::cpu_thread);
+    ASSERT_NE(cpu, nullptr);
+
+    auto stats = m_reader->get_track_stats(cpu->id);
+    ASSERT_EQ(stats.count, 0U);
+    ASSERT_FALSE(stats.min_ts.has_value());
+    ASSERT_FALSE(stats.max_ts.has_value());
+}
+
+TEST_F(reader_v4_counter_test,
+       v4_counter_display_name_falls_back_to_track_name_on_pmc_miss)
+{
+    // F7 coverage (v4 backend): track 3 has rocpd_track.name_id=2 -> 'FallbackCounterV4';
+    // its pmc_event references pmc_id=99 which exists in rocpd_info_pmc with empty name.
+    // The empty-name guard (!nit->second.empty()) prevents it from overwriting
+    // rocpd_track.name -> display name falls back to "FallbackCounterV4".
+    auto tracks = m_reader->get_tracks();
+    auto counters =
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::counter);
+
+    profiler_hub::reader_types::track_info_ptr_t fallback_counter;
+    for(const auto& c : counters)
+    {
+        if(c->name == "FallbackCounterV4")
+        {
+            fallback_counter = c;
+            break;
+        }
+    }
+    ASSERT_NE(fallback_counter, nullptr) << "v4 fallback counter track not found";
+
+    // Primary assertion: display name equals rocpd_track.name (the fallback value).
+    ASSERT_EQ(fallback_counter->name, "FallbackCounterV4");
+    ASSERT_FALSE(fallback_counter->name.empty());
+    // pmc_info is attached (pmc_id=99 exists in rocpd_info_pmc) but carries empty name.
+    ASSERT_NE(fallback_counter->pmc_info, nullptr);
+    ASSERT_TRUE(fallback_counter->pmc_info->name.empty());
+    // Non-fallback path still intact: the GRBM_COUNT track carries pmc_info.
+    auto grbm =
+        find_first_track(tracks, profiler_hub::reader_types::track_type_t::counter);
+    ASSERT_NE(grbm, nullptr);
+    ASSERT_EQ(grbm->name, "GRBM_COUNT");
+    ASSERT_NE(grbm->pmc_info, nullptr);
 }
 
 }  // namespace
