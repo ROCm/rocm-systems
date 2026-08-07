@@ -286,10 +286,11 @@ private:
   int debug_query_exception_info(pid_t target_pid,
                                  kfd_ioctl_dbg_trap_query_exception_info_args &args);
   void raise_process_debug_event(pid_t target_pid, uint64_t exception_mask);
-  /// @brief Report an EC_PROCESS_RUNTIME transition and block for the ack.
-  /// @param enabling Direction of the transition, which selects the liveness
-  ///        deadline: an inferior coming up can afford to wait out a busy
-  ///        debugger, one tearing down cannot.
+  /// @brief Report an EC_PROCESS_RUNTIME transition to the attached debugger.
+  /// @param enabling True to block for the debugger's ack under the liveness
+  ///        deadline. A disable transition is reported and returns immediately:
+  ///        the ioctl is served on the daemon's connection thread for a client
+  ///        that is already exiting, so parking it there parks the client.
   void runtime_debugger_handshake(pid_t target_pid, bool enabling);
 
   std::optional<amdgpu::ComputeUnitCore::TrapHandlerConfig>

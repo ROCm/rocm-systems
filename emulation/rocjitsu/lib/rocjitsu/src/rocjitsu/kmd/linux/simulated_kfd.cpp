@@ -2361,8 +2361,13 @@ int SimulatedKfd::runtime_enable_ioctl(KfdProcess &proc, void *arg) {
       // turns into a fatal os_driver::resume_queues failure and GDB into an
       // internal error (gdb.rocm/multi-inferior-stress.exp). Only report a real
       // transition -- a second disable is not one, and rocdbgapi rejects an
-      // event whose runtime_state has not moved as spurious.
-      notify_disable = proc.runtime_state_.enabled;
+      // event whose runtime_state has not moved as spurious. Decided against
+      // the session table under the same lock the enable branch uses, so an
+      // undebugged process exit does not re-take debug_sessions_mutex_ in the
+      // callee just to discover there is nobody to tell.
+      auto session = debug_sessions_.find(proc.client_pid());
+      notify_disable = proc.runtime_state_.enabled && session != debug_sessions_.end() &&
+                       session->second.enabled;
       proc.runtime_state_ = KfdProcess::RuntimeState{};
       args->capabilities_mask = 0;
     }
@@ -3326,6 +3331,16 @@ void SimulatedKfd::runtime_debugger_handshake(pid_t target_pid, bool enabling) {
     if (session == debug_sessions_.end() || !session->second.enabled)
       return;
     self_debugged = session->second.debugger_pid == target_pid;
+  }
+  // Drop any ack left over from an earlier transition for this pid before the
+  // event goes out. The disable direction reports without waiting, so nothing
+  // consumes the ack it draws; a later enable would otherwise find that stale
+  // entry already in runtime_acked_, satisfy its wait immediately, and let the
+  // inferior dispatch before the debugger has installed its breakpoints -- the
+  // exact failure the deadline below exists to prevent.
+  if (enabling) {
+    std::lock_guard<std::mutex> lk(runtime_handshake_mutex_);
+    runtime_acked_.erase(target_pid);
   }
   raise_process_debug_event(target_pid, KFD_EC_MASK(EC_PROCESS_RUNTIME));
   // A process debugging itself cannot answer its own handshake: the ack would
