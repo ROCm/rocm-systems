@@ -106,8 +106,7 @@ main(int /*argc*/, char** /*argv*/)
     // hipErrorNoDevice; treat both as unavailable so the outcome does not depend on which.
     if(device_err == hipErrorNoDevice || (device_err == hipSuccess && device_count <= 0))
     {
-        std::fprintf(
-            stderr, "[rocshmem-demo] %s: no HIP devices visible\n", kUnavailableMarker);
+        std::fprintf(stderr, "[rocshmem-demo] %s: no HIP devices visible\n", kUnavailableMarker);
         return 0;
     }
     CHECK_HIP(device_err);

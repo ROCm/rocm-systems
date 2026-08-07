@@ -61,10 +61,10 @@ if(NOT MPIRUN_EXECUTABLE)
 endif()
 
 # Both ranks are node-local, so confine Open MPI to the self/shared-memory transports and
-# keep it off the ob1 network components. CI runners expose RoCE devices whose kernel driver
-# ABI does not match the installed libibverbs; probing them floods the log with libibverbs
-# warnings and has been observed to wedge the ranks during teardown. This matches the
-# MPI_ENV_VARS used by the sibling tests/rocshmem-trace test.
+# keep it off the ob1 network components. CI runners expose RoCE devices whose kernel
+# driver ABI does not match the installed libibverbs; probing them floods the log with
+# libibverbs warnings and has been observed to wedge the ranks during teardown. This
+# matches the MPI_ENV_VARS used by the sibling tests/rocshmem-trace test.
 set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
                  OMPI_MCA_btl=self,vader OMPI_MCA_pml=ob1 PSM3_DEVICES=self,shm)
 
