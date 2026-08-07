@@ -51,6 +51,7 @@ message(STATUS "Found amd-dbgapi: ${amd-dbgapi_DIR}")
 add_executable(
     rocm-debug-agent-unit-tests
     test_uri.cpp
+    test_formatting.cpp
 )
 
 # Link directly to source files (not the .so).
