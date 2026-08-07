@@ -5,7 +5,7 @@
 # rocm-debug-agent unit tests have the following dependencies:
 #
 # GoogleTest (gtest)
-# amd-dbgapi
+# amd-dbgapi (headers only, via pkg-config)
 # Threads
 #
 # Unit tests are pure logic tests with no GPU/HIP runtime dependencies.
@@ -57,13 +57,86 @@ if(NOT GTest_FOUND)
     return()
 endif()
 
-# Find amd-dbgapi (headers are needed for agent_utils.h includes).
+# Find amd-dbgapi library.
+#
+# TheRock: CMAKE_PREFIX_PATH automatically includes build/dist/rocm
+# Standalone: Set CMAKE_PREFIX_PATH=/opt/rocm or custom install prefix
+#
+# Unit tests need to link amd-dbgapi because:
+# - agent_utils.cpp calls logging functions (log_level, detail::log)
+# - logging.cpp calls amd_dbgapi_set_log_level()
+# Therefore headers-only dependency is insufficient.
+
 find_package(
     amd-dbgapi
     REQUIRED
     CONFIG
 )
 
+message(STATUS "Found amd-dbgapi: ${amd-dbgapi_DIR}")
+
 # Create unit test executable.
-# Note: Test files will be added in subsequent commits.
-# This commit only sets up the GoogleTest infrastructure.
+add_executable(
+    rocm-debug-agent-unit-tests
+    test_uri.cpp
+)
+
+# Link directly to source files (not the .so).
+target_sources(
+    rocm-debug-agent-unit-tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/../src/agent_utils.cpp
+        ${PROJECT_SOURCE_DIR}/../src/logging.cpp
+)
+
+# Include directories.
+target_include_directories(
+    rocm-debug-agent-unit-tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/../src
+)
+
+# Link libraries.
+target_link_libraries(
+    rocm-debug-agent-unit-tests
+    PRIVATE
+        GTest::gtest
+        GTest::gtest_main
+        amd-dbgapi
+        Threads::Threads
+)
+
+# C++ standard and compile options (match main library).
+set_target_properties(
+    rocm-debug-agent-unit-tests
+    PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+)
+
+target_compile_options(
+    rocm-debug-agent-unit-tests
+    PRIVATE
+        -Werror -Wall -Wno-attributes
+)
+
+# Define _GNU_SOURCE for getopt_long() support on Linux.
+target_compile_definitions(
+    rocm-debug-agent-unit-tests
+    PRIVATE
+        _GNU_SOURCE
+        __STDC_LIMIT_MACROS
+        __STDC_CONSTANT_MACROS
+)
+
+# Enable CTest integration.
+include(GoogleTest)
+gtest_discover_tests(rocm-debug-agent-unit-tests)
+
+# Install (match integration test pattern).
+install(
+    TARGETS rocm-debug-agent-unit-tests
+    RUNTIME DESTINATION tests/rocm-debug-agent/unit
+    COMPONENT tests
+)
