@@ -85,7 +85,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | Option | Purpose |
 |--------|---------|
 | `--info` | Print archive summary and exit (no GPU) |
-| `--repair` | Rewrite a crash-truncated archive with a clean trailer |
+| `--repair` | Rewrite a crash-truncated archive with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index |
 | `--events` | With `--info`: print the full event log |
 | `--verbose` | Print each event as it is replayed |
 | `--skip-device-sync` | Skip `hipDeviceSynchronize` / `hipStreamSynchronize` events |
