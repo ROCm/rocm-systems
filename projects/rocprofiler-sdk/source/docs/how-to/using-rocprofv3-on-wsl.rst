@@ -14,8 +14,8 @@ driver (``/dev/dxg``) and the DXCore user-mode library rather than the native
 KFD driver (``/dev/kfd``). Because ``/dev/kfd`` is not present, ROCprofiler-SDK
 takes a different path for agent enumeration and hardware counter collection.
 
-This page documents the build-time macro and the environment variables that
-control that behavior.
+This page documents how agents are discovered on WSL2 and the environment
+variables that control that behavior.
 
 What works on WSL2
 ==================
@@ -41,25 +41,35 @@ Known limitations
 * **SPM (Streaming Performance Monitor)**: not available; the gfx11-class
   counter database does not expose SPM-capable counters.
 
-.. _wsl-build-macro:
+.. _wsl-agent-discovery:
 
-Build-time macro
-================
+How agents are discovered
+=========================
 
-``ROCPROFILER_HAVE_LIBHSAKMT_WINDOWS``
-   Defined when ROCprofiler-SDK is built against the ``libhsakmt-windows``
-   (``librocdxg``) shim, which is the native-Windows build path (it links
-   ``gdi32`` and a matching KMD). On the WSL2 / Linux build this macro is left
-   **undefined**, so the shim calls compile out and the WSL agent enumerator
-   seeds documented gfx11-class defaults for the gfx target name/version and the
-   compute-unit topology (DXCore cannot read them, and tools such as
-   ``rocprofv3-avail`` query agents before the HSA runtime is up). Once the HSA
-   runtime is initialized, ``construct_agent_cache()`` refines those fields
-   (topology, ``num_xcc``, ``domain``, ``family_id``, firmware versions,
-   workgroup/grid limits, and — unless ``ROCPROFILER_FORCE_GFX`` is set — the gfx
-   target name/version) from the HSA runtime, so GPUs whose target differs from
-   the seeded default report correct values at runtime. Most WSL2 users build
-   with the macro undefined.
+Agent discovery on WSL2 combines two sources, both read before any agent record
+becomes visible through ``rocprofiler_query_available_agents()``:
+
+* **DXCore** (``libdxcore.so``) enumerates the GPU adapters and supplies the
+  adapter identity, its marketing name and the dedicated VRAM size.
+* **librocdxg** (the DXG thunk) supplies the KMT node topology — compute unit
+  and SIMD counts, shader engines and arrays, wavefront size, clocks, family,
+  firmware versions and the gfx target — through the same interface the HSA
+  runtime itself uses on ``/dev/dxg`` systems.
+
+ROCprofiler-SDK loads ``librocdxg.so`` at run time with ``dlopen`` (reusing the
+copy the HSA runtime already loaded when there is one) and negotiates the ABI
+with the thunk before reading anything, so no build-time configuration is
+required and no separate link dependency exists. Pre-HSA consumers such as
+``rocprofv3-avail`` and tool initialization get the same complete records as a
+profiling run: agent records are built once, at enumeration time, and are never
+modified afterwards.
+
+Each adapter is paired with its KMT node by Windows LUID, falling back to the
+PCI device id only when one of the two sides does not report a LUID. An adapter
+with no matching node, or whose node reports an incomplete topology, is logged
+and omitted rather than published with placeholder values — GPU operation
+through the HSA runtime requires the same thunk, so a GPU that cannot be
+described here could not be profiled anyway.
 
 Environment variables
 ======================
@@ -78,16 +88,12 @@ Environment variables
 
 ``ROCPROFILER_FORCE_GFX``
    Overrides the GPU's ``gfx`` target name used to look up the counter
-   definitions (``config.yaml`` is keyed by gfx target). DXCore on WSL2 does not
-   expose the gfx target, so the enumerator defaults to a documented gfx11-class
-   target at agent-creation time and, once the HSA runtime is up, refines the
-   name/version from the HSA runtime (``HSA_AGENT_INFO_NAME``) in
-   ``construct_agent_cache()``. Set this variable to force a specific target; an
-   explicit value wins over the HSA-derived one (and is the way to get a correct
-   target for pre-HSA tools such as ``rocprofv3-avail`` on GPUs whose target
-   differs from the default). The value is validated and must be of the form
-   ``gfx<NNN>`` with at least three decimal digits; a malformed value is ignored
-   with a warning and the default is used.
+   definitions (``config.yaml`` is keyed by gfx target). The target normally
+   comes from the KMT node's engine id, which already honors the HSA runtime's
+   own ``HSA_OVERRIDE_GFX_VERSION``; set this variable to override both. The
+   value is validated and must be of the form ``gfx<NNN>`` with at least three
+   decimal digits; a malformed value is ignored with a warning and the
+   node-reported target is used.
 
 .. note::
 

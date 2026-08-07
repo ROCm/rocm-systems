@@ -82,55 +82,6 @@ set_target_properties(rocprofiler-sdk-object-library PROPERTIES POSITION_INDEPEN
 
 # ----------------------------------------------------------------------------------------#
 #
-# optional libhsakmt-windows (librocdxg) topology shim for WSL
-#
-# Off by default and has no effect on normal builds. When enabled, the WSL platform agent
-# fetches real KFD-equivalent topology through the librocdxg shim (hsaKmtOpenKFD +
-# hsaKmtAcquireSystemProperties + hsaKmtGetNodeProperties) instead of the hardcoded
-# fallback. Requires a built librocdxg shared library and the hsakmt headers from
-# rocr-runtime/libhsakmt.
-#
-# ----------------------------------------------------------------------------------------#
-
-option(ROCPROFILER_USE_LIBHSAKMT_WINDOWS
-       "Link the libhsakmt-windows (librocdxg) topology shim for the WSL agent" OFF)
-set(ROCPROFILER_LIBHSAKMT_WINDOWS_ROOT
-    ""
-    CACHE PATH "Path to rocr-runtime/libhsakmt providing hsakmt headers")
-set(ROCPROFILER_LIBROCDXG_LIBRARY
-    ""
-    CACHE FILEPATH "Path to the built librocdxg shared library")
-
-if(ROCPROFILER_USE_LIBHSAKMT_WINDOWS)
-    if(NOT EXISTS "${ROCPROFILER_LIBHSAKMT_WINDOWS_ROOT}/include/hsakmt/hsakmt.h")
-        message(
-            FATAL_ERROR
-                "ROCPROFILER_USE_LIBHSAKMT_WINDOWS=ON requires ROCPROFILER_LIBHSAKMT_WINDOWS_ROOT to point at rocr-runtime/libhsakmt (missing include/hsakmt/hsakmt.h)"
-            )
-    endif()
-    if(NOT EXISTS "${ROCPROFILER_LIBROCDXG_LIBRARY}")
-        message(
-            FATAL_ERROR
-                "ROCPROFILER_USE_LIBHSAKMT_WINDOWS=ON requires ROCPROFILER_LIBROCDXG_LIBRARY to point at the built librocdxg shared library"
-            )
-    endif()
-    target_compile_definitions(rocprofiler-sdk-object-library
-                               PRIVATE ROCPROFILER_HAVE_LIBHSAKMT_WINDOWS=1)
-    target_include_directories(rocprofiler-sdk-object-library
-                               PRIVATE ${ROCPROFILER_LIBHSAKMT_WINDOWS_ROOT}/include)
-    # The shim calls (hsaKmtOpenKFD / ...) are compiled into the object library, so every
-    # consumer of it (shared library, static library, and the unit-test executables that
-    # link the static library) must resolve those symbols. Attach librocdxg PUBLIC so the
-    # dependency propagates to all of them, not just the shared library.
-    target_link_libraries(rocprofiler-sdk-object-library
-                          PUBLIC ${ROCPROFILER_LIBROCDXG_LIBRARY})
-    message(
-        STATUS
-            "[rocprofiler-sdk] libhsakmt-windows shim: ${ROCPROFILER_LIBROCDXG_LIBRARY}")
-endif()
-
-# ----------------------------------------------------------------------------------------#
-#
 # shared library
 #
 # ----------------------------------------------------------------------------------------#
@@ -153,11 +104,6 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-dl
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-object-library)
-
-if(ROCPROFILER_USE_LIBHSAKMT_WINDOWS)
-    target_link_libraries(rocprofiler-sdk-shared-library
-                          PRIVATE ${ROCPROFILER_LIBROCDXG_LIBRARY})
-endif()
 
 set_target_properties(
     rocprofiler-sdk-shared-library
@@ -199,13 +145,6 @@ target_link_libraries(
 set_target_properties(
     rocprofiler-sdk-static-library PROPERTIES OUTPUT_NAME rocprofiler-sdk
                                               DEFINE_SYMBOL rocprofiler_EXPORTS)
-
-if(ROCPROFILER_USE_LIBHSAKMT_WINDOWS)
-    # Re-export librocdxg to consumers of the static library (unit-test executables) so
-    # they resolve the shim symbols compiled into the object files.
-    target_link_libraries(rocprofiler-sdk-static-library
-                          PUBLIC ${ROCPROFILER_LIBROCDXG_LIBRARY})
-endif()
 
 # ----------------------------------------------------------------------------------------#
 #

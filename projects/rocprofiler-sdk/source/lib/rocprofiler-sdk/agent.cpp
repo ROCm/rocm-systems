@@ -318,32 +318,9 @@ using unique_agent_t = ::rocprofiler::platform::unique_agent_t;
 //
 // Windows builds collapse to a single candidate (platform::windows).
 
-// Records whether the WSL/DXCore enumerator produced the current agent topology.
-// The WSL enumerator seeds documented placeholder device info at enumeration time
-// (it cannot read the real per-device topology before HSA is up);
-// construct_agent_cache() reads this to refine those fields from the HSA runtime
-// at runtime without touching the KFD path. File-local to this translation unit.
-// Internal-linkage storage for the file-local flag above; accessed only through
-// the named getter/setter below (no mutable-reference-to-static handed out).
-bool s_wsl_platform_selected = false;
-
-bool
-is_wsl_platform_selected()
-{
-    return s_wsl_platform_selected;
-}
-
-void
-set_wsl_platform_selected(bool value)
-{
-    s_wsl_platform_selected = value;
-}
-
 std::vector<unique_agent_t>
 enumerate_platform_agents()
 {
-    set_wsl_platform_selected(false);
-
     const auto forced = common::get_env("ROCPROFILER_FORCE_PLATFORM", std::string{});
     if(!forced.empty())
     {
@@ -356,7 +333,6 @@ enumerate_platform_agents()
         if(forced == "wsl")
         {
             ROCP_INFO << "agent topology: forced wsl via ROCPROFILER_FORCE_PLATFORM";
-            set_wsl_platform_selected(true);
             return platform::wsl::enumerate();
         }
 #endif
@@ -383,7 +359,6 @@ enumerate_platform_agents()
     {
         ROCP_INFO << "agent topology: selected " << platform::wsl::name
                   << " (libdxcore.so present)";
-        set_wsl_platform_selected(true);
         return platform::wsl::enumerate();
     }
     ROCP_WARNING << "agent topology: no platform matched; falling back to "
@@ -515,16 +490,12 @@ try_register_agent_v2(const rocprofiler_agent_t* agent, aqlprofile_agent_handle_
 }
 #endif  // !ROCPROFILER_EXTERNAL_AQLPROFILE
 
-// (Re)registers every agent with aqlprofile and stores the returned handles.
+// Registers every agent with aqlprofile and stores the returned handles.
 // aqlprofile's RegisterAgent caches cu_num/se_num/shader_arrays_per_se at
-// registration time and never updates an existing entry, so the registration
-// must observe the *final* agent topology. On WSL the topology is seeded with
-// placeholders at enumerate time and only refined from the HSA runtime in
-// construct_agent_cache(); the lazy registration below is triggered earlier
-// (during counter/dimension queries at tool init, before HSA is up), so it
-// captures the placeholder cu_count. construct_agent_cache() re-invokes this
-// after the HSA refine so aqlprofile's instance counts (e.g. SQ NumWGPs =
-// cu_num/2) use the real cu_count instead of the placeholder.
+// registration time and never updates an existing entry, so this must observe
+// the final agent topology. It does: every platform enumerator publishes fully
+// populated, immutable agent records, so whenever the lazy registration below
+// first runs it already sees the values profiling will use.
 void
 register_aql_handles()
 {
@@ -794,175 +765,6 @@ construct_agent_cache(::HsaApiTable* table)
         }
     }
 
-    // Refine GPU device info from the HSA runtime on the WSL/DXCore platform.
-    //
-    // The WSL enumerator must populate name / gfx_target_version and a documented
-    // default topology at enumeration time, because counter-metric (config.yaml)
-    // resolution and pre-HSA tools (rocprofv3-avail, which lists agents without
-    // starting the HSA runtime and therefore never reaches this function) read
-    // those fields directly — an empty architecture makes metric lookup fail with
-    // "Agent HW architecture is not supported". DXCore cannot read the real
-    // per-device CU topology, so the enumerator seeds gfx1150 (RDNA 3.5) defaults.
-    // Here, where each agent is mapped to its hsa_agent_t, HSA — the authoritative
-    // source aqlprofile also reads — overrides those placeholders so non-default
-    // GPUs report correct topology at runtime.
-    //
-    // Gated on is_wsl_platform_selected() so the KFD (bare-metal Linux) path is never
-    // touched: its agents already carry authoritative KFD-sysfs values. Each HSA
-    // query overrides only on success with a non-zero value, so a query failure
-    // keeps the enumerator's safe defaults rather than zeroing a field.
-    //
-    // Fallback-only: when wsl::enumerate() already obtained real topology up front
-    // from the libhsakmt-windows shim (wsl_topology_from_shim()), the agent info does
-    // not depend on HSA and this backfill is skipped entirely. It runs only when the
-    // shim was unavailable and the enumerator seeded divide-safe placeholders.
-    if(is_wsl_platform_selected() && !wsl_topology_from_shim())
-    {
-        // An explicit, valid ROCPROFILER_FORCE_GFX (applied in wsl::enumerate) is a
-        // user override of the gfx target and must win over the HSA-reported name.
-        const bool force_gfx = []() {
-            const char* _f = std::getenv("ROCPROFILER_FORCE_GFX");
-            return _f != nullptr && *_f != '\0' && parse_gfx_target_version(_f).has_value();
-        }();
-
-        auto query_hsa_u32 = [&table](hsa_agent_t hsa_agent, hsa_agent_info_t attr, uint32_t& dst) {
-            uint32_t v = 0;
-            if(table->core_->hsa_agent_get_info_fn(hsa_agent, attr, &v) == HSA_STATUS_SUCCESS &&
-               v != 0)
-                dst = v;
-        };
-
-        for(const auto& itr : agent_map)
-        {
-            const auto* rocp_agent = std::get<0>(itr.second);
-            auto        hsa_agent  = std::get<1>(itr.second);
-            if(rocp_agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
-
-            // The agents are heap-allocated and owned (non-const) by
-            // get_agent_topology(); get_agents() only hands out const views. This
-            // runs during initialization, before any consumer reads the agent.
-            auto& mut = *const_cast<rocprofiler_agent_t*>(rocp_agent);
-
-            // gfx target name + version, unless ROCPROFILER_FORCE_GFX is in effect.
-            // tests/agent.cpp compares agent->name to the HSA agent name, so the
-            // HSA-reported name is the correct source.
-            if(!force_gfx)
-            {
-                char hsa_name[64] = {};
-                if(table->core_->hsa_agent_get_info_fn(hsa_agent, HSA_AGENT_INFO_NAME, hsa_name) ==
-                       HSA_STATUS_SUCCESS &&
-                   hsa_name[0] != '\0')
-                {
-                    // Defensive: HSA_AGENT_INFO_NAME has no documented length bound,
-                    // so force NUL-termination before treating the buffer as a string.
-                    hsa_name[sizeof(hsa_name) - 1] = '\0';
-                    if(auto _ver = parse_gfx_target_version(hsa_name))
-                    {
-                        mut.name = common::get_string_entry(std::string{hsa_name})->c_str();
-                        mut.gfx_target_version = *_ver;
-                    }
-                }
-            }
-
-            query_hsa_u32(hsa_agent,
-                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT),
-                          mut.cu_count);
-            query_hsa_u32(hsa_agent,
-                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU),
-                          mut.simd_per_cu);
-            query_hsa_u32(hsa_agent,
-                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES),
-                          mut.num_shader_banks);
-            query_hsa_u32(
-                hsa_agent,
-                static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE),
-                mut.simd_arrays_per_engine);
-            query_hsa_u32(hsa_agent, HSA_AGENT_INFO_WAVEFRONT_SIZE, mut.wave_front_size);
-            query_hsa_u32(hsa_agent,
-                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU),
-                          mut.max_waves_per_cu);
-
-            // Derive composite fields the same way the gnulinux/KFD path does. The
-            // operands are non-zero (HSA values or the enumerator defaults), so the
-            // results stay self-consistent even if some HSA query failed. Guard the
-            // ratio against the partial-success case where the divisor was updated
-            // by HSA but the dividend is still the placeholder (e.g. 1/4 -> 0), which
-            // would otherwise clobber the sane placeholder with 0.
-            if(mut.simd_per_cu > 0 && mut.max_waves_per_cu >= mut.simd_per_cu)
-                mut.max_waves_per_simd = mut.max_waves_per_cu / mut.simd_per_cu;
-            if(mut.simd_per_cu > 0) mut.simd_count = mut.cu_count * mut.simd_per_cu;
-            if(mut.simd_arrays_per_engine > 0)
-                mut.array_count = mut.num_shader_banks * mut.simd_arrays_per_engine;
-            if(mut.array_count > 0) mut.cu_per_simd_array = mut.cu_count / mut.array_count;
-            if(mut.num_shader_banks > 0) mut.cu_per_engine = mut.cu_count / mut.num_shader_banks;
-
-            // num_xcc / domain. DXCore could not surface these; HSA is authoritative.
-            query_hsa_u32(
-                hsa_agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_XCC), mut.num_xcc);
-            query_hsa_u32(
-                hsa_agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DOMAIN), mut.domain);
-
-            // Family id + firmware versions. fw fields are bitfields, so they
-            // cannot bind to query_hsa_u32's uint32_t&; query into locals first.
-            query_hsa_u32(hsa_agent,
-                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_FAMILY_ID),
-                          mut.family_id);
-            if(uint32_t _ucode = 0;
-               table->core_->hsa_agent_get_info_fn(
-                   hsa_agent,
-                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_UCODE_VERSION),
-                   &_ucode) == HSA_STATUS_SUCCESS &&
-               _ucode != 0)
-                mut.fw_version.ui32.uCode = _ucode;
-            if(uint32_t _sdma = 0;
-               table->core_->hsa_agent_get_info_fn(
-                   hsa_agent,
-                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_SDMA_UCODE_VERSION),
-                   &_sdma) == HSA_STATUS_SUCCESS &&
-               _sdma != 0)
-                mut.sdma_fw_version.uCodeSDMA = _sdma;
-
-            // Workgroup / grid limits. HSA reports workgroup_max_dim as uint16_t[3]
-            // and grid_max_dim as hsa_dim3_t; widen into rocprofiler_dim3_t.
-            query_hsa_u32(hsa_agent, HSA_AGENT_INFO_WORKGROUP_MAX_SIZE, mut.workgroup_max_size);
-            query_hsa_u32(hsa_agent, HSA_AGENT_INFO_GRID_MAX_SIZE, mut.grid_max_size);
-            if(uint16_t _wdim[3] = {0, 0, 0};
-               table->core_->hsa_agent_get_info_fn(
-                   hsa_agent, HSA_AGENT_INFO_WORKGROUP_MAX_DIM, _wdim) == HSA_STATUS_SUCCESS &&
-               _wdim[0] != 0)
-                mut.workgroup_max_dim = {static_cast<uint32_t>(_wdim[0]),
-                                         static_cast<uint32_t>(_wdim[1]),
-                                         static_cast<uint32_t>(_wdim[2])};
-            if(hsa_dim3_t _gdim = {};
-               table->core_->hsa_agent_get_info_fn(
-                   hsa_agent, HSA_AGENT_INFO_GRID_MAX_DIM, &_gdim) == HSA_STATUS_SUCCESS &&
-               _gdim.x != 0)
-                mut.grid_max_dim = {_gdim.x, _gdim.y, _gdim.z};
-
-            ROCP_INFO << fmt::format(
-                "agent device info refined from HSA for logical_node_id={} ({}): "
-                "gfx_target_version={} cu_count={} simd_count={} simd_per_cu={} "
-                "num_shader_banks={} "
-                "simd_arrays_per_engine={} array_count={} wave_front_size={} max_waves_per_simd={} "
-                "num_xcc={} domain={} family_id={} workgroup_max_size={}",
-                rocp_agent->logical_node_id,
-                rocp_agent->name,
-                mut.gfx_target_version,
-                mut.cu_count,
-                mut.simd_count,
-                mut.simd_per_cu,
-                mut.num_shader_banks,
-                mut.simd_arrays_per_engine,
-                mut.array_count,
-                mut.wave_front_size,
-                mut.max_waves_per_simd,
-                mut.num_xcc,
-                mut.domain,
-                mut.family_id,
-                mut.workgroup_max_size);
-        }
-    }
-
     ROCP_INFO << "# agent node maps: " << hsa_agent_node_map.size();
 
     ROCP_FATAL_IF(agent_map.size() != hsa_agents.size())
@@ -1050,16 +852,6 @@ construct_agent_cache(::HsaApiTable* table)
             }
         }
     }
-
-    // On WSL the agent topology above was refined from the HSA runtime, but the
-    // aqlprofile agent registration is built lazily and is triggered during
-    // counter/dimension queries at tool init (before HSA is initialized), so it
-    // cached the enumerate-time placeholder cu_count. aqlprofile never updates an
-    // existing registration, so re-register here with the now-refined topology;
-    // otherwise aqlprofile's instance counts (e.g. SQ NumWGPs = cu_num/2) stay
-    // derived from the placeholder. The KFD (bare-metal) path carries
-    // authoritative topology from enumeration and is left untouched.
-    if(is_wsl_platform_selected()) register_aql_handles();
 }
 
 std::optional<hsa_agent_t>
@@ -1157,24 +949,6 @@ kfd_device_available()
         return true;
     }();
     return _available;
-}
-
-namespace
-{
-// Set by wsl::enumerate() when the libhsakmt-windows shim supplied real topology.
-std::atomic<bool> s_wsl_topology_from_shim{false};
-}  // namespace
-
-bool
-wsl_topology_from_shim()
-{
-    return s_wsl_topology_from_shim.load(std::memory_order_relaxed);
-}
-
-void
-set_wsl_topology_from_shim(bool value)
-{
-    s_wsl_topology_from_shim.store(value, std::memory_order_relaxed);
 }
 }  // namespace agent
 }  // namespace rocprofiler

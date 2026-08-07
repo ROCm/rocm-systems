@@ -31,3 +31,27 @@ rocprofiler_add_unit_test(
     ENVIRONMENT
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Pure transforms of a DXG (WSL) KMT node record: no GPU, DXG thunk or HSA runtime
+# is involved, so this runs anywhere.
+set(ROCPROFILER_LIB_WSL_DXG_TEST_SOURCES wsl_dxg_topology.cpp)
+
+add_executable(wsl-dxg-topology-tests)
+target_sources(wsl-dxg-topology-tests PRIVATE ${ROCPROFILER_LIB_WSL_DXG_TEST_SOURCES})
+target_link_libraries(
+    wsl-dxg-topology-tests
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-static-library
+            rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+            rocprofiler-sdk::rocprofiler-sdk-drm
+            GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET wsl-dxg-topology-tests
+    SOURCES ${ROCPROFILER_LIB_WSL_DXG_TEST_SOURCES}
+    TIMEOUT 30
+    LABELS "unittests;wsl-dxg-topology"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

@@ -233,17 +233,6 @@ struct metadata
                         pid_t                           _ppid         = 0,
                         const std::vector<std::string>& _command_line = {});
 
-    // Re-sync the cached agent snapshot from the canonical SDK agent records. metadata
-    // snapshots agents in its constructor (at tool-library load). On the WSL shim-success
-    // path the enumerator already produces correct topology up front, so this is an
-    // idempotent no-op. On the shim-unavailable fallback path the topology is only refined
-    // from the HSA runtime later in agent::construct_agent_cache(); calling this once from
-    // the HSA runtime-initialization callback (a defined point, not inline before emit)
-    // re-syncs the snapshot so every consumer (Perfetto/OTF2/correlation/out_agent_info.csv)
-    // observes the refined values. Only the rocprofiler_agent_v0_t base is copied, so the
-    // tool-assigned agent_info::gpu_index is preserved.
-    void refresh_agent_info();
-
     std::string_view   get_marker_message(uint64_t corr_id) const;
     std::string_view   get_kernel_name(uint64_t kernel_id,
                                        bool     rename_kernel,
