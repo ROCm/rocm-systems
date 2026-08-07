@@ -344,13 +344,13 @@ void genRandomMasks(LinearAllocGuard<T>& d_buf,
     // map each bit of maskCounter to a byte of mask
     // e.g. 101 --> 0xFF00FF
     for (int i = 0; i < sizeof(maskCounter) * 8; i++) {
-      if (maskcounter & (1 << i)) {
-        maskUChar[i] = 0xFF;
+      if (maskCounter & (1 << i)) {
+        maskAsUChar[i] = 0xFF;
       }
     }
 
     maskCounter++;
-    maskCounter = maskCounter ? maskCounter : 1;
+    maskCounter = (maskCounter && (maskCounter < std::pow(2, getWarpSize() / 8 )))? maskCounter : 1;
     buf.ptr()[i] = mask;
   }
 
@@ -382,6 +382,7 @@ void genRandomBuffers(LinearAllocGuard<T>& d_buf,
   int numBytes = numItems * sizeof(T);
   LinearAllocGuard<T> tmp(LinearAllocs::malloc, numBytes);
   LinearAllocGuard<T> d_tmp(LinearAllocs::hipMalloc, numBytes);
+  int wavefrontSize = getWarpSize();
 
   buf = std::move(tmp);
   d_buf = std::move(d_tmp);
@@ -396,11 +397,11 @@ void genRandomBuffers(LinearAllocGuard<T>& d_buf,
     unsigned char exponent = dist(gen) % 17 + 1;
 
     for (int i = 0; i < numItems; i++) {
-      buf.ptr()[i] = i;
+      buf.ptr()[i] = i % wavefrontSize;
     }
   } else {
     for (int i = 0; i < numItems; i++) {
-      buf.ptr()[i] = i;
+      buf.ptr()[i] = i % wavefrontSize;
     }
   }
   HIP_CHECK(hipMemcpy(d_buf.ptr(), buf.ptr(), numBytes, hipMemcpyHostToDevice));
