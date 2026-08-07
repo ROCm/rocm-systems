@@ -58,11 +58,6 @@ std::string operand_list(const Operand &dst, const Operand &src0, const Operand 
 
 } // namespace
 
-bool Vopd::is_vopd(const MachineInst *inst) {
-  uint32_t word0 = *reinterpret_cast<const uint32_t *>(inst);
-  return (word0 >> 24) == 0xCF || (word0 >> 26) == 0x32;
-}
-
 const char *Vopd::op_name(uint16_t op) {
   switch (op) {
   case kVopdFmacF32:

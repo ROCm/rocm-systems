@@ -516,23 +516,6 @@ TEST_P(RdnaInvalidVopdDecodeSmokeTest, DoesNotClaimVopd3Encoding) {
   auto decoder = Decoder::create(tc.arch);
   ASSERT_NE(decoder, nullptr) << tc.arch_name;
 
-  switch (tc.arch) {
-  case ROCJITSU_CODE_ARCH_RDNA3:
-    EXPECT_FALSE(
-        rdna3::Vopd::is_vopd(reinterpret_cast<const rdna3::MachineInst *>(tc.words.data())));
-    break;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-    EXPECT_FALSE(
-        rdna3_5::Vopd::is_vopd(reinterpret_cast<const rdna3_5::MachineInst *>(tc.words.data())));
-    break;
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    EXPECT_FALSE(
-        rdna4::Vopd::is_vopd(reinterpret_cast<const rdna4::MachineInst *>(tc.words.data())));
-    break;
-  default:
-    FAIL() << "unexpected test arch";
-  }
-
   EXPECT_THROW(static_cast<void>(decoder->decode(tc.words.data())), util::InvalidInst)
       << tc.arch_name << " should reserve the 0xCF VOPD3 prefix";
 }
