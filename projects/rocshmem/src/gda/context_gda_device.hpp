@@ -454,7 +454,7 @@ class GDAContext : public Context {
    */
   __device__ __forceinline__ char *ipc_peer_ptr(const void *sym_addr,
                                                  int local_pe) {
-    return ipcImpl_.ipcPeerPtr(sym_addr, ipcImpl_.shm_rank, local_pe);
+    return ipcImpl_.ipcPeerPtr(sym_addr, local_pe);
   }
 
   //Temporary scratchpad memory used by internal barrier algorithms.

@@ -174,12 +174,10 @@ class IpcOnImpl {
    * matched against the symmetrically-registered user buffers.
    *
    * @param[in] sym_addr Symmetric address (valid in the local address space)
-   * @param[in] my_pe    Local PE id (index into ipc_bases for the local base)
    * @param[in] pe       Target PE id
    * @return Address of the corresponding data in PE 'pe'
    */
-  __device__ __forceinline__ char *ipcPeerPtr(
-      const void *sym_addr, [[maybe_unused]] int my_pe, int pe) {
+  __device__ __forceinline__ char *ipcPeerPtr(const void *sym_addr, int pe) {
     uintptr_t addr = reinterpret_cast<uintptr_t>(sym_addr);
     uintptr_t heap_base = constmem.heap_base;
 
@@ -505,9 +503,8 @@ class IpcOffImpl {
   int ipc_first_pe{0};
   int ipc_stride{0};
 
-  __device__ __forceinline__ char *ipcPeerPtr([[maybe_unused]] const void *sym_addr,
-                                               [[maybe_unused]] int my_pe,
-                                               [[maybe_unused]] int pe) {
+  __device__ __forceinline__ char *ipcPeerPtr(
+      [[maybe_unused]] const void *sym_addr, [[maybe_unused]] int pe) {
     return nullptr;
   }
 
