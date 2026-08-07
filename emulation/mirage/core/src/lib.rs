@@ -36,6 +36,7 @@ pub mod paths;
 pub mod plugin;
 pub mod profile;
 pub mod proto;
+pub mod reclaim;
 pub mod registry;
 pub mod session;
 pub mod state;

@@ -211,6 +211,23 @@ pub enum CtlCmd {
     #[command(subcommand)]
     State(StateCmd),
 
+    /// Reclaim what a `mirage run` that died abruptly left behind.
+    ///
+    /// A run owns its session and cleans up when it exits, so in normal
+    /// use there is nothing here to do. `kill -9`, the OOM killer, and a
+    /// machine losing power leave no code of mirage's to run at all —
+    /// containers keep running, workloads are reparented to init, and the
+    /// session's scratch directory stays on disk. This is the command
+    /// that removes them.
+    ///
+    /// Safe to run at any time: sessions whose `mirage run` still answers
+    /// are left completely alone, as is anything mirage did not create.
+    Cleanup {
+        /// List what would be removed without removing anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Bring up a session, run a command in it, and tear it down.
     ///
     /// This process owns the session: it exists while this command runs
@@ -586,6 +603,11 @@ pub async fn dispatch(cmd: CtlCmd, json: bool) -> anyhow::Result<ExitCode> {
         }
         CtlCmd::Exec(a) => run::exec_cmd(a).await,
         CtlCmd::State(c) => state_cmd(c, json).await,
+        CtlCmd::Cleanup { dry_run } => {
+            let reclaimed = cleanup(dry_run).await;
+            reclaimed.report(dry_run, json)?;
+            Ok(ExitCode::from(0))
+        }
         CtlCmd::Run(a) => run::run_cmd(a).await,
         CtlCmd::Paths => {
             print_paths(json);
@@ -1308,6 +1330,172 @@ fn parse_envs(entries: &[String]) -> anyhow::Result<std::collections::BTreeMap<S
 
 
 
+// ----- cleanup ---------------------------------------------------------------
+
+/// What one cleanup pass found — and, unless it was a dry run, removed.
+#[derive(Debug, Default)]
+struct Reclaimed {
+    /// Sessions that had something to reclaim.
+    sessions: std::collections::BTreeSet<String>,
+    /// Container and network names.
+    containers: Vec<String>,
+    /// Stranded workload processes.
+    processes: Vec<mirage_core::reclaim::Stranded>,
+    /// Session scratch directories.
+    scratch: Vec<std::path::PathBuf>,
+}
+
+impl Reclaimed {
+    fn is_empty(&self) -> bool {
+        self.containers.is_empty() && self.processes.is_empty() && self.scratch.is_empty()
+    }
+
+    /// Print what happened, in whichever form the caller asked for.
+    fn report(&self, dry_run: bool, json: bool) -> anyhow::Result<()> {
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "dry_run": dry_run,
+                    "sessions": self.sessions,
+                    "containers": self.containers,
+                    "processes": self.processes
+                        .iter()
+                        .map(|p| serde_json::json!({"pid": p.pid, "session": p.session}))
+                        .collect::<Vec<_>>(),
+                    "scratch": self.scratch,
+                }))?
+            );
+            return Ok(());
+        }
+        if self.is_empty() {
+            println!("nothing to clean up");
+            return Ok(());
+        }
+        // "would" rather than a past tense on a dry run: the difference
+        // between the two modes is the whole reason to offer one.
+        fn verb<'a>(dry_run: bool, did: &'a str, would: &'a str) -> &'a str {
+            if dry_run { would } else { did }
+        }
+        let verb = |did, would| verb(dry_run, did, would);
+        for p in &self.processes {
+            println!(
+                "{} stranded process {} (session {})",
+                verb("killed", "would kill"),
+                p.pid,
+                p.session
+            );
+        }
+        for c in &self.containers {
+            println!("{} container resource {c}", verb("removed", "would remove"));
+        }
+        for s in &self.scratch {
+            println!(
+                "{} scratch directory {}",
+                verb("removed", "would remove"),
+                s.display()
+            );
+        }
+        Ok(())
+    }
+}
+
+/// Reclaim everything belonging to a session no live `mirage run` owns.
+///
+/// The recovery path for a run that died without tearing its session
+/// down. It never touches a live session: `answering_runs` is the same
+/// liveness test `ControlSocket::bind` uses — a socket that answers, not
+/// a socket file, which outlives a `SIGKILL`ed run and would otherwise
+/// make this refuse to clean up in exactly the situation it exists for.
+///
+/// The order is the order teardown uses, for the same reason: processes
+/// stop before the containers they run in, and the scratch directory —
+/// which every node container bind-mounts — goes last.
+async fn cleanup(dry_run: bool) -> Reclaimed {
+    let live = run::answering_runs().await;
+
+    // 1. Workload processes, found by the `MIRAGE_SESSION` each carries.
+    //
+    // Scanned once and then acted on, rather than scanned again to act:
+    // what is reported and what is removed have to be the same set, or a
+    // `--dry-run` is not a preview of anything.
+    let processes = tokio::task::spawn_blocking({
+        let live = live.clone();
+        move || {
+            let stranded = mirage_core::reclaim::stranded_workloads(&live);
+            if !dry_run {
+                mirage_core::reclaim::reap(&stranded);
+            }
+            stranded
+        }
+    })
+    .await
+    .unwrap_or_default();
+
+    let mut out = Reclaimed {
+        processes,
+        ..Reclaimed::default()
+    };
+    for p in &out.processes {
+        out.sessions.insert(p.session.as_str().to_string());
+    }
+
+    // 2. Containers and networks, found by the `mirage.owner` label.
+    //
+    // `resolve_provider(None)` rather than a bare autodetect: there is no
+    // profile here to name a provider, so `MIRAGE_CONTAINER_PROVIDER` is
+    // the only way a user can say which engine their sessions were built
+    // on — and cleaning up the wrong one finds nothing while reporting
+    // success.
+    if let Some(provider) = mirage_core::container::resolve_provider(None) {
+        let found = tokio::task::spawn_blocking({
+            let live = live.clone();
+            move || {
+                let orphans = mirage_core::container::orphans(&provider, &live);
+                if !dry_run {
+                    // Not `reclaim_orphans`, for the same reason as
+                    // above: it re-lists, and the second listing could
+                    // differ from the one being reported.
+                    mirage_core::container::remove_orphans(&provider, &orphans);
+                }
+                orphans
+            }
+        })
+        .await
+        .unwrap_or_default();
+        for orphan in found {
+            out.sessions.insert(orphan.session);
+            out.containers.push(orphan.name);
+        }
+    }
+
+    // 3. Scratch directories, one per session that was never torn down.
+    let live_ids: std::collections::HashSet<&str> = live.iter().map(SessionId::as_str).collect();
+    if let Ok(entries) = std::fs::read_dir(mirage_core::paths::session_runtime_root()) {
+        for entry in entries.flatten() {
+            let Some(id) = entry
+                .file_name()
+                .to_str()
+                .and_then(|n| SessionId::new(n).ok())
+            else {
+                continue;
+            };
+            if live_ids.contains(id.as_str()) || !entry.path().is_dir() {
+                continue;
+            }
+            if !dry_run && let Err(e) = std::fs::remove_dir_all(entry.path()) {
+                tracing::warn!(path = %entry.path().display(), "could not remove: {e}");
+                continue;
+            }
+            out.sessions.insert(id.as_str().to_string());
+            out.scratch.push(entry.path());
+        }
+        out.scratch.sort();
+    }
+
+    out
+}
+
 // ----- state dispatch --------------------------------------------------------
 
 async fn state_cmd(
@@ -1375,7 +1563,7 @@ async fn state_cmd(
             if !force && !confirm(prompt)? {
                 return Ok(ExitCode::from(0));
             }
-            purge(all).await?;
+            purge(all, json).await?;
             println!("purged");
         }
     }
@@ -1383,7 +1571,7 @@ async fn state_cmd(
 }
 
 /// Stop every live run and remove mirage's on-disk state.
-async fn purge(all: bool) -> anyhow::Result<()> {
+async fn purge(all: bool, json: bool) -> anyhow::Result<()> {
     // Ask every live run to stop, by signalling nothing: a run owns its
     // own session and tears it down when it exits, so there is no
     // "destroy session" call to make. What purge can do is remove the
@@ -1408,30 +1596,18 @@ async fn purge(all: bool) -> anyhow::Result<()> {
         );
     }
 
-    // Reclaim containers and networks no live run accounts for.
+    // Reclaim whatever runs that are already gone left behind — the
+    // containers, networks and workload processes a `SIGKILL`ed run could
+    // not remove itself. This is `mirage cleanup`, run for its effect
+    // rather than for its own sake: purge is the blunt "start again from
+    // nothing" tool and cleanup is the surgical one, but the set of
+    // things worth reclaiming is identical and must not drift.
     //
-    // A run's session lives in its own memory, so a run that was
-    // `SIGKILL`ed — or an OOM kill, or a machine that lost power — takes
-    // its record of every container with it. `--rm` handles the common
-    // case, but a container whose engine was itself interrupted can
-    // survive; the mirage label on the resource does too, and this is the
-    // command a user reaches for when something has gone wrong.
-    //
-    // Resources without mirage's label are never candidates, so this is
-    // safe on a shared engine.
-    if let Some(provider) = mirage_core::container::detect_provider() {
-        let removed = tokio::task::spawn_blocking(move || {
-            mirage_core::container::reclaim_orphans(&provider, &[])
-        })
-        .await
-        .unwrap_or_default();
-        if !removed.is_empty() {
-            println!(
-                "reclaimed {} orphaned container resource(s): {}",
-                removed.len(),
-                removed.join(", ")
-            );
-        }
+    // The live-run check above has already established that there are
+    // none, so every session it finds is orphaned by construction.
+    let reclaimed = cleanup(false).await;
+    if !reclaimed.is_empty() {
+        reclaimed.report(false, json)?;
     }
 
     let mut targets = vec![mirage_core::paths::mirage_runtime_dir()];

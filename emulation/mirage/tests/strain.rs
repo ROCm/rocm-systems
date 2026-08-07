@@ -222,18 +222,25 @@ fn interrupting_a_run_tears_down_its_workload() {
     );
 }
 
-/// A `mirage run` killed outright must still leave no workload behind.
+/// A `mirage run` killed outright strands its workload — and
+/// `mirage cleanup` reclaims it.
 ///
-/// `SIGKILL` is the case the run cannot handle: no signal handler runs,
-/// no teardown, no `Drop`. What has to hold the line is the ownership the
-/// supervisor established *before* it died — every child spawned with
-/// `kill_on_drop` and leading its own process group, so the tree cannot
-/// outlive the process that owns it. This is not an exotic scenario: it
-/// is what the OOM killer does, and what a `kill -9` from a frustrated
-/// user does. A workload found alive here is one nothing knows about any
-/// more, still holding the emulated device and still burning cores.
+/// `SIGKILL` is the one case the run cannot handle: no signal handler
+/// runs, no teardown, no `Drop`, no cancelled task. Mirage used to close
+/// it with `PR_SET_PDEATHSIG`, asking the kernel to kill each workload
+/// when its parent died. That was the workspace's only `unsafe`, and it
+/// could not be applied to node containers — they are launched from a
+/// `spawn_blocking` thread, where pdeathsig tracks a pool thread that may
+/// retire while the run is perfectly healthy — so the guarantee was never
+/// whole.
+///
+/// The trade is now explicit: the leak is allowed, and made recoverable.
+/// Both halves are asserted here, and the first one deliberately. A test
+/// that only checked the cleanup would still pass if something quietly
+/// started killing workloads again, and the whole point of removing the
+/// `unsafe` was to stop paying for a guarantee mirage was not making.
 #[test]
-fn a_run_killed_outright_leaves_no_workload_behind() {
+fn a_killed_run_strands_its_workload_and_cleanup_reclaims_it() {
     let env = Env::new();
     if skip_without_emulator() {
         return;
@@ -242,23 +249,138 @@ fn a_run_killed_outright_leaves_no_workload_behind() {
     let tag = marker("sigkill");
 
     let mut run = env.spawn_run(&["--profile", "p"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
-    run.await_ready(READY);
+    let id = run.await_ready(READY);
     wait_for_workload(&tag);
 
     run.kill();
 
-    // Dying and being reaped are not the same instant; give the kernel a
-    // few cycles before believing the process table.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline && count_processes(&tag) > 0 {
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    let survivors = find_processes(&tag);
-    kill_survivors(&tag);
+    // The accepted half. Give the kernel a moment first: if something
+    // *were* killing the workload it would happen within a few
+    // milliseconds, and asserting instantly would pass either way.
+    std::thread::sleep(Duration::from_millis(500));
+    let stranded = find_processes(&tag);
     assert!(
-        survivors.is_empty(),
-        "{} workload process(es) outlived the `mirage run` that owned them: {survivors:?}",
-        survivors.len()
+        !stranded.is_empty(),
+        "the workload did not outlive its `SIGKILL`ed run. That is a better \
+         outcome than this test expects — but it means something is enforcing \
+         a guarantee mirage no longer documents, and `mirage cleanup` is no \
+         longer the only thing standing between a `kill -9` and a leak."
+    );
+
+    // The recovered half. Nothing on disk records these processes; the
+    // only evidence is `MIRAGE_SESSION` in each one's environment, which
+    // is what `cleanup` scans for.
+    let out = env.ok(&["cleanup"]);
+    assert!(
+        out.contains("stranded process"),
+        "cleanup did not report reclaiming anything:\n{out}"
+    );
+
+    wait_for("the stranded workload to be reclaimed", TEARDOWN, || {
+        count_processes(&tag) == 0
+    });
+    kill_survivors(&tag);
+
+    // And the scratch directory the killed run could not remove.
+    let leftover = leftover_scratch(&env);
+    assert!(
+        !leftover.contains(&id),
+        "session {id}'s scratch directory survived cleanup: {leftover:?}"
+    );
+}
+
+/// `mirage cleanup` must be safe to run while other runs are healthy.
+///
+/// The command exists for the machine-wide mess a crash leaves, so it
+/// scans every process and every mirage-labelled container. That is only
+/// acceptable if a live session is untouchable: reclaiming one would kill
+/// somebody else's running job from what is advertised as a tidy-up.
+#[test]
+fn cleanup_leaves_a_live_run_completely_alone() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+    let tag = marker("cleanup-live");
+
+    let mut run = env.spawn_run(&["--profile", "p"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
+    let id = run.await_ready(READY);
+    wait_for_workload(&tag);
+
+    let out = env.ok(&["cleanup"]);
+    assert!(
+        !out.contains(&id),
+        "cleanup named a live session {id}:\n{out}"
+    );
+
+    // Still running, still serving, still able to be exec'd into.
+    assert!(count_processes(&tag) > 0, "cleanup killed a live workload");
+    assert_eq!(env.live_runs(), vec![id.clone()]);
+    assert!(
+        env.session_scratch(&id).exists(),
+        "cleanup removed a live session's scratch directory"
+    );
+
+    run.signal(Signal::SIGINT);
+    run.wait(TEARDOWN);
+    assert_no_leaks(&tag);
+}
+
+/// `--dry-run` must name what a real run would remove, and remove nothing.
+#[test]
+fn cleanup_dry_run_reports_without_acting() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+    let tag = marker("cleanup-dry");
+
+    let mut run = env.spawn_run(&["--profile", "p"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
+    run.await_ready(READY);
+    wait_for_workload(&tag);
+    run.kill();
+    std::thread::sleep(Duration::from_millis(500));
+
+    let preview = env.ok(&["cleanup", "--dry-run"]);
+    assert!(
+        preview.contains("would kill"),
+        "a dry run must say what it would do:\n{preview}"
+    );
+    assert!(
+        count_processes(&tag) > 0,
+        "a dry run killed the process it was only supposed to report"
+    );
+
+    // And the real thing removes exactly what the preview named.
+    let done = env.ok(&["cleanup"]);
+    for pid in find_processes(&tag) {
+        assert!(
+            preview.contains(&pid.to_string()) || done.contains(&pid.to_string()),
+            "process {pid} was reclaimed but named in neither pass:\n{preview}\n{done}"
+        );
+    }
+    wait_for("the stranded workload to be reclaimed", TEARDOWN, || {
+        count_processes(&tag) == 0
+    });
+    kill_survivors(&tag);
+}
+
+/// Cleanup on a clean machine must say so rather than inventing work.
+#[test]
+fn cleanup_with_nothing_to_do_says_nothing_to_do() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+    env.ok(&["run", "--profile", "p", "--", "/bin/true"]);
+
+    let out = env.ok(&["cleanup"]);
+    assert!(
+        out.contains("nothing to clean up"),
+        "a run that exited cleanly must leave cleanup with nothing to find:\n{out}"
     );
 }
 

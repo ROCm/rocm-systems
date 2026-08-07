@@ -203,11 +203,18 @@ session the user believes is alive.
   interrupted run still leaves nothing behind.
 * Containers are started with `--rm` and are not detached, so the
   container engine removes them even in the cases teardown never reaches.
-* `mirage state purge` removes the runtime directory and reclaims any
-  container or network still carrying mirage's label — the leftovers of a
-  run that was `SIGKILL`ed or a machine that lost power. It refuses while
-  any run is still live: killing someone else's foreground command from a
-  state-cleanup subcommand would be a surprise, and Ctrl-C in that
-  terminal is the right way to stop it. With `--all` it removes the
-  config directory too.
+* Nothing covers a `SIGKILL`ed run, an OOM kill, or a machine that lost
+  power: no signal handler, no `Drop` and no cancelled task of mirage's
+  runs, so the containers keep running, the workloads are reparented to
+  init and the scratch directory stays. `mirage cleanup` is the recovery.
+  It finds them by the marks left on the resources themselves — the
+  `mirage.owner` label on containers and networks, `MIRAGE_SESSION` in
+  every workload's environment — since the session's own record died with
+  the run. Sessions whose run still answers are skipped, so it is safe to
+  run while other work is in flight; `--dry-run` previews it.
+* `mirage state purge` does the same and then removes the whole runtime
+  directory. Unlike `cleanup` it refuses while any run is still live:
+  killing someone else's foreground command from a state-cleanup
+  subcommand would be a surprise, and Ctrl-C in that terminal is the
+  right way to stop it. With `--all` it removes the config directory too.
 * `$XDG_RUNTIME_DIR` is cleared on logout, so nothing survives a reboot.

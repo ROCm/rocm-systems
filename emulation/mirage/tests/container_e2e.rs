@@ -125,6 +125,16 @@ fn write_mock_provider(path: &Path, log: &Path) {
     let script = r#"#!/bin/sh
 echo "$@" >> __LOG__
 STATE=__STATE__
+mkdir -p "$STATE/containers" "$STATE/networks"
+
+# The session a resource belongs to, recovered from its name the way a
+# real engine recovers it from the `mirage.session` label. Containers are
+# `mirage-<session>-node-<rank>`, networks are `mirage-<session>`.
+session_of() {
+  s=${1#mirage-}
+  printf '%s' "${s%-node-*}"
+}
+
 case "$1" in
   pull) exit 0 ;;
   image)
@@ -132,13 +142,39 @@ case "$1" in
       inspect) exit 1 ;;
       *) exit 0 ;;
     esac ;;
+  # Listing verbs, used by orphan reclamation after a run died without
+  # tearing down. A real engine filters on the mirage.owner label; the
+  # mock creates nothing that is not mirage's, so everything it holds is
+  # a candidate.
+  ps)
+    ls "$STATE/containers" 2>/dev/null
+    exit 0 ;;
   network)
     case "$2" in
-      # `network inspect --format` is the ownership check teardown makes
-      # before removing anything; without a label it would (correctly)
-      # refuse. Plain `network inspect` is the existence probe.
+      ls)
+        ls "$STATE/networks" 2>/dev/null
+        exit 0 ;;
+      create)
+        # The name is the last argument, after any --label pairs.
+        for a in "$@"; do last=$a; done
+        : > "$STATE/networks/$last"
+        exit 0 ;;
+      rm)
+        rm -f "$STATE/networks/$3"
+        exit 0 ;;
+      # `network inspect --format` reads one label: the ownership check
+      # teardown makes before removing anything, or the session a
+      # reclaimed network belonged to. Plain `network inspect` is the
+      # existence probe.
       inspect)
-        if [ "$3" = "--format" ]; then printf mirage; exit 0; fi
+        if [ "$3" = "--format" ]; then
+          case "$4" in
+            *mirage.session*) session_of "$5" ;;
+            *) printf mirage ;;
+          esac
+          exit 0
+        fi
+        [ -f "$STATE/networks/$3" ] && exit 0
         exit 1 ;;
       *) exit 0 ;;
     esac ;;
@@ -234,11 +270,13 @@ case "$1" in
     rm -f "$STATE/containers/$3"
     exit 0 ;;
   inspect)
-    # `inspect --format` is the ownership check (a Go template naming
-    # mirage.owner); `inspect -f` is the running-state probe bring-up
-    # polls before it lets the first exec near the container.
+    # `inspect --format` reads one label: the ownership check (a Go
+    # template naming mirage.owner), or the session an orphan belonged to.
+    # `inspect -f` is the running-state probe bring-up polls before it
+    # lets the first exec near the container.
     if [ "$2" = "--format" ]; then
       case "$3" in
+        *mirage.session*) session_of "$4" ;;
         *mirage.owner*) printf mirage ;;
         *) echo true ;;
       esac
@@ -803,6 +841,96 @@ fn a_provider_that_cannot_be_found_fails_the_run_with_a_reason() {
         "a run whose session never came up is still serving: {:?}",
         env.base.live_runs()
     );
+}
+
+#[test]
+fn cleanup_reclaims_containers_no_live_run_accounts_for() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+
+    // A container and a network with nothing that knows they exist: what
+    // a `SIGKILL`ed run leaves when its provider client is reparented to
+    // init rather than dying with it. Nothing on disk records them — the
+    // only surviving evidence is the `mirage.owner` label on the
+    // resources themselves, and that is what cleanup goes looking for.
+    //
+    // Stood up directly rather than by killing a run, because the mock's
+    // client emulates `--rm` faithfully and removes its own container on
+    // the way out. A real `podman run` client does not: it is reparented
+    // and keeps the container alive, which is the leak being reclaimed
+    // here.
+    let orphan = "mirage-deadsession-node-0";
+    let network = "mirage-deadsession";
+    std::fs::write(env.containers.join(orphan), "").unwrap();
+    let networks = env.base.root().join("networks");
+    std::fs::create_dir_all(&networks).unwrap();
+    std::fs::write(networks.join(network), "").unwrap();
+
+    let out = env
+        .base
+        .mirage()
+        .arg("cleanup")
+        // No profile is involved, so this is the only way to point
+        // cleanup at the mock rather than at a real engine on PATH.
+        .env("MIRAGE_CONTAINER_PROVIDER", &env.provider)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned()
+        + &String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "cleanup failed:\n{text}");
+    assert!(text.contains(orphan), "the container was not reclaimed:\n{text}");
+    assert!(text.contains(network), "the network was not reclaimed:\n{text}");
+
+    assert!(
+        env.live_containers().is_empty(),
+        "the orphaned container survived cleanup: {:?}",
+        env.live_containers()
+    );
+    assert!(
+        !networks.join(network).exists(),
+        "the orphaned network survived cleanup"
+    );
+}
+
+#[test]
+fn cleanup_spares_the_containers_of_a_live_run() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_containerized_profile("cp");
+    let tag = marker("cleanup-live-container");
+
+    let mut run = env
+        .base
+        .spawn_run(&["--profile", "cp"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
+    let id = run.await_ready(READY);
+    let container = format!("mirage-{id}-node-0");
+    assert_eq!(env.live_containers(), vec![container.clone()]);
+
+    let out = env
+        .base
+        .mirage()
+        .arg("cleanup")
+        .env("MIRAGE_CONTAINER_PROVIDER", &env.provider)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+
+    // The safety property that makes this command safe to run at any
+    // time: a session whose run still answers is not an orphan, however
+    // much its containers look like one from the outside.
+    assert_eq!(
+        env.live_containers(),
+        vec![container],
+        "cleanup removed a live session's container"
+    );
+
+    run.signal(Signal::SIGINT);
+    run.wait(READY);
+    assert_no_leaks(&tag);
 }
 
 #[test]

@@ -173,13 +173,25 @@ registry of what is running. One socket per run rather than one
 well-known socket for a daemon, so "who owns this session?" is answered
 by the filesystem and a run that dies takes its own entry with it.
 
-`mirage state purge` removes the runtime directory (`--all` takes the
-config directory with it) and reclaims any container resources a run that
-died abruptly could not. There is no separate state directory: mirage
-writes nothing that has to survive a reboot beyond its configuration. It
-refuses while a run is still live: stopping someone's foreground command
-from a cleanup subcommand would be a surprise, and Ctrl-C in its own
-terminal already does the job.
+`mirage cleanup` reclaims what a run that died abruptly could not: its
+containers and per-session network, its workload processes, and its
+scratch directory. That is not a hypothetical tidy-up — a `SIGKILL`ed
+run, an OOM kill, or a machine losing power runs no code of mirage's at
+all, so the leak is expected and this is the recovery. Sessions whose run
+still answers are left completely alone, as is anything mirage did not
+create, so it is safe to run at any time; `--dry-run` shows what it would
+remove first. Everything it looks for is marked on the resource itself —
+a `mirage.owner` label on containers, `MIRAGE_SESSION` in every
+workload's environment — because that is what survives the death of the
+only process that knew about it.
+
+`mirage state purge` is the blunter version: it does all of the above and
+then removes the runtime directory (`--all` takes the config directory
+with it). There is no separate state directory: mirage writes nothing
+that has to survive a reboot beyond its configuration. It refuses while a
+run is still live, where `cleanup` simply skips it: stopping someone's
+foreground command from a cleanup subcommand would be a surprise, and
+Ctrl-C in its own terminal already does the job.
 
 ## Building
 

@@ -31,15 +31,32 @@
 //!    ends; the confirmation is what makes "the session is destroyed" a
 //!    statement about the process table rather than about intent.
 //!
-//! Two backstops sit under that, for the cases where the escalation
-//! above never gets to run:
+//! One backstop sits under that, for the case where the escalation above
+//! never gets to run: `kill_on_drop(true)`, so a supervising task that is
+//! cancelled abruptly kills its child rather than orphaning it.
 //!
-//! * `kill_on_drop(true)` — if a supervising task is cancelled abruptly,
-//!   tokio kills the child rather than orphaning it.
-//! * `PR_SET_PDEATHSIG` (via [`mirage_sys::die_with_parent`]) — if mirage
-//!   itself is `SIGKILL`ed or OOM-killed, *no* code of ours runs, and the
-//!   kernel is the only party left that can enforce the rule. It sends
-//!   the child `SIGKILL` when its parent goes away.
+//! # What is deliberately not covered: `SIGKILL` of mirage itself
+//!
+//! Every property above needs mirage to still be running — a signal it
+//! sends, a `Drop` it runs, a task tokio cancels. `kill -9`, and the OOM
+//! killer picking mirage during a large emulated job, leave no code of
+//! ours to run at all, and the workload is reparented to init still
+//! holding the emulated device.
+//!
+//! This module used to close that with `PR_SET_PDEATHSIG`, set in a
+//! `pre_exec` closure so the kernel would kill each child when its parent
+//! went away. That was the workspace's only `unsafe`, and it never
+//! covered the case that mattered most: node containers are launched from
+//! a `spawn_blocking` thread, and pdeathsig tracks the parent *thread*,
+//! so a retired pool thread would have killed a healthy run's containers.
+//! Covering both would have meant two mechanisms rather than one.
+//!
+//! The trade is taken the other way instead. A `SIGKILL`ed run is allowed
+//! to strand its workloads, and `mirage cleanup` reclaims them: every
+//! workload carries [`MIRAGE_SESSION`](mirage_core::container::ENV_SESSION)
+//! in its environment, the same way every container carries a
+//! `mirage.owner` label, so the recovery path can find what is stranded
+//! without any bookkeeping that a `SIGKILL` could interrupt.
 //!
 //! # Standard streams
 //!
@@ -507,16 +524,11 @@ pub fn spawn(spec: &SpawnSpec, output: mpsc::Sender<OutputChunk>) -> Result<Spaw
         .process_group(0)
         // Backstop: if the owning task is dropped without going through
         // `wait`/`terminate`, do not orphan the child.
+        //
+        // The only backstop. `SIGKILL` of mirage runs none of this and is
+        // deliberately not covered here; see the module documentation for
+        // why, and `mirage cleanup` for what recovers from it.
         .kill_on_drop(true);
-
-    // Second backstop, for the case the first one cannot reach:
-    // `SIGKILL`. Everything above is enforced by mirage running — a
-    // signal it sends, a `Drop` it runs. `kill -9`, and the OOM killer
-    // picking mirage during a large emulated job, leave no code of ours
-    // to run at all, and the workload would be reparented to init still
-    // holding the emulated device. Asking the kernel to do it is the only
-    // way to close that, and is why `mirage_sys` exists.
-    mirage_sys::die_with_parent(&mut cmd);
 
     if !spec.inherit_env {
         cmd.env_clear();

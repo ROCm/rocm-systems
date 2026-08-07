@@ -421,11 +421,40 @@ mirage state purge [-f|--force] [--all]
   Killing someone else's foreground command from a state-cleanup
   subcommand would be a surprise; stop it with Ctrl-C in its own terminal
   instead. Each run cleans up after itself when it exits.
-* What `purge` *is* for is the wreckage of a run that could not clean up
-  — one that was `SIGKILL`ed, OOM-killed, or lost with the machine. It
-  reclaims containers and networks carrying mirage's label that no live
-  run accounts for. Resources without that label are never candidates, so
-  this is safe on a shared engine.
+* `purge` also does everything `mirage cleanup` does, below, before
+  removing the directory.
+
+## `mirage cleanup`
+
+```text
+mirage cleanup [--dry-run]
+```
+
+Reclaims what a run that died abruptly left behind. In normal use there
+is nothing to do: a run owns its session and tears it down on every exit
+path. `kill -9`, the OOM killer and a machine losing power run no code of
+mirage's at all, and then three things survive it:
+
+* its node containers and per-session network,
+* its workload processes, reparented to init,
+* its session scratch directory.
+
+All three are found by a mark on the thing itself, because the session's
+own record of them died with the run: containers and networks carry the
+`mirage.owner` and `mirage.session` labels, and every workload carries
+`MIRAGE_SESSION` in its environment. Anything without those marks is
+never a candidate, so this is safe on an engine shared with other work.
+
+Safe to run at any time. A session whose `mirage run` still answers on
+its socket is not an orphan and is skipped entirely — unlike `state
+purge`, which refuses outright while any run is live. Use `--dry-run` to
+see what would be removed without removing it.
+
+One consequence of tagging by environment is worth knowing: the tag is
+inherited, so anything started from an interactive `mirage exec -- bash`
+belongs to that session as far as cleanup is concerned. That is the
+intended reading — it is part of the session's process tree — but it does
+mean a build kicked off inside one is reclaimed with it.
 
 ## `mirage paths`
 

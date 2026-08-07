@@ -702,7 +702,6 @@ dependencies = [
  "mirage_container",
  "mirage_core",
  "mirage_rocjitsu",
- "mirage_sys",
  "nix",
  "serde",
  "serde_json",
@@ -712,15 +711,6 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tracing",
-]
-
-[[package]]
-name = "mirage_sys"
-version = "0.2.0"
-dependencies = [
- "nix",
- "tempfile",
- "tokio",
 ]
 
 [[package]]

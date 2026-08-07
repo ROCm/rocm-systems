@@ -39,6 +39,17 @@ pub const ENV_RANK: &str = "MIRAGE_RANK";
 /// to translate mirage's own variables.
 pub const ENV_TORCH_RANK: &str = "RANK";
 
+/// Environment variable naming the session a process belongs to.
+///
+/// Set on every workload process and on every container provider client
+/// mirage spawns, and inherited by anything they fork. It is what makes a
+/// stranded process recoverable: session state lives in the owning run's
+/// memory, so a run that was `SIGKILL`ed leaves no record anywhere that a
+/// later mirage could read — except on the processes themselves. This is
+/// the process-side counterpart of [`LABEL_SESSION`], and
+/// [`crate::reclaim`] is what reads it.
+pub const ENV_SESSION: &str = "MIRAGE_SESSION";
+
 /// Environment variable carrying the head node's address. Set on every
 /// node, including the head (rank 0), which gets `localhost`.
 pub const ENV_HEAD_ADDR: &str = "MIRAGE_HEAD_ADDR";
@@ -313,37 +324,83 @@ pub fn teardown(state: &ContainerState) {
     }
 }
 
-/// Remove every mirage-owned container and network whose session is not
-/// in `live`, returning what was removed.
+/// One mirage-owned container or network whose session is not live.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Orphan {
+    /// The resource's id or name.
+    pub name: String,
+    /// The session it was created for.
+    pub session: String,
+    /// Whether it is a network rather than a container.
+    pub is_network: bool,
+}
+
+/// Every mirage-owned container and network whose session is not in
+/// `live`, containers first.
+///
+/// Split out from [`reclaim_orphans`] so `mirage cleanup --dry-run` can
+/// name what it would remove without removing it, and so the ordering —
+/// containers before the network they are attached to — is stated once.
+///
+/// Filtering by [`LABEL_OWNER`] is what keeps this safe on an engine
+/// shared with other work: a container mirage did not create is never a
+/// candidate, whatever it is called.
+///
+/// Blocks on the provider binary.
+#[must_use]
+pub fn orphans(provider: &str, live: &[SessionId]) -> Vec<Orphan> {
+    let live: std::collections::HashSet<&str> = live.iter().map(SessionId::as_str).collect();
+    let mut found = Vec::new();
+    for (verb, is_network) in [(&["ps", "--all"][..], false), (&["network", "ls"][..], true)] {
+        for (name, session) in labelled(provider, verb) {
+            if live.contains(session.as_str()) {
+                continue;
+            }
+            found.push(Orphan {
+                name,
+                session,
+                is_network,
+            });
+        }
+    }
+    found
+}
+
+/// Remove each of `orphans`, best-effort.
+///
+/// Takes the list rather than re-deriving it, so a caller that has
+/// already reported what it found removes exactly that — see
+/// [`crate::reclaim::reap`], which is the same split for processes.
+///
+/// No ownership re-check: [`orphans`] filters on [`LABEL_OWNER`] at the
+/// engine, so nothing that reaches here was somebody else's.
+///
+/// Blocks on the provider binary.
+pub fn remove_orphans(provider: &str, orphans: &[Orphan]) {
+    for orphan in orphans {
+        if orphan.is_network {
+            run_quiet(provider, &["network", "rm", &orphan.name]);
+        } else {
+            run_quiet(provider, &["rm", "-f", &orphan.name]);
+        }
+    }
+}
+
+/// Find and remove every mirage-owned container and network whose session
+/// is not in `live`, returning what was removed.
 ///
 /// This is the recovery path for a supervisor that died without tearing
 /// its sessions down. Session state is deliberately in-memory, so a
-/// `SIGKILL`ed daemon leaves containers with no record anywhere that a
-/// later mirage could read — except the resources themselves, which carry
-/// [`LABEL_SESSION`]. Filtering by [`LABEL_OWNER`] first is what keeps
-/// this safe to run on an engine shared with other work: a container
-/// mirage did not create is never a candidate, whatever it is called.
+/// `SIGKILL`ed run leaves containers with no record anywhere that a later
+/// mirage could read — except the resources themselves, which carry
+/// [`LABEL_SESSION`]. See [`crate::reclaim`] for the same idea applied to
+/// the workload processes such a run also strands.
 ///
 /// Blocks on the provider binary.
 pub fn reclaim_orphans(provider: &str, live: &[SessionId]) -> Vec<String> {
-    let live: std::collections::HashSet<&str> = live.iter().map(SessionId::as_str).collect();
-    let mut removed = Vec::new();
-
-    for (name, session) in labelled(provider, &["ps", "--all"]) {
-        if live.contains(session.as_str()) {
-            continue;
-        }
-        run_quiet(provider, &["rm", "-f", &name]);
-        removed.push(name);
-    }
-    for (name, session) in labelled(provider, &["network", "ls"]) {
-        if live.contains(session.as_str()) {
-            continue;
-        }
-        run_quiet(provider, &["network", "rm", &name]);
-        removed.push(name);
-    }
-    removed
+    let found = orphans(provider, live);
+    remove_orphans(provider, &found);
+    found.into_iter().map(|o| o.name).collect()
 }
 
 /// `(name, session)` for every mirage-owned resource the given listing

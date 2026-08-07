@@ -25,7 +25,7 @@ use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId};
 use mirage_core::container::{
     ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_LOCAL_RANK, ENV_MASTER_ADDR, ENV_MASTER_PORT,
-    ENV_NCCL_HOSTID, ENV_RANK, ENV_TORCH_RANK, ENV_WORLD_SIZE,
+    ENV_NCCL_HOSTID, ENV_RANK, ENV_SESSION, ENV_TORCH_RANK, ENV_WORLD_SIZE,
 };
 use mirage_core::proto::SessionDescription;
 
@@ -164,7 +164,18 @@ pub fn build_specs(
                         node: global,
                         command,
                         args: rest,
-                        env: BTreeMap::new(),
+                        // The client's own environment, not the
+                        // workload's — what the workload sees was passed
+                        // with `-e` above. The session tag is set on it
+                        // anyway so that a `provider exec` client
+                        // stranded by a `SIGKILL`ed run is reclaimable by
+                        // the same scan as a host workload; without it
+                        // the client would linger until its container was
+                        // removed out from under it.
+                        env: BTreeMap::from([(
+                            ENV_SESSION.to_string(),
+                            desc.session.as_str().to_string(),
+                        )]),
                         workdir: None,
                         stdio,
                         // The provider CLI needs its own environment to
@@ -217,6 +228,7 @@ fn process_env(
     let mut env = desc.env.clone();
     env.extend(args.env.clone());
     env.extend(proc_env(
+        &desc.session,
         global,
         node,
         local,
@@ -279,6 +291,7 @@ fn pid_recording_command(
 /// within the node, which a workload typically uses to pin a GPU). With
 /// the default of one process per node, `global == node` and `local == 0`.
 fn proc_env(
+    session: &mirage_core::session::SessionId,
     global: u32,
     node: u32,
     local: u32,
@@ -290,6 +303,11 @@ fn proc_env(
     // everyone else needs the head's address.
     let head = if node == 0 { "localhost" } else { head_addr };
     vec![
+        // Which session this process belongs to. Set on every workload,
+        // and inherited by everything it forks, because it is the only
+        // record of the association that survives the owning run being
+        // `SIGKILL`ed — see [`mirage_core::reclaim`].
+        (ENV_SESSION.to_string(), session.as_str().to_string()),
         (ENV_RANK.to_string(), node.to_string()),
         (ENV_TORCH_RANK.to_string(), global.to_string()),
         (ENV_HEAD_ADDR.to_string(), head.to_string()),
@@ -487,6 +505,51 @@ mod tests {
         // The directory the wrapper redirects into must exist before the
         // container tries to write there.
         assert!(scratch.path().join("exec").join("e-1").is_dir());
+    }
+
+    #[test]
+    fn every_process_is_tagged_with_its_session() {
+        // The tag is the only record of the association that survives the
+        // owning run being `SIGKILL`ed, so `mirage cleanup` can find what
+        // was stranded. See [`mirage_core::reclaim`].
+        let specs = build_specs(&desc(2), &exec_def(2, None), &id()).unwrap();
+        assert_eq!(specs.len(), 4);
+        for spec in &specs {
+            assert_eq!(
+                spec.env.get("MIRAGE_SESSION").map(String::as_str),
+                Some("s"),
+                "rank {} is untagged and would be unreclaimable",
+                spec.node
+            );
+        }
+    }
+
+    #[test]
+    fn a_containerised_provider_client_is_tagged_too() {
+        // The workload's own tag goes into the container with `-e`, where
+        // the host-side scan cannot see it. The client that proxies it is
+        // a host process and would otherwise linger unreclaimable.
+        let scratch = tempfile::tempdir().unwrap();
+        let mut d = desc(1);
+        d.containers = Some(ContainerTargets {
+            provider: "podman".to_string(),
+            names: vec!["mirage-s-node-0".to_string()],
+            scratch: scratch.path().to_path_buf(),
+        });
+        let specs = build_specs(&d, &exec_def(1, None), &id()).unwrap();
+        assert_eq!(
+            specs[0].env.get("MIRAGE_SESSION").map(String::as_str),
+            Some("s")
+        );
+        // And the workload inside the container is tagged through `-e`.
+        assert!(
+            specs[0]
+                .args
+                .windows(2)
+                .any(|w| w[0] == "-e" && w[1] == "MIRAGE_SESSION=s"),
+            "{:?}",
+            specs[0].args
+        );
     }
 
     #[test]
