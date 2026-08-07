@@ -49,4 +49,21 @@ saxpy(float* y, const float* x, float a, int n);
 // d[i] = d[i] + delta : another in-place read-write mutation.
 void
 add(float* d, float delta, int n);
+
+// ---- module-scope (__device__) global helpers ----
+// These operate on a __device__ int that lives in the loaded executable's data segment (not a
+// hipMalloc allocation), exercising snap()'s HSA_SYMBOL_KIND_VARIABLE capture/restore path.
+
+// Set the module global to `v` (hipMemcpyToSymbol).
+void
+set_module_counter(int v);
+
+// Read the current module global (hipMemcpyFromSymbol).
+int
+read_module_counter();
+
+// Enqueue a kernel that does an in-place `g_module_counter += 1` from a single thread. The caller
+// synchronizes (as with the other launchers).
+void
+bump_module_counter();
 }  // namespace kernel_launch
