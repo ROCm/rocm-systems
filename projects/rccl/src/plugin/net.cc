@@ -259,12 +259,15 @@ static void initPluginLibsOnceFunc() {
   char* envNetPluginList = nullptr;
   char* savePtr = nullptr;
   int pluginCounter = 0;
+  // "none" and an empty value only opt out of external plugins; they must not disable the internal AINIC path
+  bool extNetPluginRequested = false;
 
   memset(netPluginLibs, 0, NCCL_NET_MAX_PLUGINS * sizeof(netPluginLib_t));
   envNetPlugin = ncclGetEnv("NCCL_NET_PLUGIN");
   if (envNetPlugin) {
     INFO(NCCL_ENV | NCCL_NET, "NCCL_NET_PLUGIN set by environment to %s", envNetPlugin);
     if (strcasecmp(envNetPlugin, "none") == 0) envNetPlugin = "";
+    extNetPluginRequested = (envNetPlugin[0] != '\0');
     envNetPluginList = strdup(envNetPlugin);
     // Iterate over list until the list is empty
     netPluginName = strtok_r(envNetPluginList, ",", &savePtr);
@@ -304,8 +307,8 @@ static void initPluginLibsOnceFunc() {
     if (envNet && (strcasecmp(envNet, "ROCM-IB") == 0)) {
       envNet = "IB-CAST";
     }
-    if ((envNet && strcasecmp(envNet, "IB-CAST") == 0 && !(envNetPlugin)) ||
-        (!envNet && rcclUseAinic() && !(envNetPlugin))) {
+    if ((envNet && strcasecmp(envNet, "IB-CAST") == 0 && !extNetPluginRequested) ||
+        (!envNet && rcclUseAinic() && !extNetPluginRequested)) {
       netPluginLibs[pluginCounter].ncclNet = &netIbCast;
       netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
     } else {

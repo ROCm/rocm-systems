@@ -13,6 +13,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:output-format-tests>
     $<TARGET_OBJECTS:parse-numeric-range-tests>
     $<TARGET_OBJECTS:rank-passes-filter-tests>
+    $<TARGET_OBJECTS:state-tests>
     $<TARGET_OBJECTS:progress-tests>
     $<TARGET_OBJECTS:logger-tests>
     $<TARGET_OBJECTS:lib-components-tests>

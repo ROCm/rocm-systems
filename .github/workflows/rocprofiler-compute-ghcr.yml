@@ -25,6 +25,9 @@ on:
       - '.github/workflows/rocprofiler-compute-ghcr.yml'
       - 'projects/rocprofiler-compute/docker/**'
 
+permissions:
+  contents: read
+
 jobs:
   prepare_matrix_ci:
     if: github.repository == 'ROCm/rocm-systems'
