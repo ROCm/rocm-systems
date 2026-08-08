@@ -2040,6 +2040,19 @@ DsLoadU8D16Vds::DsLoadU8D16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void DsLoadU8D16Vds::implicit_uses(RegisterSet &uses) const {
+  Vds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void DsLoadU8D16Vds::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vds::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 DsLoadU8D16HiVds::DsLoadU8D16HiVds(const MachineInst *inst)
     : Vds("ds_load_u8_d16_hi", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1357)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2054,6 +2067,19 @@ DsLoadU8D16HiVds::DsLoadU8D16HiVds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+}
+
+void DsLoadU8D16HiVds::implicit_uses(RegisterSet &uses) const {
+  Vds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void DsLoadU8D16HiVds::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vds::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 DsLoadI8D16Vds::DsLoadI8D16Vds(const MachineInst *inst)
@@ -2072,6 +2098,19 @@ DsLoadI8D16Vds::DsLoadI8D16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void DsLoadI8D16Vds::implicit_uses(RegisterSet &uses) const {
+  Vds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void DsLoadI8D16Vds::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vds::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 DsLoadI8D16HiVds::DsLoadI8D16HiVds(const MachineInst *inst)
     : Vds("ds_load_i8_d16_hi", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1359)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2086,6 +2125,19 @@ DsLoadI8D16HiVds::DsLoadI8D16HiVds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+}
+
+void DsLoadI8D16HiVds::implicit_uses(RegisterSet &uses) const {
+  Vds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void DsLoadI8D16HiVds::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vds::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 DsLoadU16D16Vds::DsLoadU16D16Vds(const MachineInst *inst)
@@ -2104,6 +2156,19 @@ DsLoadU16D16Vds::DsLoadU16D16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void DsLoadU16D16Vds::implicit_uses(RegisterSet &uses) const {
+  Vds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void DsLoadU16D16Vds::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vds::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 DsLoadU16D16HiVds::DsLoadU16D16HiVds(const MachineInst *inst)
     : Vds("ds_load_u16_d16_hi", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1361)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2118,6 +2183,19 @@ DsLoadU16D16HiVds::DsLoadU16D16HiVds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+}
+
+void DsLoadU16D16HiVds::implicit_uses(RegisterSet &uses) const {
+  Vds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void DsLoadU16D16HiVds::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vds::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 DsCondSubRtnU32Vds::DsCondSubRtnU32Vds(const MachineInst *inst)
