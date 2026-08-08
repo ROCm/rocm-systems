@@ -487,6 +487,7 @@ enum class VopdOp : uint16_t {
   MovB32 = 8,
   CndmaskB32 = 9,
   FmaF32 = 19,
+  FmaF64 = 32,
 };
 
 struct VopdSlot {
@@ -4017,6 +4018,33 @@ TEST(Gfx1250DecodeTest, VopdSourceOperandsFollowPrintedSlots) {
   EXPECT_EQ(inst->src_operand(2)->name(), "s11");
   ASSERT_TRUE(inst->src_operand(2)->to_register_ref().has_value());
   EXPECT_EQ(*inst->src_operand(2)->to_register_ref(), (RegisterRef{RegClass::SGPR, 11, 1}));
+}
+
+TEST(Gfx1250DecodeTest, VopdRejectsInvalidOpcodes) {
+  const std::array<std::array<uint32_t, 3>, 3> words = {{
+      {0xCFCECF00u, 0x7E00E8B0u, 0x16000000u},          // Undefined VOPD3 opcodes.
+      {(0x32u << 26) | (12u << 22) | (8u << 17), 0, 0}, // Opcode 12 is not an X op.
+      {0xCF000000u | (3u << 18) | (32u << 12), 0, 0},   // Opcode 32 is not a VOPD3 Y op.
+  }};
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &encoding : words)
+    EXPECT_THROW(static_cast<void>(decoder->decode(encoding.data())), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vopd3RejectsOverlappingDestinations) {
+  const std::array<std::array<uint32_t, 3>, 2> words = {{
+      make_vopd3_pair({.op = VopdOp::CndmaskB32, .src0 = 0, .src1 = 1, .src2 = 2, .dst = 10},
+                      {.op = VopdOp::MulF32, .src0 = 0, .src1 = 1, .src2 = 2, .dst = 10}),
+      make_vopd3_pair({.op = VopdOp::FmaF64, .src0 = 0, .src1 = 1, .src2 = 2, .dst = 10},
+                      {.op = VopdOp::MulF32, .src0 = 0, .src1 = 1, .src2 = 2, .dst = 11}),
+  }};
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &encoding : words)
+    EXPECT_THROW(static_cast<void>(decoder->decode(encoding.data())), util::InvalidInst);
 }
 
 TEST(Gfx1250SimulationTest, DispatchesEndpgmThroughConfig) {
