@@ -270,8 +270,8 @@ release(uint, DEBUG_HIP_ANYORDER_DISPATCH, 0,                                 \
         "in-stream order is already preserved, letting streams overlap. "     \
         "0=off, 1=on. Opt-in: app must ensure streams sharing a queue are "   \
         "independent (no cross-stream data hazard).")                         \
-release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, false,                        \
-        "Ignore priority streams")                                            \
+release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, true,                         \
+        "Treat all streams as normal priority")                               \
 release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
         "Set this to true, to avoid host side abort for GPU errors")          \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
