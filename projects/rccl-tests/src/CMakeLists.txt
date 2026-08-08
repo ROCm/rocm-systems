@@ -73,6 +73,7 @@ set(COMMON_FILES
   collector.cu
   common.h
   common.cu
+  gin_sdma_collective_policy.h
   nccl1_compat.h
   rccl_compat.h
   rccl_float8.h
