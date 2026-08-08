@@ -492,13 +492,13 @@ configure_settings(bool _init)
 
     if(settings_are_configured()) return;
 
-    if(get_state() < State::Init)
+    if(state::process::get() < state::process::Init)
     {
         timemory_print_demangled_backtrace<64>();
 
         auto message = fmt::format("config::configure_settings() called before "
                                    "rocprofsys_init_library. state = {}",
-                                   static_cast<int>(get_state()));
+                                   static_cast<int>(state::process::get()));
         throw std::runtime_error(message);
     }
 
@@ -1560,7 +1560,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
     auto _use_causal = get_setting_value<bool>(std::string{ env_vars::USE_CAUSAL });
     if(_use_causal && *_use_causal) set_env(env_vars::MODE, "causal", 1);
 
-    if(get_mode() == Mode::Coverage)
+    if(get_mode() == state::process::Mode::Coverage)
     {
         set_default_setting_value(std::string{ env_vars::USE_CODE_COVERAGE }, true);
         _set(env_vars::TRACE, false);
@@ -1573,7 +1573,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::USE_SAMPLING, false);
         _set(env_vars::USE_PROCESS_SAMPLING, false);
     }
-    else if(get_mode() == Mode::Causal)
+    else if(get_mode() == state::process::Mode::Causal)
     {
         _set(env_vars::USE_CAUSAL, true);
         _set(env_vars::TRACE, false);
@@ -1581,7 +1581,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::USE_SAMPLING, false);
         _set(env_vars::USE_PROCESS_SAMPLING, false);
     }
-    else if(get_mode() == Mode::Sampling)
+    else if(get_mode() == state::process::Mode::Sampling)
     {
         set_default_setting_value(std::string{ env_vars::USE_SAMPLING }, true);
         set_default_setting_value(std::string{ env_vars::USE_PROCESS_SAMPLING }, true);
@@ -2151,7 +2151,7 @@ get_config_file()
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
-Mode
+state::process::Mode
 get_mode()
 {
     if(!settings_are_configured())
@@ -2159,18 +2159,19 @@ get_mode()
         auto _mode = rocprofsys::get_env_choice<std::string>(
             env_vars::MODE, "trace", { "trace", "sampling", "causal", "coverage" });
         if(_mode == "sampling")
-            return Mode::Sampling;
+            return state::process::Mode::Sampling;
         else if(_mode == "causal")
-            return Mode::Causal;
+            return state::process::Mode::Causal;
         else if(_mode == "coverage")
-            return Mode::Coverage;
-        return Mode::Trace;
+            return state::process::Mode::Coverage;
+        return state::process::Mode::Trace;
     }
-    static auto _m =
-        std::unordered_map<std::string_view, Mode>{ { "trace", Mode::Trace },
-                                                    { "causal", Mode::Causal },
-                                                    { "sampling", Mode::Sampling },
-                                                    { "coverage", Mode::Coverage } };
+    static auto _m = std::unordered_map<std::string_view, state::process::Mode>{
+        { "trace", state::process::Mode::Trace },
+        { "causal", state::process::Mode::Causal },
+        { "sampling", state::process::Mode::Sampling },
+        { "coverage", state::process::Mode::Coverage }
+    };
     static auto _v = get_config()->find(std::string{ env_vars::MODE });
     try
     {
@@ -2185,7 +2186,7 @@ get_mode()
         throw std::runtime_error(
             fmt::format("[{}] invalid mode {}. Choices: {}", __FUNCTION__, _mode, _msg));
     }
-    return Mode::Trace;
+    return state::process::Mode::Trace;
 }
 
 bool&
@@ -2536,7 +2537,7 @@ get_category_config()
         {
             LOG_CRITICAL("Error! Conflicting options ROCPROFSYS_ENABLE_CATEGORIES and "
                          "ROCPROFSYS_DISABLE_CATEGORIES were both provided.");
-            ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+            ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
             std::abort();
         }
 
@@ -3530,13 +3531,13 @@ get_tmp_file(std::string _basename, std::string _ext)
     return _existing_files.at(_fname);
 }
 
-CausalBackend
+state::process::CausalBackend
 get_causal_backend()
 {
-    static auto _m = std::unordered_map<std::string_view, CausalBackend>{
-        { "auto", CausalBackend::Auto },
-        { "perf", CausalBackend::Perf },
-        { "timer", CausalBackend::Timer },
+    static auto _m = std::unordered_map<std::string_view, state::process::CausalBackend>{
+        { "auto", state::process::CausalBackend::Auto },
+        { "perf", state::process::CausalBackend::Perf },
+        { "timer", state::process::CausalBackend::Timer },
     };
 
     auto _v = get_config()->find(std::string{ env_vars::CAUSAL_BACKEND });
@@ -3550,24 +3551,24 @@ get_causal_backend()
             fmt::format("[{}] invalid causal backend {}. Choices: {}", __FUNCTION__,
                         _mode, fmt::join(_v->second->get_choices(), ", ")));
     }
-    return CausalBackend::Auto;
+    return state::process::CausalBackend::Auto;
 }
 
-CausalMode
+state::process::CausalMode
 get_causal_mode()
 {
     if(!settings_are_configured())
     {
         auto _mode = rocprofsys::get_env_choice<std::string>(
             env_vars::CAUSAL_MODE, "function", { "line", "function" });
-        if(_mode == "line") return CausalMode::Line;
-        return CausalMode::Function;
+        if(_mode == "line") return state::process::CausalMode::Line;
+        return state::process::CausalMode::Function;
     }
     static auto _causal_mode = []() {
-        auto _m = std::unordered_map<std::string_view, CausalMode>{
-            { "line", CausalMode::Line },
-            { "func", CausalMode::Function },
-            { "function", CausalMode::Function }
+        auto _m = std::unordered_map<std::string_view, state::process::CausalMode>{
+            { "line", state::process::CausalMode::Line },
+            { "func", state::process::CausalMode::Function },
+            { "function", state::process::CausalMode::Function }
         };
         auto _v = get_config()->find(std::string{ env_vars::CAUSAL_MODE });
         try
@@ -3580,7 +3581,7 @@ get_causal_mode()
                 fmt::format("[{}] invalid causal mode {}. Choices: {}", __FUNCTION__,
                             _mode, fmt::join(_v->second->get_choices(), ", ")));
         }
-        return CausalMode::Function;
+        return state::process::CausalMode::Function;
     }();
     return _causal_mode;
 }

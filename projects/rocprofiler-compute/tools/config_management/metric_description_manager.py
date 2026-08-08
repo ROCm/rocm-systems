@@ -43,6 +43,108 @@ def is_gfx115x_ip_variant(arch_name: str) -> bool:
     return bool(re.fullmatch(r"gfx115([0-9a-f]|x)", arch_name, re.IGNORECASE))
 
 
+def is_gfx1250_arch(arch_name: str) -> bool:
+    """Check if arch is gfx1250 to correctly use the gfx1250 analysis layout."""
+    return arch_name == "gfx1250"
+
+
+# gfx1250 metric_table ids -> documentation section names (disambiguated
+# where multiple panels reuse generic titles like "Utilization").
+GFX1250_PANEL_ID_TO_SECTION: dict[int, str] = {
+    1: "Top Kernels",
+    2: "Dispatch List",
+    101: "System Info",
+    201: "System Speed-of-Light",
+    301: "Memory chart - Instruction Cache",
+    302: "Memory chart - Scalar Data Cache",
+    303: "Memory chart - GL0 Cache (Vector L0)",
+    304: "Memory chart - LDS (Local Data Share)",
+    305: "Memory chart - GL0-GL1 Interface",
+    306: "Memory chart - GLARB (GL1-GL2 Arbiter)",
+    307: "Memory chart - GL2 Cache (L2)",
+    308: "Memory chart - EA to HBM",
+    401: "Roofline Performance Rates",
+    402: "Roofline Plot Points",
+    501: "CPC Utilizations",
+    601: "SPI Utilization",
+    602: "SPI Wave Dispatch",
+    603: "SPI Resource Allocation",
+    604: "SPI CPC-SPI Interface",
+    701: "WGP Utilization",
+    702: "WGP Wavefront Launch Stats",
+    703: "WGP Wave Dispatch",
+    704: "WGP Wave Life",
+    705: "WGP Wave Instruction Mix",
+    706: "WGP VMEM Instruction Mix",
+    707: "WGP LDS Instruction Mix",
+    708: "WGP VALU Instruction Mix",
+    709: "WGP VALU FLOPs and IOPs Counting",
+    710: "WGP WMMA Instruction FLOPs and IOPs Counting",
+    711: "WGP Instruction Issue Stalls",
+    712: "WGP Compute Pipeline Utilization",
+    713: "WGP Latencies",
+    714: "WGP-TXA Interface",
+    715: "WGP-TXD Interface",
+    716: "WGP Instruction Cache",
+    717: "WGP Scalar Data Cache",
+    718: "WGP SQC-GL1 Interface",
+    801: "TXA Utilization",
+    802: "Shader-TXA Requests - LDS",
+    803: "Shader-TXA Requests - VMEM",
+    804: "Shader-TXA Requests - Async Load and Store",
+    805: "Shader-TXA Requests - TDM",
+    806: "Shader-TXA Requests - Block Load and Store",
+    807: "Shader-TXA Interface",
+    808: "TXA-VMW Interface",
+    809: "LDS and GL0 Data Bandwidth",
+    901: "WGP Cache Utilization (LDS + GL0)",
+    902: "Cache Requests",
+    903: "Cache Lookup",
+    904: "LDS Accesses",
+    905: "Set-Slot Dynamics",
+    906: "GL0-GL1 Interface: Requests and Bandwidth",
+    907: "GL0-GL1 Interface: Latency",
+    908: "GL0-GL1 Interface: Stalls",
+    909: "GL0-UTCL0 Interface",
+    910: "UTCL0-UTCL1 Interface",
+    911: "UTCL0 Lookup",
+    1001: "TXD Utilization",
+    1101: "GL1A Processing",
+    1102: "GL1C Utilization",
+    1103: "GL1C Request",
+    1104: "GL1C Request Bandwidth",
+    1105: "GL1C Multicast",
+    1106: "GL1C-GLARB Interface",
+    1201: "GLARBA Processing",
+    1202: "GLARBC Utilization",
+    1203: "GLARBC Request",
+    1204: "GLARBC Request Bandwidth",
+    1205: "GLARBC-GL2 Interface",
+    1301: "GL2A Processing",
+    1310: "GL2C Utilization",
+    1311: "GL2C Cache Lookup",
+    1302: "GL2C-EA Stalls",
+    1303: "GL2C-EA Interface - Latencies",
+    1304: "GL2C-EA Interface - HBM Bandwidth",
+    1305: "GL2C-EA Interface - Host CPU Bandwidth",
+    1306: "GL2C-EA Interface - PCIe Bandwidth",
+    1307: "GL2C-EA Interface - Remote Node Bandwidth",
+    1308: "GL2C-EA Interface - Remote Memory Bandwidth (Same Node)",
+    1401: "EA Utilization",
+    1402: "EA Traffic Bandwidth",
+    1403: "EA-SDP Interface - Outstanding Requests",
+    1404: "EA-SDP Interface - Stalls",
+    1501: "CHA Utilization",
+    1502: "CHA Arbitration",
+    1503: "CHC Utilization",
+    1504: "CHC Requests",
+    1505: "CHC Bandwidth and Latency",
+    1601: "UTCL1 Metrics",
+    1701: "GRBM Metrics",
+    2101: "PC Sampling",
+}
+
+
 def normalize_unit_for_docs(unit: str) -> str:
     """
     Convert template variable units to human-readable format for documentation.
@@ -197,6 +299,8 @@ def panel_id_to_section(arch_name: str, table_id: int | None) -> str | None:
         return None
     if is_gfx115x_ip_variant(arch_name):
         return RDNA35_PANEL_ID_TO_SECTION_BY_ARCH.get(table_id)
+    if is_gfx1250_arch(arch_name):
+        return GFX1250_PANEL_ID_TO_SECTION.get(table_id)
     return CDNA_PANEL_ID_TO_SECTION.get(table_id)
 
 
@@ -258,11 +362,14 @@ def extract_descriptions_from_arch(
         for ds in panel_config.get("data source", []):
             for key, value in ds.items():
                 if isinstance(value, dict) and "metric" in value:
+                    metrics_block = value.get("metric")
+                    if not isinstance(metrics_block, dict):
+                        continue
                     table_id = value.get("id")
                     section_name = panel_id_to_section(arch_name, table_id)
                     if not section_name:
                         continue
-                    for metric_name, metric_data in value["metric"].items():
+                    for metric_name, metric_data in metrics_block.items():
                         # Track section for ALL metrics (even those without units)
                         metrics_sections[metric_name] = section_name
                         # Check both "unit" and "units" (different files use
@@ -353,8 +460,8 @@ def preserve_manual_rst_edits(new_descriptions: dict, existing_per_arch: dict) -
     Preserve manually edited RST and existing metrics from per-arch YAMLs.
 
     Rules:
-    1. If existing rst != plain, it was manually edited → preserve it
-    2. If a metric exists in per-arch but not extracted from panels → preserve it
+    1. If existing rst != plain, it was manually edited -> preserve it
+    2. If a metric exists in per-arch but not extracted from panels -> preserve it
        (This handles metrics defined in panel tables but lacking descriptions)
     """
     if not existing_per_arch:
@@ -373,12 +480,12 @@ def preserve_manual_rst_edits(new_descriptions: dict, existing_per_arch: dict) -
             existing_rst = existing_data.get("rst", "")
             existing_plain = existing_data.get("plain", "")
 
-            # If RST differs from plain, it was manually edited → preserve it
+            # If RST differs from plain, it was manually edited -> preserve it
             if existing_rst and existing_rst != existing_plain:
                 new_data["rst"] = existing_rst  # PRESERVE manual edit
                 # Don't print - this is routine
 
-            # Otherwise, use new auto-generated RST (plain→rst conversion)
+            # Otherwise, use new auto-generated RST (plain->rst conversion)
 
     # Second pass: Preserve metrics that exist in per-arch but not extracted
     # from panels (e.g., metrics defined in panel tables but lacking
@@ -494,7 +601,10 @@ def validate_descriptions(
         for ds in panel_config.get("data source", []):
             for _, value in ds.items():
                 if isinstance(value, dict) and "metric" in value:
-                    all_metrics.update(value["metric"].keys())
+                    metrics_block = value.get("metric")
+                    if not isinstance(metrics_block, dict):
+                        continue
+                    all_metrics.update(metrics_block.keys())
 
         missing = sorted(all_metrics - set(panel_descriptions.keys()))
         if missing:
