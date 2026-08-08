@@ -14,7 +14,9 @@ namespace rocjitsu {
 namespace cdna3 {
 
 VNopVop1::VNopVop1(const MachineInst *inst)
-    : Vop1("v_nop_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_nop_sdwa"
+                                                                                : "v_nop_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VNopVop1)) {
   num_src_ = 0;
   num_dst_ = 0;
@@ -27,7 +29,9 @@ std::unique_ptr<Instruction> decodeVNopVop1(const MachineInst *opcode) {
 } // namespace detail
 
 VMovB32Vop1::VMovB32Vop1(const MachineInst *inst)
-    : Vop1("v_mov_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_mov_b32_sdwa"
+                                                                                : "v_mov_b32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovB32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -58,9 +62,12 @@ VMovB32Vop1::VMovB32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -155,7 +162,10 @@ std::unique_ptr<Instruction> decodeVCvtF64I32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VCvtF32I32Vop1::VCvtF32I32Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_f32_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_f32_i32_sdwa"
+               : "v_cvt_f32_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32I32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -186,9 +196,12 @@ VCvtF32I32Vop1::VCvtF32I32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -199,7 +212,10 @@ std::unique_ptr<Instruction> decodeVCvtF32I32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VCvtF32U32Vop1::VCvtF32U32Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_f32_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_f32_u32_sdwa"
+               : "v_cvt_f32_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32U32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -230,9 +246,12 @@ VCvtF32U32Vop1::VCvtF32U32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -243,7 +262,10 @@ std::unique_ptr<Instruction> decodeVCvtF32U32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VCvtU32F32Vop1::VCvtU32F32Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_u32_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_u32_f32_sdwa"
+               : "v_cvt_u32_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtU32F32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -274,9 +296,12 @@ VCvtU32F32Vop1::VCvtU32F32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -287,7 +312,10 @@ std::unique_ptr<Instruction> decodeVCvtU32F32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VCvtI32F32Vop1::VCvtI32F32Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_i32_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_i32_f32_sdwa"
+               : "v_cvt_i32_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtI32F32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -318,9 +346,12 @@ VCvtI32F32Vop1::VCvtI32F32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -331,7 +362,10 @@ std::unique_ptr<Instruction> decodeVCvtI32F32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VCvtF16F32Vop1::VCvtF16F32Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_f16_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_f16_f32_sdwa"
+               : "v_cvt_f16_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF16F32Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -362,9 +396,12 @@ VCvtF16F32Vop1::VCvtF16F32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -381,7 +418,10 @@ void VCvtF16F32Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtF32F16Vop1::VCvtF32F16Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_f32_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_f32_f16_sdwa"
+               : "v_cvt_f32_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32F16Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -413,9 +453,12 @@ VCvtF32F16Vop1::VCvtF32F16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -426,7 +469,10 @@ std::unique_ptr<Instruction> decodeVCvtF32F16Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VCvtRpiI32F32Vop1::VCvtRpiI32F32Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_rpi_i32_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_rpi_i32_f32_sdwa"
+               : "v_cvt_rpi_i32_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtRpiI32F32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -457,9 +503,12 @@ VCvtRpiI32F32Vop1::VCvtRpiI32F32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -470,7 +519,10 @@ std::unique_ptr<Instruction> decodeVCvtRpiI32F32Vop1(const MachineInst *opcode) 
 } // namespace detail
 
 VCvtFlrI32F32Vop1::VCvtFlrI32F32Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_flr_i32_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_flr_i32_f32_sdwa"
+               : "v_cvt_flr_i32_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtFlrI32F32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -501,9 +553,12 @@ VCvtFlrI32F32Vop1::VCvtFlrI32F32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -514,7 +569,10 @@ std::unique_ptr<Instruction> decodeVCvtFlrI32F32Vop1(const MachineInst *opcode) 
 } // namespace detail
 
 VCvtOffF32I4Vop1::VCvtOffF32I4Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_off_f32_i4_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_off_f32_i4_sdwa"
+               : "v_cvt_off_f32_i4_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtOffF32I4Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -545,9 +603,12 @@ VCvtOffF32I4Vop1::VCvtOffF32I4Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -615,7 +676,10 @@ std::unique_ptr<Instruction> decodeVCvtF64F32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VCvtF32Ubyte0Vop1::VCvtF32Ubyte0Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_f32_ubyte0_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_f32_ubyte0_sdwa"
+               : "v_cvt_f32_ubyte0_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte0Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -646,9 +710,12 @@ VCvtF32Ubyte0Vop1::VCvtF32Ubyte0Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -659,7 +726,10 @@ std::unique_ptr<Instruction> decodeVCvtF32Ubyte0Vop1(const MachineInst *opcode) 
 } // namespace detail
 
 VCvtF32Ubyte1Vop1::VCvtF32Ubyte1Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_f32_ubyte1_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_f32_ubyte1_sdwa"
+               : "v_cvt_f32_ubyte1_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte1Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -690,9 +760,12 @@ VCvtF32Ubyte1Vop1::VCvtF32Ubyte1Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -703,7 +776,10 @@ std::unique_ptr<Instruction> decodeVCvtF32Ubyte1Vop1(const MachineInst *opcode) 
 } // namespace detail
 
 VCvtF32Ubyte2Vop1::VCvtF32Ubyte2Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_f32_ubyte2_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_f32_ubyte2_sdwa"
+               : "v_cvt_f32_ubyte2_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte2Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -734,9 +810,12 @@ VCvtF32Ubyte2Vop1::VCvtF32Ubyte2Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -747,7 +826,10 @@ std::unique_ptr<Instruction> decodeVCvtF32Ubyte2Vop1(const MachineInst *opcode) 
 } // namespace detail
 
 VCvtF32Ubyte3Vop1::VCvtF32Ubyte3Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_f32_ubyte3_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_f32_ubyte3_sdwa"
+               : "v_cvt_f32_ubyte3_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte3Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -778,9 +860,12 @@ VCvtF32Ubyte3Vop1::VCvtF32Ubyte3Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -976,7 +1061,9 @@ std::unique_ptr<Instruction> decodeVFloorF64Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VFractF32Vop1::VFractF32Vop1(const MachineInst *inst)
-    : Vop1("v_fract_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_fract_f32_sdwa"
+                                                                                : "v_fract_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFractF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1007,9 +1094,12 @@ VFractF32Vop1::VFractF32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1020,7 +1110,9 @@ std::unique_ptr<Instruction> decodeVFractF32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VTruncF32Vop1::VTruncF32Vop1(const MachineInst *inst)
-    : Vop1("v_trunc_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_trunc_f32_sdwa"
+                                                                                : "v_trunc_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTruncF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1051,9 +1143,12 @@ VTruncF32Vop1::VTruncF32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1064,7 +1159,9 @@ std::unique_ptr<Instruction> decodeVTruncF32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VCeilF32Vop1::VCeilF32Vop1(const MachineInst *inst)
-    : Vop1("v_ceil_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ceil_f32_sdwa"
+                                                                                : "v_ceil_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCeilF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1095,9 +1192,12 @@ VCeilF32Vop1::VCeilF32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1108,7 +1208,9 @@ std::unique_ptr<Instruction> decodeVCeilF32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VRndneF32Vop1::VRndneF32Vop1(const MachineInst *inst)
-    : Vop1("v_rndne_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rndne_f32_sdwa"
+                                                                                : "v_rndne_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRndneF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1139,9 +1241,12 @@ VRndneF32Vop1::VRndneF32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1152,7 +1257,9 @@ std::unique_ptr<Instruction> decodeVRndneF32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VFloorF32Vop1::VFloorF32Vop1(const MachineInst *inst)
-    : Vop1("v_floor_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_floor_f32_sdwa"
+                                                                                : "v_floor_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFloorF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1183,9 +1290,12 @@ VFloorF32Vop1::VFloorF32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1196,7 +1306,9 @@ std::unique_ptr<Instruction> decodeVFloorF32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VExpF32Vop1::VExpF32Vop1(const MachineInst *inst)
-    : Vop1("v_exp_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_exp_f32_sdwa"
+                                                                                : "v_exp_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VExpF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1227,9 +1339,12 @@ VExpF32Vop1::VExpF32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1240,7 +1355,9 @@ std::unique_ptr<Instruction> decodeVExpF32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VLogF32Vop1::VLogF32Vop1(const MachineInst *inst)
-    : Vop1("v_log_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_log_f32_sdwa"
+                                                                                : "v_log_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLogF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1271,9 +1388,12 @@ VLogF32Vop1::VLogF32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1284,7 +1404,9 @@ std::unique_ptr<Instruction> decodeVLogF32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VRcpF32Vop1::VRcpF32Vop1(const MachineInst *inst)
-    : Vop1("v_rcp_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rcp_f32_sdwa"
+                                                                                : "v_rcp_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1315,9 +1437,12 @@ VRcpF32Vop1::VRcpF32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1328,7 +1453,10 @@ std::unique_ptr<Instruction> decodeVRcpF32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VRcpIflagF32Vop1::VRcpIflagF32Vop1(const MachineInst *inst)
-    : Vop1("v_rcp_iflag_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_rcp_iflag_f32_sdwa"
+               : "v_rcp_iflag_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpIflagF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1359,9 +1487,12 @@ VRcpIflagF32Vop1::VRcpIflagF32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1372,7 +1503,9 @@ std::unique_ptr<Instruction> decodeVRcpIflagF32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VRsqF32Vop1::VRsqF32Vop1(const MachineInst *inst)
-    : Vop1("v_rsq_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rsq_f32_sdwa"
+                                                                                : "v_rsq_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRsqF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1403,9 +1536,12 @@ VRsqF32Vop1::VRsqF32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1468,7 +1604,9 @@ std::unique_ptr<Instruction> decodeVRsqF64Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VSqrtF32Vop1::VSqrtF32Vop1(const MachineInst *inst)
-    : Vop1("v_sqrt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sqrt_f32_sdwa"
+                                                                                : "v_sqrt_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSqrtF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1499,9 +1637,12 @@ VSqrtF32Vop1::VSqrtF32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1538,7 +1679,9 @@ std::unique_ptr<Instruction> decodeVSqrtF64Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VSinF32Vop1::VSinF32Vop1(const MachineInst *inst)
-    : Vop1("v_sin_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sin_f32_sdwa"
+                                                                                : "v_sin_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSinF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1569,9 +1712,12 @@ VSinF32Vop1::VSinF32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1582,7 +1728,9 @@ std::unique_ptr<Instruction> decodeVSinF32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VCosF32Vop1::VCosF32Vop1(const MachineInst *inst)
-    : Vop1("v_cos_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cos_f32_sdwa"
+                                                                                : "v_cos_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCosF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1613,9 +1761,12 @@ VCosF32Vop1::VCosF32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1626,7 +1777,9 @@ std::unique_ptr<Instruction> decodeVCosF32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VNotB32Vop1::VNotB32Vop1(const MachineInst *inst)
-    : Vop1("v_not_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_not_b32_sdwa"
+                                                                                : "v_not_b32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VNotB32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1657,9 +1810,12 @@ VNotB32Vop1::VNotB32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1670,7 +1826,9 @@ std::unique_ptr<Instruction> decodeVNotB32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VBfrevB32Vop1::VBfrevB32Vop1(const MachineInst *inst)
-    : Vop1("v_bfrev_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_bfrev_b32_sdwa"
+                                                                                : "v_bfrev_b32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VBfrevB32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1701,9 +1859,12 @@ VBfrevB32Vop1::VBfrevB32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1714,7 +1875,9 @@ std::unique_ptr<Instruction> decodeVBfrevB32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VFfbhU32Vop1::VFfbhU32Vop1(const MachineInst *inst)
-    : Vop1("v_ffbh_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ffbh_u32_sdwa"
+                                                                                : "v_ffbh_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFfbhU32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1745,9 +1908,12 @@ VFfbhU32Vop1::VFfbhU32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1758,7 +1924,9 @@ std::unique_ptr<Instruction> decodeVFfbhU32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VFfblB32Vop1::VFfblB32Vop1(const MachineInst *inst)
-    : Vop1("v_ffbl_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ffbl_b32_sdwa"
+                                                                                : "v_ffbl_b32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFfblB32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1789,9 +1957,12 @@ VFfblB32Vop1::VFfblB32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1802,7 +1973,9 @@ std::unique_ptr<Instruction> decodeVFfblB32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VFfbhI32Vop1::VFfbhI32Vop1(const MachineInst *inst)
-    : Vop1("v_ffbh_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ffbh_i32_sdwa"
+                                                                                : "v_ffbh_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFfbhI32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1833,9 +2006,12 @@ VFfbhI32Vop1::VFfbhI32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1942,7 +2118,10 @@ std::unique_ptr<Instruction> decodeVFractF64Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VFrexpExpI32F32Vop1::VFrexpExpI32F32Vop1(const MachineInst *inst)
-    : Vop1("v_frexp_exp_i32_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_frexp_exp_i32_f32_sdwa"
+               : "v_frexp_exp_i32_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpExpI32F32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1973,9 +2152,12 @@ VFrexpExpI32F32Vop1::VFrexpExpI32F32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -1986,7 +2168,10 @@ std::unique_ptr<Instruction> decodeVFrexpExpI32F32Vop1(const MachineInst *opcode
 } // namespace detail
 
 VFrexpMantF32Vop1::VFrexpMantF32Vop1(const MachineInst *inst)
-    : Vop1("v_frexp_mant_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_frexp_mant_f32_sdwa"
+               : "v_frexp_mant_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpMantF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2017,9 +2202,12 @@ VFrexpMantF32Vop1::VFrexpMantF32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2043,7 +2231,10 @@ std::unique_ptr<Instruction> decodeVClrexcpVop1(const MachineInst *opcode) {
 } // namespace detail
 
 VScreenPartition4seB32Vop1::VScreenPartition4seB32Vop1(const MachineInst *inst)
-    : Vop1("v_screen_partition_4se_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_screen_partition_4se_b32_sdwa"
+               : "v_screen_partition_4se_b32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VScreenPartition4seB32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2074,9 +2265,12 @@ VScreenPartition4seB32Vop1::VScreenPartition4seB32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2087,7 +2281,9 @@ std::unique_ptr<Instruction> decodeVScreenPartition4seB32Vop1(const MachineInst 
 } // namespace detail
 
 VMovB64Vop1::VMovB64Vop1(const MachineInst *inst)
-    : Vop1("v_mov_b64_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_mov_b64_sdwa"
+                                                                                : "v_mov_b64_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovB64Vop1)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2119,9 +2315,12 @@ VMovB64Vop1::VMovB64Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2132,7 +2331,10 @@ std::unique_ptr<Instruction> decodeVMovB64Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VCvtF16U16Vop1::VCvtF16U16Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_f16_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_f16_u16_sdwa"
+               : "v_cvt_f16_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF16U16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2164,9 +2366,12 @@ VCvtF16U16Vop1::VCvtF16U16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2183,7 +2388,10 @@ void VCvtF16U16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtF16I16Vop1::VCvtF16I16Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_f16_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_f16_i16_sdwa"
+               : "v_cvt_f16_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF16I16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2215,9 +2423,12 @@ VCvtF16I16Vop1::VCvtF16I16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2234,7 +2445,10 @@ void VCvtF16I16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtU16F16Vop1::VCvtU16F16Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_u16_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_u16_f16_sdwa"
+               : "v_cvt_u16_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtU16F16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2266,9 +2480,12 @@ VCvtU16F16Vop1::VCvtU16F16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2285,7 +2502,10 @@ void VCvtU16F16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtI16F16Vop1::VCvtI16F16Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_i16_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_i16_f16_sdwa"
+               : "v_cvt_i16_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtI16F16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2317,9 +2537,12 @@ VCvtI16F16Vop1::VCvtI16F16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2336,7 +2559,9 @@ void VCvtI16F16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VRcpF16Vop1::VRcpF16Vop1(const MachineInst *inst)
-    : Vop1("v_rcp_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rcp_f16_sdwa"
+                                                                                : "v_rcp_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2368,9 +2593,12 @@ VRcpF16Vop1::VRcpF16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2387,7 +2615,9 @@ void VRcpF16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VSqrtF16Vop1::VSqrtF16Vop1(const MachineInst *inst)
-    : Vop1("v_sqrt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sqrt_f16_sdwa"
+                                                                                : "v_sqrt_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSqrtF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2419,9 +2649,12 @@ VSqrtF16Vop1::VSqrtF16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2438,7 +2671,9 @@ void VSqrtF16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VRsqF16Vop1::VRsqF16Vop1(const MachineInst *inst)
-    : Vop1("v_rsq_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rsq_f16_sdwa"
+                                                                                : "v_rsq_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRsqF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2470,9 +2705,12 @@ VRsqF16Vop1::VRsqF16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2489,7 +2727,9 @@ void VRsqF16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VLogF16Vop1::VLogF16Vop1(const MachineInst *inst)
-    : Vop1("v_log_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_log_f16_sdwa"
+                                                                                : "v_log_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLogF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2521,9 +2761,12 @@ VLogF16Vop1::VLogF16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2540,7 +2783,9 @@ void VLogF16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VExpF16Vop1::VExpF16Vop1(const MachineInst *inst)
-    : Vop1("v_exp_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_exp_f16_sdwa"
+                                                                                : "v_exp_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VExpF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2572,9 +2817,12 @@ VExpF16Vop1::VExpF16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2591,7 +2839,10 @@ void VExpF16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VFrexpMantF16Vop1::VFrexpMantF16Vop1(const MachineInst *inst)
-    : Vop1("v_frexp_mant_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_frexp_mant_f16_sdwa"
+               : "v_frexp_mant_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpMantF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2623,9 +2874,12 @@ VFrexpMantF16Vop1::VFrexpMantF16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2642,7 +2896,10 @@ void VFrexpMantF16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VFrexpExpI16F16Vop1::VFrexpExpI16F16Vop1(const MachineInst *inst)
-    : Vop1("v_frexp_exp_i16_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_frexp_exp_i16_f16_sdwa"
+               : "v_frexp_exp_i16_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpExpI16F16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2674,9 +2931,12 @@ VFrexpExpI16F16Vop1::VFrexpExpI16F16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2693,7 +2953,9 @@ void VFrexpExpI16F16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VFloorF16Vop1::VFloorF16Vop1(const MachineInst *inst)
-    : Vop1("v_floor_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_floor_f16_sdwa"
+                                                                                : "v_floor_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFloorF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2725,9 +2987,12 @@ VFloorF16Vop1::VFloorF16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2744,7 +3009,9 @@ void VFloorF16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VCeilF16Vop1::VCeilF16Vop1(const MachineInst *inst)
-    : Vop1("v_ceil_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ceil_f16_sdwa"
+                                                                                : "v_ceil_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCeilF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2776,9 +3043,12 @@ VCeilF16Vop1::VCeilF16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2795,7 +3065,9 @@ void VCeilF16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VTruncF16Vop1::VTruncF16Vop1(const MachineInst *inst)
-    : Vop1("v_trunc_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_trunc_f16_sdwa"
+                                                                                : "v_trunc_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTruncF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2827,9 +3099,12 @@ VTruncF16Vop1::VTruncF16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2846,7 +3121,9 @@ void VTruncF16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VRndneF16Vop1::VRndneF16Vop1(const MachineInst *inst)
-    : Vop1("v_rndne_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rndne_f16_sdwa"
+                                                                                : "v_rndne_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRndneF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2878,9 +3155,12 @@ VRndneF16Vop1::VRndneF16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2897,7 +3177,9 @@ void VRndneF16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VFractF16Vop1::VFractF16Vop1(const MachineInst *inst)
-    : Vop1("v_fract_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_fract_f16_sdwa"
+                                                                                : "v_fract_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFractF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2929,9 +3211,12 @@ VFractF16Vop1::VFractF16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2948,7 +3233,9 @@ void VFractF16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VSinF16Vop1::VSinF16Vop1(const MachineInst *inst)
-    : Vop1("v_sin_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sin_f16_sdwa"
+                                                                                : "v_sin_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSinF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2980,9 +3267,12 @@ VSinF16Vop1::VSinF16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -2999,7 +3289,9 @@ void VSinF16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VCosF16Vop1::VCosF16Vop1(const MachineInst *inst)
-    : Vop1("v_cos_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cos_f16_sdwa"
+                                                                                : "v_cos_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCosF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3031,9 +3323,12 @@ VCosF16Vop1::VCosF16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -3050,7 +3345,10 @@ void VCosF16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtNormI16F16Vop1::VCvtNormI16F16Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_norm_i16_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_norm_i16_f16_sdwa"
+               : "v_cvt_norm_i16_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtNormI16F16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3082,9 +3380,12 @@ VCvtNormI16F16Vop1::VCvtNormI16F16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -3101,7 +3402,10 @@ void VCvtNormI16F16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtNormU16F16Vop1::VCvtNormU16F16Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_norm_u16_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_norm_u16_f16_sdwa"
+               : "v_cvt_norm_u16_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtNormU16F16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3133,9 +3437,12 @@ VCvtNormU16F16Vop1::VCvtNormU16F16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -3152,7 +3459,10 @@ void VCvtNormU16F16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VSatPkU8I16Vop1::VSatPkU8I16Vop1(const MachineInst *inst)
-    : Vop1("v_sat_pk_u8_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_sat_pk_u8_i16_sdwa"
+               : "v_sat_pk_u8_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSatPkU8I16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3183,9 +3493,12 @@ VSatPkU8I16Vop1::VSatPkU8I16Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -3225,7 +3538,10 @@ std::unique_ptr<Instruction> decodeVSwapB32Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VAccvgprMovB32Vop1::VAccvgprMovB32Vop1(const MachineInst *inst)
-    : Vop1("v_accvgpr_mov_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_accvgpr_mov_b32_sdwa"
+               : "v_accvgpr_mov_b32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAccvgprMovB32Vop1)),
       vdst(32, OperandType::OPR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst + OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN)),
@@ -3257,9 +3573,12 @@ VAccvgprMovB32Vop1::VAccvgprMovB32Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
   flags_ |= ACCVGPR;
 }
@@ -3271,7 +3590,10 @@ std::unique_ptr<Instruction> decodeVAccvgprMovB32Vop1(const MachineInst *opcode)
 } // namespace detail
 
 VCvtF32Fp8Vop1::VCvtF32Fp8Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_f32_fp8_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_f32_fp8_sdwa"
+               : "v_cvt_f32_fp8_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Fp8Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(8, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3302,9 +3624,12 @@ VCvtF32Fp8Vop1::VCvtF32Fp8Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -3315,7 +3640,10 @@ std::unique_ptr<Instruction> decodeVCvtF32Fp8Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VCvtF32Bf8Vop1::VCvtF32Bf8Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_f32_bf8_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_f32_bf8_sdwa"
+               : "v_cvt_f32_bf8_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Bf8Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(8, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3346,9 +3674,12 @@ VCvtF32Bf8Vop1::VCvtF32Bf8Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -3359,7 +3690,10 @@ std::unique_ptr<Instruction> decodeVCvtF32Bf8Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VCvtPkF32Fp8Vop1::VCvtPkF32Fp8Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_pk_f32_fp8_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_pk_f32_fp8_sdwa"
+               : "v_cvt_pk_f32_fp8_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkF32Fp8Vop1)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3391,9 +3725,12 @@ VCvtPkF32Fp8Vop1::VCvtPkF32Fp8Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 
@@ -3404,7 +3741,10 @@ std::unique_ptr<Instruction> decodeVCvtPkF32Fp8Vop1(const MachineInst *opcode) {
 } // namespace detail
 
 VCvtPkF32Bf8Vop1::VCvtPkF32Bf8Vop1(const MachineInst *inst)
-    : Vop1("v_cvt_pk_f32_bf8_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_pk_f32_bf8_sdwa"
+               : "v_cvt_pk_f32_bf8_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkF32Bf8Vop1)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3436,9 +3776,12 @@ VCvtPkF32Bf8Vop1::VCvtPkF32Bf8Vop1(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
   }
 }
 

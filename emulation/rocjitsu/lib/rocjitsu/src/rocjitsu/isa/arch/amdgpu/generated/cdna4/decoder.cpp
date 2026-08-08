@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/decoder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3p.h"
 #include "util/except.h"
 #include <array>
@@ -1548,33 +1549,11 @@ private:
   static const std::array<DecodeFunc, 16> sub_decode_mtbuf;
 };
 
-namespace {
-
-bool isMfmaScaleF8f6f4Vop3px2(const MachineInst *opcode) {
-  constexpr uint32_t VOP3P_MFMA_ENC = 423;
-  constexpr uint32_t PREFIX_OP = 44;
-  auto enc0 = (opcode[0] >> 23) & 0x1FFu;
-  auto op0 = (opcode[0] >> 16) & 0x7Fu;
-  if (enc0 != VOP3P_MFMA_ENC || op0 != PREFIX_OP)
-    return false;
-  auto enc2 = (opcode[2] >> 23) & 0x1FFu;
-  auto op2 = (opcode[2] >> 16) & 0x7Fu;
-  return enc2 == VOP3P_MFMA_ENC && (op2 == 45 || op2 == 46);
-}
-
-} // namespace
-
 std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {
   return DecoderImpl::decode(opcode);
 }
 
 std::unique_ptr<Instruction> DecoderImpl::decode(const MachineInst *opcode) {
-  if (isMfmaScaleF8f6f4Vop3px2(opcode)) {
-    auto op2 = (opcode[2] >> 16) & 0x7Fu;
-    if (op2 == 45)
-      return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode + 2, true);
-    return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode + 2, true);
-  }
   Sop1MachineInst op = std::bit_cast<decltype(op)>(*opcode);
   return primary_decode_table[op.encoding](opcode);
 }
@@ -1625,8 +1604,15 @@ std::unique_ptr<Instruction> DecoderImpl::subDecodeVop3p(const MachineInst *opco
 }
 
 std::unique_ptr<Instruction> DecoderImpl::decodeVop3pX2Prefix(const MachineInst *opcode) {
-  auto op = *reinterpret_cast<const Vop3p::OpEncoding *>(opcode + 2);
-  return sub_decode_vop3p[op.op](opcode + 2);
+  const uint32_t suffix_encoding = (opcode[2] >> 23) & 0x1FFu;
+  const uint32_t suffix_opcode = (opcode[2] >> 16) & 0x7Fu;
+  if (suffix_encoding != encoding::kVop3pMfma ||
+      (suffix_opcode != kVMfmaF3216x16x128F8f6f4Vop3pMfma &&
+       suffix_opcode != kVMfmaF3232x32x64F8f6f4Vop3pMfma))
+    return decodeInvalid(opcode);
+  if (suffix_opcode == kVMfmaF3216x16x128F8f6f4Vop3pMfma)
+    return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode + 2, true);
+  return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode + 2, true);
 }
 
 std::unique_ptr<Instruction> DecoderImpl::subDecodeDs(const MachineInst *opcode) {
