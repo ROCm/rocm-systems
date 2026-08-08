@@ -833,10 +833,14 @@ else()
   message(STATUS "HIP_VMM_UNCACHED_MEMORY disabled")
 endif()
 
-# ==== rocSHMEM integration (optional) ====
-# ENABLE_ROCSHMEM: full rocshmem (device + host), links librocshmem.a into librccl.so
-# ENABLE_ROCSHMEM_GIN: GIN host code only (no device deps), rocshmem host symbols
-#   resolved at runtime from the executable that links librocshmem.a
+# ==== rocSHMEM integration (optional, mutually exclusive) ====
+# ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
+#   via -fgpu-rdc --hip-link.  Does not enable GIN plugins.
+# ENABLE_ROCSHMEM_GIN: GIN plugins (GDA, SDMA).  Device symbols (QueuePair)
+#   resolved via per-arch bitcode in the device linker pipeline +
+#   -mlink-builtin-bitcode for symmetric kernels.  Host symbols left unresolved
+#   (--allow-shlib-undefined), resolved at runtime from the executable.
+#   Does not enable alltoall_wg offload.
 if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   add_rocshmem_targets()
   # Ensure rocSHMEM is fully built/installed before compiling rccl

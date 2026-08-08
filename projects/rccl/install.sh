@@ -41,6 +41,22 @@ device_linker=true
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 kernarg_preload=true
 quiet_warnings=false
+# rocSHMEM integration modes (mutually exclusive — mixing causes duplicate
+# rocshmem state between librccl.so and the executable):
+#   --rocshmem      Alltoall_wg offload: builds rocshmem from source and links
+#                   librocshmem.a into librccl.so with -fgpu-rdc --hip-link.
+#                   All rocshmem device+host symbols are resolved inside
+#                   librccl.so.  The executable must NOT link librocshmem.a.
+#                   Does NOT enable GIN plugins.
+#   --rocshmem-gin  GIN plugins (GDA, SDMA): builds rocshmem from source for
+#                   its headers, device bitcode, and host libraries, but does
+#                   NOT link librocshmem.a into librccl.so.  GIN device
+#                   templates (GDA QueuePair, SDMA) are resolved via per-arch
+#                   bitcode injection in the device linker pipeline.  GIN host
+#                   plugin symbols are left unresolved in librccl.so
+#                   (--allow-shlib-undefined) and resolved at runtime from the
+#                   executable, which owns the single librocshmem.a instance.
+#                   Does NOT enable alltoall_wg offload.
 build_rocshmem_support=false
 build_rocshmem_gin=false
 rocshmem_mono_hash="b76636bd9260cc307d80047b92c31b4d3e86a1e4"
@@ -82,8 +98,9 @@ function display_help()
     echo "    -p|--package_build         Build RCCL package"
     echo "       --prefix                Specify custom directory to install RCCL to (default: \`/opt/rocm\`)"
     echo "    -q|--quiet-warnings        Suppress majority of compiler warnings (not recommended)"
-    echo "       --rocshmem              Build with full rocSHMEM support (links librocshmem.a into librccl.so)"
-    echo "       --rocshmem-gin          Build GIN rocshmem plugins (symbols resolved at runtime)"
+    echo "       --rocshmem              Full rocSHMEM: link librocshmem.a into librccl.so (alltoall_wg offload)"
+    echo "       --rocshmem-gin          GIN plugins only: device bitcode injected at build, host symbols"
+    echo "                                resolved at runtime from the executable (no librocshmem in librccl)"
     echo "       --run_tests_all         Run all rccl unit tests (must be built already)"
     echo "    -r|--run_tests_quick       Run small subset of rccl unit tests (must be built already)"
     echo "       --static                Build RCCL as a static library instead of shared library"
