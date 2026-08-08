@@ -248,10 +248,10 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   int nthreads = blockDim.x * gridDim.x;
 
-  /* send to all peers via GIN */
+  /* send to all peers via GIN (chunked to <=128 MiB/put; see common.h::ginPutChunked) */
   const size_t size = count * sizeof(T);
   for (int r=tid; r<devComm.nRanks; r+=nthreads) {
-    gin.put(ncclTeamWorld(devComm), r,
+    ginPutChunked(gin, ncclTeamWorld(devComm), r,
         recvwin, recvoffset + devComm.rank * size,
         sendwin, sendoffset + r * size,
         size, ncclGin_SignalInc{signalIndex});
@@ -298,13 +298,13 @@ __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, nc
     int nthreads = blockDim.x;
 
     for (int r = tid; r < startLsa; r += nthreads) {
-      gin.put(world, r,
+      ginPutChunked(gin, world, r,
           recvwin, recvoffset + world.rank * size,
           sendwin, sendoffset + r * size,
           size, ncclGin_SignalInc{signalIndex});
     }
     for (int r = startLsa + lsaSize + tid; r < world.nRanks; r += nthreads) {
-      gin.put(world, r,
+      ginPutChunked(gin, world, r,
           recvwin, recvoffset + world.rank * size,
           sendwin, sendoffset + r * size,
           size, ncclGin_SignalInc{signalIndex});

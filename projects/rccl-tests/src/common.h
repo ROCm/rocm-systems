@@ -11,6 +11,12 @@
 #define NCCL_TESTS_VERSION "2.18.3"
 
 #include "rccl/rccl.h"
+// GIN-SDMA shared policy constants (single source of truth for the put-chunk
+// cap that ginPutChunked below clamps to). Cherry-picked as a standalone,
+// namespaced (gin_sdma::), no-GPU/no-RCCL header from
+// users/dondai/gin-stage2j-sdma-A1457-a2av-wip to fix A2A >1 GiB WITHOUT
+// pulling in the other GIN-SDMA collective kernel designs.
+#include "gin_sdma_collective_policy.h"
 // nccl_device.h provides the device-API public types referenced below
 // (ncclCommProperties_t, full ncclDevCommRequirements, NCCL_GIN_TYPE_NONE, ...).
 // As of NCCL 2.29 these types are referenced unconditionally by the test engine
@@ -412,6 +418,46 @@ extern int is_main_proc;
 extern thread_local int is_main_thread;
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+// Overflow-safe AND hang-safe gin.put for the Anvil-SDMA backend. Two distinct
+// single-descriptor limits apply, and we clamp to the smaller of the two:
+//   1) Correctness: the SDMA linear-copy count field is 30 bits and 1-based
+//      (count = bytes-1), so a put of >1 GiB (kGinPutMaxBytes) silently
+//      truncates and corrupts data (a 2 GiB transfer copies only 1 GiB).
+//   2) Reliability: on MI355X + ROCm 7.13 a single copy descriptor at/above
+//      256 MiB stalls the SDMA engine on the fused copy+signal packet, so the
+//      copy never lands and the SignalInc never fires -> waitSignal hangs. A
+//      128 MiB cap (gin_sdma::kGinSdmaSafeCopyBytes) is measured hang-free with
+//      no bandwidth loss; see that constant for the evidence.
+// Split the transfer into <=kGinSdmaSafeCopyBytes segments and carry the
+// caller's remote action (e.g. SignalInc) ONLY on the final segment: the SDMA
+// queue is in-order, so a single signal still correctly means "the whole
+// message has landed" and per-message signal accounting (waitSignal counts) is
+// unchanged. A <=128 MiB message is a single put with no extra overhead.
+// Threads still each own a disjoint (peer, offset) tuple, so the inner
+// segmentation is race-free.
+template <typename RemoteAction>
+__device__ __forceinline__ void ginPutChunked(
+    ncclGin& gin, ncclTeam team, int peer,
+    ncclWindow_t dstWin, size_t dstOff,
+    ncclWindow_t srcWin, size_t srcOff,
+    size_t bytes, RemoteAction finalAction) {
+  const size_t kMax = gin_sdma::kGinSdmaSafeCopyBytes < gin_sdma::kGinPutMaxBytes
+                          ? gin_sdma::kGinSdmaSafeCopyBytes
+                          : gin_sdma::kGinPutMaxBytes;
+  size_t off = 0;
+  do {
+    const size_t rem = bytes - off;
+    const size_t seg = rem > kMax ? kMax : rem;
+    if (off + seg >= bytes) {
+      // Final (or only) segment carries the signal / remote action.
+      gin.put(team, peer, dstWin, dstOff + off, srcWin, srcOff + off, seg, finalAction);
+    } else {
+      gin.put(team, peer, dstWin, dstOff + off, srcWin, srcOff + off, seg);
+    }
+    off += seg;
+  } while (off < bytes);
+}
+
 template <typename F>
 testResult_t testLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
   if (kernel == nullptr) return testNotImplemented;
