@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
+#include "util/except.h"
 #include <format>
 #include <optional>
 #include <stdexcept>
@@ -64,6 +65,24 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
     : IsaOperand<Isa>(size_bits, opr_type, encoding_value),
       execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())),
       packed_16bit_source_(packed_16bit_source), packed_16bit_dst_(packed_16bit_dst) {
+  if (opr_type == OperandType::OPR_SREG && encoding_value > 124)
+    throw util::InvalidInst("invalid scalar register selector", "");
+  if (opr_type == OperandType::OPR_SSRC_LANESEL &&
+      !((encoding_value >= 0 && encoding_value <= 125) ||
+        (encoding_value >= 128 && encoding_value <= 191)))
+    throw util::InvalidInst("invalid lane selector", "");
+  if (opr_type == OperandType::OPR_EXEC && encoding_value != 126)
+    throw util::InvalidInst("invalid EXEC selector", "");
+  if (opr_type == OperandType::OPR_SRC_VGPR &&
+      (encoding_value < OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN ||
+       encoding_value > OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX))
+    throw util::InvalidInst("invalid VGPR source selector", "");
+  if (opr_type == OperandType::OPR_SSRC && !((encoding_value >= 0 && encoding_value <= 208) ||
+                                             (encoding_value >= 235 && encoding_value <= 238) ||
+                                             (encoding_value >= 240 && encoding_value <= 248) ||
+                                             (encoding_value >= 253 && encoding_value <= 253) ||
+                                             (encoding_value >= 255 && encoding_value <= 255)))
+    throw util::InvalidInst("invalid scalar source selector", "");
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
 
@@ -78,6 +97,24 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
       execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())),
       literal16_display_value_(literal16_display_value),
       has_literal16_display_(has_literal16_display) {
+  if (opr_type == OperandType::OPR_SREG && encoding_value > 124)
+    throw util::InvalidInst("invalid scalar register selector", "");
+  if (opr_type == OperandType::OPR_SSRC_LANESEL &&
+      !((encoding_value >= 0 && encoding_value <= 125) ||
+        (encoding_value >= 128 && encoding_value <= 191)))
+    throw util::InvalidInst("invalid lane selector", "");
+  if (opr_type == OperandType::OPR_EXEC && encoding_value != 126)
+    throw util::InvalidInst("invalid EXEC selector", "");
+  if (opr_type == OperandType::OPR_SRC_VGPR &&
+      (encoding_value < OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN ||
+       encoding_value > OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX))
+    throw util::InvalidInst("invalid VGPR source selector", "");
+  if (opr_type == OperandType::OPR_SSRC && !((encoding_value >= 0 && encoding_value <= 208) ||
+                                             (encoding_value >= 235 && encoding_value <= 238) ||
+                                             (encoding_value >= 240 && encoding_value <= 248) ||
+                                             (encoding_value >= 253 && encoding_value <= 253) ||
+                                             (encoding_value >= 255 && encoding_value <= 255)))
+    throw util::InvalidInst("invalid scalar source selector", "");
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
 
@@ -512,6 +549,9 @@ std::string Operand::name() const {
       return "null";
     if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_M0)
       return "m0";
+    if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_POS_INT_MIN &&
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_POS_INT_MAX)
+      return std::to_string(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_POS_INT_MIN);
     break;
   }
   case OperandType::OPR_SSRC_SPECIAL_SCC: {
