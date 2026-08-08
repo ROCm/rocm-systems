@@ -6755,6 +6755,69 @@ class CodeGenerator:
             self._fieldless_canon_cache = cache
         return cache.get(operand_type, 0)
 
+    def _operand_selector_max(self, operand_type: str) -> int:
+        """Return the largest numeric selector declared for an operand type."""
+        selector = next(
+            (
+                item
+                for item in self.isa_spec.opnd_selectors
+                if item.operand_type == operand_type
+            ),
+            None,
+        )
+        if selector is None:
+            raise ValueError(f'{operand_type}: operand selector is not defined')
+
+        values = []
+        for _, value in selector.op_sel_vals:
+            try:
+                values.append(int(value, 0))
+            except (TypeError, ValueError):
+                continue
+        if not values:
+            raise ValueError(f'{operand_type}: operand selector has no numeric values')
+        return max(values)
+
+    def _operand_selector_intervals(self, operand_type: str) -> list[tuple[int, int]]:
+        """Return merged numeric intervals declared for an operand type."""
+        selector = next(
+            (
+                item
+                for item in self.isa_spec.opnd_selectors
+                if item.operand_type == operand_type
+            ),
+            None,
+        )
+        if selector is None:
+            raise ValueError(f'{operand_type}: operand selector is not defined')
+
+        enum_values = {}
+        for name, value in selector.op_sel_vals:
+            try:
+                enum_values[name] = int(value, 0)
+            except (TypeError, ValueError):
+                continue
+
+        intervals = [(value, value) for value in enum_values.values()]
+        for pattern in selector.name_patterns:
+            if pattern.kind not in (
+                OperandNamePattern.REG_RANGE,
+                OperandNamePattern.POS_INT,
+                OperandNamePattern.NEG_INT,
+            ):
+                continue
+            lo = enum_values[pattern.min_enum]
+            hi = enum_values[pattern.max_enum]
+            intervals.append((min(lo, hi), max(lo, hi)))
+
+        merged: list[tuple[int, int]] = []
+        for lo, hi in sorted(intervals):
+            if merged and lo <= merged[-1][1] + 1:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+            else:
+                merged.append((lo, hi))
+        return merged
+
     def gen_insts(self) -> None:
         """Generate instruction classes deriving from encoding classes.
 
@@ -10171,6 +10234,53 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             if uses_packed_16bit_sources
             else ''
         )
+        scalar_selector_validation = ''
+        if 'OPR_SREG' in self.isa_spec.operand_types:
+            scalar_selector_max = self._operand_selector_max('OPR_SREG')
+            scalar_selector_validation = (
+                '  if (opr_type == OperandType::OPR_SREG && '
+                f'encoding_value > {scalar_selector_max})\n'
+                '    throw util::InvalidInst("invalid scalar register selector", "");\n'
+            )
+        lane_selector_validation = ''
+        if 'OPR_SSRC_LANESEL' in self.isa_spec.operand_types:
+            intervals = self._operand_selector_intervals('OPR_SSRC_LANESEL')
+            valid_expr = ' || '.join(
+                f'(encoding_value >= {lo} && encoding_value <= {hi})'
+                for lo, hi in intervals
+            )
+            lane_selector_validation = (
+                '  if (opr_type == OperandType::OPR_SSRC_LANESEL && '
+                f'!({valid_expr}))\n'
+                '    throw util::InvalidInst("invalid lane selector", "");\n'
+            )
+        exec_selector_validation = ''
+        if 'OPR_EXEC' in self.isa_spec.operand_types:
+            selector = next(
+                item
+                for item in self.isa_spec.opnd_selectors
+                if item.operand_type == 'OPR_EXEC'
+            )
+            exec_values = [int(value, 0) for _, value in selector.op_sel_vals]
+            if len(exec_values) != 1:
+                raise ValueError('OPR_EXEC must declare exactly one selector')
+            exec_selector_validation = (
+                '  if (opr_type == OperandType::OPR_EXEC && '
+                f'encoding_value != {exec_values[0]})\n'
+                '    throw util::InvalidInst("invalid EXEC selector", "");\n'
+            )
+        scalar_source_selector_validation = ''
+        if 'OPR_SSRC' in self.isa_spec.operand_types:
+            intervals = self._operand_selector_intervals('OPR_SSRC')
+            valid_expr = ' || '.join(
+                f'(encoding_value >= {lo} && encoding_value <= {hi})'
+                for lo, hi in intervals
+            )
+            scalar_source_selector_validation = (
+                '  if (opr_type == OperandType::OPR_SSRC && '
+                f'!({valid_expr}))\n'
+                '    throw util::InvalidInst("invalid scalar source selector", "");\n'
+            )
         packed_16bit_ctor_impl = []
         if uses_packed_16bit_sources:
             packed_16bit_ctor_impl.append(
@@ -10181,6 +10291,14 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     '              packed_16bit_source, packed_16bit_dst) {\n'
                     '}'
                 )
+            )
+        vgpr_source_selector_validation = ''
+        if 'OPR_SRC_VGPR' in self.isa_spec.operand_types:
+            vgpr_source_selector_validation = (
+                '  if (opr_type == OperandType::OPR_SRC_VGPR &&\n'
+                '      (encoding_value < OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN ||\n'
+                '       encoding_value > OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX))\n'
+                '    throw util::InvalidInst("invalid VGPR source selector", "");\n'
             )
         literal64_impl = (
             'std::optional<uint64_t> Operand::literal64_value() const {\n'
@@ -10212,6 +10330,11 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     f'    : {operand_base_init}(size_bits, opr_type, encoding_value)'
                     f'{execution_backend_ctor_init}'
                     f'{operand_ctor_init} {{\n'
+                    f'{scalar_selector_validation}'
+                    f'{lane_selector_validation}'
+                    f'{exec_selector_validation}'
+                    f'{vgpr_source_selector_validation}'
+                    f'{scalar_source_selector_validation}'
                     '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
                     '}'
                 ),
@@ -10223,6 +10346,11 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     f'{execution_backend_ctor_init},\n'
                     '      literal16_display_value_(literal16_display_value),\n'
                     '      has_literal16_display_(has_literal16_display) {\n'
+                    f'{scalar_selector_validation}'
+                    f'{lane_selector_validation}'
+                    f'{exec_selector_validation}'
+                    f'{vgpr_source_selector_validation}'
+                    f'{scalar_source_selector_validation}'
                     '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
                     '}'
                 ),
@@ -11118,6 +11246,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 [
                     (f'rocjitsu/isa/arch/amdgpu/{arch}/operand.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h', False),
+                    ('util/except.h', False),
                     ('format', True),
                     ('optional', True),
                     ('stdexcept', True),
@@ -11159,6 +11288,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     ('rocjitsu/vm/amdgpu/register_access.h', False),
                     ('rocjitsu/vm/amdgpu/wavefront.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h', False),
+                    ('util/except.h', False),
                     ('format', True),
                     ('optional', True),
                     ('stdexcept', True),

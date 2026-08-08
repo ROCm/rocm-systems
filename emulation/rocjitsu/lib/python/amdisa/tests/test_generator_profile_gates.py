@@ -1975,6 +1975,35 @@ def test_gfx1250_generated_vop3_auxiliary_masks_are_wave32(
         assert 'sdst(32, OperandType::OPR_SREG' in ctor
 
 
+def test_gfx1250_generated_operand_rejects_invalid_scalar_selector(
+    gfx1250_generated_root: Path,
+):
+    operand = (gfx1250_generated_root / 'operand.cpp').read_text()
+    assert 'opr_type == OperandType::OPR_SREG && encoding_value > 124' in operand
+    assert 'invalid scalar register selector' in operand
+
+
+def test_gfx1250_generated_operand_validates_lane_selectors(
+    gfx1250_generated_root: Path,
+):
+    operand_types = (gfx1250_generated_root / 'operand_types.h').read_text()
+    operand = (gfx1250_generated_root / 'operand.cpp').read_text()
+
+    assert 'OPR_SSRC_LANESEL_POS_INT_MAX = 191' in operand_types
+    assert '#include "util/except.h"' in operand
+    assert 'opr_type == OperandType::OPR_SSRC_LANESEL' in operand
+    assert 'invalid lane selector' in operand
+
+
+def test_gfx1250_generated_operand_rejects_invalid_exec_selector(
+    gfx1250_generated_root: Path,
+):
+    operand = (gfx1250_generated_root / 'operand.cpp').read_text()
+    assert '#include "util/except.h"' in operand
+    assert 'opr_type == OperandType::OPR_EXEC && encoding_value != 126' in operand
+    assert 'invalid EXEC selector' in operand
+
+
 def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     gfx1250_generated_root: Path,
 ):
@@ -2766,6 +2795,16 @@ def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member(
     assert '((amdgpu::vop3_opsel(inst_) & 0x1u) << 1)' not in body
 
 
+def test_gfx1250_generated_operand_rejects_reserved_scalar_source_selectors(
+    gfx1250_generated_root: Path,
+):
+    operand = (gfx1250_generated_root / 'operand.cpp').read_text()
+
+    assert 'opr_type == OperandType::OPR_SSRC' in operand
+    assert '(encoding_value >= 209 && encoding_value <= 229)' not in operand
+    assert 'invalid scalar source selector' in operand
+
+
 def test_generated_execute_shared_calls_have_definitions(amdgpu_generated_root: Path):
     import re
 
@@ -3382,6 +3421,30 @@ def test_ev124_125_arch_gating_in_generated_operand(amdgpu_generated_root: Path)
     ).read_text()
     assert 'if (m0_ev == 125 && ev == 124)\n    return 0u; // NULL' in shared_resolve
     assert 'if (ev == m0_ev)\n    return wf.m0();' in shared_resolve
+
+
+def test_generated_operands_validate_vgpr_source_selectors(
+    amdgpu_generated_root: Path,
+):
+    validation = (
+        'if (opr_type == OperandType::OPR_SRC_VGPR &&\n'
+        '      (encoding_value < OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN ||\n'
+        '       encoding_value > OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX))'
+    )
+    for arch in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'gfx1250',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+    ):
+        operand = (amdgpu_generated_root / arch / 'operand.cpp').read_text()
+        assert validation in operand
 
 
 def test_cdna4_mfma_f8f6f4_accepts_standalone_and_prefixed_encodings(

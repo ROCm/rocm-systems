@@ -3512,6 +3512,16 @@ TEST(Gfx1250DecodeTest, SMovB64Literal64ConsumesThreeDwords) {
   EXPECT_EQ(inst->raw_encoding()[2], words[2]);
 }
 
+TEST(Gfx1250DecodeTest, ScalarSourceRejectsReservedSelector) {
+  const uint32_t words[] = {
+      0x8C9000E2u, // s_or_b64 s[16:17], reserved selector 226, s0
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
 TEST(Gfx1250DecodeTest, Vop3LiteralConsumesThreeDwords) {
   const uint32_t words[] = {
       0xD6570001u, // v_and_or_b32 v1, 0xf8, v1, v2
@@ -3542,6 +3552,18 @@ TEST(Gfx1250DecodeTest, SaluRejectsMixedLiteralWidths) {
   const uint32_t words[] = {
       0xBF5DFFFEu, // s_cmp_neq_f16 literal64, literal32
       0x00000000u,
+      0x00000000u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop3RejectsInvalidScalarDestination) {
+  const uint32_t words[] = {
+      0xD41B10FFu, // v_cmp_ngt_f32 with reserved scalar destination 255
+      0x000000FAu,
       0x00000000u,
   };
 
@@ -3585,6 +3607,53 @@ TEST(Gfx1250DecodeTest, Vop3RejectsDppWithLiteral) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
   EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop3RejectsInvalidVgprSource) {
+  const uint32_t words[] = {
+      0xD7600000u, // v_readlane_b32 s0, invalid, null
+      0x0000F8D7u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(decoder->decode(words), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop3ReadlaneValidatesLaneSelector) {
+  const uint32_t valid_words[] = {
+      0xD7600000u, // v_readlane_b32 s0, v215, 1
+      0x000103D7u,
+  };
+  const uint32_t invalid_words[] = {
+      0xD7600000u, // v_readlane_b32 with reserved lane selector 491
+      0x0003D7D7u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> valid(decoder->decode(valid_words));
+  ASSERT_NE(valid, nullptr);
+  EXPECT_EQ(valid->disassemble(), "v_readlane_b32 s0, v215, 1");
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(invalid_words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop3CmpxValidatesExecDestination) {
+  const uint32_t valid_words[] = {
+      0xD4CD007Eu, // v_cmpx_ne_u32 exec, v0, v1
+      0x00020300u,
+  };
+  const uint32_t invalid_words[] = {
+      0xD4CD00F4u, // v_cmpx_ne_u32 with reserved EXEC destination 244
+      0x00020300u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> valid(decoder->decode(valid_words));
+  ASSERT_NE(valid, nullptr);
+  EXPECT_EQ(valid->disassemble(), "v_cmpx_ne_u32 exec, v0, v1");
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(invalid_words)), util::InvalidInst);
 }
 
 TEST(Gfx1250DecodeTest, Vop3SdstLiteralConsumesThreeDwords) {
@@ -3738,7 +3807,7 @@ TEST(Gfx1250DecodeTest, WmmaScaleF8f6f4ConsumesVop3px2Pair) {
             "v_wmma_scale_f32_16x16x128_f8f6f4 v[6:13], v[18:33], v[52:67], 0, v0, v4");
 }
 
-TEST(Gfx1250DecodeTest, WmmaScalePairDoesNotConsumeLiteralExtension) {
+TEST(Gfx1250DecodeTest, WmmaScalePairRejectsLiteralSelector) {
   const uint32_t words[] = {
       0xCC350000u,
       0x20020700u,
@@ -3748,11 +3817,7 @@ TEST(Gfx1250DecodeTest, WmmaScalePairDoesNotConsumeLiteralExtension) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
-  ASSERT_NE(inst, nullptr);
-  EXPECT_EQ(inst->size(), sizeof(words));
-  for (size_t i = 0; i < std::size(words); ++i)
-    EXPECT_EQ(inst->raw_encoding()[i], words[i]);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
 }
 
 TEST(Gfx1250DecodeTest, WmmaScale16F8f6f4ConsumesVop3px2Pair) {

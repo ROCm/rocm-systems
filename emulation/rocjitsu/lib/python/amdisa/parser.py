@@ -198,6 +198,15 @@ def _collapse_register_ranges(
     current_range_max_idx = -1
     current_int_min_enum = ''
 
+    def integer_name(index: int) -> int | None:
+        if index < 0 or index >= len(pairs):
+            return None
+        name = xs.get_node_text(pairs[index].find(xs.NAME))
+        try:
+            return int(name)
+        except ValueError:
+            return None
+
     for pair_idx, predef_val_pair in enumerate(pairs):
         predef_name = xs.get_node_text(predef_val_pair.find(xs.NAME))
         predef_val = xs.get_node_text(predef_val_pair.find(xs.VALUE))
@@ -246,36 +255,32 @@ def _collapse_register_ranges(
         else:
             try:
                 int_val = int(predef_name)
-                if int_val < 0:
-                    if int_val == -1:
-                        predef_name = opnd_type_name + '_NEG_INT_MIN'
-                        current_int_min_enum = predef_name
-                    elif int_val == -16:
-                        predef_name = opnd_type_name + '_NEG_INT_MAX'
-                        name_patterns.append(
-                            OperandNamePattern(
-                                OperandNamePattern.NEG_INT,
-                                min_enum=current_int_min_enum,
-                                max_enum=predef_name,
-                            )
-                        )
-                    else:
-                        continue
+                kind = (
+                    OperandNamePattern.NEG_INT
+                    if int_val < 0
+                    else OperandNamePattern.POS_INT
+                )
+                label = 'NEG_INT' if int_val < 0 else 'POS_INT'
+                step = -1 if int_val < 0 else 1
+                starts_range = integer_name(pair_idx - 1) != int_val - step
+                ends_range = integer_name(pair_idx + 1) != int_val + step
+
+                if starts_range:
+                    predef_name = f'{opnd_type_name}_{label}_MIN'
+                    current_int_min_enum = predef_name
+                elif ends_range:
+                    predef_name = f'{opnd_type_name}_{label}_MAX'
                 else:
-                    if int_val == 0:
-                        predef_name = opnd_type_name + '_POS_INT_MIN'
-                        current_int_min_enum = predef_name
-                    elif int_val == 64:
-                        predef_name = opnd_type_name + '_POS_INT_MAX'
-                        name_patterns.append(
-                            OperandNamePattern(
-                                OperandNamePattern.POS_INT,
-                                min_enum=current_int_min_enum,
-                                max_enum=predef_name,
-                            )
+                    continue
+
+                if ends_range:
+                    name_patterns.append(
+                        OperandNamePattern(
+                            kind,
+                            min_enum=current_int_min_enum,
+                            max_enum=predef_name,
                         )
-                    else:
-                        continue
+                    )
             except ValueError:
                 try:
                     flt_val = float(predef_name)
