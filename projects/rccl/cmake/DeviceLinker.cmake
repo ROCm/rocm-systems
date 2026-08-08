@@ -914,32 +914,44 @@ add_custom_command(
 )
 
 # ===========================================================================
-# ce_reduce.cc: minimal device-only file containing ncclCeLocalReduceKernel
-# (__global__) and its host-callable launcher ncclCeLaunchLocalReduce.
-# Compiled with full HIP here so the fat binary is embedded in ce_reduce.o.
-# ce_coll.cc (main target, --offload-host-only) has no __global__ call sites
-# and therefore produces no undefined __hip_fatbin_<hash> reference.
+# CE-reduce kernels: per-instantiation device TUs from gensrc/ce_reduce/.
+# Each instantiation file defines one ncclCeLocalReduceKernelVec<T,RedOp,U>
+# (__global__) and its host-callable launcher. Compiled with full HIP here so
+# each fat binary is self-contained (ce_coll.cc, the main target, has no
+# __global__ call sites and stays --offload-host-only).
+#
+# CE_REDUCE_FAT_OBJS is plural (mirroring SYM_FAT_OBJS below) because
+# src/device/ce_reduce/generate.py emits one TU per (type, redop)
+# instantiation instead of one aggregate ce_reduce.cc -- see that script for
+# why: two of the 40 instantiations (int8_t/uint8_t Min/Max) individually
+# generate ~56K instructions each and used to dominate the whole build's
+# wall-clock time by serializing all 40 kernels' codegen into one TU.
 # ===========================================================================
-set(CE_REDUCE_FAT_OBJ "${DEVICE_BUILD_DIR}/ce_reduce.o")
-
-add_custom_command(
-  OUTPUT  ${CE_REDUCE_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    -std=c++17
-    -fPIC
-    -w
-    -c -o ${CE_REDUCE_FAT_OBJ}
-    ${HIPIFY_DIR}/src/device/ce_reduce.cc
-  DEPENDS ${HIPIFY_DIR}/src/device/ce_reduce.cc
-  COMMENT "DL compile: device/ce_reduce.cc (CE AllReduce reduce kernel)"
-  VERBATIM
-)
+set(CE_REDUCE_FAT_OBJS "")
+file(GLOB _ce_reduce_srcs CONFIGURE_DEPENDS "${HIPIFY_DIR}/gensrc/ce_reduce/*.cpp")
+foreach(_ce_reduce_src IN LISTS _ce_reduce_srcs)
+  get_filename_component(_ce_reduce_name "${_ce_reduce_src}" NAME_WE)
+  set(_ce_reduce_obj "${DEVICE_BUILD_DIR}/${_ce_reduce_name}.o")
+  add_custom_command(
+    OUTPUT  ${_ce_reduce_obj}
+    COMMAND ${DL_CLANG}
+      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+      ${DL_HIP_COMPILER_FLAGS}
+      -DRCCL_DEVICE_LINKER
+      ${_link_def_flags}
+      ${_host_inc_flags}
+      ${DL_OPT_FLAGS}
+      -std=c++17
+      -fPIC
+      -w
+      -c -o ${_ce_reduce_obj}
+      ${_ce_reduce_src}
+    DEPENDS ${_ce_reduce_src}
+    COMMENT "DL compile: ${_ce_reduce_name} (CE AllReduce reduce kernel)"
+    VERBATIM
+  )
+  list(APPEND CE_REDUCE_FAT_OBJS ${_ce_reduce_obj})
+endforeach()
 
 # ===========================================================================
 # Symmetric kernels: per-instantiation device TUs from gensrc/symmetric/.
@@ -981,7 +993,7 @@ endif()
 # Top-level target
 # ===========================================================================
 add_custom_target(device_linker_build ALL
-  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJ} ${SYM_FAT_OBJS}
+  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJS} ${SYM_FAT_OBJS}
 )
 add_dependencies(device_linker_build hipify_all copy_nccl_device_headers)
 
@@ -989,7 +1001,7 @@ set(DEVICE_LINKER_OBJECTS
   ${COMMON_FAT_OBJ}
   ${ONERANK_FAT_OBJ}
   ${COLLECTIVES_FAT_OBJ}
-  ${CE_REDUCE_FAT_OBJ}
+  ${CE_REDUCE_FAT_OBJS}
   ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
   ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
   ${DDA_ALL_GATHER_IPC_FAT_OBJ}
