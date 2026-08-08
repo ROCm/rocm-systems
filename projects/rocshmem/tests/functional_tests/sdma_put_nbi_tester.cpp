@@ -64,7 +64,11 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
     int start_slot = (batch - (skip % batch)) % batch;
 
     // Drain all setup loads from HBM before entering the timed loop.
+#if defined(__GFX12__)
+    asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
+#else
     __builtin_amdgcn_s_waitcnt(0);
+#endif
 
     for (int i = 0; i < loop + skip; i++) {
       int slot = (start_slot + i) % batch;
