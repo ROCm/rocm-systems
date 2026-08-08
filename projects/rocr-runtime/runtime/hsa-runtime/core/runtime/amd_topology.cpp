@@ -100,11 +100,16 @@ const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
 };
 
 void DiscoverDrivers() {
+  // virtio redirects hsaKmtOpenKFD to vhsaKmt*, so the native KfdDriver::Open()
+  // also succeeds; skip it under virtio to avoid a duplicate KFD+virtio topology.
+  const bool is_virtio = core::Runtime::runtime_singleton_->thunkLoader()->IsVirtio();
   for (const auto& discover_driver_fn : discover_driver_funcs) {
     std::unique_ptr<core::Driver> driver;
     hsa_status_t ret = discover_driver_fn(driver);
 
     if (ret != HSA_STATUS_SUCCESS) continue;
+
+    if (is_virtio && driver->kernel_driver_type_ == core::DriverType::KFD) continue;
 
     core::Runtime::runtime_singleton_->RegisterDriver(std::move(driver));
   }

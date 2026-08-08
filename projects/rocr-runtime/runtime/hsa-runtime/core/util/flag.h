@@ -317,6 +317,10 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_DXG_DETECTION");
     enable_dxg_detection_ = (var == "0") ? false : true;
 
+    // gpk: HSA_ENABLE_VIRTIO tri-state. ""=auto (KFD has priority: use
+    // virtio only when /dev/kfd is absent), "1"=force virtio, "0"=force KFD.
+    enable_virtio_ = os::GetEnvVar("HSA_ENABLE_VIRTIO");
+
     var = os::GetEnvVar("HSA_CO_DMACOPY_SIZE");
     co_dmacopy_size_ = var.empty() ? 1024*1024 : atoi(var.c_str());
 
@@ -490,6 +494,7 @@ class Flag {
   bool enable_dtif() const { return enable_dtif_; }
 
   bool enable_dxg_detection() const { return enable_dxg_detection_; }
+  const std::string& enable_virtio() const { return enable_virtio_; }
 
   SDMA_OVERRIDE sdma_linear_b2b() const { return sdma_linear_b2b_; }
 
@@ -572,6 +577,7 @@ class Flag {
   bool enable_3d_swizzle_ = false;
   bool enable_dtif_;
   bool enable_dxg_detection_;
+  std::string enable_virtio_;
   SDMA_OVERRIDE sdma_linear_b2b_ = SDMA_DEFAULT;
 
   SDMA_OVERRIDE enable_sdma_;

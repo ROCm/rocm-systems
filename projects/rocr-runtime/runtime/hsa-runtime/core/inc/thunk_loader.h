@@ -439,6 +439,7 @@ class ThunkLoader {
     bool IsWinDxg() const { return is_win_dxg_; }
     bool IsWslDxg() const { return is_wsl_dxg_; }
     bool IsDTIF() const { return is_dtif_; }
+    bool IsVirtio() const { return is_virtio_; }
     bool IsSharedLibraryLoaded() const { return is_loaded_; }
     void* ThunkHandle() const { return thunk_handle; }
 
@@ -572,6 +573,7 @@ class ThunkLoader {
     bool is_win_dxg_;
     bool is_wsl_dxg_;
     bool is_dtif_;
+    bool is_virtio_;
     bool is_loaded_;
 };
 

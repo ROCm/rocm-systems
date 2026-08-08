@@ -42,6 +42,9 @@
 
 #include "core/inc/thunk_loader.h"
 #include "core/inc/runtime.h"
+#ifdef HSAKMT_VIRTIO_ENABLED
+#include "hsakmt/hsakmt_virtio.h"
+#endif
 
 #include <core/util/os.h>
 #include <iostream>
@@ -55,6 +58,7 @@ namespace core {
 
   std::string ThunkLoader::whoami() {
     is_dtif_ = is_win_dxg_ = is_wsl_dxg_ = false;
+    is_virtio_ = false;
     if (core::Runtime::runtime_singleton_->flag().enable_dtif()) {
       is_dtif_ = true;
 #if defined(_WIN32)
@@ -75,6 +79,24 @@ namespace core {
     }
 #else
     is_win_dxg_ = true;
+#endif
+
+#if defined(HSAKMT_VIRTIO_ENABLED) && defined(__linux__)
+    {
+      const std::string vv = core::Runtime::runtime_singleton_->flag().enable_virtio();
+      if (vv == "1") {
+        is_virtio_ = true;                 // force virtio
+      } else if (vv == "0") {
+        is_virtio_ = false;                // force native KFD
+      } else {
+        // Auto: KFD has priority over virtio. Use virtio only when the
+        // native /dev/kfd node is unavailable (e.g. virtio-gpu guest).
+        int kfd_fd = open("/dev/kfd", O_RDWR);
+        if (kfd_fd >= 0) { close(kfd_fd); is_virtio_ = false; }
+        else { is_virtio_ = true; }
+      }
+      if (is_virtio_) debug_print("ThunkLoader: virtio-gpu backend selected.\n");
+    }
 #endif
 
     return "";
@@ -599,6 +621,96 @@ LOAD_ERROR:
       DRM_PFN(amdgpu_bo_set_metadata) = (DRM_DEF(amdgpu_bo_set_metadata)*)(&amdgpu_bo_set_metadata);
 #if defined(__linux__)
       DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)(&drmCommandWriteRead);
+#ifdef HSAKMT_VIRTIO_ENABLED
+      // gpk: when the virtio-gpu backend is selected, override the
+      // process-wide thunk table with the virtio (vhsaKmt*) implementations.
+      // Functions with no virtio equivalent stay bound to the native
+      // &hsaKmt* above (harmless on a guest without /dev/kfd). This routes
+      // every HSAKMT_CALL to virtio and removes the per-call #ifdef WA.
+      if (is_virtio_) {
+        HSAKMT_PFN(hsaKmtAcquireSystemProperties) = (HSAKMT_DEF(hsaKmtAcquireSystemProperties)*)(&vhsaKmtAcquireSystemProperties);
+        HSAKMT_PFN(hsaKmtAisReadWriteFile) = (HSAKMT_DEF(hsaKmtAisReadWriteFile)*)(&vhsaKmtAisReadWriteFile);
+        HSAKMT_PFN(hsaKmtAllocMemory) = (HSAKMT_DEF(hsaKmtAllocMemory)*)(&vhsaKmtAllocMemory);
+        HSAKMT_PFN(hsaKmtAllocMemoryAlign) = (HSAKMT_DEF(hsaKmtAllocMemoryAlign)*)(&vhsaKmtAllocMemoryAlign);
+        HSAKMT_PFN(hsaKmtAllocQueueGWS) = (HSAKMT_DEF(hsaKmtAllocQueueGWS)*)(&vhsaKmtAllocQueueGWS);
+        HSAKMT_PFN(hsaKmtAvailableMemory) = (HSAKMT_DEF(hsaKmtAvailableMemory)*)(&vhsaKmtAvailableMemory);
+        HSAKMT_PFN(hsaKmtCloseKFD) = (HSAKMT_DEF(hsaKmtCloseKFD)*)(&vhsaKmtCloseKFD);
+        HSAKMT_PFN(hsaKmtCreateEvent) = (HSAKMT_DEF(hsaKmtCreateEvent)*)(&vhsaKmtCreateEvent);
+        HSAKMT_PFN(hsaKmtCreateQueue) = (HSAKMT_DEF(hsaKmtCreateQueue)*)(&vhsaKmtCreateQueue);
+        HSAKMT_PFN(hsaKmtCreateQueueExt) = (HSAKMT_DEF(hsaKmtCreateQueueExt)*)(&vhsaKmtCreateQueueExt);
+        HSAKMT_PFN(hsaKmtCreateQueueV2) = (HSAKMT_DEF(hsaKmtCreateQueueV2)*)(&vhsaKmtCreateQueueV2);
+        HSAKMT_PFN(hsaKmtDeregisterMemory) = (HSAKMT_DEF(hsaKmtDeregisterMemory)*)(&vhsaKmtDeregisterMemory);
+        HSAKMT_PFN(hsaKmtDestroyEvent) = (HSAKMT_DEF(hsaKmtDestroyEvent)*)(&vhsaKmtDestroyEvent);
+        HSAKMT_PFN(hsaKmtDestroyQueue) = (HSAKMT_DEF(hsaKmtDestroyQueue)*)(&vhsaKmtDestroyQueue);
+        HSAKMT_PFN(hsaKmtExportDMABufHandle) = (HSAKMT_DEF(hsaKmtExportDMABufHandle)*)(&vhsaKmtExportDMABufHandle);
+        HSAKMT_PFN(hsaKmtFreeMemory) = (HSAKMT_DEF(hsaKmtFreeMemory)*)(&vhsaKmtFreeMemory);
+        HSAKMT_PFN(hsaKmtGetAMDGPUDeviceHandle) = (HSAKMT_DEF(hsaKmtGetAMDGPUDeviceHandle)*)(&vhsaKmtGetAMDGPUDeviceHandle);
+        HSAKMT_PFN(hsaKmtGetClockCounters) = (HSAKMT_DEF(hsaKmtGetClockCounters)*)(&vhsaKmtGetClockCounters);
+        HSAKMT_PFN(hsaKmtGetNodeCacheProperties) = (HSAKMT_DEF(hsaKmtGetNodeCacheProperties)*)(&vhsaKmtGetNodeCacheProperties);
+        HSAKMT_PFN(hsaKmtGetNodeIoLinkProperties) = (HSAKMT_DEF(hsaKmtGetNodeIoLinkProperties)*)(&vhsaKmtGetNodeIoLinkProperties);
+        HSAKMT_PFN(hsaKmtGetNodeMemoryProperties) = (HSAKMT_DEF(hsaKmtGetNodeMemoryProperties)*)(&vhsaKmtGetNodeMemoryProperties);
+        HSAKMT_PFN(hsaKmtGetNodeProperties) = (HSAKMT_DEF(hsaKmtGetNodeProperties)*)(&vhsaKmtGetNodeProperties);
+        HSAKMT_PFN(hsaKmtGetQueueInfo) = (HSAKMT_DEF(hsaKmtGetQueueInfo)*)(&vhsaKmtGetQueueInfo);
+        HSAKMT_PFN(hsaKmtGetRuntimeCapabilities) = (HSAKMT_DEF(hsaKmtGetRuntimeCapabilities)*)(&vhsaKmtGetRuntimeCapabilities);
+        HSAKMT_PFN(hsaKmtGetTileConfig) = (HSAKMT_DEF(hsaKmtGetTileConfig)*)(&vhsaKmtGetTileConfig);
+        HSAKMT_PFN(hsaKmtGetVersion) = (HSAKMT_DEF(hsaKmtGetVersion)*)(&vhsaKmtGetVersion);
+        HSAKMT_PFN(hsaKmtGetXNACKMode) = (HSAKMT_DEF(hsaKmtGetXNACKMode)*)(&vhsaKmtGetXNACKMode);
+        HSAKMT_PFN(hsaKmtMapGraphicHandle) = (HSAKMT_DEF(hsaKmtMapGraphicHandle)*)(&vhsaKmtMapGraphicHandle);
+        HSAKMT_PFN(hsaKmtMapMemoryToGPU) = (HSAKMT_DEF(hsaKmtMapMemoryToGPU)*)(&vhsaKmtMapMemoryToGPU);
+        HSAKMT_PFN(hsaKmtMapMemoryToGPUNodes) = (HSAKMT_DEF(hsaKmtMapMemoryToGPUNodes)*)(&vhsaKmtMapMemoryToGPUNodes);
+        HSAKMT_PFN(hsaKmtModelEnabled) = (HSAKMT_DEF(hsaKmtModelEnabled)*)(&vhsaKmtModelEnabled);
+        HSAKMT_PFN(hsaKmtOpenKFD) = (HSAKMT_DEF(hsaKmtOpenKFD)*)(&vhsaKmtOpenKFD);
+        HSAKMT_PFN(hsaKmtOpenSMI) = (HSAKMT_DEF(hsaKmtOpenSMI)*)(&vhsaKmtOpenSMI);
+        HSAKMT_PFN(hsaKmtProcessVMRead) = (HSAKMT_DEF(hsaKmtProcessVMRead)*)(&vhsaKmtProcessVMRead);
+        HSAKMT_PFN(hsaKmtProcessVMWrite) = (HSAKMT_DEF(hsaKmtProcessVMWrite)*)(&vhsaKmtProcessVMWrite);
+        HSAKMT_PFN(hsaKmtQueryEventState) = (HSAKMT_DEF(hsaKmtQueryEventState)*)(&vhsaKmtQueryEventState);
+        HSAKMT_PFN(hsaKmtQueryPointerInfo) = (HSAKMT_DEF(hsaKmtQueryPointerInfo)*)(&vhsaKmtQueryPointerInfo);
+        HSAKMT_PFN(hsaKmtRegisterGraphicsHandleToNodes) = (HSAKMT_DEF(hsaKmtRegisterGraphicsHandleToNodes)*)(&vhsaKmtRegisterGraphicsHandleToNodes);
+        HSAKMT_PFN(hsaKmtRegisterGraphicsHandleToNodesExt) = (HSAKMT_DEF(hsaKmtRegisterGraphicsHandleToNodesExt)*)(&vhsaKmtRegisterGraphicsHandleToNodesExt);
+        HSAKMT_PFN(hsaKmtRegisterMemory) = (HSAKMT_DEF(hsaKmtRegisterMemory)*)(&vhsaKmtRegisterMemory);
+        HSAKMT_PFN(hsaKmtRegisterMemoryToNodes) = (HSAKMT_DEF(hsaKmtRegisterMemoryToNodes)*)(&vhsaKmtRegisterMemoryToNodes);
+        HSAKMT_PFN(hsaKmtRegisterMemoryWithFlags) = (HSAKMT_DEF(hsaKmtRegisterMemoryWithFlags)*)(&vhsaKmtRegisterMemoryWithFlags);
+        HSAKMT_PFN(hsaKmtRegisterSharedHandle) = (HSAKMT_DEF(hsaKmtRegisterSharedHandle)*)(&vhsaKmtRegisterSharedHandle);
+        HSAKMT_PFN(hsaKmtRegisterSharedHandleToNodes) = (HSAKMT_DEF(hsaKmtRegisterSharedHandleToNodes)*)(&vhsaKmtRegisterSharedHandleToNodes);
+        HSAKMT_PFN(hsaKmtReleaseSystemProperties) = (HSAKMT_DEF(hsaKmtReleaseSystemProperties)*)(&vhsaKmtReleaseSystemProperties);
+        HSAKMT_PFN(hsaKmtReplaceAsanHeaderPage) = (HSAKMT_DEF(hsaKmtReplaceAsanHeaderPage)*)(&vhsaKmtReplaceAsanHeaderPage);
+        HSAKMT_PFN(hsaKmtResetEvent) = (HSAKMT_DEF(hsaKmtResetEvent)*)(&vhsaKmtResetEvent);
+        HSAKMT_PFN(hsaKmtReturnAsanHeaderPage) = (HSAKMT_DEF(hsaKmtReturnAsanHeaderPage)*)(&vhsaKmtReturnAsanHeaderPage);
+        HSAKMT_PFN(hsaKmtRuntimeDisable) = (HSAKMT_DEF(hsaKmtRuntimeDisable)*)(&vhsaKmtRuntimeDisable);
+        HSAKMT_PFN(hsaKmtRuntimeEnable) = (HSAKMT_DEF(hsaKmtRuntimeEnable)*)(&vhsaKmtRuntimeEnable);
+        HSAKMT_PFN(hsaKmtSPMAcquire) = (HSAKMT_DEF(hsaKmtSPMAcquire)*)(&vhsaKmtSPMAcquire);
+        HSAKMT_PFN(hsaKmtSPMRelease) = (HSAKMT_DEF(hsaKmtSPMRelease)*)(&vhsaKmtSPMRelease);
+        HSAKMT_PFN(hsaKmtSPMSetDestBuffer) = (HSAKMT_DEF(hsaKmtSPMSetDestBuffer)*)(&vhsaKmtSPMSetDestBuffer);
+        HSAKMT_PFN(hsaKmtSVMGetAttr) = (HSAKMT_DEF(hsaKmtSVMGetAttr)*)(&vhsaKmtSVMGetAttr);
+        HSAKMT_PFN(hsaKmtSVMSetAttr) = (HSAKMT_DEF(hsaKmtSVMSetAttr)*)(&vhsaKmtSVMSetAttr);
+        HSAKMT_PFN(hsaKmtSetEvent) = (HSAKMT_DEF(hsaKmtSetEvent)*)(&vhsaKmtSetEvent);
+        HSAKMT_PFN(hsaKmtSetMemoryPolicy) = (HSAKMT_DEF(hsaKmtSetMemoryPolicy)*)(&vhsaKmtSetMemoryPolicy);
+        HSAKMT_PFN(hsaKmtSetMemoryUserData) = (HSAKMT_DEF(hsaKmtSetMemoryUserData)*)(&vhsaKmtSetMemoryUserData);
+        HSAKMT_PFN(hsaKmtSetQueueCUMask) = (HSAKMT_DEF(hsaKmtSetQueueCUMask)*)(&vhsaKmtSetQueueCUMask);
+        HSAKMT_PFN(hsaKmtSetTrapHandler) = (HSAKMT_DEF(hsaKmtSetTrapHandler)*)(&vhsaKmtSetTrapHandler);
+        HSAKMT_PFN(hsaKmtSetXNACKMode) = (HSAKMT_DEF(hsaKmtSetXNACKMode)*)(&vhsaKmtSetXNACKMode);
+        HSAKMT_PFN(hsaKmtShareMemory) = (HSAKMT_DEF(hsaKmtShareMemory)*)(&vhsaKmtShareMemory);
+        HSAKMT_PFN(hsaKmtUnmapGraphicHandle) = (HSAKMT_DEF(hsaKmtUnmapGraphicHandle)*)(&vhsaKmtUnmapGraphicHandle);
+        HSAKMT_PFN(hsaKmtUnmapMemoryToGPU) = (HSAKMT_DEF(hsaKmtUnmapMemoryToGPU)*)(&vhsaKmtUnmapMemoryToGPU);
+        HSAKMT_PFN(hsaKmtUpdateQueue) = (HSAKMT_DEF(hsaKmtUpdateQueue)*)(&vhsaKmtUpdateQueue);
+        HSAKMT_PFN(hsaKmtWaitOnEvent) = (HSAKMT_DEF(hsaKmtWaitOnEvent)*)(&vhsaKmtWaitOnEvent);
+        HSAKMT_PFN(hsaKmtWaitOnEvent_Ext) = (HSAKMT_DEF(hsaKmtWaitOnEvent_Ext)*)(&vhsaKmtWaitOnEvent_Ext);
+        HSAKMT_PFN(hsaKmtWaitOnMultipleEvents) = (HSAKMT_DEF(hsaKmtWaitOnMultipleEvents)*)(&vhsaKmtWaitOnMultipleEvents);
+        HSAKMT_PFN(hsaKmtWaitOnMultipleEvents_Ext) = (HSAKMT_DEF(hsaKmtWaitOnMultipleEvents_Ext)*)(&vhsaKmtWaitOnMultipleEvents_Ext);
+
+        DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)(&vamdgpu_device_initialize);
+        DRM_PFN(amdgpu_device_deinitialize) = (DRM_DEF(amdgpu_device_deinitialize)*)(&vamdgpu_device_deinitialize);
+        DRM_PFN(amdgpu_query_gpu_info) = (DRM_DEF(amdgpu_query_gpu_info)*)(&vamdgpu_query_gpu_info);
+        DRM_PFN(amdgpu_bo_cpu_map) = (DRM_DEF(amdgpu_bo_cpu_map)*)(&vamdgpu_bo_cpu_map);
+        DRM_PFN(amdgpu_bo_free) = (DRM_DEF(amdgpu_bo_free)*)(&vamdgpu_bo_free);
+        DRM_PFN(amdgpu_bo_export) = (DRM_DEF(amdgpu_bo_export)*)(&vamdgpu_bo_export);
+        DRM_PFN(amdgpu_bo_import) = (DRM_DEF(amdgpu_bo_import)*)(&vamdgpu_bo_import);
+        DRM_PFN(amdgpu_bo_va_op) = (DRM_DEF(amdgpu_bo_va_op)*)(&vamdgpu_bo_va_op);
+        DRM_PFN(amdgpu_bo_query_info) = (DRM_DEF(amdgpu_bo_query_info)*)(&vamdgpu_bo_query_info);
+        DRM_PFN(amdgpu_bo_set_metadata) = (DRM_DEF(amdgpu_bo_set_metadata)*)(&vamdgpu_bo_set_metadata);
+        DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)(&vdrmCommandWriteRead);
+      }
+#endif
 #endif
     }
   }
