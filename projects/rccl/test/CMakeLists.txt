@@ -26,6 +26,28 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/test_generate_device_table.py"
   )
 
+  # Clean-builds RCCL once per GPU target and fails if any exceeds the time
+  # threshold. Opt-in: it drives its own nested from-scratch builds, so it costs
+  # minutes per target and would dominate an ordinary test run. The script is
+  # also runnable directly (test/test_build_time.py --help) without configuring.
+  option(ENABLE_BUILD_TIME_TEST "Register the per-target build-time regression test" OFF)
+  if(ENABLE_BUILD_TIME_TEST)
+    # DEFAULT_GPUS, not the rocm_check_target_ids-filtered GPU_TARGETS: archs
+    # this toolchain cannot build should be reported as skipped, not dropped.
+    add_test(
+      NAME rccl-build-time
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/test_build_time.py"
+              --targets ${DEFAULT_GPUS}
+    )
+    set_tests_properties(rccl-build-time PROPERTIES
+      LABELS "build-time"
+      RUN_SERIAL TRUE
+      TIMEOUT 7200
+      ENVIRONMENT "ROCM_PATH=${ROCM_PATH}"
+    )
+  endif()
+
   if (ENABLE_CODE_COVERAGE)
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
