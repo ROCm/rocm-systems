@@ -3527,6 +3527,66 @@ TEST(Gfx1250DecodeTest, Vop3LiteralConsumesThreeDwords) {
   EXPECT_EQ(inst->size(), sizeof(words));
 }
 
+TEST(Gfx1250DecodeTest, Vop3RejectsLiteral64Selector) {
+  const uint32_t words[] = {
+      0xD5D50000u, // v_sqrt_f16 v0, reserved literal64 selector
+      0x000000FEu,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, SaluRejectsMixedLiteralWidths) {
+  const uint32_t words[] = {
+      0xBF5DFFFEu, // s_cmp_neq_f16 literal64, literal32
+      0x00000000u,
+      0x00000000u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, SendmsgRtnSelectorsAreNotLiterals) {
+  const uint32_t words[] = {
+      0xBE804CFFu, // s_sendmsg_rtn_b32 s0, 255
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "s_sendmsg_rtn_b32");
+  EXPECT_EQ(inst->size(), sizeof(words));
+  EXPECT_EQ(inst->src_operand(0)->name(), "255");
+}
+
+TEST(Gfx1250DecodeTest, VopdRejectsLiteral64Selector) {
+  const uint32_t words[] = {
+      0xCA52FFFFu,
+      0xFFFFFCFEu,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop3RejectsDppWithLiteral) {
+  const uint32_t words[] = {
+      0xD6290B00u, // v_min3_num_f32 with src0:DPP and src2:literal
+      0x83FF00FAu,
+      0x00001500u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
 TEST(Gfx1250DecodeTest, Vop3SdstLiteralConsumesThreeDwords) {
   const uint32_t words[] = {
       0xD7020001u, // v_subrev_co_u32 v1, s0, 0x60, s12

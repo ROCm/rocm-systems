@@ -1030,6 +1030,30 @@ class CodeGenerator:
     def _instruction_supports_sdwa(self, inst: Instruction, enc_name: str) -> bool:
         return self._instruction_supports_modifier_encoding(inst, enc_name, 'sdwa')
 
+    def _instruction_supports_literal_encoding(
+        self, inst: Instruction, parent_enc_name: str, width: int
+    ) -> bool:
+        """Whether the instruction lists a literal alternate for this format."""
+        if inst.available_encodings is None:
+            raise ValueError(
+                f'{inst.name}: cannot determine literal support without '
+                'instruction encoding provenance'
+            )
+
+        suffix = '_INST_LITERAL64' if width == 64 else '_INST_LITERAL'
+        parent_upper = parent_enc_name.upper()
+        for enc_name in inst.available_encodings:
+            enc_upper = enc_name.upper()
+            if not enc_upper.endswith(suffix):
+                continue
+            if (
+                self.isa_spec.profile.is_alt_encoding(enc_name)
+                and self.isa_spec.profile.derive_parent_enc_name(enc_name).upper()
+                == parent_upper
+            ):
+                return True
+        return False
+
     def _instruction_base_encoding_name(self, inst: Instruction) -> str:
         if inst.is_implied_literal_enc:
             return self.isa_spec.profile.derive_parent_enc_name(inst.enc_name)
@@ -1638,6 +1662,8 @@ class CodeGenerator:
                 opy_ = static_cast<uint16_t>((word0_ >> 12) & 0x3F);
                 uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
                 uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
+                if (srcx0 == 254 || srcy0 == 254)
+                  throw util::InvalidInst("VOPD does not support 64-bit literals", "");
                 negx_ = static_cast<uint8_t>((word1_ >> 9) & 0x7);
                 negy_ = static_cast<uint8_t>((word1_ >> 12) & 0x7);
                 uint16_t vsrcx1 = static_cast<uint16_t>((word1_ >> 16) & 0xFF);
@@ -1954,6 +1980,8 @@ class CodeGenerator:
                 uint16_t vsrcx1 = static_cast<uint16_t>((word0_ >> 9) & 0xFF);
                 uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
                 uint16_t vsrcy1 = static_cast<uint16_t>((word1_ >> 9) & 0xFF);
+                if (srcx0 == 254 || srcy0 == 254)
+                  throw util::InvalidInst("VOPD does not support 64-bit literals", "");
                 uint16_t vdstx = static_cast<uint16_t>((word1_ >> 24) & 0xFF);
                 uint16_t vdsty_hi = static_cast<uint16_t>((word1_ >> 17) & 0x7F);
                 uint16_t vdsty = static_cast<uint16_t>((vdsty_hi << 1) | ((~vdstx) & 1u));
@@ -2215,6 +2243,7 @@ class CodeGenerator:
         enc_classes = []
         class_func_impls = []
         cond_emitted: set[str] = set()
+        needs_invalid_inst_include = False
         for inst_enc in self.isa_spec.inst_encodings:
             if not inst_enc.insts:
                 continue
@@ -2356,6 +2385,37 @@ class CodeGenerator:
                     *inst_enc.implied_literal_ops.values(),
                 )
             owns_extension_words = extension_word_capacity > 0
+            literal_fields = _LITERAL_ENCODING_OPERANDS.get(
+                inst_enc.enc_name.upper(), ('', ())
+            )[1]
+            non_literal_selector_ops = sorted(
+                {
+                    inst.opcode
+                    for inst in inst_enc.insts
+                    if any(
+                        opnd.name in literal_fields
+                        and opnd.operand_type in ('OPR_SENDMSG', 'OPR_SENDMSG_RTN')
+                        for opnd in inst.operands
+                    )
+                }
+            )
+            encoded_literal_fields = [
+                field for field in literal_fields if field in enc_field_names
+            ]
+            if supports_fixed_size_embedding:
+                size_line += ' if (decode_extensions) {'
+            if needs_explicit_dpp_size and encoded_literal_fields:
+                dpp_extension_condition = ' || '.join(dpp_extension_conditions)
+                literal_selector_condition = ' || '.join(
+                    f'inst_.{field} == 255' for field in encoded_literal_fields
+                )
+                size_line += (
+                    f' if (({dpp_extension_condition}) && '
+                    f'({literal_selector_condition}))'
+                    ' throw util::InvalidInst('
+                    '"DPP and literal operands cannot be combined", "");'
+                )
+                needs_invalid_inst_include = True
             extension_size_line = ''
             if literal64_condition and size_condition is not None:
                 extension_size_line = (
@@ -2379,8 +2439,13 @@ class CodeGenerator:
                 extension_size_line = (
                     f' if ({literal32_condition}) size_ += sizeof(MachineInst);'
                 )
-            if supports_fixed_size_embedding:
-                size_line += ' if (decode_extensions) {'
+            if extension_size_line and non_literal_selector_ops:
+                extension_guard = ' && '.join(
+                    f'inst_.op != {opcode}' for opcode in non_literal_selector_ops
+                )
+                extension_size_line = (
+                    f' if ({extension_guard}) {{' + extension_size_line + ' }'
+                )
             if inst_enc.has_variable_implied_literal_size:
                 size_line += (
                     ' if (hasImpliedLiteral()) size_ += impliedLiteralWordCount()'
@@ -2709,6 +2774,8 @@ class CodeGenerator:
             ('cstring', True),
             ('string', True),
         ]
+        if needs_invalid_inst_include:
+            _enc_cpp_includes.insert(1, ('util/except.h', False))
         class_impl_file = CppFile(
             'encodings',
             self.out_path,
@@ -7271,8 +7338,28 @@ class CodeGenerator:
                     # S_SETREG_IMM32_B32 special-case stays mutually exclusive
                     # with it (no double-patch of one operand).
                     _generic_literal_patched: set[str] = set()
+                    _unsupported_literal32_fields: list[str] = []
+                    _unsupported_literal64_fields: list[str] = []
                     _lit_info = self._literal_encoding_info(enc, inst_enc_obj, inst)
-                    _supports_simm64_literals = self._supports_simm64_literal_operands()
+                    _base_enc_name = self._instruction_base_encoding_name(inst)
+                    _tracks_instruction_literal_support = (
+                        self._supports_simm64_literal_operands()
+                    )
+                    _supports_simm32_literals = (
+                        not _tracks_instruction_literal_support
+                        or self._instruction_supports_literal_encoding(
+                            inst, _base_enc_name, 32
+                        )
+                    )
+                    _supports_simm64_literals = (
+                        _tracks_instruction_literal_support
+                        and any(
+                            name.startswith('has_lit64') for name, _ in enc.enc_conds
+                        )
+                        and self._instruction_supports_literal_encoding(
+                            inst, _base_enc_name, 64
+                        )
+                    )
                     if _lit_info and self._has_machine_inst_struct(_lit_info[0]):
                         _lit_struct, _lit_fields = _lit_info
                         _lit32_struct = _lit_struct
@@ -7285,6 +7372,35 @@ class CodeGenerator:
                             )
                             if _lit32_info:
                                 _lit32_struct = _lit32_info[0]
+                        _encoded_literal_fields = [
+                            opnd.name
+                            for opnd in inst.operands
+                            if opnd.name in _lit_fields
+                            and opnd.name in enc_field_names
+                            and opnd.operand_type
+                            not in ('OPR_SENDMSG', 'OPR_SENDMSG_RTN')
+                        ]
+                        if (
+                            _supports_simm32_literals
+                            and _supports_simm64_literals
+                            and len(_encoded_literal_fields) > 1
+                        ):
+                            literal32_selector = ' || '.join(
+                                'reinterpret_cast<const OpEncoding*>(inst)->'
+                                f'{field} == 255'
+                                for field in _encoded_literal_fields
+                            )
+                            literal64_selector = ' || '.join(
+                                'reinterpret_cast<const OpEncoding*>(inst)->'
+                                f'{field} == 254'
+                                for field in _encoded_literal_fields
+                            )
+                            ctor_body_parts.append(
+                                f'if (({literal32_selector}) && '
+                                f'({literal64_selector})) '
+                                f'throw util::InvalidInst("{inst.name} may not mix '
+                                '32-bit and 64-bit literals", "");'
+                            )
                         for opnd in inst.operands:
                             # The only fieldless operand that needs a fixup
                             # are LITERAL ones.
@@ -7298,6 +7414,11 @@ class CodeGenerator:
                                 opnd.name in _lit_fields
                                 and opnd.name in enc_field_names
                             ):
+                                if opnd.operand_type in (
+                                    'OPR_SENDMSG',
+                                    'OPR_SENDMSG_RTN',
+                                ):
+                                    continue
                                 # F16 pseudo-scalar V_S_* instructions always
                                 # consume literal bits [15:0]. Unlike generic
                                 # true16 VOP3 operands, OPSEL does not select a
@@ -7325,11 +7446,14 @@ class CodeGenerator:
                                     ),
                                 )
                                 assert fixup is not None
-                                ctor_body_parts.append(
-                                    f'if (reinterpret_cast<const OpEncoding*>(inst)->{opnd.name} == 255) '
-                                    f'{fixup}'
-                                )
-                                _generic_literal_patched.add(opnd.name)
+                                if _supports_simm32_literals:
+                                    ctor_body_parts.append(
+                                        f'if (reinterpret_cast<const OpEncoding*>(inst)->{opnd.name} == 255) '
+                                        f'{fixup}'
+                                    )
+                                    _generic_literal_patched.add(opnd.name)
+                                elif _tracks_instruction_literal_support:
+                                    _unsupported_literal32_fields.append(opnd.name)
                                 if _supports_simm64_literals:
                                     ctor_body_parts.append(
                                         f'if (reinterpret_cast<const OpEncoding*>(inst)->{opnd.name} == 254) {{ '
@@ -7338,6 +7462,8 @@ class CodeGenerator:
                                         f'uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; '
                                         f'{opnd.name} = Operand({operand_size_exprs[opnd.name]}, OperandType::OPR_SIMM64, literal64, true); }}'
                                     )
+                                elif _tracks_instruction_literal_support:
+                                    _unsupported_literal64_fields.append(opnd.name)
                             if opnd.name not in enc_field_names:
                                 fixup = self._literal_operand_fixup_stmt(
                                     opnd,
@@ -7348,6 +7474,28 @@ class CodeGenerator:
                                 if fixup:
                                     ctor_body_parts.append(fixup)
                                     _generic_literal_patched.add(opnd.name)
+
+                    if _unsupported_literal32_fields:
+                        literal32_condition = ' || '.join(
+                            'reinterpret_cast<const OpEncoding*>(inst)->'
+                            f'{field} == 255'
+                            for field in _unsupported_literal32_fields
+                        )
+                        ctor_body_parts.append(
+                            f'if ({literal32_condition}) '
+                            f'throw util::InvalidInst("{inst.name} does not support 32-bit literals", "");'
+                        )
+
+                    if _unsupported_literal64_fields:
+                        literal64_condition = ' || '.join(
+                            'reinterpret_cast<const OpEncoding*>(inst)->'
+                            f'{field} == 254'
+                            for field in _unsupported_literal64_fields
+                        )
+                        ctor_body_parts.append(
+                            f'if ({literal64_condition}) '
+                            f'throw util::InvalidInst("{inst.name} does not support SRC_LITERAL64", "");'
+                        )
 
                     # SOPK's S_SETREG_IMM32_B32 carries its extension literal
                     # through the encoding base's literal_ member instead of a

@@ -35,6 +35,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "util/except.h"
 
 #include <algorithm>
 #include <array>
@@ -1455,8 +1456,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // helper block, Phase 3 emits that helper into both relocated bodies so every
   // branch or call target can be resolved through the current kernel's placement
   // map without borrowing another kernel's return continuation.
-  auto blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders,
-                                  ExternalEntryPolicy::ExplicitOnly);
+  std::vector<std::unique_ptr<BasicBlock>> blocks;
+  try {
+    blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders,
+                               ExternalEntryPolicy::ExplicitOnly);
+  } catch (const util::InvalidInst &error) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization, error.what());
+    return leave_unchanged();
+  }
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   const uint64_t text_vaddr = obj.text_sections().front()->vaddr();
   const auto relocation_pair_analysis =

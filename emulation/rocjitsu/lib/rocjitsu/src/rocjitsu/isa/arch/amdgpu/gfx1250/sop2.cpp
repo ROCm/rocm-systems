@@ -22,6 +22,11 @@ SAddCoU32Sop2::SAddCoU32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_ADD_CO_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -59,6 +64,11 @@ SSubCoU32Sop2::SSubCoU32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_SUB_CO_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -96,6 +106,11 @@ SAddCoI32Sop2::SAddCoI32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_ADD_CO_I32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -133,6 +148,11 @@ SSubCoI32Sop2::SSubCoI32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_SUB_CO_I32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -172,6 +192,11 @@ SAddCoCiU32Sop2::SAddCoCiU32Sop2(const MachineInst *inst)
   src_operands_[2] = &scc_in;
   num_src_ = 3;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_ADD_CO_CI_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -212,6 +237,11 @@ SSubCoCiU32Sop2::SSubCoCiU32Sop2(const MachineInst *inst)
   src_operands_[2] = &scc_in;
   num_src_ = 3;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_SUB_CO_CI_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -250,6 +280,11 @@ SAbsdiffI32Sop2::SAbsdiffI32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_ABSDIFF_I32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -287,6 +322,11 @@ SLshlB32Sop2::SLshlB32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_LSHL_B32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -324,6 +364,11 @@ SLshlB64Sop2::SLshlB64Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_LSHL_B64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -361,6 +406,11 @@ SLshrB32Sop2::SLshrB32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_LSHR_B32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -398,6 +448,11 @@ SLshrB64Sop2::SLshrB64Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_LSHR_B64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -435,6 +490,11 @@ SAshrI32Sop2::SAshrI32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_ASHR_I32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -472,6 +532,11 @@ SAshrI64Sop2::SAshrI64Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_ASHR_I64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -509,6 +574,11 @@ SLshl1AddU32Sop2::SLshl1AddU32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_LSHL1_ADD_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -546,6 +616,11 @@ SLshl2AddU32Sop2::SLshl2AddU32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_LSHL2_ADD_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -583,6 +658,11 @@ SLshl3AddU32Sop2::SLshl3AddU32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_LSHL3_ADD_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -620,6 +700,11 @@ SLshl4AddU32Sop2::SLshl4AddU32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_LSHL4_ADD_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -657,6 +742,11 @@ SMinI32Sop2::SMinI32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MIN_I32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -694,6 +784,11 @@ SMinU32Sop2::SMinU32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MIN_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -731,6 +826,11 @@ SMaxI32Sop2::SMaxI32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MAX_I32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -768,6 +868,11 @@ SMaxU32Sop2::SMaxU32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MAX_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -805,6 +910,11 @@ SAndB32Sop2::SAndB32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_AND_B32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -842,6 +952,11 @@ SAndB64Sop2::SAndB64Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_AND_B64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -879,6 +994,11 @@ SOrB32Sop2::SOrB32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_OR_B32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -917,6 +1037,11 @@ SOrB64Sop2::SOrB64Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_OR_B64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -955,6 +1080,11 @@ SXorB32Sop2::SXorB32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_XOR_B32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -992,6 +1122,11 @@ SXorB64Sop2::SXorB64Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_XOR_B64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1029,6 +1164,11 @@ SNandB32Sop2::SNandB32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_NAND_B32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1066,6 +1206,11 @@ SNandB64Sop2::SNandB64Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_NAND_B64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1103,6 +1248,11 @@ SNorB32Sop2::SNorB32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_NOR_B32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1140,6 +1290,11 @@ SNorB64Sop2::SNorB64Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_NOR_B64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1177,6 +1332,11 @@ SXnorB32Sop2::SXnorB32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_XNOR_B32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1214,6 +1374,11 @@ SXnorB64Sop2::SXnorB64Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_XNOR_B64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1251,6 +1416,11 @@ SAndNot1B32Sop2::SAndNot1B32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_AND_NOT1_B32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1288,6 +1458,11 @@ SAndNot1B64Sop2::SAndNot1B64Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_AND_NOT1_B64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1325,6 +1500,11 @@ SOrNot1B32Sop2::SOrNot1B32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_OR_NOT1_B32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1362,6 +1542,11 @@ SOrNot1B64Sop2::SOrNot1B64Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_OR_NOT1_B64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1399,6 +1584,11 @@ SBfeU32Sop2::SBfeU32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_BFE_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1436,6 +1626,11 @@ SBfeI32Sop2::SBfeI32Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_BFE_I32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1473,6 +1668,11 @@ SBfeU64Sop2::SBfeU64Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_BFE_U64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1510,6 +1710,11 @@ SBfeI64Sop2::SBfeI64Sop2(const MachineInst *inst)
   dst_operands_[1] = &scc;
   num_src_ = 2;
   num_dst_ = 2;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_BFE_I64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1545,6 +1750,11 @@ SBfmB32Sop2::SBfmB32Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_BFM_B32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1579,6 +1789,11 @@ SBfmB64Sop2::SBfmB64Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_BFM_B64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1613,6 +1828,11 @@ SMulI32Sop2::SMulI32Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MUL_I32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1647,6 +1867,11 @@ SMulHiU32Sop2::SMulHiU32Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MUL_HI_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1681,6 +1906,11 @@ SMulHiI32Sop2::SMulHiI32Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MUL_HI_I32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1717,6 +1947,11 @@ SCselectB32Sop2::SCselectB32Sop2(const MachineInst *inst)
   src_operands_[2] = &scc;
   num_src_ = 3;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CSELECT_B32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1754,6 +1989,11 @@ SCselectB64Sop2::SCselectB64Sop2(const MachineInst *inst)
   src_operands_[2] = &scc;
   num_src_ = 3;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CSELECT_B64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1789,6 +2029,11 @@ SPackLlB32B16Sop2::SPackLlB32B16Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_PACK_LL_B32_B16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -1825,6 +2070,11 @@ SPackLhB32B16Sop2::SPackLhB32B16Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_PACK_LH_B32_B16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -1860,6 +2110,11 @@ SPackHhB32B16Sop2::SPackHhB32B16Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_PACK_HH_B32_B16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1894,6 +2149,11 @@ SPackHlB32B16Sop2::SPackHlB32B16Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_PACK_HL_B32_B16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1929,6 +2189,11 @@ SAddF32Sop2::SAddF32Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_ADD_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1963,6 +2228,11 @@ SSubF32Sop2::SSubF32Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_SUB_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1997,6 +2267,11 @@ SMinNumF32Sop2::SMinNumF32Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MIN_NUM_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2031,6 +2306,11 @@ SMaxNumF32Sop2::SMaxNumF32Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MAX_NUM_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2065,6 +2345,11 @@ SMulF32Sop2::SMulF32Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MUL_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2105,27 +2390,16 @@ SFmaakF32Sop2::SFmaakF32Sop2(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   literal =
       Operand(32, OperandType::OPR_SIMM32,
               static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+      reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254)
+    throw util::InvalidInst("S_FMAAK_F32 does not support SRC_LITERAL64", "");
 }
 
 SFmamkF32Sop2::SFmamkF32Sop2(const MachineInst *inst)
@@ -2144,13 +2418,6 @@ SFmamkF32Sop2::SFmamkF32Sop2(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   literal =
       Operand(32, OperandType::OPR_SIMM32,
               static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
@@ -2158,13 +2425,9 @@ SFmamkF32Sop2::SFmamkF32Sop2(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+      reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254)
+    throw util::InvalidInst("S_FMAMK_F32 does not support SRC_LITERAL64", "");
 }
 
 SFmacF32Sop2::SFmacF32Sop2(const MachineInst *inst)
@@ -2178,6 +2441,11 @@ SFmacF32Sop2::SFmacF32Sop2(const MachineInst *inst)
   src_operands_[2] = &ssrc1;
   num_src_ = 3;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_FMAC_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2213,6 +2481,11 @@ SCvtPkRtzF16F32Sop2::SCvtPkRtzF16F32Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CVT_PK_RTZ_F16_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2247,6 +2520,11 @@ SAddF16Sop2::SAddF16Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_ADD_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -2295,6 +2573,11 @@ SSubF16Sop2::SSubF16Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_SUB_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -2343,6 +2626,11 @@ SMinNumF16Sop2::SMinNumF16Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MIN_NUM_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -2392,6 +2680,11 @@ SMaxNumF16Sop2::SMaxNumF16Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MAX_NUM_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -2441,6 +2734,11 @@ SMulF16Sop2::SMulF16Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MUL_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -2490,6 +2788,11 @@ SFmacF16Sop2::SFmacF16Sop2(const MachineInst *inst)
   src_operands_[2] = &ssrc1;
   num_src_ = 3;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_FMAC_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -2538,6 +2841,11 @@ SMinimumF32Sop2::SMinimumF32Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MINIMUM_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2572,6 +2880,11 @@ SMaximumF32Sop2::SMaximumF32Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MAXIMUM_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2606,6 +2919,11 @@ SMinimumF16Sop2::SMinimumF16Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MINIMUM_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -2655,6 +2973,11 @@ SMaximumF16Sop2::SMaximumF16Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MAXIMUM_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -2704,6 +3027,11 @@ SAddNcU64Sop2::SAddNcU64Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_ADD_NC_U64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -2738,6 +3066,11 @@ SSubNcU64Sop2::SSubNcU64Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_SUB_NC_U64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -2772,6 +3105,11 @@ SMulU64Sop2::SMulU64Sop2(const MachineInst *inst)
   src_operands_[1] = &ssrc1;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_MUL_U64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
