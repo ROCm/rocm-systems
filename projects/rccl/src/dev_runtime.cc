@@ -1744,14 +1744,6 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
     reqs->ginSignalCount = ginSignalTotal;
     reqs->ginCounterCount = ginCounterTotal;
     NCCLCHECK(ncclGinDevCommSetup(comm, reqs, outDevComm));
-#ifdef ENABLE_ROCSHMEM_GIN
-    if (ginSignalTotal > 0 && devr->winSortedCount > 0) {
-      struct ncclDevrWindow* win0 = devr->winSorted[0].win;
-      NCCLCHECKGOTO(ncclGinAnvilBindResourceWindowSignals(comm, win0->userPtr, ginAnvilNetSignalsOffset,
-                                                          nGinContextsTotal, ginSignalTotal),
-                    ret, fail);
-    }
-#endif
   }
 
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
@@ -1827,6 +1819,16 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   }
 
   CUDACHECKGOTO(cudaStreamSynchronize(stream), ret, fail_stream_mem_win);
+
+#ifdef ENABLE_ROCSHMEM_GIN
+  // anvil-sdma locates a peer's signal cells by adding a rank stride to its own base, so the cells must sit at the
+  // same offset on every rank. Only the resource window guarantees that, because user windows sort by local address.
+  if (devr->ginEnabled && ginSignalTotal > 0 && outDevComm->resourceWindow != nullptr) {
+    NCCLCHECKGOTO(ncclGinAnvilBindResourceWindowSignals(comm, win->userPtr, ginAnvilNetSignalsOffset,
+                                                        nGinContextsTotal, ginSignalTotal),
+                  ret, fail_stream_mem_win);
+  }
+#endif
 
   NCCLCHECKGOTO(bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, 0xbeef), ret, fail_stream_mem_win);
   CUDACHECKGOTO(cudaStreamDestroy(stream), ret, fail_stream_mem_win);
