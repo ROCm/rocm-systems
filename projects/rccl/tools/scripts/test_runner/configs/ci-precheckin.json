@@ -201,10 +201,10 @@
       "num_ranks": 1,
       "num_nodes": 1,
       "num_gpus": 1,
-      "timeout": 900,
-      "command_args": "--local-gpu --jobs 64",
+      "timeout": 2400,
+      "command_args": "--local-gpu --compare-base --max-regression-pct 10 --repeat 2 --jobs 64",
       "tests": [
-        {"name": "BuildTime.LocalGpuArch", "description": "Clean build of the runner's GPU arch stays under 5 minutes"}
+        {"name": "BuildTime.LocalGpuArch", "description": "Clean build of the runner's GPU arch is no more than 10% slower than the PR's base commit, and stays under 5 minutes"}
       ]
     }
   },
@@ -229,7 +229,7 @@
     },
     {
       "name": "RCCL Build Time",
-      "description": "Clean-build wall-clock regression for the runner's GPU arch. Drives its own cmake build, separate from the install.sh build the other suites use.",
+      "description": "Times the PR's base commit and its head on this runner and gates on both the relative change and the absolute budget. Drives its own cmake build, separate from the install.sh build the other suites use.",
       "config": "build_time",
       "enabled": true
     }

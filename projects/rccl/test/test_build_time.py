@@ -25,11 +25,16 @@ a clean single-arch build is ~50s on a 256-core host but will exceed 5 minutes
 on a small runner. Parallelism defaults to the CPU count and is recorded in the
 report; use --jobs to pin it when comparing results across machines.
 
+--compare-base sidesteps that: it builds the PR's base commit and its head on
+this same runner and gates on the relative change, and a ratio cancels out
+machine speed. It costs 2*--repeat builds per target instead of one.
+
 Usage:
     ./test_build_time.py                      # every arch in DEFAULT_GPUS
     ./test_build_time.py --local-gpu          # only this machine's arch (CI gate)
     ./test_build_time.py --targets gfx942     # one target
     ./test_build_time.py --threshold-sec 600 --jobs 32
+    ./test_build_time.py --local-gpu --compare-base --max-regression-pct 10
 """
 
 from __future__ import annotations
@@ -188,31 +193,50 @@ def pick_generator() -> tuple[str, list[str]]:
     return "Unix Makefiles", ["make"]
 
 
+def build_env() -> dict[str, str]:
+    """Environment for build subprocesses, with compiler caching disabled.
+
+    A warm ccache would make the second half of an A/B comparison finish
+    almost instantly and silently invalidate the result. RCCL's own build does
+    not enable ccache, but TheRock CI does, so force it off rather than trust
+    the surrounding configuration.
+    """
+    env = dict(os.environ)
+    env["CCACHE_DISABLE"] = "1"
+    return env
+
+
 def build_target(
-    target: str, build_dir: str, jobs: int, log_path: str
+    target: str, build_dir: str, jobs: int, log_path: str, source_dir: str = RCCL_ROOT
 ) -> tuple[float, float, bool]:
-    """Clean-configure and build one target. Returns (configure_s, build_s, ok)."""
+    """Clean-configure and build one target. Returns (configure_s, build_s, ok).
+
+    source_dir selects which checkout to build, so a single copy of this script
+    can time two revisions; each tree supplies its own toolchain file.
+    """
     shutil.rmtree(build_dir, ignore_errors=True)
     os.makedirs(build_dir)
 
     generator, build_cmd = pick_generator()
     configure = [
         "cmake",
-        "--toolchain=" + TOOLCHAIN,
+        "--toolchain=" + os.path.join(source_dir, "toolchain-linux.cmake"),
         "-G", generator,
         "-DCMAKE_BUILD_TYPE=Release",
         "-DGPU_TARGETS=" + target,
         "-DROCM_PATH=" + rocm_path(),
-        RCCL_ROOT,
+        source_dir,
     ]
 
+    env = build_env()
     log: TextIO
     with open(log_path, "w") as log:
         def run(cmd: list[str]) -> tuple[float, int]:
             log.write("\n$ " + " ".join(cmd) + "\n")
             log.flush()
             start = time.monotonic()
-            rc = subprocess.call(cmd, cwd=build_dir, stdout=log, stderr=subprocess.STDOUT)
+            rc = subprocess.call(cmd, cwd=build_dir, stdout=log, stderr=subprocess.STDOUT,
+                                 env=env)
             return time.monotonic() - start, rc
 
         configure_s, rc = run(configure)
@@ -225,6 +249,87 @@ def build_target(
 
 def fmt(seconds: float) -> str:
     return "%d:%05.2f" % (int(seconds // 60), seconds % 60)
+
+
+def git(*args: str) -> str:
+    """Run git in the RCCL source tree and return stripped stdout."""
+    return subprocess.run(["git", "-C", RCCL_ROOT, *args],
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def default_base_rev() -> str:
+    """The commit a PR branched from: the merge base with the upstream branch."""
+    upstream = os.environ.get("RCCL_BUILD_TIME_UPSTREAM", "origin/develop")
+    return git("merge-base", upstream, "HEAD")
+
+
+def rccl_dir_within(worktree: str) -> str:
+    """Locate the RCCL project inside a checkout of the enclosing repository.
+
+    RCCL lives at projects/rccl in the rocm-systems monorepo, so a worktree
+    root is not itself a configurable source directory. Resolves to the
+    worktree root when RCCL is checked out standalone.
+    """
+    rel = os.path.relpath(RCCL_ROOT, git("rev-parse", "--show-toplevel"))
+    return os.path.normpath(os.path.join(worktree, rel))
+
+
+@dataclass
+class Comparison:
+    """Base-vs-head timings for one target, in seconds (min across repeats)."""
+
+    target: str
+    status: str
+    note: str
+    base_s: float | None = None
+    head_s: float | None = None
+
+    @property
+    def delta_pct(self) -> float | None:
+        if self.base_s is None or self.head_s is None or self.base_s == 0:
+            return None
+        return (self.head_s - self.base_s) / self.base_s * 100.0
+
+
+def time_best_of(
+    target: str, source_dir: str, build_root: str, tag: str, jobs: int, repeat: int,
+    round_index: int,
+) -> tuple[float, bool]:
+    """Build one revision once and return (total_s, ok) for this round."""
+    build_dir = os.path.join(build_root, "%s-%s-%d" % (target, tag, round_index))
+    log_path = os.path.join(build_root, "%s-%s-%d.log" % (target, tag, round_index))
+    configure_s, build_s, ok = build_target(target, build_dir, jobs, log_path, source_dir)
+    shutil.rmtree(build_dir, ignore_errors=True)
+    return configure_s + build_s, ok
+
+
+def compare_target(
+    target: str, head_dir: str, base_dir: str, build_root: str, jobs: int, repeat: int,
+) -> tuple[float, float, bool]:
+    """Time base and head alternately; return (base_best, head_best, ok).
+
+    Alternating rather than running all of one revision then the other keeps
+    slow drift (thermal, noisy neighbours) from landing on just one side. The
+    minimum across repeats is the estimator because build-time noise is
+    one-sided: interference can only ever make a build slower.
+    """
+    base_times: list[float] = []
+    head_times: list[float] = []
+    for i in range(repeat):
+        base_s, ok = time_best_of(target, base_dir, build_root, "base", jobs, repeat, i)
+        if not ok:
+            return 0.0, 0.0, False
+        base_times.append(base_s)
+
+        head_s, ok = time_best_of(target, head_dir, build_root, "head", jobs, repeat, i)
+        if not ok:
+            return 0.0, 0.0, False
+        head_times.append(head_s)
+
+        print("    round %d/%d: base %s  head %s" %
+              (i + 1, repeat, fmt(base_s), fmt(head_s)), flush=True)
+
+    return min(base_times), min(head_times), True
 
 
 def resolve_targets(args: argparse.Namespace) -> tuple[list[str], str]:
@@ -256,7 +361,105 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--strict", action="store_true",
                         default=os.environ.get("RCCL_BUILD_TIME_STRICT") == "1",
                         help="fail, rather than skip, targets the compiler cannot build")
+
+    compare = parser.add_argument_group(
+        "base comparison",
+        "Time the PR's base commit and its head on this same runner and gate on the "
+        "relative change. A ratio cancels out runner speed, so unlike --threshold-sec "
+        "it needs no per-machine tuning.")
+    compare.add_argument("--compare-base", nargs="?", const="", metavar="REV",
+                         help="compare against REV (default: merge-base with origin/develop)")
+    compare.add_argument("--max-regression-pct", type=float,
+                         default=float(os.environ.get("RCCL_BUILD_TIME_MAX_REGRESSION_PCT", 10.0)),
+                         help="fail if head is more than this %% slower than base (default: 10)")
+    compare.add_argument("--repeat", type=int,
+                         default=int(os.environ.get("RCCL_BUILD_TIME_REPEAT", 2)),
+                         help="alternating base/head rounds; the minimum of each wins (default: 2)")
     return parser.parse_args()
+
+
+def run_comparison(
+    args: argparse.Namespace, targets: list[str], hipcc: str, build_root: str,
+) -> int:
+    """Time base vs head for each target and gate on the relative change."""
+    base_rev = args.compare_base or default_base_rev()
+    base_sha = git("rev-parse", base_rev)
+    head_sha = git("rev-parse", "HEAD")
+
+    print("  mode       : base-vs-head comparison")
+    print("  base       : %s (%s)" % (base_sha[:10], base_rev))
+    print("  head       : %s" % head_sha[:10])
+    print("  tolerance  : head may be at most %.1f%% slower than base, and must "
+          "still finish within %s" % (args.max_regression_pct, fmt(args.threshold_sec)))
+    print("  rounds     : %d (alternating; minimum of each wins)" % args.repeat)
+    print()
+
+    if base_sha == head_sha:
+        print("Base and head are the same commit; nothing to compare.")
+        return 0
+
+    worktree = os.path.join(build_root, "base-tree")
+    git("worktree", "add", "--detach", "--quiet", worktree, base_sha)
+    base_dir = rccl_dir_within(worktree)
+    try:
+        results: list[Comparison] = []
+        for target in targets:
+            if not compiler_supports(target, hipcc):
+                reason = "compiler does not support --offload-arch=%s" % target
+                status = FAIL if args.strict else SKIP
+                print("[%s] %s - %s" % (target, status, reason))
+                results.append(Comparison(target, status, reason))
+                continue
+
+            print("[%s] timing base and head ..." % target, flush=True)
+            base_s, head_s, ok = compare_target(
+                target, RCCL_ROOT, base_dir, build_root, args.jobs, args.repeat)
+            if not ok:
+                print("[%s] FAIL - build failed, see %s" % (target, build_root))
+                results.append(Comparison(target, FAIL, "build failed"))
+                continue
+
+            result = Comparison(target, PASS, "", base_s, head_s)
+            pct = result.delta_pct or 0.0
+
+            # The head build is timed here anyway, so this run enforces the
+            # absolute budget too and there is no need for a second CI entry.
+            problems: list[str] = []
+            if pct > args.max_regression_pct:
+                problems.append("%.1f%% slower than base (limit %.1f%%)"
+                                % (pct, args.max_regression_pct))
+            if head_s > args.threshold_sec:
+                problems.append("took %s, over the %s budget"
+                                % (fmt(head_s), fmt(args.threshold_sec)))
+            if problems:
+                result.status = FAIL
+                result.note = "; ".join(problems)
+
+            print("[%s] %s - base %s -> head %s (%+.1f%%)%s" %
+                  (target, result.status, fmt(base_s), fmt(head_s), pct,
+                   "  " + result.note if problems else ""))
+            results.append(result)
+    finally:
+        git("worktree", "remove", "--force", worktree)
+
+    print()
+    print("%-10s %10s %10s %9s  %s" % ("TARGET", "BASE", "HEAD", "DELTA", "RESULT"))
+    for r in results:
+        if r.base_s is None or r.head_s is None:
+            print("%-10s %10s %10s %9s  %s (%s)" % (r.target, "-", "-", "-", r.status, r.note))
+        else:
+            print("%-10s %10s %10s %8.1f%%  %s" %
+                  (r.target, fmt(r.base_s), fmt(r.head_s), r.delta_pct or 0.0, r.status))
+
+    failed = [r.target for r in results if r.status == FAIL]
+    if failed:
+        print("\nFAILED: %s" % ", ".join(failed))
+        return 1
+    if not any(r.status == PASS for r in results):
+        print("\nNo targets were buildable with this toolchain; nothing was measured.")
+        return 1
+    print("\nPASSED: %s" % ", ".join(r.target for r in results if r.status == PASS))
+    return 0
 
 
 def main() -> int:
@@ -285,10 +488,29 @@ def main() -> int:
     print("  ROCM_PATH  : %s" % rocm_path())
     print("  generator  : %s" % generator)
     print("  jobs       : %d (of %d CPUs)" % (args.jobs, cpu_count()))
-    print("  threshold  : %s (%.0fs) per target, configure + build" %
-          (fmt(args.threshold_sec), args.threshold_sec))
     print("  build root : %s" % build_root)
     print("  targets    : %s (from %s)" % (" ".join(targets), targets_from))
+
+    if args.compare_base is not None:
+        rc = run_comparison(args, targets, hipcc, build_root)
+    else:
+        rc = run_absolute(args, targets, hipcc, build_root)
+
+    # Each run leaves a few MB of build logs; they are only interesting when
+    # something failed, and this runs on every PR.
+    if rc == 0 and not args.keep and not args.build_root:
+        shutil.rmtree(build_root, ignore_errors=True)
+    elif rc != 0:
+        print("\nBuild logs kept at %s" % build_root)
+    return rc
+
+
+def run_absolute(
+    args: argparse.Namespace, targets: list[str], hipcc: str, build_root: str,
+) -> int:
+    """Time each target once and gate on the absolute threshold."""
+    print("  threshold  : %s (%.0fs) per target, configure + build" %
+          (fmt(args.threshold_sec), args.threshold_sec))
     print()
 
     results: list[TargetResult] = []
