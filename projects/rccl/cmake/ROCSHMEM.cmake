@@ -24,7 +24,7 @@ include(ExternalProject)
 
 # Pinned mono-repo commit for rocshmem source checkout.
 # Used by both install.sh (setup_rocshmem_worktree) and cmake (auto-detect below).
-set(ROCSHMEM_MONO_HASH "b76636bd9260cc307d80047b92c31b4d3e86a1e4" CACHE STRING
+set(ROCSHMEM_MONO_HASH "33d980d7ca1f0bf90cfe4ff9106310abcf47b550" CACHE STRING
     "Pinned rocm-systems commit hash for rocshmem source checkout")
 
 function(add_rocshmem_targets)
@@ -116,13 +116,17 @@ function(add_rocshmem_targets)
     if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
         set(_rccl_root           "${CMAKE_SOURCE_DIR}")
         set(ROCSHMEM_INSTALL_DIR "${_rccl_root}/ext/rocshmem")
-        # Convert cmake list separators to spaces for shell commands.
         # Convert cmake list separators for shell command safety.
         # GPU_TARGETS semicolons would be treated as bash command separators
         # inside the bash -lc "..." string. Use commas instead — rocshmem's
         # cmake converts commas back to semicolons.
         string(REPLACE ";" " " _rocshmem_cmake_opts "${ROCSHMEM_CMAKE_OPTIONS}")
         string(REPLACE ";" "," _rocshmem_gpu_targets "${GPU_TARGETS}")
+        # SDMA only needed for --rocshmem-gin (GIN SDMA plugin)
+        set(_rocshmem_sdma_opt "")
+        if(ENABLE_ROCSHMEM_GIN)
+            set(_rocshmem_sdma_opt "-DUSE_SDMA=ON")
+        endif()
         message(STATUS "rocSHMEM: building from ${ROCSHMEM_SOURCE_DIR}")
 
         ExternalProject_Add(rocshmem_ext
@@ -140,7 +144,7 @@ function(add_rocshmem_targets)
             CONFIGURE_COMMAND   ""
             BUILD_COMMAND
                 ${CMAKE_COMMAND} -E make_directory build
-                && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/all_backends -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_EXTERNAL_MPI=OFF -DBUILD_EXAMPLES=OFF -DBUILD_FUNCTIONAL_TESTS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_CTESTS=OFF -DBUILD_TOOLS=OFF -DUSE_SDMA=ON -DGPU_TARGETS=${_rocshmem_gpu_targets} ${_rocshmem_cmake_opts} "
+                && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/gda -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_EXTERNAL_MPI=OFF -DGDA_MLX5=ON -DGDA_BNXT=ON -DGDA_IONIC=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUNCTIONAL_TESTS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_CTESTS=OFF -DBUILD_TOOLS=OFF -DGPU_TARGETS=${_rocshmem_gpu_targets} ${_rocshmem_sdma_opt} ${_rocshmem_cmake_opts} "
             INSTALL_COMMAND ""
         )
 

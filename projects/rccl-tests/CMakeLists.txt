@@ -215,10 +215,10 @@ endif()
 
 if (ENABLE_ROCSHMEM_GIN)
     message(STATUS "rocshmem GIN backend support enabled")
-    add_definitions(-DENABLE_ROCSHMEM)
     add_definitions(-DENABLE_ROCSHMEM_GIN)
+
+    # Auto-detect paths from mono-repo layout
     if (NOT ROCSHMEM_INSTALL_DIR)
-        # Try ext/rocshmem under RCCL source (created by install.sh --rocshmem-gin)
         get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
         if(EXISTS "${_mono_root}/projects/rccl/ext/rocshmem/lib/librocshmem.a")
             set(ROCSHMEM_INSTALL_DIR "${_mono_root}/projects/rccl/ext/rocshmem")
@@ -228,38 +228,36 @@ if (ENABLE_ROCSHMEM_GIN)
                     "and no install found at ${_mono_root}/projects/rccl/ext/rocshmem")
         endif()
     endif()
-    # Device headers include <rocshmem/rocshmem.hpp> when ENABLE_ROCSHMEM_GIN is set.
-    # The installed copy has rocshmem_config.h alongside rocshmem.hpp;
-    # must come before source includes so the generated config is found.
-    include_directories(BEFORE ${ROCSHMEM_INSTALL_DIR}/include)
-    # Auto-detect RCCL_SOURCE_DIR from mono-repo layout if not provided
     if (NOT RCCL_SOURCE_DIR)
         get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
         if(EXISTS "${_mono_root}/projects/rccl/CMakeLists.txt")
             set(RCCL_SOURCE_DIR "${_mono_root}/projects/rccl")
-            message(STATUS "rccl-tests: found rccl source at ${RCCL_SOURCE_DIR}")
         endif()
     endif()
-    # Auto-detect ROCSHMEM_SOURCE_DIR from mono-repo layout if not provided
     if (NOT ROCSHMEM_SOURCE_DIR)
         get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
         if(EXISTS "${_mono_root}/projects/rocshmem/CMakeLists.txt")
             set(ROCSHMEM_SOURCE_DIR "${_mono_root}/projects/rocshmem")
-            message(STATUS "rccl-tests: found rocshmem source at ${ROCSHMEM_SOURCE_DIR}")
         endif()
     endif()
-    # Source src/ is needed globally for internal headers (sdma/anvil_device.hpp)
-    # pulled in via gin_anvil_sdma.h. But NOT include/ — that would shadow
-    # the installed rocshmem.hpp which has the generated rocshmem_config.h.
+    # Installed rocshmem headers (rocshmem_config.h) are needed globally:
+    # RCCL's public nccl_device.h → gin_anvil_sdma.h → anvil_device.hpp
+    # → log.hpp → rocshmem/rocshmem_config.h.  Must come before source
+    # includes so the generated config is found first.
+    include_directories(BEFORE ${ROCSHMEM_INSTALL_DIR}/include)
+    # Internal rocshmem headers (sdma/anvil_device.hpp) needed globally.
     if (ROCSHMEM_SOURCE_DIR)
         include_directories(${ROCSHMEM_SOURCE_DIR}/src)
     endif()
-    # rocshmem-config.cmake's transitive deps need NUMA and hsakmt targets
-    # but only calls find_dependency(NUMA). Ensure both are found.
-    list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}/lib/rocm_sysdeps")
-    find_package(hsakmt QUIET)
-    find_package(rocprofiler-register QUIET)
-    # Workaround: ROCm 7.13/14 hsakmtTargets.cmake has hardcoded RHEL CI paths
+
+    find_package(rocshmem REQUIRED CONFIG
+        PATHS ${ROCSHMEM_INSTALL_DIR}/lib/cmake/rocshmem NO_DEFAULT_PATH)
+    # hsakmtTargets.cmake bakes in RHEL CI paths (/usr/lib64/libc.so) that
+    # don't exist on Ubuntu.  Scrub them — same fix as rocshmem's own build.
+    # hsakmtTargets.cmake bakes in RHEL CI paths (/usr/lib64/libc.so,
+    # -L/__w/rockrel/...) that don't exist on Ubuntu.  Scrub them and
+    # re-add the correct libdrm search path — same fix as rocshmem's
+    # own CMakeLists.txt.
     if(TARGET hsakmt::hsakmt)
         get_target_property(_hsakmt_iface_libs hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)
         if(_hsakmt_iface_libs)
@@ -270,21 +268,12 @@ if (ENABLE_ROCSHMEM_GIN)
                 list(PREPEND _hsakmt_iface_libs "-L${_drm_dir}")
                 unset(_drm_dir)
             endif()
-            set_target_properties(hsakmt::hsakmt PROPERTIES INTERFACE_LINK_LIBRARIES "${_hsakmt_iface_libs}")
+            set_target_properties(hsakmt::hsakmt PROPERTIES
+                INTERFACE_LINK_LIBRARIES "${_hsakmt_iface_libs}")
             unset(_hsakmt_iface_libs)
         endif()
     endif()
-    # Use the rocshmem cmake config to get the imported target with all
-    # transitive dependencies (hsa-runtime64, rocprofiler-register, etc.)
-    find_package(rocshmem REQUIRED CONFIG
-        PATHS ${ROCSHMEM_INSTALL_DIR}/lib/cmake/rocshmem NO_DEFAULT_PATH)
-    set(_rocshmem_offload_arch_flags "")
-    foreach(_gpu_raw ${GPU_TARGETS})
-        string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
-        list(APPEND _rocshmem_offload_arch_flags "--offload-arch=${_gpu}")
-    endforeach()
-    list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
-    message(STATUS "rocshmem: roc::rocshmem from ${ROCSHMEM_INSTALL_DIR}, arches: ${_rocshmem_offload_arch_flags}")
+    message(STATUS "rocshmem: roc::rocshmem from ${ROCSHMEM_INSTALL_DIR}")
 endif()
 
 set(ROCM_USE_DEV_COMPONENT OFF)  # This repo doesn't have a dev component

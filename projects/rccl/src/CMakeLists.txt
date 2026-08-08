@@ -1177,45 +1177,10 @@ if(ENABLE_ROCSHMEM)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
 elseif(ENABLE_ROCSHMEM_GIN)
   # GIN device templates (Put/Flush/etc.) reference rocshmem device symbols.
-  # Link rocshmem device bitcode (.bc) to resolve them without pulling in
-  # host-side statics from librocshmem.a (avoids duplicate state).
+  # With the device linker (default), per-arch .bc files are injected directly
+  # into the per-arch device link step via DeviceLinker.cmake.
   # Host symbols from GIN plugins are left unresolved via --allow-shlib-undefined.
   target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
-  set(_rocshmem_offload_arch_flags "")
-  foreach(_gpu_raw ${GPU_TARGETS})
-    string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
-    list(APPEND _rocshmem_offload_arch_flags "--offload-arch=${_gpu}")
-    set(_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${_gpu}.bc")
-    list(APPEND _rocshmem_bc_files ${_bc})
-    list(APPEND _rocshmem_bundle_targets "hip-amdgcn-amd-amdhsa-unknown-${_gpu}")
-  endforeach()
-  list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
-  # Bundle per-arch .bc files into a single fat object so the clang offload
-  # driver routes each to the correct arch's device linker.
-  string(REPLACE ";" "," _bundle_targets_csv "${_rocshmem_bundle_targets}")
-  set(_rocshmem_bundle "${CMAKE_BINARY_DIR}/rocshmem_device_bundle.bc")
-  find_program(_clang_offload_bundler clang-offload-bundler HINTS ${ROCM_PATH}/llvm/bin)
-  set(_bundle_input_flags "")
-  foreach(_f ${_rocshmem_bc_files})
-    list(APPEND _bundle_input_flags -input=${_f})
-  endforeach()
-  add_custom_command(
-    OUTPUT ${_rocshmem_bundle}
-    COMMAND ${_clang_offload_bundler}
-      -type=bc
-      -targets=${_bundle_targets_csv}
-      ${_bundle_input_flags}
-      -output=${_rocshmem_bundle}
-    DEPENDS ${_rocshmem_bc_files}
-    COMMENT "Bundling rocshmem device bitcode for ${GPU_TARGETS}"
-    VERBATIM)
-  add_custom_target(rocshmem_device_bundle DEPENDS ${_rocshmem_bundle})
-  if(TARGET rocshmem_static)
-    add_dependencies(rocshmem_device_bundle rocshmem_static)
-  endif()
-  add_dependencies(rccl rocshmem_device_bundle)
-  target_link_libraries(rccl PRIVATE ${_rocshmem_bundle})
-  target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
 endif()
 
 ## Set RCCL link options
