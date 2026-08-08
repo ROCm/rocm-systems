@@ -17,6 +17,7 @@
 #include <queue>
 #include <span>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -310,6 +311,15 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object) {
     }
   }
 
+  std::vector<RelocationFunctionTable> direct_function_pointers;
+  const auto allocated_data_contains = [&](uint64_t vaddr, uint64_t size) {
+    return std::ranges::any_of(sections, [&](const Elf64_Shdr &section) {
+      return (section.sh_flags & SHF_ALLOC) != 0 && (section.sh_flags & SHF_EXECINSTR) == 0 &&
+             vaddr >= section.sh_addr && vaddr - section.sh_addr <= section.sh_size &&
+             size <= section.sh_size - (vaddr - section.sh_addr);
+    });
+  };
+
   for (const Elf64_Shdr &relocations : sections) {
     if (relocations.sh_type != SHT_RELA || relocations.sh_entsize != sizeof(Elf64_Rela) ||
         !range_in_image(image, relocations.sh_offset, relocations.sh_size))
@@ -355,8 +365,7 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object) {
       if (!read_object(image,
                        linked_symbols->sh_offset +
                            static_cast<uint64_t>(symbol_index) * sizeof(Elf64_Sym),
-                       symbol) ||
-          elf_symbol_type(symbol.st_info) != kElfSymbolTypeObject)
+                       symbol))
         continue;
       uint64_t target = symbol.st_value;
       if (rela.r_addend >= 0) {
@@ -371,6 +380,34 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object) {
           continue;
         target -= magnitude;
       }
+      if (elf_symbol_type(symbol.st_info) == kElfSymbolTypeFunc) {
+        // A direct GOT entry for a defined device function is a finite one-slot
+        // dispatch table. The loader follows the relocated text symbol, while
+        // the translated caller reaches the slot through the same getpc/add/load
+        // sequence used for larger tables. Model it as a one-entry table so the
+        // existing CFG and relocation machinery can preserve both addresses.
+        if (rela.r_addend == 0 && symbol.st_shndx < sections.size() &&
+            (sections[symbol.st_shndx].sh_flags & SHF_EXECINSTR) != 0 && target >= text_vaddr &&
+            target - text_vaddr < text_size && (rela.r_offset % sizeof(uint64_t)) == 0 &&
+            allocated_data_contains(rela.r_offset, sizeof(uint64_t))) {
+          const RelocationFunctionPointer entry{.slot_vaddr = rela.r_offset,
+                                                .target_text_offset = target - text_vaddr,
+                                                .abi_function_symbol = true};
+          if (ObjectCandidate *candidate = containing_candidate(candidates, rela.r_offset);
+              candidate != nullptr &&
+              ((rela.r_offset - candidate->vaddr) % sizeof(uint64_t)) == 0) {
+            candidate->entries.push_back(entry);
+          } else {
+            direct_function_pointers.push_back({.table_vaddr = rela.r_offset,
+                                                .table_size = sizeof(uint64_t),
+                                                .got_slot_vaddrs = {},
+                                                .entries = {entry}});
+          }
+        }
+        continue;
+      }
+      if (elf_symbol_type(symbol.st_info) != kElfSymbolTypeObject)
+        continue;
       const auto candidate = std::ranges::find_if(
           candidates, [&](const ObjectCandidate &item) { return item.vaddr == target; });
       if (candidate != candidates.end())
@@ -378,7 +415,7 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object) {
     }
   }
 
-  std::vector<RelocationFunctionTable> tables;
+  std::vector<RelocationFunctionTable> tables = std::move(direct_function_pointers);
   for (ObjectCandidate &candidate : candidates) {
     // RCCL addresses its relocation-backed function tables directly from
     // executable text, so a GOT reference is useful evidence but not required.
@@ -394,7 +431,42 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object) {
                       .entries = std::move(candidate.entries)});
   }
   std::ranges::sort(tables, {}, &RelocationFunctionTable::table_vaddr);
-  return tables;
+  std::vector<RelocationFunctionTable> merged;
+  for (RelocationFunctionTable &table : tables) {
+    if (merged.empty() || merged.back().table_vaddr != table.table_vaddr) {
+      merged.push_back(std::move(table));
+      continue;
+    }
+    RelocationFunctionTable &destination = merged.back();
+    destination.table_size = std::max(destination.table_size, table.table_size);
+    destination.got_slot_vaddrs.insert(destination.got_slot_vaddrs.end(),
+                                       table.got_slot_vaddrs.begin(), table.got_slot_vaddrs.end());
+    destination.entries.insert(destination.entries.end(), table.entries.begin(),
+                               table.entries.end());
+  }
+  // Normalize every table, including tables produced by a single discovery
+  // path as well as tables combined above.
+  for (RelocationFunctionTable &table : merged) {
+    std::ranges::sort(table.got_slot_vaddrs);
+    table.got_slot_vaddrs.erase(std::ranges::unique(table.got_slot_vaddrs).begin(),
+                                table.got_slot_vaddrs.end());
+    std::ranges::sort(table.entries, [](const RelocationFunctionPointer &lhs,
+                                        const RelocationFunctionPointer &rhs) {
+      return std::tie(lhs.slot_vaddr, lhs.target_text_offset, lhs.abi_function_symbol) <
+             std::tie(rhs.slot_vaddr, rhs.target_text_offset, rhs.abi_function_symbol);
+    });
+    table.entries.erase(
+        std::ranges::unique(
+            table.entries,
+            [](const RelocationFunctionPointer &lhs, const RelocationFunctionPointer &rhs) {
+              return lhs.slot_vaddr == rhs.slot_vaddr &&
+                     lhs.target_text_offset == rhs.target_text_offset &&
+                     lhs.abi_function_symbol == rhs.abi_function_symbol;
+            })
+            .begin(),
+        table.entries.end());
+  }
+  return merged;
 }
 
 RelocationPairAnalysis analyze_relocation_pairs(std::span<const std::unique_ptr<BasicBlock>> blocks,

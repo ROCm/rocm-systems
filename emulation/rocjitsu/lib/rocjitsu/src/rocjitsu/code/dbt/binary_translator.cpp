@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/dbt/binary_translator.h"
 
+#include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/analysis/exec_state.h"
 #include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/analysis/liveness.h"
@@ -45,6 +46,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <queue>
 #include <set>
 #include <span>
 #include <sstream>
@@ -179,6 +181,21 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
   dst.insert(dst.end(), src.begin(), src.end());
 }
 
+/// @brief Carry state established after the original descriptor translation into a recomputation.
+/// @returns Diagnostics produced by the recomputation itself.
+[[nodiscard]] std::vector<TranslationDiagnostic>
+preserve_descriptor_translation_state(KdTranslation &recomputed, const KdTranslation &established) {
+  std::vector<TranslationDiagnostic> fresh_diagnostics = std::move(recomputed.diagnostics);
+  recomputed.kernel_name = established.kernel_name;
+  recomputed.sidecar_descriptor = established.sidecar_descriptor;
+  recomputed.virtual_lds_lowering = established.virtual_lds_lowering;
+  recomputed.target_entry_text_offset = established.target_entry_text_offset;
+  recomputed.target_body_entry_text_offset = established.target_body_entry_text_offset;
+  recomputed.diagnostics = established.diagnostics;
+  append_diagnostics(recomputed.diagnostics, fresh_diagnostics);
+  return fresh_diagnostics;
+}
+
 /// @brief Return a human-readable kernel label for diagnostics.
 ///
 /// @details Some code objects carry empty kernel symbol names. Falling back to
@@ -265,6 +282,227 @@ struct KernelTranslationScope {
   BasicBlock *entry = nullptr;
   std::vector<BasicBlock *> blocks;
 };
+
+[[nodiscard]] std::optional<std::vector<uint64_t>>
+defined_text_function_offsets(const AmdGpuCodeObject &object) {
+  if (object.text_sections().size() != 1 || object.image_data() == nullptr)
+    return std::nullopt;
+  const auto image =
+      std::span(reinterpret_cast<const uint8_t *>(object.image_data()), object.image_size());
+  if (image.size() < sizeof(Elf64_Ehdr))
+    return std::nullopt;
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  if (ehdr.e_shentsize != sizeof(Elf64_Shdr) || ehdr.e_shoff > image.size() ||
+      static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr) > image.size() - ehdr.e_shoff) {
+    return std::nullopt;
+  }
+  std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
+  std::memcpy(sections.data(), image.data() + ehdr.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+
+  const Section &text = *object.text_sections().front();
+  const auto text_section = std::ranges::find_if(sections, [&](const Elf64_Shdr &section) {
+    return section.sh_offset == text.sectionOffset() && section.sh_addr == text.vaddr() &&
+           section.sh_size == text.size() && (section.sh_flags & SHF_EXECINSTR) != 0;
+  });
+  if (text_section == sections.end())
+    return std::nullopt;
+  const uint16_t text_index = static_cast<uint16_t>(text_section - sections.begin());
+
+  std::vector<uint64_t> offsets;
+  for (const Elf64_Shdr &symbols : sections) {
+    if (symbols.sh_type != SHT_SYMTAB && symbols.sh_type != SHT_DYNSYM)
+      continue;
+    if (symbols.sh_size == 0)
+      continue;
+    if (symbols.sh_entsize != sizeof(Elf64_Sym) || symbols.sh_offset > image.size() ||
+        symbols.sh_size > image.size() - symbols.sh_offset ||
+        symbols.sh_size % sizeof(Elf64_Sym) != 0)
+      return std::nullopt;
+    const size_t count = symbols.sh_size / sizeof(Elf64_Sym);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Sym symbol{};
+      std::memcpy(&symbol, image.data() + symbols.sh_offset + index * sizeof(Elf64_Sym),
+                  sizeof(symbol));
+      if (symbol.st_shndx != text_index || elf_symbol_type(symbol.st_info) != kElfSymbolTypeFunc)
+        continue;
+      uint64_t offset = symbol.st_value;
+      if (ehdr.e_type != ET_REL) {
+        if (symbol.st_value < text.vaddr())
+          continue;
+        offset = symbol.st_value - text.vaddr();
+      }
+      if (offset < text.size())
+        offsets.push_back(offset);
+    }
+  }
+  std::ranges::sort(offsets);
+  offsets.erase(std::ranges::unique(offsets).begin(), offsets.end());
+  return offsets;
+}
+
+enum class ExternalPairOrigin : uint8_t {
+  KernargAddress,
+  LoadedValue,
+};
+
+using ExternalPairState = std::unordered_map<uint16_t, ExternalPairOrigin>;
+
+[[nodiscard]] std::optional<uint16_t> sgpr_pair_operand(const Operand *operand) {
+  if (operand == nullptr)
+    return std::nullopt;
+  const auto ref = operand->to_register_ref();
+  if (!ref || ref->cls != RegClass::SGPR || ref->width < 2 ||
+      static_cast<uint32_t>(ref->index) + 1 >= REGISTER_SET_MAX_SGPRS) {
+    return std::nullopt;
+  }
+  return ref->index;
+}
+
+void transfer_external_pairs(ExternalPairState &state, const Instruction &inst,
+                             std::unordered_set<uint64_t> *calls) {
+  const std::string_view mnemonic = inst.mnemonic();
+  const auto dst = sgpr_pair_operand(inst.dst_operand(0));
+  const auto src0 = sgpr_pair_operand(inst.src_operand(0));
+  std::optional<ExternalPairOrigin> result;
+
+  if (mnemonic == "s_mov_b64" && src0) {
+    if (const auto source = state.find(*src0); source != state.end())
+      result = source->second;
+  } else if (mnemonic == "s_add_nc_u64" && dst) {
+    const auto src1 = sgpr_pair_operand(inst.src_operand(1));
+    const std::optional<uint16_t> address =
+        src0 && *src0 == *dst ? src0 : (src1 && *src1 == *dst ? src1 : std::nullopt);
+    if (address) {
+      const auto source = state.find(*address);
+      if (source != state.end() && source->second == ExternalPairOrigin::KernargAddress)
+        result = source->second;
+    }
+  } else if (mnemonic.starts_with("s_load_b") && dst && src0) {
+    const auto base = state.find(*src0);
+    if (base != state.end() && base->second == ExternalPairOrigin::KernargAddress)
+      result = ExternalPairOrigin::LoadedValue;
+  }
+
+  if ((inst.flags() & INDIRECT_CALL) != 0 && src0) {
+    const auto target = state.find(*src0);
+    if (calls != nullptr && target != state.end() &&
+        target->second == ExternalPairOrigin::LoadedValue) {
+      calls->insert(inst.src_loc());
+    }
+  }
+
+  const InstDefUse def_use(inst);
+  std::erase_if(state, [&](const auto &item) {
+    return def_use.defs.contains(RegisterRef{RegClass::SGPR, item.first, 1}) ||
+           def_use.defs.contains(
+               RegisterRef{RegClass::SGPR, static_cast<uint16_t>(item.first + 1), 1});
+  });
+  if (dst && result)
+    state[*dst] = *result;
+
+  if ((inst.flags() & INDIRECT_CALL) != 0) {
+    std::erase_if(state, [](const auto &item) {
+      return !is_callee_saved_sgpr(item.first) ||
+             !is_callee_saved_sgpr(static_cast<uint16_t>(item.first + 1));
+    });
+  }
+}
+
+[[nodiscard]] ExternalPairState meet_external_predecessors(
+    const BasicBlock &block, const std::unordered_set<const BasicBlock *> &allowed,
+    const std::unordered_map<const BasicBlock *, size_t> &positions,
+    const std::vector<ExternalPairState> &out, const std::vector<bool> &initialized,
+    std::optional<uint16_t> entry_kernarg_pair, const BasicBlock *entry) {
+  ExternalPairState result;
+  bool have_input = false;
+  if (&block == entry && entry_kernarg_pair) {
+    result[*entry_kernarg_pair] = ExternalPairOrigin::KernargAddress;
+    have_input = true;
+  }
+  for (const BasicBlock *predecessor : block.predecessors()) {
+    const auto position = positions.find(predecessor);
+    if (!allowed.contains(predecessor) || position == positions.end() ||
+        !initialized[position->second]) {
+      continue;
+    }
+    if (!have_input) {
+      result = out[position->second];
+      have_input = true;
+      continue;
+    }
+    std::erase_if(result, [&](const auto &item) {
+      const auto incoming = out[position->second].find(item.first);
+      return incoming == out[position->second].end() || incoming->second != item.second;
+    });
+  }
+  return result;
+}
+
+[[nodiscard]] std::unordered_set<uint64_t>
+kernarg_loaded_indirect_calls(const KernelTranslationScope &scope) {
+  if (scope.translation == nullptr || scope.entry == nullptr ||
+      !scope.translation->source_has_kernarg_segment_ptr) {
+    return {};
+  }
+
+  std::unordered_map<const BasicBlock *, size_t> positions;
+  std::unordered_set<const BasicBlock *> allowed;
+  for (size_t index = 0; index < scope.blocks.size(); ++index) {
+    if (scope.blocks[index] != nullptr) {
+      positions.emplace(scope.blocks[index], index);
+      allowed.insert(scope.blocks[index]);
+    }
+  }
+  const auto entry_position = positions.find(scope.entry);
+  if (entry_position == positions.end())
+    return {};
+
+  std::vector<ExternalPairState> in(scope.blocks.size());
+  std::vector<ExternalPairState> out(scope.blocks.size());
+  std::vector<bool> initialized(scope.blocks.size(), false);
+  std::vector<bool> queued(scope.blocks.size(), false);
+  std::queue<size_t> worklist;
+  worklist.push(entry_position->second);
+  queued[entry_position->second] = true;
+  while (!worklist.empty()) {
+    const size_t index = worklist.front();
+    worklist.pop();
+    queued[index] = false;
+    BasicBlock *block = scope.blocks[index];
+    if (block == nullptr)
+      continue;
+    ExternalPairState next_in =
+        meet_external_predecessors(*block, allowed, positions, out, initialized,
+                                   scope.translation->kernarg_segment_ptr_sgpr, scope.entry);
+    ExternalPairState next_out = next_in;
+    for (const Instruction &inst : block->instructions())
+      transfer_external_pairs(next_out, inst, nullptr);
+    const bool changed = !initialized[index] || next_in != in[index] || next_out != out[index];
+    initialized[index] = true;
+    in[index] = std::move(next_in);
+    out[index] = std::move(next_out);
+    if (!changed)
+      continue;
+    for (BasicBlock *successor : block->successors()) {
+      const auto position = positions.find(successor);
+      if (position != positions.end() && !queued[position->second]) {
+        worklist.push(position->second);
+        queued[position->second] = true;
+      }
+    }
+  }
+
+  std::unordered_set<uint64_t> calls;
+  for (size_t index = 0; index < scope.blocks.size(); ++index) {
+    if (scope.blocks[index] == nullptr || !initialized[index])
+      continue;
+    ExternalPairState state = in[index];
+    for (const Instruction &inst : scope.blocks[index]->instructions())
+      transfer_external_pairs(state, inst, &calls);
+  }
+  return calls;
+}
 
 /// @brief Descriptor state mutated by one kernel-scope translation transaction.
 struct DescriptorVariantCheckpoint {
@@ -704,10 +942,9 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
 /// value could be a relocated PC that needs the recovery this bypasses. A PC-relative builder
 /// feeding the terminator is not reached here at all: the caller's recovered-indirect and
 /// direct-branch tests run first and claim that shape.
-[[nodiscard]] std::unordered_set<uint64_t>
-adopted_root_return_offsets(const BlockOffsetIndex &block_index,
-                            std::span<const uint64_t> adopted_roots,
-                            std::span<const uint8_t> text) {
+[[nodiscard]] std::unordered_set<uint64_t> adopted_root_return_offsets(
+    const BlockOffsetIndex &block_index, std::span<const uint64_t> adopted_roots,
+    const std::unordered_set<uint64_t> &abi_function_roots, std::span<const uint8_t> text) {
   std::unordered_set<uint64_t> returns;
   for (const uint64_t root : adopted_roots) {
     BasicBlock *entry = block_for_offset(block_index, root);
@@ -732,6 +969,20 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
       }
       for (BasicBlock *succ : block->successors())
         stack.push_back(succ);
+    }
+
+    if (abi_function_roots.contains(root)) {
+      // STT_FUNC entries use the standard AMDGPU link pair. The body may be
+      // exported without an in-object call edge, and a large non-leaf function
+      // can spill/restore that pair through control flow too complex for the
+      // generic incoming-value proof below. Symbol type plus the exact ABI pair
+      // supplies the missing call-site fact without accepting another setpc.
+      constexpr uint16_t kAmdGpuFunctionReturnSreg = 30;
+      for (const auto &[block, return_sreg] : candidates) {
+        if (return_sreg == kAmdGpuFunctionReturnSreg)
+          returns.insert(block->terminator()->src_loc());
+      }
+      continue;
     }
 
     // Whether (vgpr, lane) still holds what `v_writelane_b32` put there from `sgpr`, asked at one
@@ -1441,10 +1692,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   }
 
   const auto relocation_function_tables = discover_relocation_function_tables(obj);
+  const auto text_function_offsets = defined_text_function_offsets(obj);
   auto block_leaders = kernel_block_leaders(descriptor_translations, text);
   for (const RelocationFunctionTable &table : relocation_function_tables) {
     for (const RelocationFunctionPointer &entry : table.entries)
       block_leaders.push_back(entry.target_text_offset);
+  }
+  if (text_function_offsets) {
+    block_leaders.insert(block_leaders.end(), text_function_offsets->begin(),
+                         text_function_offsets->end());
   }
   std::ranges::sort(block_leaders);
   block_leaders.erase(std::ranges::unique(block_leaders).begin(), block_leaders.end());
@@ -1614,6 +1870,18 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
   }
 
+  std::unordered_set<uint64_t> externally_supplied_call_offsets;
+  for (const KernelTranslationScope &scope : scopes) {
+    auto calls = kernarg_loaded_indirect_calls(scope);
+    externally_supplied_call_offsets.insert(calls.begin(), calls.end());
+  }
+  if (!externally_supplied_call_offsets.empty() && !text_function_offsets) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "defined device functions could not be enumerated for a kernarg-loaded indirect "
+                 "call; leaving code object unchanged");
+    return leave_unchanged();
+  }
+
   // A device function whose address is produced only by a data relocation -- a C++ vtable slot is
   // the common case -- is named by no decoded edge, so no kernel scope reaches it. Translated text
   // replaces .text wholesale, so leaving it unreached drops the body and strands the addend that
@@ -1626,6 +1894,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // covered here; that case still refuses, which is the pre-existing behavior.
   std::vector<uint64_t> adopted_roots;
   std::unordered_set<uint64_t> address_taken_offsets;
+  std::unordered_set<uint64_t> abi_function_roots;
   {
     // How many scopes would emit each block on their own. A body reached by one scope already has
     // a single placement, so its address is unambiguous and nothing needs adopting. A body reached
@@ -1659,8 +1928,28 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     };
 
     for (const RelocationFunctionTable &table : relocation_function_tables) {
-      for (const RelocationFunctionPointer &slot : table.entries)
+      for (const RelocationFunctionPointer &slot : table.entries) {
+        if (slot.abi_function_symbol)
+          abi_function_roots.insert(slot.target_text_offset);
         adopt(slot.target_text_offset);
+      }
+    }
+    if (!externally_supplied_call_offsets.empty()) {
+      // A function pointer freshly loaded from this launch's kernarg memory can
+      // name any defined device function with a compatible signature. Preserve
+      // one canonical copy of every STT_FUNC and retarget every symbol before
+      // admitting the unresolved runtime call.
+      for (uint64_t function_offset : *text_function_offsets) {
+        const BasicBlock *entry = block_for_offset(block_index, function_offset);
+        if (entry == nullptr || entry->start_offset() != function_offset) {
+          append_error(result.diagnostics, DiagnosticKind::Legalization,
+                       "defined device function is not an instruction boundary; leaving code "
+                       "object unchanged");
+          return leave_unchanged();
+        }
+        abi_function_roots.insert(function_offset);
+        adopt(function_offset);
+      }
     }
     // A getpc that computes a code address makes that body address-taken just as surely as a
     // relocation slot does, so its target has to be accounted for before the rewrite is permitted.
@@ -1685,7 +1974,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
   }
   const std::unordered_set<uint64_t> adopted_return_offsets =
-      adopted_root_return_offsets(block_index, adopted_roots, text);
+      adopted_root_return_offsets(block_index, adopted_roots, abi_function_roots, text);
 
   const size_t expected_scope_count = kernel_translation_scope_count(descriptor_translations);
   if (scopes.size() != expected_scope_count) {
@@ -1879,9 +2168,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // scope happens to hold a clone.
   std::unordered_map<uint64_t, uint64_t> canonical_placement;
 
-  // Set when a scope hosting a canonical copy had to grow its own descriptor to lower it. See the
-  // assignment for why that combination cannot be made safe from inside the scope loop.
-  bool canonical_host_outgrew_its_descriptor = false;
+  // A canonical body is reached through a pointer, so every kernel descriptor
+  // that may enter it must cover semantic scratch resources introduced while
+  // lowering its one canonical copy. The adopting scope is first; once it has
+  // translated successfully, carry its minimums into every later descriptor.
+  struct CanonicalResourceRequirements {
+    uint32_t vgprs = 0;
+    uint32_t sgprs = 0;
+    uint32_t private_bytes = 0;
+  } canonical_resources;
   // Set when an unresolved indirect transfer was admitted only because every code address this
   // object produces is relocated. That argument also covers addresses arriving from outside, which
   // reach `.text` through a symbol, so while it is in force no `.text` symbol may keep its source
@@ -1895,10 +2190,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     size_t code_relocations_begin = 0;
     size_t pending_code_relocations_begin = 0;
     std::vector<uint64_t> canonical_placements_added;
-    // The resource verdict is set before descriptor recomputation, which can still skip the scope.
-    // Rolling the placements back without also restoring this would leave a skipped host's verdict
-    // standing and refuse the object over a scope that no longer contributes anything.
-    bool canonical_host_outgrew_its_descriptor = false;
   };
 
   auto fail_or_skip_kernel =
@@ -1925,8 +2216,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     pending_code_relocations.resize(relocation_snapshot.pending_code_relocations_begin);
     for (const uint64_t placed : relocation_snapshot.canonical_placements_added)
       canonical_placement.erase(placed);
-    canonical_host_outgrew_its_descriptor =
-        relocation_snapshot.canonical_host_outgrew_its_descriptor;
     for (const DescriptorVariantCheckpoint &saved : descriptor_snapshot) {
       if (saved.index >= descriptor_translations.size()) {
         append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
@@ -1971,11 +2260,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     const size_t output_begin = translated_text.size();
     const size_t text_relocations_begin = text_relocations.size();
     const size_t data_relocations_begin = data_relocations.size();
-    ScopeRelocationCheckpoint relocation_snapshot{
-        .code_relocations_begin = code_relocations.size(),
-        .pending_code_relocations_begin = pending_code_relocations.size(),
-        .canonical_placements_added = {},
-        .canonical_host_outgrew_its_descriptor = canonical_host_outgrew_its_descriptor};
+    ScopeRelocationCheckpoint relocation_snapshot{.code_relocations_begin = code_relocations.size(),
+                                                  .pending_code_relocations_begin =
+                                                      pending_code_relocations.size(),
+                                                  .canonical_placements_added = {}};
     const auto descriptor_snapshot =
         checkpoint_scope_descriptors(descriptor_translations, *scope.translation);
     bool skip_scope = false;
@@ -2654,6 +2942,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         const bool has_recovered_indirect_call = recovered_it != recovered_indirect_by_call.end();
         const bool has_relocation_table_call = relocation_table_calls.contains(offset);
         const bool recovered_indirect_return = valid_call_return_offsets.contains(offset);
+        const bool has_fresh_external_target = externally_supplied_call_offsets.contains(offset);
         const auto direct_branch_delta = inst.branch_offset_bytes();
         // A transfer through a value this object loaded from memory needs no per-target proof once
         // every code address the object can produce is relocated: the loaded word is either a
@@ -2675,18 +2964,23 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // What that leaves is narrow and worth stating: a host that derives an entry from a symbol
         // plus a byte offset, and a symbol that is present but unreferenced, which
         // relocate_text_symbols() tolerates so debug labels in padding do not refuse the object.
+        // A target proven to come from an ordinary-launch kernarg load is the
+        // non-vacuous external counterpart: the pointer is created after this
+        // load-time translation, and all defined function bodies were adopted
+        // above. Requiring every text symbol to move closes the same symbol-plus-
+        // offset gap for that path.
         const bool target_is_relocated_by_construction =
             object_produces_code_addresses && code_addresses_fully_accounted;
         if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
             !has_recovered_indirect_call && !has_relocation_table_call &&
             !recovered_indirect_return && !direct_branch_delta &&
-            target_is_relocated_by_construction) {
+            (target_is_relocated_by_construction || has_fresh_external_target)) {
           relied_on_relocated_by_construction = true;
         }
         if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
             !has_recovered_indirect_call && !has_relocation_table_call &&
             !recovered_indirect_return && !direct_branch_delta &&
-            !target_is_relocated_by_construction) {
+            !target_is_relocated_by_construction && !has_fresh_external_target) {
           auto failure = make_kernel_failure(
               DiagnosticKind::Legalization,
               "indirect branch or call target recovery is not implemented for relocated kernel "
@@ -3363,6 +3657,20 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
            .source_target_text_offset = source_target});
     }
 
+    const bool hosts_new_canonical_body = !relocation_snapshot.canonical_placements_added.empty();
+    const CanonicalResourceRequirements hosted_canonical_resources{
+        .vgprs = hosts_new_canonical_body ? kernel_context.required_vgpr_count : 0,
+        .sgprs = hosts_new_canonical_body ? kernel_context.required_sgpr_count : 0,
+        .private_bytes =
+            hosts_new_canonical_body ? kernel_context.required_private_segment_fixed_size : 0};
+
+    // These minimums are descriptor requirements, not scratch made available
+    // to this scope's lowering. Apply them only after instruction translation
+    // so unrelated kernels keep their original temporary-allocation choices.
+    kernel_context.require_vgprs(canonical_resources.vgprs);
+    kernel_context.require_sgprs(canonical_resources.sgprs);
+    kernel_context.require_private_segment_bytes(canonical_resources.private_bytes);
+
     if (kernel_context.required_vgpr_count > kernel_context.num_vgprs)
       scope.translation->target_vgpr_count = kernel_context.required_vgpr_count;
     if (kernel_context.required_sgpr_count > kernel_context.num_sgprs)
@@ -3370,20 +3678,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     if (kernel_context.required_private_segment_fixed_size >
         kernel_context.private_segment_fixed_size)
       scope.translation->target_private_size = kernel_context.required_private_segment_fixed_size;
-
-    // Only this scope's descriptor is grown from the values above, but a canonical copy this scope
-    // hosts is entered through a pointer any kernel can dereference. If lowering that copy needed
-    // resources beyond what this descriptor started with, another kernel would enter it under a
-    // budget that was never raised. Nothing here can raise that kernel's descriptor -- it may
-    // already be translated, and its own recompute happens inside its own scope -- so record the
-    // condition and refuse below rather than emit a descriptor that under-provisions a real caller.
-    if (!relocation_snapshot.canonical_placements_added.empty() &&
-        (kernel_context.required_vgpr_count > kernel_context.num_vgprs ||
-         kernel_context.required_sgpr_count > kernel_context.num_sgprs ||
-         kernel_context.required_private_segment_fixed_size >
-             kernel_context.private_segment_fixed_size)) {
-      canonical_host_outgrew_its_descriptor = true;
-    }
 
     if (scope.translation->target_vgpr_count != kernel_context.num_vgprs ||
         scope.translation->target_sgpr_count != kernel_context.num_sgprs ||
@@ -3426,9 +3720,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           }
           return leave_unchanged();
         }
-        updated->kernel_name = translation.kernel_name;
-        updated->sidecar_descriptor = translation.sidecar_descriptor;
-        updated->virtual_lds_lowering = translation.virtual_lds_lowering;
+        const std::vector<TranslationDiagnostic> recompute_diagnostics =
+            preserve_descriptor_translation_state(*updated, translation);
         // Register feedback also recomputes ordinary, non-virtual descriptors.
         // Only a virtual-LDS variant owns a backing-pointer entry prologue;
         // asking an unrelated ISA pair to materialize one makes otherwise
@@ -3452,7 +3745,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             auto failure = make_kernel_failure(DiagnosticKind::KernelDescriptor,
                                                "kernel descriptor translation requires unsupported "
                                                "resource or ABI virtualization");
-            for (const TranslationDiagnostic &diagnostic : updated->diagnostics) {
+            for (const TranslationDiagnostic &diagnostic : recompute_diagnostics) {
               if (diagnostic.severity != DiagnosticSeverity::Error)
                 continue;
               failure.kind = diagnostic.kind;
@@ -3469,13 +3762,13 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
               break;
             }
           }
-          append_diagnostics(result.diagnostics, updated->diagnostics);
+          append_diagnostics(result.diagnostics, recompute_diagnostics);
           append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
                        "kernel descriptor translation requires unsupported resource or ABI "
                        "virtualization; leaving code object unchanged");
           return leave_unchanged();
         }
-        append_diagnostics(result.diagnostics, updated->diagnostics);
+        append_diagnostics(result.diagnostics, recompute_diagnostics);
 
         if (updated->prologue_words != translation.prologue_words) {
           auto failure = make_kernel_failure(
@@ -3509,6 +3802,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       }
     }
 
+    if (hosts_new_canonical_body) {
+      canonical_resources.vgprs =
+          std::max(canonical_resources.vgprs, hosted_canonical_resources.vgprs);
+      canonical_resources.sgprs =
+          std::max(canonical_resources.sgprs, hosted_canonical_resources.sgprs);
+      canonical_resources.private_bytes =
+          std::max(canonical_resources.private_bytes, hosted_canonical_resources.private_bytes);
+    }
+
     flush_traces(pending_traces, target_delta);
 
     for (KdTranslation &translation : descriptor_translations) {
@@ -3519,15 +3821,75 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
   }
 
-  // A canonical copy is reached through a pointer, so any kernel in the object is a possible
-  // caller, but only the hosting scope's descriptor was grown to cover it. One kernel scope means
-  // the host is the only caller and the grown descriptor already covers it.
-  if (canonical_host_outgrew_its_descriptor && scopes.size() > 1) {
-    append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
-                 "a body reached through a code address needs resources beyond its hosting "
-                 "kernel's descriptor, which would under-provision every other kernel that can "
-                 "reach it");
-    return leave_unchanged();
+  // A canonical body first encountered in a later scope can raise the shared
+  // minimum after earlier descriptors were already recomputed. Close that
+  // ordering gap with one descriptor-only pass; instruction lowering remains
+  // single-pass and every saved entry/prologue placement must stay identical.
+  if (canonical_resources.vgprs != 0 || canonical_resources.sgprs != 0 ||
+      canonical_resources.private_bytes != 0) {
+    for (KdTranslation &translation : descriptor_translations) {
+      if (translation.skipped)
+        continue;
+      if (canonical_resources.vgprs <= translation.target_vgpr_count &&
+          canonical_resources.sgprs <= translation.target_sgpr_count &&
+          canonical_resources.private_bytes <= translation.target_private_size)
+        continue;
+
+      KernelDescriptorTranslationOptions base_options;
+      base_options.virtualize_lds = translation.needs_lds_overflow_buf;
+      base_options.allow_oversized_lds =
+          can_emit_sidecar_descriptors && !translation.needs_lds_overflow_buf;
+      const auto base = descriptor_translator.translate_descriptor(
+          patcher.image_bytes(), translation.descriptor_file_offset, translation.entry_text_offset,
+          base_options);
+      if (!base) {
+        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                     "canonical function resources could not be applied to every kernel "
+                     "descriptor; leaving code object unchanged");
+        return leave_unchanged();
+      }
+
+      KernelDescriptorTranslationOptions options = base_options;
+      options.minimum_vgprs = std::max(translation.target_vgpr_count, canonical_resources.vgprs);
+      options.minimum_sgprs = std::max(translation.target_sgpr_count, canonical_resources.sgprs);
+      const uint32_t desired_private =
+          std::max(translation.target_private_size, canonical_resources.private_bytes);
+      if (desired_private < base->target_private_size) {
+        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                     "canonical function private-memory accounting regressed; leaving code "
+                     "object unchanged");
+        return leave_unchanged();
+      }
+      options.private_segment_fixed_size_addend = desired_private - base->target_private_size;
+
+      auto updated = descriptor_translator.translate_descriptor(
+          patcher.image_bytes(), translation.descriptor_file_offset, translation.entry_text_offset,
+          options);
+      if (!updated) {
+        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                     "canonical function resources could not be applied to every kernel "
+                     "descriptor; leaving code object unchanged");
+        return leave_unchanged();
+      }
+      const std::vector<TranslationDiagnostic> recompute_diagnostics =
+          preserve_descriptor_translation_state(*updated, translation);
+      if (updated->needs_lds_overflow_buf &&
+          !append_virtual_lds_entry_prologue(*updated, guest_arch_, host_arch_)) {
+        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                     "canonical function resource growth could not preserve the virtual LDS "
+                     "entry prologue; leaving code object unchanged");
+        return leave_unchanged();
+      }
+      if (!updated->supported || updated->prologue_words != translation.prologue_words) {
+        append_diagnostics(result.diagnostics, recompute_diagnostics);
+        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                     "canonical function resource growth changed an established kernel ABI; "
+                     "leaving code object unchanged");
+        return leave_unchanged();
+      }
+      append_diagnostics(result.diagnostics, recompute_diagnostics);
+      translation = std::move(*updated);
+    }
   }
 
   // Every scope has been placed, so a code-target builder can finally be told where its target

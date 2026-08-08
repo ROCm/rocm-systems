@@ -5232,9 +5232,6 @@ VSExpF32Vop3::VSExpF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
-      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
-    throw util::InvalidInst("V_S_EXP_F32 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -5249,6 +5246,9 @@ VSExpF32Vop3::VSExpF32Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_EXP_F32 does not support DPP", "");
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+    throw util::InvalidInst("V_S_EXP_F32 may not use EXEC as a destination", "");
 }
 
 VSExpF16Vop3::VSExpF16Vop3(const MachineInst *inst)
@@ -5259,9 +5259,6 @@ VSExpF16Vop3::VSExpF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
-      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
-    throw util::InvalidInst("V_S_EXP_F16 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -5277,6 +5274,9 @@ VSExpF16Vop3::VSExpF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_EXP_F16 does not support DPP", "");
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+    throw util::InvalidInst("V_S_EXP_F16 may not use EXEC as a destination", "");
 }
 
 VSLogF32Vop3::VSLogF32Vop3(const MachineInst *inst)
@@ -5287,9 +5287,6 @@ VSLogF32Vop3::VSLogF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
-      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
-    throw util::InvalidInst("V_S_LOG_F32 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -5304,6 +5301,9 @@ VSLogF32Vop3::VSLogF32Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_LOG_F32 does not support DPP", "");
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+    throw util::InvalidInst("V_S_LOG_F32 may not use EXEC as a destination", "");
 }
 
 VSLogF16Vop3::VSLogF16Vop3(const MachineInst *inst)
@@ -5314,9 +5314,6 @@ VSLogF16Vop3::VSLogF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
-      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
-    throw util::InvalidInst("V_S_LOG_F16 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -5332,6 +5329,9 @@ VSLogF16Vop3::VSLogF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_LOG_F16 does not support DPP", "");
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+    throw util::InvalidInst("V_S_LOG_F16 may not use EXEC as a destination", "");
 }
 
 VSRcpF32Vop3::VSRcpF32Vop3(const MachineInst *inst)
@@ -5342,9 +5342,6 @@ VSRcpF32Vop3::VSRcpF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
-      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
-    throw util::InvalidInst("V_S_RCP_F32 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -5359,6 +5356,9 @@ VSRcpF32Vop3::VSRcpF32Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_RCP_F32 does not support DPP", "");
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+    throw util::InvalidInst("V_S_RCP_F32 may not use EXEC as a destination", "");
 }
 
 VSRcpF16Vop3::VSRcpF16Vop3(const MachineInst *inst)
@@ -5369,9 +5369,6 @@ VSRcpF16Vop3::VSRcpF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
-      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
-    throw util::InvalidInst("V_S_RCP_F16 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -5387,6 +5384,9 @@ VSRcpF16Vop3::VSRcpF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_RCP_F16 does not support DPP", "");
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+    throw util::InvalidInst("V_S_RCP_F16 may not use EXEC as a destination", "");
 }
 
 VSRsqF32Vop3::VSRsqF32Vop3(const MachineInst *inst)
@@ -5397,9 +5397,6 @@ VSRsqF32Vop3::VSRsqF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
-      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
-    throw util::InvalidInst("V_S_RSQ_F32 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -5414,6 +5411,9 @@ VSRsqF32Vop3::VSRsqF32Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_RSQ_F32 does not support DPP", "");
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+    throw util::InvalidInst("V_S_RSQ_F32 may not use EXEC as a destination", "");
 }
 
 VSRsqF16Vop3::VSRsqF16Vop3(const MachineInst *inst)
@@ -5424,9 +5424,6 @@ VSRsqF16Vop3::VSRsqF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
-      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
-    throw util::InvalidInst("V_S_RSQ_F16 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -5442,6 +5439,9 @@ VSRsqF16Vop3::VSRsqF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_RSQ_F16 does not support DPP", "");
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+    throw util::InvalidInst("V_S_RSQ_F16 may not use EXEC as a destination", "");
 }
 
 VSSqrtF32Vop3::VSSqrtF32Vop3(const MachineInst *inst)
@@ -5452,9 +5452,6 @@ VSSqrtF32Vop3::VSSqrtF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
-      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
-    throw util::InvalidInst("V_S_SQRT_F32 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -5469,6 +5466,9 @@ VSSqrtF32Vop3::VSSqrtF32Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_SQRT_F32 does not support DPP", "");
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+    throw util::InvalidInst("V_S_SQRT_F32 may not use EXEC as a destination", "");
 }
 
 VSSqrtF16Vop3::VSSqrtF16Vop3(const MachineInst *inst)
@@ -5479,9 +5479,6 @@ VSSqrtF16Vop3::VSSqrtF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
-      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
-    throw util::InvalidInst("V_S_SQRT_F16 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -5497,6 +5494,9 @@ VSSqrtF16Vop3::VSSqrtF16Vop3(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_SQRT_F16 does not support DPP", "");
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+    throw util::InvalidInst("V_S_SQRT_F16 may not use EXEC as a destination", "");
 }
 
 VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)

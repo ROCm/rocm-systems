@@ -717,22 +717,50 @@ TEST_P(PseudoScalarExecTest, ExecutesAtExecZeroWithDestinationOpselZeroAndUsesLo
   EXPECT_EQ(fixture.wavefront->exec(), 0u);
 }
 
-TEST_P(PseudoScalarExecTest, RejectsVccDestinations) {
+TEST(PseudoScalarDecodeTest, ExecutesWithVccAsSourceAndDestination) {
+  constexpr std::array<uint32_t, 2> kVccSelectors{{106u, 107u}};
+
+  for (const PseudoScalarProfile &profile : kProfiles) {
+    SCOPED_TRACE(profile.name);
+    PseudoScalarFixture fixture(profile);
+    ASSERT_TRUE(fixture.ready());
+
+    for (const uint32_t selector : kVccSelectors) {
+      SCOPED_TRACE(selector);
+      const InstructionWords words = encode_vop3(profile, "v_s_rcp_f32", selector, selector);
+      std::unique_ptr<Instruction> instruction(fixture.decoder->decode(words.data()));
+      ASSERT_NE(instruction, nullptr);
+
+      const uint64_t source = selector == kVccSelectors[0]
+                                  ? (uint64_t{0xDEADBEEF} << 32) | f32_bits(2.0f)
+                                  : (uint64_t{f32_bits(2.0f)} << 32) | 0xDEADBEEFu;
+      const uint64_t expected = selector == kVccSelectors[0]
+                                    ? (uint64_t{0xDEADBEEF} << 32) | f32_bits(0.5f)
+                                    : (uint64_t{f32_bits(0.5f)} << 32) | 0xDEADBEEFu;
+      fixture.wavefront->set_vcc(source);
+      fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront);
+      EXPECT_EQ(fixture.wavefront->vcc(), expected);
+    }
+  }
+}
+
+TEST(PseudoScalarDecodeTest, RejectsExecDestinations) {
+  constexpr std::array<uint32_t, 2> kExecSelectors{{126u, 127u}};
   constexpr uint32_t kSourceSgpr = 0;
-  constexpr std::array<uint32_t, 2> kVccDestinationEncodings{{106u, 107u}};
 
-  const PseudoScalarProfile &profile = *GetParam().profile;
-  const PseudoScalarCase &test_case = *GetParam().test_case;
-  PseudoScalarFixture fixture(profile);
-  ASSERT_TRUE(fixture.ready()) << profile.name;
-
-  for (const uint32_t destination : kVccDestinationEncodings) {
-    const InstructionWords words =
-        encode_vop3(profile, test_case.mnemonic, destination, kSourceSgpr);
-    EXPECT_THROW(
-        { std::unique_ptr<Instruction> instruction(fixture.decoder->decode(words.data())); },
-        util::InvalidInst)
-        << profile.name << " " << test_case.mnemonic << " destination=" << destination;
+  for (const PseudoScalarProfile &profile : kProfiles) {
+    SCOPED_TRACE(profile.name);
+    std::unique_ptr<Decoder> decoder = Decoder::create(profile.arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const PseudoScalarCase &test_case : kCases) {
+      SCOPED_TRACE(test_case.mnemonic);
+      for (const uint32_t selector : kExecSelectors) {
+        SCOPED_TRACE(selector);
+        const InstructionWords words =
+            encode_vop3(profile, test_case.mnemonic, selector, kSourceSgpr);
+        EXPECT_THROW((void)decoder->decode(words.data()), util::InvalidInst);
+      }
+    }
   }
 }
 

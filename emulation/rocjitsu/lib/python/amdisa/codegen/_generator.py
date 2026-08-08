@@ -7295,21 +7295,21 @@ class CodeGenerator:
                     ctor_body_parts.extend(conditional_src_body)
                     ctor_body_parts.extend(conditional_dst_body)
 
-                    # Pseudo-scalar V_S_* instructions encode their SGPR
-                    # destination through VDST, but the ISA reserves the VCC
-                    # selectors for this instruction family. Keep this check
-                    # local to pseudo_scalar_unary: OPR_SREG legitimately
-                    # permits VCC destinations for other instructions.
+                    # LLVM models pseudo-scalar V_S_* destinations as
+                    # SReg_32_XEXEC: ordinary SGPRs and VCC halves are legal,
+                    # but EXEC_LO/EXEC_HI are deliberately excluded. Keep this
+                    # family-specific because its VDST field is wider than the
+                    # OPR_SREG register class represented by Operand itself.
                     if (
                         inst_sem is not None
                         and inst_sem.semantic_class == 'pseudo_scalar_unary'
                     ):
                         ctor_body_parts.append(
                             'if (reinterpret_cast<const OpEncoding*>(inst)->vdst == '
-                            'OpSelSreg::OPR_SREG_VCC_LO || '
+                            'OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO || '
                             'reinterpret_cast<const OpEncoding*>(inst)->vdst == '
-                            'OpSelSreg::OPR_SREG_VCC_HI) '
-                            f'throw util::InvalidInst("{inst.name} may not use VCC as '
+                            'OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI) '
+                            f'throw util::InvalidInst("{inst.name} may not use EXEC as '
                             'a destination", "");'
                         )
 
