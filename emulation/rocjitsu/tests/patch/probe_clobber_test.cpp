@@ -36,6 +36,13 @@ constexpr uint32_t kSMovM0_0 = 0xbefc0080;        // s_mov_b32 m0, 0
 constexpr uint32_t kSMovVccLo_0 = 0xbeea0080;     // s_mov_b32 vcc_lo, 0
 constexpr uint32_t kSMovFlatScrLo_0 = 0xbee60080; // s_mov_b32 flat_scratch_lo, 0
 
+// VOPC compares model their special-state write as a named destination operand:
+// v_cmp_eq_u32 exposes "vcc"; v_cmpx_eq_u32 exposes "vcc" and "exec". The summary's
+// operand-name scan therefore sees these defs (see the *WriteFromCompareIsDetected
+// tests), even though the write carries no explicitly-encoded operand field.
+constexpr uint32_t kVCmpEqU32 = 0x7D940000;  // v_cmp_eq_u32 vcc, s0, v0
+constexpr uint32_t kVCmpxEqU32 = 0x7DB40000; // v_cmpx_eq_u32 s0, v0
+
 constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA2;
 
 ProbeCallable make_callable(std::vector<uint32_t> body) {
@@ -127,6 +134,27 @@ TEST(ProbeClobber, DetectsExplicitVccWrite) {
   EXPECT_FALSE(summary->touches_exec);
   EXPECT_FALSE(summary->touches_m0);
   EXPECT_FALSE(summary->touches_flat_scratch);
+}
+
+// VOPC compares write VCC (v_cmp) / EXEC (v_cmpx) through a named destination
+// operand the decoder exposes ("vcc", "exec"), so the summary's operand-name scan
+// catches them even though the write carries no explicitly-encoded operand field.
+// (Genuinely operand-less implicit defs would still be invisible here; the
+// trampoline preserves EXEC/VCC unconditionally to cover that case.)
+TEST(ProbeClobber, VccWriteFromCompareIsDetected) {
+  const auto callable = make_callable({kVCmpEqU32, kSSetpcS30S31});
+  std::string err;
+  const auto summary = build_probe_clobber_summary(callable, &err);
+  ASSERT_TRUE(summary.has_value()) << err;
+  EXPECT_TRUE(summary->touches_vcc) << "v_cmp's VCC def is exposed as a named 'vcc' operand";
+}
+
+TEST(ProbeClobber, ExecWriteFromCmpxIsDetected) {
+  const auto callable = make_callable({kVCmpxEqU32, kSSetpcS30S31});
+  std::string err;
+  const auto summary = build_probe_clobber_summary(callable, &err);
+  ASSERT_TRUE(summary.has_value()) << err;
+  EXPECT_TRUE(summary->touches_exec) << "v_cmpx's EXEC def is exposed as a named 'exec' operand";
 }
 
 // A body that writes FLAT_SCRATCH via an explicit operand must set
