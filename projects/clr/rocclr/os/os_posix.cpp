@@ -910,9 +910,42 @@ bool amd::Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr,
       tokens >> permissions >> std::hex >> offset >> std::dec >> device >> inode;
       std::getline(tokens >> std::ws, uri_file_path);
 
-      // Readable bytes from image to the end of this mapping (anonymous or not).
+      // Readable bytes from image to the end of the region holding it. One
+      // allocation can span several adjacent entries, so walk forward while the
+      // next one is adjacent, readable and has the same backing object. The cap
+      // keeps the cost off the size of the address space; stopping early only
+      // shortens the bound.
       if (region_bound_ptr != nullptr && !permissions.empty() && permissions[0] == 'r') {
-        *region_bound_ptr = static_cast<size_t>(high_address - address);
+        constexpr int kMaxCoalescedMappings = 32;
+        uintptr_t readable_end = high_address;
+        std::string next_line;
+        for (int examined = 0; examined < kMaxCoalescedMappings; ++examined) {
+          if (!std::getline(proc_maps, next_line)) {
+            break;
+          }
+          std::stringstream next_tokens(next_line);
+          uintptr_t next_low, next_high;
+          char next_dash;
+          next_tokens >> std::hex >> next_low >> std::dec >> next_dash >> std::hex >> next_high >>
+              std::dec;
+          // Stop on an unparsable line; skipping one would make a later mapping
+          // look adjacent.
+          if (next_tokens.fail() || next_dash != '-' || next_low != readable_end) {
+            break;
+          }
+          std::string next_permissions, next_device, next_path;
+          size_t next_offset;
+          uint64_t next_inode;
+          next_tokens >> next_permissions >> std::hex >> next_offset >> std::dec >> next_device >>
+              next_inode;
+          std::getline(next_tokens >> std::ws, next_path);
+          if (next_permissions.empty() || next_permissions[0] != 'r' || next_inode != inode ||
+              next_device != device || next_path != uri_file_path) {
+            break;
+          }
+          readable_end = next_high;
+        }
+        *region_bound_ptr = static_cast<size_t>(readable_end - address);
       }
 
       if (inode == 0 || uri_file_path.empty()) {

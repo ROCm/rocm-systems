@@ -56,8 +56,14 @@ class Os : AllStatic {
 
   // Returns the file name & file offset of mapped memory if the file is mapped.
   // If region_bound_ptr is non-null and 'image' lies in a readable mapping, it is
-  // set to the number of readable bytes from 'image' to the end of that mapping
-  // (populated for anonymous mappings too, even when no file name is resolved).
+  // set to the bytes readable from 'image' to the end of the run of adjacent
+  // mappings sharing its backing object (populated for anonymous mappings too,
+  // even when no file name is resolved). One allocation may span several
+  // mappings; the run stops at a gap, an unreadable mapping, or a different
+  // backing object.
+  //
+  // This is a page-granular no-fault ceiling, not an object length. Use it to
+  // keep parsing inside readable memory, never as a trust boundary.
   static bool FindFileNameFromAddress(const void* image, std::string* fname_ptr,
                                       size_t* foffset_ptr, size_t* region_bound_ptr = nullptr);
 
