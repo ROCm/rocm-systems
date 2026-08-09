@@ -223,6 +223,26 @@ def test_each_pass_collects_distinct_batch(json_data, expected_passes, common_co
         )
 
 
+def test_pass_index_maps_to_requested_group(json_data, common_counters, pass_groups):
+    # Metric 3b: pass i must collect exactly the unique counter of --pmc group i. The union check
+    # above cannot see a pass->group permutation or a skew that moves a counter between passes,
+    # and either one silently attributes counters to the wrong group in a tool's output.
+    if not pass_groups:
+        pytest.skip("--pass-groups not supplied")
+    table = _records_by_dispatch(_sdk(json_data))
+    common = set(common_counters)
+    for dispatch_id, entry in table.items():
+        for pass_idx, expected in enumerate(pass_groups):
+            assert (
+                pass_idx in entry["passes"]
+            ), f"dispatch {dispatch_id} ({entry['kernel']}) has no pass {pass_idx}"
+            got = sorted(c for c in entry["passes"][pass_idx] if c not in common)
+            assert got == [expected], (
+                f"dispatch {dispatch_id} ({entry['kernel']}) pass {pass_idx} collected {got}, "
+                f"expected exactly ['{expected}'] from --pmc group {pass_idx}"
+            )
+
+
 def test_counters_differ_between_kernels(json_data, common_counters):
     # Metric 4: each kernel has a distinct signature over the shared counters.
     table = _records_by_dispatch(_sdk(json_data))

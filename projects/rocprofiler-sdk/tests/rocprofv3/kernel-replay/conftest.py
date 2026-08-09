@@ -47,6 +47,13 @@ def pytest_addoption(parser):
         default=["SQ_WAVES", "SQ_INSTS_VALU"],
         help="counters shared by every --pmc group; must be constant across a kernel's passes",
     )
+    parser.addoption(
+        "--pass-groups",
+        action="store",
+        nargs="+",
+        default=None,
+        help="counter unique to each --pmc group, in group order; pass i must collect entry i",
+    )
 
 
 @pytest.fixture
@@ -65,3 +72,8 @@ def expected_passes(request):
 @pytest.fixture
 def common_counters(request):
     return list(request.config.getoption("--common-counters"))
+
+
+@pytest.fixture
+def pass_groups(request):
+    return list(request.config.getoption("--pass-groups") or [])

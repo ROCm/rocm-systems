@@ -31,6 +31,12 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.p
 # this generate step.
 set(REPLAY_PASSES 5)
 
+# The counter unique to each --pmc group, in the order the groups are passed below. Pass i
+# must collect exactly entry i, which is what pins the replay pass index to the requested
+# group.
+set(REPLAY_PASS_GROUPS GRBM_COUNT GRBM_GUI_ACTIVE SQ_INSTS_SALU SQ_INSTS_SMEM
+                       SQ_INSTS_LDS)
+
 add_test(
     NAME rocprofv3-test-kernel-replay-generate
     COMMAND
@@ -64,7 +70,8 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.json --passes
-        ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU)
+        ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU --pass-groups
+        ${REPLAY_PASS_GROUPS})
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-validate
@@ -113,7 +120,8 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval/out_results.json --passes
-        ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU)
+        ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU --pass-groups
+        ${REPLAY_PASS_GROUPS})
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-interval-validate
