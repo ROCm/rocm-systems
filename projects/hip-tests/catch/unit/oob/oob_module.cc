@@ -1,6 +1,7 @@
 #include <hip_test_common.hh>
 #include <hip/hiprtc.h>
 #include "hip_test_filesystem.hh"
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -240,6 +241,53 @@ HIP_TEST_CASE(OOB_hiprtc_roundtrip_loads) {
   HIP_CHECK(hipModuleLoadData(&module, code.data()));
   HIP_CHECK(hipModuleUnload(module));
 }
+
+#if HT_AMD
+// One allocation can span several kernel mappings, so a valid code object must
+// still load when it straddles the seam. mprotect splits the region here;
+// production hits the same shape through mbind() and friends.
+HIP_TEST_CASE(OOB_hipModuleLoadData_Positive_ImageSpansSplitMapping) {
+  static constexpr char kSource[] = "extern \"C\" __global__ void nop() {}\n";
+
+  hipDeviceProp_t props;
+  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  const std::string arch = std::string("--offload-arch=") + props.gcnArchName;
+  const char* options[] = {arch.c_str()};
+
+  hiprtcProgram prog;
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, kSource, "nop.cu", 0, nullptr, nullptr));
+  HIPRTC_CHECK(hiprtcCompileProgram(prog, 1, options));
+  size_t code_size = 0;
+  HIPRTC_CHECK(hiprtcGetCodeSize(prog, &code_size));
+  std::vector<char> code(code_size);
+  HIPRTC_CHECK(hiprtcGetCode(prog, code.data()));
+  HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
+  REQUIRE(code_size > 1);
+
+  const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  // Start the image before the seam and end it after, whatever its size.
+  const size_t head = std::min(code_size / 2, page / 2);
+  const size_t start = page - head;
+  const size_t span = ((start + code_size + page - 1) / page + 1) * page;
+
+  char* region = static_cast<char*>(
+      mmap(nullptr, span, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  REQUIRE(region != MAP_FAILED);
+
+  char* image = region + start;
+  std::memcpy(image, code.data(), code_size);
+  REQUIRE(mprotect(region + page, page, PROT_READ) == 0);
+  REQUIRE(std::memcmp(image, code.data(), code_size) == 0);
+
+  hipModule_t module{};
+  const hipError_t status = hipModuleLoadData(&module, image);
+  if (status == hipSuccess) {
+    HIP_CHECK(hipModuleUnload(module));
+  }
+  REQUIRE(munmap(region, span) == 0);
+  HIP_CHECK(status);
+}
+#endif  // HT_AMD
 
 // ---------------------------------------------------------------------------
 // Readable-size bounds tests for fat-binary parsing.

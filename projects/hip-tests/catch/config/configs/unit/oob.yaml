@@ -24,3 +24,7 @@ oob:
     <<: *level_4
     disabled: [windows, amd_windows, nvidia_linux, nvidia_windows]
     tags: [oob]
+  OOB_hipModuleLoadData_Positive_ImageSpansSplitMapping:
+    <<: *level_4
+    disabled: [windows, amd_windows, nvidia_linux, nvidia_windows]
+    tags: [oob]
