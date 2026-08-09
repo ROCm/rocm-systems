@@ -21,7 +21,23 @@ set(rocprofv3-validate-env
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     )
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.py)
+rocprofiler_configure_pytest_files(
+    CONFIG pytest.ini COPY conftest.py validate.py replay_fixtures.py
+                           test_validate_selftest.py)
+
+# Guards validate.py itself: drives its checks over a synthetic correct replay and over
+# one mutation per known failure mode, requiring the correct one to be accepted and every
+# broken one rejected. Needs no GPU and no profiling run, so it is not tied to the
+# fixtures below.
+add_test(NAME rocprofv3-test-kernel-replay-validator-selftest
+         COMMAND ${Python3_EXECUTABLE} -m pytest -q --no-header
+                 ${CMAKE_CURRENT_BINARY_DIR}/test_validate_selftest.py)
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-validator-selftest
+    PROPERTIES TIMEOUT 60 LABELS "integration-tests;kernel-replay" ENVIRONMENT
+               "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 # Collect counters via in-process kernel replay. The number of --pmc groups drives the
 # number of replay passes (one batch per pass), with device memory restored between

@@ -30,14 +30,14 @@ def pytest_addoption(parser):
     parser.addoption(
         "--json-input",
         action="store",
-        required=True,
+        default=None,
         help="rocprofv3 results JSON produced by a --kernel-replay-beta-enabled run",
     )
     parser.addoption(
         "--passes",
         action="store",
         type=int,
-        required=True,
+        default=None,
         help="expected number of replay passes per dispatch (number of --pmc groups)",
     )
     parser.addoption(
@@ -59,6 +59,7 @@ def pytest_addoption(parser):
 @pytest.fixture
 def json_data(request):
     path = request.config.getoption("--json-input")
+    assert path, "--json-input is required by this test"
     assert os.path.isfile(path), f"missing JSON input: {path}"
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -66,7 +67,9 @@ def json_data(request):
 
 @pytest.fixture
 def expected_passes(request):
-    return request.config.getoption("--passes")
+    passes = request.config.getoption("--passes")
+    assert passes is not None, "--passes is required by this test"
+    return passes
 
 
 @pytest.fixture
