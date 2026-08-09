@@ -355,7 +355,8 @@ struct alignas(16) ncclDevWorkP2p {
   // Chunk size stored in 8 bits via u32fp8Encode/Decode.
   uint8_t sendChunkSize_u32fp8, recvChunkSize_u32fp8;
 
-  uint8_t sendProtoLL:1, recvProtoLL:1;
+  // SendRecv uses the LL128 protocol (instead of SIMPLE) for latency-bound sizes.
+  uint8_t sendProtoLL128:1, recvProtoLL128:1;
   uint8_t sendNetReg:1, recvNetReg:1;
   uint8_t sendIpcReg:1, recvIpcReg:1;
 

@@ -173,8 +173,8 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
         subtid, subtn, 0, false, 1, &work->sendAddr, 1, &work->recvAddr, (ssize_t)work->sendBytes);
 #endif
   } else if (isSend) {
-    if (work->sendProtoLL) {
-      runSend<ProtoLL>(subtid, subtn, group, work);
+    if (work->sendProtoLL128) {
+      runSend<ProtoLL128>(subtid, subtn, group, work);
     } else {
 #if defined(__gfx90a__)
       runSend<ProtoSimple<1, 1, 0, 8>>(subtid, subtn, group, work);
@@ -187,8 +187,8 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 #endif
     }
   } else {
-    if (work->recvProtoLL) {
-      runRecv<ProtoLL>(subtid, subtn, group, work);
+    if (work->recvProtoLL128) {
+      runRecv<ProtoLL128>(subtid, subtn, group, work);
     } else {
 #if defined(__gfx90a__)
       runRecv<ProtoSimple<1, 1, 0, 8>>(subtid, subtn, group, work);

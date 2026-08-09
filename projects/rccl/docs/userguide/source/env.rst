@@ -1574,7 +1574,7 @@ NCCL_P2P_LL_THRESHOLD
 ---------------------
 (since 2.14)
 
-The ``NCCL_P2P_LL_THRESHOLD`` is the maximum message size that NCCL will use the LL protocol for P2P operations.
+The ``NCCL_P2P_LL_THRESHOLD`` is the maximum per-channel message size (in bytes) at or below which RCCL uses the low-latency protocol for P2P (send/recv) operations. Above this size, RCCL uses the SIMPLE protocol. RCCL's P2P send/recv uses the LL128 protocol for these latency-bound sizes on both the intranode and internode paths (LL128 replaces the older LL protocol for send/recv).
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -1584,8 +1584,8 @@ NCCL_ALLOC_P2P_NET_LL_BUFFERS
 -----------------------------
 (since 2.14)
 
-``NCCL_ALLOC_P2P_NET_LL_BUFFERS`` instructs communicators to allocate dedicated LL buffers for all P2P network connections. This enables all ranks to use the LL protocol for latency-bound send and receive operations below ``NCCL_P2P_LL_THRESHOLD`` sizes.
-Intranode P2P transfers always have dedicated LL buffers allocated. If running all-to-all workloads with high numbers of ranks, this will result in a high scaling memory overhead.
+``NCCL_ALLOC_P2P_NET_LL_BUFFERS`` instructs communicators to allocate dedicated low-latency buffers for all P2P network connections. This enables all ranks to use the low-latency (LL128) protocol for latency-bound send and receive operations below ``NCCL_P2P_LL_THRESHOLD`` sizes over the network.
+Intranode P2P transfers always have dedicated low-latency buffers allocated. If running all-to-all workloads with high numbers of ranks, this will result in a high scaling memory overhead.
 
 Values accepted
 ^^^^^^^^^^^^^^^
