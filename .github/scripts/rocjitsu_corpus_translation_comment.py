@@ -169,8 +169,9 @@ def resolve_plan(event: dict[str, Any], api: Any, repository: str) -> Comparison
     run = event.get("workflow_run")
     if not isinstance(run, dict) or run.get("event") != "pull_request":
         return ComparisonPlan(False, "Source workflow was not a pull-request run.")
-    if run.get("conclusion") != "success":
-        return ComparisonPlan(False, "Source pull-request workflow did not succeed.")
+    # The candidate artifact is uploaded only after the release manifest is
+    # finalized. Other matrix lanes may fail independently, so the aggregate
+    # workflow conclusion is not a prerequisite for comparison.
     if run.get("path") != TRUSTED_WORKFLOW_PATH:
         return ComparisonPlan(
             False,
