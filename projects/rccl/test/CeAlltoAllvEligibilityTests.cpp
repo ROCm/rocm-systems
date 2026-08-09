@@ -8,6 +8,7 @@
 
 #include "ce_coll.h"
 #include "collectives.h"
+#include "group.h"
 #include "gtest/gtest.h"
 #include "nccl_common.h"
 #include "sym_kernels.h"
@@ -54,16 +55,68 @@ TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_EligibleWithSymmetricSingleNode)
     if (!isCeRuntimeDriverSupported())
         GTEST_SKIP() << "CE driver not in supported range";
 
-    EXPECT_TRUE(ncclCeAvailable(mockComm_.get(),
-                                ncclFuncAlltoAllv,
-                                ncclDevSum,
-                                ncclFloat32,
-                                ncclSymSendRegRecvReg));
-    EXPECT_TRUE(ncclCeAvailable(mockComm_.get(),
-                                ncclFuncAlltoAllv,
-                                ncclDevSum,
-                                ncclFloat32,
-                                ncclSymSendNonregRecvReg));
+    EXPECT_TRUE(ncclCeAlltoAllvEligible(mockComm_.get(),
+                                        ncclFloat32,
+                                        ncclSymSendRegRecvReg,
+                                        /*hasSysmemSegment=*/false,
+                                        /*capturing=*/false));
+    EXPECT_TRUE(ncclCeAlltoAllvEligible(mockComm_.get(),
+                                        ncclFloat32,
+                                        ncclSymSendNonregRecvReg,
+                                        /*hasSysmemSegment=*/false,
+                                        /*capturing=*/false));
+}
+
+TEST_F(CeAlltoAllvEligibilityTest, CeAlltoAllvEligible_RequiresZeroCtaPolicy)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.comm.config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+    EXPECT_FALSE(ncclCeAlltoAllvEligible(mockComm_.get(),
+                                         ncclFloat32,
+                                         ncclSymSendRegRecvReg,
+                                         /*hasSysmemSegment=*/false,
+                                         /*capturing=*/false));
+
+    mockComm_.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+    EXPECT_TRUE(ncclCeAlltoAllvEligible(mockComm_.get(),
+                                        ncclFloat32,
+                                        ncclSymSendRegRecvReg,
+                                        /*hasSysmemSegment=*/false,
+                                        /*capturing=*/false));
+}
+
+TEST_F(CeAlltoAllvEligibilityTest, CeAlltoAllvEligible_RejectsSysmemSegmentOrCapture)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    EXPECT_FALSE(ncclCeAlltoAllvEligible(mockComm_.get(),
+                                         ncclFloat32,
+                                         ncclSymSendRegRecvReg,
+                                         /*hasSysmemSegment=*/true,
+                                         /*capturing=*/false));
+    EXPECT_FALSE(ncclCeAlltoAllvEligible(mockComm_.get(),
+                                         ncclFloat32,
+                                         ncclSymSendRegRecvReg,
+                                         /*hasSysmemSegment=*/false,
+                                         /*capturing=*/true));
+}
+
+TEST_F(CeAlltoAllvEligibilityTest, CeAlltoAllvEligible_RejectsNestedGroup)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    const int savedGroupDepth = ncclGroupDepth;
+    ncclGroupDepth = 1;
+    EXPECT_FALSE(ncclCeAlltoAllvEligible(mockComm_.get(),
+                                         ncclFloat32,
+                                         ncclSymSendRegRecvReg,
+                                         /*hasSysmemSegment=*/false,
+                                         /*capturing=*/false));
+    ncclGroupDepth = savedGroupDepth;
 }
 
 TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_MultiNodeRejected)
@@ -118,24 +171,24 @@ TEST_F(CeAlltoAllvEligibilityTest, LocalMetadataPackingMatchesGatheredLayout)
     const size_t rdispls[nRanks]    = {0, 8, 24, 56};
 
     std::vector<size_t> local(4 * nRanks);
-    packLocalAlltoAllvSizes(local.data(), nRanks, sendcounts, sdispls, recvcounts, rdispls);
+    ncclAlltoAllvPackLocalSizes(local.data(), nRanks, sendcounts, sdispls, recvcounts, rdispls);
 
     std::vector<size_t> gathered(4 * nRanks * nRanks, 0);
     const size_t blockBytes = static_cast<size_t>(4 * nRanks) * sizeof(size_t);
-    std::memcpy(gathered.data() + ceAlltoAllvMetaBlockOffset(1, nRanks),
+    std::memcpy(gathered.data() + ncclAlltoAllvMetaBlockOffset(1, nRanks),
                 local.data(),
                 blockBytes);
 
-    size_t* rank1SendSizes = ceAlltoAllvSendSizes(gathered.data(), 1, nRanks);
-    size_t* rank1SendDispls = ceAlltoAllvSendDispls(gathered.data(), 1, nRanks);
-    size_t* rank1RecvSizes = ceAlltoAllvRecvSizes(gathered.data(), 1, nRanks);
-    size_t* rank1RecvDispls = ceAlltoAllvRecvDispls(gathered.data(), 1, nRanks);
+    size_t* rank1SendSizes = ncclAlltoAllvSendSizes(gathered.data(), 1, nRanks);
+    size_t* rank1SendDispls = ncclAlltoAllvSendDispls(gathered.data(), 1, nRanks);
+    size_t* rank1RecvSizes = ncclAlltoAllvRecvSizes(gathered.data(), 1, nRanks);
+    size_t* rank1RecvDispls = ncclAlltoAllvRecvDispls(gathered.data(), 1, nRanks);
 
     EXPECT_EQ(rank1SendSizes[2], 0u);
     EXPECT_EQ(rank1SendDispls[1], 16u);
     EXPECT_EQ(rank1RecvSizes[3], 0u);
     EXPECT_EQ(rank1RecvDispls[2], 24u);
-    EXPECT_EQ(ceAlltoAllvTrafficBytes(gathered.data(), 1, nRanks), 56u);
+    EXPECT_EQ(ncclAlltoAllvTrafficBytes(gathered.data(), 1, nRanks), 56u);
 }
 
 TEST_F(CeAlltoAllvEligibilityTest, PeerMetadataIndexingMatchesCeCollLayout)
@@ -147,12 +200,22 @@ TEST_F(CeAlltoAllvEligibilityTest, PeerMetadataIndexingMatchesCeCollLayout)
     std::vector<size_t> gathered(4 * nRanks * nRanks, 0);
     for (int r = 0; r < nRanks; ++r)
     {
-        size_t* recvDispls = ceAlltoAllvRecvDispls(gathered.data(), r, nRanks);
+        size_t* recvDispls = ncclAlltoAllvRecvDispls(gathered.data(), r, nRanks);
         recvDispls[myRank] = static_cast<size_t>(100 * (r + 1));
     }
 
-    size_t* peerRecvDispls = ceAlltoAllvRecvDispls(gathered.data(), dstRank, nRanks);
+    size_t* peerRecvDispls = ncclAlltoAllvRecvDispls(gathered.data(), dstRank, nRanks);
     EXPECT_EQ(peerRecvDispls[myRank], 400u);
+}
+
+TEST_F(CeAlltoAllvEligibilityTest, PeerSendSizeValidationRejectsMismatch)
+{
+    EXPECT_EQ(ncclAlltoAllvValidatePeerSendSize(128, 64, 0, 1), ncclInvalidUsage);
+}
+
+TEST_F(CeAlltoAllvEligibilityTest, PeerSendSizeValidationAcceptsMatch)
+{
+    EXPECT_EQ(ncclAlltoAllvValidatePeerSendSize(128, 128, 0, 1), ncclSuccess);
 }
 
 } // namespace RcclUnitTesting

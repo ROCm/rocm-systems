@@ -12,6 +12,8 @@
 #include <cuda.h>
 #include "rocmwrap.h"
 #include "ce_coll.h"
+#include "alltoallv_meta.h"
+#include "group.h"
 #include "alloc.h"
 #include "ce_fault_inject.h"
 
@@ -229,6 +231,14 @@ bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_
     return false;
   }
   return true;
+}
+
+bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
+                             bool hasSysmemSegment, bool capturing) {
+  if (ncclGroupDepth != 0) return false;
+  if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) return false;
+  if (hasSysmemSegment || capturing) return false;
+  return ncclCeAvailable(comm, ncclFuncAlltoAllv, ncclDevSum, datatype, winRegType);
 }
 
 bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
@@ -704,6 +714,15 @@ fail:
   goto exit;
 }
 
+ncclResult_t ncclAlltoAllvValidatePeerSendSize(size_t sendBytes, size_t peerRecvBytes, int srcRank, int dstRank) {
+  if (sendBytes != peerRecvBytes) {
+    WARN("CE AlltoAllv: size mismatch rank %d -> %d: sendBytes=%zu peerRecvBytes=%zu", srcRank, dstRank, sendBytes,
+         peerRecvBytes);
+    return ncclInvalidUsage;
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclCeAlltoAllv(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
@@ -712,9 +731,9 @@ ncclResult_t ncclCeAlltoAllv(struct ncclComm* comm, struct ncclCeCollArgs* args,
     return ncclInvalidUsage;
   }
 
-  size_t* sendSizes = args->sizes + 4 * comm->nRanks * comm->rank;
-  size_t* sendDispls = args->sizes + 4 * comm->nRanks * comm->rank + 1 * comm->nRanks;
-  size_t* recvDispls = args->sizes + 4 * comm->nRanks * comm->rank + 3 * comm->nRanks;
+  size_t* sendSizes = ncclAlltoAllvSendSizes(args->sizes, comm->rank, comm->nRanks);
+  size_t* sendDispls = ncclAlltoAllvSendDispls(args->sizes, comm->rank, comm->nRanks);
+  size_t* recvDispls = ncclAlltoAllvRecvDispls(args->sizes, comm->rank, comm->nRanks);
   size_t peerDispls = 0;
   size_t peerRcvSize = 0;
 
@@ -749,16 +768,11 @@ ncclResult_t ncclCeAlltoAllv(struct ncclComm* comm, struct ncclCeCollArgs* args,
       }
     } else {
       // Remote copy to other ranks: send to rank dstRank's receive buffer at position comm->rank
-      size_t* peerRecvSizes = args->sizes + 4 * comm->nRanks * dstRank + 2 * comm->nRanks;
-      size_t* peerRecvDispls = args->sizes + 4 * comm->nRanks * dstRank + 3 * comm->nRanks;
+      size_t* peerRecvSizes = ncclAlltoAllvRecvSizes(args->sizes, dstRank, comm->nRanks);
+      size_t* peerRecvDispls = ncclAlltoAllvRecvDispls(args->sizes, dstRank, comm->nRanks);
       peerDispls = peerRecvDispls[comm->rank];
       peerRcvSize = peerRecvSizes[comm->rank];
-      if (chunkBytes != peerRcvSize) {
-        WARN("CE AlltoAllv: size mismatch rank %d -> %d: sendBytes=%zu peerRecvBytes=%zu", comm->rank, dstRank,
-             chunkBytes, peerRcvSize);
-        ret = ncclInvalidUsage;
-        goto fail;
-      }
+      NCCLCHECKGOTO(ncclAlltoAllvValidatePeerSendSize(chunkBytes, peerRcvSize, comm->rank, dstRank), ret, fail);
 
       uint8_t* dstPtr = (uint8_t*)myRecvBuff + peerDispls;
       offset = dstPtr - (uint8_t*)args->recvBuff;

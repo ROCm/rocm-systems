@@ -19,6 +19,9 @@
 #include "dda_alltoall.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
+#include "ce_coll.h"
+#include "alltoallv_meta.h"
+#include "strongstream.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -584,10 +587,12 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
   NCCLCHECK(ncclDevrFindWindow(comm, recvbuff, &recvWin));
   ncclSymRegType_t winRegType;
   NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
-  bool ceAlltoAllvEligible = (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
-                             ncclCeAvailable(comm, ncclFuncAlltoAllv, ncclDevSum, datatype, winRegType);
+  bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+  struct ncclCudaGraph ceGraph;
+  NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+  bool ceCapturing = ncclCudaGraphValid(ceGraph);
 
-  if (ceAlltoAllvEligible) {
+  if (ncclCeAlltoAllvEligible(comm, datatype, winRegType, hasSysmemSegment, ceCapturing)) {
     const size_t nLocal = 4 * (size_t)nRanks;
     const size_t nGather = nLocal * (size_t)nRanks;
 
