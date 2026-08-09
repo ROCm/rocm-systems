@@ -968,6 +968,23 @@ ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count,
   return ncclSuccess;
 }
 
+// ncclDevFuncUnrollGenerated[] is emitted build-wide (generate.py), not per
+// architecture: in any normal multi-arch build it reports unroll 8/16/32 as
+// "generated" as soon as gfx1250 is one of the build's targets, even though
+// the actual ncclDevFuncTable_8/16/32[] entries are only compiled under
+// `defined(__gfx1250__)` (see generate.py's get_arch_guard). Without this
+// extra arch check, RCCL_UNROLL_FACTOR=3/4/5 (or the gfx1250 default falling
+// back) on any other arch passes the table check and then dispatches through
+// a null/absent function-table slot for that arch -> device-side crash.
+static bool ncclUnrollFactorAvailableForArch(struct ncclComm* comm, int unroll) {
+  if (!ncclDevFuncUnrollGenerated[unroll]) return false;
+  if ((unroll == NCCL_UNROLL_8 || unroll == NCCL_UNROLL_16 || unroll == NCCL_UNROLL_32) &&
+      !IsArchMatch(comm->archName, "gfx1250")) {
+    return false;
+  }
+  return true;
+}
+
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
   if (rcclParamUnrollFactor() != -1) {
     comm->unroll = rcclParamUnrollFactor(); //-1 to map to 0 based indexing
@@ -977,7 +994,7 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
            comm->unroll, NCCL_NUM_UNROLLS - 1);
       return ncclInvalidArgument;
     }
-    if (!ncclDevFuncUnrollGenerated[comm->unroll]) {
+    if (!ncclUnrollFactorAvailableForArch(comm, comm->unroll)) {
       WARN("RCCL_UNROLL_FACTOR %d (unroll %d) was not built for arch %s; its device function table is empty and "
            "dispatching to it would crash. "
            "Rebuild with this unroll factor, or select one that was generated for this build.",
@@ -997,10 +1014,10 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
 
   // Guard against a default that wasn't built for this arch (e.g. the generation
   // matrix was narrowed). Fall back to any generated unroll rather than segfault.
-  if (!ncclDevFuncUnrollGenerated[comm->unroll]) {
+  if (!ncclUnrollFactorAvailableForArch(comm, comm->unroll)) {
     int fallback = -1;
     for (int u = NCCL_NUM_UNROLLS - 1; u >= NCCL_UNROLL_1; u--) {
-      if (ncclDevFuncUnrollGenerated[u]) {
+      if (ncclUnrollFactorAvailableForArch(comm, u)) {
         fallback = u;
         break;
       }
