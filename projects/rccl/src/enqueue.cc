@@ -3738,7 +3738,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
       bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       if (info->coll == ncclFuncAllReduce) {
-        if (!ceArGraphAllowed || !rcclUseCeAllReduce(comm, info->count, info->datatype, info->op)) {
+        if (!ceArGraphAllowed || info->acc != nullptr || !rcclUseCeAllReduce(comm, info->count, info->datatype, info->op)) {
           ceAvailable = false;
         } else {
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
