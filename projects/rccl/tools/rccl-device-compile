@@ -27,6 +27,18 @@ Device-object mode (--emit-device-obj):
     .o is meant to be listed alongside --compile's leaf-kernel outputs in a
     --link invocation, so its device code lands in the same device.elf.
 
+Host-object mode (--emit-host-obj):
+    rccl-device-compile --emit-host-obj --clang=... --fatbin-role=owner|shared
+        -cuid=<shared> -DFOO -Ipath -o out.o in.cu.cpp
+    Compiles a mixed host+device TU's HOST half (--offload-host-only), then
+    patches the per-TU __hip_gpubin_handle_<hash> fatbin-registration handle
+    so that ALL mixed TUs built with the same -cuid share ONE handle
+    instance at link time instead of one copy per TU (which otherwise makes
+    the HIP runtime load one separate module of the identical multi-hundred-
+    MB device.elf per TU -- see patch_fatbin_handle_sharing() for the full
+    story). Exactly one mixed TU must be compiled with --fatbin-role=owner;
+    every other one uses --fatbin-role=shared.
+
 Link mode (--link):
     rccl-device-compile --link --arch=gfx942 --dispatcher=common.cu.cpp -o device.elf obj1.o obj2.o
     1. Aggregates resource JSON files from all input objects
@@ -595,6 +607,171 @@ def do_emit_device_obj(args, forwarded_flags):
 
 
 # ---------------------------------------------------------------------------
+# Host-object mode: mixed TU's host half -> .o, with a SHARED fatbin
+# registration handle across all mixed TUs (see do_emit_host_obj docstring).
+# ---------------------------------------------------------------------------
+
+_GPUBIN_HANDLE_RE = re.compile(r'__hip_gpubin_handle_[0-9a-f]+')
+
+
+def patch_fatbin_handle_sharing(asm_lines, role, source):
+    """Rewrite the per-TU __hip_gpubin_handle_<hash> storage class so that
+    all mixed TUs sharing the same -cuid end up with exactly ONE handle
+    instance at link time, instead of one copy per TU.
+
+    Background: forcing every mixed TU to compile with the same -cuid makes
+    them all reference the same __hip_fatbin_<hash> bytes (see "Shared CUID"
+    in DeviceLinker.cmake), but clang still emits a *per-TU-local*
+    __hip_gpubin_handle_<hash> variable and a static constructor
+    (__hip_module_ctor) that calls __hipRegisterFatBinary() whenever THAT
+    TU's own copy of the handle is still zero. Because the handle is
+    TU-local, every mixed TU takes that branch independently at process
+    startup, so the HIP runtime ends up loading one separate module instance
+    of the identical (multi-hundred-MB) device.elf PER TU -- harmless on an
+    idle GPU with plenty of headroom, but enough to exhaust GPU memory under
+    concurrent/resource-constrained CI runs ("device kernel image is
+    invalid" at kernel launch).
+
+    Fix: make the handle *storage* shared instead of per-TU.
+      - role == 'owner':  keep __hip_gpubin_handle_<hash> as a COMMON symbol
+        but promote it from '.local' to '.globl .hidden' so other TUs can
+        bind to it. '.hidden' matters as much as '.globl' here: librccl.so
+        is a shared object, and without it the symbol would have default
+        (exported/preemptible) visibility, which ld.lld refuses to allow
+        direct PC-relative access to ("relocation R_X86_64_PC32 cannot be
+        used against symbol ...; recompile with -fPIC") -- the existing
+        movq/cmpq instructions addressing the handle were already emitted as
+        direct RIP-relative accesses (clang's normal codegen for what it
+        believed, at compile time, was an internal-linkage local variable),
+        so the symbol must stay non-preemptible for those to remain legal.
+      - role == 'shared': drop this TU's own .type/.local/.comm declarations
+        for the handle entirely (replacing them with a matching .hidden
+        declaration on the now-undefined reference, for the same
+        preemptibility reason as above), leaving only the existing
+        movq/cmpq references to it -- those become an ordinary undefined
+        external reference that the final librccl.so link resolves against
+        the owner's single definition.
+
+    This does not depend on which TU is the "owner" or on static-initializer
+    order across TUs: these are ordinary sequential static initializers
+    running in one thread before main(), so whichever TU's constructor
+    happens to run first performs the one real __hipRegisterFatBinary() call
+    (on the content-identical fatbin wrapper); every other TU's constructor
+    then sees the shared handle already set, skips re-registering, and just
+    calls its own __hip_register_globals() against that shared module handle
+    to register its own kernels. Validated end-to-end -- including reversed
+    link/init order -- against real gfx942 hardware with a standalone 2-TU
+    repro before wiring this in.
+    """
+    handles = sorted({m.group(0) for line in asm_lines
+                       for m in [_GPUBIN_HANDLE_RE.search(line)] if m})
+    if not handles:
+        # Some registered mixed TUs (e.g. a generated dispatcher .cpp that
+        # only #includes headers, with the real __global__ kernels living in
+        # sibling per-instantiation TUs) compile to host assembly with no
+        # HIP device-registration boilerplate at all -- nothing references
+        # any device symbol, so clang emits no fatbin wrapper/ctor/handle.
+        # Nothing to patch in that case; pass the assembly through as-is.
+        return asm_lines
+    if len(handles) > 1:
+        raise RuntimeError(
+            f"{source}: multiple distinct gpubin handle symbols found "
+            f"({handles}); expected exactly one shared -cuid hash")
+    handle_name = handles[0]
+    handle = re.escape(handle_name)
+
+    out = []
+    if role == 'owner':
+        for line in asm_lines:
+            if re.match(rf'\s*\.local\s+{handle}\b', line):
+                out.append(line.replace('.local', '.globl', 1))
+                out.append(f'\t.hidden\t{handle_name}\n')
+            else:
+                out.append(line)
+    elif role == 'shared':
+        inserted_hidden = False
+        for line in asm_lines:
+            stripped = line.strip()
+            if re.match(rf'\.type\s+{handle},\s*@object', stripped):
+                if not inserted_hidden:
+                    out.append(f'\t.hidden\t{handle_name}\n')
+                    inserted_hidden = True
+                continue
+            if re.match(rf'\.local\s+{handle}\b', stripped):
+                continue
+            if re.match(rf'\.comm\s+{handle}\b', stripped):
+                continue
+            out.append(line)
+    else:
+        raise RuntimeError(f"unknown --fatbin-role={role!r}, expected 'owner' or 'shared'")
+    return out
+
+
+def do_emit_host_obj(args, forwarded_flags):
+    """Compile a mixed host+device TU's HOST half (--offload-host-only),
+    then patch its fatbin registration handle per --fatbin-role so that all
+    mixed TUs sharing a -cuid end up with ONE shared handle at link time
+    instead of one per TU. See patch_fatbin_handle_sharing() docstring for
+    the full rationale.
+    """
+    clang, _ = discover_tools(args.clang)
+    source = args.source
+    output = args.output
+    role = args.fatbin_role
+    keep_temps = args.keep_temps
+
+    if not role:
+        raise SystemExit("ERROR: --emit-host-obj requires --fatbin-role=owner|shared")
+
+    base = os.path.splitext(output)[0]
+    if keep_temps:
+        asm_file = base + '.full.s'
+        patched_file = base + '.patched.s'
+        cleanup = []
+    else:
+        tmpdir = tempfile.mkdtemp(prefix='rccl-dc-host-')
+        asm_file = os.path.join(tmpdir, 'full.s')
+        patched_file = os.path.join(tmpdir, 'patched.s')
+        cleanup = [asm_file, patched_file, tmpdir]
+
+    try:
+        compile_cmd = [
+            clang,
+            '-x', 'hip',
+            '--offload-host-only',
+        ] + forwarded_flags + [
+            '-S', '-o', asm_file, source,
+        ]
+        run(compile_cmd, f"compile (host, shared cuid) {os.path.basename(source)}")
+
+        with open(asm_file) as f:
+            asm_lines = f.readlines()
+
+        patched_lines = patch_fatbin_handle_sharing(asm_lines, role, source)
+
+        with open(patched_file, 'w') as f:
+            f.writelines(patched_lines)
+
+        assemble_cmd = [
+            clang,
+            '-x', 'assembler',
+            '-c', '-o', output, patched_file,
+        ]
+        run(assemble_cmd, f"assemble (host) {os.path.basename(source)}")
+
+    finally:
+        if not keep_temps:
+            for f in cleanup:
+                try:
+                    if os.path.isfile(f):
+                        os.unlink(f)
+                    elif os.path.isdir(f):
+                        os.rmdir(f)
+                except OSError:
+                    pass
+
+
+# ---------------------------------------------------------------------------
 # Link mode: objects -> device.elf
 # ---------------------------------------------------------------------------
 
@@ -743,11 +920,16 @@ def parse_compiler_flags(argv):
     while i < len(argv):
         arg = argv[i]
         # Our flags
-        if arg in ('--compile', '--link', '--emit-device-obj', '--keep-temps', '--version'):
+        if arg in ('--compile', '--link', '--emit-device-obj', '--emit-host-obj', '--keep-temps', '--version'):
             our_args.append(arg)
         elif arg.startswith('--arch='):
             our_args.append(arg)
         elif arg == '--arch' and i + 1 < len(argv):
+            our_args.extend([arg, argv[i + 1]])
+            i += 1
+        elif arg.startswith('--fatbin-role='):
+            our_args.append(arg)
+        elif arg == '--fatbin-role' and i + 1 < len(argv):
             our_args.extend([arg, argv[i + 1]])
             i += 1
         elif arg.startswith('--clang='):
@@ -779,6 +961,12 @@ def parse_compiler_flags(argv):
         elif arg == '-I' and i + 1 < len(argv):
             forwarded.extend(['-I', argv[i + 1]])
             i += 1
+        elif arg in ('-MF', '-MT', '-MQ') and i + 1 < len(argv):
+            # These take a following value (path/target name) that doesn't
+            # start with '-' and would otherwise be misparsed as a
+            # positional source/object file.
+            forwarded.extend([arg, argv[i + 1]])
+            i += 1
         elif arg.startswith('-'):
             forwarded.append(arg)
         else:
@@ -808,6 +996,9 @@ def main():
     parser.add_argument('--compile', action='store_true')
     parser.add_argument('--link', action='store_true')
     parser.add_argument('--emit-device-obj', action='store_true', dest='emit_device_obj')
+    parser.add_argument('--emit-host-obj', action='store_true', dest='emit_host_obj')
+    parser.add_argument('--fatbin-role', default=None, dest='fatbin_role',
+                         choices=['owner', 'shared'])
     parser.add_argument('--arch', required=False)
     parser.add_argument('--clang', default=None)
     parser.add_argument('--dispatcher', default=None)
@@ -842,6 +1033,14 @@ def main():
         args.source = positional[0]
         do_emit_device_obj(args, forwarded_flags)
 
+    elif args.emit_host_obj:
+        if not positional:
+            raise SystemExit("ERROR: --emit-host-obj requires a source file")
+        if not args.output:
+            raise SystemExit("ERROR: --emit-host-obj requires -o <output>")
+        args.source = positional[0]
+        do_emit_host_obj(args, forwarded_flags)
+
     elif args.link:
         if not positional:
             raise SystemExit("ERROR: --link requires object files")
@@ -853,7 +1052,7 @@ def main():
         do_link(args, forwarded_flags)
 
     else:
-        raise SystemExit("ERROR: specify --compile, --emit-device-obj, or --link mode")
+        raise SystemExit("ERROR: specify --compile, --emit-device-obj, --emit-host-obj, or --link mode")
 
 
 if __name__ == '__main__':

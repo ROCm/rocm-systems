@@ -707,7 +707,27 @@ add_custom_command(
 # together doesn't hit a duplicate-symbol error (see the "Shared CUID"
 # section above for why that marker exists and why we deliberately want to
 # suppress its complaint here).
+#
+# Shared fatbin REGISTRATION handle: sharing -cuid makes every mixed TU
+# reference the same __hip_fatbin_<hash> bytes, but clang still emits a
+# per-TU-*local* __hip_gpubin_handle_<hash> variable, and each TU's static
+# constructor calls __hipRegisterFatBinary() independently the first time
+# its own local copy of that handle is zero. With ~85 mixed TUs, that means
+# ~85 independent module registrations of the identical (multi-hundred-MB)
+# device.elf at process startup -- harmless on an idle GPU with headroom,
+# but enough to exhaust GPU memory under concurrent/resource-constrained CI
+# runs ("device kernel image is invalid" at kernel launch; see PR #9763).
+#
+# Fix: the driver's --emit-host-obj mode patches the handle's storage class
+# so all mixed TUs share ONE instance instead of one each -- `common` is
+# designated the sole --fatbin-role=owner (it's always registered, and was
+# the historical embedder of the combined fatbin before this refactor; see
+# dl_register_mixed_tu doc above), every other mixed TU uses
+# --fatbin-role=shared. See rccl-device-compile's
+# patch_fatbin_handle_sharing() docstring for why this doesn't depend on
+# which TU is "owner" or on static-initializer order across TUs.
 # ===========================================================================
+set(DL_FATBIN_OWNER "common")
 set(DEVICE_LINKER_OBJECTS "${DL_GLUE_OBJ}")
 
 foreach(_mtu_name IN LISTS DL_MIXED_TU_NAMES)
@@ -731,10 +751,19 @@ foreach(_mtu_name IN LISTS DL_MIXED_TU_NAMES)
     set(_mtu_depfile_kw DEPFILE ${_mtu_depfile})
   endif()
 
+  if(_mtu_name STREQUAL DL_FATBIN_OWNER)
+    set(_mtu_fatbin_role "owner")
+  else()
+    set(_mtu_fatbin_role "shared")
+  endif()
+
   add_custom_command(
     OUTPUT  ${_mtu_raw_obj}
-    COMMAND ${DL_CLANG}
-      -x hip --offload-host-only ${DL_OFFLOAD_ARCH_FLAGS}
+    COMMAND ${CMAKE_RCCLDEV_COMPILER}
+      --emit-host-obj
+      --clang=${DL_CLANG}
+      --fatbin-role=${_mtu_fatbin_role}
+      ${DL_OFFLOAD_ARCH_FLAGS}
       -cuid=${DL_SHARED_CUID}
       ${DL_HIP_COMPILER_FLAGS}
       -DRCCL_DEVICE_LINKER
@@ -746,11 +775,11 @@ foreach(_mtu_name IN LISTS DL_MIXED_TU_NAMES)
       -fPIC
       ${_mtu_w_flag}
       ${_mtu_mdmf_flags}
-      -c -o ${_mtu_raw_obj}
+      -o ${_mtu_raw_obj}
       ${DL_MTU_SRC_${_mtu_name}}
     DEPENDS ${DL_MTU_SRC_${_mtu_name}}
     ${_mtu_depfile_kw}
-    COMMENT "DL compile (host, shared cuid): ${_mtu_name}"
+    COMMENT "DL compile (host, shared cuid, fatbin-role=${_mtu_fatbin_role}): ${_mtu_name}"
     VERBATIM
     COMMAND_EXPAND_LISTS
   )
