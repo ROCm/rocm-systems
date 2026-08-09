@@ -31,12 +31,19 @@ Host-object mode (--emit-host-obj):
     rccl-device-compile --emit-host-obj --clang=... --fatbin-role=owner|shared
         -cuid=<shared> -DFOO -Ipath -o out.o in.cu.cpp
     Compiles a mixed host+device TU's HOST half (--offload-host-only), then
-    patches the per-TU __hip_gpubin_handle_<hash> fatbin-registration handle
-    so that ALL mixed TUs built with the same -cuid share ONE handle
-    instance at link time instead of one copy per TU (which otherwise makes
-    the HIP runtime load one separate module of the identical multi-hundred-
-    MB device.elf per TU -- see patch_fatbin_handle_sharing() for the full
-    story). Exactly one mixed TU must be compiled with --fatbin-role=owner;
+    patches two per-TU HIP-registration objects so that ALL mixed TUs built
+    with the same -cuid share ONE instance of each at link time instead of
+    one copy per TU:
+      - __hip_gpubin_handle_<hash>, the fatbin-registration handle (see
+        patch_fatbin_handle_sharing()) -- otherwise the HIP runtime loads
+        one separate module of the identical multi-hundred-MB device.elf
+        per TU.
+      - __hip_fatbin_wrapper, the __CudaFatBinaryWrapper struct itself (see
+        patch_fatbin_wrapper_sharing()) -- otherwise TheRock CI's kpack
+        packaging pipeline mis-indexes device code per wrapper position,
+        which is the actual cause of the CI-only "device kernel image is
+        invalid" failures (e.g. AllReduce.OneRankAvgTailElements).
+    Exactly one mixed TU must be compiled with --fatbin-role=owner;
     every other one uses --fatbin-role=shared.
 
 Link mode (--link):
@@ -612,6 +619,119 @@ def do_emit_device_obj(args, forwarded_flags):
 # ---------------------------------------------------------------------------
 
 _GPUBIN_HANDLE_RE = re.compile(r'__hip_gpubin_handle_[0-9a-f]+')
+_FATBIN_WRAPPER_TYPE_RE = re.compile(r'\s*\.type\s+__hip_fatbin_wrapper,\s*@object\b')
+_FATBIN_WRAPPER_SIZE_RE = re.compile(r'\s*\.size\s+__hip_fatbin_wrapper,\s*24\b')
+_FATBIN_WRAPPER_SECTION_RE = re.compile(r'\s*\.section\s+\.hipFatBinSegment\b')
+
+
+def patch_fatbin_wrapper_sharing(asm_lines, role, source):
+    """Rewrite the per-TU __hip_fatbin_wrapper object (the 24-byte
+    __CudaFatBinaryWrapper struct clang emits into .hipFatBinSegment for
+    every HIP TU) so that all mixed TUs sharing the same -cuid end up with
+    exactly ONE wrapper instance at link time, instead of one copy per TU.
+
+    Background: patch_fatbin_handle_sharing() (below) already collapses the
+    *handle* (the pointer __hipRegisterFatBinary() returns) down to one
+    shared instance, and the "Shared CUID" mechanism in DeviceLinker.cmake
+    already collapses the actual fatbin *bytes* (__hip_fatbin_<hash>) down
+    to one glue-provided definition. But clang still independently emits,
+    in EVERY mixed TU's own host object, its own byte-for-byte-identical
+    __hip_fatbin_wrapper struct (magic/version/pointer-to-the-shared-
+    fatbin/reserved) as a `.local` object in .hipFatBinSegment -- this
+    struct has no per-TU content at all once the fatbin is shared, but its
+    *presence* is what TheRock's CI packaging pipeline (kpack, see
+    rocm-systems/shared/kpack) counts to decide how many device-code
+    "bundles" a binary has.
+
+    kpack's extractor scans .hip_fatbin for concatenated
+    __CLANG_OFFLOAD_BUNDLE__ blocks and (correctly, post-unification) finds
+    exactly ONE, so it writes exactly one code-object entry ("...#0") into
+    the .kpack archive. But kpack's ELF-rewriter walks .hipFatBinSegment
+    and, unaware that multiple wrapper structs can point at the same
+    bundle, assigns each of the N wrapper structs it finds a distinct
+    sequential co_index (0..N-1) purely by position. Since N (wrapper
+    count, still one per TU) no longer matches 1 (actual bundle count post-
+    unification), N-1 of those co_index values have no corresponding kpack
+    archive entry. At runtime kpack_load_code_object() does a strict
+    "name#co_index" lookup with no fallback, so any kernel registered
+    through one of the mismatched TUs fails to load its device code and
+    hipLaunchKernel returns hipErrorInvalidImage -- this is the actual
+    cause of the CI-only, unreproducible-locally "device kernel image is
+    invalid" failure (e.g. AllReduce.OneRankAvgTailElements), since a
+    plain (non-kpack) local build never exercises this path at all.
+
+    Fix: make the wrapper struct itself shared instead of per-TU, so there
+    is truly only one wrapper in .hipFatBinSegment for kpack to see --
+    eliminating the N-vs-1 mismatch at the source instead of teaching
+    either side of kpack about it.
+      - role == 'owner': keep this TU's __hip_fatbin_wrapper definition
+        (the .hipFatBinSegment data block) but promote it from implicitly
+        `.local` to `.globl .hidden` so other TUs can bind to it. As with
+        the handle, '.hidden' is required alongside '.globl': librccl.so
+        is a shared object, and __hip_module_ctor's existing
+        `leaq __hip_fatbin_wrapper(%rip), %rdi` was emitted as a direct
+        RIP-relative access (clang believed, at compile time, that this
+        was an internal-linkage local object), which ld.lld only permits
+        against a non-preemptible (hidden) symbol.
+      - role == 'shared': delete this TU's own __hip_fatbin_wrapper data
+        block entirely (there is nothing per-TU left in it once the fatbin
+        bytes and handle are shared), leaving only the existing
+        `leaq __hip_fatbin_wrapper(%rip), %rdi` reference in
+        __hip_module_ctor -- which becomes an ordinary undefined external
+        reference that the final librccl.so link resolves against the
+        owner's single definition, and a `.hidden` declaration is added so
+        that reference is legal for the same preemptibility reason as
+        above.
+
+    Validated end-to-end on real gfx942 hardware with a standalone 2-TU
+    repro (reversed link order too) before wiring this in.
+    """
+    start_idx = None
+    end_idx = None
+    for i, line in enumerate(asm_lines):
+        if start_idx is None and _FATBIN_WRAPPER_TYPE_RE.match(line):
+            start_idx = i
+            continue
+        if start_idx is not None and _FATBIN_WRAPPER_SIZE_RE.match(line):
+            end_idx = i
+            break
+
+    if start_idx is None:
+        # Some registered mixed TUs (e.g. a generated dispatcher .cpp that
+        # only #includes headers, with the real __global__ kernels living
+        # in sibling per-instantiation TUs) compile to host assembly with
+        # no HIP device-registration boilerplate at all. Nothing to patch.
+        return asm_lines
+    if end_idx is None:
+        raise RuntimeError(
+            f"{source}: found __hip_fatbin_wrapper .type but no matching "
+            f".size __hip_fatbin_wrapper, 24 -- unexpected assembly shape")
+
+    if role == 'owner':
+        out = list(asm_lines)
+        # Insert .globl/.hidden right after the .section switch (mirrors
+        # clang's own placement of .globl for other objects in this file),
+        # so the label below is defined as a global, hidden symbol.
+        for j in range(start_idx, end_idx + 1):
+            if _FATBIN_WRAPPER_SECTION_RE.match(out[j]):
+                out[j:j + 1] = [
+                    out[j],
+                    '\t.globl\t__hip_fatbin_wrapper\n',
+                    '\t.hidden\t__hip_fatbin_wrapper\n',
+                ]
+                break
+        else:
+            raise RuntimeError(
+                f"{source}: __hip_fatbin_wrapper block has no "
+                f".section .hipFatBinSegment switch -- unexpected assembly shape")
+        return out
+    elif role == 'shared':
+        out = list(asm_lines[:start_idx])
+        out.append('\t.hidden\t__hip_fatbin_wrapper\n')
+        out.extend(asm_lines[end_idx + 1:])
+        return out
+    else:
+        raise RuntimeError(f"unknown --fatbin-role={role!r}, expected 'owner' or 'shared'")
 
 
 def patch_fatbin_handle_sharing(asm_lines, role, source):
@@ -709,10 +829,11 @@ def patch_fatbin_handle_sharing(asm_lines, role, source):
 
 def do_emit_host_obj(args, forwarded_flags):
     """Compile a mixed host+device TU's HOST half (--offload-host-only),
-    then patch its fatbin registration handle per --fatbin-role so that all
-    mixed TUs sharing a -cuid end up with ONE shared handle at link time
-    instead of one per TU. See patch_fatbin_handle_sharing() docstring for
-    the full rationale.
+    then patch its fatbin registration handle AND its fatbin wrapper struct
+    per --fatbin-role so that all mixed TUs sharing a -cuid end up with ONE
+    shared handle and ONE shared wrapper at link time instead of one of
+    each per TU. See patch_fatbin_handle_sharing() and
+    patch_fatbin_wrapper_sharing() docstrings for the full rationale.
     """
     clang, _ = discover_tools(args.clang)
     source = args.source
@@ -748,6 +869,7 @@ def do_emit_host_obj(args, forwarded_flags):
             asm_lines = f.readlines()
 
         patched_lines = patch_fatbin_handle_sharing(asm_lines, role, source)
+        patched_lines = patch_fatbin_wrapper_sharing(patched_lines, role, source)
 
         with open(patched_file, 'w') as f:
             f.writelines(patched_lines)
