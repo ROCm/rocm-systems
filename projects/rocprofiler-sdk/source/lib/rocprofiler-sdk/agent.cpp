@@ -771,8 +771,8 @@ construct_agent_cache(::HsaApiTable* table)
                 "rocprofiler-sdk could not read the WSL topology for {} of the {} GPUs the HSA "
                 "runtime reports (KMT node ids: {}). Profiling is unavailable on those GPUs; the "
                 "application continues and the {} GPU(s) that were mapped remain profilable. This "
-                "build requires a librocdxg exporting the DxgAbiCheck/DxgGetNodeTopology topology "
-                "ABI - see the earlier 'wsl topology:' diagnostics for the exact symbol, ABI "
+                "build requires a librocdxg exporting the DxgGetNodeTopology topology ABI - see "
+                "the earlier 'wsl topology:' diagnostics for the exact symbol, ABI "
                 "version or adapter that was rejected, and update the WSL ROCm runtime package to "
                 "a version matching this rocprofiler-sdk.",
                 mapping.unmatched_gpu_node_ids.size(),

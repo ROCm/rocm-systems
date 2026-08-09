@@ -87,28 +87,6 @@ struct RocdxgHandle
 
     bool ready() const { return handle != nullptr && thunk.complete(); }
 };
-
-// Confirm the thunk speaks the ABI this build was compiled against before any
-// structure crosses the boundary. Zero means "this caller never exchanges that
-// structure": rocprofiler-sdk only uses the size-aware DxgGetNodeTopology, so
-// it advertises nothing beyond the size of the descriptor block itself.
-bool
-check_abi(const DxgThunk& dxg)
-{
-    auto sizes           = DxgStructureSizes{};
-    sizes.StructureSizes = sizeof(DxgStructureSizes);
-
-    if(auto st = dxg.abi_check(&sizes); st != kHsaKmtStatusSuccess)
-    {
-        ROCP_WARNING << fmt::format(
-            "wsl topology: DxgAbiCheck rejected this build (status={}); refusing to read the KMT "
-            "topology from an ABI-incompatible {}",
-            st,
-            kLibRocdxgSoname);
-        return false;
-    }
-    return true;
-}
 }  // namespace
 
 const DxgLoaderOps&
@@ -133,9 +111,8 @@ resolve_dxg_thunk(void* handle, const DxgLoaderOps& ops)
         return sym;
     };
 
-    auto thunk      = DxgThunk{};
-    thunk.abi_check = reinterpret_cast<PFN_DxgAbiCheck>(resolve("DxgAbiCheck"));
-    thunk.get_node  = reinterpret_cast<PFN_DxgGetNodeTopology>(resolve("DxgGetNodeTopology"));
+    auto thunk     = DxgThunk{};
+    thunk.get_node = reinterpret_cast<PFN_DxgGetNodeTopology>(resolve("DxgGetNodeTopology"));
     thunk.acquire_snapshot =
         reinterpret_cast<PFN_DxgAcquireTopologySnapshot>(resolve("DxgAcquireTopologySnapshot"));
     thunk.release_snapshot =
@@ -165,7 +142,6 @@ read_dxg_gpu_topology(const DxgThunk& dxg)
     auto out = std::vector<DxgNodeTopology>{};
 
     if(!dxg.complete()) return out;
-    if(!check_abi(dxg)) return out;
 
     // The thunk refcounts this: SUCCESS means we opened it, KERNEL_ALREADY_OPENED
     // means the HSA runtime (or another consumer) had it open and we took an
@@ -207,9 +183,14 @@ read_dxg_gpu_topology(const DxgThunk& dxg)
             continue;
         }
 
-        // The thunk reports what it actually wrote. A short write means it is
-        // an older revision than this build expects, so the trailing fields
-        // are untouched rather than wrong - reject instead of publishing them.
+        // The whole compatibility contract, and all of it that is needed: the
+        // thunk reports which ABI it speaks and how many bytes it actually
+        // wrote, per call, so nothing here depends on process-wide state. A
+        // short write means an older revision than this build expects, leaving
+        // the trailing fields untouched rather than wrong. `node` above was
+        // zero-initialized, so a thunk that returned success without writing
+        // anything fails this check too rather than being read back as an
+        // all-zero GPU.
         if(node.AbiVersion != kDxgNodeTopologyAbiVersion || node.StructSize != sizeof(node))
         {
             ROCP_WARNING << fmt::format(

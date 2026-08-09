@@ -57,12 +57,11 @@ becomes visible through ``rocprofiler_query_available_agents()``:
   runtime itself uses on ``/dev/dxg`` systems.
 
 ROCprofiler-SDK loads ``librocdxg.so`` at run time with ``dlopen`` (reusing the
-copy the HSA runtime already loaded when there is one) and negotiates the ABI
-with the thunk before reading anything, so no build-time configuration is
-required and no separate link dependency exists. Pre-HSA consumers such as
-``rocprofv3-avail`` and tool initialization get the same complete records as a
-profiling run: agent records are built once, at enumeration time, and are never
-modified afterwards.
+copy the HSA runtime already loaded when there is one), so no build-time
+configuration is required and no separate link dependency exists. Pre-HSA
+consumers such as ``rocprofv3-avail`` and tool initialization get the same
+complete records as a profiling run: agent records are built once, at
+enumeration time, and are never modified afterwards.
 
 Each adapter is paired with its KMT node by Windows LUID. The PCI device id is
 only a fallback for the nodes a LUID cannot speak for, and it has to identify
@@ -75,17 +74,24 @@ rather than published with placeholder values.
 Version requirement
 -------------------
 
-The topology ABI (``DxgAbiCheck``, ``DxgAcquireTopologySnapshot``,
-``DxgGetNodeTopology``, ``DxgReleaseTopologySnapshot``) is a hard requirement,
-not a preference. There is no fallback to the older ``hsaKmtGetNodeProperties``
-path: that call exchanges a full ``HsaNodeProperties``, whose layout is not
-version-stable, so calling it across a package boundary is exactly the
-mismatch ``DxgAbiCheck`` exists to prevent.
+The topology ABI (``DxgAcquireTopologySnapshot``, ``DxgGetNodeTopology``,
+``DxgReleaseTopologySnapshot``) is a hard requirement, not a preference. There
+is no fallback to the older ``hsaKmtGetNodeProperties`` path: that call
+exchanges a full ``HsaNodeProperties``, whose layout is not version-stable, so
+calling it across a package boundary either overruns the caller's buffer or
+misreads its fields.
 
-A ``librocdxg`` that predates this ABI, or one that rejects the handshake,
-therefore yields **no GPU agents at all**. That is not harmless: the HSA runtime
-loads the same thunk and still reports its GPUs, so rocprofiler-SDK and HSA
-disagree about which agents exist.
+Compatibility is settled one call at a time. Each ``DxgGetNodeTopology`` reply
+states the ABI version it was written to and how many bytes were written, and
+a record that does not match what this build expects is discarded. Nothing is
+negotiated once for the process as a whole, so reading the topology never
+changes what the HSA runtime — which has the same thunk open in the same
+process — subsequently sees.
+
+A ``librocdxg`` that predates this ABI, or one whose records this build cannot
+interpret, therefore yields **no GPU agents at all**. That is not harmless: the
+HSA runtime loads the same thunk and still reports its GPUs, so rocprofiler-SDK
+and HSA disagree about which agents exist.
 
 Partially described topologies land in the same place. If one of two adapters
 reports no LUID, is ambiguous against its node, or describes an incomplete

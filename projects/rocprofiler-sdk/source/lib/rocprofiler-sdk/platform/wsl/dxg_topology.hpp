@@ -48,9 +48,10 @@ namespace wsl
 // rather than included because rocprofiler-sdk builds standalone against an
 // installed ROCm and cannot require an hsakmt header revision that may be
 // older than the thunk it dlopens at runtime. Duplication is safe here only
-// because this ABI is small, append-only, and handshaked at run time
-// (DxgNodeTopology::StructSize / AbiVersion); the full HsaNodeProperties
-// layout is deliberately NOT duplicated.
+// because this ABI is small, append-only, and every reply describes itself
+// (DxgNodeTopology::StructSize / AbiVersion), so a thunk that disagrees with
+// these declarations is caught on the very call that would have used it. The
+// full HsaNodeProperties layout is deliberately NOT duplicated.
 
 // HSAKMT_STATUS values this file cares about.
 inline constexpr int32_t kHsaKmtStatusSuccess             = 0;
@@ -58,18 +59,6 @@ inline constexpr int32_t kHsaKmtStatusKernelAlreadyOpened = 22;
 
 inline constexpr uint32_t kDxgNodeTopologyAbiVersion = 2;
 inline constexpr uint32_t kDxgNodeTopologyMinSize    = 8;
-
-// Mirror of HsaStructureSizes. DxgAbiCheck only reads it - and validates its
-// size before reading anything else - so this cannot be overrun by the thunk.
-struct DxgStructureSizes
-{
-    uint16_t StructureSizes;
-    uint16_t SizeOfHsaNodeProperties;
-    uint16_t SizeOfHsaExternalHandleDesc;
-    uint16_t Reserved[5];
-};
-
-static_assert(sizeof(DxgStructureSizes) == 16, "HsaStructureSizes ABI mismatch");
 
 // Mirror of HsaDxgNodeTopology.
 struct DxgNodeTopology

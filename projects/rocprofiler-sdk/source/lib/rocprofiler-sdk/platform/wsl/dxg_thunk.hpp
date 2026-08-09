@@ -42,7 +42,6 @@ namespace platform
 {
 namespace wsl
 {
-using PFN_DxgAbiCheck                = int32_t (*)(DxgStructureSizes*);
 using PFN_DxgGetNodeTopology         = int32_t (*)(uint32_t, uint32_t, DxgNodeTopology*);
 using PFN_DxgAcquireTopologySnapshot = int32_t (*)(uint32_t*);
 using PFN_DxgReleaseTopologySnapshot = int32_t (*)();
@@ -50,17 +49,17 @@ using PFN_hsaKmtOpenKFD              = int32_t (*)();
 using PFN_hsaKmtCloseKFD             = int32_t (*)();
 
 // The unversioned soname, matching ThunkLoader::whoami() in the HSA runtime.
-// Never a versioned name (librocdxg.so.1 / .so.7): the ABI is negotiated
-// through DxgAbiCheck, and hard-coding a soversion would silently stop
-// resolving the very object the HSA runtime has loaded.
+// Never a versioned name (librocdxg.so.1 / .so.7): hard-coding a soversion
+// would silently stop resolving the very object the HSA runtime has loaded,
+// and the soversion is not what decides compatibility anyway - every
+// DxgGetNodeTopology reply carries its own size and ABI version.
 inline constexpr const char* kLibRocdxgSoname = "librocdxg.so";
 
-// Every entry point the topology read needs. A thunk predating the topology
-// ABI exports some of these and not others, so all six are required before
-// anything is called.
+// Every entry point the topology read needs. The librocdxg that ships today
+// exports hsaKmtOpenKFD and hsaKmtCloseKFD but none of the Dxg* topology
+// calls, so all five are required before anything is called.
 struct DxgThunk
 {
-    PFN_DxgAbiCheck                abi_check        = nullptr;
     PFN_DxgGetNodeTopology         get_node         = nullptr;
     PFN_DxgAcquireTopologySnapshot acquire_snapshot = nullptr;
     PFN_DxgReleaseTopologySnapshot release_snapshot = nullptr;
@@ -69,8 +68,8 @@ struct DxgThunk
 
     bool complete() const
     {
-        return abi_check != nullptr && get_node != nullptr && acquire_snapshot != nullptr &&
-               release_snapshot != nullptr && open_kfd != nullptr && close_kfd != nullptr;
+        return get_node != nullptr && acquire_snapshot != nullptr && release_snapshot != nullptr &&
+               open_kfd != nullptr && close_kfd != nullptr;
     }
 };
 
@@ -92,10 +91,11 @@ default_loader_ops();
 DxgThunk
 resolve_dxg_thunk(void* handle, const DxgLoaderOps& ops);
 
-// Read the GPU nodes through an already-resolved thunk: ABI handshake, open,
-// acquire snapshot, per-node read, then release and close on the way out of
-// every path including the early ones. Returns an empty vector for anything it
-// refuses to trust; nothing here is fatal.
+// Read the GPU nodes through an already-resolved thunk: open, acquire
+// snapshot, per-node read, then release and close on the way out of every path
+// including the early ones. Every record is checked against the ABI version
+// and size this build was compiled for before it is trusted. Returns an empty
+// vector for anything it refuses to trust; nothing here is fatal.
 std::vector<DxgNodeTopology>
 read_dxg_gpu_topology(const DxgThunk& thunk);
 
