@@ -126,7 +126,7 @@ returns an error.
 | `--perf-level STABLE_*` | ✅ | ❌ | ❌ | ✅ | ✅ |
 | `--perf-determinism` | ✅ | ⚠️ | ❌ | ❌ | ❌ |
 
-**Legend:** ✅ Supported  ⚠️ Limited / ASIC-dependent  ❌ Not supported  ❓ Unconfirmed
+**Legend:** ✅ Supported  ⚠️ Limited / ASIC-dependent  ❌ Not supported
 
 **Notes on specific GPU families:**
 
@@ -135,8 +135,8 @@ returns an error.
 - **MI300 (Aqua Vanjaram)** -- Only `AUTO` and `MANUAL` are accepted; `LOW`,
   `HIGH`, and the `STABLE_*` profiling levels are rejected by PMFW
   (`AMDSMI_STATUS_NOT_SUPPORTED`). Performance determinism is ASIC/PMFW-dependent
-  -- observed working on MI300A but returning `NOT_SUPPORTED` on MI308X. Verify
-  with `amd-smi metric --perf-level` after setting.
+  -- observed working on MI300A but returning `AMDSMI_STATUS_NOT_SUPPORTED` on
+  MI308X. Verify with `amd-smi metric --perf-level` after setting.
 - **MI350** -- Only `AUTO` and `MANUAL` are accepted; `LOW`, `HIGH`, and
   `STABLE_*` are rejected by PMFW. Performance determinism is **defeatured**; CSC
   (Clock Stretching Compensation) is intended to address the variability use case
@@ -146,7 +146,7 @@ returns an error.
   supported on the tested consumer parts (Navi 31 / RX 7900 XTX, Navi 32 /
   RX 7700 XT): `amd-smi set --perf-determinism` returns
   `AMDSMI_STATUS_NOT_SUPPORTED` and the `perf_determinism` level is rejected at
-  the sysfs interface. Behavior on workstation RDNA SKUs is unverified.
+  the sysfs interface. Workstation RDNA SKUs have not been tested.
 - **RDNA 4 (Navi 4x)** -- All performance levels (`AUTO`, `LOW`, `HIGH`,
   `MANUAL`, `STABLE_*`) are supported on Navi 48 (RX 9070 XT). Performance
   determinism is **not** supported (`AMDSMI_STATUS_NOT_SUPPORTED`;
