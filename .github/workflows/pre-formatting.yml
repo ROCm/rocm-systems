@@ -3,9 +3,15 @@ on:
   pull_request:
     branches:
       - testbranch
+
+permissions:
+  contents: read
+
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
 #      - name: Generate a token
 #        id: generate-token
