@@ -4671,8 +4671,8 @@ void rdna4_wave64_generated_vcmpx_dpp_write_mask_preserves_exec() {
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     uint32_t src = 0x1000u + lane;
     uint32_t cmp = lane < 16 ? 0xDEAD0000u + lane : 0x1000u + ((lane & ~15u) - 1u);
-    if (lane == 20)
-      cmp = 0xDEAD0020u;
+    if (lane == 20 || lane == 33)
+      cmp = 0xDEAD0000u + lane;
     cu->write_vgpr(vbase + kSrc0, lane, src);
     cu->write_vgpr(vbase + kSrc1, lane, cmp);
   }
@@ -4691,7 +4691,7 @@ void rdna4_wave64_generated_vcmpx_dpp_write_mask_preserves_exec() {
   inst.execute_impl(*wf);
 
   EXPECT_EQ(wf->vcc(), kOldVcc);
-  EXPECT_EQ(wf->exec(), 0xA5A55A5AFFEF005AULL);
+  EXPECT_EQ(wf->exec(), 0xA5A55A58FFEF005AULL);
 }
 
 template <typename Traits> void wave32_generated_vcmpx_preserves_exec_hi() {
@@ -5013,7 +5013,8 @@ void rdna4_vop3_dpp_availability_is_instruction_specific() {
   rdna4_vop3p_dpp_marker_is_unsupported<rdna4::Vop3pVopDpp8MachineInst>(amdgpu::SRC_DPP8_FI_0);
 }
 
-template <typename Raw> void rdna4_vopc_dpp_marker_is_instruction_specific(uint32_t marker) {
+template <typename Raw>
+void rdna4_vopc_dpp_marker_is_instruction_specific(uint32_t marker, const char *expected_label) {
   Raw raw{};
   raw.src0 = marker;
   raw.vsrc1 = 8;
@@ -5047,9 +5048,10 @@ template <typename Raw> void rdna4_vopc_dpp_marker_is_instruction_specific(uint3
 }
 
 void rdna4_vopc_dpp_availability_is_instruction_specific() {
-  rdna4_vopc_dpp_marker_is_instruction_specific<rdna4::VopcVopDpp16MachineInst>(amdgpu::SRC_DPP);
+  rdna4_vopc_dpp_marker_is_instruction_specific<rdna4::VopcVopDpp16MachineInst>(amdgpu::SRC_DPP,
+                                                                                "DPP");
   rdna4_vopc_dpp_marker_is_instruction_specific<rdna4::VopcVopDpp8MachineInst>(
-      amdgpu::SRC_DPP8_FI_0);
+      amdgpu::SRC_DPP8_FI_0, "DPP8");
 }
 
 TEST(DppPermuteTest, CdnaGeneratedVop1UsesSharedRowBroadcast) {
