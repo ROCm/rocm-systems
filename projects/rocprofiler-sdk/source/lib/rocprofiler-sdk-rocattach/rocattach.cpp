@@ -175,7 +175,7 @@ build_environment_buffer()
             continue;
         }
         constexpr auto register_library_env = "ROCPROFILER_REGISTER_LIBRARY=";
-        if(strncmp(register_library_env, var, sizeof(register_library_env) - 1) == 0)
+        if(std::string_view{var}.find(register_library_env) == 0)
         {
             // ROCPROFILER_REGISTER_LIBRARY is set by the attaching process's SDK and may
             // contain a host-only, fully versioned path. Do not propagate it to the target;
