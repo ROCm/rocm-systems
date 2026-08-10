@@ -23,6 +23,9 @@ class IBuffer;
 namespace hipFile {
 class IFile;
 }
+namespace hipFile {
+class ITaskGroup;
+}
 
 namespace hipFile {
 
@@ -303,6 +306,9 @@ public:
     /// @return True if the operation now has Canceled state, false otherwise.
     bool tryCancel();
 
+    /// @brief Execute the operation.
+    void run() noexcept;
+
     /// @brief Record an internal execution failure on the operation.
     void recordInternalError();
 
@@ -351,6 +357,8 @@ public:
     BatchContext(BatchContext &&)            = delete;
     BatchContext &operator=(BatchContext &&) = delete;
 
+    ~BatchContext() override;
+
     ///
     /// @brief Return the max number of concurrent operations supported by this BatchContext.
     ///
@@ -378,6 +386,9 @@ private:
     /// application.
     /// shared_ptr as it may need to be passed to a backend.
     std::unordered_set<std::shared_ptr<BatchOperation>> outstanding_ops;
+
+    /// Task group used for all submitted operations owned by this context.
+    std::unique_ptr<ITaskGroup> task_group;
 
     BatchContext(unsigned capacity);
 

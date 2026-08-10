@@ -5,8 +5,12 @@
 
 #include "batch.h"
 #include "buffer.h"
+#include "context.h"
 #include "file.h"
 #include "hipfile.h"
+#include "hipfile-private.h"
+#include "state.h"
+#include "thread-pool.h"
 
 #include <bit>
 #include <cstddef>
@@ -229,6 +233,50 @@ BatchOperation::event() const
 }
 
 void
+BatchOperation::run() noexcept
+try {
+    {
+        std::lock_guard<std::mutex> lock{state_mutex};
+        if (std::holds_alternative<Canceled>(state)) {
+            return;
+        }
+        transitionTo(Running{});
+    }
+
+    ssize_t result   = 0;
+    auto    backends = Context<DriverState>::get()->getBackends();
+    try {
+        if (io_params->opcode == hipFileBatchRead) {
+            result = hipFileIo(IoType::Read, file, buffer, io_params->u.batch.size,
+                               io_params->u.batch.file_offset, io_params->u.batch.devPtr_offset, backends);
+        }
+        else {
+            result = hipFileIo(IoType::Write, file, buffer, io_params->u.batch.size,
+                               io_params->u.batch.file_offset, io_params->u.batch.devPtr_offset, backends);
+        }
+        if (result == -1) {
+            result = -errno;
+        }
+    }
+    catch (const Hip::RuntimeError &) {
+        // Return hipFileHipDriverError for HIP runtime errors to avoid
+        // collision with POSIX errors.
+        result = -hipFileHipDriverError;
+    }
+
+    std::lock_guard<std::mutex> lock{state_mutex};
+    if (result >= 0) {
+        transitionTo(Complete{result});
+    }
+    else {
+        transitionTo(Failed{result});
+    }
+}
+catch (...) {
+    recordInternalError();
+}
+
+void
 BatchOperation::recordInternalError()
 {
     std::lock_guard<std::mutex> lock{state_mutex};
@@ -244,7 +292,11 @@ BatchContext::BatchContext(unsigned _capacity) : capacity{_capacity}
     if (_capacity > MAX_SIZE) {
         throw std::invalid_argument("Batch capacity is limited to " + std::to_string(MAX_SIZE));
     }
+
+    task_group = Context<IThreadPool>::get()->makeTaskGroup();
 }
+
+BatchContext::~BatchContext() = default;
 
 unsigned
 BatchContext::getCapacity() const noexcept
@@ -258,13 +310,22 @@ BatchContext::submitOperations(BatchOperations pending_ops)
     if (pending_ops.empty()) {
         throw std::invalid_argument("ops must not be empty");
     }
-    std::unique_lock<std::shared_mutex> _ulock{context_mutex};
+    {
+        std::unique_lock<std::shared_mutex> context_lock{context_mutex};
 
-    if (pending_ops.size() > capacity - outstanding_ops.size()) {
-        throw BatchFull();
+        if (pending_ops.size() > capacity - outstanding_ops.size()) {
+            throw BatchFull();
+        }
+
+        for (const auto &op : pending_ops) {
+            op->markPending();
+        }
+        outstanding_ops.insert(pending_ops.begin(), pending_ops.end());
+
+        for (const auto &op : pending_ops) {
+            task_group->run([op]() { op->run(); });
+        }
     }
-
-    outstanding_ops.insert(pending_ops.begin(), pending_ops.end());
 }
 
 void
