@@ -80,6 +80,7 @@ extern const char* HipExtraSourceCodeNoGWS;
 
 namespace amd::roc {
 bool roc::Device::isHsaInitialized_ = false;
+bool roc::Device::hostVmemSupported_ = false;
 std::vector<hsa_agent_t> roc::Device::gpu_agents_;
 std::vector<AgentInfo> roc::Device::cpu_agents_;
 
@@ -404,6 +405,10 @@ bool Device::init() {
     LogPrintfError("hsa_iterate_agents failed with %x", status);
     return false;
   }
+
+  bool vmem_supported = false;
+  Hsa::system_get_info(HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED, &vmem_supported);
+  hostVmemSupported_ = !cpu_agents_.empty() && vmem_supported;
 
   std::string ordinals =
       amd::IS_HIP ? ((HIP_VISIBLE_DEVICES[0] != '\0') ? HIP_VISIBLE_DEVICES : CUDA_VISIBLE_DEVICES)
@@ -2376,27 +2381,12 @@ void Device::deviceVmemRelease(uint64_t mem_handle) const {
   }
 }
 
-bool Device::hostVmemSupported(int numaNode) const {
-  if (cpu_agents_.empty()) {
-    return false;
-  }
-  int node = numaNode;
-  if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
-    node = static_cast<int>(numa::getCurrentNumaNode());
-  }
-  hsa_agent_t cpu = getCpuAgent(node);
-  bool supported = false;
-  hsa_status_t hsa_status = Hsa::agent_get_info(
-      cpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED),
-      &supported);
-  if (hsa_status != HSA_STATUS_SUCCESS) {
-    // Older ROCr predates this query: treat host-NUMA VMM as unsupported.
-    return false;
-  }
-  return supported;
-}
-
 uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const {
+  if (!hostVmemSupported_) {
+    LogError("hostVmemAlloc: host memory VMM not supported on this system");
+    return 0;
+  }
+
   // numaNode < 0 (HostNumaCurrent) resolves to the calling thread's current node.
   int node = numaNode;
   if (node < 0) {
@@ -2405,11 +2395,6 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
   if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
     LogPrintfError("hostVmemAlloc: invalid NUMA node %d (cpu agents: %zu)", numaNode,
                    cpu_agents_.size());
-    return 0;
-  }
-
-  if (!hostVmemSupported(node)) {
-    LogError("hostVmemAlloc: host memory VMM not supported on this CPU agent");
     return 0;
   }
 
@@ -3864,7 +3849,13 @@ void Device::getGlobalCUMask(std::string_view cuMaskStr) {
 device::Signal* Device::createSignal() const { return new roc::Signal(); }
 
 // ================================================================================================
-device::Signal* Device::createIpcSignal() const { return new roc::IpcSignal(); }
+device::Signal* Device::createIpcSignal() const {
+#if defined(__linux__)
+  return new roc::IpcSignal();
+#else
+  return nullptr;  // mimic PAL windows path
+#endif
+}
 
 // ================================================================================================
 static std::string GetLocalHostName() {
@@ -4268,26 +4259,58 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
             "candidate_mask=0x%x",
             vgpu, candidate_mask);
   } else {
-    // Regular read/write/intra: enforce exclusivity (don't share engines)
-    // Build a mask of engines already allocated to other VirtualGPUs
+    // Regular read/write/intra: prefer exclusive affinity to avoid cross-stream contention.
     for (const auto& pair : vgpu_to_engine_) {
       allocated_mask |= pair.second;
     }
 
     uint32_t available_mask = validEngineMask & ~allocated_mask;
 
-    if (available_mask == 0) {
-      ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
-              "No unallocated SDMA engines available for VirtualGPU %p, engine_type=%d "
-              "(valid_mask=0x%x, allocated_mask=0x%x)",
-              vgpu, engine_type, validEngineMask, allocated_mask);
-      return 0;
-    }
+    if (available_mask != 0) {
+      // Prefer high-bandwidth (recommended) engines if available.
+      candidate_mask = available_mask & preferredMask;
+      if (candidate_mask == 0) {
+        candidate_mask = available_mask;
+      }
+    } else {
+      // If all valid engines are assigned, share one and rely on ROCr to serialize submissions.
+      // Prefer idle engines, then preferred engines, and round-robin within the selected class.
+      uint32_t idle_mask = freeEngineMask & validEngineMask;
+      uint32_t selection_mask = idle_mask & preferredMask;
+      if (selection_mask == 0) {
+        selection_mask = idle_mask;
+      }
+      if (selection_mask == 0) {
+        selection_mask = validEngineMask & preferredMask;
+      }
+      if (selection_mask == 0) {
+        selection_mask = validEngineMask;
+      }
+      if (selection_mask == 0) {
+        ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
+                "No valid SDMA engines available for oversubscribed VirtualGPU %p, "
+                "engine_type=%d",
+                vgpu, engine_type);
+        return 0;
+      }
 
-    // Prefer high-bandwidth (recommended) engines if available
-    candidate_mask = available_mask & preferredMask;
-    if (candidate_mask == 0) {
-      candidate_mask = available_mask;
+      uint32_t engine_count = 0;
+      for (uint32_t mask = selection_mask; mask != 0; mask &= mask - 1) {
+        ++engine_count;
+      }
+      uint32_t slot =
+          next_rr_engine_.fetch_add(1, std::memory_order_relaxed) % engine_count;
+      // Select the set bit at the zero-based slot index, starting from the least significant bit.
+      while (slot != 0) {
+        selection_mask &= selection_mask - 1;
+        --slot;
+      }
+      candidate_mask = selection_mask & (~selection_mask + 1);
+
+      ClPrint(amd::LOG_INFO, amd::LOG_COPY,
+              "All valid SDMA engines are assigned; sharing an engine for VirtualGPU %p, "
+              "engine_type=%d (candidate_mask=0x%x, valid_mask=0x%x, allocated_mask=0x%x)",
+              vgpu, engine_type, candidate_mask, validEngineMask, allocated_mask);
     }
   }
 

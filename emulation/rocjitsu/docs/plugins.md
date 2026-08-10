@@ -210,34 +210,15 @@ Multiple plugins can be active simultaneously via `ExecutionPluginGroup`.
 ### VGPR observation precision
 
 `onAmdgpuWriteVgprLanes` observes instruction-level VGPR destinations rather
-than VM/runtime storage writes. Memory-pipeline completion and internal
-destination-preservation merges deliberately bypass the hook.
+than VM/runtime storage writes. Reads and writes carry the architectural lane
+and byte masks for masked, sub-dword, and multi-register operands. Internal
+storage operations used to preserve unaffected register state do not produce
+additional architectural callbacks.
 
-The current implementation does not provide precise write masks for DPP
-instructions or for sub-dword SDWA destinations using `UNUSED_PRESERVE`:
-
-- DPP execution may report EXEC lanes that are later preserved by row/bank or
-  `BOUND_CTRL` masking.
-- Partial-preserve SDWA execution may report a full-dword write even though
-  unselected destination bytes are preserved.
-
-DPP restoration and SDWA destination merging use raw storage, so they do not
-emit additional synthetic callbacks. The remaining semantic callback is still
-conservative. Read observation is also not precise for these encodings: DPP
-source staging may report the full source wave, and partial SDWA source staging
-may report broader lane or byte effects than the instruction architecturally
-uses.
-
-Plugins that require exact register hazards must classify DPP and partial SDWA
-instructions from the before-execute callback and ignore their VGPR read and
-write callbacks. The runtime does not suppress these callbacks automatically.
-This gives unsupported instructions false-negative coverage rather than
-allowing conservative callbacks to become false-positive diagnostics.
-Ordinary, 64-bit, and packed 16-bit destinations remain supported.
-
-Precise DPP/SDWA observation is deferred to an execution refactor that will
-report architectural register effects directly instead of staging broad reads,
-executing broad writes, and repairing preserved state afterward.
+Asynchronous memory operations are modeled separately. The race detector
+records their register dependencies when they are issued. A later completion
+updates storage without emitting the same instruction-level write again.
+Synchronization retires the corresponding outstanding operations.
 
 
 ## Adding a new plugin

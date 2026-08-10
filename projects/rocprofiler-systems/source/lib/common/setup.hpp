@@ -8,7 +8,6 @@
 #include <spdlog/fmt/fmt.h>
 
 #include <cstdlib>
-#include <cstring>
 #include <dlfcn.h>
 #include <link.h>
 #include <linux/limits.h>
@@ -71,14 +70,13 @@ get_environ(int _verbose, std::string _search_paths = {},
 
     if(!_omnilib_path.empty())
     {
-        _omnilib      = fmt::format("{}/{}", _omnilib_path, ::basename(_omnilib.c_str()));
+        _omnilib      = fmt::format("{}/{}", _omnilib_path, path::filename(_omnilib));
         _search_paths = fmt::format("{}:{}", _omnilib_path, _search_paths);
     }
 
     if(!_omnilib_dl_path.empty())
     {
-        _omnilib_dl =
-            fmt::format("{}/{}", _omnilib_dl_path, ::basename(_omnilib_dl.c_str()));
+        _omnilib_dl = fmt::format("{}/{}", _omnilib_dl_path, path::filename(_omnilib_dl));
         _search_paths = fmt::format("{}:{}", _omnilib_dl_path, _search_paths);
     }
 

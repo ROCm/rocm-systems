@@ -6,11 +6,13 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "util/log.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
@@ -22,6 +24,7 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <vector>
 
 using namespace rocjitsu;
 
@@ -39,6 +42,24 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
   auto s = std::make_unique<rj_vm_t>();
   s->soc = loaded.soc();
   auto num_xcds = s->soc->num_xcds();
+  std::vector<SoC *> partition_socs;
+  partition_socs.reserve(loaded.extra_gpu_builds.size() + 1);
+  partition_socs.push_back(s->soc);
+  if (loaded.num_gpus > 1) {
+    for (auto &eb : loaded.extra_gpu_builds) {
+      if (auto *extra_soc = dynamic_cast<SoC *>(eb.root.get()))
+        partition_socs.push_back(extra_soc);
+    }
+  }
+  // XCD partitions (config num_threads): run each XCD on its own engine
+  // partition/thread so the XCDs execute concurrently across their separate L2s.
+  const uint32_t num_threads_requested = loaded.engine_config.num_threads;
+  const uint32_t num_threads_used =
+      amdgpu::clamp_xcd_partition_count(partition_socs, num_threads_requested);
+  if (num_threads_used != num_threads_requested)
+    util::Logger::warn("num_threads clamped: requested=", num_threads_requested,
+                       ", effective=", num_threads_used);
+  loaded.engine_config.num_threads = num_threads_used;
 
   bool serve = (mode == RJ_VM_MODE_LOCAL || mode == RJ_VM_MODE_DAEMON);
   bool daemon = (mode == RJ_VM_MODE_DAEMON);
@@ -99,7 +120,22 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     loaded.wire_links(s->engine->topology());
     s->soc->wire_backing(s->engine->topology());
   }
+  if (num_threads_used > 1 && !amdgpu::partition_topology_by_xcds(
+                                  s->engine->topology(), partition_socs, num_threads_used)) {
+    throw std::invalid_argument("multi-threaded VM requires at least one XCD");
+  }
   s->engine->create();
+
+  // dispatch_wf() cannot enqueue work while a restored component tree is
+  // detached from an engine. Once create() has assigned partitions and event
+  // queues, resume any resident waves reconstructed from a checkpoint. The
+  // schedule_work() guards make this a no-op for ordinary idle configurations.
+  for (uint32_t i = 0; i < s->vm->num_socs(); ++i) {
+    for (auto *cu : s->vm->soc(i)->all_cus()) {
+      if (!cu->is_idle())
+        cu->schedule_work();
+    }
+  }
 
   if (serve) {
     s->engine->register_as_primary();
@@ -163,7 +199,8 @@ rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode, rj_vm_t **vm)
   try {
     auto loaded = config::load_config(json_path, rocjitsu::kEmbeddedSchema);
     return create_from_loaded(loaded, mode, vm);
-  } catch (const std::exception &) {
+  } catch (const std::exception &e) {
+    util::Logger::warn("rj_vm_create failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_FILE;
   }
 }
@@ -174,7 +211,8 @@ rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode, rj_vm_
   try {
     auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
     return create_from_loaded(loaded, mode, vm);
-  } catch (const std::exception &) {
+  } catch (const std::exception &e) {
+    util::Logger::warn("rj_vm_create_from_string failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   }
 }
@@ -222,6 +260,8 @@ rj_status_t rj_vm_step(rj_vm_t *vm, int *active) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
+  if (vm->engine_config.num_threads != 1)
+    return ROCJITSU_STATUS_UNSUPPORTED;
 
   bool any_active = vm->engine->step();
   if (active)
