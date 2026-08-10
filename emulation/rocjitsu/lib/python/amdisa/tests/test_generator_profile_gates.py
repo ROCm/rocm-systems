@@ -1029,6 +1029,35 @@ def test_gfx1250_wmma_f32_passes_c_modifier_to_accumulator_helper():
     assert 'amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi)' in body
 
 
+@pytest.mark.parametrize('k', [64, 128])
+@pytest.mark.parametrize(
+    ('input_type', 'a_fp8', 'b_fp8'),
+    [
+        ('FP8_FP8', 'true', 'true'),
+        ('FP8_BF8', 'true', 'false'),
+        ('BF8_FP8', 'false', 'true'),
+        ('BF8_BF8', 'false', 'false'),
+    ],
+)
+def test_gfx1250_wmma_f16_f8_passes_fp16_overflow_mode(
+    k: int, input_type: str, a_fp8: str, b_fp8: str
+) -> None:
+    inst = Instruction(f'V_WMMA_F16_16X16X{k}_{input_type}', 'ENC_VOP3P', 0, [])
+    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'gfx1250')
+
+    assert f'amdgpu::exec_wmma_f16_f8_spec<16, 16, {k}, {a_fp8}, {b_fp8}>(' in body
+    assert 'const_acc, wf.fp16_ovfl());' in body
+
+
+def test_gfx1250_wmma_f16_overflow_mode_is_scoped_to_f8_helper() -> None:
+    inst = Instruction('V_WMMA_F16_16X16X32_F16', 'ENC_VOP3P', 0, [])
+    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'gfx1250')
+
+    assert 'amdgpu::exec_wmma_f16_spec<16, 16, 32>(' in body
+    assert 's2, const_acc);' in body
+    assert 'wf.fp16_ovfl()' not in body
+
+
 def test_rdna_wmma_uses_arch_specific_wave32_operand_layout():
     operands = [
         Operand('vdst', 256, 'OPR_VGPR', False, True, False, False, 0),
@@ -2206,6 +2235,103 @@ def test_generated_dpp_encodings_own_extension_words(
                 arch,
                 class_name,
             )
+
+
+@pytest.mark.parametrize(
+    'arch',
+    [
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+        'gfx1250',
+    ],
+)
+def test_generated_scalar_literals_own_extension_words(
+    amdgpu_generated_root: Path,
+    arch: str,
+):
+    encodings_h = (amdgpu_generated_root / arch / 'encodings.h').read_text()
+    encodings_cpp = (amdgpu_generated_root / arch / 'encodings.cpp').read_text()
+    raw_word_counts = {
+        'Sop1': 3 if arch == 'gfx1250' else 2,
+        'Sopc': 3 if arch == 'gfx1250' else 2,
+        'Sopk': 2,
+        'Sop2': 3 if arch == 'gfx1250' else 2,
+    }
+
+    for class_name, raw_word_count in raw_word_counts.items():
+        class_start = encodings_h.index(f'class {class_name} ')
+        class_end = encodings_h.index('\n};', class_start)
+        class_body = encodings_h[class_start:class_end]
+        assert (
+            f'std::array<uint32_t, {raw_word_count}> raw_words_{{}};' in class_body
+        ), (arch, class_name)
+
+        constructor = _generated_constructor_body(encodings_cpp, class_name)
+        assert 'std::memcpy(raw_words_.data(), inst, size_);' in constructor, (
+            arch,
+            class_name,
+        )
+        assert 'raw_encoding_ = raw_words_.data();' in constructor, (
+            arch,
+            class_name,
+        )
+
+
+@pytest.mark.parametrize('arch', ['rdna1', 'rdna2'])
+def test_generated_early_rdna_vector_literals_own_extension_words(
+    amdgpu_generated_root: Path,
+    arch: str,
+):
+    encodings_h = (amdgpu_generated_root / arch / 'encodings.h').read_text()
+    encodings_cpp = (amdgpu_generated_root / arch / 'encodings.cpp').read_text()
+
+    for class_name, raw_word_count in {
+        'Vopc': 2,
+        'Vop3': 3,
+        'Vop3p': 3,
+        'Vop3SdstEnc': 3,
+    }.items():
+        class_start = encodings_h.index(f'class {class_name} ')
+        class_end = encodings_h.index('\n};', class_start)
+        class_body = encodings_h[class_start:class_end]
+        assert (
+            f'std::array<uint32_t, {raw_word_count}> raw_words_{{}};' in class_body
+        ), (arch, class_name)
+
+        constructor = _generated_constructor_body(encodings_cpp, class_name)
+        assert 'std::memcpy(raw_words_.data(), inst, size_);' in constructor, (
+            arch,
+            class_name,
+        )
+        assert 'raw_encoding_ = raw_words_.data();' in constructor, (
+            arch,
+            class_name,
+        )
+
+
+def test_gfx1250_generated_vop3_owns_only_supported_extension_word(
+    gfx1250_generated_root: Path,
+):
+    encodings_h = (gfx1250_generated_root / 'encodings.h').read_text()
+    encodings_cpp = (gfx1250_generated_root / 'encodings.cpp').read_text()
+
+    for class_name in ('Vop3', 'Vop3p'):
+        class_start = encodings_h.index(f'class {class_name} ')
+        class_end = encodings_h.index('\n};', class_start)
+        class_body = encodings_h[class_start:class_end]
+        assert 'std::array<uint32_t, 3> raw_words_{};' in class_body
+        assert 'has_lit64' not in class_body
+
+        constructor = _generated_constructor_body(encodings_cpp, class_name)
+        assert 'size_ += sizeof(MachineInst);' in constructor
+        assert '2 * sizeof(MachineInst)' not in constructor
 
 
 def test_gfx1250_generated_vop1_dpp8_uses_src0_marker_for_fi(

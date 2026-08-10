@@ -530,6 +530,11 @@ def gen_mfma(
                             f'  amdgpu::{spec}(cu, dst, src0_base, src1_base, s2, const_acc,'
                             f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
                         )
+                    elif spec.startswith('exec_wmma_f16_f8_spec'):
+                        L.append(
+                            f'  amdgpu::{spec}(cu, dst, src0_base, src1_base, s2, const_acc,'
+                            f' wf.fp16_ovfl());'
+                        )
                     else:
                         L.append(
                             f'  amdgpu::{spec}(cu, dst, src0_base, src1_base, s2, const_acc);'
