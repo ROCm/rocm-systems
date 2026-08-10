@@ -14,6 +14,8 @@ if(NOT DEFINED CMAKE_MODULE_PATH)
     set(CMAKE_MODULE_PATH ${TTD_PROJECT_SOURCE_DIR} ${TTD_PROJECT_SOURCE_DIR}/cmake)
 endif()
 
+include(${TTD_PROJECT_SOURCE_DIR}/cmake/version.cmake)
+
 include(GNUInstallDirs) # install directories
 set(CMAKE_INSTALL_LIBDIR "lib") # rocm doesn't use lib64
 
@@ -186,7 +188,8 @@ endif()
 if(TTD_DISASM_COMPILE_DEFS)
     target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ${TTD_DISASM_COMPILE_DEFS})
 endif()
-target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ROCPROF_TRACE_DECODER_BUILDING_LIBRARY)
+target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ROCPROF_TRACE_DECODER_BUILDING_LIBRARY
+                                                                 ${TTD_VERSION_COMPILE_DEFS})
 set_target_properties(rocprof-trace-decoder-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 option(ARCH_MODEL "Enable ARCH_MODEL stitcher path" OFF)
@@ -264,7 +267,8 @@ if(DEFINED BUILD_TESTS AND BUILD_TESTS)
     if(TTD_DISASM_COMPILE_DEFS)
         target_compile_definitions(rocprof-trace-decoder-sanitized PRIVATE ${TTD_DISASM_COMPILE_DEFS})
     endif()
-    target_compile_definitions(rocprof-trace-decoder-sanitized PRIVATE ROCPROF_TRACE_DECODER_BUILDING_LIBRARY)
+    target_compile_definitions(rocprof-trace-decoder-sanitized PRIVATE ROCPROF_TRACE_DECODER_BUILDING_LIBRARY
+                                                                       ${TTD_VERSION_COMPILE_DEFS})
     target_compile_options(rocprof-trace-decoder-sanitized PRIVATE -fsanitize=address,undefined -g -O1)
     target_link_options(rocprof-trace-decoder-sanitized PRIVATE -fsanitize=address,undefined)
     if(ARCH_MODEL)

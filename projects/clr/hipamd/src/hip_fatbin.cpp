@@ -8,6 +8,7 @@
 #include "hip_fatbin.hpp"
 #include "hip_global.hpp"
 #include <algorithm>
+#include <cstddef>
 #include <unordered_map>
 #include <mutex>
 #include "hip_code_object.hpp"
@@ -231,16 +232,19 @@ static bool UncompressAndPopulateCodeObject(
     bundle_ids.push_back(bis.c_str());
   }
 
-  if (image_bound < sizeof(symbols::ClangOffloadBundleCompressedHeader)) {
+  constexpr size_t kCompressedHeaderSize =
+      offsetof(symbols::ClangOffloadBundleCompressedHeader, compressedBinarydesc);
+  if (image_bound < kCompressedHeaderSize) {
     LogError("Compressed fat binary header is truncated");
     return false;
   }
 
   const auto obheader = reinterpret_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image);
   const size_t size = obheader->totalSize;
-  if (size > image_bound) {
-    LogPrintfError("Rejecting compressed fat binary: totalSize=%llu exceeds image bound=%llu",
+  if (size < kCompressedHeaderSize || size > image_bound) {
+    LogPrintfError("Rejecting compressed fat binary: totalSize=%llu is outside [%llu, %llu]",
                    static_cast<unsigned long long>(size),
+                   static_cast<unsigned long long>(kCompressedHeaderSize),
                    static_cast<unsigned long long>(image_bound));
     return false;
   }

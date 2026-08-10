@@ -392,9 +392,11 @@ add_executable(
     patch/probe_callable_test.cpp
     patch/probe_clobber_test.cpp
     patch/error_report_test.cpp
+    dbi/dbi_spill_sim_test.cpp
     code/code_object_target_id_test.cpp
     code/amdgpu_code_object_test.cpp
     code/relocation_function_table_test.cpp
+    code/kernel_descriptor_scan_test.cpp
     dbt/semantic_scratch_test.cpp
     dbt/waitcnt_translator_test.cpp
     dbt/virtual_lds_dispatch_rewrite_test.cpp
@@ -474,7 +476,9 @@ add_executable(
 if(HAS_DEVICE_KERNELS)
     target_sources(
         rocjitsu_tests
-        PRIVATE dbt/multikernel_indirect_branch_test.cpp
+        PRIVATE
+            dbt/device_kernels_translate_tests.cpp
+            dbt/multikernel_indirect_branch_test.cpp
     )
 endif()
 if(HAS_GFX1250_DEVICE_KERNELS)
@@ -1063,6 +1067,15 @@ if(RJ_HAS_GFX1201_GPU)
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
     add_test(
+        NAME "GuestKfdLifecycleTest.ReopensAfterLastClose"
+        COMMAND
+            ${RJ_CLI} --config
+            ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+            $<TARGET_FILE:guest_kfd_test>
+            --gtest_filter=GuestKfdLifecycleTest.ReopensAfterLastClose
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
         NAME "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
         COMMAND
             ${RJ_CLI} --config
@@ -1084,6 +1097,7 @@ if(RJ_HAS_GFX1201_GPU)
         "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
         "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
         "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
+        "GuestKfdLifecycleTest.ReopensAfterLastClose"
         "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
         "GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect"
         PROPERTIES TIMEOUT 60 SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
@@ -1095,6 +1109,7 @@ if(RJ_HAS_GFX1201_GPU)
             "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
             "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
             "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
+            "GuestKfdLifecycleTest.ReopensAfterLastClose"
             "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
             "GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect"
     )

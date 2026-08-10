@@ -298,7 +298,6 @@ __global__ __launch_bounds__(256) void ncclCeLocalReduceKernelVec(
           size_t rankOffset = (size_t)r * slotChunkElems + vIdx * W;
           tmp.vec = *reinterpret_cast<const LT*>(slotIn + rankOffset);
           // no pragma here, same rationale as the twin loop in the strided-unroll section above.
-         // the twin loop in the strided-unroll section above.
           for (int k = 0; k < W; k++) {
             acc.v[k] = ReduceOp<T, RedOp>::apply(acc.v[k], tmp.v[k]);
           }

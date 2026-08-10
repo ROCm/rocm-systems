@@ -19,20 +19,9 @@ bool isVop3pOp(const MachineInst opcode, uint32_t op) {
   return (opcode >> 24) == 0xcc && ((opcode >> 16) & 0xff) == op;
 }
 
-bool isWmmaScaleF32Vop3px2(const MachineInst *opcode) {
-  if (!isVop3pOp(opcode[0], 0x35) && !isVop3pOp(opcode[0], 0x3a))
-    return false;
-
-  return isVop3pOp(opcode[2], 0x33) || isVop3pOp(opcode[2], 0x88);
-}
-
 } // namespace
 
 std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {
-  if (isWmmaScaleF32Vop3px2(opcode))
-    return std::make_unique<VWmmaScaleF32Vop3px2>(opcode);
-  if (Vopd::is_vopd(opcode))
-    return std::make_unique<Vopd>(opcode);
   Sop1MachineInst op = std::bit_cast<decltype(op)>(*opcode);
   return primary_decode_table[op.encoding](opcode);
 }
@@ -40,6 +29,10 @@ std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {
 std::unique_ptr<Instruction> Decoder::decodeInvalid(const MachineInst *opcode) {
   throw util::InvalidInst(std::format("{:X}", *opcode));
   return nullptr;
+}
+
+std::unique_ptr<Instruction> Decoder::decodeVopd(const MachineInst *opcode) {
+  return std::make_unique<Vopd>(opcode);
 }
 
 std::unique_ptr<Instruction> Decoder::decodeVCndmaskB32Vop2(const MachineInst *opcode) {
@@ -2849,6 +2842,12 @@ std::unique_ptr<Instruction> Decoder::decodeVPkMin3U16Vop3p(const MachineInst *o
 std::unique_ptr<Instruction>
 Decoder::decodeVWmmaF3216x16x128F8f6f4Vop3p(const MachineInst *opcode) {
   return std::make_unique<VWmmaF3216x16x128F8f6f4Vop3p>(opcode);
+}
+
+std::unique_ptr<Instruction> Decoder::decodeVWmmaScaleF32Vop3px2(const MachineInst *opcode) {
+  if (!isVop3pOp(opcode[2], 0x33) && !isVop3pOp(opcode[2], 0x88))
+    return decodeInvalid(opcode);
+  return std::make_unique<VWmmaScaleF32Vop3px2>(opcode);
 }
 
 std::unique_ptr<Instruction> Decoder::decodeVPkMinimum3F16Vop3p(const MachineInst *opcode) {
@@ -7023,22 +7022,22 @@ const std::array<Decoder::DecodeFunc, 512> Decoder::primary_decode_table = {
     &Decoder::subDecodeVbuffer,
     &Decoder::subDecodeVbuffer,
     &Decoder::subDecodeVbuffer,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
+    &Decoder::decodeVopd,
+    &Decoder::decodeVopd,
+    &Decoder::decodeVopd,
+    &Decoder::decodeVopd,
+    &Decoder::decodeVopd,
+    &Decoder::decodeVopd,
+    &Decoder::decodeVopd,
+    &Decoder::decodeVopd,
     &Decoder::subDecodeVop3p,
     &Decoder::subDecodeVop3p,
     &Decoder::decodeInvalid,
     &Decoder::decodeInvalid,
     &Decoder::decodeInvalid,
     &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
+    &Decoder::decodeVopd,
+    &Decoder::decodeVopd,
     &Decoder::subDecodeVimage,
     &Decoder::subDecodeVimage,
     &Decoder::subDecodeVimage,
@@ -8183,12 +8182,12 @@ const std::array<Decoder::DecodeFunc, 256> Decoder::sub_decode_vop3p = {
     &Decoder::decodeVPkMin3U16Vop3p,
     &Decoder::decodeVWmmaF3216x16x128F8f6f4Vop3p,
     &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
+    &Decoder::decodeVWmmaScaleF32Vop3px2,
     &Decoder::decodeVPkMinimum3F16Vop3p,
     &Decoder::decodeVPkMaximum3F16Vop3p,
     &Decoder::decodeVPkMin3NumF16Vop3p,
     &Decoder::decodeVPkMax3NumF16Vop3p,
-    &Decoder::decodeInvalid,
+    &Decoder::decodeVWmmaScaleF32Vop3px2,
     &Decoder::decodeInvalid,
     &Decoder::decodeInvalid,
     &Decoder::decodeVFmaMixF32Bf16Vop3p,
