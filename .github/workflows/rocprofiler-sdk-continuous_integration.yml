@@ -184,7 +184,7 @@ jobs:
             submods-scoped-v1-${{ runner.os }}-
 
       - name: Init/Update submodules
-        run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
+        run: git submodule update --init --recursive --jobs 4 -- ${SUBMODULE_PATHS}
 
       - name: Clone ROCDecode
         uses: actions/checkout@v6
@@ -411,7 +411,7 @@ jobs:
             submods-scoped-v1-${{ runner.os }}-
 
       - name: Init/Update submodules
-        run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
+        run: git submodule update --init --recursive --jobs 4 -- ${SUBMODULE_PATHS}
 
       - name: Install requirements (venv)
         timeout-minutes: 10
@@ -555,7 +555,7 @@ jobs:
           submods-scoped-v1-${{ runner.os }}-
 
     - name: Init/Update submodules
-      run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
+      run: git submodule update --init --recursive --jobs 4 -- ${SUBMODULE_PATHS}
 
     - name: Install requirements
       timeout-minutes: 10
