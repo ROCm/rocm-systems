@@ -180,6 +180,9 @@ inline void uninstall()
     {
         at::removeCallback(handle);
     }
+    // Nothing consumes snapshots once the callback is gone, so any left by a
+    // backward that never ran would be retained for the life of the process.
+    g_snapshots.clear();
 }
 
 inline bool is_installed()
