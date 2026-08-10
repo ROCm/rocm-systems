@@ -17,92 +17,58 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-const bool SNopSopp::execute_registered_ = register_exec_fn<SNopSopp>();
-
 void SNopSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_nop_sopp(*this, wf); }
-
-const bool SSethaltSopp::execute_registered_ = register_exec_fn<SSethaltSopp>();
 
 void SSethaltSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_sethalt_sopp(*this, wf);
 }
 
-const bool SSleepSopp::execute_registered_ = register_exec_fn<SSleepSopp>();
-
 void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sleep_sopp(*this, wf); }
-
-const bool SMonitorSleepSopp::execute_registered_ = register_exec_fn<SMonitorSleepSopp>();
 
 void SMonitorSleepSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-const bool SClauseSopp::execute_registered_ = register_exec_fn<SClauseSopp>();
-
 void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_clause_sopp(*this, wf); }
-
-const bool SSetVgprMsbSopp::execute_registered_ = register_exec_fn<SSetVgprMsbSopp>();
 
 void SSetVgprMsbSopp::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_vgpr_msb_mode(static_cast<uint8_t>(simm16.encoding_value_ & 0xffu));
 }
 
-const bool SDelayAluSopp::execute_registered_ = register_exec_fn<SDelayAluSopp>();
-
 void SDelayAluSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_delay_alu_sopp(*this, wf);
 }
-
-const bool SWaitAluSopp::execute_registered_ = register_exec_fn<SWaitAluSopp>();
 
 void SWaitAluSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_wait_alu_sopp(*this, wf);
 }
 
-const bool SWaitIdleSopp::execute_registered_ = register_exec_fn<SWaitIdleSopp>();
-
 void SWaitIdleSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_wait_idle_sopp(*this, wf);
 }
 
-const bool STrapSopp::execute_registered_ = register_exec_fn<STrapSopp>();
-
 void STrapSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_trap_sopp(*this, wf); }
-
-const bool SRoundModeSopp::execute_registered_ = register_exec_fn<SRoundModeSopp>();
 
 void SRoundModeSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_round_mode_sopp(*this, wf);
 }
 
-const bool SDenormModeSopp::execute_registered_ = register_exec_fn<SDenormModeSopp>();
-
 void SDenormModeSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_denorm_mode_sopp(*this, wf);
 }
-
-const bool SBarrierWaitSopp::execute_registered_ = register_exec_fn<SBarrierWaitSopp>();
 
 void SBarrierWaitSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_barrier_wait_sopp(*this, wf);
 }
 
-const bool SBarrierLeaveSopp::execute_registered_ = register_exec_fn<SBarrierLeaveSopp>();
-
 void SBarrierLeaveSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
-const bool SCodeEndSopp::execute_registered_ = register_exec_fn<SCodeEndSopp>();
 
 void SCodeEndSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_code_end_sopp(*this, wf);
 }
 
-const bool SBranchSopp::execute_registered_ = register_exec_fn<SBranchSopp>();
-
 void SBranchSopp::execute_impl(amdgpu::Wavefront &wf) {
   int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
   wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
 }
-
-const bool SCbranchScc0Sopp::execute_registered_ = register_exec_fn<SCbranchScc0Sopp>();
 
 void SCbranchScc0Sopp::execute_impl(amdgpu::Wavefront &wf) {
   if (!wf.read_scc()) {
@@ -111,16 +77,12 @@ void SCbranchScc0Sopp::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-const bool SCbranchScc1Sopp::execute_registered_ = register_exec_fn<SCbranchScc1Sopp>();
-
 void SCbranchScc1Sopp::execute_impl(amdgpu::Wavefront &wf) {
   if (wf.read_scc()) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
   }
 }
-
-const bool SCbranchVcczSopp::execute_registered_ = register_exec_fn<SCbranchVcczSopp>();
 
 void SCbranchVcczSopp::execute_impl(amdgpu::Wavefront &wf) {
   const uint64_t live_vcc =
@@ -131,8 +93,6 @@ void SCbranchVcczSopp::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-const bool SCbranchVccnzSopp::execute_registered_ = register_exec_fn<SCbranchVccnzSopp>();
-
 void SCbranchVccnzSopp::execute_impl(amdgpu::Wavefront &wf) {
   const uint64_t live_vcc =
       wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
@@ -142,16 +102,12 @@ void SCbranchVccnzSopp::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-const bool SCbranchExeczSopp::execute_registered_ = register_exec_fn<SCbranchExeczSopp>();
-
 void SCbranchExeczSopp::execute_impl(amdgpu::Wavefront &wf) {
   if (wf.exec() == 0) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
   }
 }
-
-const bool SCbranchExecnzSopp::execute_registered_ = register_exec_fn<SCbranchExecnzSopp>();
 
 void SCbranchExecnzSopp::execute_impl(amdgpu::Wavefront &wf) {
   if (wf.exec() != 0) {
@@ -160,124 +116,82 @@ void SCbranchExecnzSopp::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-const bool SEndpgmSopp::execute_registered_ = register_exec_fn<SEndpgmSopp>();
-
 void SEndpgmSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
-
-const bool SEndpgmSavedSopp::execute_registered_ = register_exec_fn<SEndpgmSavedSopp>();
 
 void SEndpgmSavedSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
 
-const bool SWakeupSopp::execute_registered_ = register_exec_fn<SWakeupSopp>();
-
 void SWakeupSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_wakeup_sopp(*this, wf); }
-
-const bool SSetprioSopp::execute_registered_ = register_exec_fn<SSetprioSopp>();
 
 void SSetprioSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_setprio_sopp(*this, wf);
 }
 
-const bool SSendmsgSopp::execute_registered_ = register_exec_fn<SSendmsgSopp>();
-
 void SSendmsgSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_sendmsg_sopp(*this, wf);
 }
-
-const bool SSendmsghaltSopp::execute_registered_ = register_exec_fn<SSendmsghaltSopp>();
 
 void SSendmsghaltSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_sendmsghalt_sopp(*this, wf);
 }
 
-const bool SIncperflevelSopp::execute_registered_ = register_exec_fn<SIncperflevelSopp>();
-
 void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_incperflevel_sopp(*this, wf);
 }
-
-const bool SDecperflevelSopp::execute_registered_ = register_exec_fn<SDecperflevelSopp>();
 
 void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_decperflevel_sopp(*this, wf);
 }
 
-const bool STtracedataSopp::execute_registered_ = register_exec_fn<STtracedataSopp>();
-
 void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_ttracedata_sopp(*this, wf);
 }
-
-const bool STtracedataImmSopp::execute_registered_ = register_exec_fn<STtracedataImmSopp>();
 
 void STtracedataImmSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_ttracedata_imm_sopp(*this, wf);
 }
 
-const bool SIcacheInvSopp::execute_registered_ = register_exec_fn<SIcacheInvSopp>();
-
 void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_icache_inv_sopp(*this, wf);
 }
 
-const bool SSetprioIncWgSopp::execute_registered_ = register_exec_fn<SSetprioIncWgSopp>();
-
 void SSetprioIncWgSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
-const bool SWaitLoadcntSopp::execute_registered_ = register_exec_fn<SWaitLoadcntSopp>();
 
 void SWaitLoadcntSopp::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
   wf.set_wait_counter("wait_loadcnt", cnt);
 }
 
-const bool SWaitStorecntSopp::execute_registered_ = register_exec_fn<SWaitStorecntSopp>();
-
 void SWaitStorecntSopp::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
   wf.set_wait_counter("wait_storecnt", cnt);
 }
 
-const bool SWaitXcntSopp::execute_registered_ = register_exec_fn<SWaitXcntSopp>();
-
 void SWaitXcntSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
-const bool SWaitDscntSopp::execute_registered_ = register_exec_fn<SWaitDscntSopp>();
 
 void SWaitDscntSopp::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
   wf.set_wait_counter("wait_dscnt", cnt);
 }
 
-const bool SWaitKmcntSopp::execute_registered_ = register_exec_fn<SWaitKmcntSopp>();
-
 void SWaitKmcntSopp::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
   wf.set_wait_counter("wait_kmcnt", cnt);
 }
-
-const bool SWaitLoadcntDscntSopp::execute_registered_ = register_exec_fn<SWaitLoadcntDscntSopp>();
 
 void SWaitLoadcntDscntSopp::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
   wf.set_wait_counter("wait_loadcnt_dscnt", cnt);
 }
 
-const bool SWaitStorecntDscntSopp::execute_registered_ = register_exec_fn<SWaitStorecntDscntSopp>();
-
 void SWaitStorecntDscntSopp::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
   wf.set_wait_counter("wait_storecnt_dscnt", cnt);
 }
 
-const bool SWaitAsynccntSopp::execute_registered_ = register_exec_fn<SWaitAsynccntSopp>();
-
 void SWaitAsynccntSopp::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
   wf.set_wait_counter("wait_asynccnt", cnt);
 }
-
-const bool SWaitTensorcntSopp::execute_registered_ = register_exec_fn<SWaitTensorcntSopp>();
 
 void SWaitTensorcntSopp::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);

@@ -33,9 +33,22 @@ inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1
 // store throughput and lower register pressure than the non-temporal or
 // system-scope variants. Reads remain non-temporal (load128NT) so the LL128
 // flag poll never observes a stale cache line.
+//
+// The width is correctness-load-bearing, not just a throughput choice: the LL128
+// reader re-checks only the flag word, so the data words must become visible no
+// later than their flag. A single 128-bit vector store keeps data+flag in one
+// instruction and one memory transaction, guaranteeing that ordering rather than
+// leaving it to backend coalescing of two scalar stores (which two separate
+// `*u64` writes rely on, and which is especially fragile with gfx1250 ordering
+// still to be revisited). Emit the b128 vector store explicitly here.
 inline __device__ void store128Plain(uint64_t* ptr, uint64_t v0, uint64_t v1) {
-  *((u64_gptr)ptr) = v0;
-  *((u64_gptr)ptr + 1) = v1;
+  union {
+    v4u v;
+    uint64_t u64[2];
+  } u;
+  u.u64[0] = v0;
+  u.u64[1] = v1;
+  *((v4u_gptr)ptr) = u.v;
 }
 
 template <typename T, typename RedOp, typename Fan, int Direct, int P2p, bool isNetOffload, int Metadata, int Pipeline,
@@ -179,24 +192,32 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   //                     userRegUsed member (dual path, legacy behavior).
   // When Direct == 0 the bypass folds away entirely regardless of UserRegMode.
   __device__ __forceinline__ bool userBypass() const {
-    if (!Direct) return false;
-    if (UserRegMode == 1) return true;
-    if (UserRegMode == 2) return false;
+    if (!Direct) {
+      return false;
+    }
+    if (UserRegMode == 1) {
+      return true;
+    }
+    if (UserRegMode == 2) {
+      return false;
+    }
     return userRegUsed;
   }
   __device__ __forceinline__ void loadUser128(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
-    if (userBypass())
+    if (userBypass()) {
       load128(ptr, v0, v1);
-    else
+    } else {
       load128NT(ptr, v0, v1);
+    }
   }
   __device__ __forceinline__ void storeUser128(uint64_t* ptr, uint64_t v0, uint64_t v1) {
     // Non-registered stores use the plain cacheable path (February behavior) to
     // recover store throughput; only the registered path keeps system-scope.
-    if (userBypass())
+    if (userBypass()) {
       store128(ptr, v0, v1);
-    else
+    } else {
       store128Plain(ptr, v0, v1);
+    }
   }
 
   template <int WordPerThread>
@@ -536,7 +557,7 @@ public:
     userRegUsed = (e != nullptr) && (e->regUsed || e->netRegUsed);
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-    skip_fence = !ncclShmem.comm.gfx9CheapFenceOff;
+    skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
 #else
     // The cheap post-peer fence is only safe with global DWORDX4 builtins
     // (system-scope cache-bypassing stores); otherwise always use the full fence.

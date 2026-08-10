@@ -71,8 +71,7 @@ rocprof-sys-run -- ./all_reduce_perf -b 8 -e 128M -f 2 -g 2
 > **Note:** RCCL collective calls (`ncclAllReduce`, `ncclBroadcast`, ...) are only captured when the `rccl_api` domain is enabled. Add `rccl_api` to `ROCPROFSYS_ROCM_DOMAINS`, or set `ROCPROFSYS_USE_RCCLP=true` (which enables the `rccl_api` domain for you).
 
 ```bash
-rocprof-sys-run \
-    -e ROCPROFSYS_ROCM_DOMAINS=rccl_api,hip_runtime_api,kernel_dispatch,memory_copy \
-    -e ROCPROFSYS_TRACE=true \
-    -- ./all_reduce_perf -b 8 -e 128M -f 2 -g 2
+ROCPROFSYS_ROCM_DOMAINS=rccl_api,hip_runtime_api,kernel_dispatch,memory_copy \
+ROCPROFSYS_TRACE=true \
+rocprof-sys-run -- ./all_reduce_perf -b 8 -e 128M -f 2 -g 2
 ```

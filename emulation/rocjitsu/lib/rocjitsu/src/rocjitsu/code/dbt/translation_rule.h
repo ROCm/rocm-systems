@@ -87,6 +87,9 @@ struct KernelResourceRequirements {
   /// @brief Initial per-lane private segment size from descriptor translation.
   uint32_t private_segment_fixed_size = 0;
 
+  /// @brief Whether private memory above the fixed segment is a dynamic call stack.
+  bool uses_dynamic_stack = false;
+
   /// @brief Minimum per-lane private segment size required after spill-backed lowerings.
   uint32_t required_private_segment_fixed_size = 0;
 
@@ -114,10 +117,11 @@ struct KernelResourceRequirements {
   /// @param accum_base Initial target AccVGPR base.
   /// @param sgprs Initial target SGPR count.
   /// @param private_bytes Initial per-lane private segment size.
+  /// @param dynamic_stack Whether the kernel uses a runtime-managed dynamic stack.
   KernelResourceRequirements(uint32_t vgprs, uint32_t agprs, uint32_t accum_base, uint32_t sgprs,
-                             uint32_t private_bytes = 0)
+                             uint32_t private_bytes = 0, bool dynamic_stack = false)
       : num_vgprs(vgprs), num_agprs(agprs), accum_offset(accum_base), num_sgprs(sgprs),
-        private_segment_fixed_size(private_bytes),
+        private_segment_fixed_size(private_bytes), uses_dynamic_stack(dynamic_stack),
         required_private_segment_fixed_size(private_bytes),
         semantic_spill_persistent_end(private_bytes) {}
 
@@ -259,8 +263,8 @@ struct TranslationContext : KernelResourceRequirements, VirtualLdsTranslationSta
   TranslationContext(uint32_t vgprs, uint32_t sgprs) : KernelResourceRequirements(vgprs, sgprs) {}
 
   TranslationContext(uint32_t vgprs, uint32_t agprs, uint32_t accum_base, uint32_t sgprs,
-                     uint32_t private_bytes = 0)
-      : KernelResourceRequirements(vgprs, agprs, accum_base, sgprs, private_bytes) {}
+                     uint32_t private_bytes = 0, bool dynamic_stack = false)
+      : KernelResourceRequirements(vgprs, agprs, accum_base, sgprs, private_bytes, dynamic_stack) {}
 };
 
 /// @brief Status returned by a semantic EXPAND rule lookup or expansion.
@@ -420,6 +424,7 @@ struct TranslationRule {
   ExpandFn expand_fn;             ///< Expansion generator (for Expand).
   const LaneLayout *guest_layout; ///< Source matrix layout (for matrix Expand).
   const LaneLayout *host_layout;  ///< Target matrix layout (for matrix Expand).
+  bool requires_liveness = true;  ///< Conservative default; tables opt out after auditing.
 
   constexpr auto operator<=>(const TranslationRule &rhs) const {
     if (auto cmp = src_encoding_id <=> rhs.src_encoding_id; cmp != 0)

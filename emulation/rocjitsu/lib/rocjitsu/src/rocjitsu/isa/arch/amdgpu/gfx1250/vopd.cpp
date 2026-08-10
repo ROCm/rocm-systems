@@ -58,11 +58,6 @@ std::string operand_list(const Operand &dst, const Operand &src0, const Operand 
 
 } // namespace
 
-bool Vopd::is_vopd(const MachineInst *inst) {
-  uint32_t word0 = *reinterpret_cast<const uint32_t *>(inst);
-  return (word0 >> 24) == 0xCF || (word0 >> 26) == 0x32;
-}
-
 const char *Vopd::op_name(uint16_t op) {
   switch (op) {
   case kVopdFmacF32:
@@ -136,7 +131,7 @@ bool Vopd::is_float64_op(uint16_t op) {
 }
 
 Vopd::Vopd(const MachineInst *inst)
-    : IsaInstruction<Isa>("vopd", registered_exec_fn<Vopd>()), dstx_(32, OperandType::OPR_VGPR, 0),
+    : IsaInstruction<Isa>("vopd", selected_exec_fn(0)), dstx_(32, OperandType::OPR_VGPR, 0),
       dsty_(32, OperandType::OPR_VGPR, 0), srcx0_(32, OperandType::OPR_SRC, 0),
       srcx1_(32, OperandType::OPR_VGPR, 0), srcx2_(32, OperandType::OPR_VGPR, 0),
       srcy0_(32, OperandType::OPR_SRC, 0), srcy1_(32, OperandType::OPR_VGPR, 0),

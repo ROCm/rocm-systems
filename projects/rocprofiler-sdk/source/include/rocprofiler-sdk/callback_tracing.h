@@ -25,6 +25,7 @@
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip.h>
+#include <rocprofiler-sdk/hipfile.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/marker.h>
 #include <rocprofiler-sdk/ompt.h>
@@ -145,6 +146,16 @@ typedef struct rocprofiler_callback_tracing_rocshmem_api_data_t
     rocprofiler_rocshmem_api_args_t   args;
     rocprofiler_rocshmem_api_retval_t retval;
 } rocprofiler_callback_tracing_rocshmem_api_data_t;
+
+/**
+ * @brief ROCProfiler hipFILE API Callback Data.
+ */
+typedef struct rocprofiler_callback_tracing_hipfile_api_data_t
+{
+    uint64_t                         size;  ///< size of this struct
+    rocprofiler_hipfile_api_args_t   args;
+    rocprofiler_hipfile_api_retval_t retval;
+} rocprofiler_callback_tracing_hipfile_api_data_t;
 
 /**
  * @brief ROCProfiler Code Object Load Tracer Callback Record.

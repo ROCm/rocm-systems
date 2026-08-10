@@ -14,7 +14,7 @@ all_protos    = ["LL","LL128","SIMPLE"]
 all_algos     = ["TREE","RING", "", "", "", "", "PAT"]
 all_accs      = ["0", "1"]
 all_pipelines = ["0", "1"]
-all_unrolls   = ["1", "2", "4"]
+all_unrolls   = ["1", "2", "4", "8", "16", "32"]
 # User-buffer registration mode (compile-time UserRegMode template parameter):
 #   "0" = runtime / not-applicable (single kernel, current behavior)
 #   "1" = registered user buffer   (LL128 Direct path bypasses cache)
@@ -242,13 +242,17 @@ def calc_unroll_and_pipeline_for_local_arch():
   # Use (gfx_name, cu_count) as key for dictionary and convert it to list here
   gfx_targets = list(gfx_targets.keys())
   
-  # Homogeneous system is required to build for only 1 variant of unroll factor (except for gfx950)
+  # Homogeneous system is required to build for only 1 variant of unroll factor (except for gfx950 and gfx1250)
   if len(gfx_targets) == 1:
     gfx_name, cu_count = gfx_targets[0]
     if "gfx950" == gfx_name:
       return (["1", "2"], ["0"])  # Disable pipelining for gfx950
     elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
       return (["2"], all_pipelines)
+    elif "gfx1250" == gfx_name:
+      # gfx1250 (MI450) benefits from larger unrolls; Unroll 8 required for FP8 launch;
+      # 32 is the default (commSetUnrollFactor).
+      return (["8", "16", "32"], all_pipelines)
     else:
       return (["4"], all_pipelines)
   else:
@@ -391,13 +395,14 @@ def custom_sort_key(fn: Fn):
 def get_arch_guard(fn):
   cond = None
 
-  if fn.proto == "LL128" and fn.acc == "1":
+  if fn.unroll in ("8", "16", "32"):
+      cond = "defined(__gfx1250__)"
+  elif fn.proto == "LL128" and fn.acc == "1":
       cond = "(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
   elif fn.proto == "LL128":
       cond = "(defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
   elif fn.acc == "1":
       cond = "defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)"
-
   return cond
 
 # Build the mangled function symbol suffix. The user-buffer registration mode is
@@ -479,7 +484,12 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
           "};\n\n")
       unroll_fns = [fn for fn in primary_funcs if fn.unroll == unroll]
       for i, fn in enumerate(unroll_fns):
-        sym = paste("_", "ncclDevFunc", *fn)
+        # Must match the symbol emitted for the forward declarations / table /
+        # DEFINE_ncclDevFunc above: fn_sym() omits the reg suffix when reg=="0",
+        # so calling by name here must use it too (plain *fn would append the
+        # "_0" reg field and reference an undeclared symbol, breaking the
+        # pure-RDC / --no-device-linker build).
+        sym = "ncclDevFunc_" + fn_sym(fn)
         guard = get_arch_guard(fn)
         spec = f"template<> struct Caller{unroll}<{i}, {i+1}> {{ static __forceinline__ __device__ void call{unroll}(unsigned short) noexcept"
         if guard:
@@ -565,6 +575,17 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
         key = ((coll_idx & 0x3F))
       
       out(f'  {{{key}, {fn_id}}}, {comment}\n')
+  out("};\n")
+
+  # Which unroll-factor tables were actually generated for this build. The host
+  # (commSetUnrollFactor) uses this to reject an RCCL_UNROLL_FACTOR that maps to
+  # an empty ncclDevFuncTable_* / NCCL_CALL_FUNCTIONS_* slot, which would
+  # otherwise dispatch to a nullptr and segfault on the device.
+  out("\n")
+  out("// Indexed by unroll-factor enum (NCCL_UNROLL_1 .. NCCL_UNROLL_32).\n")
+  out("bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS] = {\n")
+  for u in all_unrolls:
+    out("  %s, // unroll %s\n" % ("true" if u in local_unroll else "false", u))
   out("};\n")
 
 # Maps to .cu filename which implements this func. The only constraint is that
@@ -707,7 +728,13 @@ specialized_filelist.sort(key=_compile_cost_key)
 
 # Write the list of specialized files for CMake consumption
 with open(os.path.join(gensrc, "specialized_files.txt"), "w") as f:
-  for filename, func_name, guard, _ in specialized_filelist:
-    f.write("%s %s %s\n" % (filename, func_name, guard or ""))
+  for filename, func_name, guard, fn in specialized_filelist:
+    if fn.unroll in ("8", "16", "32"):
+      cmake_guard = "defined(__gfx1250__)"
+      if fn.proto == "LL128":
+        cmake_guard += " && defined(ENABLE_LL128)"
+    else:
+      cmake_guard = guard or ""
+    f.write("%s %s %s\n" % (filename, func_name, cmake_guard))
 
 print("-- Generated %d specialized kernel files in %s" % (len(specialized_filelist), specialized_dir))
