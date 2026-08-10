@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/vm/plugins/plugin_abi.h"
+#include "rocjitsu/vm/plugins/plugin_exports.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -39,7 +39,7 @@ __attribute__((destructor)) void on_unload() { trace("unload"); }
 
 extern "C" ROCJITSU_PLUGIN_EXPORT const rocjitsu::PluginMetadata *rocjitsu_plugin_metadata() {
   trace("metadata");
-  static const rocjitsu::PluginMetadata metadata{PLUGIN_FIXTURE_NAME, "rocjitsu-tests", "1", "{}"};
+  static const rocjitsu::PluginMetadata metadata{PLUGIN_FIXTURE_NAME, "{}"};
   return &metadata;
 }
 

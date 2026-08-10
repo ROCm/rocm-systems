@@ -3,8 +3,8 @@
 
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 
-#include "rocjitsu/vm/plugins/plugin_abi.h"
 #include "rocjitsu/vm/plugins/plugin_config_resolver.h"
+#include "rocjitsu/vm/plugins/plugin_exports.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 
 #include "util/dynamic_loader.h"
@@ -147,8 +147,7 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
   }
 
   open_handles().push_back(handle);
-  util::Logger::plugins("plugin '", name, "' loaded", (meta->version && *meta->version) ? " v" : "",
-                        (meta->version && *meta->version) ? meta->version : "");
+  util::Logger::plugins("plugin '", name, "' loaded");
   return true;
 }
 

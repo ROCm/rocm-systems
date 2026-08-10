@@ -73,11 +73,6 @@ public:
 class StdoutSink : public PluginSink {
 public:
   void write(std::string_view msg) override { std::fwrite(msg.data(), 1, msg.size(), stdout); }
-
-  static StdoutSink &instance() {
-    static StdoutSink s;
-    return s;
-  }
 };
 
 /// @brief Writes to a file. Owns the FILE* handle; flushes after each write.
@@ -115,7 +110,6 @@ public:
   void write(std::string_view msg) override { buf_ += msg; }
 
   const std::string &str() const { return buf_; }
-  void clear() { buf_.clear(); }
 
 private:
   std::string buf_;
