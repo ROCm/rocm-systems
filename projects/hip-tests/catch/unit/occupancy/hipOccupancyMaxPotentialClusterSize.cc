@@ -42,7 +42,7 @@ TEST_CASE("Unit_hipOccupancyMaxPotentialClusterSize_Positive_RangeValidation") {
   hipLaunchConfig_t config = {};
 
   config.blockDim = {1024};
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
 
   if (!props.clusterLaunch) {
     HIP_SKIP_TEST("cluster launches are not supported on this device");
@@ -70,7 +70,7 @@ TEST_CASE("Unit_hipOccupancyMaxPotentialClusterSize_Negative_Parameters") {
   attribute[0].val.clusterDim.z = 1;
   config.numAttrs = 1;
   config.attrs = attribute;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
 
   if (!props.clusterLaunch) {
     SUCCEED("cluster launches are not supported on this device");

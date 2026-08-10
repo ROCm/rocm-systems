@@ -27,7 +27,7 @@ void BuildMemcpyGraph(hipGraph_t* graph, void* device_ptr, const void* src, void
   hipGraphNode_t h2d_node = nullptr;
   hipGraphNode_t d2h_node = nullptr;
 
-  HIP_CHECK(hipGraphCreate(graph, 0));
+  HIP_CHECK(hipGraphCreate(graph, 0))
   HIP_CHECK(hipGraphAddMemcpyNode1D(&h2d_node, *graph, nullptr, 0, device_ptr, src, size,
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&d2h_node, *graph, &h2d_node, 1, dst, device_ptr, size,
@@ -45,17 +45,17 @@ HIP_TEST_CASE(Contract_GraphExecLifecycle_HipGraphInstantiateWithFlags_ZeroFlag_
   hipGraphExec_t graph_exec = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   BuildMemcpyGraph(&graph, device_ptr, src.data(), dst.data(), dst.size());
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
-  HIP_CHECK(hipGraphInstantiateWithFlags(&graph_exec, graph, 0));
+  HIP_CHECK(hipGraphInstantiateWithFlags(&graph_exec, graph, 0))
   cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(dst == src);
 }
@@ -69,12 +69,12 @@ HIP_TEST_CASE(Contract_GraphExecLifecycle_HipGraphExecGetFlags_Default_ReflectsZ
   hipGraphNode_t node = nullptr;
   unsigned long long flags = 1;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
-  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
-  HIP_CHECK(hipGraphInstantiateWithFlags(&graph_exec, graph, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0))
+  HIP_CHECK(hipGraphInstantiateWithFlags(&graph_exec, graph, 0))
   cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
-  HIP_CHECK(hipGraphExecGetFlags(graph_exec, &flags));
+  HIP_CHECK(hipGraphExecGetFlags(graph_exec, &flags))
 
   REQUIRE(flags == 0);
 }
@@ -87,13 +87,13 @@ HIP_TEST_CASE(Contract_GraphExecLifecycle_HipGraphExecGetFlags_Default_ReflectsA
   hipGraphNode_t node = nullptr;
   unsigned long long flags = 0;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
-  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0))
   HIP_CHECK(
       hipGraphInstantiateWithFlags(&graph_exec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
   cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
-  HIP_CHECK(hipGraphExecGetFlags(graph_exec, &flags));
+  HIP_CHECK(hipGraphExecGetFlags(graph_exec, &flags))
 
   REQUIRE((flags & hipGraphInstantiateFlagAutoFreeOnLaunch) != 0);
 }
@@ -109,18 +109,18 @@ HIP_TEST_CASE(Contract_GraphExecLifecycle_HipGraphUpload_Default_ThenLaunchSucce
   hipGraphExec_t graph_exec = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   BuildMemcpyGraph(&graph, device_ptr, src.data(), dst.data(), dst.size());
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
-  HIP_CHECK(hipGraphInstantiateWithFlags(&graph_exec, graph, 0));
+  HIP_CHECK(hipGraphInstantiateWithFlags(&graph_exec, graph, 0))
   cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
-  HIP_CHECK(hipGraphUpload(graph_exec, stream));
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphUpload(graph_exec, stream))
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(dst == src);
 }
@@ -134,11 +134,11 @@ HIP_TEST_CASE(Contract_GraphExecLifecycle_HipGraphInstantiateWithFlags_InvalidAr
   hipGraphNode_t node = nullptr;
   unsigned long long flags = 0;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
-  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0))
 
   REQUIRE(hipGraphInstantiateWithFlags(nullptr, graph, 0) != hipSuccess);
   REQUIRE(hipGraphInstantiateWithFlags(&graph_exec, nullptr, 0) != hipSuccess);

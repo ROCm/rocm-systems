@@ -48,7 +48,7 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_ArgValidation) {
   hipTextureObject_t texObj;
 
   // Initialization
-  HIP_CHECK(hipMalloc(&texBuf, N * sizeof(float)));
+  HIP_CHECK(hipMalloc(&texBuf, N * sizeof(float)))
   // Populate resource descriptor
   memset(&resDesc, 0, sizeof(resDesc));
   resDesc.resType = hipResourceTypeLinear;
@@ -91,7 +91,7 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_ArgValidation) {
   }
 
   // De-Initialization
-  HIP_CHECK(hipFree(texBuf));
+  HIP_CHECK(hipFree(texBuf))
 }
 
 /**

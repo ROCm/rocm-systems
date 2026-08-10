@@ -48,9 +48,9 @@ enum class MemoryType { kHostMalloc, kManaged, kDeviceFineGrained };
 static void TstCoherency(int* ptr, MemoryType type) {
   int* dptr = nullptr;
   hipStream_t stream{};
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   int apu = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&apu, hipDeviceAttributeIntegrated, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&apu, hipDeviceAttributeIntegrated, 0))
   fprintf(stderr, "Device 0 is %s\n", apu ? "apu" : "dgpu");
   // Host builtin atomcs cannot work on device fine grained mem on dgpu
   // Note: hipDeviceAttributeHostNativeAtomicSupported should return 1 for kHostMalloc here
@@ -59,7 +59,7 @@ static void TstCoherency(int* ptr, MemoryType type) {
   *ptr = 1;
 
   if (type == MemoryType::kHostMalloc) {
-    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&dptr), ptr, 0));
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&dptr), ptr, 0))
     CoherentTst<<<1, 1, 0, stream>>>(dptr);
   } else {
     CoherentTst<<<1, 1, 0, stream>>>(ptr);
@@ -88,8 +88,8 @@ static void TstCoherency(int* ptr, MemoryType type) {
     }
   });
 
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipStreamDestroy(stream))
   my_thread.join();
   if (*ptr == 4) {
     YES_COHERENT = true;
@@ -99,7 +99,7 @@ static void TstCoherency(int* ptr, MemoryType type) {
 /* Test case description: The following test validates if fine grain
    behavior is observed or not with memory allocated using hipHostMalloc()*/
 HIP_TEST_CASE(Unit_hipHostMalloc_CoherentTst) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   CHECK_PCIE_ATOMIC_SUPPORT;
 
   int *Ptr = nullptr, SIZE = sizeof(int);
@@ -107,15 +107,15 @@ HIP_TEST_CASE(Unit_hipHostMalloc_CoherentTst) {
 
   // Allocating hipHostMalloc() memory with hipHostMallocCoherent flag
   SECTION("hipHostMalloc with hipHostMallocCoherent flag") {
-    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocCoherent));
+    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocCoherent))
   }
   SECTION("hipHostMalloc with Default flag") { HIP_CHECK(hipHostMalloc(&Ptr, SIZE)); }
   SECTION("hipHostMalloc with hipHostMallocMapped flag") {
-    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocMapped));
+    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocMapped))
   }
 
   TstCoherency(Ptr, MemoryType::kHostMalloc);
-  HIP_CHECK(hipHostFree(Ptr));
+  HIP_CHECK(hipHostFree(Ptr))
   REQUIRE(YES_COHERENT);
 }
 
@@ -125,7 +125,7 @@ HIP_TEST_CASE(Unit_hipHostMalloc_CoherentTst) {
 // passing
 #if HT_AMD
 HIP_TEST_CASE(Unit_hipMallocManaged_CoherentTst) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   CHECK_PCIE_ATOMIC_SUPPORT;
   CHECK_MANAGED_MEMORY_SUPPORT
 
@@ -134,13 +134,13 @@ HIP_TEST_CASE(Unit_hipMallocManaged_CoherentTst) {
 
   // Allocating hipMallocManaged() memory
   SECTION("hipMallocManaged with hipMemAttachGlobal flag") {
-    HIP_CHECK(hipMallocManaged(&Ptr, SIZE, hipMemAttachGlobal));
+    HIP_CHECK(hipMallocManaged(&Ptr, SIZE, hipMemAttachGlobal))
   }
   SECTION("hipMallocManaged with hipMemAttachHost flag") {
-    HIP_CHECK(hipMallocManaged(&Ptr, SIZE, hipMemAttachHost));
+    HIP_CHECK(hipMallocManaged(&Ptr, SIZE, hipMemAttachHost))
   }
   TstCoherency(Ptr, MemoryType::kManaged);
-  HIP_CHECK(hipFree(Ptr));
+  HIP_CHECK(hipFree(Ptr))
   REQUIRE(YES_COHERENT);
 }
 #endif
@@ -148,32 +148,32 @@ HIP_TEST_CASE(Unit_hipMallocManaged_CoherentTst) {
 /* Test case description: The following test validates if memory access is fine
    with memory allocated using hipMallocManaged() and CoarseGrain Advise*/
 HIP_TEST_CASE(Unit_hipMallocManaged_CoherentTstWthAdvise) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   CHECK_MANAGED_MEMORY_SUPPORT
   int *Ptr = nullptr, SIZE = sizeof(int);
   YES_COHERENT = false;
 
   // Allocating hipMallocManaged() memory
   SECTION("hipMallocManaged with hipMemAttachGlobal flag") {
-    HIP_CHECK(hipMallocManaged(&Ptr, SIZE, hipMemAttachGlobal));
+    HIP_CHECK(hipMallocManaged(&Ptr, SIZE, hipMemAttachGlobal))
   }
   SECTION("hipMallocManaged with hipMemAttachHost flag") {
-    HIP_CHECK(hipMallocManaged(&Ptr, SIZE, hipMemAttachHost));
+    HIP_CHECK(hipMallocManaged(&Ptr, SIZE, hipMemAttachHost))
   }
 #if HT_AMD
-  HIP_CHECK(hipMemAdvise(Ptr, SIZE, hipMemAdviseSetCoarseGrain, 0));
+  HIP_CHECK(hipMemAdvise(Ptr, SIZE, hipMemAdviseSetCoarseGrain, 0))
 #endif
   // Initializing Ptr memory with 9
   *Ptr = 9;
   hipStream_t strm;
-  HIP_CHECK(hipStreamCreate(&strm));
+  HIP_CHECK(hipStreamCreate(&strm))
   SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
-  HIP_CHECK(hipStreamSynchronize(strm));
+  HIP_CHECK(hipStreamSynchronize(strm))
   if (*Ptr == 81) {
     YES_COHERENT = true;
   }
-  HIP_CHECK(hipFree(Ptr));
-  HIP_CHECK(hipStreamDestroy(strm));
+  HIP_CHECK(hipFree(Ptr))
+  HIP_CHECK(hipStreamDestroy(strm))
   REQUIRE(YES_COHERENT);
 }
 
@@ -183,18 +183,18 @@ HIP_TEST_CASE(Unit_hipMallocManaged_CoherentTstWthAdvise) {
 // The following tests are disabled for Nvidia as they are not applicable
 #if HT_AMD
 HIP_TEST_CASE(Unit_hipMalloc_CoherentTst) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   int *Ptr = nullptr, SIZE = sizeof(int);
   uint32_t svm_attrib = 0;
   bool IfTstPassed = false;
   // Allocating hipMalloc() memory
-  HIP_CHECK(hipMalloc(&Ptr, SIZE));
+  HIP_CHECK(hipMalloc(&Ptr, SIZE))
   HIP_CHECK(hipMemRangeGetAttribute(&svm_attrib, sizeof(svm_attrib),
                                     hipMemRangeAttributeCoherencyMode, Ptr, SIZE));
   if (svm_attrib == hipMemRangeCoherencyModeCoarseGrain) {
     IfTstPassed = true;
   }
-  HIP_CHECK(hipFree(Ptr));
+  HIP_CHECK(hipFree(Ptr))
   REQUIRE(IfTstPassed);
 }
 #endif
@@ -203,13 +203,13 @@ HIP_TEST_CASE(Unit_hipMalloc_CoherentTst) {
    hipExtMallocWithFlags()*/
 #if HT_AMD
 HIP_TEST_CASE(Unit_hipExtMallocWithFlags_CoherentTst) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   CHECK_MANAGED_MEMORY_SUPPORT
   int *Ptr = nullptr, SIZE = sizeof(int), InitVal = 9, Pageable = 0, finegrain = 0;
   bool FineGrain = true;
   YES_COHERENT = false;
 
-  HIP_CHECK(hipDeviceGetAttribute(&Pageable, hipDeviceAttributePageableMemoryAccess, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&Pageable, hipDeviceAttributePageableMemoryAccess, 0))
   INFO("hipDeviceAttributePageableMemoryAccess: " << Pageable);
 
   if (Pageable != 1) {
@@ -217,7 +217,7 @@ HIP_TEST_CASE(Unit_hipExtMallocWithFlags_CoherentTst) {
   }
 
   // Allocating hipExtMallocWithFlags() memory with flags
-  HIP_CHECK(hipDeviceGetAttribute(&finegrain, hipDeviceAttributeFineGrainSupport, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&finegrain, hipDeviceAttributeFineGrainSupport, 0))
   if (finegrain == 1) {
     SECTION("hipExtMallocWithFlags with hipDeviceMallocFinegrained flag") {
       HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&Ptr), SIZE * 2,
@@ -241,15 +241,15 @@ HIP_TEST_CASE(Unit_hipExtMallocWithFlags_CoherentTst) {
   } else {
     *Ptr = InitVal;
     hipStream_t strm;
-    HIP_CHECK(hipStreamCreate(&strm));
+    HIP_CHECK(hipStreamCreate(&strm))
     SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
-    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipStreamSynchronize(strm))
     if (*Ptr == (InitVal * InitVal)) {
       YES_COHERENT = true;
     }
-    HIP_CHECK(hipStreamDestroy(strm));
+    HIP_CHECK(hipStreamDestroy(strm))
   }
-  HIP_CHECK(hipFree(Ptr));
+  HIP_CHECK(hipFree(Ptr))
   REQUIRE(YES_COHERENT);
 }
 #endif

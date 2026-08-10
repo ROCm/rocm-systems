@@ -38,7 +38,7 @@ static void validateMemory(void* devPtr, hipExtent extent, size_t pitch) {
   hipPitchedPtr devPitchedPtr{devPtr, pitch, extent.width, extent.height};
   hipPitchedPtr hostPitchedPtr{hostPtr.get(), pitch, extent.width, extent.height};
 
-  HIP_CHECK(hipMemset3D(devPitchedPtr, 1, extent));
+  HIP_CHECK(hipMemset3D(devPitchedPtr, 1, extent))
 
   hipMemcpy3DParms params{};
   params.srcPtr = devPitchedPtr;
@@ -124,9 +124,9 @@ HIP_TEST_CASE(Unit_hipMalloc3D_ValidatePitch) {
   hipPitchedPtr hipPitchedPtr;
   hipExtent validExtent{generateExtent(AllocationApi::hipMalloc3D)};
 
-  HIP_CHECK(hipMalloc3D(&hipPitchedPtr, validExtent));
+  HIP_CHECK(hipMalloc3D(&hipPitchedPtr, validExtent))
   validateMemory(hipPitchedPtr.ptr, validExtent, hipPitchedPtr.pitch);
-  HIP_CHECK(hipFree(hipPitchedPtr.ptr));
+  HIP_CHECK(hipFree(hipPitchedPtr.ptr))
 }
 
 HIP_TEST_CASE(Unit_hipMemAllocPitch_ValidatePitch) {
@@ -146,7 +146,7 @@ HIP_TEST_CASE(Unit_hipMemAllocPitch_ValidatePitch) {
   HIP_CHECK(
       hipMemAllocPitch(&ptr, &pitch, validExtent.width, validExtent.height, elementSizeBytes));
   validateMemory(reinterpret_cast<void*>(ptr), validExtent, pitch);
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(ptr)));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(ptr)))
 }
 
 HIP_TEST_CASE(Unit_hipMallocPitch_ValidatePitch) {
@@ -154,9 +154,9 @@ HIP_TEST_CASE(Unit_hipMallocPitch_ValidatePitch) {
   size_t pitch = 0;
   void* ptr;
   hipExtent validExtent{generateExtent(AllocationApi::hipMemAllocPitch)};
-  HIP_CHECK(hipMallocPitch(&ptr, &pitch, validExtent.width, validExtent.height));
+  HIP_CHECK(hipMallocPitch(&ptr, &pitch, validExtent.width, validExtent.height))
   validateMemory(ptr, validExtent, pitch);
-  HIP_CHECK(hipFree(ptr));
+  HIP_CHECK(hipFree(ptr))
 }
 
 HIP_TEST_CASE(Unit_hipMalloc3D_Negative) {
@@ -228,12 +228,12 @@ HIP_TEST_CASE(Unit_hipMallocPitch_Zero_Dims) {
   size_t pitch = 0;
 
   SECTION("width == 0") {
-    HIP_CHECK(hipMallocPitch(&ptr, &pitch, 0, 1));
+    HIP_CHECK(hipMallocPitch(&ptr, &pitch, 0, 1))
     REQUIRE(ptr == nullptr);
   }
 
   SECTION("height == 0") {
-    HIP_CHECK(hipMallocPitch(&ptr, &pitch, 1, 0));
+    HIP_CHECK(hipMallocPitch(&ptr, &pitch, 1, 0))
     REQUIRE(ptr == nullptr);
   }
 }
@@ -249,7 +249,7 @@ HIP_TEST_CASE(Unit_hipMemAllocPitch_Negative) {
   /* Device synchronize is used here to initialize the device.
    * Nvidia does not implicitly do it for this Api. And hipInit(0) does not work either.
    */
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   SECTION("Invalid elementSizeBytes") {
     unsigned int invalidElementSizeBytes = GENERATE(0, 7, 12, 17);
@@ -382,7 +382,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_Basic, int, unsigned int, float) {
   size_t width{NUM_W * sizeof(TestType)};
   REQUIRE(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H) == hipSuccess);
   REQUIRE(width <= pitch_A);
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(A_d))
 }
 
 /*
@@ -401,15 +401,15 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_SmallandBigChunks, int, unsigned int,
  */
 HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_Memcpy2D, int, float, double) {
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, *A_d{nullptr}, *B_d{nullptr};
   size_t pitch_A = 0, pitch_B = 0;
   size_t width{NUM_W * sizeof(TestType)};
 
   // Allocating memory
   HipTest::initArrays<TestType>(nullptr, nullptr, nullptr, &A_h, &B_h, &C_h, NUM_W * NUM_H, false);
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H));
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&B_d), &pitch_B, width, NUM_H));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H))
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&B_d), &pitch_B, width, NUM_H))
 
   // Initialize the data
   HipTest::setDefaultData<TestType>(NUM_W * NUM_H, A_h, B_h, C_h);
@@ -431,8 +431,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_Memcpy2D, int, float, double) {
 
 
   // DeAllocating the memory
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
   HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_h, B_h, C_h, false);
 }
 
@@ -468,15 +468,15 @@ HIP_TEST_CASE(Unit_hipMallocPitch_MultiThread) {
  */
 HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_KernelLaunch, int, float, double) {
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, *A_d{nullptr}, *B_d{nullptr};
   size_t pitch_A = 0, pitch_B = 0;
   size_t width{NUM_W * sizeof(TestType)};
 
   // Allocating memory
   HipTest::initArrays<TestType>(nullptr, nullptr, nullptr, &A_h, &B_h, &C_h, NUM_W * NUM_H, false);
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H));
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&B_d), &pitch_B, width, NUM_H));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H))
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&B_d), &pitch_B, width, NUM_H))
 
   // Host to Device
   HIP_CHECK(hipMemcpy2D(A_d, pitch_A, A_h, COLUMNS * sizeof(TestType), COLUMNS * sizeof(TestType),
@@ -484,7 +484,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_KernelLaunch, int, float, double) {
 
   hipLaunchKernelGGL(copy_var<TestType>, dim3(1), dim3(1), 0, 0, static_cast<TestType*>(A_d),
                      static_cast<TestType*>(B_d), ROWS, pitch_A, pitch_B);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
 
   // hipMemcpy2D Device to Host
@@ -495,7 +495,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_KernelLaunch, int, float, double) {
   validateResult(A_h, B_h, pitch_A);
 
   // DeAllocating the memory
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
   HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_h, B_h, C_h, false);
 }

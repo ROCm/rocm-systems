@@ -39,6 +39,6 @@ std::vector<char> CreateRTCCharArray(const char* src);
 
 inline hipFunction_t GetKernel(const hipModule_t module, const char* kname) {
   hipFunction_t kernel = nullptr;
-  HIP_CHECK(hipModuleGetFunction(&kernel, module, kname));
+  HIP_CHECK(hipModuleGetFunction(&kernel, module, kname))
   return kernel;
 }

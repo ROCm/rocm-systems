@@ -65,7 +65,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_Negative) {
   hipGraph_t graph;
   hipGraphNode_t memcpyToSymbolNode, memcpyH2D_A;
   std::vector<hipGraphNode_t> dependencies;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   // Adding MemcpyNode
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
@@ -139,7 +139,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_Negative) {
 #endif
 
   HipTest::freeArrays<int>(A_d, B_d, nullptr, A_h, B_h, nullptr, false);
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 /*
 This function is used to verify the following scenarios
@@ -162,11 +162,11 @@ void hipGraphAddMemcpyNodeFromSymbol_GlobalMemory(bool device_ctxchg = false,
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyToSymbolNode, memcpyFromSymbolNode, memcpyH2D_A;
   std::vector<hipGraphNode_t> dependencies;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   if (device_ctxchg) {
-    HIP_CHECK(hipSetDevice(1));
-    HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
+    HIP_CHECK(hipSetDevice(1))
+    HIP_CHECK(hipDeviceEnablePeerAccess(0, 0))
   }
   // Adding MemcpyNode
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
@@ -201,9 +201,9 @@ void hipGraphAddMemcpyNodeFromSymbol_GlobalMemory(bool device_ctxchg = false,
 
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, 0));
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, 0))
+  HIP_CHECK(hipStreamSynchronize(0))
 
   // Validating the result
   for (int i = 0; i < SIZE; i++) {
@@ -214,8 +214,8 @@ void hipGraphAddMemcpyNodeFromSymbol_GlobalMemory(bool device_ctxchg = false,
   }
 
   HipTest::freeArrays<int>(A_d, nullptr, nullptr, A_h, B_h, nullptr, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 /*
 This testcase verifies allocating global symbol memory,
@@ -246,7 +246,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryPeerDevice) {
   int numDevices = 0;
   int canAccessPeer = 0;
   if (numDevices > 1) {
-    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
+    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1))
     if (canAccessPeer) {
       hipGraphAddMemcpyNodeFromSymbol_GlobalMemory(true, false);
     } else {
@@ -267,7 +267,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemoryPeerDevice) 
   int numDevices = 0;
   int canAccessPeer = 0;
   if (numDevices > 1) {
-    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
+    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1))
     if (canAccessPeer) {
       hipGraphAddMemcpyNodeFromSymbol_GlobalMemory(true, true);
     } else {
@@ -298,7 +298,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryWithKernel) {
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyToSymbolNode, memcpyFromSymbolNode, memcpyH2D_A;
   std::vector<hipGraphNode_t> dependencies;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   // Adding MemcpyNode
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
@@ -336,9 +336,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryWithKernel) {
                                     B_h, B_d, Nbytes, hipMemcpyDeviceToHost));
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, 0));
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, 0))
+  HIP_CHECK(hipStreamSynchronize(0))
 
   // Validating the result
   for (int i = 0; i < SIZE; i++) {
@@ -349,6 +349,6 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryWithKernel) {
   }
 
   HipTest::freeArrays<int>(A_d, B_d, nullptr, A_h, B_h, nullptr, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }

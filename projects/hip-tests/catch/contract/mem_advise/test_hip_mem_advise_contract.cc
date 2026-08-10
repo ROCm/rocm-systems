@@ -17,13 +17,13 @@ bool ManagedMemorySupported() {
   void* ptr = nullptr;
   const hipError_t status = hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal);
   if (status == hipSuccess) {
-    HIP_CHECK(hipFree(ptr));
+    HIP_CHECK(hipFree(ptr))
     return true;
   }
   if (status == hipErrorNotSupported || status == hipErrorOutOfMemory) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return false;
 }
 
@@ -44,7 +44,7 @@ bool ApplyAdviseOrSkip(const void* dev_ptr, size_t count, hipMemoryAdvise advice
   ) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 
@@ -61,7 +61,7 @@ bool QueryRangeAttributeOrSkip(void* data, size_t data_size, hipMemRangeAttribut
   ) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 }  // namespace
@@ -71,10 +71,10 @@ HIP_TEST_CASE(Contract_MemAdvise_HipMemAdvise_SetReadMostly_RangeAttributeReflec
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   int* data = nullptr;
-  HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal))
   cleanup.Add([data] { (void)hipFree(data); });
 
   if (!ApplyAdviseOrSkip(data, kRangeBytes, hipMemAdviseSetReadMostly, device)) {
@@ -110,10 +110,10 @@ HIP_TEST_CASE(Contract_MemAdvise_HipMemAdvise_SetPreferredLocation_RangeAttribut
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   int* data = nullptr;
-  HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal))
   cleanup.Add([data] { (void)hipFree(data); });
 
   if (!ApplyAdviseOrSkip(data, kRangeBytes, hipMemAdviseSetPreferredLocation, device)) {
@@ -151,10 +151,10 @@ HIP_TEST_CASE(Contract_MemAdvise_HipMemAdvise_SetAccessedBy_RangeAttributeReflec
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   int* data = nullptr;
-  HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal))
   cleanup.Add([data] { (void)hipFree(data); });
 
   if (!ApplyAdviseOrSkip(data, kRangeBytes, hipMemAdviseSetAccessedBy, device)) {
@@ -181,10 +181,10 @@ HIP_TEST_CASE(Contract_MemAdvise_HipMemRangeGetAttributes_MultipleAttributes_Suc
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   int* data = nullptr;
-  HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal))
   cleanup.Add([data] { (void)hipFree(data); });
 
   const bool read_mostly_set =
@@ -211,7 +211,7 @@ HIP_TEST_CASE(Contract_MemAdvise_HipMemRangeGetAttributes_MultipleAttributes_Suc
   ) {
     HIP_SKIP_TEST("hipMemRangeGetAttributes is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   bool observable = false;
   if (read_mostly_set && read_mostly != 0) {
@@ -233,7 +233,7 @@ HIP_TEST_CASE(Contract_MemAdvise_HipMemRangeGetAttributes_MultipleAttributes_Suc
 // @asserts: hipMemAdvise - rejects a null range pointer with a non-success status
 HIP_TEST_CASE(Contract_MemAdvise_HipMemAdvise_NullPointer_IsRejected) {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   const hipError_t status =
       hipMemAdvise(nullptr, sizeof(int), hipMemAdviseSetReadMostly, device);
@@ -247,7 +247,7 @@ HIP_TEST_CASE(Contract_MemAdvise_HipMemRangeGetAttribute_NullData_IsRejected) {
   hip::contract::ContractCleanup cleanup;
 
   int* data = nullptr;
-  HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&data, kRangeBytes, hipMemAttachGlobal))
   cleanup.Add([data] { (void)hipFree(data); });
 
   const hipError_t status = hipMemRangeGetAttribute(

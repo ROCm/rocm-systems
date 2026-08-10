@@ -31,7 +31,7 @@ static void runUnsafeAtomicMaxSameAddressTest() {
 template <typename TestType>
 static void runUnsafeAtomicMaxAdjacentAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
@@ -45,7 +45,7 @@ static void runUnsafeAtomicMaxAdjacentAddressesTest() {
 template <typename TestType>
 static void runUnsafeAtomicMaxScatteredAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
@@ -71,7 +71,7 @@ static void runUnsafeAtomicMaxMultiKernelSameAddressTest() {
 template <typename TestType>
 static void runUnsafeAtomicMaxMultiKernelAdjacentAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
@@ -85,7 +85,7 @@ static void runUnsafeAtomicMaxMultiKernelAdjacentAddressesTest() {
 template <typename TestType>
 static void runUnsafeAtomicMaxMultiKernelScatteredAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {

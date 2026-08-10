@@ -33,7 +33,7 @@
  */
 HIP_TEST_CASE(Unit_hipDeviceTotalMem_NegTst) {
 #if HT_NVIDIA
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
 #endif
   size_t totMem;
   // Scenario 1
@@ -49,7 +49,7 @@ HIP_TEST_CASE(Unit_hipDeviceTotalMem_NegTst) {
   // Scenario 3
   SECTION("device is out of bounds") {
     int numDevices;
-    HIP_CHECK(hipGetDeviceCount(&numDevices));
+    HIP_CHECK(hipGetDeviceCount(&numDevices))
     HIP_CHECK_ERROR(hipDeviceTotalMem(&totMem, numDevices), hipErrorInvalidDevice);
   }
 }
@@ -70,20 +70,20 @@ HIP_TEST_CASE(Unit_hipDeviceTotalMem_ValidateTotalMem) {
   size_t totMem;
   int numDevices = 0;
 
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   REQUIRE(numDevices != 0);
 
   hipDevice_t device;
   hipDeviceProp_t prop;
   auto devNo = GENERATE_COPY(range(0, numDevices));
   totMem = 0;
-  HIP_CHECK(hipDeviceGet(&device, devNo));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
-  HIP_CHECK(hipDeviceTotalMem(&totMem, device));
+  HIP_CHECK(hipDeviceGet(&device, devNo))
+  HIP_CHECK(hipGetDeviceProperties(&prop, device))
+  HIP_CHECK(hipDeviceTotalMem(&totMem, device))
 
   size_t free = 0, total = 0;
-  HIP_CHECK(hipSetDevice(devNo));
-  HIP_CHECK(hipMemGetInfo(&free, &total));
+  HIP_CHECK(hipSetDevice(devNo))
+  HIP_CHECK(hipMemGetInfo(&free, &total))
 
   REQUIRE(totMem == prop.totalGlobalMem);
   REQUIRE(total == totMem);
@@ -109,14 +109,14 @@ HIP_TEST_CASE(Unit_hipDeviceTotalMem_NonSelectedDevice) {
   }
 
   for (int i = 1; i < deviceCount; i++) {
-    HIP_CHECK(hipSetDevice(i - 1));
+    HIP_CHECK(hipSetDevice(i - 1))
     hipDevice_t device;
-    HIP_CHECK(hipDeviceGet(&device, i));
+    HIP_CHECK(hipDeviceGet(&device, i))
 
     size_t totMem = 0;
     hipDeviceProp_t prop;
-    HIP_CHECK(hipDeviceTotalMem(&totMem, device));
-    HIP_CHECK(hipGetDeviceProperties(&prop, device));
+    HIP_CHECK(hipDeviceTotalMem(&totMem, device))
+    HIP_CHECK(hipGetDeviceProperties(&prop, device))
     REQUIRE(totMem == prop.totalGlobalMem);
   }
 }

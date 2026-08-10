@@ -23,9 +23,9 @@ HIP_TEST_CASE(Unit_hipDestroyExternalMemory_Vulkan_Negative_Parameters) {
     const auto storage = vkt.CreateMappedStorage<int>(1, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
     auto desc = vkt.BuildMemoryDescriptor(storage.memory, sizeof(*storage.host_ptr));
     hipExternalMemory_t ext_memory;
-    HIP_CHECK(hipImportExternalMemory(&ext_memory, &desc));
+    HIP_CHECK(hipImportExternalMemory(&ext_memory, &desc))
 
-    HIP_CHECK(hipDestroyExternalMemory(ext_memory));
+    HIP_CHECK(hipDestroyExternalMemory(ext_memory))
     HIP_CHECK_ERROR(hipDestroyExternalMemory(ext_memory), hipErrorInvalidValue);
   }
 #endif
@@ -50,7 +50,7 @@ HIP_TEST_CASE(Unit_hipDestroyExternalMemory_Vulkan_Capture) {
   const auto storage = vkt.CreateMappedStorage<int>(1, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
   auto desc = vkt.BuildMemoryDescriptor(storage.memory, sizeof(*storage.host_ptr));
   hipExternalMemory_t ext_memory;
-  HIP_CHECK(hipImportExternalMemory(&ext_memory, &desc));
+  HIP_CHECK(hipImportExternalMemory(&ext_memory, &desc))
 
   hipError_t memcpy_err = hipSuccess;
   BEGIN_CAPTURE_SYNC(memcpy_err, true);

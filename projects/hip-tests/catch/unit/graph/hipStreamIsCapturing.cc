@@ -46,10 +46,10 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_Negative_Parameters) {
     hipStreamCaptureStatus cStatus;
     hipGraph_t graph{nullptr};
 
-    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
     HIP_CHECK_ERROR(hipStreamIsCapturing(nullptr, &cStatus), hipErrorStreamCaptureImplicit);
-    HIP_CHECK(hipStreamEndCapture(stream, &graph));
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipStreamEndCapture(stream, &graph))
+    HIP_CHECK(hipGraphDestroy(graph))
   }
 }
 
@@ -71,7 +71,7 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Basic) {
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
 
-  HIP_CHECK(hipStreamIsCapturing(stream, &cStatus));
+  HIP_CHECK(hipStreamIsCapturing(stream, &cStatus))
   REQUIRE(hipStreamCaptureStatusNone == cStatus);
 }
 
@@ -88,36 +88,36 @@ void checkStreamCaptureStatus(hipStreamCaptureMode mode, hipStream_t stream) {
   LinearAllocGuard<float> A_d(LinearAllocs::hipMalloc, Nbytes);
 
   // Status is none before capture begins
-  HIP_CHECK(hipStreamIsCapturing(stream, &cStatus));
+  HIP_CHECK(hipStreamIsCapturing(stream, &cStatus))
   REQUIRE(hipStreamCaptureStatusNone == cStatus);
 
-  HIP_CHECK(hipStreamBeginCapture(stream, mode));
+  HIP_CHECK(hipStreamBeginCapture(stream, mode))
   captureSequenceSimple(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), N, stream);
 
   // Status is active during stream capture
-  HIP_CHECK(hipStreamIsCapturing(stream, &cStatus));
+  HIP_CHECK(hipStreamIsCapturing(stream, &cStatus))
   REQUIRE(hipStreamCaptureStatusActive == cStatus);
 
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
   REQUIRE(graph != nullptr);
 
   // Status is none after capture ends
-  HIP_CHECK(hipStreamIsCapturing(stream, &cStatus));
+  HIP_CHECK(hipStreamIsCapturing(stream, &cStatus))
   REQUIRE(hipStreamCaptureStatusNone == cStatus);
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   REQUIRE(graphExec != nullptr);
 
   // Replay the recorded sequence multiple times
   for (size_t i = 0; i < kLaunchIters; i++) {
     std::fill_n(A_h.host_ptr(), N, static_cast<float>(i));
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
     ArrayFindIfNot(B_h.host_ptr(), static_cast<float>(i), N);
   }
 
   HIP_CHECK(hipGraphExecDestroy(graphExec))
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -177,15 +177,15 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Thread) {
 
   const hipStreamCaptureMode captureMode = hipStreamCaptureModeGlobal;
 
-  HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
+  HIP_CHECK(hipStreamBeginCapture(stream, captureMode))
   captureSequenceSimple(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), N, stream);
 
   std::thread t(thread_func, stream);
   t.join();
   HIP_CHECK_THREAD_FINALIZE();
 
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**

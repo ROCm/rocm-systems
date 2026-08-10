@@ -20,7 +20,7 @@ class Memset3DBenchmark : public Benchmark<Memset3DBenchmark> {
 
   void operator()() {
     TIMED_SECTION(kTimerTypeEvent) {
-      HIP_CHECK(hipMemset3D(dst_.pitched_ptr(), 17, dst_.extent()));
+      HIP_CHECK(hipMemset3D(dst_.pitched_ptr(), 17, dst_.extent()))
     }
   }
 

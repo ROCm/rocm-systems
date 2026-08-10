@@ -61,41 +61,41 @@ static void hipWithoutGraphs(float* inputVec_h, float* inputVec_d, double* outpu
   hipStream_t stream1, stream2, stream3;
   hipEvent_t forkStreamEvent, memsetEvent1, memsetEvent2;
   double result_h = 0.0;
-  HIP_CHECK(hipStreamCreate(&stream1));
-  HIP_CHECK(hipStreamCreate(&stream2));
-  HIP_CHECK(hipStreamCreate(&stream3));
-  HIP_CHECK(hipEventCreate(&forkStreamEvent));
-  HIP_CHECK(hipEventCreate(&memsetEvent1));
-  HIP_CHECK(hipEventCreate(&memsetEvent2));
+  HIP_CHECK(hipStreamCreate(&stream1))
+  HIP_CHECK(hipStreamCreate(&stream2))
+  HIP_CHECK(hipStreamCreate(&stream3))
+  HIP_CHECK(hipEventCreate(&forkStreamEvent))
+  HIP_CHECK(hipEventCreate(&memsetEvent1))
+  HIP_CHECK(hipEventCreate(&memsetEvent2))
   auto start = std::chrono::high_resolution_clock::now();
   for (int i = 0, _iters = isQuickLevel() ? GRAPH_LAUNCH_ITERS_QUICK : GRAPH_LAUNCH_ITERATIONS; i < _iters; i++) {
     HIP_CHECK(hipMemcpyAsync(inputVec_d, inputVec_h, sizeof(float) * inputSize, hipMemcpyDefault,
                              stream1));
-    HIP_CHECK(hipMemsetAsync(outputVec_d, 0, sizeof(double) * numOfBlocks, stream2));
-    HIP_CHECK(hipEventRecord(memsetEvent1, stream2));
-    HIP_CHECK(hipMemsetAsync(result_d, 0, sizeof(double), stream3));
-    HIP_CHECK(hipEventRecord(memsetEvent2, stream3));
-    HIP_CHECK(hipStreamWaitEvent(stream1, memsetEvent1, 0));
+    HIP_CHECK(hipMemsetAsync(outputVec_d, 0, sizeof(double) * numOfBlocks, stream2))
+    HIP_CHECK(hipEventRecord(memsetEvent1, stream2))
+    HIP_CHECK(hipMemsetAsync(result_d, 0, sizeof(double), stream3))
+    HIP_CHECK(hipEventRecord(memsetEvent2, stream3))
+    HIP_CHECK(hipStreamWaitEvent(stream1, memsetEvent1, 0))
     hipLaunchKernelGGL(reduce, dim3(inputSize / THREADS_PER_BLOCK, 1, 1),
                        dim3(THREADS_PER_BLOCK, 1, 1), 0, stream1, inputVec_d, outputVec_d);
-    HIP_CHECK(hipStreamWaitEvent(stream1, memsetEvent2, 0));
+    HIP_CHECK(hipStreamWaitEvent(stream1, memsetEvent2, 0))
     hipLaunchKernelGGL(reduceFinal, dim3(1, 1, 1), dim3(THREADS_PER_BLOCK, 1, 1), 0, stream1,
                        outputVec_d, result_d);
-    HIP_CHECK(hipMemcpyAsync(&result_h, result_d, sizeof(double), hipMemcpyDefault, stream1));
-    HIP_CHECK(hipStreamSynchronize(stream1));
-    HIP_CHECK(hipStreamSynchronize(stream2));
-    HIP_CHECK(hipStreamSynchronize(stream3));
+    HIP_CHECK(hipMemcpyAsync(&result_h, result_d, sizeof(double), hipMemcpyDefault, stream1))
+    HIP_CHECK(hipStreamSynchronize(stream1))
+    HIP_CHECK(hipStreamSynchronize(stream2))
+    HIP_CHECK(hipStreamSynchronize(stream3))
   }
   auto stop = std::chrono::high_resolution_clock::now();
   auto result = std::chrono::duration<double, std::milli>(stop - start);
   INFO("Time taken for hipWithoutGraphs : "
        << std::chrono::duration_cast<std::chrono::milliseconds>(result).count() << " millisecs ");
-  HIP_CHECK(hipEventDestroy(forkStreamEvent));
-  HIP_CHECK(hipEventDestroy(memsetEvent1));
-  HIP_CHECK(hipEventDestroy(memsetEvent2));
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
-  HIP_CHECK(hipStreamDestroy(stream3));
+  HIP_CHECK(hipEventDestroy(forkStreamEvent))
+  HIP_CHECK(hipEventDestroy(memsetEvent1))
+  HIP_CHECK(hipEventDestroy(memsetEvent2))
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipStreamDestroy(stream2))
+  HIP_CHECK(hipStreamDestroy(stream3))
   double result_h_cpu = 0.0;
   for (size_t i = 0; i < inputSize; i++) {
     result_h_cpu += inputVec_h[i];
@@ -114,49 +114,49 @@ static void hipGraphsUsingStreamCapture(float* inputVec_h, float* inputVec_d, do
   hipEvent_t forkStreamEvent, memsetEvent1, memsetEvent2;
   hipGraph_t graph;
   double result_h = 0.0;
-  HIP_CHECK(hipStreamCreate(&stream1));
-  HIP_CHECK(hipStreamCreate(&stream2));
-  HIP_CHECK(hipStreamCreate(&stream3));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipEventCreate(&forkStreamEvent));
-  HIP_CHECK(hipEventCreate(&memsetEvent1));
-  HIP_CHECK(hipEventCreate(&memsetEvent2));
+  HIP_CHECK(hipStreamCreate(&stream1))
+  HIP_CHECK(hipStreamCreate(&stream2))
+  HIP_CHECK(hipStreamCreate(&stream3))
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipEventCreate(&forkStreamEvent))
+  HIP_CHECK(hipEventCreate(&memsetEvent1))
+  HIP_CHECK(hipEventCreate(&memsetEvent2))
   auto start = std::chrono::high_resolution_clock::now();
-  HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipEventRecord(forkStreamEvent, stream1));
-  HIP_CHECK(hipStreamWaitEvent(stream2, forkStreamEvent, 0));
-  HIP_CHECK(hipStreamWaitEvent(stream3, forkStreamEvent, 0));
+  HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipEventRecord(forkStreamEvent, stream1))
+  HIP_CHECK(hipStreamWaitEvent(stream2, forkStreamEvent, 0))
+  HIP_CHECK(hipStreamWaitEvent(stream3, forkStreamEvent, 0))
   HIP_CHECK(
       hipMemcpyAsync(inputVec_d, inputVec_h, sizeof(float) * inputSize, hipMemcpyDefault, stream1));
-  HIP_CHECK(hipMemsetAsync(outputVec_d, 0, sizeof(double) * numOfBlocks, stream2));
-  HIP_CHECK(hipEventRecord(memsetEvent1, stream2));
-  HIP_CHECK(hipMemsetAsync(result_d, 0, sizeof(double), stream3));
-  HIP_CHECK(hipEventRecord(memsetEvent2, stream3));
-  HIP_CHECK(hipStreamWaitEvent(stream1, memsetEvent1, 0));
+  HIP_CHECK(hipMemsetAsync(outputVec_d, 0, sizeof(double) * numOfBlocks, stream2))
+  HIP_CHECK(hipEventRecord(memsetEvent1, stream2))
+  HIP_CHECK(hipMemsetAsync(result_d, 0, sizeof(double), stream3))
+  HIP_CHECK(hipEventRecord(memsetEvent2, stream3))
+  HIP_CHECK(hipStreamWaitEvent(stream1, memsetEvent1, 0))
   hipLaunchKernelGGL(reduce, dim3(inputSize / THREADS_PER_BLOCK, 1, 1),
                      dim3(THREADS_PER_BLOCK, 1, 1), 0, stream1, inputVec_d, outputVec_d);
-  HIP_CHECK(hipStreamWaitEvent(stream1, memsetEvent2, 0));
+  HIP_CHECK(hipStreamWaitEvent(stream1, memsetEvent2, 0))
   hipLaunchKernelGGL(reduceFinal, dim3(1, 1, 1), dim3(THREADS_PER_BLOCK, 1, 1), 0, stream1,
                      outputVec_d, result_d);
-  HIP_CHECK(hipMemcpyAsync(&result_h, result_d, sizeof(double), hipMemcpyDefault, stream1));
-  HIP_CHECK(hipStreamEndCapture(stream1, &graph));
+  HIP_CHECK(hipMemcpyAsync(&result_h, result_d, sizeof(double), hipMemcpyDefault, stream1))
+  HIP_CHECK(hipStreamEndCapture(stream1, &graph))
   hipGraphNode_t* nodes{nullptr};
   size_t numNodes = 0;
-  HIP_CHECK(hipGraphGetNodes(graph, nodes, &numNodes));
+  HIP_CHECK(hipGraphGetNodes(graph, nodes, &numNodes))
   INFO("Num of nodes in the graph created using stream capture API" << numNodes);
-  HIP_CHECK(hipGraphGetRootNodes(graph, nodes, &numNodes));
+  HIP_CHECK(hipGraphGetRootNodes(graph, nodes, &numNodes))
   INFO(
       "Num of root nodes in the graph created using"
       " stream capture API"
       << numNodes);
   hipGraphExec_t graphExec;
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   auto start1 = std::chrono::high_resolution_clock::now();
   for (int i = 0, _iters = isQuickLevel() ? GRAPH_LAUNCH_ITERS_QUICK : GRAPH_LAUNCH_ITERATIONS; i < _iters; i++) {
-    HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
+    HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
   }
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
   auto stop = std::chrono::high_resolution_clock::now();
   auto withInit = std::chrono::duration<double, std::milli>(stop - start);
   auto withoutInit = std::chrono::duration<double, std::milli>(stop - start1);
@@ -166,15 +166,15 @@ static void hipGraphsUsingStreamCapture(float* inputVec_h, float* inputVec_d, do
        << std::chrono::duration_cast<std::chrono::milliseconds>(withoutInit).count()
        << " milliseconds ");
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
-  HIP_CHECK(hipStreamDestroy(stream3));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
-  HIP_CHECK(hipEventDestroy(forkStreamEvent));
-  HIP_CHECK(hipEventDestroy(memsetEvent1));
-  HIP_CHECK(hipEventDestroy(memsetEvent2));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipStreamDestroy(stream2))
+  HIP_CHECK(hipStreamDestroy(stream3))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
+  HIP_CHECK(hipEventDestroy(forkStreamEvent))
+  HIP_CHECK(hipEventDestroy(memsetEvent1))
+  HIP_CHECK(hipEventDestroy(memsetEvent2))
   double result_h_cpu = 0.0;
   for (size_t i = 0; i < inputSize; i++) {
     result_h_cpu += inputVec_h[i];
@@ -193,7 +193,7 @@ static void hipGraphsManual(float* inputVec_h, float* inputVec_d, double* output
   std::vector<hipGraphNode_t> nodeDependencies;
   hipGraphNode_t memcpyNode, kernelNode, memsetNode;
   double result_h = 0.0;
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   auto start = std::chrono::high_resolution_clock::now();
   hipKernelNodeParams kernelNodeParams{};
   hipMemsetParams memsetParams{};
@@ -203,10 +203,10 @@ static void hipGraphsManual(float* inputVec_h, float* inputVec_d, double* output
   memsetParams.elementSize = sizeof(float);
   memsetParams.width = numOfBlocks * 2;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, inputVec_d, inputVec_h,
                                     sizeof(float) * inputSize, hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
   nodeDependencies.push_back(memsetNode);
   nodeDependencies.push_back(memcpyNode);
   void* kernelArgs[4] = {reinterpret_cast<void*>(&inputVec_d),
@@ -227,7 +227,7 @@ static void hipGraphsManual(float* inputVec_h, float* inputVec_d, double* output
   memsetParams.elementSize = sizeof(float);
   memsetParams.width = 2;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
   nodeDependencies.push_back(memsetNode);
   memset(&kernelNodeParams, 0, sizeof(kernelNodeParams));
   kernelNodeParams.func = reinterpret_cast<void*>(reduceFinal);
@@ -250,19 +250,19 @@ static void hipGraphsManual(float* inputVec_h, float* inputVec_d, double* output
   hipGraphExec_t graphExec;
   hipGraphNode_t* nodes{nullptr};
   size_t numNodes{};
-  HIP_CHECK(hipGraphGetNodes(graph, nodes, &numNodes));
+  HIP_CHECK(hipGraphGetNodes(graph, nodes, &numNodes))
   INFO("Num of nodes in the graph created using hipGraphs Manual" << numNodes);
-  HIP_CHECK(hipGraphGetRootNodes(graph, nodes, &numNodes));
+  HIP_CHECK(hipGraphGetRootNodes(graph, nodes, &numNodes))
   INFO(
       "Num of root nodes in the graph created using"
       " hipGraphs Manual"
       << numNodes);
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   auto start1 = std::chrono::high_resolution_clock::now();
   for (int i = 0, _iters = isQuickLevel() ? GRAPH_LAUNCH_ITERS_QUICK : GRAPH_LAUNCH_ITERATIONS; i < _iters; i++) {
-    HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
+    HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
   }
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
   auto stop = std::chrono::high_resolution_clock::now();
   auto withInit = std::chrono::duration<double, std::milli>(stop - start);
   auto withoutInit = std::chrono::duration<double, std::milli>(stop - start1);
@@ -273,9 +273,9 @@ static void hipGraphsManual(float* inputVec_h, float* inputVec_d, double* output
        << std::chrono::duration_cast<std::chrono::milliseconds>(withoutInit).count()
        << " milliseconds ");
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
   double result_h_cpu = 0.0;
   for (size_t i = 0; i < inputSize; i++) {
     result_h_cpu += inputVec_h[i];
@@ -297,12 +297,12 @@ HIP_TEST_CASE(Unit_hipGraph_BasicFunctional) {
   INFO("Elements : " << size << " ThreadsPerBlock : " << THREADS_PER_BLOCK);
   INFO("Graph Launch iterations = " << GRAPH_LAUNCH_ITERATIONS);
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   inputVec_h = reinterpret_cast<float*>(malloc(sizeof(float) * size));
   REQUIRE(inputVec_h != nullptr);
-  HIP_CHECK(hipMalloc(&inputVec_d, sizeof(float) * size));
-  HIP_CHECK(hipMalloc(&outputVec_d, sizeof(double) * maxBlocks));
-  HIP_CHECK(hipMalloc(&result_d, sizeof(double)));
+  HIP_CHECK(hipMalloc(&inputVec_d, sizeof(float) * size))
+  HIP_CHECK(hipMalloc(&outputVec_d, sizeof(double) * maxBlocks))
+  HIP_CHECK(hipMalloc(&result_d, sizeof(double)))
   init_input(inputVec_h, size);
 
   SECTION("Execution Without HIPGraphs") {
@@ -317,8 +317,8 @@ HIP_TEST_CASE(Unit_hipGraph_BasicFunctional) {
     hipGraphsUsingStreamCapture(inputVec_h, inputVec_d, outputVec_d, result_d, size, maxBlocks);
   }
 
-  HIP_CHECK(hipFree(inputVec_d));
-  HIP_CHECK(hipFree(outputVec_d));
-  HIP_CHECK(hipFree(result_d));
+  HIP_CHECK(hipFree(inputVec_d))
+  HIP_CHECK(hipFree(outputVec_d))
+  HIP_CHECK(hipFree(result_d))
   free(inputVec_h);
 }

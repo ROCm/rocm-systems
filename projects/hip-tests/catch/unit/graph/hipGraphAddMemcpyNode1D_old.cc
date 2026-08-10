@@ -42,22 +42,22 @@ static void validateMemcpyNode1DArray(bool peerAccess,
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipMalloc(&devArray1, numBytes));
-  HIP_CHECK(hipMalloc(&devArray2, numBytes));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipMalloc(&devArray1, numBytes))
+  HIP_CHECK(hipMalloc(&devArray2, numBytes))
 
   // Initialize 1D object
   for (int i = 0; i < SIZE; i++) {
     harray1D[i] = i + 1;
   }
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   // For peer access test, Memory is allocated on device(0)
   // while memcpy nodes are allocated and assigned to peer device(1)
   if (peerAccess) {
-    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipSetDevice(1))
   }
 
   // Host to Device (harray1D -> devArray1)
@@ -75,16 +75,16 @@ static void validateMemcpyNode1DArray(bool peerAccess,
   // Instantiate and launch the graph
   hipError_t graphInstStatus = hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0);
   if (peerAccess && graphInstStatus == hipErrorNotSupported) {
-    HIP_CHECK(hipSetDevice(0));
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipStreamDestroy(streamForGraph));
-    HIP_CHECK(hipFree(devArray1));
-    HIP_CHECK(hipFree(devArray2));
+    HIP_CHECK(hipSetDevice(0))
+    HIP_CHECK(hipGraphDestroy(graph))
+    HIP_CHECK(hipStreamDestroy(streamForGraph))
+    HIP_CHECK(hipFree(devArray1))
+    HIP_CHECK(hipFree(devArray2))
     SKIP("Multi-device graph instantiation not supported (hipErrorNotSupported)");
   }
-  HIP_CHECK(graphInstStatus);
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(graphInstStatus)
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Validate result
   for (int i = 0; i < SIZE; i++) {
@@ -94,11 +94,11 @@ static void validateMemcpyNode1DArray(bool peerAccess,
       REQUIRE(false);
     }
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
-  HIP_CHECK(hipFree(devArray1));
-  HIP_CHECK(hipFree(devArray2));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
+  HIP_CHECK(hipFree(devArray1))
+  HIP_CHECK(hipFree(devArray2))
 }
 
 
@@ -118,9 +118,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Functional) {
   }
   SECTION("Memcpy with 1D array on peer device") {
     int numDevices{}, peerAccess{};
-    HIP_CHECK(hipGetDeviceCount(&numDevices));
+    HIP_CHECK(hipGetDeviceCount(&numDevices))
     if (numDevices > 1) {
-      HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 1, 0));
+      HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 1, 0))
     }
 
     if (!peerAccess) {
@@ -143,9 +143,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Negative) {
   hipGraphNode_t memcpyNode{};
   hipError_t ret;
 
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipMalloc(&A_h, Nbytes));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipMalloc(&A_h, Nbytes))
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   SECTION("Pass pGraphNode as nullptr") {
     ret = hipGraphAddMemcpyNode1D(nullptr, graph, nullptr, 0, A_d, A_h, Nbytes,
@@ -192,9 +192,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Negative) {
                                   hipMemcpyHostToDevice);
     REQUIRE(hipSuccess == ret);
   }
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(A_h));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(A_h))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 /*
  * Create two host pointers, copy the data between them by the api
@@ -216,21 +216,21 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_HostToHost) {
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyH2H;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
 
   // Host to Host
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2H, graph, nullptr, 0, B_h.data(), A_h.data(), numBytes,
                                     hipMemcpyHostToHost));
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 
   // Validation
   REQUIRE(std::equal(A_h.begin(), A_h.end(), B_h.begin(), B_h.end()));

@@ -35,10 +35,10 @@ static void MemPoolSetGetAccess(const MemPools mempool_type, int src_device, int
   desc.location.type = hipMemLocationTypeDevice;
   desc.location.id = dst_device;
   desc.flags = access_flags;
-  HIP_CHECK(hipMemPoolSetAccess(mempool.mempool(), &desc, 1));
+  HIP_CHECK(hipMemPoolSetAccess(mempool.mempool(), &desc, 1))
 
   hipMemAccessFlags flags = hipMemAccessFlagsProtNone;
-  HIP_CHECK(hipMemPoolGetAccess(&flags, mempool.mempool(), &desc.location));
+  HIP_CHECK(hipMemPoolGetAccess(&flags, mempool.mempool(), &desc.location))
   REQUIRE(flags == access_flags);
 }
 
@@ -103,8 +103,8 @@ HIP_TEST_CASE(Unit_hipMemPoolSetGetAccess_Positive_MultipleGPU) {
   const auto access_flag = hipMemAccessFlagsProtReadWrite;
 
   int can_access_peer = 0;
-  HIP_CHECK(hipSetDevice(src_device));
-  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
+  HIP_CHECK(hipSetDevice(src_device))
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device))
   if (can_access_peer) {
     MemPoolSetGetAccess(mempool_type, src_device, dst_device, access_flag);
   }
@@ -124,8 +124,8 @@ void MemPoolSetGetAccess_P2P(const MemPools mempool_type) {
 
   int *alloc_mem1, *alloc_mem2;
   int can_access_peer = 0;
-  HIP_CHECK(hipSetDevice(src_device));
-  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
+  HIP_CHECK(hipSetDevice(src_device))
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device))
   if (can_access_peer) {
     hipEvent_t waitOnStream1;
 
@@ -150,9 +150,9 @@ void MemPoolSetGetAccess_P2P(const MemPools mempool_type) {
     constexpr int expected_value = 15;
     VectorSet<<<block_count, thread_count, 0, stream1.stream()>>>(alloc_mem1, expected_value,
                                                                   element_count);
-    HIP_CHECK(hipEventRecord(waitOnStream1, stream1.stream()));
+    HIP_CHECK(hipEventRecord(waitOnStream1, stream1.stream()))
 
-    HIP_CHECK(hipSetDevice(dst_device));
+    HIP_CHECK(hipSetDevice(dst_device))
     StreamGuard stream2(Streams::withFlags, hipStreamNonBlocking);
 
     // Allocate memory in dst device
@@ -165,22 +165,22 @@ void MemPoolSetGetAccess_P2P(const MemPools mempool_type) {
     desc.location.type = hipMemLocationTypeDevice;
     desc.location.id = dst_device;
     desc.flags = hipMemAccessFlagsProtReadWrite;
-    HIP_CHECK(hipMemPoolSetAccess(mempool.mempool(), &desc, 1));
+    HIP_CHECK(hipMemPoolSetAccess(mempool.mempool(), &desc, 1))
 
     hipMemAccessFlags flags = hipMemAccessFlagsProtNone;
-    HIP_CHECK(hipMemPoolGetAccess(&flags, mempool.mempool(), &desc.location));
+    HIP_CHECK(hipMemPoolGetAccess(&flags, mempool.mempool(), &desc.location))
     REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
 
-    HIP_CHECK(hipStreamWaitEvent(stream2.stream(), waitOnStream1, 0));
+    HIP_CHECK(hipStreamWaitEvent(stream2.stream(), waitOnStream1, 0))
     copyP2PAndScale<<<block_count, thread_count, 0, stream2.stream()>>>(alloc_mem2, alloc_mem1,
                                                                         element_count);
 
     HIP_CHECK(hipMemcpyAsync(host_alloc.host_ptr(), alloc_mem2, allocation_size,
                              hipMemcpyDeviceToHost, stream2.stream()));
-    HIP_CHECK(hipFreeAsync(alloc_mem1, stream2.stream()));
-    HIP_CHECK(hipFreeAsync(alloc_mem2, stream2.stream()));
-    HIP_CHECK(hipStreamSynchronize(stream2.stream()));
-    HIP_CHECK(hipEventDestroy(waitOnStream1));
+    HIP_CHECK(hipFreeAsync(alloc_mem1, stream2.stream()))
+    HIP_CHECK(hipFreeAsync(alloc_mem2, stream2.stream()))
+    HIP_CHECK(hipStreamSynchronize(stream2.stream()))
+    HIP_CHECK(hipEventDestroy(waitOnStream1))
 
     ArrayFindIfNot(host_alloc.host_ptr(), 2 * expected_value, element_count);
   }
@@ -228,11 +228,11 @@ HIP_TEST_CASE(Unit_hipMemPoolSetGetAccess_Positive_P2P) {
  */
 HIP_TEST_CASE(Unit_hipMemPoolSetAccess_Negative_Parameters) {
   int device_id = 0;
-  HIP_CHECK(hipSetDevice(device_id));
+  HIP_CHECK(hipSetDevice(device_id))
   checkMempoolSupported(device_id) MemPoolGuard mempool(MemPools::dev_default, device_id);
 
   int num_dev = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_dev));
+  HIP_CHECK(hipGetDeviceCount(&num_dev))
 
   hipMemAccessDesc desc;
   memset(&desc, 0, sizeof(hipMemAccessDesc));
@@ -286,14 +286,14 @@ HIP_TEST_CASE(Unit_hipMemPoolSetAccess_Negative_Parameters) {
  */
 static bool checkMempoolSetAccess(int N, int dev0, int dev1) {
   // Set the current device context to dev0
-  HIP_CHECK(hipSetDevice(dev0));
+  HIP_CHECK(hipSetDevice(dev0))
   // Create mempool in current device
   hipMemPool_t mem_pool;
   hipMemPoolProps pool_props{};
   pool_props.allocType = hipMemAllocationTypePinned;
   pool_props.location.id = dev0;
   pool_props.location.type = hipMemLocationTypeDevice;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
 
   int *A_h, *B_h, *C_h;
   size_t byte_size = N * sizeof(int);
@@ -312,48 +312,48 @@ static bool checkMempoolSetAccess(int N, int dev0, int dev1) {
   }
   // create multiple streams
   hipStream_t stream0;
-  HIP_CHECK(hipStreamCreate(&stream0));
+  HIP_CHECK(hipStreamCreate(&stream0))
   int *A_d0, *B_d0;
   // Allocate memory on dev0 and initialize it on stream0
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d0), byte_size, mem_pool, stream0));
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B_d0), byte_size, mem_pool, stream0));
-  HIP_CHECK(hipMemcpyAsync(A_d0, A_h, byte_size, hipMemcpyHostToDevice, stream0));
-  HIP_CHECK(hipMemcpyAsync(B_d0, B_h, byte_size, hipMemcpyHostToDevice, stream0));
-  HIP_CHECK(hipStreamSynchronize(stream0));
-  HIP_CHECK(hipStreamDestroy(stream0));
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d0), byte_size, mem_pool, stream0))
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B_d0), byte_size, mem_pool, stream0))
+  HIP_CHECK(hipMemcpyAsync(A_d0, A_h, byte_size, hipMemcpyHostToDevice, stream0))
+  HIP_CHECK(hipMemcpyAsync(B_d0, B_h, byte_size, hipMemcpyHostToDevice, stream0))
+  HIP_CHECK(hipStreamSynchronize(stream0))
+  HIP_CHECK(hipStreamDestroy(stream0))
   // Set the current device context to dev1
-  HIP_CHECK(hipSetDevice(dev1));
+  HIP_CHECK(hipSetDevice(dev1))
   // if withSetAccess is true set the access of mem_pool
   // to both dev0 and dev1.
   hipMemAccessDesc accessDesc;
   accessDesc.location.type = hipMemLocationTypeDevice;
   accessDesc.location.id = dev1;
   accessDesc.flags = hipMemAccessFlagsProtReadWrite;
-  HIP_CHECK(hipMemPoolSetAccess(mem_pool, &accessDesc, 1));
+  HIP_CHECK(hipMemPoolSetAccess(mem_pool, &accessDesc, 1))
 
   int *A_d1, *B_d1, *C_d1;
   hipStream_t stream1;
-  HIP_CHECK(hipStreamCreate(&stream1));
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d1), byte_size, mem_pool, stream1));
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B_d1), byte_size, mem_pool, stream1));
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&C_d1), byte_size, mem_pool, stream1));
-  HIP_CHECK(hipMemcpyAsync(A_d1, A_d0, byte_size, hipMemcpyDeviceToDevice, stream1));
-  HIP_CHECK(hipMemcpyAsync(B_d1, B_d0, byte_size, hipMemcpyDeviceToDevice, stream1));
+  HIP_CHECK(hipStreamCreate(&stream1))
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d1), byte_size, mem_pool, stream1))
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B_d1), byte_size, mem_pool, stream1))
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&C_d1), byte_size, mem_pool, stream1))
+  HIP_CHECK(hipMemcpyAsync(A_d1, A_d0, byte_size, hipMemcpyDeviceToDevice, stream1))
+  HIP_CHECK(hipMemcpyAsync(B_d1, B_d0, byte_size, hipMemcpyDeviceToDevice, stream1))
   // Launch Kernel on stream1
   hipLaunchKernelGGL(HipTest::vectorADD, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0,
                      stream1, static_cast<const int*>(A_d1), static_cast<const int*>(B_d1), C_d1,
                      N);
-  HIP_CHECK(hipMemcpyAsync(C_h, C_d1, byte_size, hipMemcpyDeviceToHost, stream1));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d1), stream1));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B_d1), stream1));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C_d1), stream1));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d0), stream1));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B_d0), stream1));
-  HIP_CHECK(hipStreamSynchronize(stream1));
-  HIP_CHECK(hipStreamDestroy(stream1));
+  HIP_CHECK(hipMemcpyAsync(C_h, C_d1, byte_size, hipMemcpyDeviceToHost, stream1))
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d1), stream1))
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B_d1), stream1))
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C_d1), stream1))
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d0), stream1))
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B_d0), stream1))
+  HIP_CHECK(hipStreamSynchronize(stream1))
+  HIP_CHECK(hipStreamDestroy(stream1))
   // Set the current device context back to dev0
-  HIP_CHECK(hipSetDevice(dev0));
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK(hipSetDevice(dev0))
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
   // verify and validate
   for (int i = 0; i < N; i++) {
     REQUIRE(C_h[i] == (A_h[i] + B_h[i]));
@@ -394,14 +394,14 @@ static void getDevicePairs(std::vector<std::pair<int, int>>* p2p_pairs, int numD
 HIP_TEST_CASE(Unit_hipMemPoolSetAccess_SetAccess) {
   constexpr int N = 1 << 14;
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   checkIfMultiDev(numDevices) for (int dev = 0; dev < numDevices; dev++){
       checkMempoolSupported(dev)} std::vector<std::pair<int, int>>
       p2p_pairs;
   getDevicePairs(&p2p_pairs, numDevices);
   for (auto pair : p2p_pairs) {
     int canAccessPeer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, pair.first, pair.second));
+    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, pair.first, pair.second))
     if (canAccessPeer) {
       REQUIRE(true == checkMempoolSetAccess(N, pair.first, pair.second));
     } else {
@@ -426,7 +426,7 @@ HIP_TEST_CASE(Unit_hipMemPoolSetAccess_NegTst) {
   pool_props.allocType = hipMemAllocationTypePinned;
   pool_props.location.id = 0;
   pool_props.location.type = hipMemLocationTypeDevice;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
   constexpr size_t count = 1;
   hipMemAccessDesc descList, descListNeg;
   descList.flags = hipMemAccessFlagsProtReadWrite;
@@ -462,13 +462,13 @@ HIP_TEST_CASE(Unit_hipMemPoolSetAccess_NegTst) {
   // Scenario5
   SECTION("Unavailable device number") {
     int num_devices = 0;
-    HIP_CHECK(hipGetDeviceCount(&num_devices));
+    HIP_CHECK(hipGetDeviceCount(&num_devices))
     descListNeg.flags = hipMemAccessFlagsProtReadWrite;
     descListNeg.location.type = hipMemLocationTypeDevice;
     descListNeg.location.id = num_devices;
     REQUIRE(hipMemPoolSetAccess(mem_pool, &descListNeg, count) == hipErrorInvalidDevice);
   }
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
 }
 
 /**
@@ -502,11 +502,11 @@ HIP_TEST_CASE(Unit_hipMemPoolSetAccess_NegTst) {
  */
 HIP_TEST_CASE(Unit_hipMemPoolGetAccess_Negative_Parameters) {
   int device_id = 0;
-  HIP_CHECK(hipSetDevice(device_id));
+  HIP_CHECK(hipSetDevice(device_id))
   checkMempoolSupported(device_id) MemPoolGuard mempool(MemPools::dev_default, device_id);
 
   int num_dev = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_dev));
+  HIP_CHECK(hipGetDeviceCount(&num_dev))
 
   hipMemAccessFlags flags = hipMemAccessFlagsProtNone;
   hipMemLocation location = {hipMemLocationTypeDevice, device_id};
@@ -546,25 +546,25 @@ static bool checkMempoolSetAccessWithGet(int dev0, int dev1) {
   pool_props.allocType = hipMemAllocationTypePinned;
   pool_props.location.id = dev0;
   pool_props.location.type = hipMemLocationTypeDevice;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
   // Set access to dev1
   hipMemAccessDesc accessDesc;
   accessDesc.location.type = hipMemLocationTypeDevice;
   accessDesc.location.id = dev1;
   accessDesc.flags = hipMemAccessFlagsProtReadWrite;
-  HIP_CHECK(hipMemPoolSetAccess(mem_pool, &accessDesc, 1));
+  HIP_CHECK(hipMemPoolSetAccess(mem_pool, &accessDesc, 1))
   // Validate access for dev1
   hipMemAccessFlags flags;
   hipMemLocation location;
   location.type = hipMemLocationTypeDevice;
   location.id = dev1;
-  HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, &location));
+  HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, &location))
   REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
   // Validate access for dev0
   location.id = dev0;
-  HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, &location));
+  HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, &location))
   REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
   return true;
 }
 
@@ -575,7 +575,7 @@ static bool checkMempoolSetAccessWithGetUsingArray(int dev0, int dev1) {
   pool_props.allocType = hipMemAllocationTypePinned;
   pool_props.location.id = dev0;
   pool_props.location.type = hipMemLocationTypeDevice;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
   // Set access of dev0 and dev1
   hipMemAccessDesc accessDesc[2];
   accessDesc[0].location.type = hipMemLocationTypeDevice;
@@ -584,18 +584,18 @@ static bool checkMempoolSetAccessWithGetUsingArray(int dev0, int dev1) {
   accessDesc[1].location.type = hipMemLocationTypeDevice;
   accessDesc[1].location.id = dev1;
   accessDesc[1].flags = hipMemAccessFlagsProtReadWrite;
-  HIP_CHECK(hipMemPoolSetAccess(mem_pool, accessDesc, 2));
+  HIP_CHECK(hipMemPoolSetAccess(mem_pool, accessDesc, 2))
   // Validate access for dev0 and dev1
   hipMemAccessFlags flags;
   hipMemLocation location;
   location.type = hipMemLocationTypeDevice;
   location.id = dev0;
-  HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, &location));
+  HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, &location))
   REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
   location.id = dev1;
-  HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, &location));
+  HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, &location))
   REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
   return true;
 }
 
@@ -612,14 +612,14 @@ static bool checkMempoolSetAccessWithGetUsingArray(int dev0, int dev1) {
  */
 HIP_TEST_CASE(Unit_hipMemPoolGetAccess_SetGet) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   checkIfMultiDev(numDevices) for (int dev = 0; dev < numDevices; dev++){
       checkMempoolSupported(dev)} std::vector<std::pair<int, int>>
       p2p_pairs;
   getDevicePairs(&p2p_pairs, numDevices);
   for (auto pair : p2p_pairs) {
     int canAccessPeer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, pair.first, pair.second));
+    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, pair.first, pair.second))
     if (canAccessPeer) {
       REQUIRE(true == checkMempoolSetAccessWithGet(pair.first, pair.second));
       REQUIRE(true == checkMempoolSetAccessWithGetUsingArray(pair.first, pair.second));
@@ -642,15 +642,15 @@ HIP_TEST_CASE(Unit_hipMemPoolGetAccess_SetGet) {
  */
 HIP_TEST_CASE(Unit_hipMemPoolGetAccess_GetDefMempoolOfEachDevice) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   for (int dev = 0; dev < numDevices; dev++) {
     checkMempoolSupported(dev) hipMemAccessFlags flags;
     hipMemLocation location;
     hipMemPool_t mem_pool;
-    HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, dev));
+    HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, dev))
     location.id = dev;
     location.type = hipMemLocationTypeDevice;
-    HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, &location));
+    HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, &location))
     REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
   }
 }

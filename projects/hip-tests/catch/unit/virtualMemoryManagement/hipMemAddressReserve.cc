@@ -41,7 +41,7 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_AlignmentTest) {
   int deviceId = 0;
   hipDevice_t device;
   CTX_CREATE();
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
@@ -56,7 +56,7 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_AlignmentTest) {
   size_t alignmnt = 1;
   hipMemGenericAllocationHandle_t handle;
   // Allocate physical memory
-  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate host memory and intialize data
   std::vector<int> A_h(N), B_h(N);
   // Initialize with data
@@ -66,24 +66,24 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_AlignmentTest) {
   // check for address alignment fron 2 to 1024
   for (int iter = 0; iter < 12; iter++) {
     alignmnt = alignmnt * 2;
-    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, alignmnt, 0, 0));
+    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, alignmnt, 0, 0))
     REQUIRE((reinterpret_cast<unsigned long long>(ptrA) % alignmnt) == 0);
     std::fill(B_h.begin(), B_h.end(), initializer);
-    HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
+    HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
     // Set access
     hipMemAccessDesc accessDesc = {};
     accessDesc.location.type = hipMemLocationTypeDevice;
     accessDesc.location.id = device;
     accessDesc.flags = hipMemAccessFlagsProtReadWrite;
     // Make the address accessible to GPU 0
-    HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
-    HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
-    HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
+    HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1))
+    HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size))
+    HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size))
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
-    HIP_CHECK(hipMemUnmap(ptrA, size_mem));
-    HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+    HIP_CHECK(hipMemUnmap(ptrA, size_mem))
+    HIP_CHECK(hipMemAddressFree(ptrA, size_mem))
   }
-  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemRelease(handle))
   CTX_DESTROY();
 }
 
@@ -104,7 +104,7 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Negative) {
   int deviceId = 0;
   hipDevice_t device;
   CTX_CREATE();
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
@@ -145,7 +145,7 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Capture) {
   void* device_ptr = nullptr;
 
   CTX_CREATE();
-  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  HIP_CHECK(hipDeviceGet(&device, kDeviceId))
 
   hipMemAllocationProp allocation_prop{};
   allocation_prop.type = hipMemAllocationTypePinned;
@@ -154,19 +154,19 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Capture) {
 
   HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &allocation_prop,
                                            hipMemAllocationGranularityMinimum));
-  HIP_CHECK(hipMemCreate(&allocation_handle, granularity, &allocation_prop, 0));
+  HIP_CHECK(hipMemCreate(&allocation_handle, granularity, &allocation_prop, 0))
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemAddressReserve(&device_ptr, granularity, kAlignment, nullptr, 0));
+  HIP_CHECK(hipMemAddressReserve(&device_ptr, granularity, kAlignment, nullptr, 0))
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipMemAddressFree(device_ptr, granularity));
-  HIP_CHECK(hipMemRelease(allocation_handle));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipMemAddressFree(device_ptr, granularity))
+  HIP_CHECK(hipMemRelease(allocation_handle))
   CTX_DESTROY();
 }
 

@@ -18,7 +18,7 @@ HIP_TEST_CASE(Unit_hipDestroyExternalSemaphore_Vulkan_Negative_Parameters) {
   SECTION("Double free") {
     VulkanTest vkt(enable_validation);
     const auto ext_semaphore = ImportBinarySemaphore(vkt);
-    HIP_CHECK(hipDestroyExternalSemaphore(ext_semaphore));
+    HIP_CHECK(hipDestroyExternalSemaphore(ext_semaphore))
     HIP_CHECK_ERROR(hipDestroyExternalSemaphore(ext_semaphore), hipErrorInvalidValue);
   }
 #endif

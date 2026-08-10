@@ -24,12 +24,12 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu) {
 
   int numDevices = 0;
   constexpr auto def_val{10};
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices > 1) {
     int canAccessPeer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
+    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1))
     if (canAccessPeer) {
-      HIP_CHECK(hipSetDevice(0));
+      HIP_CHECK(hipSetDevice(0))
       hipArray_t A_d{nullptr};
       size_t width{sizeof(float) * NUM_W};
       float *A_h{nullptr}, *E_h{nullptr};
@@ -38,20 +38,20 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu) {
       HipTest::initArrays<float>(nullptr, nullptr, nullptr, &A_h, nullptr, nullptr, width * NUM_H,
                                  false);
       hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
-      HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
+      HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault))
       HipTest::setDefaultData<float>(width * NUM_H, A_h, nullptr, nullptr);
-      HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, A_h, width, width, NUM_H, hipMemcpyHostToDevice));
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&E_h), width * NUM_H));
+      HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, A_h, width, width, NUM_H, hipMemcpyHostToDevice))
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&E_h), width * NUM_H))
       for (int i = 0; i < NUM_W * NUM_H; i++) {
         E_h[i] = def_val + i;
       }
-      HIP_CHECK(hipSetDevice(1));
-      HIP_CHECK(hipMemcpy2DFromArray(E_h, width, A_d, 0, 0, width, NUM_H, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipSetDevice(1))
+      HIP_CHECK(hipMemcpy2DFromArray(E_h, width, A_d, 0, 0, width, NUM_H, hipMemcpyDeviceToHost))
       REQUIRE(HipTest::checkArray(A_h, E_h, NUM_W, NUM_H) == true);
 
       // Cleaning the memory
-      HIP_CHECK(hipFreeArray(A_d));
-      HIP_CHECK(hipHostFree(E_h));
+      HIP_CHECK(hipFreeArray(A_d))
+      HIP_CHECK(hipHostFree(E_h))
       HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, nullptr, nullptr, false);
     } else {
       HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
@@ -76,12 +76,12 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_multiDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices > 1) {
     int canAccessPeer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
+    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1))
     if (canAccessPeer) {
-      HIP_CHECK(hipSetDevice(0));
+      HIP_CHECK(hipSetDevice(0))
       hipArray_t A_d{nullptr};
       size_t width{sizeof(float) * NUM_W};
       float *A_h{nullptr}, *hData{nullptr};
@@ -90,17 +90,17 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_multiDeviceContextChange) {
       HipTest::initArrays<float>(nullptr, nullptr, nullptr, &A_h, &hData, nullptr, width * NUM_H,
                                  false);
       hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
-      HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
+      HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault))
       HipTest::setDefaultData<float>(width * NUM_H, A_h, hData, nullptr);
 
-      HIP_CHECK(hipSetDevice(1));
-      HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width, width, NUM_H, hipMemcpyHostToDevice));
+      HIP_CHECK(hipSetDevice(1))
+      HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width, width, NUM_H, hipMemcpyHostToDevice))
 
-      HIP_CHECK(hipMemcpy2DFromArray(A_h, width, A_d, 0, 0, width, NUM_H, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy2DFromArray(A_h, width, A_d, 0, 0, width, NUM_H, hipMemcpyDeviceToHost))
       REQUIRE(HipTest::checkArray(A_h, hData, NUM_W, NUM_H) == true);
 
       // Cleaning the memory
-      HIP_CHECK(hipFreeArray(A_d));
+      HIP_CHECK(hipFreeArray(A_d))
       HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, hData, nullptr, false);
     } else {
       HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);

@@ -14,8 +14,8 @@ namespace {
 bool MemoryPoolsSupported() {
   int device = 0;
   int supported = 0;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeMemoryPoolsSupported, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeMemoryPoolsSupported, device))
   return supported != 0;
 }
 
@@ -27,7 +27,7 @@ void SkipIfMemoryPoolsUnsupported() {
 
 hipMemPoolProps CurrentDevicePoolProps() {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   hipMemPoolProps props{};
   props.allocType = hipMemAllocationTypePinned;
   props.handleTypes = hipMemHandleTypeNone;
@@ -45,7 +45,7 @@ bool CreatePool(hipMemPool_t* pool) {
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return false;
 }
 }
@@ -61,7 +61,7 @@ HIP_TEST_CASE(Contract_MemoryPoolLifecycle_HipMemPoolCreate_Destroy_SucceedsWhen
 
   REQUIRE(pool != nullptr);
 
-  HIP_CHECK(hipMemPoolDestroy(pool));
+  HIP_CHECK(hipMemPoolDestroy(pool))
 }
 
 // @asserts: hipMemPoolSetAttribute - a release-threshold value set on a pool reads back unchanged via hipMemPoolGetAttribute
@@ -77,8 +77,8 @@ HIP_TEST_CASE(Contract_MemoryPoolLifecycle_HipMemPoolSetAttribute_GetSetReleaseT
   }
   cleanup.Add([pool] { (void)hipMemPoolDestroy(pool); });
 
-  HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &threshold));
-  HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrReleaseThreshold, &readback));
+  HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &threshold))
+  HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrReleaseThreshold, &readback))
 
   REQUIRE(readback == threshold);
 }
@@ -94,7 +94,7 @@ HIP_TEST_CASE(Contract_MemoryPoolLifecycle_HipMemPoolTrimTo_Default_SucceedsOnEm
   }
   cleanup.Add([pool] { (void)hipMemPoolDestroy(pool); });
 
-  HIP_CHECK(hipMemPoolTrimTo(pool, 0));
+  HIP_CHECK(hipMemPoolTrimTo(pool, 0))
 }
 
 // @asserts: hipMallocFromPoolAsync - an async allocation from a created pool on a stream yields a non-null pointer, or is unsupported
@@ -110,13 +110,13 @@ HIP_TEST_CASE(Contract_MemoryPoolLifecycle_HipMallocFromPoolAsync_MallocFromCrea
   }
   cleanup.Add([pool] { (void)hipMemPoolDestroy(pool); });
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   const hipError_t status = hipMallocFromPoolAsync(&ptr, 128, pool, stream);
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("hipMallocFromPoolAsync is not supported by this device/runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   // Free-and-drain on teardown: enqueue the async free, then synchronize the
   // stream so the free completes before the stream-destroy and pool-destroy
   // actions (registered earlier, so they run after this one) tear down the stream

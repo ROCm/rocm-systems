@@ -30,18 +30,18 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic) {
     params.blockDim = dim3{1, 1, 1};
     params.args = nullptr;
     params.sharedMem = 0;
-    HIP_CHECK(hipSetDevice(device++));
-    HIP_CHECK(hipStreamCreate(&params.stream));
+    HIP_CHECK(hipSetDevice(device++))
+    HIP_CHECK(hipStreamCreate(&params.stream))
   }
 
-  HIP_CHECK(hipLaunchCooperativeKernelMultiDevice(params_list.data(), device_count, 0u));
+  HIP_CHECK(hipLaunchCooperativeKernelMultiDevice(params_list.data(), device_count, 0u))
 
   for (const auto params : params_list) {
-    HIP_CHECK(hipStreamSynchronize(params.stream));
+    HIP_CHECK(hipStreamSynchronize(params.stream))
   }
 
   for (const auto params : params_list) {
-    HIP_CHECK(hipStreamDestroy(params.stream));
+    HIP_CHECK(hipStreamDestroy(params.stream))
   }
 }
 
@@ -64,8 +64,8 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters) {
     params.blockDim = dim3{1, 1, 1};
     params.args = nullptr;
     params.sharedMem = 0;
-    HIP_CHECK(hipSetDevice(device++));
-    HIP_CHECK(hipStreamCreate(&params.stream));
+    HIP_CHECK(hipSetDevice(device++))
+    HIP_CHECK(hipStreamCreate(&params.stream))
   }
 
   SECTION("launchParamsList == nullptr") {
@@ -120,7 +120,7 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters) {
   }
 
   for (const auto params : params_list) {
-    HIP_CHECK(hipStreamDestroy(params.stream));
+    HIP_CHECK(hipStreamDestroy(params.stream))
   }
 }
 
@@ -134,7 +134,7 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSam
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   std::vector<hipLaunchParams> params_list(2);
 
@@ -144,13 +144,13 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSam
     params.blockDim = dim3{1, 1, 1};
     params.args = nullptr;
     params.sharedMem = 0;
-    HIP_CHECK(hipStreamCreate(&params.stream));
+    HIP_CHECK(hipStreamCreate(&params.stream))
   }
 
   HIP_CHECK_ERROR(hipLaunchCooperativeKernelMultiDevice(params_list.data(), 2, 0u),
                   hipErrorInvalidDevice);
 
   for (const auto params : params_list) {
-    HIP_CHECK(hipStreamDestroy(params.stream));
+    HIP_CHECK(hipStreamDestroy(params.stream))
   }
 }

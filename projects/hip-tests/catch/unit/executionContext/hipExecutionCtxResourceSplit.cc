@@ -26,12 +26,12 @@
  *    Verifies the result SM count and that the remainder captures the rest.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Sanity) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   hipDevResource input{};
-  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm))
 
   unsigned int totalSMs = input.sm.smCount;
   unsigned int alignment = input.sm.smCoscheduledAlignment;
@@ -43,7 +43,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Sanity) {
 
   hipDevResource result[1] = {};
   hipDevResource remainder{};
-  HIP_CHECK(hipDevSmResourceSplit(result, 1, &input, &remainder, 0, params));
+  HIP_CHECK(hipDevSmResourceSplit(result, 1, &input, &remainder, 0, params))
 
   REQUIRE(result[0].type == hipDevResourceTypeSm);
   REQUIRE(result[0].sm.smCount == halfSMs);
@@ -60,21 +60,21 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Sanity) {
  *    and verifies group counts and SM totals.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Sanity) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   hipDevResource input{};
-  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm))
 
   unsigned int nbGroups = 0;
-  HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, 2));
+  HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, 2))
   REQUIRE(nbGroups > 0);
 
   std::vector<hipDevResource> result(nbGroups);
   hipDevResource remainder{};
   unsigned int actualGroups = nbGroups;
-  HIP_CHECK(hipDevSmResourceSplitByCount(result.data(), &actualGroups, &input, &remainder, 0, 2));
+  HIP_CHECK(hipDevSmResourceSplitByCount(result.data(), &actualGroups, &input, &remainder, 0, 2))
   REQUIRE(actualGroups == nbGroups);
 
   unsigned int totalAssigned = 0;
@@ -98,12 +98,12 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Sanity) {
  *    smCount < 2, and smCount exceeding total SMs.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Negative) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   hipDevResource input{};
-  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm))
 
   hipDevResource result[2] = {};
   hipDevSmResourceGroupParams params[2] = {};
@@ -163,18 +163,18 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Negative) {
  *    correctness.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Functional) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   hipDevResource input{};
-  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm))
 
   unsigned int totalSMs = input.sm.smCount;
   unsigned int alignment = input.sm.smCoscheduledAlignment;
 
   unsigned int nbGroups = 0;
-  HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, alignment));
+  HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, alignment))
   REQUIRE(nbGroups >= 2);
 
   unsigned int groupA = alignment;
@@ -186,7 +186,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Functional) {
 
   hipDevResource result[2] = {};
   hipDevResource remainder{};
-  HIP_CHECK(hipDevSmResourceSplit(result, 2, &input, &remainder, 0, params));
+  HIP_CHECK(hipDevSmResourceSplit(result, 2, &input, &remainder, 0, params))
 
   REQUIRE(result[0].type == hipDevResourceTypeSm);
   REQUIRE(result[0].sm.smCount == groupA);
@@ -210,12 +210,12 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Functional) {
  *    parameters: NULL nbGroups, NULL input, and wrong resource type.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Negative) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   hipDevResource input{};
-  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm))
 
   unsigned int nbGroups = 2;
 
@@ -244,19 +244,19 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Negative) {
  *    correctness.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Functional) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   hipDevResource input{};
-  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm))
 
   unsigned int totalSMs = input.sm.smCount;
   unsigned int alignment = input.sm.smCoscheduledAlignment;
   unsigned int minCount = min(alignment, (static_cast<unsigned int>(totalSMs * 0.4) / alignment) * alignment);
 
   unsigned int nbGroups = 0;
-  HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, minCount));
+  HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, minCount))
   REQUIRE(nbGroups >= 2);
 
   unsigned int requestedGroups = 2;
@@ -289,18 +289,18 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Functional) {
  *    partition.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Backfill_Functional) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   hipDevResource input{};
-  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm))
 
   unsigned int totalSMs = input.sm.smCount;
   unsigned int alignment = input.sm.smCoscheduledAlignment;
 
   unsigned int nbGroups = 0;
-  HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, alignment));
+  HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, alignment))
   REQUIRE(nbGroups >= 2);
 
   unsigned int maxExplicit = (nbGroups - 1) * alignment;
@@ -315,7 +315,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Backfill_Functional) {
 
   hipDevResource result[2] = {};
   hipDevResource remainder{};
-  HIP_CHECK(hipDevSmResourceSplit(result, 2, &input, &remainder, 0, params));
+  HIP_CHECK(hipDevSmResourceSplit(result, 2, &input, &remainder, 0, params))
 
   REQUIRE(result[0].sm.smCount == group0);
   REQUIRE(result[1].sm.smCount == totalSMs - group0);
@@ -335,12 +335,12 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Backfill_Functional) {
  *    (bitwise AND is zero).
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Disjoint_Sets) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   hipDevResource input{};
-  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm))
 
   unsigned int totalSMs = input.sm.smCount;
   unsigned int alignment = input.sm.smCoscheduledAlignment;
@@ -355,7 +355,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Disjoint_Sets) {
 
   hipDevResource result[3] = {};
   hipDevResource remainder{};
-  HIP_CHECK(hipDevSmResourceSplit(result, 3, &input, &remainder, 0, params));
+  HIP_CHECK(hipDevSmResourceSplit(result, 3, &input, &remainder, 0, params))
 
   for (int i = 0; i < 3; i++) {
     REQUIRE(result[i].type == hipDevResourceTypeSm);
@@ -370,14 +370,14 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Disjoint_Sets) {
 
   for (int i = 0; i < 3; i++) {
     hipDevResourceDesc_t desc{};
-    HIP_CHECK(hipDevResourceGenerateDesc(&desc, &result[i], 1));
-    HIP_CHECK(hipGreenCtxCreate(&ctx[i], desc, 0, 0));
+    HIP_CHECK(hipDevResourceGenerateDesc(&desc, &result[i], 1))
+    HIP_CHECK(hipGreenCtxCreate(&ctx[i], desc, 0, 0))
     REQUIRE(ctx[i] != nullptr);
-    HIP_CHECK(hipExecutionCtxStreamCreate(&stream[i], ctx[i], hipStreamNonBlocking, 0));
+    HIP_CHECK(hipExecutionCtxStreamCreate(&stream[i], ctx[i], hipStreamNonBlocking, 0))
     REQUIRE(stream[i] != nullptr);
 
     masks[i].resize(maskWords, 0);
-    HIP_CHECK(hipExtStreamGetCUMask(stream[i], maskWords, masks[i].data()));
+    HIP_CHECK(hipExtStreamGetCUMask(stream[i], maskWords, masks[i].data()))
   }
 
   for (int i = 0; i < 3; i++) {
@@ -389,8 +389,8 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Disjoint_Sets) {
   }
 
   for (int i = 0; i < 3; i++) {
-    HIP_CHECK(hipStreamDestroy(stream[i]));
-    HIP_CHECK(hipExecutionCtxDestroy(ctx[i]));
+    HIP_CHECK(hipStreamDestroy(stream[i]))
+    HIP_CHECK(hipExecutionCtxDestroy(ctx[i]))
   }
 }
 #endif

@@ -34,10 +34,10 @@ HIP_TEST_CASE(Unit_coopgroups_any) {
 
   unsigned int *data, *res;
 
-  HIP_CHECK(hipMalloc(&data, sizeof(int) * warp_size));
-  HIP_CHECK(hipMalloc(&res, sizeof(int) * warp_size));
+  HIP_CHECK(hipMalloc(&data, sizeof(int) * warp_size))
+  HIP_CHECK(hipMalloc(&res, sizeof(int) * warp_size))
 
-  HIP_CHECK(hipMemset(data, 0, sizeof(int) * warp_size));
+  HIP_CHECK(hipMemset(data, 0, sizeof(int) * warp_size))
 
   SECTION("all set") {
     constexpr unsigned int any_val = 10;
@@ -247,8 +247,8 @@ HIP_TEST_CASE(Unit_coopgroups_any) {
     }
   }
 
-  HIP_CHECK(hipFree(data));
-  HIP_CHECK(hipFree(res));
+  HIP_CHECK(hipFree(data))
+  HIP_CHECK(hipFree(res))
 }
 
 __global__ void coop_all_coal(unsigned int* data, unsigned int val, unsigned int* res) {
@@ -275,10 +275,10 @@ HIP_TEST_CASE(Unit_coopgroups_coal_all) {
 
   unsigned int *data, *res;
 
-  HIP_CHECK(hipMalloc(&data, sizeof(unsigned int) * warp_size));
-  HIP_CHECK(hipMalloc(&res, sizeof(unsigned int) * warp_size));
+  HIP_CHECK(hipMalloc(&data, sizeof(unsigned int) * warp_size))
+  HIP_CHECK(hipMalloc(&res, sizeof(unsigned int) * warp_size))
 
-  HIP_CHECK(hipMemset(data, 0, sizeof(unsigned int) * warp_size));
+  HIP_CHECK(hipMemset(data, 0, sizeof(unsigned int) * warp_size))
 
   SECTION("All set - all in sync") {
     constexpr unsigned int any_val = 10;
@@ -454,8 +454,8 @@ HIP_TEST_CASE(Unit_coopgroups_coal_all) {
     }
   }
 
-  HIP_CHECK(hipFree(data));
-  HIP_CHECK(hipFree(res));
+  HIP_CHECK(hipFree(data))
+  HIP_CHECK(hipFree(res))
 }
 
 __global__ void coop_match_any_coal(unsigned int* data, unsigned long long* res) {
@@ -481,11 +481,11 @@ HIP_TEST_CASE(Unit_coopgroups_match_any_coal) {
   unsigned int* data;
   unsigned long long* res;
 
-  HIP_CHECK(hipMalloc(&data, sizeof(unsigned int) * warp_size));
-  HIP_CHECK(hipMalloc(&res, sizeof(unsigned long long) * warp_size));
+  HIP_CHECK(hipMalloc(&data, sizeof(unsigned int) * warp_size))
+  HIP_CHECK(hipMalloc(&res, sizeof(unsigned long long) * warp_size))
 
-  HIP_CHECK(hipMemset(data, 0, sizeof(unsigned int) * warp_size));
-  HIP_CHECK(hipMemset(res, 0, sizeof(unsigned long long) * warp_size));
+  HIP_CHECK(hipMemset(data, 0, sizeof(unsigned int) * warp_size))
+  HIP_CHECK(hipMemset(res, 0, sizeof(unsigned long long) * warp_size))
 
   SECTION("all set") {
     constexpr unsigned int any_val = 10;
@@ -523,8 +523,8 @@ HIP_TEST_CASE(Unit_coopgroups_match_any_coal) {
     }
   }
 
-  HIP_CHECK(hipFree(data));
-  HIP_CHECK(hipFree(res));
+  HIP_CHECK(hipFree(data))
+  HIP_CHECK(hipFree(res))
 }
 
 __global__ void coop_match_all_coal(unsigned int* data, unsigned long long* res, int* pred_res) {
@@ -552,12 +552,12 @@ HIP_TEST_CASE(Unit_coopgroups_match_all_coal) {
   unsigned long long* res;
   int* pred_res;
 
-  HIP_CHECK(hipMalloc(&data, sizeof(unsigned int) * warp_size));
-  HIP_CHECK(hipMalloc(&res, sizeof(unsigned long long) * warp_size));
-  HIP_CHECK(hipMalloc(&pred_res, sizeof(int) * warp_size));
+  HIP_CHECK(hipMalloc(&data, sizeof(unsigned int) * warp_size))
+  HIP_CHECK(hipMalloc(&res, sizeof(unsigned long long) * warp_size))
+  HIP_CHECK(hipMalloc(&pred_res, sizeof(int) * warp_size))
 
-  HIP_CHECK(hipMemset(data, 0, sizeof(unsigned int) * warp_size));
-  HIP_CHECK(hipMemset(res, 0, sizeof(unsigned long long) * warp_size));
+  HIP_CHECK(hipMemset(data, 0, sizeof(unsigned int) * warp_size))
+  HIP_CHECK(hipMemset(res, 0, sizeof(unsigned long long) * warp_size))
 
   SECTION("all set") {
     constexpr unsigned int any_val = 10;
@@ -652,7 +652,7 @@ HIP_TEST_CASE(Unit_coopgroups_match_all_coal) {
     }
   }
 
-  HIP_CHECK(hipFree(data));
-  HIP_CHECK(hipFree(res));
-  HIP_CHECK(hipFree(pred_res));
+  HIP_CHECK(hipFree(data))
+  HIP_CHECK(hipFree(res))
+  HIP_CHECK(hipFree(pred_res))
 }

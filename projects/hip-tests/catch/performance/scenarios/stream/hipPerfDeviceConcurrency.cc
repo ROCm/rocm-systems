@@ -76,7 +76,7 @@ hipPerfDeviceConcurrency::~hipPerfDeviceConcurrency() {}
 
 void hipPerfDeviceConcurrency::open(void) {
   int nGpu = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpu));
+  HIP_CHECK(hipGetDeviceCount(&nGpu))
   setNumGpus(nGpu);
   if (nGpu < 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
@@ -102,16 +102,16 @@ bool hipPerfDeviceConcurrency::run(unsigned int testCase, int numGpus) {
       deviceId = i;
     }
 
-    HIP_CHECK(hipSetDevice(deviceId));
+    HIP_CHECK(hipSetDevice(deviceId))
     hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, i));
+    HIP_CHECK(hipGetDeviceProperties(&props, i))
     if (testCase != 0) {
       CONSOLE_PRINT("info: running on bus 0x%x %s with %d CUs and device ID: %d", props.pciBusID,
                     props.name, props.multiProcessorCount, i);
     }
     numCUs[i] = props.multiProcessorCount;
     int clkFrequency = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&clkFrequency, hipDeviceAttributeClockRate, i));
+    HIP_CHECK(hipDeviceGetAttribute(&clkFrequency, hipDeviceAttributeClockRate, i))
     if (clkFrequency == 0) {
       CONSOLE_PRINT("clkFrequency = 0, set it to 1000000");
       clkFrequency = 1000000;
@@ -128,10 +128,10 @@ bool hipPerfDeviceConcurrency::run(unsigned int testCase, int numGpus) {
     width_ = 256;
     bufSize = width_ * width_ * sizeof(uint);
     // Create streams for concurrency
-    HIP_CHECK(hipStreamCreate(&streams[i]));
+    HIP_CHECK(hipStreamCreate(&streams[i]))
 
     // Allocate memory on the host and device
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&hPtr[i]), bufSize, hipHostMallocDefault));
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&hPtr[i]), bufSize, hipHostMallocDefault))
     setData(hPtr[i], 0xdeadbeef);
     HIP_CHECK(hipMalloc(reinterpret_cast<uint**>(&dPtr[i]), bufSize))
 
@@ -147,7 +147,7 @@ bool hipPerfDeviceConcurrency::run(unsigned int testCase, int numGpus) {
     yPos = static_cast<float>(coords[coordIdx].y + 0.5 * coords[coordIdx].width);
 
     // Copy memory from host to device
-    HIP_CHECK(hipMemcpy(dPtr[i], hPtr[i], bufSize, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dPtr[i], hPtr[i], bufSize, hipMemcpyHostToDevice))
   }
 
   // Time the kernel execution
@@ -157,12 +157,12 @@ bool hipPerfDeviceConcurrency::run(unsigned int testCase, int numGpus) {
       deviceId = i;
     }
 
-    HIP_CHECK(hipSetDevice(deviceId));
+    HIP_CHECK(hipSetDevice(deviceId))
     hipLaunchKernelGGL(mandelbrot, dim3(blocks), dim3(threads_per_block), 0, streams[i], dPtr[i],
                        width_, xPos, yPos, xStep, yStep, maxIter[i]);
   }
   for (int i = 0; i < numGpus; i++) {
-    HIP_CHECK(hipStreamSynchronize(0));
+    HIP_CHECK(hipStreamSynchronize(0))
   }
 
   auto all_end = std::chrono::steady_clock::now();
@@ -172,10 +172,10 @@ bool hipPerfDeviceConcurrency::run(unsigned int testCase, int numGpus) {
     if (testCase != 0) {
       deviceId = i;
     }
-    HIP_CHECK(hipSetDevice(deviceId));
+    HIP_CHECK(hipSetDevice(deviceId))
 
     // Copy data back from device to the host
-    HIP_CHECK(hipMemcpy(hPtr[i], dPtr[i], bufSize, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hPtr[i], dPtr[i], bufSize, hipMemcpyDeviceToHost))
     checkData(hPtr[i]);
     expectedIters[i] = width_ * width_ * (unsigned long long)maxIter[i];
     if (testCase != 0) {
@@ -185,10 +185,10 @@ bool hipPerfDeviceConcurrency::run(unsigned int testCase, int numGpus) {
       }
     }
 
-    HIP_CHECK(hipStreamDestroy(streams[i]));
+    HIP_CHECK(hipStreamDestroy(streams[i]))
     // Free host and device memory
-    HIP_CHECK(hipHostFree(hPtr[i]));
-    HIP_CHECK(hipFree(dPtr[i]));
+    HIP_CHECK(hipHostFree(hPtr[i]))
+    HIP_CHECK(hipFree(dPtr[i]))
   }
 
   if (testCase != 0) {

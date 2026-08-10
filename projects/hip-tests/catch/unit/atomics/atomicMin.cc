@@ -32,7 +32,7 @@ static void runAtomicMinSameAddressTest() {
 template <typename TestType>
 static void runAtomicMinAdjacentAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
@@ -46,7 +46,7 @@ static void runAtomicMinAdjacentAddressesTest() {
 template <typename TestType>
 static void runAtomicMinScatteredAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
@@ -72,7 +72,7 @@ static void runAtomicMinMultiKernelSameAddressTest() {
 template <typename TestType>
 static void runAtomicMinMultiKernelAdjacentAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
@@ -86,7 +86,7 @@ static void runAtomicMinMultiKernelAdjacentAddressesTest() {
 template <typename TestType>
 static void runAtomicMinMultiKernelScatteredAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {

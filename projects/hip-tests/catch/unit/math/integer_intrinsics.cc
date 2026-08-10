@@ -25,7 +25,7 @@ HIP_TEST_CASE(Unit_Device___brev_Sanity_Positive) {
   LinearAllocGuard<unsigned int> y(LinearAllocs::hipMallocManaged, sizeof(unsigned int));
 
   __brev_kernel<<<1, 1>>>(y.ptr(), 0xAAAAAAAA);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(y.ptr()[0] == 0x55555555);
 }
@@ -51,7 +51,7 @@ HIP_TEST_CASE(Unit_Device___brevll_Sanity_Positive) {
                                              sizeof(unsigned long long int));
 
   __brevll_kernel<<<1, 1>>>(y.ptr(), 0xAAAAAAAAAAAAAAAA);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(y.ptr()[0] == 0x5555555555555555);
 }
@@ -74,14 +74,14 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device___clz_Sanity_Positive, int, unsigned int) {
   LinearAllocGuard<TestType> y(LinearAllocs::hipMallocManaged, sizeof(TestType));
 
   __clz_kernel<<<1, 1>>>(y.ptr(), static_cast<TestType>(0));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(y.ptr()[0] == 32);
 
   TestType x = 1;
   for (int i = 0; i < 32; ++i) {
     __clz_kernel<<<1, 1>>>(y.ptr(), x << i);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     REQUIRE(y.ptr()[0] == 31 - i);
   }
@@ -107,14 +107,14 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device___clzll_Sanity_Positive, long long int,
   LinearAllocGuard<TestType> y(LinearAllocs::hipMallocManaged, sizeof(TestType));
 
   __clzll_kernel<<<1, 1>>>(y.ptr(), static_cast<TestType>(0));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(y.ptr()[0] == 64);
 
   TestType x = 1;
   for (int i = 0; i < 64; ++i) {
     __clzll_kernel<<<1, 1>>>(y.ptr(), x << i);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     REQUIRE(y.ptr()[0] == 63 - i);
   }
@@ -138,14 +138,14 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device___ffs_Sanity_Positive, int, unsigned int) {
   LinearAllocGuard<TestType> y(LinearAllocs::hipMallocManaged, sizeof(TestType));
 
   __ffs_kernel<<<1, 1>>>(y.ptr(), static_cast<TestType>(0));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(y.ptr()[0] == 0);
 
   TestType x = 1;
   for (int i = 0; i < 32; ++i) {
     __ffs_kernel<<<1, 1>>>(y.ptr(), x << i);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     REQUIRE(y.ptr()[0] == i + 1);
   }
@@ -171,14 +171,14 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device___ffsll_Sanity_Positive, long long int,
   LinearAllocGuard<TestType> y(LinearAllocs::hipMallocManaged, sizeof(TestType));
 
   __ffsll_kernel<<<1, 1>>>(y.ptr(), static_cast<TestType>(0));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(y.ptr()[0] == 0);
 
   TestType x = 1;
   for (int i = 0; i < 64; ++i) {
     __ffsll_kernel<<<1, 1>>>(y.ptr(), x << i);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     REQUIRE(y.ptr()[0] == i + 1);
   }
@@ -202,14 +202,14 @@ HIP_TEST_CASE(Unit_Device___popc_Sanity_Positive) {
   LinearAllocGuard<unsigned int> y(LinearAllocs::hipMallocManaged, sizeof(unsigned int));
 
   __popc_kernel<<<1, 1>>>(y.ptr(), 0);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(y.ptr()[0] == 0);
 
   unsigned int x = 0;
   for (int i = 0; i < 32; ++i) {
     __popc_kernel<<<1, 1>>>(y.ptr(), x |= (1u << i));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     REQUIRE(y.ptr()[0] == i + 1);
   }
@@ -236,14 +236,14 @@ HIP_TEST_CASE(Unit_Device___popcll_Sanity_Positive) {
                                              sizeof(unsigned long long int));
 
   __popcll_kernel<<<1, 1>>>(y.ptr(), 0);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(y.ptr()[0] == 0);
 
   unsigned long long int x = 0;
   for (int i = 0; i < 64; ++i) {
     __popcll_kernel<<<1, 1>>>(y.ptr(), x |= (1ull << i));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     REQUIRE(y.ptr()[0] == i + 1);
   }
@@ -270,7 +270,7 @@ HIP_TEST_CASE(Unit_Device___mul24_Sanity_Positive) {
   int x2 = GENERATE(0, -42, 42, 0xFFFFFFFF);
 
   __mul24_kernel<<<1, 1>>>(y.ptr(), x1, x2);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(y.ptr()[0] == x1 * x2);
 }
@@ -298,7 +298,7 @@ HIP_TEST_CASE(Unit_Device___umul24_Sanity_Positive) {
   unsigned int x2 = GENERATE(0, 42, 0xFFFFFF);
 
   __umul24_kernel<<<1, 1>>>(y.ptr(), x1, x2);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(y.ptr()[0] == x1 * x2);
 }
@@ -328,7 +328,7 @@ HIP_TEST_CASE(Unit_Device___funnelshift_l_Sanity_Positive) {
 
   for (unsigned int shift = 0; shift < 64; ++shift) {
     __funnelshift_l_kernel<<<1, 1>>>(y.ptr(), lo, hi, shift);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     INFO("shift: " << shift);
     REQUIRE(y.ptr()[0] == static_cast<unsigned int>((hi_lo << (shift & 31)) >> 32));
@@ -360,7 +360,7 @@ HIP_TEST_CASE(Unit_Device___funnelshift_lc_Sanity_Positive) {
 
   for (unsigned int shift = 0; shift < 64; ++shift) {
     __funnelshift_lc_kernel<<<1, 1>>>(y.ptr(), lo, hi, shift);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     INFO("shift: " << shift);
     REQUIRE(y.ptr()[0] == static_cast<unsigned int>((hi_lo << std::min(shift, 32u)) >> 32));
@@ -392,7 +392,7 @@ HIP_TEST_CASE(Unit_Device___funnelshift_r_Sanity_Positive) {
 
   for (unsigned int shift = 0; shift < 64; ++shift) {
     __funnelshift_r_kernel<<<1, 1>>>(y.ptr(), lo, hi, shift);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     INFO("shift: " << shift);
     REQUIRE(y.ptr()[0] == static_cast<unsigned int>(hi_lo >> (shift & 31)));
@@ -424,7 +424,7 @@ HIP_TEST_CASE(Unit_Device___funnelshift_rc_Sanity_Positive) {
 
   for (unsigned int shift = 0; shift < 64; ++shift) {
     __funnelshift_rc_kernel<<<1, 1>>>(y.ptr(), lo, hi, shift);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     INFO("shift: " << shift);
     REQUIRE(y.ptr()[0] == static_cast<unsigned int>(hi_lo >> std::min(shift, 32u)));
@@ -452,7 +452,7 @@ HIP_TEST_CASE(Unit_Device___hadd_Sanity_Positive) {
   int x2 = GENERATE(0, -42, 42, 0xFFFFFFFF);
 
   __hadd_kernel<<<1, 1>>>(y.ptr(), x1, x2);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   INFO("x1: " << x1);
   INFO("x2: " << x2);
@@ -482,7 +482,7 @@ HIP_TEST_CASE(Unit_Device___uhadd_Sanity_Positive) {
   unsigned int x2 = GENERATE(0, 42, 0xFFFFFFFF);
 
   __uhadd_kernel<<<1, 1>>>(y.ptr(), x1, x2);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   INFO("x1: " << x1);
   INFO("x2: " << x2);
@@ -510,7 +510,7 @@ HIP_TEST_CASE(Unit_Device___rhadd_Sanity_Positive) {
   int x2 = GENERATE(0, -42, 42, 0xFFFFFFFF);
 
   __rhadd_kernel<<<1, 1>>>(y.ptr(), x1, x2);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   INFO("x1: " << x1);
   INFO("x2: " << x2);
@@ -540,7 +540,7 @@ HIP_TEST_CASE(Unit_Device___urhadd_Sanity_Positive) {
   unsigned int x2 = GENERATE(0, 42, 0xFFFFFFFF);
 
   __urhadd_kernel<<<1, 1>>>(y.ptr(), x1, x2);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   INFO("x1: " << x1);
   INFO("x2: " << x2);
@@ -569,7 +569,7 @@ HIP_TEST_CASE(Unit_Device___mulhi_Sanity_Positive) {
   int x2 = GENERATE(0, -42, 42, 0xFFFFFFFF);
 
   __mulhi_kernel<<<1, 1>>>(y.ptr(), x1, x2);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   INFO("x1: " << x1);
   INFO("x2: " << x2);
@@ -600,7 +600,7 @@ HIP_TEST_CASE(Unit_Device___umulhi_Sanity_Positive) {
   unsigned int x2 = GENERATE(0, 42, 0xFFFFFFFF);
 
   __umulhi_kernel<<<1, 1>>>(y.ptr(), x1, x2);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   INFO("x1: " << x1);
   INFO("x2: " << x2);
@@ -631,7 +631,7 @@ HIP_TEST_CASE(Unit_Device___mul64hi_Sanity_Positive) {
   long long x2 = GENERATE(0, -42, 42, 0xFFFFFFFF);
 
   __mul64hi_kernel<<<1, 1>>>(y.ptr(), x1, x2);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   INFO("x1: " << x1);
   INFO("x2: " << x2);
@@ -664,7 +664,7 @@ HIP_TEST_CASE(Unit_Device___umul64hi_Sanity_Positive) {
   unsigned long long x2 = GENERATE(0, 42, 0xFFFFFFFF);
 
   __umul64hi_kernel<<<1, 1>>>(y.ptr(), x1, x2);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   INFO("x1: " << x1);
   INFO("x2: " << x2);
@@ -696,7 +696,7 @@ HIP_TEST_CASE(Unit_Device___sad_Sanity_Positive) {
   unsigned int x3 = GENERATE(0, 42, 0xFFFFFFFF);
 
   __sad_kernel<<<1, 1>>>(y.ptr(), x1, x2, x3);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   INFO("x1: " << x1);
   INFO("x2: " << x2);
@@ -727,7 +727,7 @@ HIP_TEST_CASE(Unit_Device___usad_Sanity_Positive) {
   unsigned int x3 = GENERATE(0, 42, 0xFFFFFFFF);
 
   __usad_kernel<<<1, 1>>>(y.ptr(), x1, x2, x3);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   INFO("x1: " << x1);
   INFO("x2: " << x2);
@@ -768,7 +768,7 @@ HIP_TEST_CASE(Unit_Device___byte_perm_Sanity_Positive) {
   unsigned int s = (s3 << 12) | (s2 << 8) | (s1 << 4) | s0;
 
   __byte_perm<<<1, 1>>>(y.ptr(), x1, x2, s);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   unsigned int expected = (bytes[s3] << 24) | (bytes[s2] << 16) | (bytes[s1] << 8) | bytes[s0];
   REQUIRE(y.ptr()[0] == expected);

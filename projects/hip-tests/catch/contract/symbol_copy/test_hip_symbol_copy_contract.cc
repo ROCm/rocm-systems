@@ -42,7 +42,7 @@ constexpr int kSentinel = 0x1234;
 // only exercised against a provisioned runtime.
 void RequireDevice() {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -53,10 +53,10 @@ void RequireDevice() {
 // copy operation runs against them.
 void TouchAndSyncSymbols() {
   hipLaunchKernelGGL(TouchSymbolCopyScalarKernel, dim3(1), dim3(1), 0, 0);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   hipLaunchKernelGGL(TouchSymbolCopyArrayKernel, dim3(1), dim3(1), 0, 0);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 }
 }  // namespace
 
@@ -120,7 +120,7 @@ HIP_TEST_CASE(Contract_SymbolCopy_HipMemcpyFromSymbol_DefaultDirection_ReadsByte
   REQUIRE(symbol_ptr != nullptr);
 
   const int written = kSentinel;
-  HIP_CHECK(hipMemcpy(symbol_ptr, &written, sizeof(written), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(symbol_ptr, &written, sizeof(written), hipMemcpyHostToDevice))
 
   // Reading through hipMemcpyFromSymbol with the default direction must return
   // the seeded bytes.
@@ -138,7 +138,7 @@ HIP_TEST_CASE(Contract_SymbolCopy_HipMemcpyToSymbolAsync_FromSymbolAsync_RoundTr
   hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // A stream-ordered write followed by a stream-ordered read on the same stream
@@ -151,7 +151,7 @@ HIP_TEST_CASE(Contract_SymbolCopy_HipMemcpyToSymbolAsync_FromSymbolAsync_RoundTr
   HIP_CHECK(hipMemcpyFromSymbolAsync(&read_back, HIP_SYMBOL(g_contract_symbol_copy_scalar),
                                      sizeof(read_back), 0, hipMemcpyDeviceToHost, stream));
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(read_back == kSentinel);
 }

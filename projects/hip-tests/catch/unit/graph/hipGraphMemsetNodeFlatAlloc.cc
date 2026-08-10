@@ -37,7 +37,7 @@ struct FlatPitched {
   FlatPitched(size_t width_bytes_, size_t height_, size_t align = 512)
       : width_bytes(width_bytes_), height(height_) {
     pitch = ((width_bytes + align - 1) / align) * align;
-    HIP_CHECK(hipMalloc(&ptr, pitch * height));
+    HIP_CHECK(hipMalloc(&ptr, pitch * height))
   }
   ~FlatPitched() { static_cast<void>(hipFree(ptr)); }
   FlatPitched(const FlatPitched&) = delete;
@@ -83,26 +83,26 @@ HIP_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_FlatAlloc_2D_Positive) {
   FlatPitched alloc(width_bytes, height);
 
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   // Seed node with placeholder params (1D so AddMemsetNode trivially accepts).
   auto initial = Make2DParams(alloc.ptr, alloc.pitch, 1, 1, 1, 0);
   hipGraphNode_t node = nullptr;
-  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &initial));
+  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &initial))
 
   // Now reshape to a real 2D memset on the same flat allocation.
   auto reshaped = Make2DParams(alloc.ptr, alloc.pitch, width_bytes, height, 1, 0xAB);
-  HIP_CHECK(hipGraphMemsetNodeSetParams(node, &reshaped));
+  HIP_CHECK(hipGraphMemsetNodeSetParams(node, &reshaped))
 
   hipGraphExec_t exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
-  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread))
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
 
   Verify2DMemsetResult(alloc.ptr, alloc.pitch, width_bytes, height, 0xAB);
 
-  HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(exec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -123,16 +123,16 @@ HIP_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_PitchedAlloc_OverExtent_Negative)
   LinearAllocGuard2D<unsigned char> alloc(width, height);  // hipMallocPitch
 
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   auto initial = Make2DParams(alloc.ptr(), alloc.pitch(), width, height, 1, 0);
   hipGraphNode_t node = nullptr;
-  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &initial));
+  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &initial))
 
   auto over = Make2DParams(alloc.ptr(), alloc.pitch(), width * 2, height * 2, 1, 0);
   HIP_CHECK_ERROR(hipGraphMemsetNodeSetParams(node, &over), hipErrorInvalidValue);
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -154,13 +154,13 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_FlatAlloc_2DMemset_Idempotent) {
   FlatPitched alloc(width_bytes, height);
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   auto capture_graph = [&](unsigned char value) {
     hipGraph_t g = nullptr;
-    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
-    HIP_CHECK(hipMemset2DAsync(alloc.ptr, alloc.pitch, value, width_bytes, height, stream));
-    HIP_CHECK(hipStreamEndCapture(stream, &g));
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal))
+    HIP_CHECK(hipMemset2DAsync(alloc.ptr, alloc.pitch, value, width_bytes, height, stream))
+    HIP_CHECK(hipStreamEndCapture(stream, &g))
     return g;
   };
 
@@ -168,21 +168,21 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_FlatAlloc_2DMemset_Idempotent) {
   hipGraph_t gB = capture_graph(0);
 
   hipGraphExec_t exec = nullptr;
-  HIP_CHECK(hipGraphInstantiateWithFlags(&exec, gA, 0));
+  HIP_CHECK(hipGraphInstantiateWithFlags(&exec, gA, 0))
 
   hipGraphNode_t err_node = nullptr;
   hipGraphExecUpdateResult result = hipGraphExecUpdateError;
-  HIP_CHECK(hipGraphExecUpdate(exec, gB, &err_node, &result));
+  HIP_CHECK(hipGraphExecUpdate(exec, gB, &err_node, &result))
   REQUIRE(result == hipGraphExecUpdateSuccess);
 
-  HIP_CHECK(hipGraphLaunch(exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
   Verify2DMemsetResult(alloc.ptr, alloc.pitch, width_bytes, height, 0);
 
-  HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(gB));
-  HIP_CHECK(hipGraphDestroy(gA));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(exec))
+  HIP_CHECK(hipGraphDestroy(gB))
+  HIP_CHECK(hipGraphDestroy(gA))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -202,25 +202,25 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_2DMemset_ShapeChange_Negative) {
   FlatPitched alloc(width_bytes, height);
 
   hipGraph_t gA = nullptr;
-  HIP_CHECK(hipGraphCreate(&gA, 0));
+  HIP_CHECK(hipGraphCreate(&gA, 0))
   auto base = Make2DParams(alloc.ptr, alloc.pitch, width_bytes, height, 1, 0);
   hipGraphNode_t nodeA = nullptr;
-  HIP_CHECK(hipGraphAddMemsetNode(&nodeA, gA, nullptr, 0, &base));
+  HIP_CHECK(hipGraphAddMemsetNode(&nodeA, gA, nullptr, 0, &base))
 
   hipGraphExec_t exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&exec, gA, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&exec, gA, nullptr, nullptr, 0))
 
   auto try_update = [&](const hipMemsetParams& changed) {
     hipGraph_t gB = nullptr;
-    HIP_CHECK(hipGraphCreate(&gB, 0));
+    HIP_CHECK(hipGraphCreate(&gB, 0))
     hipGraphNode_t nodeB = nullptr;
-    HIP_CHECK(hipGraphAddMemsetNode(&nodeB, gB, nullptr, 0, &changed));
+    HIP_CHECK(hipGraphAddMemsetNode(&nodeB, gB, nullptr, 0, &changed))
     hipGraphNode_t err_node = nullptr;
     hipGraphExecUpdateResult result = hipGraphExecUpdateSuccess;
     hipError_t status = hipGraphExecUpdate(exec, gB, &err_node, &result);
     REQUIRE(status == hipErrorGraphExecUpdateFailure);
     REQUIRE(result == hipGraphExecUpdateErrorParametersChanged);
-    HIP_CHECK(hipGraphDestroy(gB));
+    HIP_CHECK(hipGraphDestroy(gB))
   };
 
   SECTION("width changes") {
@@ -237,8 +237,8 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_2DMemset_ShapeChange_Negative) {
     try_update(Make2DParams(alloc.ptr, alloc.pitch, width_bytes, height, 2, 0));
   }
 
-  HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(gA));
+  HIP_CHECK(hipGraphExecDestroy(exec))
+  HIP_CHECK(hipGraphDestroy(gA))
 }
 
 /**
@@ -258,33 +258,33 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_2DMemset_ValueAndDst_Positive) {
   FlatPitched allocB(width_bytes, height);
 
   hipGraph_t gA = nullptr;
-  HIP_CHECK(hipGraphCreate(&gA, 0));
+  HIP_CHECK(hipGraphCreate(&gA, 0))
   auto pA = Make2DParams(allocA.ptr, allocA.pitch, width_bytes, height, 1, 0x11);
   hipGraphNode_t nodeA = nullptr;
-  HIP_CHECK(hipGraphAddMemsetNode(&nodeA, gA, nullptr, 0, &pA));
+  HIP_CHECK(hipGraphAddMemsetNode(&nodeA, gA, nullptr, 0, &pA))
 
   hipGraphExec_t exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&exec, gA, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&exec, gA, nullptr, nullptr, 0))
 
   hipGraph_t gB = nullptr;
-  HIP_CHECK(hipGraphCreate(&gB, 0));
+  HIP_CHECK(hipGraphCreate(&gB, 0))
   // dst -> allocB, value -> 0x77, but shape unchanged.
   auto pB = Make2DParams(allocB.ptr, allocB.pitch, width_bytes, height, 1, 0x77);
   hipGraphNode_t nodeB = nullptr;
-  HIP_CHECK(hipGraphAddMemsetNode(&nodeB, gB, nullptr, 0, &pB));
+  HIP_CHECK(hipGraphAddMemsetNode(&nodeB, gB, nullptr, 0, &pB))
 
   hipGraphNode_t err_node = nullptr;
   hipGraphExecUpdateResult result = hipGraphExecUpdateError;
-  HIP_CHECK(hipGraphExecUpdate(exec, gB, &err_node, &result));
+  HIP_CHECK(hipGraphExecUpdate(exec, gB, &err_node, &result))
   REQUIRE(result == hipGraphExecUpdateSuccess);
 
-  HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
-  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread))
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
   Verify2DMemsetResult(allocB.ptr, allocB.pitch, width_bytes, height, 0x77);
 
-  HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(gB));
-  HIP_CHECK(hipGraphDestroy(gA));
+  HIP_CHECK(hipGraphExecDestroy(exec))
+  HIP_CHECK(hipGraphDestroy(gB))
+  HIP_CHECK(hipGraphDestroy(gA))
 }
 
 /**
@@ -306,17 +306,17 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_FlatAlloc_2DMemset_ChildGraph) {
 
   auto build_outer = [&](unsigned char value, hipGraph_t* outer_out) {
     hipGraph_t inner = nullptr;
-    HIP_CHECK(hipGraphCreate(&inner, 0));
+    HIP_CHECK(hipGraphCreate(&inner, 0))
     auto p = Make2DParams(alloc.ptr, alloc.pitch, width_bytes, height, 1, value);
     hipGraphNode_t inner_node = nullptr;
-    HIP_CHECK(hipGraphAddMemsetNode(&inner_node, inner, nullptr, 0, &p));
+    HIP_CHECK(hipGraphAddMemsetNode(&inner_node, inner, nullptr, 0, &p))
 
     hipGraph_t outer = nullptr;
-    HIP_CHECK(hipGraphCreate(&outer, 0));
+    HIP_CHECK(hipGraphCreate(&outer, 0))
     hipGraphNode_t child = nullptr;
-    HIP_CHECK(hipGraphAddChildGraphNode(&child, outer, nullptr, 0, inner));
+    HIP_CHECK(hipGraphAddChildGraphNode(&child, outer, nullptr, 0, inner))
 
-    HIP_CHECK(hipGraphDestroy(inner));
+    HIP_CHECK(hipGraphDestroy(inner))
     *outer_out = outer;
   };
 
@@ -326,20 +326,20 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_FlatAlloc_2DMemset_ChildGraph) {
   build_outer(0x33, &gB);
 
   hipGraphExec_t exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&exec, gA, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&exec, gA, nullptr, nullptr, 0))
 
   hipGraphNode_t err_node = nullptr;
   hipGraphExecUpdateResult result = hipGraphExecUpdateError;
-  HIP_CHECK(hipGraphExecUpdate(exec, gB, &err_node, &result));
+  HIP_CHECK(hipGraphExecUpdate(exec, gB, &err_node, &result))
   REQUIRE(result == hipGraphExecUpdateSuccess);
 
-  HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
-  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread))
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
   Verify2DMemsetResult(alloc.ptr, alloc.pitch, width_bytes, height, 0x33);
 
-  HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(gB));
-  HIP_CHECK(hipGraphDestroy(gA));
+  HIP_CHECK(hipGraphExecDestroy(exec))
+  HIP_CHECK(hipGraphDestroy(gB))
+  HIP_CHECK(hipGraphDestroy(gA))
 }
 
 /**
@@ -359,19 +359,19 @@ HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_FlatAlloc_2D) {
   FlatPitched alloc(width_bytes, height);
 
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   auto base = Make2DParams(alloc.ptr, alloc.pitch, width_bytes, height, 1, 0);
   hipGraphNode_t node = nullptr;
-  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &base));
+  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &base))
 
   hipGraphExec_t exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0))
 
   SECTION("value-only change accepted") {
     auto only_value = Make2DParams(alloc.ptr, alloc.pitch, width_bytes, height, 1, 0x5A);
-    HIP_CHECK(hipGraphExecMemsetNodeSetParams(exec, node, &only_value));
-    HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipGraphExecMemsetNodeSetParams(exec, node, &only_value))
+    HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread))
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
     Verify2DMemsetResult(alloc.ptr, alloc.pitch, width_bytes, height, 0x5A);
   }
 
@@ -387,8 +387,8 @@ HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_FlatAlloc_2D) {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(exec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 #if HT_AMD
@@ -411,24 +411,24 @@ HIP_TEST_CASE(Unit_hipGraphExecNodeSetParams_Memset_FlatAlloc_2D) {
   FlatPitched alloc(width_bytes, height);
 
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNodeParams initial = {};
   initial.type = hipGraphNodeTypeMemset;
   initial.memset = Make2DParams(alloc.ptr, alloc.pitch, width_bytes, height, 1, 0);
   hipGraphNode_t node = nullptr;
-  HIP_CHECK(hipGraphAddNode(&node, graph, nullptr, 0, &initial));
+  HIP_CHECK(hipGraphAddNode(&node, graph, nullptr, 0, &initial))
 
   hipGraphExec_t exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0))
 
   SECTION("value-only change accepted") {
     hipGraphNodeParams only_value = {};
     only_value.type = hipGraphNodeTypeMemset;
     only_value.memset = Make2DParams(alloc.ptr, alloc.pitch, width_bytes, height, 1, 0x9C);
-    HIP_CHECK(hipGraphExecNodeSetParams(exec, node, &only_value));
-    HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipGraphExecNodeSetParams(exec, node, &only_value))
+    HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread))
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
     Verify2DMemsetResult(alloc.ptr, alloc.pitch, width_bytes, height, 0x9C);
   }
 
@@ -439,8 +439,8 @@ HIP_TEST_CASE(Unit_hipGraphExecNodeSetParams_Memset_FlatAlloc_2D) {
     HIP_CHECK_ERROR(hipGraphExecNodeSetParams(exec, node, &shape_change), hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(exec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 #endif  // HT_AMD
 

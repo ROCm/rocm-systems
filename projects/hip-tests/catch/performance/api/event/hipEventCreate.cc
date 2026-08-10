@@ -22,7 +22,7 @@ class HipEventCreateBenchmark : public Benchmark<HipEventCreateBenchmark> {
 
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipEventCreate(&event)); }
 
-    HIP_CHECK(hipEventDestroy(event));
+    HIP_CHECK(hipEventDestroy(event))
   }
 };
 

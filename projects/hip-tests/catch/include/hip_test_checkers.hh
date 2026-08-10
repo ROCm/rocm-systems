@@ -176,13 +176,13 @@ bool initArraysForHost(T** A_h, T** B_h, T** C_h, size_t N, bool usePinnedHost =
 
   if (usePinnedHost) {
     if (A_h) {
-      HIP_CHECK(hipHostMalloc((void**)A_h, Nbytes));
+      HIP_CHECK(hipHostMalloc((void**)A_h, Nbytes))
     }
     if (B_h) {
-      HIP_CHECK(hipHostMalloc((void**)B_h, Nbytes));
+      HIP_CHECK(hipHostMalloc((void**)B_h, Nbytes))
     }
     if (C_h) {
-      HIP_CHECK(hipHostMalloc((void**)C_h, Nbytes));
+      HIP_CHECK(hipHostMalloc((void**)C_h, Nbytes))
     }
   } else {
     if (A_h) {
@@ -211,13 +211,13 @@ bool initArrays(T** A_d, T** B_d, T** C_d, T** A_h, T** B_h, T** C_h, size_t N,
   size_t Nbytes = N * sizeof(T);
 
   if (A_d) {
-    HIP_CHECK(hipMalloc(A_d, Nbytes));
+    HIP_CHECK(hipMalloc(A_d, Nbytes))
   }
   if (B_d) {
-    HIP_CHECK(hipMalloc(B_d, Nbytes));
+    HIP_CHECK(hipMalloc(B_d, Nbytes))
   }
   if (C_d) {
-    HIP_CHECK(hipMalloc(C_d, Nbytes));
+    HIP_CHECK(hipMalloc(C_d, Nbytes))
   }
 
   return initArraysForHost(A_h, B_h, C_h, N, usePinnedHost);
@@ -253,13 +253,13 @@ void initArraysForHostT(T** A_h, T** B_h, T** C_h, size_t N, bool usePinnedHost 
 
   if (usePinnedHost) {
     if (A_h) {
-      HIP_CHECK_THREAD(hipHostMalloc((void**)A_h, Nbytes));
+      HIP_CHECK_THREAD(hipHostMalloc((void**)A_h, Nbytes))
     }
     if (B_h) {
-      HIP_CHECK_THREAD(hipHostMalloc((void**)B_h, Nbytes));
+      HIP_CHECK_THREAD(hipHostMalloc((void**)B_h, Nbytes))
     }
     if (C_h) {
-      HIP_CHECK_THREAD(hipHostMalloc((void**)C_h, Nbytes));
+      HIP_CHECK_THREAD(hipHostMalloc((void**)C_h, Nbytes))
     }
   } else {
     if (A_h) {
@@ -289,13 +289,13 @@ void initArraysT(T** A_d, T** B_d, T** C_d, T** A_h, T** B_h, T** C_h, size_t N,
   size_t Nbytes = N * sizeof(T);
 
   if (A_d) {
-    HIP_CHECK_THREAD(hipMalloc(A_d, Nbytes));
+    HIP_CHECK_THREAD(hipMalloc(A_d, Nbytes))
   }
   if (B_d) {
-    HIP_CHECK_THREAD(hipMalloc(B_d, Nbytes));
+    HIP_CHECK_THREAD(hipMalloc(B_d, Nbytes))
   }
   if (C_d) {
-    HIP_CHECK_THREAD(hipMalloc(C_d, Nbytes));
+    HIP_CHECK_THREAD(hipMalloc(C_d, Nbytes))
   }
 
   initArraysForHostT(A_h, B_h, C_h, N, usePinnedHost);
@@ -306,13 +306,13 @@ void initArraysT(T** A_d, T** B_d, T** C_d, T** A_h, T** B_h, T** C_h, size_t N,
 template <typename T> void freeArraysForHostT(T* A_h, T* B_h, T* C_h, bool usePinnedHost) {
   if (usePinnedHost) {
     if (A_h) {
-      HIP_CHECK_THREAD(hipHostFree(A_h));
+      HIP_CHECK_THREAD(hipHostFree(A_h))
     }
     if (B_h) {
-      HIP_CHECK_THREAD(hipHostFree(B_h));
+      HIP_CHECK_THREAD(hipHostFree(B_h))
     }
     if (C_h) {
-      HIP_CHECK_THREAD(hipHostFree(C_h));
+      HIP_CHECK_THREAD(hipHostFree(C_h))
     }
   } else {
     if (A_h) {
@@ -330,13 +330,13 @@ template <typename T> void freeArraysForHostT(T* A_h, T* B_h, T* C_h, bool usePi
 template <typename T> bool freeArraysForHost(T* A_h, T* B_h, T* C_h, bool usePinnedHost) {
   if (usePinnedHost) {
     if (A_h) {
-      HIP_CHECK(hipHostFree(A_h));
+      HIP_CHECK(hipHostFree(A_h))
     }
     if (B_h) {
-      HIP_CHECK(hipHostFree(B_h));
+      HIP_CHECK(hipHostFree(B_h))
     }
     if (C_h) {
-      HIP_CHECK(hipHostFree(C_h));
+      HIP_CHECK(hipHostFree(C_h))
     }
   } else {
     if (A_h) {
@@ -355,13 +355,13 @@ template <typename T> bool freeArraysForHost(T* A_h, T* B_h, T* C_h, bool usePin
 template <typename T>
 void freeArraysT(T* A_d, T* B_d, T* C_d, T* A_h, T* B_h, T* C_h, bool usePinnedHost) {
   if (A_d) {
-    HIP_CHECK_THREAD(hipFree(A_d));
+    HIP_CHECK_THREAD(hipFree(A_d))
   }
   if (B_d) {
-    HIP_CHECK_THREAD(hipFree(B_d));
+    HIP_CHECK_THREAD(hipFree(B_d))
   }
   if (C_d) {
-    HIP_CHECK_THREAD(hipFree(C_d));
+    HIP_CHECK_THREAD(hipFree(C_d))
   }
 
   freeArraysForHostT(A_h, B_h, C_h, usePinnedHost);
@@ -370,13 +370,13 @@ void freeArraysT(T* A_d, T* B_d, T* C_d, T* A_h, T* B_h, T* C_h, bool usePinnedH
 template <typename T>
 bool freeArrays(T* A_d, T* B_d, T* C_d, T* A_h, T* B_h, T* C_h, bool usePinnedHost) {
   if (A_d) {
-    HIP_CHECK(hipFree(A_d));
+    HIP_CHECK(hipFree(A_d))
   }
   if (B_d) {
-    HIP_CHECK(hipFree(B_d));
+    HIP_CHECK(hipFree(B_d))
   }
   if (C_d) {
-    HIP_CHECK(hipFree(C_d));
+    HIP_CHECK(hipFree(C_d))
   }
 
   return freeArraysForHost(A_h, B_h, C_h, usePinnedHost);

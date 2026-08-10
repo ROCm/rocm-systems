@@ -54,26 +54,26 @@ HIP_TEST_CASE(Unit_hipEventIpc) {
   hipEvent_t start, stop;
 
   // NULL stream check:
-  HIP_CHECK(hipEventCreateWithFlags(&start, hipEventDisableTiming | hipEventInterprocess));
-  HIP_CHECK(hipEventCreateWithFlags(&stop, hipEventDisableTiming | hipEventInterprocess));
+  HIP_CHECK(hipEventCreateWithFlags(&start, hipEventDisableTiming | hipEventInterprocess))
+  HIP_CHECK(hipEventCreateWithFlags(&stop, hipEventDisableTiming | hipEventInterprocess))
 
-  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
 
 
   for (int i = 0; i < iterations; i++) {
     //--- START TIMED REGION
     long long hostStart = HipTest::get_time();
     // Record the start event
-    HIP_CHECK(hipEventRecord(start, NULL));
+    HIP_CHECK(hipEventRecord(start, NULL))
 
     hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
                        static_cast<const float*>(A_d), static_cast<const float*>(B_d), C_d, N);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
 
-    HIP_CHECK(hipEventRecord(stop, NULL));
-    HIP_CHECK(hipEventSynchronize(stop));
-    HIP_CHECK(hipEventQuery(stop));
+    HIP_CHECK(hipEventRecord(stop, NULL))
+    HIP_CHECK(hipEventSynchronize(stop))
+    HIP_CHECK(hipEventQuery(stop))
     long long hostStop = HipTest::get_time();
     //--- STOP TIMED REGION
 
@@ -89,24 +89,24 @@ HIP_TEST_CASE(Unit_hipEventIpc) {
   }
 
   hipIpcEventHandle_t ipc_handle;
-  HIP_CHECK(hipIpcGetEventHandle(&ipc_handle, start));
+  HIP_CHECK(hipIpcGetEventHandle(&ipc_handle, start))
 
   hipEvent_t ipc_event;
   hipError_t err = hipIpcOpenEventHandle(&ipc_event, ipc_handle);
 
 #if HT_WIN
   // always different process Id on Windows
-  HIP_CHECK(err);
+  HIP_CHECK(err)
 #else
   // hipIpcOpenEventHandle() should be called in a different process, hence it should fail here
   REQUIRE(err == hipErrorInvalidContext);
 #endif
-  HIP_CHECK(hipEventDestroy(start));
-  HIP_CHECK(hipEventDestroy(stop));
+  HIP_CHECK(hipEventDestroy(start))
+  HIP_CHECK(hipEventDestroy(stop))
 #if HT_WIN
-  HIP_CHECK(hipEventDestroy(ipc_event));
+  HIP_CHECK(hipEventDestroy(ipc_event))
 #endif
-  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
 
   HipTest::checkVectorADD(A_h, B_h, C_h, N, true);
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
@@ -131,7 +131,7 @@ HIP_TEST_CASE(Unit_hipEventIpc) {
  */
 HIP_TEST_CASE(Unit_hipEventIpc_DestroyNonBlocking) {
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
   if (!props.ipcEventSupported) {
     HIP_SKIP_TEST("Device does not support IPC events");
   }
@@ -143,13 +143,13 @@ HIP_TEST_CASE(Unit_hipEventIpc_DestroyNonBlocking) {
   // which mirrors the runtime backend selection in hipEventCreateWithFlags().
   {
     hipEvent_t probe;
-    HIP_CHECK(hipEventCreateWithFlags(&probe, hipEventInterprocess | hipEventDisableTiming));
+    HIP_CHECK(hipEventCreateWithFlags(&probe, hipEventInterprocess | hipEventDisableTiming))
     hipIpcEventHandle_t handle{};
-    HIP_CHECK(hipIpcGetEventHandle(&handle, probe));
+    HIP_CHECK(hipIpcGetEventHandle(&handle, probe))
     uint32_t handleType = 0;
     static_assert(sizeof(handleType) <= sizeof(handle), "IPC handle smaller than its type word");
     std::memcpy(&handleType, &handle, sizeof(handleType));
-    HIP_CHECK(hipEventDestroy(probe));
+    HIP_CHECK(hipEventDestroy(probe))
     constexpr uint32_t kEmulatedIpcEvent = 0;
     if (handleType == kEmulatedIpcEvent) {
       HIP_SKIP_TEST("Device uses emulated IPC events; destroy is blocking by design");
@@ -157,24 +157,24 @@ HIP_TEST_CASE(Unit_hipEventIpc_DestroyNonBlocking) {
   }
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   hipEvent_t event;
-  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventInterprocess | hipEventDisableTiming));
+  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventInterprocess | hipEventDisableTiming))
 
   // Keep the GPU busy so the event's recorded work is still in flight at destroy time. Use a
   // long delay so a non-blocking destroy (microseconds) sits far below the threshold and a
   // blocking destroy (~the full kernel) sits far above it, well clear of any timing jitter.
   const std::chrono::milliseconds delay(isQuickLevel() ? 2000 : 5000);
   LaunchDelayKernel(delay, stream);
-  HIP_CHECK(hipEventRecord(event, stream));
+  HIP_CHECK(hipEventRecord(event, stream))
 
   // The event completes only behind the long delay kernel, so it must read as pending.
   HIP_CHECK_ERROR(hipEventQuery(event), hipErrorNotReady);
 
   // The call under test: destroy must return immediately, not block for the kernel.
   const auto t0 = std::chrono::steady_clock::now();
-  HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipEventDestroy(event))
   const auto t1 = std::chrono::steady_clock::now();
   const auto destroy_ms =
       std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
@@ -185,8 +185,8 @@ HIP_TEST_CASE(Unit_hipEventIpc_DestroyNonBlocking) {
   REQUIRE(destroy_ms < delay.count() / 2);
 
   // Drain the per-device deferred IPC-signal cleanup queue now that the work can complete.
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**

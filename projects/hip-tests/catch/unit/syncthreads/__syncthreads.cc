@@ -35,7 +35,7 @@ HIP_TEST_CASE(Unit___syncthreads_Positive_Basic) {
 
   HipTest::launchKernel(SyncthreadsKernel<SyncthreadsKind::kDefault>, kGridSize, kBlockSize,
                         sizeof(int) * kBlockSize, nullptr, out_alloc.ptr());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int i = 0; i < kGridSize; ++i) {
     REQUIRE(out_alloc.host_ptr()[i] == kBlockSize * (kBlockSize + 1) / 2);

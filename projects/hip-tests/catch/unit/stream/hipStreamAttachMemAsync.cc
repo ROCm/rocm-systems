@@ -25,7 +25,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Negative) {
   if (streamType == StreamAttachTestType::StreamPerThread) {
     stream = hipStreamPerThread;
   } else if (streamType == StreamAttachTestType::CreatedStream) {
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     REQUIRE(stream != nullptr);
   }
 
@@ -56,7 +56,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Negative) {
   }
 
   if (streamType == StreamAttachTestType::CreatedStream) {
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 
@@ -80,24 +80,24 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_UseCase) {
                StreamAttachTestType::CreatedStream);
 
   if (streamType == StreamAttachTestType::CreatedStream) {
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     REQUIRE(stream != nullptr);
   }
 
   SECTION("Size zero is valid") {
     int* d_memory{nullptr};
-    HIP_CHECK(hipMallocManaged(&d_memory, sizeof(int) * size, hipMemAttachHost));
+    HIP_CHECK(hipMallocManaged(&d_memory, sizeof(int) * size, hipMemAttachHost))
     HIP_CHECK(
         hipStreamAttachMemAsync(stream, reinterpret_cast<hipDeviceptr_t*>(d_memory), 0, hipMemAttachHost));
     HIP_CHECK(hipStreamSynchronize(stream));  // Wait for command to complete
-    HIP_CHECK(hipFree(d_memory));
+    HIP_CHECK(hipFree(d_memory))
   }
 
   SECTION("Access from device and host") {
     int* d_memory{nullptr};
 
-    HIP_CHECK(hipMallocManaged(&d_memory, sizeof(int) * size, hipMemAttachHost));
-    HIP_CHECK(hipMemset(d_memory, 0, sizeof(int) * size));
+    HIP_CHECK(hipMallocManaged(&d_memory, sizeof(int) * size, hipMemAttachHost))
+    HIP_CHECK(hipMemset(d_memory, 0, sizeof(int) * size))
     HIP_CHECK(
         hipStreamAttachMemAsync(stream, reinterpret_cast<hipDeviceptr_t*>(d_memory), 0, hipMemAttachHost));
     HIP_CHECK(hipStreamSynchronize(stream));  // Wait for the command to complete
@@ -108,13 +108,13 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_UseCase) {
     auto ptr = std::make_unique<int[]>(size);
     std::copy(d_memory, d_memory + size, ptr.get());
 
-    HIP_CHECK(hipFree(d_memory));
+    HIP_CHECK(hipFree(d_memory))
 
     REQUIRE(std::all_of(ptr.get(), ptr.get() + size, [](int n) { return n == size; }));
   }
 
   SECTION("Access ManagedMemory") {
-    HIP_CHECK(hipMemset(m_memory, 0, sizeof(int) * size));
+    HIP_CHECK(hipMemset(m_memory, 0, sizeof(int) * size))
     HIP_CHECK(
         hipStreamAttachMemAsync(stream, reinterpret_cast<hipDeviceptr_t*>(m_memory), 0, hipMemAttachHost));
     HIP_CHECK(hipStreamSynchronize(stream));  // Wait for the command to complete
@@ -129,6 +129,6 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_UseCase) {
   }
 
   if (streamType == StreamAttachTestType::CreatedStream) {
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }

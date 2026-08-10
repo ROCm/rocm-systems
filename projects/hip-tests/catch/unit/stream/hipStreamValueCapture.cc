@@ -9,9 +9,9 @@
 
 static bool streamWaitValueSupported() {
   int device_num = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_num));
+  HIP_CHECK(hipGetDeviceCount(&device_num))
   for (int device_id = 0; device_id < device_num; ++device_id) {
-    HIP_CHECK(hipSetDevice(device_id));
+    HIP_CHECK(hipSetDevice(device_id))
     int waitValueSupport = 0;
     auto getAttributeError = hipDeviceGetAttribute(
         &waitValueSupport, hipDeviceAttributeCanUseStreamWaitValue, device_id);
@@ -54,38 +54,38 @@ HIP_TEST_CASE(Unit_hipStreamWaitWriteValue32_Capture) {
   HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtr), sizeof(uint64_t),
                                   hipMallocSignalMemory));
   *reinterpret_cast<uint64_t*>(devPtr) = 0;
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   hipStream_t captureStream;
-  HIP_CHECK(hipStreamCreate(&captureStream));
+  HIP_CHECK(hipStreamCreate(&captureStream))
 
   // Capture: write 0x42, then wait for 0x42
-  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeGlobal))
   HIP_CHECK(hipStreamWriteValue32(captureStream, reinterpret_cast<void*>(devPtr), 0x42,
                                   hipStreamWriteValueDefault));
   HIP_CHECK(hipStreamWaitValue32(captureStream, reinterpret_cast<void*>(devPtr), 0x42,
                                  hipStreamWaitValueEq, 0xFFFFFFFF));
   hipGraph_t graph;
-  HIP_CHECK(hipStreamEndCapture(captureStream, &graph));
+  HIP_CHECK(hipStreamEndCapture(captureStream, &graph))
 
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   hipStream_t launchStream;
-  HIP_CHECK(hipStreamCreate(&launchStream));
-  HIP_CHECK(hipGraphLaunch(graphExec, launchStream));
-  HIP_CHECK(hipStreamSynchronize(launchStream));
+  HIP_CHECK(hipStreamCreate(&launchStream))
+  HIP_CHECK(hipGraphLaunch(graphExec, launchStream))
+  HIP_CHECK(hipStreamSynchronize(launchStream))
 
   uint32_t result = 0;
   HIP_CHECK(hipMemcpy(&result, reinterpret_cast<void*>(devPtr), sizeof(uint32_t),
                       hipMemcpyDeviceToHost));
   REQUIRE(result == 0x42);
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(launchStream));
-  HIP_CHECK(hipStreamDestroy(captureStream));
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtr)));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(launchStream))
+  HIP_CHECK(hipStreamDestroy(captureStream))
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtr)))
 }
 
 /**
@@ -110,38 +110,38 @@ HIP_TEST_CASE(Unit_hipStreamWaitWriteValue64_Capture) {
   HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtr), sizeof(uint64_t),
                                   hipMallocSignalMemory));
   *reinterpret_cast<uint64_t*>(devPtr) = 0;
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   hipStream_t captureStream;
-  HIP_CHECK(hipStreamCreate(&captureStream));
+  HIP_CHECK(hipStreamCreate(&captureStream))
 
-  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeGlobal))
   HIP_CHECK(hipStreamWriteValue64(captureStream, reinterpret_cast<void*>(devPtr),
                                   0xCAFEBABECAFEBABEULL, hipStreamWriteValueDefault));
   HIP_CHECK(hipStreamWaitValue64(captureStream, reinterpret_cast<void*>(devPtr),
                                  0xCAFEBABECAFEBABEULL, hipStreamWaitValueEq,
                                  0xFFFFFFFFFFFFFFFFULL));
   hipGraph_t graph;
-  HIP_CHECK(hipStreamEndCapture(captureStream, &graph));
+  HIP_CHECK(hipStreamEndCapture(captureStream, &graph))
 
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   hipStream_t launchStream;
-  HIP_CHECK(hipStreamCreate(&launchStream));
-  HIP_CHECK(hipGraphLaunch(graphExec, launchStream));
-  HIP_CHECK(hipStreamSynchronize(launchStream));
+  HIP_CHECK(hipStreamCreate(&launchStream))
+  HIP_CHECK(hipGraphLaunch(graphExec, launchStream))
+  HIP_CHECK(hipStreamSynchronize(launchStream))
 
   uint64_t result = 0;
   HIP_CHECK(hipMemcpy(&result, reinterpret_cast<void*>(devPtr), sizeof(uint64_t),
                       hipMemcpyDeviceToHost));
   REQUIRE(result == 0xCAFEBABECAFEBABEULL);
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(launchStream));
-  HIP_CHECK(hipStreamDestroy(captureStream));
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtr)));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(launchStream))
+  HIP_CHECK(hipStreamDestroy(captureStream))
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtr)))
 }
 
 /**
@@ -164,14 +164,14 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_Capture) {
 
   hipCtx_t ctx;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  HIP_CHECK(hipCtxCreate(&ctx, 0, device));
+  HIP_CHECK(hipDeviceGet(&device, 0))
+  HIP_CHECK(hipCtxCreate(&ctx, 0, device))
 
   hipDeviceptr_t devPtr = 0;
   HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtr), sizeof(uint64_t),
                                   hipMallocSignalMemory));
   *reinterpret_cast<uint64_t*>(devPtr) = 0;
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Batch: WriteValue32(0x1234) then WaitValue32(== 0x1234)
   hipStreamBatchMemOpParams params[2] = {};
@@ -186,33 +186,33 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_Capture) {
   params[1].waitValue.flags   = hipStreamWaitValueEq;
 
   hipStream_t captureStream;
-  HIP_CHECK(hipStreamCreate(&captureStream));
+  HIP_CHECK(hipStreamCreate(&captureStream))
 
-  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipStreamBatchMemOp(captureStream, 2, params, 0));
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipStreamBatchMemOp(captureStream, 2, params, 0))
   hipGraph_t graph;
-  HIP_CHECK(hipStreamEndCapture(captureStream, &graph));
+  HIP_CHECK(hipStreamEndCapture(captureStream, &graph))
 
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   hipStream_t launchStream;
-  HIP_CHECK(hipStreamCreate(&launchStream));
-  HIP_CHECK(hipGraphLaunch(graphExec, launchStream));
-  HIP_CHECK(hipStreamSynchronize(launchStream));
+  HIP_CHECK(hipStreamCreate(&launchStream))
+  HIP_CHECK(hipGraphLaunch(graphExec, launchStream))
+  HIP_CHECK(hipStreamSynchronize(launchStream))
 
   uint32_t result = 0;
   HIP_CHECK(hipMemcpy(&result, reinterpret_cast<void*>(devPtr), sizeof(uint32_t),
                       hipMemcpyDeviceToHost));
   REQUIRE(result == 0x1234);
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(launchStream));
-  HIP_CHECK(hipStreamDestroy(captureStream));
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtr)));
-  HIP_CHECK(hipCtxPopCurrent(&ctx));
-  HIP_CHECK(hipCtxDestroy(ctx));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(launchStream))
+  HIP_CHECK(hipStreamDestroy(captureStream))
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtr)))
+  HIP_CHECK(hipCtxPopCurrent(&ctx))
+  HIP_CHECK(hipCtxDestroy(ctx))
 }
 
 /**

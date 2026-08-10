@@ -29,13 +29,13 @@ HIP_TEST_CASE(Unit_hipGetTextureAlignmentOffset_Positive) {
   size_t* tex_buf;
   hipChannelFormatDesc chanDesc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
 
-  HIP_CHECK(hipMalloc(&tex_buf, 32));
-  HIP_CHECK(hipBindTexture(&offset, tex, reinterpret_cast<void*>(tex_buf), chanDesc, 32));
-  HIP_CHECK(hipGetTextureAlignmentOffset(&offset, &tex));
+  HIP_CHECK(hipMalloc(&tex_buf, 32))
+  HIP_CHECK(hipBindTexture(&offset, tex, reinterpret_cast<void*>(tex_buf), chanDesc, 32))
+  HIP_CHECK(hipGetTextureAlignmentOffset(&offset, &tex))
   REQUIRE(offset == 0);
 
-  HIP_CHECK(hipFree(tex_buf));
-  HIP_CHECK(hipUnbindTexture(tex));
+  HIP_CHECK(hipFree(tex_buf))
+  HIP_CHECK(hipUnbindTexture(tex))
 }
 
 /**
@@ -56,8 +56,8 @@ HIP_TEST_CASE(Unit_hipGetTextureAlignmentOffset_Negative) {
   size_t* tex_buf;
   hipChannelFormatDesc chanDesc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
 
-  HIP_CHECK(hipMalloc(&tex_buf, 32));
-  HIP_CHECK(hipBindTexture(&offset, tex, reinterpret_cast<void*>(tex_buf), chanDesc, 32));
+  HIP_CHECK(hipMalloc(&tex_buf, 32))
+  HIP_CHECK(hipBindTexture(&offset, tex, reinterpret_cast<void*>(tex_buf), chanDesc, 32))
 
   SECTION("offset is nullptr") {
     HIP_CHECK_ERROR(hipGetTextureAlignmentOffset(nullptr, &tex), hipErrorInvalidValue);
@@ -67,8 +67,8 @@ HIP_TEST_CASE(Unit_hipGetTextureAlignmentOffset_Negative) {
     HIP_CHECK_ERROR(hipGetTextureAlignmentOffset(&offset, nullptr), hipErrorInvalidTexture);
   }
 
-  HIP_CHECK(hipFree(tex_buf));
-  HIP_CHECK(hipUnbindTexture(tex));
+  HIP_CHECK(hipFree(tex_buf))
+  HIP_CHECK(hipUnbindTexture(tex))
 }
 
 #endif

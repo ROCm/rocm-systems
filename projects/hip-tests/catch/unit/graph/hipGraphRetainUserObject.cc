@@ -18,17 +18,17 @@
       and release it by calling hipGraphReleaseUserObject. */
 static void hipGraphRetainUserObject_Functional_1(void* object, void destroyObj(void*)) {
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipUserObject_t hObject;
 
-  HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyObj, 1, hipUserObjectNoDestructorSync));
+  HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyObj, 1, hipUserObjectNoDestructorSync))
   REQUIRE(hObject != nullptr);
-  HIP_CHECK(hipGraphRetainUserObject(graph, hObject, 1, hipGraphUserObjectMove));
+  HIP_CHECK(hipGraphRetainUserObject(graph, hObject, 1, hipGraphUserObjectMove))
 
-  HIP_CHECK(hipGraphReleaseUserObject(graph, hObject));
-  HIP_CHECK(hipUserObjectRelease(hObject));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphReleaseUserObject(graph, hObject))
+  HIP_CHECK(hipUserObjectRelease(hObject))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Functional_1) {
@@ -71,11 +71,11 @@ HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Functional_2) {
   hipGraphExec_t graphExec;
   size_t NElem{N};
 
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   dependencies.push_back(memcpyNode);
@@ -106,24 +106,24 @@ HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Functional_2) {
   HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyFloatObj, refCount,
                                 hipUserObjectNoDestructorSync));
   REQUIRE(hObject != nullptr);
-  HIP_CHECK(hipUserObjectRetain(hObject, refCountRetain));
-  HIP_CHECK(hipGraphRetainUserObject(graph, hObject, refCountRetain, hipGraphUserObjectMove));
+  HIP_CHECK(hipUserObjectRetain(hObject, refCountRetain))
+  HIP_CHECK(hipGraphRetainUserObject(graph, hObject, refCountRetain, hipGraphUserObjectMove))
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Verify result
   HipTest::checkVectorADD<int>(A_h, B_h, C_h, N);
 
-  HIP_CHECK(hipUserObjectRelease(hObject, refCount + refCountRetain));
-  HIP_CHECK(hipGraphReleaseUserObject(graph, hObject, refCountRetain));
+  HIP_CHECK(hipUserObjectRelease(hObject, refCount + refCountRetain))
+  HIP_CHECK(hipGraphReleaseUserObject(graph, hObject, refCountRetain))
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 }
 
 /**
@@ -137,7 +137,7 @@ HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Functional_2) {
  */
 HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Negative) {
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   float* object = new float();
   REQUIRE(object != nullptr);
@@ -160,15 +160,15 @@ HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Negative) {
                     hipErrorInvalidValue);
   }
   SECTION("Pass initialRefcount as INT_MAX") {
-    HIP_CHECK(hipGraphRetainUserObject(graph, hObject, INT_MAX, hipGraphUserObjectMove));
+    HIP_CHECK(hipGraphRetainUserObject(graph, hObject, INT_MAX, hipGraphUserObjectMove))
   }
   SECTION("Pass flag as 0") { HIP_CHECK(hipGraphRetainUserObject(graph, hObject, 1, 0)); }
   SECTION("Pass flag as INT_MAX") {
     HIP_CHECK_ERROR(hipGraphRetainUserObject(graph, hObject, 1, INT_MAX), hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipUserObjectRelease(hObject, 1));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipUserObjectRelease(hObject, 1))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 // This test releases the user object with a ref count more than the count
@@ -177,7 +177,7 @@ HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Negative) {
 // done to match CUDA behavior, but this can cause undefined behavior.
 HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Negative_Basic) {
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   float* object = new float();
   REQUIRE(object != nullptr);
@@ -188,22 +188,22 @@ HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Negative_Basic) {
   REQUIRE(hObject != nullptr);
 
   // Retain graph object with reference count 2
-  HIP_CHECK(hipGraphRetainUserObject(graph, hObject, 2, hipGraphUserObjectMove));
+  HIP_CHECK(hipGraphRetainUserObject(graph, hObject, 2, hipGraphUserObjectMove))
 
   // Release graph object with reference count more than 2
-  HIP_CHECK(hipGraphReleaseUserObject(graph, hObject, 4));
+  HIP_CHECK(hipGraphReleaseUserObject(graph, hObject, 4))
 
   // Again Retain graph object with reference count 8
-  HIP_CHECK(hipGraphRetainUserObject(graph, hObject, 8, hipGraphUserObjectMove));
+  HIP_CHECK(hipGraphRetainUserObject(graph, hObject, 8, hipGraphUserObjectMove))
 
   // Release graph object with reference count 8
-  HIP_CHECK(hipGraphReleaseUserObject(graph, hObject, 8));
+  HIP_CHECK(hipGraphReleaseUserObject(graph, hObject, 8))
 
   // Release user object with reference count 2
-  HIP_CHECK(hipUserObjectRelease(hObject, 2));
+  HIP_CHECK(hipUserObjectRelease(hObject, 2))
 
   // Finally, release user object with reference count 1
   // This will avoid memory leaks
-  HIP_CHECK(hipUserObjectRelease(hObject, 1));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipUserObjectRelease(hObject, 1))
+  HIP_CHECK(hipGraphDestroy(graph))
 }

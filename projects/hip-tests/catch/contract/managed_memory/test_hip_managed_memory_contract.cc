@@ -25,13 +25,13 @@ bool ManagedMemorySupported() {
   void* ptr = nullptr;
   const hipError_t status = hipMallocManaged(&ptr, sizeof(int), hipMemAttachGlobal);
   if (status == hipSuccess) {
-    HIP_CHECK(hipFree(ptr));
+    HIP_CHECK(hipFree(ptr))
     return true;
   }
   if (status == hipErrorNotSupported || status == hipErrorOutOfMemory) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return false;
 }
 
@@ -48,7 +48,7 @@ HIP_TEST_CASE(Contract_ManagedMemory_HipMallocManaged_Default_ReturnsUsablePoint
   hip::contract::ContractCleanup cleanup;
   int* data = nullptr;
 
-  HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal))
   cleanup.Add([data] { (void)hipFree(data); });
 
   REQUIRE(data != nullptr);
@@ -61,20 +61,20 @@ HIP_TEST_CASE(Contract_ManagedMemory_HipMallocManaged_HostWriteDeviceRead_RoundT
   int* data = nullptr;
   int* observed = nullptr;
 
-  HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal))
   cleanup.Add([data] { (void)hipFree(data); });
-  HIP_CHECK(hipMalloc(&observed, sizeof(*observed)));
+  HIP_CHECK(hipMalloc(&observed, sizeof(*observed)))
   cleanup.Add([observed] { (void)hipFree(observed); });
   *data = kHostValue;
-  HIP_CHECK(hipMemset(observed, 0, sizeof(*observed)));
+  HIP_CHECK(hipMemset(observed, 0, sizeof(*observed)))
 
   hipLaunchKernelGGL(ReadThenWriteKernel, dim3(1), dim3(1), 0, 0, data, kHostValue,
                      kDeviceValue, observed);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   int host_observed = 0;
-  HIP_CHECK(hipMemcpy(&host_observed, observed, sizeof(host_observed), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&host_observed, observed, sizeof(host_observed), hipMemcpyDeviceToHost))
   REQUIRE(host_observed == 1);
 }
 
@@ -85,17 +85,17 @@ HIP_TEST_CASE(Contract_ManagedMemory_HipMallocManaged_DeviceWriteHostRead_RoundT
   int* data = nullptr;
   int* observed = nullptr;
 
-  HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal))
   cleanup.Add([data] { (void)hipFree(data); });
-  HIP_CHECK(hipMalloc(&observed, sizeof(*observed)));
+  HIP_CHECK(hipMalloc(&observed, sizeof(*observed)))
   cleanup.Add([observed] { (void)hipFree(observed); });
   *data = kHostValue;
-  HIP_CHECK(hipMemset(observed, 0, sizeof(*observed)));
+  HIP_CHECK(hipMemset(observed, 0, sizeof(*observed)))
 
   hipLaunchKernelGGL(ReadThenWriteKernel, dim3(1), dim3(1), 0, 0, data, kHostValue,
                      kDeviceValue, observed);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(*data == kDeviceValue);
 }
@@ -105,8 +105,8 @@ HIP_TEST_CASE(Contract_ManagedMemory_HipFree_ManagedPointer_Succeeds) {
   SkipIfManagedMemoryUnsupported();
   int* data = nullptr;
 
-  HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal));
-  HIP_CHECK(hipFree(data));
+  HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal))
+  HIP_CHECK(hipFree(data))
 }
 
 // @asserts: hipMemPrefetchAsync - prefetching a managed range to the current device succeeds where concurrent managed access is supported
@@ -118,17 +118,17 @@ HIP_TEST_CASE(Contract_ManagedMemory_HipMemPrefetchAsync_Default_SucceedsWhenSup
   int concurrent_managed_access = 0;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   HIP_CHECK(hipDeviceGetAttribute(&concurrent_managed_access,
                                   hipDeviceAttributeConcurrentManagedAccess, device));
   if (concurrent_managed_access == 0) {
     HIP_SKIP_TEST("hipMemPrefetchAsync requires concurrent managed access support.");
   }
 
-  HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&data, sizeof(*data), hipMemAttachGlobal))
   cleanup.Add([data] { (void)hipFree(data); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipMemPrefetchAsync(data, sizeof(*data), device, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemPrefetchAsync(data, sizeof(*data), device, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 }

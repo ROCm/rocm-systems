@@ -31,7 +31,7 @@ HIP_TEST_CASE(Unit_hipGetMipmappedArrayLevel_Negative_Parameters) {
   hipExtent extent = make_hipExtent(4, 4, 6);
   unsigned int levels = 1 + std::log2(extent.depth);
 
-  HIP_CHECK(hipMallocMipmappedArray(&array, &desc, extent, levels, 0));
+  HIP_CHECK(hipMallocMipmappedArray(&array, &desc, extent, levels, 0))
 
   hipArray_t levelArray;
 
@@ -47,7 +47,7 @@ HIP_TEST_CASE(Unit_hipGetMipmappedArrayLevel_Negative_Parameters) {
     HIP_CHECK_ERROR(hipGetMipmappedArrayLevel(&levelArray, array, levels), hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipFreeMipmappedArray(array));
+  HIP_CHECK(hipFreeMipmappedArray(array))
 }
 
 /**

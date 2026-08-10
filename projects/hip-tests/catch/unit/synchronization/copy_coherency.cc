@@ -24,12 +24,12 @@ class MemcpyFunction {
 
 
 void MemcpyFunction::load(const char* fileName, const char* functionName) {
-  HIP_CHECK(hipModuleLoad(&_module, fileName));
-  HIP_CHECK(hipModuleGetFunction(&_function, _module, functionName));
+  HIP_CHECK(hipModuleLoad(&_module, fileName))
+  HIP_CHECK(hipModuleGetFunction(&_function, _module, functionName))
 }
 
 void MemcpyFunction::unload() {
-  HIP_CHECK(hipModuleUnload(_module));
+  HIP_CHECK(hipModuleUnload(_module))
 }
 
 void MemcpyFunction::launch(int* dst, const int* src, size_t numElements,
@@ -124,7 +124,7 @@ const char* SyncTypeStr(SyncType s) {
 void runCmd(CmdType cmd, int* dst, const int* src, hipStream_t s, size_t numElements) {
   switch (cmd) {
     case COPY:
-      HIP_CHECK(hipMemcpyAsync(dst, src, numElements * sizeof(int), hipMemcpyDeviceToDevice, s));
+      HIP_CHECK(hipMemcpyAsync(dst, src, numElements * sizeof(int), hipMemcpyDeviceToDevice, s))
       break;
     case KERNEL: {
       unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, numElements);
@@ -151,7 +151,7 @@ void resetInputs(int* Ad, int* Bd, int* Ch, size_t numElements, int expected) {
   hipLaunchKernelGGL(memsetIntKernel, dim3(blocks), dim3(threadsPerBlock), 0, hipStream_t(0), Bd,
                      0xF000BA55, numElements);
   memset(Ch, 13, numElements * sizeof(int));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 }
 
 // Intended to test proper synchronization and cache flushing
@@ -166,7 +166,7 @@ void runTestImpl(CmdType cmdAType, SyncType syncType, CmdType cmdBType, hipStrea
                  hipStream_t stream2, int numElements, int* Ad, int* Bd, int* Cd, int* Ch,
                  int expected) {
   hipEvent_t e;
-  HIP_CHECK(hipEventCreateWithFlags(&e, 0));
+  HIP_CHECK(hipEventCreateWithFlags(&e, 0))
 
   resetInputs(Ad, Bd, Ch, numElements, expected);
 
@@ -187,32 +187,32 @@ void runTestImpl(CmdType cmdAType, SyncType syncType, CmdType cmdBType, hipStrea
   switch (syncType) {
     case EVENT_QUERY: {
       hipError_t st = hipErrorNotReady;
-      HIP_CHECK(hipEventRecord(e, stream1));
+      HIP_CHECK(hipEventRecord(e, stream1))
       do {
         st = hipEventQuery(e);
       } while (st == hipErrorNotReady);
-      HIP_CHECK(st);
+      HIP_CHECK(st)
     } break;
     case EVENT_SYNC:
-      HIP_CHECK(hipEventRecord(e, stream1));
-      HIP_CHECK(hipEventSynchronize(e));
+      HIP_CHECK(hipEventRecord(e, stream1))
+      HIP_CHECK(hipEventSynchronize(e))
       break;
     case STREAM_WAIT_EVENT:
-      HIP_CHECK(hipEventRecord(e, stream1));
-      HIP_CHECK(hipStreamWaitEvent(stream2, e, 0));
+      HIP_CHECK(hipEventRecord(e, stream1))
+      HIP_CHECK(hipStreamWaitEvent(stream2, e, 0))
       break;
     case STREAM_QUERY: {
       hipError_t st = hipErrorNotReady;
       do {
         st = hipStreamQuery(stream1);
       } while (st == hipErrorNotReady);
-      HIP_CHECK(st);
+      HIP_CHECK(st)
     } break;
     case STREAM_SYNC:
-      HIP_CHECK(hipStreamSynchronize(stream1));
+      HIP_CHECK(hipStreamSynchronize(stream1))
       break;
     case DEVICE_SYNC:
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
       break;
     default:
       fprintf(stderr, "warning: unknown sync type=%s", SyncTypeStr(syncType));
@@ -222,12 +222,12 @@ void runTestImpl(CmdType cmdAType, SyncType syncType, CmdType cmdBType, hipStrea
 
   // Copy back to host, use async copy to avoid any extra synchronization
   //  that might mask issues.
-  HIP_CHECK(hipMemcpyAsync(Ch, Cd, sizeElements, hipMemcpyDeviceToHost, stream2));
-  HIP_CHECK(hipStreamSynchronize(stream2));
+  HIP_CHECK(hipMemcpyAsync(Ch, Cd, sizeElements, hipMemcpyDeviceToHost, stream2))
+  HIP_CHECK(hipStreamSynchronize(stream2))
 
   checkReverse(Ch, numElements, expected);
 
-  HIP_CHECK(hipEventDestroy(e));
+  HIP_CHECK(hipEventDestroy(e))
 }
 
 void testWrapper(size_t numElements) {
@@ -235,16 +235,16 @@ void testWrapper(size_t numElements) {
   const int expected = 0x42;
   int *Ad, *Bd, *Cd, *Ch;
 
-  HIP_CHECK(hipMalloc(&Ad, sizeElements));
-  HIP_CHECK(hipMalloc(&Bd, sizeElements));
-  HIP_CHECK(hipMalloc(&Cd, sizeElements));
-  HIP_CHECK(hipHostMalloc(&Ch, sizeElements));
+  HIP_CHECK(hipMalloc(&Ad, sizeElements))
+  HIP_CHECK(hipMalloc(&Bd, sizeElements))
+  HIP_CHECK(hipMalloc(&Cd, sizeElements))
+  HIP_CHECK(hipHostMalloc(&Ch, sizeElements))
 
   hipStream_t stream1, stream2;
 
-  HIP_CHECK(hipStreamCreate(&stream1));
-  HIP_CHECK(hipStreamCreate(&stream2));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipStreamCreate(&stream1))
+  HIP_CHECK(hipStreamCreate(&stream2))
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int cmdA = 0; cmdA < MAX_CmdType; cmdA++) {
     for (int cmdB = 0; cmdB < MAX_CmdType; cmdB++) {
@@ -271,8 +271,8 @@ void testWrapper(size_t numElements) {
   HIP_CHECK(hipFree(Cd));
   HIP_CHECK(hipHostFree(Ch));
 
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipStreamDestroy(stream2))
 }
 
 /**

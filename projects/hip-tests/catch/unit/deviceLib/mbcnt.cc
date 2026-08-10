@@ -27,7 +27,7 @@ HIP_TEST_CASE(Unit_mbcnt) {
   unsigned int* device_lane_id;
 
   hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
   INFO("System minor : " << devProp.minor);
   INFO("System major : " << devProp.major);
   INFO("agent prop name : " << devProp.name);
@@ -41,20 +41,20 @@ HIP_TEST_CASE(Unit_mbcnt) {
   const unsigned int num_threads = num_threads_per_block * num_blocks;
   const size_t buffer_size = num_threads * sizeof(unsigned int);
 
-  HIP_CHECK(hipMalloc((void**)&device_mbcnt_lo, buffer_size));
-  HIP_CHECK(hipMalloc((void**)&device_mbcnt_hi, buffer_size));
-  HIP_CHECK(hipMalloc((void**)&device_lane_id, buffer_size));
+  HIP_CHECK(hipMalloc((void**)&device_mbcnt_lo, buffer_size))
+  HIP_CHECK(hipMalloc((void**)&device_mbcnt_hi, buffer_size))
+  HIP_CHECK(hipMalloc((void**)&device_lane_id, buffer_size))
 
   hipLaunchKernelGGL(HIP_kernel, dim3(num_blocks), dim3(num_threads_per_block), 0, 0,
                      device_mbcnt_lo, device_mbcnt_hi, device_lane_id);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   unsigned int* host_mbcnt_lo = (unsigned int*)malloc(buffer_size);
   unsigned int* host_mbcnt_hi = (unsigned int*)malloc(buffer_size);
   unsigned int* host_lane_id = (unsigned int*)malloc(buffer_size);
 
-  HIP_CHECK(hipMemcpy(host_mbcnt_lo, device_mbcnt_lo, buffer_size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(host_mbcnt_hi, device_mbcnt_hi, buffer_size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(host_lane_id, device_lane_id, buffer_size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_mbcnt_lo, device_mbcnt_lo, buffer_size, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(host_mbcnt_hi, device_mbcnt_hi, buffer_size, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(host_lane_id, device_lane_id, buffer_size, hipMemcpyDeviceToHost))
 
   // verify the results
   int mbcnt_lo_errors = 0;
@@ -73,9 +73,9 @@ HIP_TEST_CASE(Unit_mbcnt) {
   }
 
 
-  HIP_CHECK(hipFree(device_mbcnt_lo));
-  HIP_CHECK(hipFree(device_mbcnt_hi));
-  HIP_CHECK(hipFree(device_lane_id));
+  HIP_CHECK(hipFree(device_mbcnt_lo))
+  HIP_CHECK(hipFree(device_mbcnt_hi))
+  HIP_CHECK(hipFree(device_lane_id))
 
   free(host_mbcnt_lo);
   free(host_mbcnt_hi);

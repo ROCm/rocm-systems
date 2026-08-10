@@ -19,7 +19,7 @@ HIP_TEST_CASE(Unit_hipUserObjectRelease_Negative) {
   REQUIRE(object != nullptr);
 
   hipUserObject_t hObject;
-  HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyIntObj, 1, hipUserObjectNoDestructorSync));
+  HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyIntObj, 1, hipUserObjectNoDestructorSync))
   REQUIRE(hObject != nullptr);
 
   SECTION("Pass User Object as nullptr") {
@@ -29,5 +29,5 @@ HIP_TEST_CASE(Unit_hipUserObjectRelease_Negative) {
     HIP_CHECK_ERROR(hipUserObjectRelease(hObject, 0), hipErrorInvalidValue);
   }
   SECTION("Pass initialRefcount as INT_MAX") { HIP_CHECK(hipUserObjectRelease(hObject, INT_MAX)); }
-  HIP_CHECK(hipUserObjectRelease(hObject, 1));
+  HIP_CHECK(hipUserObjectRelease(hObject, 1))
 }

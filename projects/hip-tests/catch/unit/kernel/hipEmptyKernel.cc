@@ -37,7 +37,7 @@ __global__ void Empty(int param) {}
 
 HIP_TEST_CASE(Unit_hipEmptyKernel) {
   hipLaunchKernelGGL(HIP_KERNEL_NAME(Empty), dim3(1), dim3(1), 0, 0, 0);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 }
 
 /**

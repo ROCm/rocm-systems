@@ -96,23 +96,23 @@ static void test_cg_thread_block_type(ThreadBlockTypeTests test_type, int block_
   dim3 *group_dim_dev, *group_dim_host;
 
   // Allocate device memory
-  HIP_CHECK(hipMalloc(&size_dev, num_bytes));
-  HIP_CHECK(hipMalloc(&thd_rank_dev, num_bytes));
-  HIP_CHECK(hipMalloc(&sync_dev, num_bytes));
+  HIP_CHECK(hipMalloc(&size_dev, num_bytes))
+  HIP_CHECK(hipMalloc(&thd_rank_dev, num_bytes))
+  HIP_CHECK(hipMalloc(&sync_dev, num_bytes))
 
   // Allocate host memory
-  HIP_CHECK(hipHostMalloc(&size_host, num_bytes));
-  HIP_CHECK(hipHostMalloc(&thd_rank_host, num_bytes));
-  HIP_CHECK(hipHostMalloc(&sync_host, num_bytes));
+  HIP_CHECK(hipHostMalloc(&size_host, num_bytes))
+  HIP_CHECK(hipHostMalloc(&thd_rank_host, num_bytes))
+  HIP_CHECK(hipHostMalloc(&sync_host, num_bytes))
 
   switch (test_type) {
     case (ThreadBlockTypeTests::basicApi):
-      HIP_CHECK(hipMalloc(&group_index_dev, num_dim3_bytes));
-      HIP_CHECK(hipMalloc(&thd_index_dev, num_dim3_bytes));
-      HIP_CHECK(hipMalloc(&group_dim_dev, num_dim3_bytes));
-      HIP_CHECK(hipHostMalloc(&group_index_host, num_dim3_bytes));
-      HIP_CHECK(hipHostMalloc(&thd_index_host, num_dim3_bytes));
-      HIP_CHECK(hipHostMalloc(&group_dim_host, num_dim3_bytes));
+      HIP_CHECK(hipMalloc(&group_index_dev, num_dim3_bytes))
+      HIP_CHECK(hipMalloc(&thd_index_dev, num_dim3_bytes))
+      HIP_CHECK(hipMalloc(&group_dim_dev, num_dim3_bytes))
+      HIP_CHECK(hipHostMalloc(&group_index_host, num_dim3_bytes))
+      HIP_CHECK(hipHostMalloc(&thd_index_host, num_dim3_bytes))
+      HIP_CHECK(hipHostMalloc(&group_dim_host, num_dim3_bytes))
 
       hipLaunchKernelGGL(kernel_cg_thread_block_type, 2, block_size, 0, 0, size_dev, thd_rank_dev,
                          sync_dev, group_index_dev, thd_index_dev, group_dim_dev);
@@ -127,13 +127,13 @@ static void test_cg_thread_block_type(ThreadBlockTypeTests test_type, int block_
   }
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(size_host, size_dev, num_bytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(thd_rank_host, thd_rank_dev, num_bytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(sync_host, sync_dev, num_bytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(size_host, size_dev, num_bytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(thd_rank_host, thd_rank_dev, num_bytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(sync_host, sync_dev, num_bytes, hipMemcpyDeviceToHost))
   if (test_type == ThreadBlockTypeTests::basicApi) {
-    HIP_CHECK(hipMemcpy(group_index_host, group_index_dev, num_dim3_bytes, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(thd_index_host, thd_index_dev, num_dim3_bytes, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(group_dim_host, group_dim_dev, num_dim3_bytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(group_index_host, group_index_dev, num_dim3_bytes, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipMemcpy(thd_index_host, thd_index_dev, num_dim3_bytes, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipMemcpy(group_dim_host, group_dim_dev, num_dim3_bytes, hipMemcpyDeviceToHost))
   }
 
   // Validate results for both blocks together
@@ -155,22 +155,22 @@ static void test_cg_thread_block_type(ThreadBlockTypeTests test_type, int block_
   }
 
   // Free device memory
-  HIP_CHECK(hipFree(size_dev));
-  HIP_CHECK(hipFree(thd_rank_dev));
-  HIP_CHECK(hipFree(sync_dev));
+  HIP_CHECK(hipFree(size_dev))
+  HIP_CHECK(hipFree(thd_rank_dev))
+  HIP_CHECK(hipFree(sync_dev))
 
   // Free host memory
-  HIP_CHECK(hipHostFree(size_host));
-  HIP_CHECK(hipHostFree(thd_rank_host));
-  HIP_CHECK(hipHostFree(sync_host));
+  HIP_CHECK(hipHostFree(size_host))
+  HIP_CHECK(hipHostFree(thd_rank_host))
+  HIP_CHECK(hipHostFree(sync_host))
 
   if (test_type == ThreadBlockTypeTests::basicApi) {
-    HIP_CHECK(hipFree(group_index_dev));
-    HIP_CHECK(hipFree(thd_index_dev));
-    HIP_CHECK(hipFree(group_dim_dev));
-    HIP_CHECK(hipHostFree(group_index_host));
-    HIP_CHECK(hipHostFree(thd_index_host));
-    HIP_CHECK(hipHostFree(group_dim_host));
+    HIP_CHECK(hipFree(group_index_dev))
+    HIP_CHECK(hipFree(thd_index_dev))
+    HIP_CHECK(hipFree(group_dim_dev))
+    HIP_CHECK(hipHostFree(group_index_host))
+    HIP_CHECK(hipHostFree(thd_index_host))
+    HIP_CHECK(hipHostFree(group_dim_host))
   }
 }
 
@@ -179,8 +179,8 @@ HIP_TEST_CASE(Unit_hipCGThreadBlockType) {
   // Use default device for validating the test
   int device;
   hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&device_properties, device))
 
   if (!device_properties.cooperativeLaunch) {
     HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);

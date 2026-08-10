@@ -39,7 +39,7 @@ static constexpr int ARRAY_LOOP{100};
  *
  */
 static void MallocArray_DiffSizes(int gpu) {
-  HIP_CHECK_THREAD(hipSetDevice(gpu));
+  HIP_CHECK_THREAD(hipSetDevice(gpu))
   // Use of GENERATE in thead function causes random failures with multithread condition.
   std::vector<std::pair<size_t, size_t>> runs{std::make_pair(NUM_W, NUM_H),
                                               std::make_pair(BIGNUM_W, BIGNUM_H)};
@@ -51,7 +51,7 @@ static void MallocArray_DiffSizes(int gpu) {
           hipMallocArray(&A_d[i], &desc, std::get<0>(size), std::get<1>(size), hipArrayDefault));
     }
     for (int i = 0; i < ARRAY_LOOP; i++) {
-      HIP_CHECK_THREAD(hipFreeArray(A_d[i]));
+      HIP_CHECK_THREAD(hipFreeArray(A_d[i]))
     }
   }
 }
@@ -156,12 +156,12 @@ void testArrayAsTexture(hipArray_t arrayPtr, const size_t width, const size_t he
   textDesc.readMode = hipReadModeElementType;  // don't convert the data to floats
   textDesc.normalizedCoords = 1;               // use normalized coordinates (0.0-1.0)
 
-  HIP_CHECK(hipCreateTextureObject(&textObj, &resDesc, &textDesc, nullptr));
+  HIP_CHECK(hipCreateTextureObject(&textObj, &resDesc, &textDesc, nullptr))
 
 
   // run kernel
   T* device_data{};
-  HIP_CHECK(hipMalloc(&device_data, size));
+  HIP_CHECK(hipMalloc(&device_data, size))
   readFromTexture<<<dim3(width / BlockSize, height ? height / BlockSize : 1, 1),
                     dim3(BlockSize, height ? BlockSize : 1, 1)>>>(device_data, textObj, width,
                                                                   height, false);
@@ -169,13 +169,13 @@ void testArrayAsTexture(hipArray_t arrayPtr, const size_t width, const size_t he
 
   // copy data back and then test it
   std::fill(std::begin(hostData), std::end(hostData), 0);
-  HIP_CHECK(hipMemcpy(hostData.data(), device_data, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostData.data(), device_data, size, hipMemcpyDeviceToHost))
 
   checkDataIsAscending(hostData);
 
   // clean up
-  HIP_CHECK(hipDestroyTextureObject(textObj));
-  HIP_CHECK(hipFree(device_data));
+  HIP_CHECK(hipDestroyTextureObject(textObj))
+  HIP_CHECK(hipFree(device_data))
 }
 
 // Test an array created with the TextureGather flag.
@@ -231,19 +231,19 @@ void testArrayAsTextureWithGather(hipArray_t arrayPtr, const size_t width, const
   textDesc.addressMode[2] = hipAddressModeWrap;
   textDesc.normalizedCoords = 1;  // use normalized coordinates (0.0 - 1.0)
 
-  HIP_CHECK(hipCreateTextureObject(&textObj, &resDesc, &textDesc, nullptr));
+  HIP_CHECK(hipCreateTextureObject(&textObj, &resDesc, &textDesc, nullptr))
 
   // run kernel
   T* device_data{};
-  HIP_CHECK(hipMalloc(&device_data, size));
+  HIP_CHECK(hipMalloc(&device_data, size))
   readFromTexture<T>
       <<<dim3(width / BlockSize, height / BlockSize, 1), dim3(BlockSize, BlockSize, 1)>>>(
           device_data, textObj, width, height, true);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   // copy data back
   std::fill(std::begin(hostData), std::end(hostData), 0);
-  HIP_CHECK(hipMemcpy(hostData.data(), device_data, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostData.data(), device_data, size, hipMemcpyDeviceToHost))
 
   if (ChannelToRead >= vec_size) {
     // we expect all the values to be zero
@@ -303,8 +303,8 @@ void testArrayAsTextureWithGather(hipArray_t arrayPtr, const size_t width, const
   }
 
   // clean up
-  HIP_CHECK(hipDestroyTextureObject(textObj));
-  HIP_CHECK(hipFree(device_data));
+  HIP_CHECK(hipDestroyTextureObject(textObj))
+  HIP_CHECK(hipFree(device_data))
 }
 
 // Test the an array created with the SurfaceLoadStore flag by generating a surface and reading from
@@ -334,12 +334,12 @@ void testArrayAsSurface(hipArray_t arrayPtr, const size_t width, const size_t he
   resDesc.resType = hipResourceTypeArray;
 
   resDesc.res.array.array = arrayPtr;
-  HIP_CHECK(hipCreateSurfaceObject(&surfObj, &resDesc));
+  HIP_CHECK(hipCreateSurfaceObject(&surfObj, &resDesc))
 
 
   // run kernel
   T* device_data{};
-  HIP_CHECK(hipMalloc(&device_data, size));
+  HIP_CHECK(hipMalloc(&device_data, size))
   // This will increment the values of the surface, so this is undone later
   incSurface<T><<<dim3(width / BlockSize, height ? height / BlockSize : 1, 1),
                   dim3(BlockSize, height ? BlockSize : 1, 1)>>>(surfObj, height);
@@ -358,8 +358,8 @@ void testArrayAsSurface(hipArray_t arrayPtr, const size_t width, const size_t he
   checkDataIsAscending(hostData);
 
   // clean up
-  HIP_CHECK(hipDestroySurfaceObject(surfObj));
-  HIP_CHECK(hipFree(device_data));
+  HIP_CHECK(hipDestroySurfaceObject(surfObj))
+  HIP_CHECK(hipFree(device_data))
 }
 
 // The happy path of a default array and a SurfaceLoadStore array should work
@@ -380,7 +380,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocArray_happy, uint, int, int4, ushort, short
     INFO("flag is hipArrayDefault");
     INFO("height: " << height);
 
-    HIP_CHECK(hipMallocArray(&arrayPtr, &desc, width, height, hipArrayDefault));
+    HIP_CHECK(hipMallocArray(&arrayPtr, &desc, width, height, hipArrayDefault))
     testArrayAsTexture<TestType>(arrayPtr, width, height);
   }
 #if HT_NVIDIA  // surfaces not supported on AMD
@@ -389,21 +389,21 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocArray_happy, uint, int, int4, ushort, short
     INFO("flag is hipArraySurfaceLoadStore");
     INFO("height: " << height);
 
-    HIP_CHECK(hipMallocArray(&arrayPtr, &desc, width, height, hipArraySurfaceLoadStore));
+    HIP_CHECK(hipMallocArray(&arrayPtr, &desc, width, height, hipArraySurfaceLoadStore))
     testArrayAsSurface<TestType>(arrayPtr, width, height);
   }
   SECTION("hipArrayTextureGather") {
     hipDeviceProp_t prop;
     int device;
-    HIP_CHECK(hipGetDevice(&device));
-    HIP_CHECK(hipGetDeviceProperties(&prop, device));
+    HIP_CHECK(hipGetDevice(&device))
+    HIP_CHECK(hipGetDeviceProperties(&prop, device))
     // tex2Dgather not supported on gfx90a
     if (std::string(prop.gcnArchName).find("gfx90a") == std::string::npos) {
       height = 1024;
       INFO("flag is hipArrayTextureGather");
       INFO("height: " << height);
 
-      HIP_CHECK(hipMallocArray(&arrayPtr, &desc, width, height, hipArrayTextureGather));
+      HIP_CHECK(hipMallocArray(&arrayPtr, &desc, width, height, hipArrayTextureGather))
       testArrayAsTextureWithGather<TestType>(arrayPtr, width, height);
     } else {
       std::string const skip_msg = std::string(
@@ -416,7 +416,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocArray_happy, uint, int, int4, ushort, short
   }
 #endif
 
-  HIP_CHECK(hipFreeArray(arrayPtr));
+  HIP_CHECK(hipFreeArray(arrayPtr))
 }
 
 // Arrays can be up to the size of maxTexture* but no bigger
@@ -455,8 +455,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocArray_MaxTexture_Default, uint, int4, ushor
     auto maxArrayCreateError = hipMallocArray(&array, &desc, width, height, flag);
     // this can try to alloc many GB of memory, so out of memory is acceptable
     if (maxArrayCreateError == hipErrorOutOfMemory) return;
-    HIP_CHECK(maxArrayCreateError);
-    HIP_CHECK(hipFreeArray(array));
+    HIP_CHECK(maxArrayCreateError)
+    HIP_CHECK(hipFreeArray(array))
   }
   SECTION("Negative") {
     SECTION("1D - More Than Max") {

@@ -35,7 +35,7 @@ HIP_TEST_CASE(Unit_hipGetDeviceCount_MaskedDevices) {
   setenv("HIP_VISIBLE_DEVICES", visibleDeviceString, 1);
 #endif
 
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   REQUIRE(numDevices == 1);
 }
 #endif

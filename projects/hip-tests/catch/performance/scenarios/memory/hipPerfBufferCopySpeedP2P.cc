@@ -57,18 +57,18 @@ static string sizeToString(int size) {
 
 static void checkP2PSupport() {
   int deviceCnt = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCnt));
+  HIP_CHECK(hipGetDeviceCount(&deviceCnt))
   cout << "Total no. of  available gpu #" << deviceCnt << "\n" << endl;
 
   for (int deviceId = 0; deviceId < deviceCnt; deviceId++) {
     hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+    HIP_CHECK(hipGetDeviceProperties(&props, deviceId))
     cout << "for gpu#" << deviceId << " " << props.name << endl;
     cout << "    peer2peer supported : ";
     int PeerCnt = 0;
     for (int i = 0; i < deviceCnt; i++) {
       int isPeer;
-      HIP_CHECK(hipDeviceCanAccessPeer(&isPeer, i, deviceId));
+      HIP_CHECK(hipDeviceCanAccessPeer(&isPeer, i, deviceId))
       if (isPeer) {
         cout << "gpu#" << i << " ";
         ++PeerCnt;
@@ -81,7 +81,7 @@ static void checkP2PSupport() {
     int nonPeerCnt = 0;
     for (int i = 0; i < deviceCnt; i++) {
       int isPeer;
-      HIP_CHECK(hipDeviceCanAccessPeer(&isPeer, i, deviceId));
+      HIP_CHECK(hipDeviceCanAccessPeer(&isPeer, i, deviceId))
       if (!isPeer && (i != deviceId)) {
         cout << "gpu#" << i << " ";
         ++nonPeerCnt;
@@ -118,7 +118,7 @@ static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingM
                                  const bool useHipMemcpyAsync) {
   const char* method = useHipMemcpyAsync ? "hipMemcpyAsync()" : "copy kernel";
   int gpuCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&gpuCount));
+  HIP_CHECK(hipGetDeviceCount(&gpuCount))
   if (gpuCount < 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -132,58 +132,58 @@ static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingM
 #endif
   for (int currentGpu = 0; currentGpu < gpuCount; currentGpu++) {
     for (int peerGpu = 0; peerGpu < gpuCount; peerGpu++) {
-      HIP_CHECK(hipSetDevice(currentGpu));
+      HIP_CHECK(hipSetDevice(currentGpu))
 
       fprintf(stderr, "Uni: Gpu%d -> Gpu%d by %s, Timing %s, Iterations %d\n", currentGpu, peerGpu,
               method, timingMode == TIMING_MODE_GPU ? "GPU" : "CPU", iterations);
 
       if (currentGpu != peerGpu) {
         int canAccessPeer = 0;
-        HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, currentGpu, peerGpu));
+        HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, currentGpu, peerGpu))
         if (!canAccessPeer) {
           fprintf(stderr, "Gpu%d cannot access Gpu%d, Skipped\n", currentGpu, peerGpu);
           continue;
         }
-        HIP_CHECK(hipDeviceEnablePeerAccess(peerGpu, 0));
+        HIP_CHECK(hipDeviceEnablePeerAccess(peerGpu, 0))
       }
       fprintf(stderr, "Size(KB)          Time(ms)       Bandwidth(GB/s)\n");
 
       unsigned char *currentGpuMem = nullptr, *peerGpuMem = nullptr;
 
-      HIP_CHECK(hipMalloc((void**)&currentGpuMem, numMax));
-      HIP_CHECK(hipSetDevice(peerGpu));
-      HIP_CHECK(hipMalloc((void**)&peerGpuMem, numMax));
-      HIP_CHECK(hipSetDevice(currentGpu));
+      HIP_CHECK(hipMalloc((void**)&currentGpuMem, numMax))
+      HIP_CHECK(hipSetDevice(peerGpu))
+      HIP_CHECK(hipMalloc((void**)&peerGpuMem, numMax))
+      HIP_CHECK(hipSetDevice(currentGpu))
 #ifdef VERIFY_DATA
-      HIP_CHECK(hipMemcpy(currentGpuMem, hostMem0.data(), numMax, hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpy(currentGpuMem, hostMem0.data(), numMax, hipMemcpyHostToDevice))
 #endif
       unsigned N = numMax / sizeof(T);   // Number of T in buffer of numMax bytes.
       REQUIRE(N * sizeof(T) == numMax);  // To prevent verification failure
       unsigned blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
       // Warmup
       if (useHipMemcpyAsync) {
-        HIP_CHECK(hipMemcpyAsync(peerGpuMem, currentGpuMem, numMax, hipMemcpyDeviceToDevice, 0));
+        HIP_CHECK(hipMemcpyAsync(peerGpuMem, currentGpuMem, numMax, hipMemcpyDeviceToDevice, 0))
       } else {
         hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0, 0,
                            reinterpret_cast<T*>(peerGpuMem), reinterpret_cast<T*>(currentGpuMem),
                            static_cast<size_t>(N));
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipGetLastError())
       }
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
 #ifdef VERIFY_DATA
       // Verify
-      HIP_CHECK(hipMemcpy(hostMem1.data(), peerGpuMem, numMax, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(hostMem1.data(), peerGpuMem, numMax, hipMemcpyDeviceToHost))
       REQUIRE(hostMem1 == hostMem0);
 #endif
       float t = 0;  // in ms
       auto cpuStart = std::chrono::steady_clock::now();
       hipEvent_t eventStart, eventStop;
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       if (timingMode == TIMING_MODE_GPU) {
-        HIP_CHECK(hipEventCreate(&eventStart));
-        HIP_CHECK(hipEventCreate(&eventStop));
+        HIP_CHECK(hipEventCreate(&eventStart))
+        HIP_CHECK(hipEventCreate(&eventStop))
       }
 
       for (int i = 0; i < nSizes; i++) {
@@ -192,10 +192,10 @@ static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingM
         N = nbytes / sizeof(T);  // Number of T in buffer of nbytes bytes
         blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
         if (timingMode == TIMING_MODE_CPU) {
-          HIP_CHECK(hipDeviceSynchronize());
+          HIP_CHECK(hipDeviceSynchronize())
           cpuStart = std::chrono::steady_clock::now();
         } else if (timingMode == TIMING_MODE_GPU) {
-          HIP_CHECK(hipEventRecord(eventStart, stream));
+          HIP_CHECK(hipEventRecord(eventStart, stream))
         }
 
         for (size_t offsetEnd = numMax - nbytes, offset = 0, j = 0; j < iterations;
@@ -209,15 +209,15 @@ static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingM
                                reinterpret_cast<T*>(peerGpuMem + offset),
                                reinterpret_cast<T*>(currentGpuMem + offset),
                                static_cast<size_t>(N));
-            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipGetLastError())
           }
         }
         if (timingMode == TIMING_MODE_GPU) {
-          HIP_CHECK(hipEventRecord(eventStop, stream));
-          HIP_CHECK(hipEventSynchronize(eventStop));
-          HIP_CHECK(hipEventElapsedTime(&t, eventStart, eventStop));
+          HIP_CHECK(hipEventRecord(eventStop, stream))
+          HIP_CHECK(hipEventSynchronize(eventStop))
+          HIP_CHECK(hipEventElapsedTime(&t, eventStart, eventStop))
         } else if (timingMode == TIMING_MODE_CPU) {
-          HIP_CHECK(hipDeviceSynchronize());
+          HIP_CHECK(hipDeviceSynchronize())
           std::chrono::duration<double, std::milli> cpuMs =
               std::chrono::steady_clock::now() - cpuStart;
           t = cpuMs.count();
@@ -233,22 +233,22 @@ static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingM
         }
       }
       if (currentGpu != peerGpu) {
-        HIP_CHECK(hipDeviceDisablePeerAccess(peerGpu));
+        HIP_CHECK(hipDeviceDisablePeerAccess(peerGpu))
       }
       if (timingMode == TIMING_MODE_GPU) {
-        HIP_CHECK(hipEventDestroy(eventStart));
-        HIP_CHECK(hipEventDestroy(eventStop));
+        HIP_CHECK(hipEventDestroy(eventStart))
+        HIP_CHECK(hipEventDestroy(eventStop))
       }
 #ifdef VERIFY_DATA
       // Verify again
       for (size_t n = 0; n < numMax; n++) hostMem1[n] = 0;
-      HIP_CHECK(hipMemcpy(hostMem1.data(), peerGpuMem, numMax, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(hostMem1.data(), peerGpuMem, numMax, hipMemcpyDeviceToHost))
       REQUIRE(hostMem1 == hostMem0);
 #endif
       // Cleanup
-      HIP_CHECK(hipFree((void*)currentGpuMem));
-      HIP_CHECK(hipFree((void*)peerGpuMem));
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipFree((void*)currentGpuMem))
+      HIP_CHECK(hipFree((void*)peerGpuMem))
+      HIP_CHECK(hipStreamDestroy(stream))
     }
   }
   outputMatrix(string("Unidirectional ") + method + " Time Table(ms)", gpuCount, timeMs, timingMode,
@@ -260,7 +260,7 @@ static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingM
 static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsync) {
   const char* method = useHipMemcpyAsync ? "hipMemcpyAsync()" : "copy kernel";
   int gpuCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&gpuCount));
+  HIP_CHECK(hipGetDeviceCount(&gpuCount))
   if (gpuCount < 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -269,27 +269,27 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
   size_t numMax = sizeToBytes(sizes[nSizes - 1]) * 2;
   for (int currentGpu = 0; currentGpu < gpuCount; currentGpu++) {
     for (int peerGpu = 0; peerGpu < gpuCount; peerGpu++) {
-      HIP_CHECK(hipSetDevice(currentGpu));
+      HIP_CHECK(hipSetDevice(currentGpu))
       fprintf(stderr, "Bi: Gpu%d <-> Gpu%d by %s, Timing GPU, Iterations %d\n", currentGpu, peerGpu,
               method, iterations);
 
       if (currentGpu != peerGpu) {
         int canAccessPeer = 0;
-        HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, currentGpu, peerGpu));
+        HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, currentGpu, peerGpu))
         if (!canAccessPeer) {
           fprintf(stderr, "currentGpu %d cannot access peerGpu %d\n", currentGpu, peerGpu);
           continue;
         }
         canAccessPeer = 0;
-        HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, peerGpu, currentGpu));
+        HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, peerGpu, currentGpu))
         if (!canAccessPeer) {
           fprintf(stderr, "peerGpu %d cannot access currentGpu %d\n", peerGpu, currentGpu);
           continue;
         }
-        HIP_CHECK(hipSetDevice(peerGpu));
-        HIP_CHECK(hipDeviceEnablePeerAccess(currentGpu, 0));
-        HIP_CHECK(hipSetDevice(currentGpu));
-        HIP_CHECK(hipDeviceEnablePeerAccess(peerGpu, 0));
+        HIP_CHECK(hipSetDevice(peerGpu))
+        HIP_CHECK(hipDeviceEnablePeerAccess(currentGpu, 0))
+        HIP_CHECK(hipSetDevice(currentGpu))
+        HIP_CHECK(hipDeviceEnablePeerAccess(peerGpu, 0))
       }
       fprintf(stderr,
               "Gpu%d -> Gpu%d                                         *"
@@ -300,15 +300,15 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
               "       Time(ms)       Bandwidth(GB/s)\n");
 
       unsigned char *currentGpuMem[2], *peerGpuMem[2];
-      HIP_CHECK(hipMalloc((void**)&currentGpuMem[0], numMax));
-      HIP_CHECK(hipMalloc((void**)&currentGpuMem[1], numMax));
+      HIP_CHECK(hipMalloc((void**)&currentGpuMem[0], numMax))
+      HIP_CHECK(hipMalloc((void**)&currentGpuMem[1], numMax))
 
-      HIP_CHECK(hipSetDevice(peerGpu));
+      HIP_CHECK(hipSetDevice(peerGpu))
       // peerGpu is the current device
-      HIP_CHECK(hipMalloc((void**)&peerGpuMem[0], numMax));
-      HIP_CHECK(hipMalloc((void**)&peerGpuMem[1], numMax));
+      HIP_CHECK(hipMalloc((void**)&peerGpuMem[0], numMax))
+      HIP_CHECK(hipMalloc((void**)&peerGpuMem[1], numMax))
 
-      HIP_CHECK(hipSetDevice(currentGpu));
+      HIP_CHECK(hipSetDevice(currentGpu))
 
       unsigned N = numMax / sizeof(T);  // Number of T in buffer of numMax bytes.
       REQUIRE(N * sizeof(T) == numMax);
@@ -318,39 +318,39 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
       if (useHipMemcpyAsync) {
         HIP_CHECK(
             hipMemcpyAsync(peerGpuMem[0], currentGpuMem[0], numMax, hipMemcpyDeviceToDevice, 0));
-        HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipSetDevice(peerGpu));
+        HIP_CHECK(hipDeviceSynchronize())
+        HIP_CHECK(hipSetDevice(peerGpu))
         HIP_CHECK(
             hipMemcpyAsync(currentGpuMem[1], peerGpuMem[1], numMax, hipMemcpyDeviceToDevice, 0));
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipDeviceSynchronize())
       } else {
         // Warmup
         hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0, 0,
                            reinterpret_cast<T*>(peerGpuMem[0]),
                            reinterpret_cast<T*>(currentGpuMem[0]), static_cast<size_t>(N));
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipGetLastError())
+        HIP_CHECK(hipDeviceSynchronize())
 
-        HIP_CHECK(hipSetDevice(peerGpu));
+        HIP_CHECK(hipSetDevice(peerGpu))
         hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0, 0,
                            reinterpret_cast<T*>(currentGpuMem[1]),
                            reinterpret_cast<T*>(peerGpuMem[1]), static_cast<size_t>(N));
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipGetLastError())
+        HIP_CHECK(hipDeviceSynchronize())
       }
 
       hipStream_t stream[2];
       hipEvent_t eventStart[2], eventStop[2];
-      HIP_CHECK(hipSetDevice(currentGpu));
-      HIP_CHECK(hipStreamCreate(&stream[0]));
-      HIP_CHECK(hipEventCreate(&eventStart[0]));
-      HIP_CHECK(hipEventCreate(&eventStop[0]));
-      HIP_CHECK(hipSetDevice(peerGpu));
-      HIP_CHECK(hipStreamCreate(&stream[1]));
-      HIP_CHECK(hipEventCreate(&eventStart[1]));
-      HIP_CHECK(hipEventCreate(&eventStop[1]));
+      HIP_CHECK(hipSetDevice(currentGpu))
+      HIP_CHECK(hipStreamCreate(&stream[0]))
+      HIP_CHECK(hipEventCreate(&eventStart[0]))
+      HIP_CHECK(hipEventCreate(&eventStop[0]))
+      HIP_CHECK(hipSetDevice(peerGpu))
+      HIP_CHECK(hipStreamCreate(&stream[1]))
+      HIP_CHECK(hipEventCreate(&eventStart[1]))
+      HIP_CHECK(hipEventCreate(&eventStop[1]))
 
-      HIP_CHECK(hipSetDevice(currentGpu));
+      HIP_CHECK(hipSetDevice(currentGpu))
 
       for (int i = 0; i < nSizes; i++) {
         const int thisSize = sizes[i];
@@ -358,8 +358,8 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
         N = nbytes / sizeof(T);  // Number of T in buffer of nbytes bytes
         blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
 
-        HIP_CHECK(hipEventRecord(eventStart[0], stream[0]));
-        HIP_CHECK(hipEventRecord(eventStart[1], stream[1]));
+        HIP_CHECK(hipEventRecord(eventStart[0], stream[0]))
+        HIP_CHECK(hipEventRecord(eventStart[1], stream[1]))
 
         for (size_t offsetEnd = numMax - nbytes, offset = 0, j = 0; j < iterations;
              j++, offset += nbytes) {
@@ -381,16 +381,16 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
           }
         }
 
-        HIP_CHECK(hipEventRecord(eventStop[0], stream[0]));
-        HIP_CHECK(hipEventRecord(eventStop[1], stream[1]));
+        HIP_CHECK(hipEventRecord(eventStop[0], stream[0]))
+        HIP_CHECK(hipEventRecord(eventStop[1], stream[1]))
 
-        HIP_CHECK(hipEventSynchronize(eventStop[0]));
-        HIP_CHECK(hipEventSynchronize(eventStop[1]));
+        HIP_CHECK(hipEventSynchronize(eventStop[0]))
+        HIP_CHECK(hipEventSynchronize(eventStop[1]))
 
         float t[2];
         double bandwidth[2];
         for (int n = 0; n < 2; n++) {
-          HIP_CHECK(hipEventElapsedTime(&t[n], eventStart[n], eventStop[n]));
+          HIP_CHECK(hipEventElapsedTime(&t[n], eventStart[n], eventStop[n]))
           t[n] /= iterations;
           bandwidth[n] = nbytes / megaSize / t[n];  // GByte/s
         }
@@ -406,17 +406,17 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
         }
       }
       if (currentGpu != peerGpu) {
-        HIP_CHECK(hipSetDevice(peerGpu));
-        HIPCHECK(hipDeviceDisablePeerAccess(currentGpu));
-        HIP_CHECK(hipSetDevice(currentGpu));
-        HIPCHECK(hipDeviceDisablePeerAccess(peerGpu));
+        HIP_CHECK(hipSetDevice(peerGpu))
+        HIPCHECK(hipDeviceDisablePeerAccess(currentGpu))
+        HIP_CHECK(hipSetDevice(currentGpu))
+        HIPCHECK(hipDeviceDisablePeerAccess(peerGpu))
       }
       for (int i = 0; i < 2; i++) {
-        HIP_CHECK(hipEventDestroy(eventStart[i]));
-        HIP_CHECK(hipEventDestroy(eventStop[i]));
-        HIP_CHECK(hipStreamDestroy(stream[i]));
-        HIP_CHECK(hipFree((void*)currentGpuMem[i]));
-        HIP_CHECK(hipFree((void*)peerGpuMem[i]));
+        HIP_CHECK(hipEventDestroy(eventStart[i]))
+        HIP_CHECK(hipEventDestroy(eventStop[i]))
+        HIP_CHECK(hipStreamDestroy(stream[i]))
+        HIP_CHECK(hipFree((void*)currentGpuMem[i]))
+        HIP_CHECK(hipFree((void*)peerGpuMem[i]))
       }
     }
   }

@@ -36,7 +36,7 @@ bool TryMallocPitch(void** device_ptr, size_t* pitch, size_t width, size_t heigh
   if (status == hipErrorOutOfMemory) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 }  // namespace
@@ -109,5 +109,5 @@ HIP_TEST_CASE(Contract_PitchedMemory_HipFree_PitchedAllocation_Succeeds) {
     HIP_SKIP_TEST("hipMallocPitch is not supported by this device/runtime path.");
   }
 
-  HIP_CHECK(hipFree(device_ptr));
+  HIP_CHECK(hipFree(device_ptr))
 }

@@ -33,7 +33,7 @@
  */
 HIP_TEST_CASE(Unit_hipMemPoolTrimTo_Negative_Parameter) {
   int device_id = 0;
-  HIP_CHECK(hipSetDevice(device_id));
+  HIP_CHECK(hipSetDevice(device_id))
   checkMempoolSupported(device_id) size_t trim_size = 1024;
 
   SECTION("Passing nullptr to mem_pool") {
@@ -55,9 +55,9 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_Negative_Parameter) {
  */
 HIP_TEST_CASE(Unit_hipMemPoolTrimTo_Positive_Basic) {
   int device_id = 0;
-  HIP_CHECK(hipSetDevice(device_id));
+  HIP_CHECK(hipSetDevice(device_id))
   checkMempoolSupported(device_id) unsigned int* notified = nullptr;
-  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)))
   *notified = 0;
 
   const size_t allocation_size1 = kPageSize * kPageSize * 16;
@@ -80,57 +80,57 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_Positive_Basic) {
   attr = hipMemPoolAttrReleaseThreshold;
   // The pool must hold 512MB
   std::uint64_t threshold = 512 * 1024 * 1024ULL;
-  HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &threshold));
+  HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &threshold))
 
   // Not a real free, since kernel isn't done
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream.stream()));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream.stream()))
 
   // Get reserved memory before trim
   attr = hipMemPoolAttrReservedMemCurrent;
   std::uint64_t res_before_trim = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_before_trim));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_before_trim))
 
   size_t min_bytes_to_hold = allocation_size2;
-  HIP_CHECK(hipMemPoolTrimTo(mempool.mempool(), min_bytes_to_hold));
+  HIP_CHECK(hipMemPoolTrimTo(mempool.mempool(), min_bytes_to_hold))
 
   std::uint64_t res_after_trim = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_after_trim));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_after_trim))
   // Trim must be a nop because execution isn't done
   REQUIRE(res_before_trim == res_after_trim);
 
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
   *notified = 1;
-  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream.stream()))
 
   std::uint64_t res_after_sync = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_after_sync));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_after_sync))
   // Since hipMemPoolAttrReleaseThreshold is 128 MB sync does nothing to the freed memory
   REQUIRE(res_after_trim == res_after_sync);
 
-  HIP_CHECK(hipMemPoolTrimTo(mempool.mempool(), min_bytes_to_hold));
+  HIP_CHECK(hipMemPoolTrimTo(mempool.mempool(), min_bytes_to_hold))
 
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_after_trim));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_after_trim))
   // Validate memory after real trim. The pool must hold less memory than before
   REQUIRE(res_after_trim < res_after_sync);
 
   attr = hipMemPoolAttrReleaseThreshold;
   std::uint64_t value64 = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &value64))
   // Make sure the threshold query works
   REQUIRE(threshold == value64);
 
   attr = hipMemPoolAttrUsedMemCurrent;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &value64))
   // Make sure the current usage query works - just small buffer left
   REQUIRE(allocation_size2 == value64);
 
   attr = hipMemPoolAttrUsedMemHigh;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &value64))
   // Make sure the high watermark usage works - the both buffers must be reported
   REQUIRE((allocation_size1 + allocation_size2) == value64);
 
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem2), stream.stream()));
-  HIP_CHECK(hipHostFree(notified));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem2), stream.stream()))
+  HIP_CHECK(hipHostFree(notified))
 }
 
 /**
@@ -147,14 +147,14 @@ static bool checkhipMemPoolTrimTo(hipStream_t stream, int N, int dev = 0) {
   pool_props.allocType = hipMemAllocationTypePinned;
   pool_props.location.id = dev;
   pool_props.location.type = hipMemLocationTypeDevice;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
   uint64_t setThreshold = UINT64_MAX;
-  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, hipMemPoolAttrReleaseThreshold, &setThreshold));
+  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, hipMemPoolAttrReleaseThreshold, &setThreshold))
   testObj.useCommonMempool(mem_pool);
   for (int iter = LAUNCH_ITERATIONS; iter > 0; iter--) {
     // Set different min_bytes_to_hold for each iteration
     size_t min_bytes_to_hold = byte_size * 3 * iter;
-    HIP_CHECK(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold));
+    HIP_CHECK(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold))
     // assign memory to device pointers
     testObj.allocFromMempool(stream);
     testObj.transferToMempool(stream);
@@ -162,10 +162,10 @@ static bool checkhipMemPoolTrimTo(hipStream_t stream, int N, int dev = 0) {
     testObj.transferFromMempool(stream);
     testObj.freeDevBuf(stream);
     // verify and validate
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
     REQUIRE(true == testObj.validateResult());
   }
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
   testObj.freeHostBuf();
   return true;
 }
@@ -189,10 +189,10 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_VaryingMinBytesToHold) {
   checkMempoolSupported(0)
       // create a stream
       hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   const int N = isQuickLevel() ? (1 << 12) : (1 << 20);
   REQUIRE(true == checkhipMemPoolTrimTo(stream, N));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -208,7 +208,7 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_VaryingMinBytesToHold) {
 HIP_TEST_CASE(Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold) {
   const int N = isQuickLevel() ? (1 << 12) : (1 << 20);
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
@@ -216,9 +216,9 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold) {
     checkMempoolSupported(dev) HIP_CHECK(hipSetDevice(dev));
     // create a stream
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     REQUIRE(true == checkhipMemPoolTrimTo(stream, N, dev));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 
@@ -226,7 +226,7 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold) {
  * Local function to test hipMemPoolAttrReleaseThreshold with multiple threads
  */
 static void checkhipMemPoolTrimToMultiThreaded(hipStream_t stream, int N, int dev = 0) {
-  HIP_CHECK_THREAD(hipSetDevice(dev));
+  HIP_CHECK_THREAD(hipSetDevice(dev))
 
   streamMemAllocTest testObj(N, true);
   size_t byte_size = N * sizeof(int);
@@ -237,15 +237,15 @@ static void checkhipMemPoolTrimToMultiThreaded(hipStream_t stream, int N, int de
   pool_props.allocType = hipMemAllocationTypePinned;
   pool_props.location.id = dev;
   pool_props.location.type = hipMemLocationTypeDevice;
-  HIP_CHECK_THREAD(hipMemPoolCreate(&mem_pool, &pool_props));
+  HIP_CHECK_THREAD(hipMemPoolCreate(&mem_pool, &pool_props))
   uint64_t setThreshold = UINT64_MAX;
-  HIP_CHECK_THREAD(hipMemPoolSetAttribute(mem_pool, hipMemPoolAttrReleaseThreshold, &setThreshold));
+  HIP_CHECK_THREAD(hipMemPoolSetAttribute(mem_pool, hipMemPoolAttrReleaseThreshold, &setThreshold))
   testObj.useCommonMempool(mem_pool);
 
   for (int iter = LAUNCH_ITERATIONS; iter > 0; iter--) {
     // Set different min_bytes_to_hold for each iteration
     size_t min_bytes_to_hold = byte_size * 3 * iter;
-    HIP_CHECK_THREAD(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold));
+    HIP_CHECK_THREAD(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold))
 
     testObj.allocFromMempool(stream);
     testObj.transferToMempool(stream);
@@ -254,11 +254,11 @@ static void checkhipMemPoolTrimToMultiThreaded(hipStream_t stream, int N, int de
     testObj.freeDevBuf(stream);
 
     // Verify and validate
-    HIP_CHECK_THREAD(hipStreamSynchronize(stream));
+    HIP_CHECK_THREAD(hipStreamSynchronize(stream))
     REQUIRE_THREAD(true == testObj.validateResultThreadSafe());
   }
 
-  HIP_CHECK_THREAD(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK_THREAD(hipMemPoolDestroy(mem_pool))
   testObj.freeHostBuf();
 }
 
@@ -277,15 +277,15 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_Multithreaded) {
   constexpr int N = 1 << 10;
 
   int num_devices = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
 
   std::vector<std::thread> tests;
   std::vector<hipStream_t> streams(num_devices);
 
   // Initialize and create streams
   for (int idx = 0; idx < num_devices; idx++) {
-    HIP_CHECK(hipSetDevice(idx));
-    HIP_CHECK(hipStreamCreate(&streams[idx]));
+    HIP_CHECK(hipSetDevice(idx))
+    HIP_CHECK(hipStreamCreate(&streams[idx]))
   }
 
   // Spawn the test threads
@@ -300,8 +300,8 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_Multithreaded) {
 
   // Wait for thread and destroy stream
   for (int idx = 0; idx < num_devices; idx++) {
-    HIP_CHECK(hipSetDevice(idx));
-    HIP_CHECK(hipStreamDestroy(streams[idx]));
+    HIP_CHECK(hipSetDevice(idx))
+    HIP_CHECK(hipStreamDestroy(streams[idx]))
   }
 
   HIP_CHECK_THREAD_FINALIZE();

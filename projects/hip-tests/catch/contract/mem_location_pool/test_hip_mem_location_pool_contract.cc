@@ -12,8 +12,8 @@ namespace {
 bool MemoryPoolsSupported() {
   int device = 0;
   int supported = 0;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeMemoryPoolsSupported, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeMemoryPoolsSupported, device))
   return supported != 0;
 }
 
@@ -25,7 +25,7 @@ void SkipIfMemoryPoolsUnsupported() {
 
 hipMemLocation CurrentDeviceLocation() {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   hipMemLocation location{};
   location.type = hipMemLocationTypeDevice;
   location.id = device;
@@ -44,7 +44,7 @@ HIP_TEST_CASE(Contract_MemLocationPool_HipMemGetMemPool_Default_ReturnsPoolForDe
   // location and the pinned allocation type.
   hipMemLocation location = CurrentDeviceLocation();
   hipMemPool_t pool = nullptr;
-  HIP_CHECK(hipMemGetMemPool(&pool, &location, hipMemAllocationTypePinned));
+  HIP_CHECK(hipMemGetMemPool(&pool, &location, hipMemAllocationTypePinned))
 
   REQUIRE(pool != nullptr);
 #endif  // HT_NVIDIA && CUDA_VERSION < 13000
@@ -59,7 +59,7 @@ HIP_TEST_CASE(Contract_MemLocationPool_HipMemGetDefaultMemPool_CurrentDevice_Ret
 
   hipMemLocation location = CurrentDeviceLocation();
   hipMemPool_t default_pool = nullptr;
-  HIP_CHECK(hipMemGetDefaultMemPool(&default_pool, &location, hipMemAllocationTypePinned));
+  HIP_CHECK(hipMemGetDefaultMemPool(&default_pool, &location, hipMemAllocationTypePinned))
   REQUIRE(default_pool != nullptr);
 #endif  // HT_NVIDIA
 }
@@ -72,19 +72,19 @@ HIP_TEST_CASE(Contract_MemLocationPool_HipMemSetMemPool_Default_RoundTripsThroug
   SkipIfMemoryPoolsUnsupported();
 
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   hipMemLocation location = CurrentDeviceLocation();
 
   // Setting the device's default pool as the current pool for the location must
   // round-trip: a subsequent location query must report the same pool handle.
   hipMemPool_t default_pool = nullptr;
-  HIP_CHECK(hipDeviceGetDefaultMemPool(&default_pool, device));
+  HIP_CHECK(hipDeviceGetDefaultMemPool(&default_pool, device))
   REQUIRE(default_pool != nullptr);
 
-  HIP_CHECK(hipMemSetMemPool(&location, hipMemAllocationTypePinned, default_pool));
+  HIP_CHECK(hipMemSetMemPool(&location, hipMemAllocationTypePinned, default_pool))
 
   hipMemPool_t readback = nullptr;
-  HIP_CHECK(hipMemGetMemPool(&readback, &location, hipMemAllocationTypePinned));
+  HIP_CHECK(hipMemGetMemPool(&readback, &location, hipMemAllocationTypePinned))
   REQUIRE(readback == default_pool);
 #endif  // HT_NVIDIA && CUDA_VERSION < 13000
 }
@@ -97,14 +97,14 @@ HIP_TEST_CASE(Contract_MemLocationPool_HipMemGetAccess_Default_ReturnsFlagsForPo
   hipMemLocation location = CurrentDeviceLocation();
   hipStream_t stream = nullptr;
   void* pooled = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t alloc_status = hipMallocAsync(&pooled, 256, stream);
   if (alloc_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Stream-ordered allocation is not supported by this device/runtime path.");
   }
-  HIP_CHECK(alloc_status);
+  HIP_CHECK(alloc_status)
   // Free-and-drain on teardown: the async free is enqueued on the stream, then
   // the stream is synchronized so the free completes before the stream-destroy
   // action (registered earlier, so it runs after this one) tears the stream down.
@@ -112,14 +112,14 @@ HIP_TEST_CASE(Contract_MemLocationPool_HipMemGetAccess_Default_ReturnsFlagsForPo
     (void)hipFreeAsync(pooled, stream);
     (void)hipStreamSynchronize(stream);
   });
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   REQUIRE(pooled != nullptr);
 
   // Querying access for the owning device location must succeed and report one of
   // the defined protection flag values. The exact value is policy-dependent, so
   // only membership in the valid set is asserted.
   unsigned long long flags = 0xFFFFFFFFull;
-  HIP_CHECK(hipMemGetAccess(&flags, &location, pooled));
+  HIP_CHECK(hipMemGetAccess(&flags, &location, pooled))
   REQUIRE((flags == hipMemAccessFlagsProtNone || flags == hipMemAccessFlagsProtRead ||
            flags == hipMemAccessFlagsProtReadWrite));
 }

@@ -220,7 +220,7 @@ static hipSurfaceObject_t make_surface(hipArray_t array) {
   res_desc.resType = hipResourceTypeArray;
   res_desc.res.array.array = array;
   hipSurfaceObject_t surf = 0;
-  HIP_CHECK(hipCreateSurfaceObject(&surf, &res_desc));
+  HIP_CHECK(hipCreateSurfaceObject(&surf, &res_desc))
   return surf;
 }
 
@@ -253,32 +253,32 @@ HIP_TEST_CASE(Unit_GLHIPImageData_Positive_GLWrite_HIPRead_SolidColor) {
   hipGraphicsResource* resource = nullptr;
   HIP_CHECK(hipGraphicsGLRegisterImage(&resource, tex, GL_TEXTURE_2D,
                                        hipGraphicsRegisterFlagsSurfaceLoadStore));
-  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0));
+  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0))
 
   hipArray_t array = nullptr;
-  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, 0));
+  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, 0))
 
   hipSurfaceObject_t surf = make_surface(array);
 
   uint32_t* d_out = nullptr;
-  HIP_CHECK(hipMalloc(&d_out, kNumPixels * sizeof(uint32_t)));
-  HIP_CHECK(hipMemset(d_out, 0, kNumPixels * sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc(&d_out, kNumPixels * sizeof(uint32_t)))
+  HIP_CHECK(hipMemset(d_out, 0, kNumPixels * sizeof(uint32_t)))
 
   dim3 grid, block;
   dispatch2d(grid, block, kWidth, kHeight);
   kernel_read_surface<<<grid, block>>>(surf, d_out, kWidth, kHeight);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   std::vector<uint32_t> hip_pixels(kNumPixels, 0);
   HIP_CHECK(hipMemcpy(hip_pixels.data(), d_out,
                       kNumPixels * sizeof(uint32_t),
                       hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipDestroySurfaceObject(surf));
-  HIP_CHECK(hipFree(d_out));
-  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0));
-  HIP_CHECK(hipGraphicsUnregisterResource(resource));
+  HIP_CHECK(hipDestroySurfaceObject(surf))
+  HIP_CHECK(hipFree(d_out))
+  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0))
+  HIP_CHECK(hipGraphicsUnregisterResource(resource))
   glDeleteTextures(1, &tex);
 
   for (unsigned int i = 0; i < kNumPixels; ++i) {
@@ -310,32 +310,32 @@ HIP_TEST_CASE(Unit_GLHIPImageData_Positive_GLWrite_HIPRead_Gradient) {
   hipGraphicsResource* resource = nullptr;
   HIP_CHECK(hipGraphicsGLRegisterImage(&resource, tex, GL_TEXTURE_2D,
                                        hipGraphicsRegisterFlagsSurfaceLoadStore));
-  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0));
+  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0))
 
   hipArray_t array = nullptr;
-  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, 0));
+  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, 0))
 
   hipSurfaceObject_t surf = make_surface(array);
 
   uint32_t* d_out = nullptr;
-  HIP_CHECK(hipMalloc(&d_out, kNumPixels * sizeof(uint32_t)));
-  HIP_CHECK(hipMemset(d_out, 0, kNumPixels * sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc(&d_out, kNumPixels * sizeof(uint32_t)))
+  HIP_CHECK(hipMemset(d_out, 0, kNumPixels * sizeof(uint32_t)))
 
   dim3 grid, block;
   dispatch2d(grid, block, kWidth, kHeight);
   kernel_read_surface<<<grid, block>>>(surf, d_out, kWidth, kHeight);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   std::vector<uint32_t> hip_pixels(kNumPixels, 0);
   HIP_CHECK(hipMemcpy(hip_pixels.data(), d_out,
                       kNumPixels * sizeof(uint32_t),
                       hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipDestroySurfaceObject(surf));
-  HIP_CHECK(hipFree(d_out));
-  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0));
-  HIP_CHECK(hipGraphicsUnregisterResource(resource));
+  HIP_CHECK(hipDestroySurfaceObject(surf))
+  HIP_CHECK(hipFree(d_out))
+  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0))
+  HIP_CHECK(hipGraphicsUnregisterResource(resource))
   glDeleteTextures(1, &tex);
 
   for (unsigned int i = 0; i < kNumPixels; ++i) {
@@ -365,22 +365,22 @@ HIP_TEST_CASE(Unit_GLHIPImageData_Positive_HIPWrite_GLRead_SolidColor) {
   hipGraphicsResource* resource = nullptr;
   HIP_CHECK(hipGraphicsGLRegisterImage(&resource, tex, GL_TEXTURE_2D,
                                        hipGraphicsRegisterFlagsSurfaceLoadStore));
-  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0));
+  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0))
 
   hipArray_t array = nullptr;
-  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, 0));
+  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, 0))
 
   hipSurfaceObject_t surf = make_surface(array);
 
   dim3 grid, block;
   dispatch2d(grid, block, kWidth, kHeight);
   kernel_fill_surface<<<grid, block>>>(surf, R, G, B, A, kWidth, kHeight);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipDestroySurfaceObject(surf));
-  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0));
-  HIP_CHECK(hipGraphicsUnregisterResource(resource));
+  HIP_CHECK(hipDestroySurfaceObject(surf))
+  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0))
+  HIP_CHECK(hipGraphicsUnregisterResource(resource))
 
   std::vector<uint32_t> gl_pixels = read_gl_texture(tex, kWidth, kHeight);
   glDeleteTextures(1, &tex);
@@ -405,10 +405,10 @@ HIP_TEST_CASE(Unit_GLHIPImageData_Positive_HIPWrite_GLRead_UniquePerPixel) {
   hipGraphicsResource* resource = nullptr;
   HIP_CHECK(hipGraphicsGLRegisterImage(&resource, tex, GL_TEXTURE_2D,
                                        hipGraphicsRegisterFlagsSurfaceLoadStore));
-  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0));
+  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0))
 
   hipArray_t array = nullptr;
-  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, 0));
+  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, 0))
 
   std::vector<uint32_t> expected(kNumPixels);
   for (unsigned int y = 0; y < kHeight; ++y) {
@@ -425,12 +425,12 @@ HIP_TEST_CASE(Unit_GLHIPImageData_Positive_HIPWrite_GLRead_UniquePerPixel) {
   dim3 grid, block;
   dispatch2d(grid, block, kWidth, kHeight);
   kernel_write_unique_surface<<<grid, block>>>(surf, kWidth, kHeight);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipDestroySurfaceObject(surf));
-  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0));
-  HIP_CHECK(hipGraphicsUnregisterResource(resource));
+  HIP_CHECK(hipDestroySurfaceObject(surf))
+  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0))
+  HIP_CHECK(hipGraphicsUnregisterResource(resource))
 
   std::vector<uint32_t> gl_pixels = read_gl_texture(tex, kWidth, kHeight);
   glDeleteTextures(1, &tex);
@@ -468,22 +468,22 @@ HIP_TEST_CASE(Unit_GLHIPImageData_Positive_RoundTrip_InvertChannels) {
   hipGraphicsResource* resource = nullptr;
   HIP_CHECK(hipGraphicsGLRegisterImage(&resource, tex, GL_TEXTURE_2D,
                                        hipGraphicsRegisterFlagsSurfaceLoadStore));
-  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0));
+  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0))
 
   hipArray_t array = nullptr;
-  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, 0));
+  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, 0))
 
   hipSurfaceObject_t surf = make_surface(array);
 
   dim3 grid, block;
   dispatch2d(grid, block, kWidth, kHeight);
   kernel_invert_surface<<<grid, block>>>(surf, kWidth, kHeight);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipDestroySurfaceObject(surf));
-  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0));
-  HIP_CHECK(hipGraphicsUnregisterResource(resource));
+  HIP_CHECK(hipDestroySurfaceObject(surf))
+  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0))
+  HIP_CHECK(hipGraphicsUnregisterResource(resource))
 
   std::vector<uint32_t> gl_pixels = read_gl_texture(tex, kWidth, kHeight);
   glDeleteTextures(1, &tex);
@@ -512,22 +512,22 @@ HIP_TEST_CASE(Unit_GLHIPImageData_Positive_RoundTrip_CoordTransform) {
   hipGraphicsResource* resource = nullptr;
   HIP_CHECK(hipGraphicsGLRegisterImage(&resource, tex, GL_TEXTURE_2D,
                                        hipGraphicsRegisterFlagsSurfaceLoadStore));
-  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0));
+  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0))
 
   hipArray_t array = nullptr;
-  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, 0));
+  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, 0))
 
   hipSurfaceObject_t surf = make_surface(array);
 
   dim3 grid, block;
   dispatch2d(grid, block, kWidth, kHeight);
   kernel_transform_surface<<<grid, block>>>(surf, kWidth, kHeight);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipDestroySurfaceObject(surf));
-  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0));
-  HIP_CHECK(hipGraphicsUnregisterResource(resource));
+  HIP_CHECK(hipDestroySurfaceObject(surf))
+  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0))
+  HIP_CHECK(hipGraphicsUnregisterResource(resource))
 
   std::vector<uint32_t> gl_pixels = read_gl_texture(tex, kWidth, kHeight);
   glDeleteTextures(1, &tex);
@@ -588,37 +588,37 @@ HIP_TEST_CASE(Unit_GLHIPImageData_Positive_Mipmap_GLWrite_HIPRead_PerLevel) {
     unsigned int w = mip_dim(kWidth, lvl);
     unsigned int h = mip_dim(kHeight, lvl);
 
-    HIP_CHECK(hipGraphicsMapResources(1, &resource, 0));
+    HIP_CHECK(hipGraphicsMapResources(1, &resource, 0))
 
     hipArray_t array = nullptr;
-    HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, lvl));
+    HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, lvl))
 
     hipSurfaceObject_t surf = make_surface(array);
 
     uint32_t* d_out = nullptr;
-    HIP_CHECK(hipMalloc(&d_out, w * h * sizeof(uint32_t)));
-    HIP_CHECK(hipMemset(d_out, 0, w * h * sizeof(uint32_t)));
+    HIP_CHECK(hipMalloc(&d_out, w * h * sizeof(uint32_t)))
+    HIP_CHECK(hipMemset(d_out, 0, w * h * sizeof(uint32_t)))
 
     dim3 grid, block;
     dispatch2d(grid, block, w, h);
     kernel_read_surface<<<grid, block>>>(surf, d_out, w, h);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipDeviceSynchronize())
 
     std::vector<uint32_t> hip_pixels(w * h, 0);
     HIP_CHECK(hipMemcpy(hip_pixels.data(), d_out,
                         w * h * sizeof(uint32_t), hipMemcpyDeviceToHost));
 
-    HIP_CHECK(hipDestroySurfaceObject(surf));
-    HIP_CHECK(hipFree(d_out));
-    HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0));
+    HIP_CHECK(hipDestroySurfaceObject(surf))
+    HIP_CHECK(hipFree(d_out))
+    HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0))
 
     for (unsigned int i = 0; i < w * h; ++i) {
       REQUIRE(hip_pixels[i] == level_color[lvl]);
     }
   }
 
-  HIP_CHECK(hipGraphicsUnregisterResource(resource));
+  HIP_CHECK(hipGraphicsUnregisterResource(resource))
   glDeleteTextures(1, &tex);
 }
 
@@ -655,7 +655,7 @@ HIP_TEST_CASE(Unit_GLHIPImageData_Positive_Mipmap_HIPWrite_GLRead_HigherLevels) 
   hipGraphicsResource* resource = nullptr;
   HIP_CHECK(hipGraphicsGLRegisterImage(&resource, tex, GL_TEXTURE_2D,
                                        hipGraphicsRegisterFlagsSurfaceLoadStore));
-  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0));
+  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0))
 
   /* Write each non-base mip level from HIP and verify via GL. */
   for (int lvl = 1; lvl < kMipLevels; ++lvl) {
@@ -663,7 +663,7 @@ HIP_TEST_CASE(Unit_GLHIPImageData_Positive_Mipmap_HIPWrite_GLRead_HigherLevels) 
     h = mip_dim(kHeight, lvl);
 
     hipArray_t array = nullptr;
-    HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, lvl));
+    HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0, lvl))
 
     hipSurfaceObject_t surf = make_surface(array);
 
@@ -675,12 +675,12 @@ HIP_TEST_CASE(Unit_GLHIPImageData_Positive_Mipmap_HIPWrite_GLRead_HigherLevels) 
     dim3 grid, block;
     dispatch2d(grid, block, w, h);
     kernel_fill_surface<<<grid, block>>>(surf, r, g, b, a, w, h);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipDestroySurfaceObject(surf));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipDestroySurfaceObject(surf))
   }
 
-  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0));
+  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0))
 
   /* Verify */
   for (int lvl = 0; lvl < kMipLevels; ++lvl) {
@@ -693,7 +693,7 @@ HIP_TEST_CASE(Unit_GLHIPImageData_Positive_Mipmap_HIPWrite_GLRead_HigherLevels) 
     }
   }
 
-  HIP_CHECK(hipGraphicsUnregisterResource(resource));
+  HIP_CHECK(hipGraphicsUnregisterResource(resource))
   glDeleteTextures(1, &tex);
 }
 
@@ -735,7 +735,7 @@ HIP_TEST_CASE(Unit_GLHIPImageData_Positive_Mipmap_RoundTrip_InvertLevel2) {
   hipGraphicsResource* resource = nullptr;
   HIP_CHECK(hipGraphicsGLRegisterImage(&resource, tex, GL_TEXTURE_2D,
                                        hipGraphicsRegisterFlagsSurfaceLoadStore));
-  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0));
+  HIP_CHECK(hipGraphicsMapResources(1, &resource, 0))
 
   hipArray_t array = nullptr;
   HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, resource, 0,
@@ -746,12 +746,12 @@ HIP_TEST_CASE(Unit_GLHIPImageData_Positive_Mipmap_RoundTrip_InvertLevel2) {
   dim3 grid, block;
   dispatch2d(grid, block, w, h);
   kernel_invert_surface<<<grid, block>>>(surf, w, h);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipDestroySurfaceObject(surf));
-  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0));
-  HIP_CHECK(hipGraphicsUnregisterResource(resource));
+  HIP_CHECK(hipDestroySurfaceObject(surf))
+  HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0))
+  HIP_CHECK(hipGraphicsUnregisterResource(resource))
 
   std::vector<uint32_t> gl_mip1 = read_gl_mip_level(tex, kTargetLevel, w, h);
   glDeleteTextures(1, &tex);

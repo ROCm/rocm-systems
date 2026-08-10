@@ -58,8 +58,8 @@ __global__ void DoublerFunctorKernel(DoublerFunctor doubler_, bool* deviceResult
 void HipFunctorTests::TestForSimpleClassFunctor(void) {
   DoublerFunctor doubler;
   bool *deviceResults, *hostResults;
-  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)));
-  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)));
+  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)))
+  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)))
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) {
     // initialize to false, will be set to
     // true if the functor is called in device code
@@ -75,8 +75,8 @@ void HipFunctorTests::TestForSimpleClassFunctor(void) {
   HIP_CHECK(
       hipMemcpy(hostResults, deviceResults, BLOCK_DIM_SIZE * sizeof(bool), hipMemcpyDeviceToHost));
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) REQUIRE(hostResults[k] == true);
-  HIP_CHECK(hipHostFree(hostResults));
-  HIP_CHECK(hipFree(deviceResults));
+  HIP_CHECK(hipHostFree(hostResults))
+  HIP_CHECK(hipFree(deviceResults))
 }
 
 // pointer functor passed to kernel
@@ -89,8 +89,8 @@ __global__ void PtrDoublerFunctorKernel(DoublerFunctor* doubler_, bool* deviceRe
 void HipFunctorTests::TestForClassObjPtrFunctor(void) {
   DoublerFunctor* ptrdoubler = new DoublerFunctor[sizeof(int)];
   bool *deviceResults, *hostResults;
-  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)));
-  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)));
+  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)))
+  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)))
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) {
     // initialize to false, will be set to
     // true if the functor is called in device code
@@ -106,8 +106,8 @@ void HipFunctorTests::TestForClassObjPtrFunctor(void) {
   HIP_CHECK(
       hipMemcpy(hostResults, deviceResults, BLOCK_DIM_SIZE * sizeof(bool), hipMemcpyDeviceToHost));
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) REQUIRE(hostResults[k] == true);
-  HIP_CHECK(hipHostFree(hostResults));
-  HIP_CHECK(hipFree(deviceResults));
+  HIP_CHECK(hipHostFree(hostResults))
+  HIP_CHECK(hipFree(deviceResults))
   delete[] ptrdoubler;
 }
 
@@ -129,8 +129,8 @@ __global__ void TemplateFunctorKernel(compare compare_, bool* deviceResult) {
 void HipFunctorTests::TestForClassTemplateFunctor(void) {
   compare comparefunctor;
   bool *deviceResults, *hostResults;
-  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)));
-  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)));
+  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)))
+  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)))
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) {
     // initialize to false, will be set to
     // true if the functor is called in device code
@@ -146,8 +146,8 @@ void HipFunctorTests::TestForClassTemplateFunctor(void) {
   HIP_CHECK(
       hipMemcpy(hostResults, deviceResults, BLOCK_DIM_SIZE * sizeof(bool), hipMemcpyDeviceToHost));
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) REQUIRE(hostResults[k] == true);
-  HIP_CHECK(hipHostFree(hostResults));
-  HIP_CHECK(hipFree(deviceResults));
+  HIP_CHECK(hipHostFree(hostResults))
+  HIP_CHECK(hipFree(deviceResults))
 }
 
 
@@ -169,8 +169,8 @@ __global__ void DoublerCalculatorFunctorKernel(DoublerCalculator doubler_, bool*
 void HipFunctorTests::TestForFunctorContainInClassObj(void) {
   DoublerCalculator Doubler;
   bool *deviceResults, *hostResults;
-  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)));
-  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)));
+  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)))
+  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)))
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) {
     // initialize to false, will be set to
     // true if the functor is called in device code
@@ -190,8 +190,8 @@ void HipFunctorTests::TestForFunctorContainInClassObj(void) {
   HIP_CHECK(
       hipMemcpy(hostResults, deviceResults, BLOCK_DIM_SIZE * sizeof(bool), hipMemcpyDeviceToHost));
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) REQUIRE(hostResults[k] == true);
-  HIP_CHECK(hipHostFree(hostResults));
-  HIP_CHECK(hipFree(deviceResults));
+  HIP_CHECK(hipHostFree(hostResults))
+  HIP_CHECK(hipFree(deviceResults))
 }
 
 // Struct functor tests
@@ -213,8 +213,8 @@ __global__ void structDoublerFunctorKernel(sDoublerFunctor doubler_, bool* devic
 void HipFunctorTests::TestForSimpleStructFunctor(void) {
   sDoublerFunctor doubler;
   bool *deviceResults, *hostResults;
-  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)));
-  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)));
+  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)))
+  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)))
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) {
     // initialize to false, will be set to
     // true if the functor is called in device code
@@ -230,8 +230,8 @@ void HipFunctorTests::TestForSimpleStructFunctor(void) {
   HIP_CHECK(
       hipMemcpy(hostResults, deviceResults, BLOCK_DIM_SIZE * sizeof(bool), hipMemcpyDeviceToHost));
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) REQUIRE(hostResults[k] == true);
-  HIP_CHECK(hipHostFree(hostResults));
-  HIP_CHECK(hipFree(deviceResults));
+  HIP_CHECK(hipHostFree(hostResults))
+  HIP_CHECK(hipFree(deviceResults))
 }
 
 // ptr functor passed to kernel
@@ -244,8 +244,8 @@ __global__ void structPtrDoublerFunctorKernel(sDoublerFunctor* doubler_, bool* d
 void HipFunctorTests::TestForStructObjPtrFunctor(void) {
   sDoublerFunctor* ptrdoubler = new sDoublerFunctor[sizeof(int)];
   bool *deviceResults, *hostResults;
-  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)));
-  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)));
+  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)))
+  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)))
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) {
     // initialize to false, will be set to
     // true if the functor is called in device code
@@ -261,8 +261,8 @@ void HipFunctorTests::TestForStructObjPtrFunctor(void) {
   HIP_CHECK(
       hipMemcpy(hostResults, deviceResults, BLOCK_DIM_SIZE * sizeof(bool), hipMemcpyDeviceToHost));
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) REQUIRE(hostResults[k] == true);
-  HIP_CHECK(hipHostFree(hostResults));
-  HIP_CHECK(hipFree(deviceResults));
+  HIP_CHECK(hipHostFree(hostResults))
+  HIP_CHECK(hipFree(deviceResults))
   delete[] ptrdoubler;
 }
 
@@ -284,8 +284,8 @@ __global__ void structTemplateFunctorKernel(sCompare compare_, bool* deviceResul
 void HipFunctorTests::TestForStructTemplateFunctor(void) {
   sCompare comparefunctor;
   bool *deviceResults, *hostResults;
-  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)));
-  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)));
+  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)))
+  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)))
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) {
     // initialize to false, will be set to
     // true if the functor is called in device code
@@ -303,8 +303,8 @@ void HipFunctorTests::TestForStructTemplateFunctor(void) {
   HIP_CHECK(
       hipMemcpy(hostResults, deviceResults, BLOCK_DIM_SIZE * sizeof(bool), hipMemcpyDeviceToHost));
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) REQUIRE(hostResults[k] == true);
-  HIP_CHECK(hipHostFree(hostResults));
-  HIP_CHECK(hipFree(deviceResults));
+  HIP_CHECK(hipHostFree(hostResults))
+  HIP_CHECK(hipFree(deviceResults))
 }
 
 // Doubler calculator struct
@@ -326,8 +326,8 @@ __global__ void DoublerCalculatorFunctorKernel(sDoublerCalculator doubler_, bool
 void HipFunctorTests::TestForFunctorContainInStructObj(void) {
   sDoublerCalculator Doubler;
   bool *deviceResults, *hostResults;
-  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)));
-  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)));
+  HIP_CHECK(hipMalloc(&deviceResults, BLOCK_DIM_SIZE * sizeof(bool)))
+  HIP_CHECK(hipHostMalloc(&hostResults, BLOCK_DIM_SIZE * sizeof(bool)))
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) {
     // initialize to false, will be set to
     // true if the functor is called in device code
@@ -348,8 +348,8 @@ void HipFunctorTests::TestForFunctorContainInStructObj(void) {
   HIP_CHECK(
       hipMemcpy(hostResults, deviceResults, BLOCK_DIM_SIZE * sizeof(bool), hipMemcpyDeviceToHost));
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) REQUIRE(hostResults[k] == true);
-  HIP_CHECK(hipHostFree(hostResults));
-  HIP_CHECK(hipFree(deviceResults));
+  HIP_CHECK(hipHostFree(hostResults))
+  HIP_CHECK(hipFree(deviceResults))
 }
 
 /**

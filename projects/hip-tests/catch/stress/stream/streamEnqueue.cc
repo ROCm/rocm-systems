@@ -45,10 +45,10 @@ HIP_TEST_CASE(Stress_StreamEnqueue_DifferentThreads) {
   std::vector<AtomicWrap<unsigned long long>> hostData(hwThreads, 0);
 
   unsigned long long* dPtr{nullptr};
-  HIP_CHECK(hipMalloc(&dPtr, sizeof(unsigned long long) * hwThreads));
+  HIP_CHECK(hipMalloc(&dPtr, sizeof(unsigned long long) * hwThreads))
   REQUIRE(dPtr != nullptr);
 
-  HIP_CHECK(hipMemset(dPtr, 0, sizeof(unsigned long long) * hwThreads));
+  HIP_CHECK(hipMemset(dPtr, 0, sizeof(unsigned long long) * hwThreads))
 
   std::random_device device;
   std::mt19937 engine(device());
@@ -72,7 +72,7 @@ HIP_TEST_CASE(Stress_StreamEnqueue_DifferentThreads) {
   };
 
   hipStream_t stream{};
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   std::vector<std::thread> threadPool{};
   threadPool.reserve(hwThreads);
 
@@ -86,13 +86,13 @@ HIP_TEST_CASE(Stress_StreamEnqueue_DifferentThreads) {
     i.join();
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 
   auto hPtr = std::make_unique<unsigned long long[]>(hwThreads);
   HIP_CHECK(
       hipMemcpy(hPtr.get(), dPtr, sizeof(unsigned long long) * hwThreads, hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipFree(dPtr));
+  HIP_CHECK(hipFree(dPtr))
 
   // Validate that CPU and GPU has the same results
   for (size_t i = 0; i < hwThreads; i++) {
@@ -110,7 +110,7 @@ __global__ void doOperation(int* dPtr, int val) {
 // Same device stream operate on same memory
 HIP_TEST_CASE(Stress_StreamEnqueue_DifferentThreads_MultiGPU) {
   int deviceCount{0};
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   REQUIRE(deviceCount > 0);
 
   // Skip the test if devices less than 2
@@ -131,18 +131,18 @@ HIP_TEST_CASE(Stress_StreamEnqueue_DifferentThreads_MultiGPU) {
   constexpr size_t size = 1024;
 
   for (int i = 0; i < deviceCount; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
 
     for (size_t j = 0; j < streamPerGPU; j++) {
       hipStream_t stream{nullptr};
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
       REQUIRE(stream != nullptr);
       streamPool.push_back(stream);
 
       int* dPtr{nullptr};
-      HIP_CHECK(hipMalloc(&dPtr, sizeof(int) * size));
+      HIP_CHECK(hipMalloc(&dPtr, sizeof(int) * size))
       REQUIRE(dPtr != nullptr);
-      HIP_CHECK(hipMemset(dPtr, 0, sizeof(int) * size));
+      HIP_CHECK(hipMemset(dPtr, 0, sizeof(int) * size))
       // All streams work on exclusive memory
       streamToDeviceMemory[stream] = dPtr;
 
@@ -205,12 +205,12 @@ HIP_TEST_CASE(Stress_StreamEnqueue_DifferentThreads_MultiGPU) {
 
   // Sync and check results
   for (auto& i : streamPool) {
-    HIP_CHECK(hipStreamSynchronize(i));
+    HIP_CHECK(hipStreamSynchronize(i))
     auto dResult = std::make_unique<int[]>(size);
     HIP_CHECK(hipMemcpy(dResult.get(), streamToDeviceMemory[i], sizeof(int) * size,
                         hipMemcpyDeviceToHost));
-    HIP_CHECK(hipFree(streamToDeviceMemory[i]));
-    HIP_CHECK(hipStreamDestroy(i));
+    HIP_CHECK(hipFree(streamToDeviceMemory[i]))
+    HIP_CHECK(hipStreamDestroy(i))
     auto res = streamToHostMemory[i].data.load();
     INFO("Matching CPU: " << res << " GPU: " << dResult[0] << " Dev Ptr: "
                           << streamToDeviceMemory[i] << " on Device: " << streamToDeviceIndex[i]);

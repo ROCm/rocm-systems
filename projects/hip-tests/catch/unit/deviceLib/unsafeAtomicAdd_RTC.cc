@@ -49,7 +49,7 @@ __global__ void AtomicCheck(double* Ad, double *result) {
 HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   std::string gfxName(props.gcnArchName);
 
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
@@ -86,8 +86,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float
 
     hipModule_t module;
     hipFunction_t f_kernel;
-    HIP_CHECK(hipModuleLoadData(&module, code.data()));
-    HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
+    HIP_CHECK(hipModuleLoadData(&module, code.data()))
+    HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"))
     if (props.canMapHostMemory != 1) {
       HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
@@ -98,8 +98,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float
       HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType),
                               hipHostMallocCoherent));
       A_h[0] = INITIAL_VAL;
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0))
       struct {
         TestType* p;
         TestType* result;
@@ -107,8 +107,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float
       auto size = sizeof(args_f);
       void* config_d[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args_f, HIP_LAUNCH_PARAM_BUFFER_SIZE,
                           &size, HIP_LAUNCH_PARAM_END};
-      HIP_CHECK(hipModuleLaunchKernel(f_kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config_d));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipModuleLaunchKernel(f_kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config_d))
+      HIP_CHECK(hipDeviceSynchronize())
       if ((gfxName == "gfx90a" || gfxName.find("gfx90a:")) == 0) {
         REQUIRE(A_h[0] == INITIAL_VAL);
         REQUIRE(*result == 0);
@@ -116,10 +116,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float
         REQUIRE(A_h[0] == INITIAL_VAL + INCREMENT_VAL);
         REQUIRE(*result == INITIAL_VAL);
       }
-      HIP_CHECK(hipHostFree(A_h));
-      HIP_CHECK(hipHostFree(result));
+      HIP_CHECK(hipHostFree(A_h))
+      HIP_CHECK(hipHostFree(result))
     }
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   } else {
     HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
@@ -137,7 +137,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float
 HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   std::string gfxName(props.gcnArchName);
 
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
@@ -175,8 +175,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, 
 
     hipModule_t module;
     hipFunction_t f_kernel;
-    HIP_CHECK(hipModuleLoadData(&module, code.data()));
-    HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
+    HIP_CHECK(hipModuleLoadData(&module, code.data()))
+    HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"))
 
     if (props.canMapHostMemory != 1) {
       HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
@@ -188,8 +188,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, 
       HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType),
                               hipHostMallocCoherent));
       A_h[0] = INITIAL_VAL;
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0))
       struct {
         TestType* p;
         TestType* result;
@@ -197,8 +197,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, 
       auto size = sizeof(args_f);
       void* config_d[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args_f, HIP_LAUNCH_PARAM_BUFFER_SIZE,
                           &size, HIP_LAUNCH_PARAM_END};
-      HIP_CHECK(hipModuleLaunchKernel(f_kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config_d));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipModuleLaunchKernel(f_kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config_d))
+      HIP_CHECK(hipDeviceSynchronize())
       if ((gfxName == "gfx90a" || gfxName.find("gfx90a:")) == 0) {
         REQUIRE(A_h[0] == INITIAL_VAL);
         REQUIRE(*result == 0);
@@ -206,10 +206,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, 
         REQUIRE(A_h[0] == INITIAL_VAL + INCREMENT_VAL);
         REQUIRE(*result == INITIAL_VAL);
       }
-      HIP_CHECK(hipHostFree(A_h));
-      HIP_CHECK(hipHostFree(result));
+      HIP_CHECK(hipHostFree(A_h))
+      HIP_CHECK(hipHostFree(result))
     }
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   } else {
     HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
@@ -224,7 +224,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, 
 HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   std::string gfxName(props.gcnArchName);
 
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
@@ -262,8 +262,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, doubl
 
     hipModule_t module;
     hipFunction_t f_kernel;
-    HIP_CHECK(hipModuleLoadData(&module, code.data()));
-    HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
+    HIP_CHECK(hipModuleLoadData(&module, code.data()))
+    HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"))
 
     if (props.canMapHostMemory != 1) {
       HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
@@ -275,8 +275,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, doubl
       HIP_CHECK(
           hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(float), hipHostMallocCoherent));
       A_h[0] = INITIAL_VAL;
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0))
       struct {
         TestType* p;
         TestType* result;
@@ -284,8 +284,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, doubl
       auto size = sizeof(args_f);
       void* config_d[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args_f, HIP_LAUNCH_PARAM_BUFFER_SIZE,
                           &size, HIP_LAUNCH_PARAM_END};
-      HIP_CHECK(hipModuleLaunchKernel(f_kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config_d));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipModuleLaunchKernel(f_kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config_d))
+      HIP_CHECK(hipDeviceSynchronize())
       if ((gfxName == "gfx90a" || gfxName.find("gfx90a:")) == 0) {
         REQUIRE(A_h[0] == INITIAL_VAL);
         REQUIRE(*result == 0);
@@ -293,10 +293,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, doubl
         REQUIRE(A_h[0] == INITIAL_VAL + INCREMENT_VAL);
         REQUIRE(*result == INITIAL_VAL);
       }
-      HIP_CHECK(hipHostFree(A_h));
-      HIP_CHECK(hipHostFree(result));
+      HIP_CHECK(hipHostFree(A_h))
+      HIP_CHECK(hipHostFree(result))
     }
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   } else {
     HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
@@ -310,7 +310,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, doubl
 HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   std::string gfxName(props.gcnArchName);
 
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
@@ -348,8 +348,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, fl
 
     hipModule_t module;
     hipFunction_t f_kernel;
-    HIP_CHECK(hipModuleLoadData(&module, code.data()));
-    HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
+    HIP_CHECK(hipModuleLoadData(&module, code.data()))
+    HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"))
     if (props.canMapHostMemory != 1) {
       HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
@@ -357,10 +357,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, fl
       TestType *A_d, *result_d;
       HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), sizeof(TestType),
                               hipHostMallocNonCoherent));
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType)));
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType)))
       A_h[0] = INITIAL_VAL;
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0))
       struct {
         TestType* p;
         TestType* result;
@@ -368,14 +368,14 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, fl
       auto size = sizeof(args_f);
       void* config_d[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args_f, HIP_LAUNCH_PARAM_BUFFER_SIZE,
                           &size, HIP_LAUNCH_PARAM_END};
-      HIP_CHECK(hipModuleLaunchKernel(f_kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config_d));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipModuleLaunchKernel(f_kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config_d))
+      HIP_CHECK(hipDeviceSynchronize())
       REQUIRE(A_h[0] == INITIAL_VAL + INCREMENT_VAL);
       REQUIRE(*result == INITIAL_VAL);
-      HIP_CHECK(hipHostFree(A_h));
-      HIP_CHECK(hipHostFree(result));
+      HIP_CHECK(hipHostFree(A_h))
+      HIP_CHECK(hipHostFree(result))
     }
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   } else {
     HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
@@ -390,7 +390,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, fl
 HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   std::string gfxName(props.gcnArchName);
 
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
@@ -428,8 +428,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, floa
 
     hipModule_t module;
     hipFunction_t f_kernel;
-    HIP_CHECK(hipModuleLoadData(&module, code.data()));
-    HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
+    HIP_CHECK(hipModuleLoadData(&module, code.data()))
+    HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"))
 
     if (props.canMapHostMemory != 1) {
       HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
@@ -438,10 +438,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, floa
       TestType *A_d, *result_d;
       HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), sizeof(TestType),
                               hipHostMallocNonCoherent));
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType)));
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType)))
       A_h[0] = INITIAL_VAL;
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0))
       struct {
         TestType* p;
         TestType* result;
@@ -449,14 +449,14 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, floa
       auto size = sizeof(args_f);
       void* config_d[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args_f, HIP_LAUNCH_PARAM_BUFFER_SIZE,
                           &size, HIP_LAUNCH_PARAM_END};
-      HIP_CHECK(hipModuleLaunchKernel(f_kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config_d));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipModuleLaunchKernel(f_kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config_d))
+      HIP_CHECK(hipDeviceSynchronize())
       REQUIRE(A_h[0] == INITIAL_VAL + INCREMENT_VAL);
       REQUIRE(*result == INITIAL_VAL);
-      HIP_CHECK(hipHostFree(A_h));
-      HIP_CHECK(hipHostFree(result));
+      HIP_CHECK(hipHostFree(A_h))
+      HIP_CHECK(hipHostFree(result))
     }
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   } else {
     HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
@@ -471,7 +471,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, floa
 HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC, float, double) {
   int device = 0;
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   std::string gfxName(props.gcnArchName);
 
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
@@ -509,8 +509,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC, float, double) {
 
     hipModule_t module;
     hipFunction_t f_kernel;
-    HIP_CHECK(hipModuleLoadData(&module, code.data()));
-    HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
+    HIP_CHECK(hipModuleLoadData(&module, code.data()))
+    HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"))
 
     if (props.canMapHostMemory != 1) {
       HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
@@ -519,10 +519,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC, float, double) {
       TestType *A_d, *result_d;
       HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), sizeof(TestType),
                               hipHostMallocNonCoherent));
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType)));
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType)))
       A_h[0] = INITIAL_VAL;
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0))
       struct {
         TestType* p;
         TestType* result;
@@ -530,14 +530,14 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC, float, double) {
       auto size = sizeof(args_f);
       void* config_d[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args_f, HIP_LAUNCH_PARAM_BUFFER_SIZE,
                           &size, HIP_LAUNCH_PARAM_END};
-      HIP_CHECK(hipModuleLaunchKernel(f_kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config_d));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipModuleLaunchKernel(f_kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config_d))
+      HIP_CHECK(hipDeviceSynchronize())
       REQUIRE(A_h[0] == INITIAL_VAL + INCREMENT_VAL);
       REQUIRE(*result == INITIAL_VAL);
-      HIP_CHECK(hipHostFree(A_h));
-      HIP_CHECK(hipHostFree(result));
+      HIP_CHECK(hipHostFree(A_h))
+      HIP_CHECK(hipHostFree(result))
     }
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   } else {
     HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }

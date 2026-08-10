@@ -30,7 +30,7 @@ HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_Functional) {
   hipGraphNode_t memsetNode{}, emptyNode{};
   std::vector<hipGraphNode_t> dependencies;
 
-  HIP_CHECK(hipMalloc(&pOutBuff_d, size));
+  HIP_CHECK(hipMalloc(&pOutBuff_d, size))
   hipMemsetParams memsetParams{};
   memsetParams.dst = reinterpret_cast<void*>(pOutBuff_d);
   memsetParams.value = 0;
@@ -38,16 +38,16 @@ HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_Functional) {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = size * sizeof(char);
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
   dependencies.push_back(memsetNode);
 
   // Create emptyNode and add it to graph with dependency
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, dependencies.data(), dependencies.size()));
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, dependencies.data(), dependencies.size()))
 
   REQUIRE(emptyNode != nullptr);
-  HIP_CHECK(hipFree(pOutBuff_d));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(pOutBuff_d))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -60,7 +60,7 @@ HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_NegTest) {
   hipGraphNode_t memsetNode{}, emptyNode{};
   std::vector<hipGraphNode_t> dependencies;
 
-  HIP_CHECK(hipMalloc(&pOutBuff_d, size));
+  HIP_CHECK(hipMalloc(&pOutBuff_d, size))
   hipMemsetParams memsetParams{};
   memsetParams.dst = reinterpret_cast<void*>(pOutBuff_d);
   memsetParams.value = 0;
@@ -68,8 +68,8 @@ HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_NegTest) {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = size * sizeof(char);
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
   dependencies.push_back(memsetNode);
   // pGraphNode is nullptr
   SECTION("Null Empty Graph Node") {
@@ -87,8 +87,8 @@ HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_NegTest) {
             hipGraphAddEmptyNode(&emptyNode, graph, nullptr, dependencies.size()));
   }
 
-  HIP_CHECK(hipFree(pOutBuff_d));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(pOutBuff_d))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 // Function to fill input data
@@ -118,7 +118,7 @@ HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_BarrierFunc) {
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, size);
   hipGraph_t graph;
   std::vector<hipGraphNode_t> nodeDependencies;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   int *inputVec_d1{nullptr}, *inputVec_h1{nullptr}, *outputVec_h1{nullptr}, *outputVec_d1{nullptr};
   int *inputVec_d2{nullptr}, *inputVec_h2{nullptr}, *outputVec_h2{nullptr}, *outputVec_d2{nullptr};
   int *inputVec_d3{nullptr}, *inputVec_h3{nullptr}, *outputVec_h3{nullptr}, *outputVec_d3{nullptr};
@@ -205,19 +205,19 @@ HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_BarrierFunc) {
   // Create executable graph
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec{nullptr};
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   // Execute graph
   for (int iter = 0; iter < TEST_LOOP_SIZE; iter++) {
     fillRandInpData(inputVec_h1, inputVec_h2, inputVec_h3, size);
-    HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-    HIP_CHECK(hipStreamSynchronize(streamForGraph));
+    HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+    HIP_CHECK(hipStreamSynchronize(streamForGraph))
     validateOutData(inputVec_h1, outputVec_h1, size);
     validateOutData(inputVec_h2, outputVec_h2, size);
     validateOutData(inputVec_h3, outputVec_h3, size);
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
   // Free
   HipTest::freeArrays<int>(inputVec_d1, outputVec_d1, nullptr, inputVec_h1, outputVec_h1, nullptr,
                            false);
@@ -225,5 +225,5 @@ HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_BarrierFunc) {
                            false);
   HipTest::freeArrays<int>(inputVec_d3, outputVec_d3, nullptr, inputVec_h3, outputVec_h3, nullptr,
                            false);
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }

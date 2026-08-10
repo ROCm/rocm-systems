@@ -23,7 +23,7 @@ HIP_TEST_CASE(Unit_hipMemcpyAsync_Positive_Basic) {
 
 HIP_TEST_CASE(Unit_hipMemcpyAsync_Positive_Synchronization_Behavior) {
   using namespace std::placeholders;
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   // This behavior differs on NVIDIA and AMD, on AMD the hipMemcpy calls is synchronous with
   // respect to the host
@@ -128,7 +128,7 @@ HIP_TEST_CASE(Unit_hipMemcpyAsync_Negative_Parameters) {
 
 HIP_TEST_CASE(Unit_hipMemcpyAsync_Capture) {
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   LinearAllocGuard<int> src_alloc(LinearAllocs::hipMalloc, kPageSize);
   LinearAllocGuard<int> dst_alloc(LinearAllocs::hipMalloc, kPageSize);
@@ -139,5 +139,5 @@ HIP_TEST_CASE(Unit_hipMemcpyAsync_Capture) {
       hipMemcpyAsync(dst_alloc.ptr(), src_alloc.ptr(), kPageSize, hipMemcpyDeviceToDevice, stream));
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }

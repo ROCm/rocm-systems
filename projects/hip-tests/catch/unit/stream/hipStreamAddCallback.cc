@@ -36,7 +36,7 @@ hipStream_t gstream;
 
 void HIPRT_CB Callback(hipStream_t stream, hipError_t status, void* userData) {
   UNUSED(stream);
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   REQUIRE(userData == NULL);
   gPassed = true;
   for (size_t i = 0; i < NSize; i++) {
@@ -65,41 +65,41 @@ bool testStreamCallbackFunctionality(bool isDefault) {
     A_h[i] = 1.618f + i;
   }
 
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipMalloc(&C_d, Nbytes));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipMalloc(&C_d, Nbytes))
   if (isDefault) {
-    HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, 0));
+    HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, 0))
 
     const unsigned threadsPerBlock = 1024;
     const int blocks = (NSize % threadsPerBlock == 0) ? (NSize / threadsPerBlock)
                                                       : ((NSize / threadsPerBlock) + 1);
     hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, 0, A_d,
                        C_d, NSize);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, 0));
-    HIP_CHECK(hipStreamAddCallback(0, Callback, nullptr, 0));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, 0))
+    HIP_CHECK(hipStreamAddCallback(0, Callback, nullptr, 0))
     while (!gcbDone)
       std::this_thread::sleep_for(std::chrono::microseconds(100000));  // Sleep for 100 ms
   } else {
     hipStream_t mystream;
-    HIP_CHECK(hipStreamCreateWithFlags(&mystream, hipStreamNonBlocking));
+    HIP_CHECK(hipStreamCreateWithFlags(&mystream, hipStreamNonBlocking))
 
-    HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mystream));
+    HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mystream))
 
     const unsigned threadsPerBlock = 1024;
     const int blocks = (NSize % threadsPerBlock == 0) ? (NSize / threadsPerBlock)
                                                       : ((NSize / threadsPerBlock) + 1);
     hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, mystream,
                        A_d, C_d, NSize);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream));
-    HIP_CHECK(hipStreamAddCallback(mystream, Callback, nullptr, 0));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream))
+    HIP_CHECK(hipStreamAddCallback(mystream, Callback, nullptr, 0))
     while (!gcbDone)
       std::this_thread::sleep_for(std::chrono::microseconds(100000));  // Sleep for 100 ms
-    HIP_CHECK(hipStreamDestroy(mystream));
+    HIP_CHECK(hipStreamDestroy(mystream))
   }
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(C_d)));
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(C_d)))
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)))
   free(C_h);
   free(A_h);
   return gPassed;
@@ -114,7 +114,7 @@ bool testStreamCallbackFunctionality(bool isDefault) {
  */
 void Callback_ChkUsrdataPtr(hipStream_t stream, hipError_t status, void* userData) {
   REQUIRE(stream == gstream);
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   gPassed = true;
   if (gusrptr != userData) {
     gPassed = false;
@@ -124,7 +124,7 @@ void Callback_ChkUsrdataPtr(hipStream_t stream, hipError_t status, void* userDat
 
 void Callback_ChkStreamValue(hipStream_t stream, hipError_t status, void* userData) {
   REQUIRE(userData == nullptr);
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   gPassed = true;
   if (stream != gstream) {
     gPassed = false;
@@ -150,7 +150,7 @@ using hipStreaAddCallbackTest::testStreamCallbackFunctionality;
  */
 HIP_TEST_CASE(Unit_hipStreamAddCallback_ParamTst_Positive) {
   hipStream_t mystream;
-  HIP_CHECK(hipStreamCreate(&mystream));
+  HIP_CHECK(hipStreamCreate(&mystream))
 
   // Scenario1
   SECTION("userData pointer value validation") {
@@ -158,7 +158,7 @@ HIP_TEST_CASE(Unit_hipStreamAddCallback_ParamTst_Positive) {
     gusrptr = ptr0xff;
     gPassed = true;
     gcbDone = false;
-    HIP_CHECK(hipStreamAddCallback(mystream, Callback_ChkUsrdataPtr, gusrptr, 0));
+    HIP_CHECK(hipStreamAddCallback(mystream, Callback_ChkUsrdataPtr, gusrptr, 0))
     while (!gcbDone) {
       std::this_thread::sleep_for(std::chrono::microseconds(100000));  // Sleep for 100 ms
     }
@@ -169,13 +169,13 @@ HIP_TEST_CASE(Unit_hipStreamAddCallback_ParamTst_Positive) {
     gstream = mystream;
     gPassed = true;
     gcbDone = false;
-    HIP_CHECK(hipStreamAddCallback(mystream, Callback_ChkStreamValue, nullptr, 0));
+    HIP_CHECK(hipStreamAddCallback(mystream, Callback_ChkStreamValue, nullptr, 0))
     while (!gcbDone) {
       std::this_thread::sleep_for(std::chrono::microseconds(100000));  // Sleep for 100 ms
     }
     REQUIRE(gPassed);
   }
-  HIP_CHECK(hipStreamDestroy(mystream));
+  HIP_CHECK(hipStreamDestroy(mystream))
 }
 
 /*
@@ -183,7 +183,7 @@ HIP_TEST_CASE(Unit_hipStreamAddCallback_ParamTst_Positive) {
  */
 HIP_TEST_CASE(Unit_hipStreamAddCallback_ParamTst_Negative) {
   hipStream_t mystream;
-  HIP_CHECK(hipStreamCreate(&mystream));
+  HIP_CHECK(hipStreamCreate(&mystream))
 
   // Scenario1
   SECTION("callback is nullptr for non-default stream") {
@@ -201,7 +201,7 @@ HIP_TEST_CASE(Unit_hipStreamAddCallback_ParamTst_Negative) {
   SECTION("flag is nonzero for default stream") {
     REQUIRE_FALSE(hipSuccess == hipStreamAddCallback(0, Callback, nullptr, 10));
   }
-  HIP_CHECK(hipStreamDestroy(mystream));
+  HIP_CHECK(hipStreamDestroy(mystream))
 }
 
 /*

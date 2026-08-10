@@ -45,7 +45,7 @@ THE SOFTWARE.
  */
 HIP_TEST_CASE(Unit_hipMemGetDefaultMemPool_Negative) {
   int dev;
-  HIP_CHECK(hipGetDevice(&dev));
+  HIP_CHECK(hipGetDevice(&dev))
   checkMempoolSupported(dev);
 
   hipMemPool_t memPool;
@@ -72,7 +72,7 @@ HIP_TEST_CASE(Unit_hipMemGetDefaultMemPool_Negative) {
 
   SECTION("Invalid location - out of range device id") {
     int dev_count = 0;
-    HIP_CHECK(hipGetDeviceCount(&dev_count));
+    HIP_CHECK(hipGetDeviceCount(&dev_count))
     location.id = dev_count;
     HIP_CHECK_ERROR(hipMemGetDefaultMemPool(&memPool, &location, allocationType),
                     hipErrorInvalidValue);
@@ -87,7 +87,7 @@ HIP_TEST_CASE(Unit_hipMemGetDefaultMemPool_Negative) {
   SECTION("Invalid location - type Host") {
     location.type = hipMemLocationTypeHost;
 #if HT_NVIDIA
-    HIP_CHECK(hipMemGetDefaultMemPool(&memPool, &location, allocationType));
+    HIP_CHECK(hipMemGetDefaultMemPool(&memPool, &location, allocationType))
 #else
     HIP_CHECK_ERROR(hipMemGetDefaultMemPool(&memPool, &location, allocationType),
                     hipErrorInvalidValue);
@@ -114,7 +114,7 @@ HIP_TEST_CASE(Unit_hipMemGetDefaultMemPool_Negative) {
  */
 HIP_TEST_CASE(Unit_hipMemGetDefaultMemPool_Basic) {
   int dev;
-  HIP_CHECK(hipGetDevice(&dev));
+  HIP_CHECK(hipGetDevice(&dev))
   checkMempoolSupported(dev);
 
   hipMemLocation location{};
@@ -123,31 +123,31 @@ HIP_TEST_CASE(Unit_hipMemGetDefaultMemPool_Basic) {
 
   SECTION("Pinned - matches hipDeviceGetDefaultMemPool") {
     hipMemPool_t memPool1, memPool2, deviceMemPool;
-    HIP_CHECK(hipMemGetDefaultMemPool(&memPool1, &location, hipMemAllocationTypePinned));
+    HIP_CHECK(hipMemGetDefaultMemPool(&memPool1, &location, hipMemAllocationTypePinned))
     REQUIRE(memPool1 != nullptr);
-    HIP_CHECK(hipDeviceGetDefaultMemPool(&deviceMemPool, dev));
+    HIP_CHECK(hipDeviceGetDefaultMemPool(&deviceMemPool, dev))
     REQUIRE(deviceMemPool != nullptr);
     REQUIRE(memPool1 == deviceMemPool);
 
     // Idempotency: second call returns the same pool
-    HIP_CHECK(hipMemGetDefaultMemPool(&memPool2, &location, hipMemAllocationTypePinned));
+    HIP_CHECK(hipMemGetDefaultMemPool(&memPool2, &location, hipMemAllocationTypePinned))
     REQUIRE(memPool1 == memPool2);
   }
 
   SECTION("Managed - returns non-null pool") {
     hipMemPool_t memPool1, memPool2;
-    HIP_CHECK(hipMemGetDefaultMemPool(&memPool1, &location, hipMemAllocationTypeManaged));
+    HIP_CHECK(hipMemGetDefaultMemPool(&memPool1, &location, hipMemAllocationTypeManaged))
     REQUIRE(memPool1 != nullptr);
 
     // Idempotency: second call returns the same pool
-    HIP_CHECK(hipMemGetDefaultMemPool(&memPool2, &location, hipMemAllocationTypeManaged));
+    HIP_CHECK(hipMemGetDefaultMemPool(&memPool2, &location, hipMemAllocationTypeManaged))
     REQUIRE(memPool1 == memPool2);
   }
 
   SECTION("Pinned and Managed pools are distinct") {
     hipMemPool_t pinnedPool, managedPool;
-    HIP_CHECK(hipMemGetDefaultMemPool(&pinnedPool, &location, hipMemAllocationTypePinned));
-    HIP_CHECK(hipMemGetDefaultMemPool(&managedPool, &location, hipMemAllocationTypeManaged));
+    HIP_CHECK(hipMemGetDefaultMemPool(&pinnedPool, &location, hipMemAllocationTypePinned))
+    HIP_CHECK(hipMemGetDefaultMemPool(&managedPool, &location, hipMemAllocationTypeManaged))
     REQUIRE(pinnedPool != nullptr);
     REQUIRE(managedPool != nullptr);
     REQUIRE(pinnedPool != managedPool);
@@ -168,7 +168,7 @@ HIP_TEST_CASE(Unit_hipMemGetDefaultMemPool_Basic) {
  */
 HIP_TEST_CASE(Unit_hipMemGetDefaultMemPool_Functional) {
   int dev;
-  HIP_CHECK(hipGetDevice(&dev));
+  HIP_CHECK(hipGetDevice(&dev))
   checkMempoolSupported(dev);
 
   hipMemLocation location{};
@@ -176,39 +176,39 @@ HIP_TEST_CASE(Unit_hipMemGetDefaultMemPool_Functional) {
   location.type = hipMemLocationTypeDevice;
 
   hipMemPool_t memPool;
-  HIP_CHECK(hipMemGetDefaultMemPool(&memPool, &location, hipMemAllocationTypePinned));
+  HIP_CHECK(hipMemGetDefaultMemPool(&memPool, &location, hipMemAllocationTypePinned))
   REQUIRE(memPool != nullptr);
 
   // Set release threshold to keep memory reserved across syncs
   hipMemPoolAttr attr = hipMemPoolAttrReleaseThreshold;
   std::uint64_t threshold = UINT64_MAX;
-  HIP_CHECK(hipMemPoolSetAttribute(memPool, attr, &threshold));
+  HIP_CHECK(hipMemPoolSetAttribute(memPool, attr, &threshold))
 
   constexpr size_t num_elems = 1024;
   constexpr size_t byte_size = num_elems * sizeof(int);
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   int* d_buf = nullptr;
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&d_buf), byte_size, memPool, stream));
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&d_buf), byte_size, memPool, stream))
   REQUIRE(d_buf != nullptr);
 
   // Initialize device memory and copy back to verify
-  HIP_CHECK(hipMemsetAsync(d_buf, 0, byte_size, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemsetAsync(d_buf, 0, byte_size, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   std::vector<int> host_buf(num_elems, -1);
-  HIP_CHECK(hipMemcpyAsync(host_buf.data(), d_buf, byte_size, hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpyAsync(host_buf.data(), d_buf, byte_size, hipMemcpyDeviceToHost, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   for (size_t i = 0; i < num_elems; ++i) {
     REQUIRE(host_buf[i] == 0);
   }
 
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(d_buf), stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(d_buf), stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -225,23 +225,23 @@ HIP_TEST_CASE(Unit_hipMemGetDefaultMemPool_Functional) {
  */
 HIP_TEST_CASE(Unit_hipMemGetDefaultMemPool_Multidevice) {
   int num_devices;
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
 
   std::vector<hipMemPool_t> pools(num_devices, nullptr);
 
   for (int i = 0; i < num_devices; i++) {
     checkMempoolSupported(i);
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
 
     hipMemLocation location{};
     location.id = i;
     location.type = hipMemLocationTypeDevice;
 
     hipMemPool_t pool, defaultPool;
-    HIP_CHECK(hipMemGetDefaultMemPool(&pool, &location, hipMemAllocationTypePinned));
+    HIP_CHECK(hipMemGetDefaultMemPool(&pool, &location, hipMemAllocationTypePinned))
     REQUIRE(pool != nullptr);
 
-    HIP_CHECK(hipDeviceGetDefaultMemPool(&defaultPool, i));
+    HIP_CHECK(hipDeviceGetDefaultMemPool(&defaultPool, i))
     REQUIRE(pool == defaultPool);
 
     pools[i] = pool;

@@ -55,7 +55,7 @@ void graphNodesCommon(hipGraph_t& graph, T* hostMem1, T* devMem1, T* hostMem2, T
   memsetParams.elementSize = sizeof(T);
   memsetParams.width = N;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams))
 
   from.push_back(memset_A);
 
@@ -66,7 +66,7 @@ void graphNodesCommon(hipGraph_t& graph, T* hostMem1, T* devMem1, T* hostMem2, T
   memsetParams.elementSize = sizeof(T);
   memsetParams.width = N;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memset_B, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memset_B, graph, nullptr, 0, &memsetParams))
 
   from.push_back(memset_B);
 
@@ -77,7 +77,7 @@ void graphNodesCommon(hipGraph_t& graph, T* hostMem1, T* devMem1, T* hostMem2, T
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs1);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&memsetKer_C, graph, nullptr, 0, &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&memsetKer_C, graph, nullptr, 0, &kernelNodeParams))
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, devMem1, hostMem1, Nbytes,
                                     hipMemcpyHostToDevice));
@@ -102,7 +102,7 @@ void graphNodesCommon(hipGraph_t& graph, T* hostMem1, T* devMem1, T* hostMem2, T
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs2);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kernelNodeParams))
 
   from.push_back(kernel_vecAdd);
   to.push_back(kernel_vecAdd);
@@ -132,27 +132,27 @@ void captureNodesCommon(hipGraph_t& graph, T* hostMem1, T* devMem1, T* hostMem2,
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipEventRecord(events[0], streams[0]));
-  HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0));
-  HIP_CHECK(hipStreamWaitEvent(streams[2], events[0], 0));
+  HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipEventRecord(events[0], streams[0]))
+  HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0))
+  HIP_CHECK(hipStreamWaitEvent(streams[2], events[0], 0))
   // Add operations to stream3
   hipLaunchKernelGGL(HipTest::memsetReverse<T>, dim3(blocks), dim3(threadsPerBlock), 0, streams[2],
                      devMem3, memsetVal, NElem);
-  HIP_CHECK(hipEventRecord(events[1], streams[2]));
+  HIP_CHECK(hipEventRecord(events[1], streams[2]))
   // Add operations to stream2
-  HIP_CHECK(hipMemsetAsync(devMem2, 0, Nbytes, streams[1]));
-  HIP_CHECK(hipMemcpyAsync(devMem2, hostMem2, Nbytes, hipMemcpyHostToDevice, streams[1]));
-  HIP_CHECK(hipEventRecord(events[2], streams[1]));
+  HIP_CHECK(hipMemsetAsync(devMem2, 0, Nbytes, streams[1]))
+  HIP_CHECK(hipMemcpyAsync(devMem2, hostMem2, Nbytes, hipMemcpyHostToDevice, streams[1]))
+  HIP_CHECK(hipEventRecord(events[2], streams[1]))
   // Add operations to stream1
-  HIP_CHECK(hipMemsetAsync(devMem1, 0, Nbytes, streams[0]));
-  HIP_CHECK(hipMemcpyAsync(devMem1, hostMem1, Nbytes, hipMemcpyHostToDevice, streams[0]));
-  HIP_CHECK(hipStreamWaitEvent(streams[0], events[2], 0));
-  HIP_CHECK(hipStreamWaitEvent(streams[0], events[1], 0));
+  HIP_CHECK(hipMemsetAsync(devMem1, 0, Nbytes, streams[0]))
+  HIP_CHECK(hipMemcpyAsync(devMem1, hostMem1, Nbytes, hipMemcpyHostToDevice, streams[0]))
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[2], 0))
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[1], 0))
   hipLaunchKernelGGL(HipTest::vectorADD<T>, dim3(blocks), dim3(threadsPerBlock), 0, streams[0],
                      devMem1, devMem2, devMem3, NElem);
-  HIP_CHECK(hipMemcpyAsync(hostMem3, devMem3, Nbytes, hipMemcpyDeviceToHost, streams[0]));
-  HIP_CHECK(hipStreamEndCapture(streams[0], &graph));
+  HIP_CHECK(hipMemcpyAsync(hostMem3, devMem3, Nbytes, hipMemcpyDeviceToHost, streams[0]))
+  HIP_CHECK(hipStreamEndCapture(streams[0], &graph))
 }
 
 enum class GraphGetNodesTest { equalNumNodes, lesserNumNodes, greaterNumNodes };
@@ -163,7 +163,7 @@ static void validateGraphNodesCommon(
   size_t numNodes = testNumNodes;
   hipGraphNode_t* nodes = new hipGraphNode_t[numNodes]{};
   int found_count{0};
-  HIP_CHECK(f(nodes, &numNodes));
+  HIP_CHECK(f(nodes, &numNodes))
   // Count how many nodes from the nodelist are present
   for (auto node : nodelist) {
     for (size_t i = 0; i < numNodes; i++) {

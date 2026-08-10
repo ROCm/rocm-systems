@@ -21,7 +21,7 @@ static hipError_t GraphExecSemaphoreSetParamsSignalWrapper(
     hipExternalSemaphore_t* extSemArray, hipExternalSemaphoreSignalParams* paramsArray,
     unsigned int numExtSems, hipStream_t stream) {
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   hipGraphNode_t node = nullptr;
 
   hipExternalSemaphoreSignalNodeParams node_params = {};
@@ -40,23 +40,23 @@ static hipError_t GraphExecSemaphoreSetParamsSignalWrapper(
   initial_params.paramsArray = signal_params;
   initial_params.numExtSems = numExtSems;
 
-  HIP_CHECK(hipGraphAddExternalSemaphoresSignalNode(&node, graph, nullptr, 0, &initial_params));
+  HIP_CHECK(hipGraphAddExternalSemaphoresSignalNode(&node, graph, nullptr, 0, &initial_params))
 
   hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
-  HIP_CHECK(hipGraphExecExternalSemaphoresSignalNodeSetParams(graph_exec, node, &node_params));
+  HIP_CHECK(hipGraphExecExternalSemaphoresSignalNodeSetParams(graph_exec, node, &node_params))
 
   hipExternalSemaphoreSignalNodeParams retrieved_params{};
   memset(&retrieved_params, 0, sizeof(hipExternalSemaphoreSignalNodeParams));
-  HIP_CHECK(hipGraphExternalSemaphoresSignalNodeGetParams(node, &retrieved_params));
+  HIP_CHECK(hipGraphExternalSemaphoresSignalNodeGetParams(node, &retrieved_params))
   REQUIRE(initial_params == retrieved_params);
 
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
+  HIP_CHECK(hipGraphDestroy(graph))
   delete[] signal_params;
 
   return hipSuccess;
@@ -137,7 +137,7 @@ HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresSignalNodeSetParams_Vulkan_Posi
  */
 HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresSignalNodeSetParams_Vulkan_Negative_Parameters) {
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   VulkanTest vkt(enable_validation);
   hipExternalSemaphoreSignalParams signal_params = {};
@@ -150,10 +150,10 @@ HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresSignalNodeSetParams_Vulkan_Nega
   node_params.numExtSems = 1;
 
   hipGraphNode_t node = nullptr;
-  HIP_CHECK(hipGraphAddExternalSemaphoresSignalNode(&node, graph, nullptr, 0, &node_params));
+  HIP_CHECK(hipGraphAddExternalSemaphoresSignalNode(&node, graph, nullptr, 0, &node_params))
 
   hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
   SECTION("pGraphExec == nullptr") {
     HIP_CHECK_ERROR(hipGraphExecExternalSemaphoresSignalNodeSetParams(nullptr, node, &node_params),
@@ -171,9 +171,9 @@ HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresSignalNodeSetParams_Vulkan_Nega
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore));
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore))
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**

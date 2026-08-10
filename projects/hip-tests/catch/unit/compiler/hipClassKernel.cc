@@ -48,8 +48,8 @@ HIP_TEST_CASE(Unit_hipClassKernel_Friend) {
   bool* result_ecd;
   result_ecd = AllocateDeviceMemory();
   hipLaunchKernelGGL(friendClassKernel, dim3(BLOCKS), dim3(THREADS_PER_BLOCK), 0, 0, result_ecd);
-  HIP_CHECK(hipStreamSynchronize(nullptr));
-  HIP_CHECK(hipFree(result_ecd));
+  HIP_CHECK(hipStreamSynchronize(nullptr))
+  HIP_CHECK(hipFree(result_ecd))
 }
 
 // check sizeof empty class is 1

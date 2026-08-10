@@ -39,32 +39,32 @@ static constexpr int nIters = 10;                     // interation number for t
  */
 HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2All_Inter_GPU) {
   int nGpus = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpus));
+  HIP_CHECK(hipGetDeviceCount(&nGpus))
   if (nGpus < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   int** ArrayOfDevicePointers = reinterpret_cast<int**>(malloc(nGpus * sizeof(int*)));
 
   for (int local = 0; local < nGpus; local++) {
-    HIP_CHECK(hipSetDevice(local));
-    HIP_CHECK(hipMalloc(&ArrayOfDevicePointers[local], dataBytes));
+    HIP_CHECK(hipSetDevice(local))
+    HIP_CHECK(hipMalloc(&ArrayOfDevicePointers[local], dataBytes))
   }
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipStream_t* streams = reinterpret_cast<hipStream_t*>(malloc(nGpus * sizeof(hipStream_t)));
   for (int stream = 0; stream < nGpus; stream++) {
-    HIP_CHECK(hipStreamCreateWithFlags(&streams[stream], hipStreamNonBlocking));
+    HIP_CHECK(hipStreamCreateWithFlags(&streams[stream], hipStreamNonBlocking))
   }
 
   std::vector<int> srcData(dataBytes);
   std::fill_n(srcData.begin(), N, 9);
-  HIP_CHECK(hipMemcpy(ArrayOfDevicePointers[0], srcData.data(), dataBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(ArrayOfDevicePointers[0], srcData.data(), dataBytes, hipMemcpyHostToDevice))
 
   // warmup operation
   for (int dstDeviceId = 1; dstDeviceId < nGpus; dstDeviceId++) {
     HIP_CHECK(hipMemcpyPeerAsync(ArrayOfDevicePointers[dstDeviceId], dstDeviceId,
                                  ArrayOfDevicePointers[0], 0, dataBytes, streams[dstDeviceId]));
   }
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int dstDeviceId = 1; dstDeviceId < nGpus; dstDeviceId++) {
     auto cpuStart = std::chrono::steady_clock::now();
@@ -72,7 +72,7 @@ HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2All_Inter_GPU) {
       HIP_CHECK(hipMemcpyPeerAsync(ArrayOfDevicePointers[dstDeviceId], dstDeviceId,
                                    ArrayOfDevicePointers[0], 0, dataBytes, streams[dstDeviceId]));
     }
-    HIP_CHECK(hipStreamSynchronize(streams[dstDeviceId]));
+    HIP_CHECK(hipStreamSynchronize(streams[dstDeviceId]))
     std::chrono::duration<double, std::milli> cpuMS = std::chrono::steady_clock::now() - cpuStart;
 
     fprintf(stderr,
@@ -88,7 +88,7 @@ HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2All_Inter_GPU) {
       HIP_CHECK(hipMemcpyPeerAsync(ArrayOfDevicePointers[dstDeviceId], dstDeviceId,
                                    ArrayOfDevicePointers[0], 0, dataBytes, streams[dstDeviceId]));
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   }
   std::chrono::duration<double, std::milli> cpuMS = std::chrono::steady_clock::now() - cpuStart;
 
@@ -101,7 +101,7 @@ HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2All_Inter_GPU) {
 // validation
 #ifdef VERIFY_DATA
   for (int dstDeviceId = 1; dstDeviceId < nGpus; dstDeviceId++) {
-    HIP_CHECK(hipSetDevice(dstDeviceId));
+    HIP_CHECK(hipSetDevice(dstDeviceId))
     std::vector<int> dstData(dataBytes);
     std::fill_n(dstData.begin(), N, 0);
     HIP_CHECK(hipMemcpy(dstData.data(), ArrayOfDevicePointers[dstDeviceId], dataBytes,
@@ -112,8 +112,8 @@ HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2All_Inter_GPU) {
   }
 #endif
   for (int i = 0; i < nGpus; i++) {
-    HIP_CHECK(hipFree(ArrayOfDevicePointers[i]));
-    HIP_CHECK(hipStreamDestroy(streams[i]));
+    HIP_CHECK(hipFree(ArrayOfDevicePointers[i]))
+    HIP_CHECK(hipStreamDestroy(streams[i]))
   }
 }
 

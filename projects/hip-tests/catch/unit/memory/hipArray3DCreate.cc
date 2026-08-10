@@ -69,9 +69,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_happy, char, uchar2, uint2, int4, s
     CAPTURE(desc.Width, desc.Height, desc.Depth);
 
     hipArray_t array;
-    HIP_CHECK(hipArray3DCreate(&array, &desc));
+    HIP_CHECK(hipArray3DCreate(&array, &desc))
     checkArrayIsExpected(array, desc);
-    HIP_CHECK(hipArrayDestroy(array));
+    HIP_CHECK(hipArrayDestroy(array))
   }
 }
 
@@ -154,9 +154,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_MaxTexture, int, uint4, short, usho
     auto maxArrayCreateError = hipArray3DCreate(&array, &desc);
     // this can try to alloc many GB of memory, so out of memory is acceptable
     if (maxArrayCreateError == hipErrorOutOfMemory) return;
-    HIP_CHECK(maxArrayCreateError);
+    HIP_CHECK(maxArrayCreateError)
     checkArrayIsExpected(array, desc);
-    HIP_CHECK(hipArrayDestroy(array));
+    HIP_CHECK(hipArrayDestroy(array))
   }
   SECTION("Negative") {
     std::vector<hipExtent> extentsToTest{

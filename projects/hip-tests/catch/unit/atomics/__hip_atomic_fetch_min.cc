@@ -29,7 +29,7 @@ static void runHipAtomicFetchMinWavefrontSameAddressTest() {
 template <typename TestType>
 static void runHipAtomicFetchMinWavefrontAdjacentAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
@@ -44,7 +44,7 @@ static void runHipAtomicFetchMinWavefrontAdjacentAddressesTest() {
 template <typename TestType>
 static void runHipAtomicFetchMinWavefrontScatteredAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
@@ -71,7 +71,7 @@ static void runHipAtomicFetchMinWorkgroupSameAddressTest() {
 template <typename TestType>
 static void runHipAtomicFetchMinWorkgroupAdjacentAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
@@ -86,7 +86,7 @@ static void runHipAtomicFetchMinWorkgroupAdjacentAddressesTest() {
 template <typename TestType>
 static void runHipAtomicFetchMinWorkgroupScatteredAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {

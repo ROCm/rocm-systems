@@ -38,9 +38,9 @@ static bool hipPerfDevMemWriteSpeed_test() {
   d_uint16 pval;
 
   int deviceId = 0;
-  HIP_CHECK(hipSetDevice(deviceId));
+  HIP_CHECK(hipSetDevice(deviceId))
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+  HIP_CHECK(hipGetDeviceProperties(&props, deviceId))
 
   CONSOLE_PRINT("info: running on bus 0x%x %s with %d CUs\n", props.pciBusID, props.name,
                 props.multiProcessorCount);
@@ -62,13 +62,13 @@ static bool hipPerfDevMemWriteSpeed_test() {
   }
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
-  HIP_CHECK(hipMalloc(&dDst, nBytes));
+  HIP_CHECK(hipMalloc(&dDst, nBytes))
   hipLaunchKernelGGL(write_kernel, dim3(blocks), dim3(threadsPerBlock), 0, stream, dDst, N, pval);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpy(hDst, dDst, nBytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMemcpy(hDst, dDst, nBytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (uint i = 0; i < N; i++) {
     for (uint j = 0; j < ARRAY_SIZE; j++) {
@@ -87,9 +87,9 @@ static bool hipPerfDevMemWriteSpeed_test() {
 
   for (int i = 0; i < nIter; i++) {
     hipLaunchKernelGGL(write_kernel, dim3(blocks), dim3(threadsPerBlock), 0, stream, dDst, N, pval);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
   }
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   auto all_end = std::chrono::steady_clock::now();
   std::chrono::duration<double> all_kernel_time = all_end - all_start;
@@ -103,8 +103,8 @@ static bool hipPerfDevMemWriteSpeed_test() {
       perf, nBytes / (1024 * 1024));
 
   delete[] hDst;
-  HIP_CHECK(hipFree(dDst));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(dDst))
+  HIP_CHECK(hipStreamDestroy(stream))
   return true;
 }
 
@@ -122,7 +122,7 @@ static bool hipPerfDevMemWriteSpeed_test() {
 
 HIP_TEST_CASE(Performance_hipPerfDevMemWriteSpeed_test) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   if (numDevices <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);

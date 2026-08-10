@@ -55,17 +55,17 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeGetParams_Negative_Parameters) {
   }
 
   SECTION("pNodeParams == nullptr") {
-    HIP_CHECK(hipGraphCreate(&graph, 0));
-    HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
+    HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params))
     HIP_CHECK_ERROR(hipGraphMemcpyNodeGetParams(node, nullptr), hipErrorInvalidValue);
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphDestroy(graph))
   }
 
 #if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-208
   SECTION("Node is destroyed") {
-    HIP_CHECK(hipGraphCreate(&graph, 0));
-    HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params));
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
+    HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params))
+    HIP_CHECK(hipGraphDestroy(graph))
     HIP_CHECK_ERROR(hipGraphMemcpyNodeGetParams(node, &params), hipErrorInvalidValue);
   }
 #endif

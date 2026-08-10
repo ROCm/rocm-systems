@@ -59,7 +59,7 @@ void getDeviceCount(int* pdevCnt) {
     // writing only, no need for read-descriptor
     close(fd[0]);
 
-    HIP_CHECK(hipGetDeviceCount(&devCnt));
+    HIP_CHECK(hipGetDeviceCount(&devCnt))
     // send the value on the write-descriptor:
     write(fd[1], &devCnt, sizeof(devCnt));
 
@@ -91,7 +91,7 @@ bool testWithMaskedDevices(int actualNumGPUs) {
 #ifdef __HIP_PLATFORM_NVIDIA__
     unsetenv("CUDA_VISIBLE_DEVICES");
     setenv("CUDA_VISIBLE_DEVICES", visibleDeviceString, 1);
-    HIP_CHECK(hipInit(0));
+    HIP_CHECK(hipInit(0))
 #else
     unsetenv("ROCR_VISIBLE_DEVICES");
     unsetenv("HIP_VISIBLE_DEVICES");
@@ -131,7 +131,7 @@ bool testWithMaskedDevices(int actualNumGPUs) {
 
 bool getPciBusId(int deviceCount, char** hipDeviceList) {
   for (int i = 0; i < deviceCount; i++) {
-    HIP_CHECK(hipDeviceGetPCIBusId(hipDeviceList[i], MAX_DEVICE_LENGTH, i));
+    HIP_CHECK(hipDeviceGetPCIBusId(hipDeviceList[i], MAX_DEVICE_LENGTH, i))
   }
   return true;
 }
@@ -203,7 +203,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci) {
   }
 
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   REQUIRE_FALSE(deviceCount == 0);
   // Allocate an array of pointer to characters
   char** hipDeviceList = new char*[deviceCount];

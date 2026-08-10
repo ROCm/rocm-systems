@@ -34,16 +34,16 @@ HIP_TEST_CASE(Contract_GraphHost_HipGraphAddHostNode_Default_InvokesCallbackOnLa
   params.fn = IncrementCounter;
   params.userData = &counter;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
-  HIP_CHECK(hipGraphAddHostNode(&host_node, graph, nullptr, 0, &params));
+  HIP_CHECK(hipGraphAddHostNode(&host_node, graph, nullptr, 0, &params))
 
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
   cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(counter == kExpectedValue);
 }
@@ -59,12 +59,12 @@ HIP_TEST_CASE(Contract_GraphHost_HipGraphHostNodeGetParams_Default_RoundTripsFnA
   params.fn = IncrementCounter;
   params.userData = &counter;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
-  HIP_CHECK(hipGraphAddHostNode(&host_node, graph, nullptr, 0, &params));
+  HIP_CHECK(hipGraphAddHostNode(&host_node, graph, nullptr, 0, &params))
 
   hipHostNodeParams retrieved{};
-  HIP_CHECK(hipGraphHostNodeGetParams(host_node, &retrieved));
+  HIP_CHECK(hipGraphHostNodeGetParams(host_node, &retrieved))
 
   REQUIRE(retrieved.fn == IncrementCounter);
   REQUIRE(retrieved.userData == &counter);
@@ -82,10 +82,10 @@ HIP_TEST_CASE(Contract_GraphHost_HipGraphNodeGetType_NodeType_ReportsHost) {
   params.fn = IncrementCounter;
   params.userData = &counter;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
-  HIP_CHECK(hipGraphAddHostNode(&host_node, graph, nullptr, 0, &params));
+  HIP_CHECK(hipGraphAddHostNode(&host_node, graph, nullptr, 0, &params))
 
-  HIP_CHECK(hipGraphNodeGetType(host_node, &node_type));
+  HIP_CHECK(hipGraphNodeGetType(host_node, &node_type))
   REQUIRE(node_type == hipGraphNodeTypeHost);
 }

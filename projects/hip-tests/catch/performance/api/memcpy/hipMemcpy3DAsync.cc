@@ -19,7 +19,7 @@ class Memcpy3DAsyncBenchmark : public Benchmark<Memcpy3DAsyncBenchmark> {
     hipMemcpy3DParms params = CreateMemcpy3DParam(dst_ptr, make_hipPos(0, 0, 0), src_ptr,
                                                   make_hipPos(0, 0, 0), extent, kind);
     TIMED_SECTION_STREAM(kTimerTypeEvent, stream) { HIP_CHECK(hipMemcpy3DAsync(&params, stream)); }
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 };
 
@@ -66,9 +66,9 @@ static void RunBenchmark(const hipExtent extent, hipMemcpyKind kind,
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
 
     LinearAllocGuard3D<int> src_allocation(extent);
-    HIP_CHECK(hipSetDevice(dst_device));
+    HIP_CHECK(hipSetDevice(dst_device))
     LinearAllocGuard3D<int> dst_allocation(extent);
-    HIP_CHECK(hipSetDevice(src_device));
+    HIP_CHECK(hipSetDevice(src_device))
     benchmark.Run(dst_allocation.pitched_ptr(), src_allocation.pitched_ptr(),
                   dst_allocation.extent(), kind, stream);
   }

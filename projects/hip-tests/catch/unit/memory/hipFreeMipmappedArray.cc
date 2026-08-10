@@ -64,8 +64,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMipmappedArrayImplicitSyncArray, char, float)
     LaunchDelayKernel(std::chrono::milliseconds{50}, nullptr);
     // make sure device is busy
     HIP_CHECK_ERROR(hipStreamQuery(nullptr), hipErrorNotReady);
-    HIP_CHECK(hipFreeMipmappedArray(arrayPtr));
-    HIP_CHECK(hipStreamQuery(nullptr));
+    HIP_CHECK(hipFreeMipmappedArray(arrayPtr))
+    HIP_CHECK(hipStreamQuery(nullptr))
   }
 }
 
@@ -73,7 +73,7 @@ HIP_TEST_CASE(Unit_hipFreeMipmappedArray_Negative_Nullptr) {
 #if HT_AMD
   HIP_CHECK_ERROR(hipFreeMipmappedArray(nullptr), hipErrorInvalidValue);
 #else
-  HIP_CHECK(hipFreeMipmappedArray(nullptr));
+  HIP_CHECK(hipFreeMipmappedArray(nullptr))
 #endif
 }
 

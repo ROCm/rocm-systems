@@ -54,7 +54,7 @@ HIP_TEST_CASE(Contract_Texture_HipCreateTextureObject_CreateAndDestroyLinearReso
   hip::contract::ContractCleanup cleanup;
 
   void* dev_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&dev_ptr, kLinearBytes));
+  HIP_CHECK(hipMalloc(&dev_ptr, kLinearBytes))
   cleanup.Add([dev_ptr] { (void)hipFree(dev_ptr); });
 
   const hipResourceDesc res = MakeLinearResourceDesc(dev_ptr);
@@ -65,7 +65,7 @@ HIP_TEST_CASE(Contract_Texture_HipCreateTextureObject_CreateAndDestroyLinearReso
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   cleanup.Add([tex_obj] { (void)hipDestroyTextureObject(tex_obj); });
 
   REQUIRE(tex_obj != 0);
@@ -77,7 +77,7 @@ HIP_TEST_CASE(Contract_Texture_HipGetTextureObjectResourceDesc_GetResourceDesc_R
   hip::contract::ContractCleanup cleanup;
 
   void* dev_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&dev_ptr, kLinearBytes));
+  HIP_CHECK(hipMalloc(&dev_ptr, kLinearBytes))
   cleanup.Add([dev_ptr] { (void)hipFree(dev_ptr); });
 
   const hipResourceDesc res = MakeLinearResourceDesc(dev_ptr);
@@ -88,11 +88,11 @@ HIP_TEST_CASE(Contract_Texture_HipGetTextureObjectResourceDesc_GetResourceDesc_R
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   cleanup.Add([tex_obj] { (void)hipDestroyTextureObject(tex_obj); });
 
   hipResourceDesc returned{};
-  HIP_CHECK(hipGetTextureObjectResourceDesc(&returned, tex_obj));
+  HIP_CHECK(hipGetTextureObjectResourceDesc(&returned, tex_obj))
 
   REQUIRE(returned.resType == hipResourceTypeLinear);
   REQUIRE(returned.res.linear.devPtr == dev_ptr);
@@ -111,7 +111,7 @@ HIP_TEST_CASE(Contract_Texture_HipGetTextureObjectTextureDesc_GetTextureDesc_Rou
   hip::contract::ContractCleanup cleanup;
 
   void* dev_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&dev_ptr, kLinearBytes));
+  HIP_CHECK(hipMalloc(&dev_ptr, kLinearBytes))
   cleanup.Add([dev_ptr] { (void)hipFree(dev_ptr); });
 
   const hipResourceDesc res = MakeLinearResourceDesc(dev_ptr);
@@ -122,11 +122,11 @@ HIP_TEST_CASE(Contract_Texture_HipGetTextureObjectTextureDesc_GetTextureDesc_Rou
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   cleanup.Add([tex_obj] { (void)hipDestroyTextureObject(tex_obj); });
 
   hipTextureDesc returned{};
-  HIP_CHECK(hipGetTextureObjectTextureDesc(&returned, tex_obj));
+  HIP_CHECK(hipGetTextureObjectTextureDesc(&returned, tex_obj))
 
   REQUIRE(returned.readMode == hipReadModeElementType);
   REQUIRE(returned.normalizedCoords == 0);
@@ -140,7 +140,7 @@ HIP_TEST_CASE(Contract_Texture_HipCreateTextureObject_CreateAndDestroyArrayResou
 
   hipArray_t array = nullptr;
   const hipChannelFormatDesc channel = ByteChannelDesc();
-  HIP_CHECK(hipMallocArray(&array, &channel, kArrayWidth, kArrayHeight));
+  HIP_CHECK(hipMallocArray(&array, &channel, kArrayWidth, kArrayHeight))
   cleanup.Add([array] { (void)hipFreeArray(array); });
 
   const hipResourceDesc res = MakeArrayResourceDesc(array);
@@ -151,7 +151,7 @@ HIP_TEST_CASE(Contract_Texture_HipCreateTextureObject_CreateAndDestroyArrayResou
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   cleanup.Add([tex_obj] { (void)hipDestroyTextureObject(tex_obj); });
 
   REQUIRE(tex_obj != 0);
@@ -164,11 +164,11 @@ HIP_TEST_CASE(Contract_Texture_HipGetChannelDesc_Default_MatchesArrayFormat) {
 
   hipArray_t array = nullptr;
   const hipChannelFormatDesc channel = ByteChannelDesc();
-  HIP_CHECK(hipMallocArray(&array, &channel, kArrayWidth, kArrayHeight));
+  HIP_CHECK(hipMallocArray(&array, &channel, kArrayWidth, kArrayHeight))
   cleanup.Add([array] { (void)hipFreeArray(array); });
 
   hipChannelFormatDesc returned{};
-  HIP_CHECK(hipGetChannelDesc(&returned, array));
+  HIP_CHECK(hipGetChannelDesc(&returned, array))
 
   REQUIRE(returned.x == channel.x);
   REQUIRE(returned.y == channel.y);
@@ -195,7 +195,7 @@ HIP_TEST_CASE(Contract_Surface_HipCreateSurfaceObject_CreateAndDestroyArrayResou
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   cleanup.Add([surf_obj] { (void)hipDestroySurfaceObject(surf_obj); });
 
   REQUIRE(surf_obj != 0);
@@ -219,11 +219,11 @@ HIP_TEST_CASE(Contract_Surface_HipGetChannelDesc_Default_RoundTripsArrayResource
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   cleanup.Add([surf_obj] { (void)hipDestroySurfaceObject(surf_obj); });
 
   hipChannelFormatDesc returned{};
-  HIP_CHECK(hipGetChannelDesc(&returned, array));
+  HIP_CHECK(hipGetChannelDesc(&returned, array))
 
   REQUIRE(returned.x == channel.x);
   REQUIRE(returned.y == channel.y);
@@ -243,7 +243,7 @@ HIP_TEST_CASE(Contract_Texture_HipGetTextureObjectResourceViewDesc_GetResourceVi
 
   hipArray_t array = nullptr;
   const hipChannelFormatDesc channel = ByteChannelDesc();
-  HIP_CHECK(hipMallocArray(&array, &channel, kArrayWidth, kArrayHeight));
+  HIP_CHECK(hipMallocArray(&array, &channel, kArrayWidth, kArrayHeight))
   cleanup.Add([array] { (void)hipFreeArray(array); });
 
   const hipResourceDesc res = MakeArrayResourceDesc(array);
@@ -268,7 +268,7 @@ HIP_TEST_CASE(Contract_Texture_HipGetTextureObjectResourceViewDesc_GetResourceVi
   if (create_status == hipErrorNotSupported) {
     HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
   }
-  HIP_CHECK(create_status);
+  HIP_CHECK(create_status)
   cleanup.Add([tex_obj] { (void)hipDestroyTextureObject(tex_obj); });
 
   // The runtime resource-view query must return the view the object was created
@@ -280,7 +280,7 @@ HIP_TEST_CASE(Contract_Texture_HipGetTextureObjectResourceViewDesc_GetResourceVi
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("hipGetTextureObjectResourceViewDesc is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   REQUIRE(returned.format == view.format);
   REQUIRE(returned.width == view.width);

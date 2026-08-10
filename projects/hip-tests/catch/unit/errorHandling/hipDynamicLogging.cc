@@ -25,11 +25,11 @@ static bool hipDynamicLoggingTest() {
   capture.startCapture();
 
   // Set Logging params
-  HIP_CHECK(hipExtSetLoggingParams(4, 0, -1));
+  HIP_CHECK(hipExtSetLoggingParams(4, 0, -1))
 
   // Logging is disabled here - allocate memory
   int* dptr = nullptr;
-  HIP_CHECK(hipMalloc(&dptr, sizeof(int)));
+  HIP_CHECK(hipMalloc(&dptr, sizeof(int)))
 
   // Stop capture after hipMalloc and check no output (logging disabled)
   std::string malloc_output = capture.stopCapture();
@@ -42,11 +42,11 @@ static bool hipDynamicLoggingTest() {
   capture.startCapture();
 
   // Enable logging and do memset
-  HIP_CHECK(hipExtEnableLogging());
-  HIP_CHECK(hipMemset(dptr, 0x00, sizeof(int)));
+  HIP_CHECK(hipExtEnableLogging())
+  HIP_CHECK(hipMemset(dptr, 0x00, sizeof(int)))
 
   // Disable logging
-  HIP_CHECK(hipExtDisableLogging());
+  HIP_CHECK(hipExtDisableLogging())
 
   // Stop capture after disabling logging and check for output
   std::string logging_output = capture.stopCapture();
@@ -56,7 +56,7 @@ static bool hipDynamicLoggingTest() {
   }
 
   // Clean up
-  HIP_CHECK(hipFree(dptr));
+  HIP_CHECK(hipFree(dptr))
 
   INFO("Successfully captured HIP logging output (" << logging_output.size() << " bytes)");
   INFO("Logging output: " << logging_output);
@@ -80,7 +80,7 @@ static bool hipDynamicLoggingTest() {
  */
 HIP_TEST_CASE(Unit_hipDynamicLogging_Positive_Basic) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   if (numDevices <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
@@ -103,7 +103,7 @@ HIP_TEST_CASE(Unit_hipDynamicLogging_Positive_Basic) {
  */
 HIP_TEST_CASE(Unit_hipDynamicLogging_Positive_MultipleEnableDisable) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   if (numDevices <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
@@ -112,24 +112,24 @@ HIP_TEST_CASE(Unit_hipDynamicLogging_Positive_MultipleEnableDisable) {
   // Test multiple enable/disable cycles
   OutCapture capture;
   int* dptr = nullptr;
-  HIP_CHECK(hipMalloc(&dptr, sizeof(int)));
+  HIP_CHECK(hipMalloc(&dptr, sizeof(int)))
 
   // Set different logging parameters
-  HIP_CHECK(hipExtSetLoggingParams(3, 0, -1));
+  HIP_CHECK(hipExtSetLoggingParams(3, 0, -1))
 
   for (int i = 0; i < 3; ++i) {
     // Start capture and enable logging
     capture.startCapture();
-    HIP_CHECK(hipExtEnableLogging());
-    HIP_CHECK(hipMemset(dptr, 0x42, sizeof(int)));
-    HIP_CHECK(hipExtDisableLogging());
+    HIP_CHECK(hipExtEnableLogging())
+    HIP_CHECK(hipMemset(dptr, 0x42, sizeof(int)))
+    HIP_CHECK(hipExtDisableLogging())
 
     // Check that we captured some output
     std::string output = capture.stopCapture();
     REQUIRE(output.size() > 0);
   }
 
-  HIP_CHECK(hipFree(dptr));
+  HIP_CHECK(hipFree(dptr))
 }
 
 /**

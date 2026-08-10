@@ -41,7 +41,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Negative_Parameters) {
 HIP_TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Positive_RangeValidation) {
   hipDeviceProp_t devProp;
 
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
 
   SECTION("dynSharedMemPerBlk = 0, blockSizeLimit = 0") {
     MaxPotentialBlockSize(
@@ -64,7 +64,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Positive_RangeValidation) {
 HIP_TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Positive_TemplateInvocation) {
   hipDeviceProp_t devProp;
 
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
 
   SECTION("dynSharedMemPerBlk = 0, blockSizeLimit = 0") {
     MaxPotentialBlockSize(

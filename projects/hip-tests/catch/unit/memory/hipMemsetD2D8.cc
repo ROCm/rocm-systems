@@ -40,15 +40,15 @@ HIP_TEST_CASE(Unit_hipMemsetD2D8_BasicFunctional) {
   HIP_CHECK(
       hipMemAllocPitch(&A_d, &pitch_A, width, numH, 4 * sizeof(char)));
   std::vector<char>A_h(sizeElements, 'a');
-  HIP_CHECK(hipMemsetD2D8(A_d, pitch_A, memsetval, width, numH));
-  HIP_CHECK(hipMemcpy2D(A_h.data(), width, reinterpret_cast<void*>(A_d), pitch_A, width, numH, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemsetD2D8(A_d, pitch_A, memsetval, width, numH))
+  HIP_CHECK(hipMemcpy2D(A_h.data(), width, reinterpret_cast<void*>(A_d), pitch_A, width, numH, hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < sizeElements; i++) {
     INFO("Memset2D mismatch at index:" << i << " computed:" << A_h[i]
                                        << " memsetval:" << memsetval);
     REQUIRE(A_h[i] == memsetval);
   }
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)))
 }
 /**
  * Test Description
@@ -78,7 +78,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D8_UnEvenRowsCols) {
   HIP_CHECK(hipMemcpy2D(reinterpret_cast<void *>(A_d), devPitch, A_h.data(), sizeof(char) * cols, sizeof(char) * cols, rows,
                         hipMemcpyHostToDevice));
 
-  HIP_CHECK(hipMemsetD2D8(A_d, devPitch, memsetval, sizeof(char) * cols, rows));
+  HIP_CHECK(hipMemsetD2D8(A_d, devPitch, memsetval, sizeof(char) * cols, rows))
 
   HIP_CHECK(hipMemcpy2D(B_h.data(), sizeof(char) * cols, reinterpret_cast<void *>(A_d), devPitch, sizeof(char) * cols, rows,
                         hipMemcpyDeviceToHost));
@@ -90,7 +90,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D8_UnEvenRowsCols) {
       REQUIRE(B_h[i * cols + j] == memsetval);
     }
   }
-  HIP_CHECK(hipFree(reinterpret_cast<void *>(A_d)));
+  HIP_CHECK(hipFree(reinterpret_cast<void *>(A_d)))
 }
 /**
  * Test Description
@@ -135,7 +135,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D8_NegTsts) {
     HIP_CHECK_ERROR(hipMemsetD2D8(A_d, devPitch, memsetval, numW, -10), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipMemsetD2D8(A_d, devPitch, memsetval, -10, numH), hipErrorInvalidValue);
   }
-  HIP_CHECK(hipFree(reinterpret_cast<void*>( A_d )));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>( A_d )))
 }
 /**
  * End doxygen group MemoryTest.

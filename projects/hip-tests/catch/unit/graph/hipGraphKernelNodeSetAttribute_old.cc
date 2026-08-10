@@ -61,8 +61,8 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Functional) {
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&stream))
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_A, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_B, graph, nullptr, 0, B_d, B_h, Nbytes,
@@ -77,12 +77,12 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Functional) {
   kNodeParams.sharedMemBytes = 0;
   kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kNodeParams))
 
   // Create dependencies
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &kernel_vecAdd, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_B, &kernel_vecAdd, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &kernel_vecAdd, &memcpy_C, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &kernel_vecAdd, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_B, &kernel_vecAdd, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &kernel_vecAdd, &memcpy_C, 1))
 
   hipKernelNodeAttrValue value_in, value_out;
 
@@ -142,17 +142,17 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Functional) {
   }
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Verify graph execution result
   HipTest::checkVectorADD<int>(A_h, B_h, C_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -210,8 +210,8 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Negative) {
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&stream))
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_A, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_B, graph, nullptr, 0, B_d, B_h, Nbytes,
@@ -226,7 +226,7 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Negative) {
   kNodeParams.sharedMemBytes = 0;
   kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kNodeParams))
 
   hipKernelNodeAttrValue value_in, value_out;
   memset(&value_in, 0, sizeof(hipKernelNodeAttrValue));
@@ -358,8 +358,8 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Negative) {
   }
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**

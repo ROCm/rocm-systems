@@ -145,8 +145,8 @@ HIP_TEST_CASE(Unit_hipLaunchKernelExC_NegetiveTsts) {
   config.numAttrs = 1;
 
   int* d_output = nullptr;
-  HIP_CHECK(hipMalloc(&d_output, totalThreads * sizeof(int)));
-  HIP_CHECK(hipMemset(d_output, 0, totalThreads * sizeof(int)));
+  HIP_CHECK(hipMalloc(&d_output, totalThreads * sizeof(int)))
+  HIP_CHECK(hipMemset(d_output, 0, totalThreads * sizeof(int)))
   void* kernelArgs[] = {&d_output, (void*)&totalThreads};
 
   SECTION("Kernel function as nullptr") {
@@ -179,7 +179,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelExC_NegetiveTsts) {
     HIP_CHECK_ERROR(hipLaunchKernelExC(&invalidConfig, (void*)cooperativeKernelExC, kernelArgs),
                     hipErrorInvalidConfiguration);
   }
-  HIP_CHECK(hipFree(d_output));
+  HIP_CHECK(hipFree(d_output))
 }
 /**
  * Test Description
@@ -214,8 +214,8 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_NegetiveTsts) {
   config.numAttrs = 1;
 
   int* d_output = nullptr;
-  HIP_CHECK(hipMalloc(&d_output, totalThreads * sizeof(int)));
-  HIP_CHECK(hipMemset(d_output, 0, totalThreads * sizeof(int)));
+  HIP_CHECK(hipMalloc(&d_output, totalThreads * sizeof(int)))
+  HIP_CHECK(hipMemset(d_output, 0, totalThreads * sizeof(int)))
 
   SECTION("Empty Kernel Args") {
     HIP_CHECK_ERROR(hipLaunchKernelEx(&config, emptyKernel), hipSuccess);
@@ -244,7 +244,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_NegetiveTsts) {
                                       d_output, totalThreads),
                     hipErrorInvalidConfiguration);
   }
-  HIP_CHECK(hipFree(d_output));
+  HIP_CHECK(hipFree(d_output))
 }
 
 bool runTest(const char* testName, const void* kernelFunc, int totalThreads, int blockSize,
@@ -252,8 +252,8 @@ bool runTest(const char* testName, const void* kernelFunc, int totalThreads, int
   const int numBlocks = (totalThreads + blockSize - 1) / blockSize;
 
   int* d_output = nullptr;
-  HIP_CHECK(hipMalloc(&d_output, totalThreads * sizeof(int)));
-  HIP_CHECK(hipMemset(d_output, 0, totalThreads * sizeof(int)));
+  HIP_CHECK(hipMalloc(&d_output, totalThreads * sizeof(int)))
+  HIP_CHECK(hipMemset(d_output, 0, totalThreads * sizeof(int)))
 
   hipLaunchConfig_t config = {};
   config.gridDim = dim3{(uint32_t)numBlocks, 1, 1};
@@ -272,15 +272,15 @@ bool runTest(const char* testName, const void* kernelFunc, int totalThreads, int
   void* kernelArgs[] = {&d_output, (void*)&totalThreads};
 
   if (useTemplate) {
-    HIP_CHECK(hipLaunchKernelEx(&config, (void (*)(int*, int))kernelFunc, d_output, totalThreads));
+    HIP_CHECK(hipLaunchKernelEx(&config, (void (*)(int*, int))kernelFunc, d_output, totalThreads))
   } else {
-    HIP_CHECK(hipLaunchKernelExC(&config, kernelFunc, kernelArgs));
+    HIP_CHECK(hipLaunchKernelExC(&config, kernelFunc, kernelArgs))
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   int* h_output = (int*)malloc(totalThreads * sizeof(int));
-  HIP_CHECK(hipMemcpy(h_output, d_output, totalThreads * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(h_output, d_output, totalThreads * sizeof(int), hipMemcpyDeviceToHost))
 
   // Verify results.
   bool success = true;
@@ -299,7 +299,7 @@ bool runTest(const char* testName, const void* kernelFunc, int totalThreads, int
     }
   }
 
-  HIP_CHECK(hipFree(d_output));
+  HIP_CHECK(hipFree(d_output))
   free(h_output);
   return success;
 }
@@ -369,9 +369,9 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_Different_Kernels) {
     SECTION("hipLaunchKernelEx") { HIP_CHECK(hipLaunchKernelEx(&config, emptyKernel)); }
 
     SECTION("hipLaunchKernelExC") {
-      HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(emptyKernel), nullptr));
+      HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(emptyKernel), nullptr))
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   SECTION("Kernel with arguments using kernelParams") {
@@ -379,19 +379,19 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_Different_Kernels) {
     config.blockDim = dim3{1, 1, 1};
 
     int* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, sizeof(int)));
+    HIP_CHECK(hipMalloc(&devMem, sizeof(int)))
 
     SECTION("hipLaunchKernelEx") { HIP_CHECK(hipLaunchKernelEx(&config, argKernel, devMem)); }
 
     SECTION("hipLaunchKernelExC") {
       void* kernel_args[1] = {&devMem};
-      HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(argKernel), kernel_args));
+      HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(argKernel), kernel_args))
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     int result = 0;
-    HIP_CHECK(hipMemcpy(&result, devMem, sizeof(result), hipMemcpyDefault));
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipMemcpy(&result, devMem, sizeof(result), hipMemcpyDefault))
+    HIP_CHECK(hipFree(devMem))
     REQUIRE(result == 100);
   }
 
@@ -399,9 +399,9 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_Different_Kernels) {
     SECTION("hipLaunchKernelEx") { HIP_CHECK(hipLaunchKernelEx(&config, coopEmptykernel)); }
 
     SECTION("hipLaunchKernelExC") {
-      HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(coopEmptykernel), nullptr));
+      HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(coopEmptykernel), nullptr))
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   }
 }
 
@@ -442,11 +442,11 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_CooperativeKernelWithArgs) {
   }
 
   int* devMem = nullptr;
-  HIP_CHECK(hipMalloc(&devMem, N * sizeof(int)));
-  HIP_CHECK(hipMemcpy(devMem, hostMem, N * sizeof(int), hipMemcpyDefault));
+  HIP_CHECK(hipMalloc(&devMem, N * sizeof(int)))
+  HIP_CHECK(hipMemcpy(devMem, hostMem, N * sizeof(int), hipMemcpyDefault))
 
   SECTION("hipLaunchKernelEx") {
-    HIP_CHECK(hipLaunchKernelEx(&config, coopFillArrayKernel, devMem));
+    HIP_CHECK(hipLaunchKernelEx(&config, coopFillArrayKernel, devMem))
   }
 
   SECTION("hipLaunchKernelExC") {
@@ -454,13 +454,13 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_CooperativeKernelWithArgs) {
     HIP_CHECK(
         hipLaunchKernelExC(&config, reinterpret_cast<void*>(coopFillArrayKernel), kernel_args));
   }
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipMemcpy(hostMem, devMem, N * sizeof(int), hipMemcpyDefault));
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipMemcpy(hostMem, devMem, N * sizeof(int), hipMemcpyDefault))
   for (int i = 0; i < N; i++) {
     REQUIRE(hostMem[i] == 550);
   }
 
-  HIP_CHECK(hipFree(devMem));
+  HIP_CHECK(hipFree(devMem))
 }
 
 /**
@@ -505,7 +505,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_MaxBlockDims) {
     SECTION("hipLaunchKernelEx") { HIP_CHECK(hipLaunchKernelEx(&config, emptyKernel)); }
 
     SECTION("hipLaunchKernelExC") {
-      HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(emptyKernel), nullptr));
+      HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(emptyKernel), nullptr))
     }
   }
 
@@ -516,7 +516,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_MaxBlockDims) {
     SECTION("hipLaunchKernelEx") { HIP_CHECK(hipLaunchKernelEx(&config, emptyKernel)); }
 
     SECTION("hipLaunchKernelExC") {
-      HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(emptyKernel), nullptr));
+      HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(emptyKernel), nullptr))
     }
   }
 
@@ -527,10 +527,10 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_MaxBlockDims) {
     SECTION("hipLaunchKernelEx") { HIP_CHECK(hipLaunchKernelEx(&config, emptyKernel)); }
 
     SECTION("hipLaunchKernelExC") {
-      HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(emptyKernel), nullptr));
+      HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(emptyKernel), nullptr))
     }
   }
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 }
 /**
  * End doxygen group KernelTest.

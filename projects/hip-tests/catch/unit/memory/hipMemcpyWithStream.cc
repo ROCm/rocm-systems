@@ -14,7 +14,7 @@ HIP_TEST_CASE(Unit_hipMemcpy_Positive_Basic) { MemcpyWithDirectionCommonTests<fa
 
 HIP_TEST_CASE(Unit_hipMemcpy_Positive_Synchronization_Behavior) {
   using namespace std::placeholders;
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   // For transfers from pageable host memory to device memory, a stream sync is performed before
   // the copy is initiated. The function will return once the pageable buffer has been copied to
@@ -85,9 +85,9 @@ HIP_TEST_CASE(Unit_hipMemcpyWithStream_Capture) {
   LinearAllocGuard<int> device_data(LinearAllocs::hipMalloc, kNumElements * sizeof(int));
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
 
   HIP_CHECK_ERROR(hipMemcpyWithStream(device_data.ptr(), host_data.ptr(),
                                       kNumElements * sizeof(int), hipMemcpyHostToDevice, stream),
@@ -95,5 +95,5 @@ HIP_TEST_CASE(Unit_hipMemcpyWithStream_Capture) {
 
   HIP_CHECK_ERROR(hipStreamEndCapture(stream, nullptr), hipErrorStreamCaptureInvalidated);
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }

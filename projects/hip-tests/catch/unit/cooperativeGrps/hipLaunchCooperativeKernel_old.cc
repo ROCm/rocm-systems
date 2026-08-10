@@ -49,10 +49,10 @@ __global__ void test_gws(int* buf, size_t buf_size, unsigned long long* tmp_buf,
 HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Basic) {
   // Use default device for validating the test
   int device;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  HIP_CHECK(hipGetDeviceProperties(&device_properties, device))
 
   if (!device_properties.cooperativeLaunch) {
     HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
@@ -71,11 +71,11 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Basic) {
     A_h[i] = static_cast<int>(i);
   }
 
-  HIP_CHECK(hipMalloc(&A_d, buffer_size));
-  HIP_CHECK(hipMemcpy(A_d, A_h, buffer_size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipHostMalloc(&C_d, sizeof(unsigned long long)));
+  HIP_CHECK(hipMalloc(&A_d, buffer_size))
+  HIP_CHECK(hipMemcpy(A_d, A_h, buffer_size, hipMemcpyHostToDevice))
+  HIP_CHECK(hipHostMalloc(&C_d, sizeof(unsigned long long)))
 
-  HIPCHECK(hipStreamCreate(&stream));
+  HIPCHECK(hipStreamCreate(&stream))
 
   uint32_t workgroup = GENERATE(32, 64, 128, 256);
 
@@ -89,7 +89,7 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Basic) {
                                                          dimBlock.x * sizeof(unsigned long long)));
 
   dimGrid.x = device_properties.multiProcessorCount * std::min(numBlocks, 32);
-  HIP_CHECK(hipMalloc(&B_d, dimGrid.x * sizeof(unsigned long long)));
+  HIP_CHECK(hipMalloc(&B_d, dimGrid.x * sizeof(unsigned long long)))
 
   void* params[4];
   params[0] = (void*)&A_d;
@@ -101,14 +101,14 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Basic) {
   HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(test_gws), dimGrid, dimBlock, params,
                                        dimBlock.x * sizeof(unsigned long long), stream));
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(((unsigned long long)*C_d) ==
           (((unsigned long long)(kBufferLen) * (kBufferLen - 1)) / 2));
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipHostFree(C_d));
-  HIP_CHECK(hipFree(B_d));
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipHostFree(C_d))
+  HIP_CHECK(hipFree(B_d))
+  HIP_CHECK(hipFree(A_d))
   free(A_h);
 }

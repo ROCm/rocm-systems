@@ -28,7 +28,7 @@ static void test_uniform0(int* retval, uint num_blocks, uint threads_per_block) 
     retval[i] = 0x23232323;
   }
   hipLaunchKernelGGL(kernel_uniform0, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipStreamSynchronize(0))
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != num_threads; ++ii) {
     REQUIRE(retval[ii] == strlen("Hello World\n"));
@@ -53,7 +53,7 @@ static void test_uniform1(int* retval, uint num_blocks, uint threads_per_block) 
     retval[i] = 0x23232323;
   }
   hipLaunchKernelGGL(kernel_uniform1, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipStreamSynchronize(0))
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != num_threads; ++ii) {
     REQUIRE(retval[ii] == strlen("Six times Eight is 42") + 1);
@@ -78,7 +78,7 @@ static void test_divergent0(int* retval, uint num_blocks, uint threads_per_block
     retval[i] = 0x23232323;
   }
   hipLaunchKernelGGL(kernel_divergent0, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipStreamSynchronize(0))
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != 10; ++ii) {
     REQUIRE(retval[ii] == 13);
@@ -113,7 +113,7 @@ static void test_divergent1(int* retval, uint num_blocks, uint threads_per_block
     retval[i] = 0x23232323;
   }
   hipLaunchKernelGGL(kernel_divergent1, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipStreamSynchronize(0))
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != num_threads; ++ii) {
     if (ii % 2) {
@@ -146,7 +146,7 @@ static void test_series(int* retval, uint num_blocks, uint threads_per_block) {
     retval[i] = 0x23232323;
   }
   hipLaunchKernelGGL(kernel_series, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipStreamSynchronize(0))
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != num_threads; ++ii) {
     REQUIRE(retval[ii] == strlen(msg_long1) + strlen(msg_short) + strlen(msg_long2) + 3);
@@ -180,7 +180,7 @@ static void test_series(int* retval, uint num_blocks, uint threads_per_block) {
  */
 HIP_TEST_CASE(Unit_Printf_PrintfBasicTsts) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
@@ -188,14 +188,14 @@ HIP_TEST_CASE(Unit_Printf_PrintfBasicTsts) {
   uint threads_per_block = 64;
   uint num_threads = num_blocks * threads_per_block;
   void* retval_void;
-  HIP_CHECK(hipHostMalloc(&retval_void, 4 * num_threads));
+  HIP_CHECK(hipHostMalloc(&retval_void, 4 * num_threads))
   auto retval = reinterpret_cast<int*>(retval_void);
   test_uniform0(retval, num_blocks, threads_per_block);
   test_uniform1(retval, num_blocks, threads_per_block);
   test_divergent0(retval, num_blocks, threads_per_block);
   test_divergent1(retval, num_blocks, threads_per_block);
   test_series(retval, num_blocks, threads_per_block);
-  HIP_CHECK(hipFree(retval_void));
+  HIP_CHECK(hipFree(retval_void))
 }
 /**
  * End doxygen group PrintfTest.

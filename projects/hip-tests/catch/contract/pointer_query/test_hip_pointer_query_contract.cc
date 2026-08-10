@@ -28,7 +28,7 @@ bool PointerSetAttributeOrSkip(const void* value, hipPointer_attribute attribute
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 #endif  // HT_AMD && !defined(_WIN32)
@@ -38,10 +38,10 @@ bool PointerSetAttributeOrSkip(const void* value, hipPointer_attribute attribute
 HIP_TEST_CASE(Contract_PointerQuery_HipDrvPointerGetAttributes_DrvGetAttributesDeviceAllocation_ReportsTypeAndOrdinal) {
   hip::contract::ContractCleanup cleanup;
   int current_device = 0;
-  HIP_CHECK(hipGetDevice(&current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
 
   void* data = nullptr;
-  HIP_CHECK(hipMalloc(&data, kAllocationBytes));
+  HIP_CHECK(hipMalloc(&data, kAllocationBytes))
   cleanup.Add([data] { (void)hipFree(data); });
 
   unsigned int memory_type = 0;
@@ -61,7 +61,7 @@ HIP_TEST_CASE(Contract_PointerQuery_HipDrvPointerGetAttributes_DrvGetAttributesD
 HIP_TEST_CASE(Contract_PointerQuery_HipDrvPointerGetAttributes_DrvGetAttributes_MatchesSingleAttributeQuery) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
-  HIP_CHECK(hipMalloc(&data, kAllocationBytes));
+  HIP_CHECK(hipMalloc(&data, kAllocationBytes))
   cleanup.Add([data] { (void)hipFree(data); });
 
   void* batch_device_pointer = nullptr;
@@ -82,7 +82,7 @@ HIP_TEST_CASE(Contract_PointerQuery_HipDrvPointerGetAttributes_DrvGetAttributes_
 HIP_TEST_CASE(Contract_PointerQuery_HipDrvPointerGetAttributes_DrvGetAttributesInvalidArgs_AreRejected) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
-  HIP_CHECK(hipMalloc(&data, kAllocationBytes));
+  HIP_CHECK(hipMalloc(&data, kAllocationBytes))
   cleanup.Add([data] { (void)hipFree(data); });
 
   unsigned int memory_type = 0;
@@ -106,11 +106,11 @@ HIP_TEST_CASE(Contract_PointerQuery_HipDrvPointerGetAttributes_DrvGetAttributesI
 HIP_TEST_CASE(Contract_PointerQuery_HipMemPtrGetInfo_Default_ReturnsAllocationSize) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
-  HIP_CHECK(hipMalloc(&data, kAllocationBytes));
+  HIP_CHECK(hipMalloc(&data, kAllocationBytes))
   cleanup.Add([data] { (void)hipFree(data); });
 
   size_t size = 0;
-  HIP_CHECK(hipMemPtrGetInfo(data, &size));
+  HIP_CHECK(hipMemPtrGetInfo(data, &size))
 
   REQUIRE(size >= kAllocationBytes);
 }
@@ -125,7 +125,7 @@ HIP_TEST_CASE(Contract_PointerQuery_HipPointerSetAttribute_SyncMemops_SucceedsWh
 #else
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
-  HIP_CHECK(hipMalloc(&data, kAllocationBytes));
+  HIP_CHECK(hipMalloc(&data, kAllocationBytes))
   cleanup.Add([data] { (void)hipFree(data); });
 
   int value = 1;
@@ -146,7 +146,7 @@ HIP_TEST_CASE(Contract_PointerQuery_HipPointerSetAttribute_InvalidArgs_AreReject
 #else
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
-  HIP_CHECK(hipMalloc(&data, kAllocationBytes));
+  HIP_CHECK(hipMalloc(&data, kAllocationBytes))
   cleanup.Add([data] { (void)hipFree(data); });
 
   int value = 0;

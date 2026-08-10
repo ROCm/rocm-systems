@@ -23,32 +23,32 @@ static void HipModuleGetGlobalTest(hipModule_t module, const std::string global_
 
   hipDeviceptr_t global;
   size_t global_size = 0;
-  HIP_CHECK(hipModuleGetGlobal(&global, &global_size, module, global_name.c_str()));
+  HIP_CHECK(hipModuleGetGlobal(&global, &global_size, module, global_name.c_str()))
   REQUIRE(global != 0);
   REQUIRE(size == global_size);
 
   hipFunction_t kernel = nullptr;
   const auto kernel_name = global_name + "_address_validation_kernel";
-  HIP_CHECK(hipModuleGetFunction(&kernel, module, kernel_name.c_str()));
+  HIP_CHECK(hipModuleGetFunction(&kernel, module, kernel_name.c_str()))
   LinearAllocGuard<bool> equal_addresses(LinearAllocs::hipMalloc, sizeof(bool));
-  HIP_CHECK(hipMemset(equal_addresses.ptr(), false, sizeof(*equal_addresses.ptr())));
+  HIP_CHECK(hipMemset(equal_addresses.ptr(), false, sizeof(*equal_addresses.ptr())))
   bool* equal_addresses_ptr = equal_addresses.ptr();
   void* kernel_args[2] = {&global, &equal_addresses_ptr};
-  HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args, nullptr));
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args, nullptr))
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
   bool ok;
-  HIP_CHECK(hipMemcpy(&ok, equal_addresses_ptr, sizeof(ok), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&ok, equal_addresses_ptr, sizeof(ok), hipMemcpyDeviceToHost))
   REQUIRE(ok);
 
   constexpr T expected_value = 42;
   std::array<T, N> fill_buffer;
   std::fill_n(fill_buffer.begin(), N, expected_value);
-  HIP_CHECK(hipMemcpyHtoD(global, fill_buffer.data(), size));
+  HIP_CHECK(hipMemcpyHtoD(global, fill_buffer.data(), size))
 
 
   std::array<T, N> read_buffer;
-  HIP_CHECK(hipMemcpyDtoH(read_buffer.data(), global, size));
+  HIP_CHECK(hipMemcpyDtoH(read_buffer.data(), global, size))
   ArrayFindIfNot(read_buffer.data(), expected_value, read_buffer.size());
 }
 
@@ -62,7 +62,7 @@ static void HipModuleGetGlobalTest(hipModule_t module, const std::string global_
   }
 
 static inline hipModule_t GetModule() {
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
   const static auto mg = ModuleGuard::LoadModule("get_global_test_module.code");
   return mg.module();
 }
@@ -85,11 +85,11 @@ HIP_TEST_CASE(Unit_hipModuleGetGlobal_Positive_Parameters) {
   size_t global_size = 0;
 
   SECTION("dptr == nullptr") {
-    HIP_CHECK(hipModuleGetGlobal(nullptr, &global_size, module, "int_var"));
+    HIP_CHECK(hipModuleGetGlobal(nullptr, &global_size, module, "int_var"))
   }
 
   SECTION("bytes == nullptr") {
-    HIP_CHECK(hipModuleGetGlobal(&global, nullptr, module, "int_var"));
+    HIP_CHECK(hipModuleGetGlobal(&global, nullptr, module, "int_var"))
   }
 }
 
@@ -135,15 +135,15 @@ HIP_TEST_CASE(Unit_hipModuleGetGlobal_Negative_Dptr_And_Bytes_Are_Nullptr) {
 // is loaded
 HIP_TEST_CASE(Unit_hipModuleGetGlobal_DiffDevice) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   auto module = GetModule();
-  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipSetDevice(1))
   hipDeviceptr_t global;
   size_t global_size = 0;
-  HIP_CHECK(hipModuleGetGlobal(&global, &global_size, module, "int_var"));
+  HIP_CHECK(hipModuleGetGlobal(&global, &global_size, module, "int_var"))
   REQUIRE(global != 0);
   REQUIRE(sizeof(int) == global_size);
 }

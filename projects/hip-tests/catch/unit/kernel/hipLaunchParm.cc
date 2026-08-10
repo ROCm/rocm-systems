@@ -51,7 +51,7 @@ static hipError_t hipHostMallocError = hipErrorUnknown;
 static hipError_t hipMemsetError = hipErrorUnknown;
 
 static void ResultValidation() {
-  HIP_CHECK(hipMemcpy(result_h, result_d, BLOCK_DIM_SIZE * sizeof(bool), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(result_h, result_d, BLOCK_DIM_SIZE * sizeof(bool), hipMemcpyDeviceToHost))
 
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) {
     REQUIRE(result_h[k] == true);
@@ -64,8 +64,8 @@ static void ResultValidation() {
 // tests which were disabled.
 static void ResetValidationMem() {
   // reset the memory to false to reuse it.
-  HIP_CHECK(hipMemset(result_d, false, BLOCK_DIM_SIZE));
-  HIP_CHECK(hipMemset(result_h, false, BLOCK_DIM_SIZE));
+  HIP_CHECK(hipMemset(result_d, false, BLOCK_DIM_SIZE))
+  HIP_CHECK(hipMemset(result_h, false, BLOCK_DIM_SIZE))
   return;
 }
 
@@ -592,14 +592,14 @@ HIP_TEST_CASE(Unit_hipLaunchParm) {
     hipLaunchKernelStruct_t5 hipLaunchKernelStruct_h5;
     char* cp_d5;  // This is passed as pointer to struct member
     // allocating memory for char pointer on device
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&cp_d5), sizeof(char)));
-    HIP_CHECK(hipMemset(cp_d5, 'p', sizeof(char)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&cp_d5), sizeof(char)))
+    HIP_CHECK(hipMemset(cp_d5, 'p', sizeof(char)))
     hipLaunchKernelStruct_h5.c1 = 'c';
     hipLaunchKernelStruct_h5.cp = cp_d5;
     hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc5), dim3(BLOCK_DIM_SIZE), dim3(1),
                        0, 0, hipLaunchKernelStruct_h5, result_d);
     ResultValidation();
-    HIP_CHECK(hipFree(reinterpret_cast<void*>(cp_d5)));
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(cp_d5)))
   }
 
   SECTION("Passing struct with aligned(8)") {
@@ -670,8 +670,8 @@ HIP_TEST_CASE(Unit_hipLaunchParm) {
     ResetValidationMem();
     uint32_t* ip_d9;
     // allocating memory for char pointer on device
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ip_d9), sizeof(uint32_t)));
-    HIP_CHECK(hipMemset(ip_d9, 1, sizeof(uint32_t)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ip_d9), sizeof(uint32_t)))
+    HIP_CHECK(hipMemset(ip_d9, 1, sizeof(uint32_t)))
     // ip_d9 passed as pointer to struct member, struct.ip = &ip_d9
     const hipLaunchKernelStruct_t9 hipLaunchKernelStruct_h9 = {'c', ip_d9};
     hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc9), dim3(BLOCK_DIM_SIZE), dim3(1),
@@ -679,7 +679,7 @@ HIP_TEST_CASE(Unit_hipLaunchParm) {
 #if ENABLE_DECLARE_INITIALIZATION_POINTER
     ResultValidation();
 #endif
-    HIP_CHECK(hipFree(reinterpret_cast<void*>(ip_d9)));
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(ip_d9)))
   }
 
   SECTION("Passing struct with uintN_t") {
@@ -740,12 +740,12 @@ HIP_TEST_CASE(Unit_hipLaunchParm) {
 
 #if ENABLE_HEAP_MEMORY_ACCESS  // causing page fault here,
                                // on small bar set
-    HIP_CHECK(hipMalloc(&hipLaunchKernelStruct_h15.heapmem, BLOCK_DIM_SIZE * sizeof(int)));
-    HIP_CHECK(hipMemset(&hipLaunchKernelStruct_h15.heapmem, 0, BLOCK_DIM_SIZE));
+    HIP_CHECK(hipMalloc(&hipLaunchKernelStruct_h15.heapmem, BLOCK_DIM_SIZE * sizeof(int)))
+    HIP_CHECK(hipMemset(&hipLaunchKernelStruct_h15.heapmem, 0, BLOCK_DIM_SIZE))
     hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc15), dim3(BLOCK_DIM_SIZE), dim3(1),
                        0, 0, hipLaunchKernelStruct_h15, result_d);
     ResultValidation();
-    HIP_CHECK(hipFree(reinterpret_cast<void*>(hipLaunchKernelStruct_h15.heapmem)));
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(hipLaunchKernelStruct_h15.heapmem)))
 #endif
   }
 
@@ -806,7 +806,7 @@ HIP_TEST_CASE(Unit_hipLaunchParm) {
 
   SECTION("Passing the different hipLaunchParm options") {
     float* Ad;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), 1024));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), 1024))
     hipLaunchKernelGGL(HIP_KERNEL_NAME(vAdd), size_t(1024), 1, 0, 0, Ad);
     hipLaunchKernelGGL(HIP_KERNEL_NAME(vAdd), 1024, dim3(1), 0, 0, Ad);
     hipLaunchKernelGGL(HIP_KERNEL_NAME(vAdd), dim3(1024), 1, 0, 0, Ad);
@@ -844,11 +844,11 @@ HIP_TEST_CASE(Unit_hipLaunchParm) {
     MY_LAUNCH_WITH_PAREN(hipLaunchKernelGGL(vAdd, dim3(1024), dim3(1), 0, 0, Ad), true,
                          "firstCall");
 #endif
-    HIP_CHECK(hipFree(reinterpret_cast<void*>(A)));
-    HIP_CHECK(hipFree(reinterpret_cast<void*>(Ad)));
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(A)))
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(Ad)))
   }
-  HIP_CHECK(hipHostFree(result_h));
-  HIP_CHECK(hipFree(result_d));
+  HIP_CHECK(hipHostFree(result_h))
+  HIP_CHECK(hipFree(result_d))
 }
 
 /**

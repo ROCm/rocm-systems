@@ -39,17 +39,17 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
   void* hipHostFree_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
-  HIP_CHECK(hipGetProcAddress("hipMalloc", &hipMalloc_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipFree", &hipFree_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMalloc", &hipMalloc_ptr, currentHipVersion, 0, nullptr))
+  HIP_CHECK(hipGetProcAddress("hipFree", &hipFree_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(hipGetProcAddress("hipExtMallocWithFlags", &hipExtMallocWithFlags_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMallocHost", &hipMallocHost_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMallocHost", &hipMallocHost_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(
       hipGetProcAddress("hipMemAllocHost", &hipMemAllocHost_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipHostMalloc", &hipHostMalloc_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipHostAlloc", &hipHostAlloc_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipHostMalloc", &hipHostMalloc_ptr, currentHipVersion, 0, nullptr))
+  HIP_CHECK(hipGetProcAddress("hipHostAlloc", &hipHostAlloc_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(hipGetProcAddress("hipHostGetDevicePointer", &hipHostGetDevicePointer_ptr,
                               currentHipVersion, 0, nullptr));
   HIP_CHECK(
@@ -58,8 +58,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
       hipGetProcAddress("hipMallocPitch", &hipMallocPitch_ptr, currentHipVersion, 0, nullptr));
   HIP_CHECK(
       hipGetProcAddress("hipMemAllocPitch", &hipMemAllocPitch_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipFreeHost", &hipFreeHost_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipHostFree", &hipHostFree_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipFreeHost", &hipFreeHost_ptr, currentHipVersion, 0, nullptr))
+  HIP_CHECK(hipGetProcAddress("hipHostFree", &hipHostFree_ptr, currentHipVersion, 0, nullptr))
 
   hipError_t (*dyn_hipMalloc_ptr)(void**, size_t) =
       reinterpret_cast<hipError_t (*)(void**, size_t)>(hipMalloc_ptr);
@@ -86,14 +86,14 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
   // Validating hipMalloc and hipFree APIs
   {
     void* d_ptr = nullptr;
-    HIP_CHECK(dyn_hipMalloc_ptr(&d_ptr, 256));
+    HIP_CHECK(dyn_hipMalloc_ptr(&d_ptr, 256))
 
     REQUIRE(d_ptr != nullptr);
     size_t d_ptr_size = -1;
-    HIP_CHECK(hipMemPtrGetInfo(d_ptr, &d_ptr_size));
+    HIP_CHECK(hipMemPtrGetInfo(d_ptr, &d_ptr_size))
     REQUIRE(d_ptr_size == 256);
 
-    HIP_CHECK(dyn_hipFree_ptr(d_ptr));
+    HIP_CHECK(dyn_hipFree_ptr(d_ptr))
 
     // With ASAN Enabled, this might pass since we do not release the memory at the line above
 #if !defined(ENABLE_ADDRESS_SANITIZER)
@@ -117,36 +117,36 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
 
     for (unsigned int flag : ext_mlc_flags) {
       ext_d_ptr = nullptr;
-      HIP_CHECK(dyn_hipExtMallocWithFlags_ptr(&ext_d_ptr, 8, flag));
+      HIP_CHECK(dyn_hipExtMallocWithFlags_ptr(&ext_d_ptr, 8, flag))
       REQUIRE(ext_d_ptr != nullptr);
 
       ext_d_ptr_size = -1;
-      HIP_CHECK(hipMemPtrGetInfo(ext_d_ptr, &ext_d_ptr_size));
+      HIP_CHECK(hipMemPtrGetInfo(ext_d_ptr, &ext_d_ptr_size))
       REQUIRE(ext_d_ptr_size == 8);
-      HIP_CHECK(hipFree(ext_d_ptr));
+      HIP_CHECK(hipFree(ext_d_ptr))
     }
   }
 
   // Validating hipMallocHost API
   {
     void* h_ptr = nullptr;
-    HIP_CHECK(dyn_hipMallocHost_ptr(&h_ptr, 128));
+    HIP_CHECK(dyn_hipMallocHost_ptr(&h_ptr, 128))
     REQUIRE(h_ptr != nullptr);
     size_t h_ptr_size = -1;
-    HIP_CHECK(hipMemPtrGetInfo(h_ptr, &h_ptr_size));
+    HIP_CHECK(hipMemPtrGetInfo(h_ptr, &h_ptr_size))
     REQUIRE(h_ptr_size == 128);
-    HIP_CHECK(hipFree(h_ptr));
+    HIP_CHECK(hipFree(h_ptr))
   }
 
   // Validating hipMemAllocHost API
   {
     void* h_ptr = nullptr;
-    HIP_CHECK(dyn_hipMemAllocHost_ptr(&h_ptr, 256));
+    HIP_CHECK(dyn_hipMemAllocHost_ptr(&h_ptr, 256))
     REQUIRE(h_ptr != nullptr);
     size_t h_ptr_size = -1;
-    HIP_CHECK(hipMemPtrGetInfo(h_ptr, &h_ptr_size));
+    HIP_CHECK(hipMemPtrGetInfo(h_ptr, &h_ptr_size))
     REQUIRE(h_ptr_size == 256);
-    HIP_CHECK(hipFree(h_ptr));
+    HIP_CHECK(hipFree(h_ptr))
   }
 
   // Validating hipHostMalloc API
@@ -160,13 +160,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
     for (unsigned int flag : h3_flags) {
       h_ptr = nullptr;
 
-      HIP_CHECK(dyn_hipHostMalloc_ptr(&h_ptr, 256, flag));
+      HIP_CHECK(dyn_hipHostMalloc_ptr(&h_ptr, 256, flag))
       REQUIRE(h_ptr != nullptr);
 
       h_ptr_size = -1;
-      HIP_CHECK(hipMemPtrGetInfo(h_ptr, &h_ptr_size));
+      HIP_CHECK(hipMemPtrGetInfo(h_ptr, &h_ptr_size))
       REQUIRE(h_ptr_size == 256);
-      HIP_CHECK(hipFree(h_ptr));
+      HIP_CHECK(hipFree(h_ptr))
     }
   }
 
@@ -175,13 +175,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
     void* h_ptr = nullptr;
     size_t h_ptr_size = -1;
 
-    HIP_CHECK(dyn_hipHostAlloc_ptr(&h_ptr, 256, 0));
+    HIP_CHECK(dyn_hipHostAlloc_ptr(&h_ptr, 256, 0))
     REQUIRE(h_ptr != nullptr);
 
     h_ptr_size = -1;
-    HIP_CHECK(hipMemPtrGetInfo(h_ptr, &h_ptr_size));
+    HIP_CHECK(hipMemPtrGetInfo(h_ptr, &h_ptr_size))
     REQUIRE(h_ptr_size == 256);
-    HIP_CHECK(hipFree(h_ptr));
+    HIP_CHECK(hipFree(h_ptr))
   }
 
   // Validating hipHostGetDevicePointer API
@@ -198,14 +198,14 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
     for (unsigned int flag : flags) {
       hostPtr = nullptr;
 
-      HIP_CHECK(hipHostMalloc(&hostPtr, 1024, flag));
+      HIP_CHECK(hipHostMalloc(&hostPtr, 1024, flag))
       REQUIRE(hostPtr != nullptr);
 
       devicePtrForhostPtr = nullptr;
       devicePtrForhostPtrWithFuncPtr = nullptr;
 
-      HIP_CHECK(hipHostGetDevicePointer(&devicePtrForhostPtr, hostPtr, 0));
-      HIP_CHECK(dyn_hipHostGetDevicePointer_ptr(&devicePtrForhostPtrWithFuncPtr, hostPtr, 0));
+      HIP_CHECK(hipHostGetDevicePointer(&devicePtrForhostPtr, hostPtr, 0))
+      HIP_CHECK(dyn_hipHostGetDevicePointer_ptr(&devicePtrForhostPtrWithFuncPtr, hostPtr, 0))
 
       REQUIRE(devicePtrForhostPtr != nullptr);
       REQUIRE(devicePtrForhostPtrWithFuncPtr != nullptr);
@@ -214,13 +214,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
 
       hostPtr_size = -1;
       hostPtr_ptr_size = -1;
-      HIP_CHECK(hipMemPtrGetInfo(devicePtrForhostPtr, &hostPtr_size));
+      HIP_CHECK(hipMemPtrGetInfo(devicePtrForhostPtr, &hostPtr_size))
       REQUIRE(hostPtr_size == 1024);
-      HIP_CHECK(hipMemPtrGetInfo(devicePtrForhostPtrWithFuncPtr, &hostPtr_ptr_size));
+      HIP_CHECK(hipMemPtrGetInfo(devicePtrForhostPtrWithFuncPtr, &hostPtr_ptr_size))
       REQUIRE(hostPtr_ptr_size == 1024);
       REQUIRE(hostPtr_size == hostPtr_ptr_size);
 
-      HIP_CHECK(hipFree(hostPtr));
+      HIP_CHECK(hipFree(hostPtr))
     }
   }
 
@@ -235,19 +235,19 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
 
     for (unsigned int flag : flags) {
       h = nullptr;
-      HIP_CHECK(hipHostMalloc(&h, 512, flag));
+      HIP_CHECK(hipHostMalloc(&h, 512, flag))
       REQUIRE(h != nullptr);
 
       expect_flags = -1;
       expect_flags_with_ptr = -1;
-      HIP_CHECK(hipHostGetFlags(&expect_flags, h));
-      HIP_CHECK(dyn_hipHostGetFlags_ptr(&expect_flags_with_ptr, h));
+      HIP_CHECK(hipHostGetFlags(&expect_flags, h))
+      HIP_CHECK(dyn_hipHostGetFlags_ptr(&expect_flags_with_ptr, h))
       REQUIRE(expect_flags == flag);
       REQUIRE(expect_flags_with_ptr == flag);
 
       REQUIRE(expect_flags_with_ptr == expect_flags);
 
-      HIP_CHECK(hipFree(h));
+      HIP_CHECK(hipFree(h))
     }
   }
 
@@ -258,13 +258,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
     int width1 = 260;
     int height1 = 2;
 
-    HIP_CHECK(dyn_hipMallocPitch_ptr(&pitchedMem_ptr, &pitch_ptr, width1, height1));
+    HIP_CHECK(dyn_hipMallocPitch_ptr(&pitchedMem_ptr, &pitch_ptr, width1, height1))
 
     size_t pitchedMem_sizeptr = -1;
-    HIP_CHECK(hipMemPtrGetInfo(pitchedMem_ptr, &pitchedMem_sizeptr));
+    HIP_CHECK(hipMemPtrGetInfo(pitchedMem_ptr, &pitchedMem_sizeptr))
     REQUIRE(pitchedMem_sizeptr == 1024);
 
-    HIP_CHECK(hipFree(pitchedMem_ptr));
+    HIP_CHECK(hipFree(pitchedMem_ptr))
   }
 
   // Validating hipMemAllocPitch API
@@ -285,10 +285,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
 
       REQUIRE(pitch_ptr == 512);
       pitchedMem_sizeptr = -1;
-      HIP_CHECK(hipMemPtrGetInfo(pitchedMem_ptr, &pitchedMem_sizeptr));
+      HIP_CHECK(hipMemPtrGetInfo(pitchedMem_ptr, &pitchedMem_sizeptr))
       REQUIRE(pitchedMem_sizeptr == 1024);
 
-      HIP_CHECK(hipFree(pitchedMem_ptr));
+      HIP_CHECK(hipFree(pitchedMem_ptr))
     }
   }
 
@@ -302,24 +302,24 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
   // Validating hipFreeHost API
   {
     void* h_ptr = nullptr;
-    HIP_CHECK(hipMallocHost(&h_ptr, 128));
+    HIP_CHECK(hipMallocHost(&h_ptr, 128))
     REQUIRE(h_ptr != nullptr);
 
     size_t h_ptr_size = -1;
-    HIP_CHECK(hipMemPtrGetInfo(h_ptr, &h_ptr_size));
-    HIP_CHECK(dyn_hipFreeHost_ptr(h_ptr));
+    HIP_CHECK(hipMemPtrGetInfo(h_ptr, &h_ptr_size))
+    HIP_CHECK(dyn_hipFreeHost_ptr(h_ptr))
     REQUIRE(hipMemPtrGetInfo(h_ptr, &h_ptr_size) == hipErrorInvalidValue);
   }
 
   // Validating hipHostFree API
   {
     void* h_ptr = nullptr;
-    HIP_CHECK(hipMallocHost(&h_ptr, 128));
+    HIP_CHECK(hipMallocHost(&h_ptr, 128))
     REQUIRE(h_ptr != nullptr);
 
     size_t h_ptr_size = -1;
-    HIP_CHECK(hipMemPtrGetInfo(h_ptr, &h_ptr_size));
-    HIP_CHECK(dyn_hipHostFree_ptr(h_ptr));
+    HIP_CHECK(hipMemPtrGetInfo(h_ptr, &h_ptr_size))
+    HIP_CHECK(dyn_hipHostFree_ptr(h_ptr))
     REQUIRE(hipMemPtrGetInfo(h_ptr, &h_ptr_size) == hipErrorInvalidValue);
   }
 #endif
@@ -344,7 +344,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisRegisterUnReg) {
   void* hipHostUnregister_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(
       hipGetProcAddress("hipHostRegister", &hipHostRegister_ptr, currentHipVersion, 0, nullptr));
@@ -363,18 +363,18 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisRegisterUnReg) {
   REQUIRE(reg_h_ptr != nullptr);
 
   unsigned int reg_flags = hipHostRegisterDefault;
-  HIP_CHECK(dyn_hipHostRegister_ptr(reg_h_ptr, 1024, reg_flags));
+  HIP_CHECK(dyn_hipHostRegister_ptr(reg_h_ptr, 1024, reg_flags))
 
   void* devicePtrReg_ptr = nullptr;
-  HIP_CHECK(hipHostGetDevicePointer(&devicePtrReg_ptr, reg_h_ptr, 0));
+  HIP_CHECK(hipHostGetDevicePointer(&devicePtrReg_ptr, reg_h_ptr, 0))
   REQUIRE(devicePtrReg_ptr != nullptr);
 
   size_t reg_ptr_size = -1;
-  HIP_CHECK(hipMemPtrGetInfo(devicePtrReg_ptr, &reg_ptr_size));
+  HIP_CHECK(hipMemPtrGetInfo(devicePtrReg_ptr, &reg_ptr_size))
   REQUIRE(reg_ptr_size == 1024);
 
   // Validating hipHostUnregister API
-  HIP_CHECK(dyn_hipHostUnregister_ptr(reg_h_ptr));
+  HIP_CHECK(dyn_hipHostUnregister_ptr(reg_h_ptr))
 
   REQUIRE(hipHostGetDevicePointer(&devicePtrReg_ptr, reg_h_ptr, 0) == hipErrorInvalidValue);
   free(reg_h_ptr);
@@ -409,13 +409,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   void* hipMalloc3D_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(
       hipGetProcAddress("hipMallocArray", &hipMallocArray_ptr, currentHipVersion, 0, nullptr));
   HIP_CHECK(
       hipGetProcAddress("hipArrayCreate", &hipArrayCreate_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipFreeArray", &hipFreeArray_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipFreeArray", &hipFreeArray_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(
       hipGetProcAddress("hipArrayDestroy", &hipArrayDestroy_ptr, currentHipVersion, 0, nullptr));
   HIP_CHECK(
@@ -428,7 +428,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
                               currentHipVersion, 0, nullptr));
   HIP_CHECK(
       hipGetProcAddress("hipMalloc3DArray", &hipMalloc3DArray_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMalloc3D", &hipMalloc3D_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMalloc3D", &hipMalloc3D_ptr, currentHipVersion, 0, nullptr))
 
   hipError_t (*dyn_hipMallocArray_ptr)(hipArray_t*, const hipChannelFormatDesc*, size_t, size_t,
                                        unsigned int) =
@@ -478,27 +478,27 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   size_t m_height = 16;
   unsigned int m_flags = hipArrayDefault;
 
-  HIP_CHECK(hipMallocArray(&m_array, &m_desc, m_width, m_height, m_flags));
-  HIP_CHECK(dyn_hipMallocArray_ptr(&m_array_ptr, &m_desc, m_width, m_height, m_flags));
+  HIP_CHECK(hipMallocArray(&m_array, &m_desc, m_width, m_height, m_flags))
+  HIP_CHECK(dyn_hipMallocArray_ptr(&m_array_ptr, &m_desc, m_width, m_height, m_flags))
 
   REQUIRE(m_array != nullptr);
   REQUIRE(m_array_ptr != nullptr);
 
   HIP_ARRAY_DESCRIPTOR m_array_desc;
-  HIP_CHECK(hipArrayGetDescriptor(&m_array_desc, m_array));
+  HIP_CHECK(hipArrayGetDescriptor(&m_array_desc, m_array))
   REQUIRE(m_array_desc.Width == m_width);
   REQUIRE(m_array_desc.Height == m_height);
 
   HIP_ARRAY_DESCRIPTOR m_array_ptr_desc;
-  HIP_CHECK(hipArrayGetDescriptor(&m_array_ptr_desc, m_array_ptr));
+  HIP_CHECK(hipArrayGetDescriptor(&m_array_ptr_desc, m_array_ptr))
   REQUIRE(m_array_ptr_desc.Width == m_width);
   REQUIRE(m_array_ptr_desc.Height == m_height);
 
   REQUIRE(m_array_ptr_desc.Width == m_array_desc.Width);
   REQUIRE(m_array_ptr_desc.Height == m_array_desc.Height);
 
-  HIP_CHECK(hipFreeArray(m_array));
-  HIP_CHECK(hipFreeArray(m_array_ptr));
+  HIP_CHECK(hipFreeArray(m_array))
+  HIP_CHECK(hipFreeArray(m_array_ptr))
 
   // Validating hipArrayCreate API
   hipArray_t array = nullptr;
@@ -510,40 +510,40 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   desc.Width = 8;
   desc.Height = 8;
 
-  HIP_CHECK(hipArrayCreate(&array, &desc));
-  HIP_CHECK(dyn_hipArrayCreate_ptr(&array_ptr, &desc));
+  HIP_CHECK(hipArrayCreate(&array, &desc))
+  HIP_CHECK(dyn_hipArrayCreate_ptr(&array_ptr, &desc))
 
   REQUIRE(array != nullptr);
   REQUIRE(array_ptr != nullptr);
 
   HIP_ARRAY_DESCRIPTOR array_desc;
-  HIP_CHECK(hipArrayGetDescriptor(&array_desc, array));
+  HIP_CHECK(hipArrayGetDescriptor(&array_desc, array))
   REQUIRE(array_desc.Width == desc.Width);
   REQUIRE(array_desc.Height == desc.Height);
 
   HIP_ARRAY_DESCRIPTOR array_ptr_desc;
-  HIP_CHECK(hipArrayGetDescriptor(&array_ptr_desc, array_ptr));
+  HIP_CHECK(hipArrayGetDescriptor(&array_ptr_desc, array_ptr))
   REQUIRE(array_ptr_desc.Width == desc.Width);
   REQUIRE(array_ptr_desc.Height == desc.Height);
 
   REQUIRE(array_ptr_desc.Width == array_desc.Width);
   REQUIRE(array_ptr_desc.Height == array_desc.Height);
 
-  HIP_CHECK(hipFreeArray(array));
-  HIP_CHECK(hipFreeArray(array_ptr));
+  HIP_CHECK(hipFreeArray(array))
+  HIP_CHECK(hipFreeArray(array_ptr))
 
   // Validating hipFreeArray API
   hipArray_t f_array = nullptr;
   hipArray_t f_array_ptr = nullptr;
 
-  HIP_CHECK(hipArrayCreate(&f_array, &desc));
-  HIP_CHECK(hipArrayCreate(&f_array_ptr, &desc));
+  HIP_CHECK(hipArrayCreate(&f_array, &desc))
+  HIP_CHECK(hipArrayCreate(&f_array_ptr, &desc))
 
   REQUIRE(f_array != nullptr);
   REQUIRE(f_array_ptr != nullptr);
 
-  HIP_CHECK(hipFreeArray(f_array));
-  HIP_CHECK(dyn_hipFreeArray_ptr(f_array_ptr));
+  HIP_CHECK(hipFreeArray(f_array))
+  HIP_CHECK(dyn_hipFreeArray_ptr(f_array_ptr))
 
   HIP_ARRAY_DESCRIPTOR f_array_desc;
   REQUIRE(hipArrayGetDescriptor(&f_array_desc, f_array) == hipErrorInvalidHandle);
@@ -553,14 +553,14 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   hipArray_t d_array = nullptr;
   hipArray_t d_array_ptr = nullptr;
 
-  HIP_CHECK(hipArrayCreate(&d_array, &desc));
-  HIP_CHECK(hipArrayCreate(&d_array_ptr, &desc));
+  HIP_CHECK(hipArrayCreate(&d_array, &desc))
+  HIP_CHECK(hipArrayCreate(&d_array_ptr, &desc))
 
   REQUIRE(d_array != nullptr);
   REQUIRE(d_array_ptr != nullptr);
 
-  HIP_CHECK(hipArrayDestroy(d_array));
-  HIP_CHECK(dyn_hipArrayDestroy_ptr(d_array_ptr));
+  HIP_CHECK(hipArrayDestroy(d_array))
+  HIP_CHECK(dyn_hipArrayDestroy_ptr(d_array_ptr))
 
   HIP_ARRAY_DESCRIPTOR d_array_desc;
   REQUIRE(hipArrayGetDescriptor(&d_array_desc, d_array) == hipErrorInvalidHandle);
@@ -576,8 +576,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   gi_desc.Width = 64;
   gi_desc.Height = 64;
 
-  HIP_CHECK(hipArrayCreate(&gi_array, &gi_desc));
-  HIP_CHECK(hipArrayCreate(&gi_array_ptr, &gi_desc));
+  HIP_CHECK(hipArrayCreate(&gi_array, &gi_desc))
+  HIP_CHECK(hipArrayCreate(&gi_array_ptr, &gi_desc))
 
   REQUIRE(gi_array != nullptr);
   REQUIRE(gi_array_ptr != nullptr);
@@ -585,7 +585,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   hipChannelFormatDesc gi_array_desc;
   hipExtent gi_array_extent;
   unsigned int gi_array_flags;
-  HIP_CHECK(hipArrayGetInfo(&gi_array_desc, &gi_array_extent, &gi_array_flags, gi_array));
+  HIP_CHECK(hipArrayGetInfo(&gi_array_desc, &gi_array_extent, &gi_array_flags, gi_array))
   REQUIRE(gi_array_desc.x == 32);
   REQUIRE(gi_array_desc.y == 0);
   REQUIRE(gi_array_desc.z == 0);
@@ -621,8 +621,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   REQUIRE(gi_array_extent_ptr.depth == gi_array_extent.depth);
   REQUIRE(gi_array_flags_ptr == gi_array_flags);
 
-  HIP_CHECK(hipFreeArray(gi_array));
-  HIP_CHECK(hipFreeArray(gi_array_ptr));
+  HIP_CHECK(hipFreeArray(gi_array))
+  HIP_CHECK(hipFreeArray(gi_array_ptr))
 
   // Validating hipArrayGetDescriptor API
   hipArray_t gd_array = nullptr;
@@ -634,21 +634,21 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   gd_desc.Width = 32;
   gd_desc.Height = 32;
 
-  HIP_CHECK(hipArrayCreate(&gd_array, &gd_desc));
-  HIP_CHECK(hipArrayCreate(&gd_array_ptr, &gd_desc));
+  HIP_CHECK(hipArrayCreate(&gd_array, &gd_desc))
+  HIP_CHECK(hipArrayCreate(&gd_array_ptr, &gd_desc))
 
   REQUIRE(gd_array != nullptr);
   REQUIRE(gd_array_ptr != nullptr);
 
   HIP_ARRAY_DESCRIPTOR gd_array_desc;
-  HIP_CHECK(hipArrayGetDescriptor(&gd_array_desc, gd_array));
+  HIP_CHECK(hipArrayGetDescriptor(&gd_array_desc, gd_array))
   REQUIRE(gd_array_desc.Format == HIP_AD_FORMAT_FLOAT);
   REQUIRE(gd_array_desc.NumChannels == 1);
   REQUIRE(gd_array_desc.Width == 32);
   REQUIRE(gd_array_desc.Height == 32);
 
   HIP_ARRAY_DESCRIPTOR gd_array_desc_ptr;
-  HIP_CHECK(dyn_hipArrayGetDescriptor_ptr(&gd_array_desc_ptr, gd_array_ptr));
+  HIP_CHECK(dyn_hipArrayGetDescriptor_ptr(&gd_array_desc_ptr, gd_array_ptr))
   REQUIRE(gd_array_desc_ptr.Format == HIP_AD_FORMAT_FLOAT);
   REQUIRE(gd_array_desc_ptr.NumChannels == 1);
   REQUIRE(gd_array_desc_ptr.Width == 32);
@@ -659,8 +659,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   REQUIRE(gd_array_desc_ptr.Width == gd_array_desc.Width);
   REQUIRE(gd_array_desc_ptr.Height == gd_array_desc.Height);
 
-  HIP_CHECK(hipFreeArray(gd_array));
-  HIP_CHECK(hipFreeArray(gd_array_ptr));
+  HIP_CHECK(hipFreeArray(gd_array))
+  HIP_CHECK(hipFreeArray(gd_array_ptr))
 
   // Validating hipArray3DCreate API
   hipArray_t array3d = nullptr;
@@ -674,20 +674,20 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   desc3d.Depth = 2;
   desc3d.Flags = 0;
 
-  HIP_CHECK(hipArray3DCreate(&array3d, &desc3d));
-  HIP_CHECK(dyn_hipArray3DCreate_ptr(&array3d_ptr, &desc3d));
+  HIP_CHECK(hipArray3DCreate(&array3d, &desc3d))
+  HIP_CHECK(dyn_hipArray3DCreate_ptr(&array3d_ptr, &desc3d))
 
   REQUIRE(array3d != nullptr);
   REQUIRE(array3d_ptr != nullptr);
 
   HIP_ARRAY3D_DESCRIPTOR array_desc3d;
-  HIP_CHECK(hipArray3DGetDescriptor(&array_desc3d, array3d));
+  HIP_CHECK(hipArray3DGetDescriptor(&array_desc3d, array3d))
   REQUIRE(array_desc3d.Width == desc3d.Width);
   REQUIRE(array_desc3d.Height == desc3d.Height);
   REQUIRE(array_desc3d.Depth == desc3d.Depth);
 
   HIP_ARRAY3D_DESCRIPTOR array_ptr_desc3d;
-  HIP_CHECK(hipArray3DGetDescriptor(&array_ptr_desc3d, array3d_ptr));
+  HIP_CHECK(hipArray3DGetDescriptor(&array_ptr_desc3d, array3d_ptr))
   REQUIRE(array_ptr_desc3d.Width == desc3d.Width);
   REQUIRE(array_ptr_desc3d.Height == desc3d.Height);
   REQUIRE(array_ptr_desc3d.Depth == desc3d.Depth);
@@ -696,8 +696,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   REQUIRE(array_ptr_desc3d.Height == array_desc3d.Height);
   REQUIRE(array_ptr_desc3d.Depth == array_desc3d.Depth);
 
-  HIP_CHECK(hipArrayDestroy(array3d));
-  HIP_CHECK(hipArrayDestroy(array3d_ptr));
+  HIP_CHECK(hipArrayDestroy(array3d))
+  HIP_CHECK(hipArrayDestroy(array3d_ptr))
 
   // Validating hipArray3DGetDescriptor API
   hipArray_t gd_array3d = nullptr;
@@ -711,20 +711,20 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   gd_desc3d.Depth = 8;
   gd_desc3d.Flags = 0;
 
-  HIP_CHECK(hipArray3DCreate(&gd_array3d, &gd_desc3d));
-  HIP_CHECK(hipArray3DCreate(&gd_array3d_ptr, &gd_desc3d));
+  HIP_CHECK(hipArray3DCreate(&gd_array3d, &gd_desc3d))
+  HIP_CHECK(hipArray3DCreate(&gd_array3d_ptr, &gd_desc3d))
 
   REQUIRE(gd_array3d != nullptr);
   REQUIRE(gd_array3d_ptr != nullptr);
 
   HIP_ARRAY3D_DESCRIPTOR gd_array_desc3d;
-  HIP_CHECK(hipArray3DGetDescriptor(&gd_array_desc3d, gd_array3d));
+  HIP_CHECK(hipArray3DGetDescriptor(&gd_array_desc3d, gd_array3d))
   REQUIRE(gd_array_desc3d.Width == gd_desc3d.Width);
   REQUIRE(gd_array_desc3d.Height == gd_desc3d.Height);
   REQUIRE(gd_array_desc3d.Depth == gd_desc3d.Depth);
 
   HIP_ARRAY3D_DESCRIPTOR gd_array_ptr_desc3d;
-  HIP_CHECK(dyn_hipArray3DGetDescriptor_ptr(&gd_array_ptr_desc3d, gd_array3d_ptr));
+  HIP_CHECK(dyn_hipArray3DGetDescriptor_ptr(&gd_array_ptr_desc3d, gd_array3d_ptr))
   REQUIRE(gd_array_ptr_desc3d.Width == gd_desc3d.Width);
   REQUIRE(gd_array_ptr_desc3d.Height == gd_desc3d.Height);
   REQUIRE(gd_array_ptr_desc3d.Depth == gd_desc3d.Depth);
@@ -733,8 +733,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   REQUIRE(gd_array_ptr_desc3d.Height == gd_array_desc3d.Height);
   REQUIRE(gd_array_ptr_desc3d.Depth == gd_array_desc3d.Depth);
 
-  HIP_CHECK(hipArrayDestroy(gd_array3d));
-  HIP_CHECK(hipArrayDestroy(gd_array3d_ptr));
+  HIP_CHECK(hipArrayDestroy(gd_array3d))
+  HIP_CHECK(hipArrayDestroy(gd_array3d_ptr))
 
   // Validating hipMalloc3DArray API
   hipArray_t m_array3d = nullptr;
@@ -744,20 +744,20 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   hipExtent m_extent3d{12, 16, 8};
   unsigned int m_flags3d = hipArrayDefault;
 
-  HIP_CHECK(hipMalloc3DArray(&m_array3d, &m_desc3d, m_extent3d, m_flags3d));
-  HIP_CHECK(dyn_hipMalloc3DArray_ptr(&m_array3d_ptr, &m_desc3d, m_extent3d, m_flags3d));
+  HIP_CHECK(hipMalloc3DArray(&m_array3d, &m_desc3d, m_extent3d, m_flags3d))
+  HIP_CHECK(dyn_hipMalloc3DArray_ptr(&m_array3d_ptr, &m_desc3d, m_extent3d, m_flags3d))
 
   REQUIRE(m_array3d != nullptr);
   REQUIRE(m_array3d_ptr != nullptr);
 
   HIP_ARRAY3D_DESCRIPTOR m_array_desc3d;
-  HIP_CHECK(hipArray3DGetDescriptor(&m_array_desc3d, m_array3d));
+  HIP_CHECK(hipArray3DGetDescriptor(&m_array_desc3d, m_array3d))
   REQUIRE(m_array_desc3d.Width == 12);
   REQUIRE(m_array_desc3d.Height == 16);
   REQUIRE(m_array_desc3d.Depth == 8);
 
   HIP_ARRAY3D_DESCRIPTOR m_array_ptr_desc3d;
-  HIP_CHECK(hipArray3DGetDescriptor(&m_array_ptr_desc3d, m_array3d_ptr));
+  HIP_CHECK(hipArray3DGetDescriptor(&m_array_ptr_desc3d, m_array3d_ptr))
   REQUIRE(m_array_ptr_desc3d.Width == 12);
   REQUIRE(m_array_ptr_desc3d.Height == 16);
   REQUIRE(m_array_ptr_desc3d.Depth == 8);
@@ -766,20 +766,20 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   REQUIRE(m_array_ptr_desc3d.Height == m_array_desc3d.Height);
   REQUIRE(m_array_ptr_desc3d.Depth == m_array_desc3d.Depth);
 
-  HIP_CHECK(hipFreeArray(m_array3d));
-  HIP_CHECK(hipFreeArray(m_array3d_ptr));
+  HIP_CHECK(hipFreeArray(m_array3d))
+  HIP_CHECK(hipFreeArray(m_array3d_ptr))
 
   // Validating hipMalloc3D API
   hipPitchedPtr p_array3d;
   hipPitchedPtr p_array3d_ptr;
 
   hipExtent p_extent3d{260, 16, 8};
-  HIP_CHECK(hipMalloc3D(&p_array3d, p_extent3d));
-  HIP_CHECK(dyn_hipMalloc3D_ptr(&p_array3d_ptr, p_extent3d));
+  HIP_CHECK(hipMalloc3D(&p_array3d, p_extent3d))
+  HIP_CHECK(dyn_hipMalloc3D_ptr(&p_array3d_ptr, p_extent3d))
 
   REQUIRE(p_array3d.ptr != nullptr);
   size_t p_size = -1;
-  HIP_CHECK(hipMemPtrGetInfo(p_array3d.ptr, &p_size));
+  HIP_CHECK(hipMemPtrGetInfo(p_array3d.ptr, &p_size))
   REQUIRE(p_size == 65536);
   REQUIRE(p_array3d.pitch == 512);
   REQUIRE(p_array3d.xsize == 260);
@@ -787,7 +787,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
 
   REQUIRE(p_array3d_ptr.ptr != nullptr);
   size_t p_size_ptr = -1;
-  HIP_CHECK(hipMemPtrGetInfo(p_array3d_ptr.ptr, &p_size_ptr));
+  HIP_CHECK(hipMemPtrGetInfo(p_array3d_ptr.ptr, &p_size_ptr))
   REQUIRE(p_size_ptr == 65536);
   REQUIRE(p_array3d_ptr.pitch == 512);
   REQUIRE(p_array3d_ptr.xsize == 260);
@@ -798,8 +798,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   REQUIRE(p_array3d_ptr.xsize == p_array3d.xsize);
   REQUIRE(p_array3d_ptr.ysize == p_array3d.ysize);
 
-  HIP_CHECK(hipFree(p_array3d.ptr));
-  HIP_CHECK(hipFree(p_array3d_ptr.ptr));
+  HIP_CHECK(hipFree(p_array3d.ptr))
+  HIP_CHECK(hipFree(p_array3d_ptr.ptr))
 }
 
 /**
@@ -822,7 +822,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes) {
   void* hipDrvPointerGetAttributes_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(hipGetProcAddress("hipPointerGetAttribute", &hipPointerGetAttribute_ptr,
                               currentHipVersion, 0, nullptr));
@@ -855,7 +855,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes) {
             hipPointerSetAttribute_ptr);
 
     void* devPtr = nullptr;
-    HIP_CHECK(hipMalloc(&devPtr, 1024));
+    HIP_CHECK(hipMalloc(&devPtr, 1024))
     REQUIRE(devPtr != nullptr);
 
     // HIP_POINTER_ATTRIBUTE_CONTEXT
@@ -991,14 +991,14 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes) {
                                                HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE,
                                                reinterpret_cast<hipDeviceptr_t>(devPtr)));
     }
-    HIP_CHECK(hipFree(devPtr));
+    HIP_CHECK(hipFree(devPtr))
   }
 #endif
 
   // Validating hipPointerGetAttribute API
   {
     void* devPtr1 = nullptr;
-    HIP_CHECK(hipMalloc(&devPtr1, 1024));
+    HIP_CHECK(hipMalloc(&devPtr1, 1024))
     REQUIRE(devPtr1 != nullptr);
 
     // HIP_POINTER_ATTRIBUTE_MEMORY_TYPE
@@ -1095,20 +1095,20 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes) {
                                              reinterpret_cast<hipDeviceptr_t>(devPtr1)));
     REQUIRE(accessFlagsWithPtr == accessFlags);
 
-    HIP_CHECK(hipFree(devPtr1));
+    HIP_CHECK(hipFree(devPtr1))
   }
 
   // Validating hipPointerGetAttributes API
   {
     void* devPtr2 = nullptr;
-    HIP_CHECK(hipMalloc(&devPtr2, 1024));
+    HIP_CHECK(hipMalloc(&devPtr2, 1024))
     REQUIRE(devPtr2 != nullptr);
 
     hipPointerAttribute_t allAttributesData;
-    HIP_CHECK(hipPointerGetAttributes(&allAttributesData, devPtr2));
+    HIP_CHECK(hipPointerGetAttributes(&allAttributesData, devPtr2))
 
     hipPointerAttribute_t allAttributesDataWithPtr;
-    HIP_CHECK(dyn_hipPointerGetAttributes_ptr(&allAttributesDataWithPtr, devPtr2));
+    HIP_CHECK(dyn_hipPointerGetAttributes_ptr(&allAttributesDataWithPtr, devPtr2))
 
     REQUIRE(allAttributesDataWithPtr.type == allAttributesData.type);
     REQUIRE(allAttributesDataWithPtr.device == allAttributesData.device);
@@ -1116,13 +1116,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes) {
     REQUIRE(allAttributesDataWithPtr.hostPointer == allAttributesData.hostPointer);
     REQUIRE(allAttributesDataWithPtr.isManaged == allAttributesData.isManaged);
     REQUIRE(allAttributesDataWithPtr.allocationFlags == allAttributesData.allocationFlags);
-    HIP_CHECK(hipFree(devPtr2));
+    HIP_CHECK(hipFree(devPtr2))
   }
 
   // Validating hipDrvPointerGetAttributes API
   {
     void* devPtr3 = nullptr;
-    HIP_CHECK(hipMalloc(&devPtr3, 1024));
+    HIP_CHECK(hipMalloc(&devPtr3, 1024))
     REQUIRE(devPtr3 != nullptr);
 
     hipPointer_attribute requiredAttributes[] = {
@@ -1135,7 +1135,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes) {
     void* startAddress = nullptr;
     void* requiredData[] = {&memoryType, &devicePointer, &rangeSize, &startAddress};
 
-    HIP_CHECK(hipDrvPointerGetAttributes(4, requiredAttributes, requiredData, devPtr3));
+    HIP_CHECK(hipDrvPointerGetAttributes(4, requiredAttributes, requiredData, devPtr3))
 
     unsigned int memoryTypeWithPtr = -1;
     void* devicePointerWithPtr = nullptr;
@@ -1152,7 +1152,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes) {
     REQUIRE(rangeSizeWithPtr == rangeSize);
     REQUIRE(startAddressWithPtr == startAddress);
 
-    HIP_CHECK(hipFree(devPtr3));
+    HIP_CHECK(hipFree(devPtr3))
   }
 }
 
@@ -1177,12 +1177,12 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopy) {
   void* hipMemcpy_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
-  HIP_CHECK(hipGetProcAddress("hipMemcpyHtoD", &hipMemcpyHtoD_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpyDtoH", &hipMemcpyDtoH_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpyDtoD", &hipMemcpyDtoD_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpy", &hipMemcpy_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpyHtoD", &hipMemcpyHtoD_ptr, currentHipVersion, 0, nullptr))
+  HIP_CHECK(hipGetProcAddress("hipMemcpyDtoH", &hipMemcpyDtoH_ptr, currentHipVersion, 0, nullptr))
+  HIP_CHECK(hipGetProcAddress("hipMemcpyDtoD", &hipMemcpyDtoD_ptr, currentHipVersion, 0, nullptr))
+  HIP_CHECK(hipGetProcAddress("hipMemcpy", &hipMemcpy_ptr, currentHipVersion, 0, nullptr))
 
   hipError_t (*dyn_hipMemcpyHtoD_ptr)(hipDeviceptr_t, void*, size_t) =
       reinterpret_cast<hipError_t (*)(hipDeviceptr_t, void*, size_t)>(hipMemcpyHtoD_ptr);
@@ -1203,46 +1203,46 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopy) {
     fillHostArray(hostMem, N, value);
 
     int* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    HIP_CHECK(hipMalloc(&devMem, Nbytes))
     REQUIRE(devMem != nullptr);
-    HIP_CHECK(dyn_hipMemcpyHtoD_ptr(devMem, hostMem, Nbytes));
+    HIP_CHECK(dyn_hipMemcpyHtoD_ptr(devMem, hostMem, Nbytes))
     REQUIRE(validateDeviceArray(devMem, N, value) == true);
 
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
     free(hostMem);
   }
 
   // Validating hipMemcpyDtoH API
   {
     int* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    HIP_CHECK(hipMalloc(&devMem, Nbytes))
     REQUIRE(devMem != nullptr);
     fillDeviceArray(devMem, N, value);
 
     int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
     REQUIRE(hostMem != nullptr);
-    HIP_CHECK(dyn_hipMemcpyDtoH_ptr(hostMem, devMem, Nbytes));
+    HIP_CHECK(dyn_hipMemcpyDtoH_ptr(hostMem, devMem, Nbytes))
     REQUIRE(validateHostArray(hostMem, N, value) == true);
 
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
     free(hostMem);
   }
 
   // Validating hipMemcpyDtoD API
   {
     int* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    HIP_CHECK(hipMalloc(&devMem, Nbytes))
     REQUIRE(devMem != nullptr);
     fillDeviceArray(devMem, N, value);
 
     int* dstDevMem = nullptr;
-    HIP_CHECK(hipMalloc(&dstDevMem, Nbytes));
+    HIP_CHECK(hipMalloc(&dstDevMem, Nbytes))
     REQUIRE(dstDevMem != nullptr);
-    HIP_CHECK(dyn_hipMemcpyDtoD_ptr(dstDevMem, devMem, Nbytes));
+    HIP_CHECK(dyn_hipMemcpyDtoD_ptr(dstDevMem, devMem, Nbytes))
     REQUIRE(validateDeviceArray(dstDevMem, N, value) == true);
 
-    HIP_CHECK(hipFree(devMem));
-    HIP_CHECK(hipFree(dstDevMem));
+    HIP_CHECK(hipFree(devMem))
+    HIP_CHECK(hipFree(dstDevMem))
   }
 
   // Validating hipMemcpy API
@@ -1255,7 +1255,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopy) {
 
       int* dstHostMem = reinterpret_cast<int*>(malloc(Nbytes));
       REQUIRE(dstHostMem != nullptr);
-      HIP_CHECK(dyn_hipMemcpy_ptr(dstHostMem, hostMem, Nbytes, hipMemcpyHostToHost));
+      HIP_CHECK(dyn_hipMemcpy_ptr(dstHostMem, hostMem, Nbytes, hipMemcpyHostToHost))
       REQUIRE(validateHostArray(dstHostMem, N, value) == true);
 
       free(hostMem);
@@ -1268,60 +1268,60 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopy) {
       fillHostArray(hostMem, N, value);
 
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
-      HIP_CHECK(dyn_hipMemcpy_ptr(devMem, hostMem, Nbytes, hipMemcpyHostToDevice));
+      HIP_CHECK(dyn_hipMemcpy_ptr(devMem, hostMem, Nbytes, hipMemcpyHostToDevice))
       REQUIRE(validateDeviceArray(devMem, N, value) == true);
 
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
     // With flag hipMemcpyDeviceToHost
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
       int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
       REQUIRE(hostMem != nullptr);
-      HIP_CHECK(dyn_hipMemcpy_ptr(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost));
+      HIP_CHECK(dyn_hipMemcpy_ptr(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost))
       REQUIRE(validateHostArray(hostMem, N, value) == true);
 
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
     // With flag hipMemcpyDeviceToDevice
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
       int* dstDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes));
+      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes))
       REQUIRE(dstDevMem != nullptr);
-      HIP_CHECK(dyn_hipMemcpy_ptr(dstDevMem, devMem, Nbytes, hipMemcpyDeviceToDevice));
+      HIP_CHECK(dyn_hipMemcpy_ptr(dstDevMem, devMem, Nbytes, hipMemcpyDeviceToDevice))
       REQUIRE(validateDeviceArray(dstDevMem, N, value) == true);
 
-      HIP_CHECK(hipFree(devMem));
-      HIP_CHECK(hipFree(dstDevMem));
+      HIP_CHECK(hipFree(devMem))
+      HIP_CHECK(hipFree(dstDevMem))
     }
     // With flag hipMemcpyDeviceToDeviceNoCU
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
       int* dstDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes));
+      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes))
       REQUIRE(dstDevMem != nullptr);
-      HIP_CHECK(dyn_hipMemcpy_ptr(dstDevMem, devMem, Nbytes, hipMemcpyDeviceToDeviceNoCU));
+      HIP_CHECK(dyn_hipMemcpy_ptr(dstDevMem, devMem, Nbytes, hipMemcpyDeviceToDeviceNoCU))
       REQUIRE(validateDeviceArray(dstDevMem, N, value) == true);
 
-      HIP_CHECK(hipFree(devMem));
-      HIP_CHECK(hipFree(dstDevMem));
+      HIP_CHECK(hipFree(devMem))
+      HIP_CHECK(hipFree(dstDevMem))
     }
     // With flag hipMemcpyDefault - Host To Host
     {
@@ -1331,7 +1331,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopy) {
 
       int* dstHostMem = reinterpret_cast<int*>(malloc(Nbytes));
       REQUIRE(dstHostMem != nullptr);
-      HIP_CHECK(dyn_hipMemcpy_ptr(dstHostMem, hostMem, Nbytes, hipMemcpyDefault));
+      HIP_CHECK(dyn_hipMemcpy_ptr(dstHostMem, hostMem, Nbytes, hipMemcpyDefault))
       REQUIRE(validateHostArray(dstHostMem, N, value) == true);
 
       free(hostMem);
@@ -1344,44 +1344,44 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopy) {
       fillHostArray(hostMem, N, value);
 
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
-      HIP_CHECK(dyn_hipMemcpy_ptr(devMem, hostMem, Nbytes, hipMemcpyDefault));
+      HIP_CHECK(dyn_hipMemcpy_ptr(devMem, hostMem, Nbytes, hipMemcpyDefault))
       REQUIRE(validateDeviceArray(devMem, N, value) == true);
 
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
     // With flag hipMemcpyDefault - Device To Host
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
       int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
       REQUIRE(hostMem != nullptr);
-      HIP_CHECK(dyn_hipMemcpy_ptr(hostMem, devMem, Nbytes, hipMemcpyDefault));
+      HIP_CHECK(dyn_hipMemcpy_ptr(hostMem, devMem, Nbytes, hipMemcpyDefault))
       REQUIRE(validateHostArray(hostMem, N, value) == true);
 
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
     // With flag hipMemcpyDefault - Device To Device
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
       int* dstDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes));
+      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes))
       REQUIRE(dstDevMem != nullptr);
-      HIP_CHECK(dyn_hipMemcpy_ptr(dstDevMem, devMem, Nbytes, hipMemcpyDefault));
+      HIP_CHECK(dyn_hipMemcpy_ptr(dstDevMem, devMem, Nbytes, hipMemcpyDefault))
       REQUIRE(validateDeviceArray(dstDevMem, N, value) == true);
 
-      HIP_CHECK(hipFree(devMem));
-      HIP_CHECK(hipFree(dstDevMem));
+      HIP_CHECK(hipFree(devMem))
+      HIP_CHECK(hipFree(dstDevMem))
     }
   }
 }
@@ -1408,7 +1408,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
   void* hipMemcpyWithStream_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(hipGetProcAddress("hipMemcpyHtoDAsync", &hipMemcpyHtoDAsync_ptr, currentHipVersion, 0,
                               nullptr));
@@ -1449,11 +1449,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
 
     std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamCreate(&stream[s]));
+      HIP_CHECK(hipStreamCreate(&stream[s]))
     }
 
     int* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    HIP_CHECK(hipMalloc(&devMem, Nbytes))
     REQUIRE(devMem != nullptr);
 
     for (int s = 0; s < Ns; s++) {
@@ -1463,27 +1463,27 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
     }
 
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamSynchronize(stream[s]));
+      HIP_CHECK(hipStreamSynchronize(stream[s]))
     }
 
     REQUIRE(validateDeviceArray(devMem, N, value) == true);
 
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamDestroy(stream[s]));
+      HIP_CHECK(hipStreamDestroy(stream[s]))
     }
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
     free(hostMem);
   }
   // Validating hipMemcpyDtoHAsync API
   {
     int* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    HIP_CHECK(hipMalloc(&devMem, Nbytes))
     REQUIRE(devMem != nullptr);
     fillDeviceArray(devMem, N, value);
 
     std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamCreate(&stream[s]));
+      HIP_CHECK(hipStreamCreate(&stream[s]))
     }
 
     int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
@@ -1496,32 +1496,32 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
     }
 
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamSynchronize(stream[s]));
+      HIP_CHECK(hipStreamSynchronize(stream[s]))
     }
 
     REQUIRE(validateHostArray(hostMem, N, value) == true);
 
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamDestroy(stream[s]));
+      HIP_CHECK(hipStreamDestroy(stream[s]))
     }
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
     free(hostMem);
   }
 
   // Validating hipMemcpyDtoDAsync API
   {
     int* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    HIP_CHECK(hipMalloc(&devMem, Nbytes))
     REQUIRE(devMem != nullptr);
     fillDeviceArray(devMem, N, value);
 
     std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamCreate(&stream[s]));
+      HIP_CHECK(hipStreamCreate(&stream[s]))
     }
 
     int* dstDevMem = nullptr;
-    HIP_CHECK(hipMalloc(&dstDevMem, Nbytes));
+    HIP_CHECK(hipMalloc(&dstDevMem, Nbytes))
     REQUIRE(dstDevMem != nullptr);
 
     for (int s = 0; s < Ns; s++) {
@@ -1531,17 +1531,17 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
     }
 
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamSynchronize(stream[s]));
+      HIP_CHECK(hipStreamSynchronize(stream[s]))
     }
 
     REQUIRE(validateDeviceArray(dstDevMem, N, value) == true);
 
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamDestroy(stream[s]));
+      HIP_CHECK(hipStreamDestroy(stream[s]))
     }
 
-    HIP_CHECK(hipFree(devMem));
-    HIP_CHECK(hipFree(dstDevMem));
+    HIP_CHECK(hipFree(devMem))
+    HIP_CHECK(hipFree(dstDevMem))
   }
 
   // Validating hipMemcpyAsync API
@@ -1554,7 +1554,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* dstHostMem = reinterpret_cast<int*>(malloc(Nbytes));
@@ -1567,13 +1567,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateHostArray(dstHostMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
 
       free(hostMem);
@@ -1587,11 +1587,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
 
       for (int s = 0; s < Ns; s++) {
@@ -1601,27 +1601,27 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateDeviceArray(devMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
     // With flag hipMemcpyDeviceToHost
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
@@ -1634,32 +1634,32 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateHostArray(hostMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
 
     // With flag hipMemcpyDeviceToDevice
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* dstDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes));
+      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes))
       REQUIRE(dstDevMem != nullptr);
 
       for (int s = 0; s < Ns; s++) {
@@ -1669,32 +1669,32 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateDeviceArray(dstDevMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
 
-      HIP_CHECK(hipFree(devMem));
-      HIP_CHECK(hipFree(dstDevMem));
+      HIP_CHECK(hipFree(devMem))
+      HIP_CHECK(hipFree(dstDevMem))
     }
     // With flag hipMemcpyDeviceToDeviceNoCU
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* dstDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes));
+      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes))
       REQUIRE(dstDevMem != nullptr);
 
       for (int s = 0; s < Ns; s++) {
@@ -1704,17 +1704,17 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateDeviceArray(dstDevMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
 
-      HIP_CHECK(hipFree(devMem));
-      HIP_CHECK(hipFree(dstDevMem));
+      HIP_CHECK(hipFree(devMem))
+      HIP_CHECK(hipFree(dstDevMem))
     }
     // With flag hipMemcpyDefault - Host To Host
     {
@@ -1724,7 +1724,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* dstHostMem = reinterpret_cast<int*>(malloc(Nbytes));
@@ -1737,13 +1737,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateHostArray(dstHostMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
 
       free(hostMem);
@@ -1757,11 +1757,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
 
       for (int s = 0; s < Ns; s++) {
@@ -1771,27 +1771,27 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateDeviceArray(devMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
     // With flag hipMemcpyDefault - Device To Host
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
@@ -1804,32 +1804,32 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateHostArray(hostMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
 
     // With flag hipMemcpyDefault - Device To Device
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* dstDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes));
+      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes))
       REQUIRE(dstDevMem != nullptr);
 
       for (int s = 0; s < Ns; s++) {
@@ -1839,17 +1839,17 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateDeviceArray(dstDevMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
 
-      HIP_CHECK(hipFree(devMem));
-      HIP_CHECK(hipFree(dstDevMem));
+      HIP_CHECK(hipFree(devMem))
+      HIP_CHECK(hipFree(dstDevMem))
     }
   }
 
@@ -1863,7 +1863,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* dstHostMem = reinterpret_cast<int*>(malloc(Nbytes));
@@ -1876,13 +1876,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateHostArray(dstHostMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
 
       free(hostMem);
@@ -1896,11 +1896,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
 
       for (int s = 0; s < Ns; s++) {
@@ -1910,27 +1910,27 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateDeviceArray(devMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
     // With flag hipMemcpyDeviceToHost
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
@@ -1943,32 +1943,32 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateHostArray(hostMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
 
     // With flag hipMemcpyDeviceToDevice
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* dstDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes));
+      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes))
       REQUIRE(dstDevMem != nullptr);
 
       for (int s = 0; s < Ns; s++) {
@@ -1978,32 +1978,32 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateDeviceArray(dstDevMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
 
-      HIP_CHECK(hipFree(devMem));
-      HIP_CHECK(hipFree(dstDevMem));
+      HIP_CHECK(hipFree(devMem))
+      HIP_CHECK(hipFree(dstDevMem))
     }
     // With flag hipMemcpyDeviceToDeviceNoCU
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* dstDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes));
+      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes))
       REQUIRE(dstDevMem != nullptr);
 
       for (int s = 0; s < Ns; s++) {
@@ -2014,17 +2014,17 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateDeviceArray(dstDevMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
 
-      HIP_CHECK(hipFree(devMem));
-      HIP_CHECK(hipFree(dstDevMem));
+      HIP_CHECK(hipFree(devMem))
+      HIP_CHECK(hipFree(dstDevMem))
     }
     // With flag hipMemcpyDefault - Host To Host
     {
@@ -2034,7 +2034,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* dstHostMem = reinterpret_cast<int*>(malloc(Nbytes));
@@ -2047,13 +2047,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateHostArray(dstHostMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
 
       free(hostMem);
@@ -2067,11 +2067,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
 
       for (int s = 0; s < Ns; s++) {
@@ -2081,27 +2081,27 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateDeviceArray(devMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
     // With flag hipMemcpyDefault - Device To Host
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
@@ -2114,32 +2114,32 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateHostArray(hostMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
 
     // With flag hipMemcpyDefault - Device To Device
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, Nbytes));
+      HIP_CHECK(hipMalloc(&devMem, Nbytes))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
       std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamCreate(&stream[s]));
+        HIP_CHECK(hipStreamCreate(&stream[s]))
       }
 
       int* dstDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes));
+      HIP_CHECK(hipMalloc(&dstDevMem, Nbytes))
       REQUIRE(dstDevMem != nullptr);
 
       for (int s = 0; s < Ns; s++) {
@@ -2149,17 +2149,17 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       }
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamSynchronize(stream[s]));
+        HIP_CHECK(hipStreamSynchronize(stream[s]))
       }
 
       REQUIRE(validateDeviceArray(dstDevMem, N, value) == true);
 
       for (int s = 0; s < Ns; s++) {
-        HIP_CHECK(hipStreamDestroy(stream[s]));
+        HIP_CHECK(hipStreamDestroy(stream[s]))
       }
 
-      HIP_CHECK(hipFree(devMem));
-      HIP_CHECK(hipFree(dstDevMem));
+      HIP_CHECK(hipFree(devMem))
+      HIP_CHECK(hipFree(dstDevMem))
     }
   }
 }
@@ -2189,18 +2189,18 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
   void* hipMemsetAsync_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
-  HIP_CHECK(hipGetProcAddress("hipMemsetD8", &hipMemsetD8_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemsetD16", &hipMemsetD16_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemsetD32", &hipMemsetD32_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemsetD8", &hipMemsetD8_ptr, currentHipVersion, 0, nullptr))
+  HIP_CHECK(hipGetProcAddress("hipMemsetD16", &hipMemsetD16_ptr, currentHipVersion, 0, nullptr))
+  HIP_CHECK(hipGetProcAddress("hipMemsetD32", &hipMemsetD32_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(
       hipGetProcAddress("hipMemsetD8Async", &hipMemsetD8Async_ptr, currentHipVersion, 0, nullptr));
   HIP_CHECK(hipGetProcAddress("hipMemsetD16Async", &hipMemsetD16Async_ptr, currentHipVersion, 0,
                               nullptr));
   HIP_CHECK(hipGetProcAddress("hipMemsetD32Async", &hipMemsetD32Async_ptr, currentHipVersion, 0,
                               nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemset", &hipMemset_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemset", &hipMemset_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(
       hipGetProcAddress("hipMemsetAsync", &hipMemsetAsync_ptr, currentHipVersion, 0, nullptr));
 
@@ -2231,17 +2231,17 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     unsigned char value = 255;
 
     void* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    HIP_CHECK(hipMalloc(&devMem, Nbytes))
     REQUIRE(devMem != nullptr);
-    HIP_CHECK(dyn_hipMemsetD8_ptr(devMem, value, N));
+    HIP_CHECK(dyn_hipMemsetD8_ptr(devMem, value, N))
 
     unsigned char* hostMem = (unsigned char*)malloc(Nbytes);
     REQUIRE(hostMem != nullptr);
-    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost))
 
     REQUIRE(validateArrayT<unsigned char>(hostMem, N, value) == true);
 
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
     free(hostMem);
   }
   // Validating hipMemsetD16 API
@@ -2251,16 +2251,16 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     uint16_t value = 65535;
 
     void* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    HIP_CHECK(hipMalloc(&devMem, Nbytes))
     REQUIRE(devMem != nullptr);
-    HIP_CHECK(dyn_hipMemsetD16_ptr(devMem, value, N));
+    HIP_CHECK(dyn_hipMemsetD16_ptr(devMem, value, N))
 
     uint16_t* hostMem = reinterpret_cast<uint16_t*>(malloc(Nbytes));
     REQUIRE(hostMem != nullptr);
-    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost))
 
     REQUIRE(validateArrayT<uint16_t>(hostMem, N, value) == true);
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
     free(hostMem);
   }
   // Validating hipMemsetD32 API
@@ -2270,17 +2270,17 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     int value = 2147483647;
 
     void* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    HIP_CHECK(hipMalloc(&devMem, Nbytes))
     REQUIRE(devMem != nullptr);
-    HIP_CHECK(dyn_hipMemsetD32_ptr(devMem, value, N));
+    HIP_CHECK(dyn_hipMemsetD32_ptr(devMem, value, N))
 
     int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
     REQUIRE(hostMem != nullptr);
-    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost))
 
     REQUIRE(validateArrayT<int>(hostMem, N, value) == true);
 
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
     free(hostMem);
   }
   // Validating hipMemsetD8Async API
@@ -2291,33 +2291,33 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     const int Ns = 4;
 
     unsigned char* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    HIP_CHECK(hipMalloc(&devMem, Nbytes))
     REQUIRE(devMem != nullptr);
 
     std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamCreate(&stream[s]));
+      HIP_CHECK(hipStreamCreate(&stream[s]))
     }
 
     for (int s = 0; s < Ns; s++) {
       int startIndex = s * (N / Ns);
-      HIP_CHECK(dyn_hipMemsetD8Async_ptr(devMem + startIndex, value, N / Ns, stream[s]));
+      HIP_CHECK(dyn_hipMemsetD8Async_ptr(devMem + startIndex, value, N / Ns, stream[s]))
     }
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamSynchronize(stream[s]));
+      HIP_CHECK(hipStreamSynchronize(stream[s]))
     }
 
     unsigned char* hostMem = (unsigned char*)malloc(Nbytes);
     REQUIRE(hostMem != nullptr);
-    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost))
 
     REQUIRE(validateArrayT<unsigned char>(hostMem, N, value) == true);
 
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamDestroy(stream[s]));
+      HIP_CHECK(hipStreamDestroy(stream[s]))
     }
 
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
     free(hostMem);
   }
 
@@ -2329,33 +2329,33 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     const int Ns = 4;
 
     uint16_t* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    HIP_CHECK(hipMalloc(&devMem, Nbytes))
     REQUIRE(devMem != nullptr);
 
     std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamCreate(&stream[s]));
+      HIP_CHECK(hipStreamCreate(&stream[s]))
     }
 
     for (int s = 0; s < Ns; s++) {
       int startIndex = s * (N / Ns);
-      HIP_CHECK(dyn_hipMemsetD16Async_ptr(devMem + startIndex, value, N / Ns, stream[s]));
+      HIP_CHECK(dyn_hipMemsetD16Async_ptr(devMem + startIndex, value, N / Ns, stream[s]))
     }
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamSynchronize(stream[s]));
+      HIP_CHECK(hipStreamSynchronize(stream[s]))
     }
 
     uint16_t* hostMem = reinterpret_cast<uint16_t*>(malloc(Nbytes));
     REQUIRE(hostMem != nullptr);
-    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost))
 
     REQUIRE(validateArrayT<uint16_t>(hostMem, N, value) == true);
 
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamDestroy(stream[s]));
+      HIP_CHECK(hipStreamDestroy(stream[s]))
     }
 
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
     free(hostMem);
   }
 
@@ -2367,33 +2367,33 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     const int Ns = 4;
 
     int* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    HIP_CHECK(hipMalloc(&devMem, Nbytes))
     REQUIRE(devMem != nullptr);
 
     std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamCreate(&stream[s]));
+      HIP_CHECK(hipStreamCreate(&stream[s]))
     }
 
     for (int s = 0; s < Ns; s++) {
       int startIndex = s * (N / Ns);
-      HIP_CHECK(dyn_hipMemsetD32Async_ptr(devMem + startIndex, value, N / Ns, stream[s]));
+      HIP_CHECK(dyn_hipMemsetD32Async_ptr(devMem + startIndex, value, N / Ns, stream[s]))
     }
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamSynchronize(stream[s]));
+      HIP_CHECK(hipStreamSynchronize(stream[s]))
     }
 
     int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
     REQUIRE(hostMem != nullptr);
-    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost))
 
     REQUIRE(validateArrayT<int>(hostMem, N, value) == true);
 
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamDestroy(stream[s]));
+      HIP_CHECK(hipStreamDestroy(stream[s]))
     }
 
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
     free(hostMem);
   }
 
@@ -2404,17 +2404,17 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     int value = 10;
 
     void* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    HIP_CHECK(hipMalloc(&devMem, Nbytes))
     REQUIRE(devMem != nullptr);
-    HIP_CHECK(dyn_hipMemset_ptr(devMem, value, Nbytes));
+    HIP_CHECK(dyn_hipMemset_ptr(devMem, value, Nbytes))
 
     char* hostMem = reinterpret_cast<char*>(malloc(Nbytes));
     REQUIRE(hostMem != nullptr);
-    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost))
 
     REQUIRE(validateArrayT<char>(hostMem, N, value) == true);
 
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
     free(hostMem);
   }
 
@@ -2426,33 +2426,33 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     const int Ns = 4;
 
     char* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    HIP_CHECK(hipMalloc(&devMem, Nbytes))
     REQUIRE(devMem != nullptr);
 
     std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamCreate(&stream[s]));
+      HIP_CHECK(hipStreamCreate(&stream[s]))
     }
 
     for (int s = 0; s < Ns; s++) {
       int startIndex = s * (N / Ns);
-      HIP_CHECK(dyn_hipMemsetAsync_ptr(devMem + startIndex, value, N / Ns, stream[s]));
+      HIP_CHECK(dyn_hipMemsetAsync_ptr(devMem + startIndex, value, N / Ns, stream[s]))
     }
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamSynchronize(stream[s]));
+      HIP_CHECK(hipStreamSynchronize(stream[s]))
     }
 
     char* hostMem = reinterpret_cast<char*>(malloc(Nbytes));
     REQUIRE(hostMem != nullptr);
-    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost))
 
     REQUIRE(validateArrayT<char>(hostMem, N, value) == true);
 
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamDestroy(stream[s]));
+      HIP_CHECK(hipStreamDestroy(stream[s]))
     }
 
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
     free(hostMem);
   }
 }
@@ -2479,7 +2479,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
   hipDriverProcAddressQueryResult symbolStatus = HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(
       hipGetProcAddress("hipMemset2D", &hipMemset2D_ptr, currentHipVersion, 0, &symbolStatus));
@@ -2515,18 +2515,18 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
   {
     const int N = width * height;
     char* devMem = nullptr;
-    HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+    HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
     REQUIRE(devMem != nullptr);
 
-    HIP_CHECK(dyn_hipMemset2D_ptr(devMem, pitch, value, width, height));
+    HIP_CHECK(dyn_hipMemset2D_ptr(devMem, pitch, value, width, height))
 
     char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
     REQUIRE(hostMem != nullptr);
-    HIP_CHECK(hipMemcpy2D(hostMem, width, devMem, pitch, width, height, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy2D(hostMem, width, devMem, pitch, width, height, hipMemcpyDeviceToHost))
 
     REQUIRE(validateArrayT<char>(hostMem, N, value) == true);
 
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
     free(hostMem);
   }
 
@@ -2534,16 +2534,16 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
   {
     const int N = width * height;
     char* devMem = nullptr;
-    HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+    HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
     REQUIRE(devMem != nullptr);
 
     // set the whole matrix first to something different than 'value'
-    HIP_CHECK(dyn_hipMemset2DAsync_ptr(devMem, pitch, 5, width, height, 0));
-    HIP_CHECK(hipStreamSynchronize(0));
+    HIP_CHECK(dyn_hipMemset2DAsync_ptr(devMem, pitch, 5, width, height, 0))
+    HIP_CHECK(hipStreamSynchronize(0))
 
     std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamCreate(&stream[s]));
+      HIP_CHECK(hipStreamCreate(&stream[s]))
     }
 
     for (int s = 0; s < Ns; s++) {
@@ -2553,20 +2553,20 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
                                          stream[s]));
     }
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamSynchronize(stream[s]));
+      HIP_CHECK(hipStreamSynchronize(stream[s]))
     }
 
     char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
     REQUIRE(hostMem != nullptr);
-    HIP_CHECK(hipMemcpy2D(hostMem, width, devMem, pitch, width, height, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy2D(hostMem, width, devMem, pitch, width, height, hipMemcpyDeviceToHost))
 
     REQUIRE(validateArrayT<char>(hostMem, N, value) == true);
 
     for (int s = 0; s < Ns; s++) {
-      HIP_CHECK(hipStreamDestroy(stream[s]));
+      HIP_CHECK(hipStreamDestroy(stream[s]))
     }
 
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
     free(hostMem);
   }
 
@@ -2576,10 +2576,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
 
     hipPitchedPtr devMem;
     hipExtent extent3d{width, height, depth};
-    HIP_CHECK(hipMalloc3D(&devMem, extent3d));
+    HIP_CHECK(hipMalloc3D(&devMem, extent3d))
     REQUIRE(devMem.ptr != nullptr);
 
-    HIP_CHECK(dyn_hipMemset3D_ptr(devMem, value, extent3d));
+    HIP_CHECK(dyn_hipMemset3D_ptr(devMem, value, extent3d))
 
     char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
     REQUIRE(hostMem != nullptr);
@@ -2591,11 +2591,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
     myparms.srcPtr = devMem;
     myparms.extent = extent3d;
     myparms.kind = hipMemcpyDeviceToHost;
-    HIP_CHECK(hipMemcpy3D(&myparms));
+    HIP_CHECK(hipMemcpy3D(&myparms))
 
     REQUIRE(validateArrayT<char>(hostMem, N, value) == true);
 
-    HIP_CHECK(hipFree(devMem.ptr));
+    HIP_CHECK(hipFree(devMem.ptr))
     free(hostMem);
   }
 
@@ -2609,10 +2609,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
 
     hipPitchedPtr devMem;
     hipExtent extent3d{width, height, depth};
-    HIP_CHECK(hipMalloc3D(&devMem, extent3d));
+    HIP_CHECK(hipMalloc3D(&devMem, extent3d))
     REQUIRE(devMem.ptr != nullptr);
 
-    HIP_CHECK(dyn_hipMemset3DAsync_ptr(devMem, value, extent3d, NULL));
+    HIP_CHECK(dyn_hipMemset3DAsync_ptr(devMem, value, extent3d, NULL))
 
     char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
     REQUIRE(hostMem != nullptr);
@@ -2624,11 +2624,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
     myparms.srcPtr = devMem;
     myparms.extent = extent3d;
     myparms.kind = hipMemcpyDeviceToHost;
-    HIP_CHECK(hipMemcpy3D(&myparms));
+    HIP_CHECK(hipMemcpy3D(&myparms))
 
     REQUIRE(validateArrayT<char>(hostMem, N, value) == true);
 
-    HIP_CHECK(hipFree(devMem.ptr));
+    HIP_CHECK(hipFree(devMem.ptr))
     free(hostMem);
   }
 }
@@ -2652,9 +2652,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated) {
   void* hipMemPtrGetInfo_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
-  HIP_CHECK(hipGetProcAddress("hipMemGetInfo", &hipMemGetInfo_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemGetInfo", &hipMemGetInfo_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(
       hipGetProcAddress("hipMemPtrGetInfo", &hipMemPtrGetInfo_ptr, currentHipVersion, 0, nullptr));
 
@@ -2666,22 +2666,22 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated) {
   // Validating hipMemGetInfo API
   size_t freeMem = 0, totalMem = 0, freeMemWithPtr = 0, totalMemWithPtr = 0;
 
-  HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem));
-  HIP_CHECK(dyn_hipMemGetInfo_ptr(&freeMemWithPtr, &totalMemWithPtr));
+  HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem))
+  HIP_CHECK(dyn_hipMemGetInfo_ptr(&freeMemWithPtr, &totalMemWithPtr))
 
   REQUIRE(freeMemWithPtr == freeMem);
   REQUIRE(totalMemWithPtr == totalMem);
 
   // Validating hipMemPtrGetInfo API
   void* devPtr = nullptr;
-  HIP_CHECK(hipMalloc(&devPtr, 128));
+  HIP_CHECK(hipMalloc(&devPtr, 128))
   REQUIRE(devPtr != nullptr);
 
   size_t devMemsize = -1;
-  HIP_CHECK(dyn_hipMemPtrGetInfo_ptr(devPtr, &devMemsize));
+  HIP_CHECK(dyn_hipMemPtrGetInfo_ptr(devPtr, &devMemsize))
   REQUIRE(devMemsize == 128);
 
-  HIP_CHECK(hipFree(devPtr));
+  HIP_CHECK(hipFree(devPtr))
 }
 
 /**
@@ -2705,9 +2705,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
   void* hipMemcpyParam2DAsync_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
-  HIP_CHECK(hipGetProcAddress("hipMemcpy2D", &hipMemcpy2D_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpy2D", &hipMemcpy2D_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(
       hipGetProcAddress("hipMemcpy2DAsync", &hipMemcpy2DAsync_ptr, currentHipVersion, 0, nullptr));
   HIP_CHECK(
@@ -2760,7 +2760,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       fillCharHostArray(hostMem, N, value);
 
       char* devMem = nullptr;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
       REQUIRE(devMem != nullptr);
 
       HIP_CHECK(
@@ -2769,15 +2769,15 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       REQUIRE(validateCharDeviceArray(devMem, N, value) == true);
 
       free(hostMem);
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
     }
 
     // With flag hipMemcpyDeviceToHost
     {
       char* devMem = nullptr;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
       REQUIRE(devMem != nullptr);
-      HIP_CHECK(hipMemset2D(devMem, pitch, value, width, height));
+      HIP_CHECK(hipMemset2D(devMem, pitch, value, width, height))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
@@ -2787,7 +2787,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
 
       REQUIRE(validateCharHostArray(hostMem, N, value) == true);
 
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
 
@@ -2795,13 +2795,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
     {
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       char* dDevMem = nullptr;
       size_t dPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
       REQUIRE(dDevMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2D_ptr(dDevMem, dPitch, sDevMem, sPitch, width, height,
@@ -2809,21 +2809,21 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
 
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
     }
 
     // With flag hipMemcpyDeviceToDeviceNoCU
     {
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       char* dDevMem = nullptr;
       size_t dPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
       REQUIRE(dDevMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2D_ptr(dDevMem, dPitch, sDevMem, sPitch, width, height,
@@ -2831,8 +2831,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
 
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
     }
     // With flag hipMemcpyDefault - Host To Host
     {
@@ -2858,7 +2858,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       fillCharHostArray(hostMem, N, value);
 
       char* devMem = nullptr;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
       REQUIRE(devMem != nullptr);
 
       HIP_CHECK(
@@ -2867,15 +2867,15 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       REQUIRE(validateCharDeviceArray(devMem, N, value) == true);
 
       free(hostMem);
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
     }
 
     // With flag hipMemcpyDefault - Device To Host
     {
       char* devMem = nullptr;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
       REQUIRE(devMem != nullptr);
-      HIP_CHECK(hipMemset2D(devMem, pitch, value, width, height));
+      HIP_CHECK(hipMemset2D(devMem, pitch, value, width, height))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
@@ -2885,7 +2885,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
 
       REQUIRE(validateCharHostArray(hostMem, N, value) == true);
 
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
 
@@ -2893,13 +2893,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
     {
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       char* dDevMem = nullptr;
       size_t dPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
       REQUIRE(dDevMem != nullptr);
 
       HIP_CHECK(
@@ -2907,8 +2907,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
 
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
     }
   }
 
@@ -2945,7 +2945,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       fillCharHostArray(hostMem, N, value);
 
       char* devMem = nullptr;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
       REQUIRE(devMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DAsync_ptr(devMem, pitch, hostMem, pitch, width, height,
@@ -2954,15 +2954,15 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       REQUIRE(validateCharDeviceArray(devMem, N, value) == true);
 
       free(hostMem);
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
     }
 
     // With flag hipMemcpyDeviceToHost
     {
       char* devMem = nullptr;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
       REQUIRE(devMem != nullptr);
-      HIP_CHECK(hipMemset2D(devMem, pitch, value, width, height));
+      HIP_CHECK(hipMemset2D(devMem, pitch, value, width, height))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
@@ -2972,7 +2972,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
 
       REQUIRE(validateCharHostArray(hostMem, N, value) == true);
 
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
 
@@ -2980,13 +2980,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
     {
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       char* dDevMem = nullptr;
       size_t dPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
       REQUIRE(dDevMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DAsync_ptr(dDevMem, dPitch, sDevMem, sPitch, width, height,
@@ -2994,21 +2994,21 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
 
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
     }
 
     // With flag hipMemcpyDeviceToDeviceNoCU
     {
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       char* dDevMem = nullptr;
       size_t dPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
       REQUIRE(dDevMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DAsync_ptr(dDevMem, dPitch, sDevMem, sPitch, width, height,
@@ -3016,8 +3016,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
 
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
     }
     // With flag hipMemcpyDefault - Host To Host
     {
@@ -3044,7 +3044,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       fillCharHostArray(hostMem, N, value);
 
       char* devMem = nullptr;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
       REQUIRE(devMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DAsync_ptr(devMem, pitch, hostMem, pitch, width, height,
@@ -3053,15 +3053,15 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       REQUIRE(validateCharDeviceArray(devMem, N, value) == true);
 
       free(hostMem);
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
     }
 
     // With flag hipMemcpyDefault - Device To Host
     {
       char* devMem = nullptr;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
       REQUIRE(devMem != nullptr);
-      HIP_CHECK(hipMemset2D(devMem, pitch, value, width, height));
+      HIP_CHECK(hipMemset2D(devMem, pitch, value, width, height))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
@@ -3071,7 +3071,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
 
       REQUIRE(validateCharHostArray(hostMem, N, value) == true);
 
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
 
@@ -3079,13 +3079,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
     {
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       char* dDevMem = nullptr;
       size_t dPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
       REQUIRE(dDevMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DAsync_ptr(dDevMem, dPitch, sDevMem, sPitch, width, height,
@@ -3093,8 +3093,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
 
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
     }
   }
 
@@ -3126,7 +3126,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       desc.WidthInBytes = width * sizeof(char);
       desc.Height = height;
 
-      HIP_CHECK(dyn_hipMemcpyParam2D_ptr(&desc));
+      HIP_CHECK(dyn_hipMemcpyParam2D_ptr(&desc))
 
       REQUIRE(validateCharHostArray(dHostMem, N, value) == true);
 
@@ -3140,7 +3140,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       fillCharHostArray(hostMem, N, value);
 
       char* devMem = nullptr;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
       REQUIRE(devMem != nullptr);
 
       hip_Memcpy2D desc = {};
@@ -3153,20 +3153,20 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       desc.WidthInBytes = width * sizeof(char);
       desc.Height = height;
 
-      HIP_CHECK(dyn_hipMemcpyParam2D_ptr(&desc));
+      HIP_CHECK(dyn_hipMemcpyParam2D_ptr(&desc))
 
       REQUIRE(validateCharDeviceArray(devMem, N, value) == true);
 
       free(hostMem);
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
     }
 
     // Device To Host
     {
       char* devMem = nullptr;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
       REQUIRE(devMem != nullptr);
-      HIP_CHECK(hipMemset2D(devMem, pitch, value, width, height));
+      HIP_CHECK(hipMemset2D(devMem, pitch, value, width, height))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
@@ -3182,11 +3182,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       desc.WidthInBytes = width * sizeof(char);
       desc.Height = height;
 
-      HIP_CHECK(dyn_hipMemcpyParam2D_ptr(&desc));
+      HIP_CHECK(dyn_hipMemcpyParam2D_ptr(&desc))
 
       REQUIRE(validateCharHostArray(hostMem, N, value) == true);
 
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
 
@@ -3194,13 +3194,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
     {
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       char* dDevMem = nullptr;
       size_t dPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
       REQUIRE(dDevMem != nullptr);
 
       hip_Memcpy2D desc = {};
@@ -3213,35 +3213,35 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       desc.WidthInBytes = width * sizeof(char);
       desc.Height = height;
 
-      HIP_CHECK(dyn_hipMemcpyParam2D_ptr(&desc));
+      HIP_CHECK(dyn_hipMemcpyParam2D_ptr(&desc))
 
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
     }
 
     // Device To Device - Two GPU's
     {
       int deviceCount = 0;
-      HIP_CHECK(hipGetDeviceCount(&deviceCount));
+      HIP_CHECK(hipGetDeviceCount(&deviceCount))
 
       if (deviceCount > 1) {
-        HIP_CHECK(hipSetDevice(0));
+        HIP_CHECK(hipSetDevice(0))
         int can_access_peer = 0;
-        HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
+        HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1))
         if (can_access_peer) {
           char* sDevMem = nullptr;
           size_t sPitch;
-          HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+          HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
           REQUIRE(sDevMem != nullptr);
-          HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+          HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
-          HIP_CHECK(hipSetDevice(1));
+          HIP_CHECK(hipSetDevice(1))
 
           char* dDevMem = nullptr;
           size_t dPitch;
-          HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+          HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
           REQUIRE(dDevMem != nullptr);
           hip_Memcpy2D desc = {};
           desc.srcMemoryType = hipMemoryTypeDevice;
@@ -3252,12 +3252,12 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
           desc.dstPitch = dPitch;
           desc.WidthInBytes = width * sizeof(char);
           desc.Height = height;
-          HIP_CHECK(dyn_hipMemcpyParam2D_ptr(&desc));
+          HIP_CHECK(dyn_hipMemcpyParam2D_ptr(&desc))
 
           REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-          HIP_CHECK(hipFree(sDevMem));
-          HIP_CHECK(hipFree(dDevMem));
+          HIP_CHECK(hipFree(sDevMem))
+          HIP_CHECK(hipFree(dDevMem))
         }
       }
     }
@@ -3274,7 +3274,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
     // Host to Host
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       char* sHostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(sHostMem != nullptr);
@@ -3294,13 +3294,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       desc.WidthInBytes = width * sizeof(char);
       desc.Height = height;
 
-      HIP_CHECK(dyn_hipMemcpyParam2DAsync_ptr(&desc, stream));
+      HIP_CHECK(dyn_hipMemcpyParam2DAsync_ptr(&desc, stream))
 
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharHostArray(dHostMem, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamDestroy(stream))
       free(sHostMem);
       free(dHostMem);
     }
@@ -3308,14 +3308,14 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
     // Host to Device
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
       fillCharHostArray(hostMem, N, value);
 
       char* devMem = nullptr;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
       REQUIRE(devMem != nullptr);
 
       hip_Memcpy2D desc = {};
@@ -3328,25 +3328,25 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       desc.WidthInBytes = width * sizeof(char);
       desc.Height = height;
 
-      HIP_CHECK(dyn_hipMemcpyParam2DAsync_ptr(&desc, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipMemcpyParam2DAsync_ptr(&desc, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharDeviceArray(devMem, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamDestroy(stream))
       free(hostMem);
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
     }
 
     // Device To Host
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       char* devMem = nullptr;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
       REQUIRE(devMem != nullptr);
-      HIP_CHECK(hipMemset2D(devMem, pitch, value, width, height));
+      HIP_CHECK(hipMemset2D(devMem, pitch, value, width, height))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
@@ -3362,30 +3362,30 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       desc.WidthInBytes = width * sizeof(char);
       desc.Height = height;
 
-      HIP_CHECK(dyn_hipMemcpyParam2DAsync_ptr(&desc, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipMemcpyParam2DAsync_ptr(&desc, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharHostArray(hostMem, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
 
     // Device To Device - single GPU
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       char* dDevMem = nullptr;
       size_t dPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
       REQUIRE(dDevMem != nullptr);
 
       hip_Memcpy2D desc = {};
@@ -3398,40 +3398,40 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       desc.WidthInBytes = width * sizeof(char);
       desc.Height = height;
 
-      HIP_CHECK(dyn_hipMemcpyParam2DAsync_ptr(&desc, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipMemcpyParam2DAsync_ptr(&desc, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
     }
 
     // Device To Device - Two GPU's
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       int deviceCount = 0;
-      HIP_CHECK(hipGetDeviceCount(&deviceCount));
+      HIP_CHECK(hipGetDeviceCount(&deviceCount))
 
       if (deviceCount > 1) {
-        HIP_CHECK(hipSetDevice(0));
+        HIP_CHECK(hipSetDevice(0))
         int can_access_peer = 0;
-        HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
+        HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1))
         if (can_access_peer) {
           char* sDevMem = nullptr;
           size_t sPitch;
-          HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+          HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
           REQUIRE(sDevMem != nullptr);
-          HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+          HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
-          HIP_CHECK(hipSetDevice(1));
+          HIP_CHECK(hipSetDevice(1))
 
           char* dDevMem = nullptr;
           size_t dPitch;
-          HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+          HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
           REQUIRE(dDevMem != nullptr);
           hip_Memcpy2D desc = {};
           desc.srcMemoryType = hipMemoryTypeDevice;
@@ -3442,15 +3442,15 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
           desc.dstPitch = dPitch;
           desc.WidthInBytes = width * sizeof(char);
           desc.Height = height;
-          HIP_CHECK(dyn_hipMemcpyParam2DAsync_ptr(&desc, stream));
+          HIP_CHECK(dyn_hipMemcpyParam2DAsync_ptr(&desc, stream))
 
-          HIP_CHECK(hipStreamSynchronize(stream));
+          HIP_CHECK(hipStreamSynchronize(stream))
 
           REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-          HIP_CHECK(hipStreamDestroy(stream));
-          HIP_CHECK(hipFree(sDevMem));
-          HIP_CHECK(hipFree(dDevMem));
+          HIP_CHECK(hipStreamDestroy(stream))
+          HIP_CHECK(hipFree(sDevMem))
+          HIP_CHECK(hipFree(dDevMem))
         }
       }
     }
@@ -3470,7 +3470,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
   void* hipMemcpyHtoA_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(hipGetProcAddress("hipMemcpy2DToArray", &hipMemcpy2DToArray_ptr, currentHipVersion, 0,
                               nullptr));
@@ -3484,8 +3484,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipGetProcAddress("hipMemcpyToArray", &hipMemcpyToArray_ptr, currentHipVersion, 0, nullptr));
   HIP_CHECK(hipGetProcAddress("hipMemcpyFromArray", &hipMemcpyFromArray_ptr, currentHipVersion, 0,
                               nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpyAtoH", &hipMemcpyAtoH_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpyHtoA", &hipMemcpyHtoA_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpyAtoH", &hipMemcpyAtoH_ptr, currentHipVersion, 0, nullptr))
+  HIP_CHECK(hipGetProcAddress("hipMemcpyHtoA", &hipMemcpyHtoA_ptr, currentHipVersion, 0, nullptr))
 
   hipError_t (*dyn_hipMemcpy2DToArray_ptr)(hipArray_t, size_t, size_t, const void* src, size_t,
                                            size_t, size_t, hipMemcpyKind) =
@@ -3534,7 +3534,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DToArray_ptr(array, 0, 0, hostMem, width, width, height,
@@ -3549,20 +3549,20 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
 
       free(hostMem);
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
     // With flag hipMemcpyDeviceToDevice
     {
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DToArray_ptr(array, 0, 0, sDevMem, sPitch, width, height,
@@ -3575,22 +3575,22 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
                                      hipMemcpyDeviceToHost));
       REQUIRE(validateCharHostArray(hostMemory, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
+      HIP_CHECK(hipFree(sDevMem))
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
     // With flag hipMemcpyDeviceToDeviceNoCU
     {
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DToArray_ptr(array, 0, 0, sDevMem, sPitch, width, height,
@@ -3603,9 +3603,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
                                      hipMemcpyDeviceToHost));
       REQUIRE(validateCharHostArray(hostMemory, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
+      HIP_CHECK(hipFree(sDevMem))
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
     // With flag hipMemcpyDefault - Host To Device
     {
@@ -3616,7 +3616,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
       HIP_CHECK(
@@ -3631,20 +3631,20 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
 
       free(hostMem);
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
     // With flag hipMemcpyDefault - Device To Device
     {
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DToArray_ptr(array, 0, 0, sDevMem, sPitch, width, height,
@@ -3657,9 +3657,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
                                      hipMemcpyDeviceToHost));
       REQUIRE(validateCharHostArray(hostMemory, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
+      HIP_CHECK(hipFree(sDevMem))
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
   }
 
@@ -3673,7 +3673,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
     // With flags hipMemcpyHostToDevice
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
@@ -3682,12 +3682,12 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DToArrayAsync_ptr(array, 0, 0, hostMem, width, width, height,
                                                 hipMemcpyHostToDevice, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       char* hostMemory = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMemory != nullptr);
@@ -3696,31 +3696,31 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
                                      hipMemcpyDeviceToHost));
       REQUIRE(validateCharHostArray(hostMemory, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamDestroy(stream))
       free(hostMem);
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
     // With flags hipMemcpyDeviceToDevice
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DToArrayAsync_ptr(array, 0, 0, sDevMem, sPitch, width, height,
                                                 hipMemcpyDeviceToDevice, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       char* hostMemory = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMemory != nullptr);
@@ -3729,31 +3729,31 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
                                      hipMemcpyDeviceToHost));
       REQUIRE(validateCharHostArray(hostMemory, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(sDevMem));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(sDevMem))
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
     // With flags hipMemcpyDeviceToDeviceNoCU
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DToArrayAsync_ptr(array, 0, 0, sDevMem, sPitch, width, height,
                                                 hipMemcpyDeviceToDeviceNoCU, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       char* hostMemory = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMemory != nullptr);
@@ -3762,15 +3762,15 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
                                      hipMemcpyDeviceToHost));
       REQUIRE(validateCharHostArray(hostMemory, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(sDevMem));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(sDevMem))
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
     // With flags hipMemcpyDefault - Host To Device
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
@@ -3779,12 +3779,12 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DToArrayAsync_ptr(array, 0, 0, hostMem, width, width, height,
                                                 hipMemcpyDefault, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       char* hostMemory = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMemory != nullptr);
@@ -3793,31 +3793,31 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
                                      hipMemcpyDeviceToHost));
       REQUIRE(validateCharHostArray(hostMemory, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamDestroy(stream))
       free(hostMem);
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
     // With flags hipMemcpyDefault - Device To Device
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DToArrayAsync_ptr(array, 0, 0, sDevMem, sPitch, width, height,
                                                 hipMemcpyDefault, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       char* hostMemory = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMemory != nullptr);
@@ -3826,10 +3826,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
                                      hipMemcpyDeviceToHost));
       REQUIRE(validateCharHostArray(hostMemory, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(sDevMem));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(sDevMem))
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
   }
 
@@ -3849,7 +3849,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
       HIP_CHECK(
           hipMemcpy2DToArray(array, 0, 0, hostMem, width, width, height, hipMemcpyHostToDevice));
@@ -3863,67 +3863,67 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
 
       free(hostMem);
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
 
     // With flag hipMemcpyDeviceToDevice
     {
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
       HIP_CHECK(
           hipMemcpy2DToArray(array, 0, 0, sDevMem, sPitch, width, height, hipMemcpyDeviceToDevice));
 
       char* dDevMem = nullptr;
       size_t dPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
       REQUIRE(dDevMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DFromArray_ptr(dDevMem, width, array, 0, 0, width, height,
                                              hipMemcpyDeviceToDevice));
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
+      HIP_CHECK(hipFreeArray(array))
     }
 
     // With flag hipMemcpyDeviceToDeviceNoCU
     {
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
       HIP_CHECK(
           hipMemcpy2DToArray(array, 0, 0, sDevMem, sPitch, width, height, hipMemcpyDeviceToDevice));
 
       char* dDevMem = nullptr;
       size_t dPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
       REQUIRE(dDevMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DFromArray_ptr(dDevMem, width, array, 0, 0, width, height,
                                              hipMemcpyDeviceToDeviceNoCU));
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
+      HIP_CHECK(hipFreeArray(array))
     }
 
     // With flag hipMemcpyDefault - Device To Host
@@ -3935,7 +3935,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
       HIP_CHECK(
           hipMemcpy2DToArray(array, 0, 0, hostMem, width, width, height, hipMemcpyHostToDevice));
@@ -3949,36 +3949,36 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
 
       free(hostMem);
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
 
     // With flag hipMemcpyDefault - Device To Device
     {
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
       HIP_CHECK(
           hipMemcpy2DToArray(array, 0, 0, sDevMem, sPitch, width, height, hipMemcpyDeviceToDevice));
       char* dDevMem = nullptr;
       size_t dPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
       REQUIRE(dDevMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DFromArray_ptr(dDevMem, width, array, 0, 0, width, height,
                                              hipMemcpyDefault));
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
+      HIP_CHECK(hipFreeArray(array))
     }
   }
 
@@ -3992,7 +3992,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
     // With flag hipMemcpyDeviceToHost
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
@@ -4001,7 +4001,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
       HIP_CHECK(
           hipMemcpy2DToArray(array, 0, 0, hostMem, width, width, height, hipMemcpyHostToDevice));
@@ -4011,92 +4011,92 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
 
       HIP_CHECK(dyn_hipMemcpy2DFromArrayAsync_ptr(hostMemory, width, array, 0, 0, width, height,
                                                   hipMemcpyDeviceToHost, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharHostArray(hostMemory, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamDestroy(stream))
       free(hostMem);
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
 
     // With flag hipMemcpyDeviceToDevice
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
       HIP_CHECK(
           hipMemcpy2DToArray(array, 0, 0, sDevMem, sPitch, width, height, hipMemcpyDeviceToDevice));
 
       char* dDevMem = nullptr;
       size_t dPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
       REQUIRE(dDevMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DFromArrayAsync_ptr(dDevMem, width, array, 0, 0, width, height,
                                                   hipMemcpyDeviceToDevice, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
+      HIP_CHECK(hipFreeArray(array))
     }
 
     // With flag hipMemcpyDeviceToDeviceNoCU
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
       HIP_CHECK(
           hipMemcpy2DToArray(array, 0, 0, sDevMem, sPitch, width, height, hipMemcpyDeviceToDevice));
 
       char* dDevMem = nullptr;
       size_t dPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
       REQUIRE(dDevMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DFromArrayAsync_ptr(dDevMem, width, array, 0, 0, width, height,
                                                   hipMemcpyDeviceToDeviceNoCU, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
+      HIP_CHECK(hipFreeArray(array))
     }
 
     // With flag hipMemcpyDefault - Device To Host
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
@@ -4105,7 +4105,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
       HIP_CHECK(
           hipMemcpy2DToArray(array, 0, 0, hostMem, width, width, height, hipMemcpyHostToDevice));
@@ -4115,50 +4115,50 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
 
       HIP_CHECK(dyn_hipMemcpy2DFromArrayAsync_ptr(hostMemory, width, array, 0, 0, width, height,
                                                   hipMemcpyDefault, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharHostArray(hostMemory, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamDestroy(stream))
       free(hostMem);
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
 
     // With flag hipMemcpyDefault - Device To Device
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
       HIP_CHECK(
           hipMemcpy2DToArray(array, 0, 0, sDevMem, sPitch, width, height, hipMemcpyDeviceToDevice));
 
       char* dDevMem = nullptr;
       size_t dPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
       REQUIRE(dDevMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DFromArrayAsync_ptr(dDevMem, width, array, 0, 0, width, height,
                                                   hipMemcpyDefault, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
+      HIP_CHECK(hipFreeArray(array))
     }
   }
 
@@ -4177,7 +4177,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
       HIP_CHECK(
@@ -4192,19 +4192,19 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
 
       free(hostMem);
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
     // With flag hipMemcpyDeviceToDevice
     {
       int* sDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&sDevMem, N * sizeof(int)));
+      HIP_CHECK(hipMalloc(&sDevMem, N * sizeof(int)))
       REQUIRE(sDevMem != nullptr);
       fillDeviceArray(sDevMem, N, value);
 
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
       HIP_CHECK(
@@ -4217,21 +4217,21 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
           hipMemcpyFromArray(hostMemory, array, 0, 0, N * sizeof(int), hipMemcpyDeviceToHost));
       REQUIRE(validateHostArray(hostMemory, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
+      HIP_CHECK(hipFree(sDevMem))
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
     // With flag hipMemcpyDeviceToDeviceNoCU
     {
       int* sDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&sDevMem, N * sizeof(int)));
+      HIP_CHECK(hipMalloc(&sDevMem, N * sizeof(int)))
       REQUIRE(sDevMem != nullptr);
       fillDeviceArray(sDevMem, N, value);
 
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
       HIP_CHECK(dyn_hipMemcpyToArray_ptr(array, 0, 0, sDevMem, N * sizeof(int),
@@ -4244,9 +4244,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
           hipMemcpyFromArray(hostMemory, array, 0, 0, N * sizeof(int), hipMemcpyDeviceToHost));
       REQUIRE(validateHostArray(hostMemory, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
+      HIP_CHECK(hipFree(sDevMem))
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
     // With flag hipMemcpyDefault - Host To Device
     {
@@ -4257,10 +4257,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
-      HIP_CHECK(dyn_hipMemcpyToArray_ptr(array, 0, 0, hostMem, N * sizeof(int), hipMemcpyDefault));
+      HIP_CHECK(dyn_hipMemcpyToArray_ptr(array, 0, 0, hostMem, N * sizeof(int), hipMemcpyDefault))
 
       int* hostMemory = reinterpret_cast<int*>(malloc(N * sizeof(int)));
       REQUIRE(hostMemory != nullptr);
@@ -4271,22 +4271,22 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
 
       free(hostMem);
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
     // With flag hipMemcpyDefault - Device To Device
     {
       int* sDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&sDevMem, N * sizeof(int)));
+      HIP_CHECK(hipMalloc(&sDevMem, N * sizeof(int)))
       REQUIRE(sDevMem != nullptr);
       fillDeviceArray(sDevMem, N, value);
 
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
-      HIP_CHECK(dyn_hipMemcpyToArray_ptr(array, 0, 0, sDevMem, N * sizeof(int), hipMemcpyDefault));
+      HIP_CHECK(dyn_hipMemcpyToArray_ptr(array, 0, 0, sDevMem, N * sizeof(int), hipMemcpyDefault))
 
       int* hostMemory = reinterpret_cast<int*>(malloc(N * sizeof(int)));
       REQUIRE(hostMemory != nullptr);
@@ -4295,9 +4295,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
           hipMemcpyFromArray(hostMemory, array, 0, 0, N * sizeof(int), hipMemcpyDeviceToHost));
       REQUIRE(validateHostArray(hostMemory, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
+      HIP_CHECK(hipFree(sDevMem))
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
   }
 
@@ -4317,10 +4317,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
-      HIP_CHECK(hipMemcpyToArray(array, 0, 0, hostMem, N * sizeof(int), hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpyToArray(array, 0, 0, hostMem, N * sizeof(int), hipMemcpyHostToDevice))
 
       int* hostMemory = reinterpret_cast<int*>(malloc(N * sizeof(int)));
       REQUIRE(hostMemory != nullptr);
@@ -4331,7 +4331,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
 
       free(hostMem);
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
 
     // With flag hipMemcpyDeviceToDevice
@@ -4343,13 +4343,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
-      HIP_CHECK(hipMemcpyToArray(array, 0, 0, hostMem, N * sizeof(int), hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpyToArray(array, 0, 0, hostMem, N * sizeof(int), hipMemcpyHostToDevice))
 
       int* deviceMemory = nullptr;
-      HIP_CHECK(hipMalloc(&deviceMemory, N * sizeof(int)));
+      HIP_CHECK(hipMalloc(&deviceMemory, N * sizeof(int)))
       REQUIRE(deviceMemory != nullptr);
 
       HIP_CHECK(dyn_hipMemcpyFromArray_ptr(deviceMemory, array, 0, 0, N * sizeof(int),
@@ -4357,8 +4357,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       REQUIRE(validateDeviceArray(deviceMemory, N, value) == true);
 
       free(hostMem);
-      HIP_CHECK(hipFree(deviceMemory));
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFree(deviceMemory))
+      HIP_CHECK(hipFreeArray(array))
     }
 
     // With flag hipMemcpyDeviceToDeviceNoCU
@@ -4370,13 +4370,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
-      HIP_CHECK(hipMemcpyToArray(array, 0, 0, hostMem, N * sizeof(int), hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpyToArray(array, 0, 0, hostMem, N * sizeof(int), hipMemcpyHostToDevice))
 
       int* deviceMemory = nullptr;
-      HIP_CHECK(hipMalloc(&deviceMemory, N * sizeof(int)));
+      HIP_CHECK(hipMalloc(&deviceMemory, N * sizeof(int)))
       REQUIRE(deviceMemory != nullptr);
 
       HIP_CHECK(dyn_hipMemcpyFromArray_ptr(deviceMemory, array, 0, 0, N * sizeof(int),
@@ -4384,8 +4384,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       REQUIRE(validateDeviceArray(deviceMemory, N, value) == true);
 
       free(hostMem);
-      HIP_CHECK(hipFree(deviceMemory));
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFree(deviceMemory))
+      HIP_CHECK(hipFreeArray(array))
     }
 
     // With flag hipMemcpyDefault - Device To Host
@@ -4397,10 +4397,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
-      HIP_CHECK(hipMemcpyToArray(array, 0, 0, hostMem, N * sizeof(int), hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpyToArray(array, 0, 0, hostMem, N * sizeof(int), hipMemcpyHostToDevice))
 
       int* hostMemory = reinterpret_cast<int*>(malloc(N * sizeof(int)));
       REQUIRE(hostMemory != nullptr);
@@ -4411,7 +4411,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
 
       free(hostMem);
       free(hostMemory);
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFreeArray(array))
     }
 
     // With flag hipMemcpyDefault - Device To Device
@@ -4423,13 +4423,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       hipArray_t array = nullptr;
       hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
       unsigned int flags = hipArrayDefault;
-      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+      HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
       REQUIRE(array != nullptr);
 
-      HIP_CHECK(hipMemcpyToArray(array, 0, 0, hostMem, N * sizeof(int), hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpyToArray(array, 0, 0, hostMem, N * sizeof(int), hipMemcpyHostToDevice))
 
       int* deviceMemory = nullptr;
-      HIP_CHECK(hipMalloc(&deviceMemory, N * sizeof(int)));
+      HIP_CHECK(hipMalloc(&deviceMemory, N * sizeof(int)))
       REQUIRE(deviceMemory != nullptr);
 
       HIP_CHECK(
@@ -4437,8 +4437,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
       REQUIRE(validateDeviceArray(deviceMemory, N, value) == true);
 
       free(hostMem);
-      HIP_CHECK(hipFree(deviceMemory));
-      HIP_CHECK(hipFreeArray(array));
+      HIP_CHECK(hipFree(deviceMemory))
+      HIP_CHECK(hipFreeArray(array))
     }
   }
 
@@ -4450,22 +4450,22 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
     hipArray_t array = nullptr;
     hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
     unsigned int flags = hipArrayDefault;
-    HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+    HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags))
     REQUIRE(array != nullptr);
     int value = 10;
     int* hostMem = reinterpret_cast<int*>(malloc(N * sizeof(int)));
     REQUIRE(hostMem != nullptr);
     fillHostArray(hostMem, N, value);
-    HIP_CHECK(dyn_hipMemcpyHtoA_ptr(array, 0, hostMem, N * sizeof(int)));
+    HIP_CHECK(dyn_hipMemcpyHtoA_ptr(array, 0, hostMem, N * sizeof(int)))
 
     int* hostMemory = reinterpret_cast<int*>(malloc(N * sizeof(int)));
     REQUIRE(hostMemory != nullptr);
-    HIP_CHECK(dyn_hipMemcpyAtoH_ptr(hostMemory, array, 0, N * sizeof(int)));
+    HIP_CHECK(dyn_hipMemcpyAtoH_ptr(hostMemory, array, 0, N * sizeof(int)))
     REQUIRE(validateHostArray(hostMemory, N, value) == true);
 
     free(hostMem);
     free(hostMemory);
-    HIP_CHECK(hipFreeArray(array));
+    HIP_CHECK(hipFreeArray(array))
   }
 }
 
@@ -4490,9 +4490,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
   void* hipDrvMemcpy3DAsync_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
-  HIP_CHECK(hipGetProcAddress("hipMemcpy3D", &hipMemcpy3D_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpy3D", &hipMemcpy3D_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(
       hipGetProcAddress("hipMemcpy3DAsync", &hipMemcpy3DAsync_ptr, currentHipVersion, 0, nullptr));
   HIP_CHECK(
@@ -4535,7 +4535,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.dstPos = make_hipPos(0, 0, 0);
       myparms.extent = extent3d;
       myparms.kind = hipMemcpyHostToHost;
-      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms));
+      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms))
 
       REQUIRE(validateCharHostArray(dHostMem, N, value) == true);
 
@@ -4550,7 +4550,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       fillCharHostArray(hostMem, N, value);
 
       hipPitchedPtr devMem;
-      HIP_CHECK(hipMalloc3D(&devMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&devMem, extent3d))
       REQUIRE(devMem.ptr != nullptr);
 
       hipMemcpy3DParms myparms{};
@@ -4560,20 +4560,20 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.dstPos = make_hipPos(0, 0, 0);
       myparms.extent = extent3d;
       myparms.kind = hipMemcpyHostToDevice;
-      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms));
+      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms))
 
       REQUIRE(validateCharDeviceArray(reinterpret_cast<char*>(devMem.ptr), N, value) == true);
 
-      HIP_CHECK(hipFree(devMem.ptr));
+      HIP_CHECK(hipFree(devMem.ptr))
       free(hostMem);
     }
 
     // With flag hipMemcpyDeviceToHost
     {
       hipPitchedPtr devMem;
-      HIP_CHECK(hipMalloc3D(&devMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&devMem, extent3d))
       REQUIRE(devMem.ptr != nullptr);
-      HIP_CHECK(hipMemset3D(devMem, value, extent3d));
+      HIP_CHECK(hipMemset3D(devMem, value, extent3d))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
@@ -4585,23 +4585,23 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.dstPos = make_hipPos(0, 0, 0);
       myparms.extent = extent3d;
       myparms.kind = hipMemcpyDeviceToHost;
-      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms));
+      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms))
 
       REQUIRE(validateCharHostArray(hostMem, N, value) == true);
 
-      HIP_CHECK(hipFree(devMem.ptr));
+      HIP_CHECK(hipFree(devMem.ptr))
       free(hostMem);
     }
 
     // With flag hipMemcpyDeviceToDevice
     {
       hipPitchedPtr sDevMem;
-      HIP_CHECK(hipMalloc3D(&sDevMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&sDevMem, extent3d))
       REQUIRE(sDevMem.ptr != nullptr);
-      HIP_CHECK(hipMemset3D(sDevMem, value, extent3d));
+      HIP_CHECK(hipMemset3D(sDevMem, value, extent3d))
 
       hipPitchedPtr dDevMem;
-      HIP_CHECK(hipMalloc3D(&dDevMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&dDevMem, extent3d))
       REQUIRE(dDevMem.ptr != nullptr);
 
       hipMemcpy3DParms myparms{};
@@ -4611,23 +4611,23 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.dstPos = make_hipPos(0, 0, 0);
       myparms.extent = extent3d;
       myparms.kind = hipMemcpyDeviceToDevice;
-      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms));
+      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms))
 
       REQUIRE(validateCharDeviceArray(reinterpret_cast<char*>(dDevMem.ptr), N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem.ptr));
-      HIP_CHECK(hipFree(dDevMem.ptr));
+      HIP_CHECK(hipFree(sDevMem.ptr))
+      HIP_CHECK(hipFree(dDevMem.ptr))
     }
 
     // With flag hipMemcpyDeviceToDeviceNoCU
     {
       hipPitchedPtr sDevMem;
-      HIP_CHECK(hipMalloc3D(&sDevMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&sDevMem, extent3d))
       REQUIRE(sDevMem.ptr != nullptr);
-      HIP_CHECK(hipMemset3D(sDevMem, value, extent3d));
+      HIP_CHECK(hipMemset3D(sDevMem, value, extent3d))
 
       hipPitchedPtr dDevMem;
-      HIP_CHECK(hipMalloc3D(&dDevMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&dDevMem, extent3d))
       REQUIRE(dDevMem.ptr != nullptr);
 
       hipMemcpy3DParms myparms{};
@@ -4637,12 +4637,12 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.dstPos = make_hipPos(0, 0, 0);
       myparms.extent = extent3d;
       myparms.kind = hipMemcpyDeviceToDeviceNoCU;
-      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms));
+      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms))
 
       REQUIRE(validateCharDeviceArray(reinterpret_cast<char*>(dDevMem.ptr), N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem.ptr));
-      HIP_CHECK(hipFree(dDevMem.ptr));
+      HIP_CHECK(hipFree(sDevMem.ptr))
+      HIP_CHECK(hipFree(dDevMem.ptr))
     }
 
     // With flag hipMemcpyDefault - Host To Host
@@ -4661,7 +4661,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.dstPos = make_hipPos(0, 0, 0);
       myparms.extent = extent3d;
       myparms.kind = hipMemcpyDefault;
-      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms));
+      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms))
 
       REQUIRE(validateCharHostArray(dHostMem, N, value) == true);
 
@@ -4676,7 +4676,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       fillCharHostArray(hostMem, N, value);
 
       hipPitchedPtr devMem;
-      HIP_CHECK(hipMalloc3D(&devMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&devMem, extent3d))
       REQUIRE(devMem.ptr != nullptr);
 
       hipMemcpy3DParms myparms{};
@@ -4686,20 +4686,20 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.dstPos = make_hipPos(0, 0, 0);
       myparms.extent = extent3d;
       myparms.kind = hipMemcpyDefault;
-      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms));
+      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms))
 
       REQUIRE(validateCharDeviceArray(reinterpret_cast<char*>(devMem.ptr), N, value) == true);
 
-      HIP_CHECK(hipFree(devMem.ptr));
+      HIP_CHECK(hipFree(devMem.ptr))
       free(hostMem);
     }
 
     // With flag hipMemcpyDefault - Device To Host
     {
       hipPitchedPtr devMem;
-      HIP_CHECK(hipMalloc3D(&devMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&devMem, extent3d))
       REQUIRE(devMem.ptr != nullptr);
-      HIP_CHECK(hipMemset3D(devMem, value, extent3d));
+      HIP_CHECK(hipMemset3D(devMem, value, extent3d))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
@@ -4711,23 +4711,23 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.dstPos = make_hipPos(0, 0, 0);
       myparms.extent = extent3d;
       myparms.kind = hipMemcpyDefault;
-      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms));
+      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms))
 
       REQUIRE(validateCharHostArray(hostMem, N, value) == true);
 
-      HIP_CHECK(hipFree(devMem.ptr));
+      HIP_CHECK(hipFree(devMem.ptr))
       free(hostMem);
     }
 
     // With flag hipMemcpyDefault - Device To Device
     {
       hipPitchedPtr sDevMem;
-      HIP_CHECK(hipMalloc3D(&sDevMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&sDevMem, extent3d))
       REQUIRE(sDevMem.ptr != nullptr);
-      HIP_CHECK(hipMemset3D(sDevMem, value, extent3d));
+      HIP_CHECK(hipMemset3D(sDevMem, value, extent3d))
 
       hipPitchedPtr dDevMem;
-      HIP_CHECK(hipMalloc3D(&dDevMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&dDevMem, extent3d))
       REQUIRE(dDevMem.ptr != nullptr);
 
       hipMemcpy3DParms myparms{};
@@ -4737,12 +4737,12 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.dstPos = make_hipPos(0, 0, 0);
       myparms.extent = extent3d;
       myparms.kind = hipMemcpyDefault;
-      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms));
+      HIP_CHECK(dyn_hipMemcpy3D_ptr(&myparms))
 
       REQUIRE(validateCharDeviceArray(reinterpret_cast<char*>(dDevMem.ptr), N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem.ptr));
-      HIP_CHECK(hipFree(dDevMem.ptr));
+      HIP_CHECK(hipFree(sDevMem.ptr))
+      HIP_CHECK(hipFree(dDevMem.ptr))
     }
   }
 
@@ -4773,14 +4773,14 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.kind = hipMemcpyHostToHost;
 
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
-      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharHostArray(dHostMem, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamDestroy(stream))
       free(sHostMem);
       free(dHostMem);
     }
@@ -4792,7 +4792,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       fillCharHostArray(hostMem, N, value);
 
       hipPitchedPtr devMem;
-      HIP_CHECK(hipMalloc3D(&devMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&devMem, extent3d))
       REQUIRE(devMem.ptr != nullptr);
 
       hipMemcpy3DParms myparms{};
@@ -4804,24 +4804,24 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.kind = hipMemcpyHostToDevice;
 
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
-      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharDeviceArray(reinterpret_cast<char*>(devMem.ptr), N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(devMem.ptr));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(devMem.ptr))
       free(hostMem);
     }
 
     // With flag hipMemcpyDeviceToHost
     {
       hipPitchedPtr devMem;
-      HIP_CHECK(hipMalloc3D(&devMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&devMem, extent3d))
       REQUIRE(devMem.ptr != nullptr);
-      HIP_CHECK(hipMemset3D(devMem, value, extent3d));
+      HIP_CHECK(hipMemset3D(devMem, value, extent3d))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
@@ -4835,27 +4835,27 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.kind = hipMemcpyDeviceToHost;
 
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
-      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharHostArray(hostMem, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(devMem.ptr));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(devMem.ptr))
       free(hostMem);
     }
 
     // With flag hipMemcpyDeviceToDevice
     {
       hipPitchedPtr sDevMem;
-      HIP_CHECK(hipMalloc3D(&sDevMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&sDevMem, extent3d))
       REQUIRE(sDevMem.ptr != nullptr);
-      HIP_CHECK(hipMemset3D(sDevMem, value, extent3d));
+      HIP_CHECK(hipMemset3D(sDevMem, value, extent3d))
 
       hipPitchedPtr dDevMem;
-      HIP_CHECK(hipMalloc3D(&dDevMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&dDevMem, extent3d))
       REQUIRE(dDevMem.ptr != nullptr);
 
       hipMemcpy3DParms myparms{};
@@ -4867,27 +4867,27 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.kind = hipMemcpyDeviceToDevice;
 
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
-      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharDeviceArray(reinterpret_cast<char*>(dDevMem.ptr), N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(sDevMem.ptr));
-      HIP_CHECK(hipFree(dDevMem.ptr));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(sDevMem.ptr))
+      HIP_CHECK(hipFree(dDevMem.ptr))
     }
 
     // With flag hipMemcpyDeviceToDeviceNoCU
     {
       hipPitchedPtr sDevMem;
-      HIP_CHECK(hipMalloc3D(&sDevMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&sDevMem, extent3d))
       REQUIRE(sDevMem.ptr != nullptr);
-      HIP_CHECK(hipMemset3D(sDevMem, value, extent3d));
+      HIP_CHECK(hipMemset3D(sDevMem, value, extent3d))
 
       hipPitchedPtr dDevMem;
-      HIP_CHECK(hipMalloc3D(&dDevMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&dDevMem, extent3d))
       REQUIRE(dDevMem.ptr != nullptr);
 
       hipMemcpy3DParms myparms{};
@@ -4899,16 +4899,16 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.kind = hipMemcpyDeviceToDeviceNoCU;
 
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
-      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharDeviceArray(reinterpret_cast<char*>(dDevMem.ptr), N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(sDevMem.ptr));
-      HIP_CHECK(hipFree(dDevMem.ptr));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(sDevMem.ptr))
+      HIP_CHECK(hipFree(dDevMem.ptr))
     }
 
     // With flag hipMemcpyDefault - Host To Host
@@ -4929,14 +4929,14 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.kind = hipMemcpyDefault;
 
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
-      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharHostArray(dHostMem, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamDestroy(stream))
       free(sHostMem);
       free(dHostMem);
     }
@@ -4948,7 +4948,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       fillCharHostArray(hostMem, N, value);
 
       hipPitchedPtr devMem;
-      HIP_CHECK(hipMalloc3D(&devMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&devMem, extent3d))
       REQUIRE(devMem.ptr != nullptr);
 
       hipMemcpy3DParms myparms{};
@@ -4960,24 +4960,24 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.kind = hipMemcpyDefault;
 
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
-      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharDeviceArray(reinterpret_cast<char*>(devMem.ptr), N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(devMem.ptr));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(devMem.ptr))
       free(hostMem);
     }
 
     // With flag hipMemcpyDefault - Device To Host
     {
       hipPitchedPtr devMem;
-      HIP_CHECK(hipMalloc3D(&devMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&devMem, extent3d))
       REQUIRE(devMem.ptr != nullptr);
-      HIP_CHECK(hipMemset3D(devMem, value, extent3d));
+      HIP_CHECK(hipMemset3D(devMem, value, extent3d))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
@@ -4991,27 +4991,27 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.kind = hipMemcpyDefault;
 
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
-      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharHostArray(hostMem, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(devMem.ptr));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(devMem.ptr))
       free(hostMem);
     }
 
     // With flag hipMemcpyDefault - Device To Device
     {
       hipPitchedPtr sDevMem;
-      HIP_CHECK(hipMalloc3D(&sDevMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&sDevMem, extent3d))
       REQUIRE(sDevMem.ptr != nullptr);
-      HIP_CHECK(hipMemset3D(sDevMem, value, extent3d));
+      HIP_CHECK(hipMemset3D(sDevMem, value, extent3d))
 
       hipPitchedPtr dDevMem;
-      HIP_CHECK(hipMalloc3D(&dDevMem, extent3d));
+      HIP_CHECK(hipMalloc3D(&dDevMem, extent3d))
       REQUIRE(dDevMem.ptr != nullptr);
 
       hipMemcpy3DParms myparms{};
@@ -5023,16 +5023,16 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       myparms.kind = hipMemcpyDefault;
 
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
-      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipMemcpy3DAsync_ptr(&myparms, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateCharDeviceArray(reinterpret_cast<char*>(dDevMem.ptr), N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(sDevMem.ptr));
-      HIP_CHECK(hipFree(dDevMem.ptr));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(sDevMem.ptr))
+      HIP_CHECK(hipFree(dDevMem.ptr))
     }
   }
 
@@ -5066,7 +5066,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       desc.Height = height;
       desc.Depth = depth;
 
-      HIP_CHECK(dyn_hipDrvMemcpy3D_ptr(&desc));
+      HIP_CHECK(dyn_hipDrvMemcpy3D_ptr(&desc))
 
       REQUIRE(validateHostArray(dHostMem, N, value) == true);
 
@@ -5081,7 +5081,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       fillHostArray(hostMem, N, value);
 
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, N * sizeof(int)));
+      HIP_CHECK(hipMalloc(&devMem, N * sizeof(int)))
       REQUIRE(devMem != nullptr);
 
       HIP_MEMCPY3D desc = {};
@@ -5097,18 +5097,18 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       desc.Height = height;
       desc.Depth = depth;
 
-      HIP_CHECK(dyn_hipDrvMemcpy3D_ptr(&desc));
+      HIP_CHECK(dyn_hipDrvMemcpy3D_ptr(&desc))
 
       REQUIRE(validateDeviceArray(devMem, N, value) == true);
 
       free(hostMem);
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
     }
 
     // Device To Host
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, N * sizeof(int)));
+      HIP_CHECK(hipMalloc(&devMem, N * sizeof(int)))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
@@ -5128,23 +5128,23 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       desc.Height = height;
       desc.Depth = depth;
 
-      HIP_CHECK(dyn_hipDrvMemcpy3D_ptr(&desc));
+      HIP_CHECK(dyn_hipDrvMemcpy3D_ptr(&desc))
 
       REQUIRE(validateHostArray(hostMem, N, value) == true);
 
       free(hostMem);
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
     }
 
     // Device To Device
     {
       int* sDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&sDevMem, N * sizeof(int)));
+      HIP_CHECK(hipMalloc(&sDevMem, N * sizeof(int)))
       REQUIRE(sDevMem != nullptr);
       fillDeviceArray(sDevMem, N, value);
 
       int* dDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&dDevMem, N * sizeof(int)));
+      HIP_CHECK(hipMalloc(&dDevMem, N * sizeof(int)))
       REQUIRE(dDevMem != nullptr);
 
       HIP_MEMCPY3D desc = {};
@@ -5160,12 +5160,12 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       desc.Height = height;
       desc.Depth = depth;
 
-      HIP_CHECK(dyn_hipDrvMemcpy3D_ptr(&desc));
+      HIP_CHECK(dyn_hipDrvMemcpy3D_ptr(&desc))
 
       REQUIRE(validateDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
     }
   }
 
@@ -5200,14 +5200,14 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       desc.Depth = depth;
 
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
-      HIP_CHECK(dyn_hipDrvMemcpy3DAsync_ptr(&desc, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipDrvMemcpy3DAsync_ptr(&desc, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateHostArray(dHostMem, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamDestroy(stream))
       free(sHostMem);
       free(dHostMem);
     }
@@ -5219,7 +5219,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       fillHostArray(hostMem, N, value);
 
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, N * sizeof(int)));
+      HIP_CHECK(hipMalloc(&devMem, N * sizeof(int)))
       REQUIRE(devMem != nullptr);
 
       HIP_MEMCPY3D desc = {};
@@ -5236,22 +5236,22 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       desc.Depth = depth;
 
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
-      HIP_CHECK(dyn_hipDrvMemcpy3DAsync_ptr(&desc, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipDrvMemcpy3DAsync_ptr(&desc, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateDeviceArray(devMem, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamDestroy(stream))
       free(hostMem);
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
     }
 
     // Device To Host
     {
       int* devMem = nullptr;
-      HIP_CHECK(hipMalloc(&devMem, N * sizeof(int)));
+      HIP_CHECK(hipMalloc(&devMem, N * sizeof(int)))
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
@@ -5272,27 +5272,27 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       desc.Depth = depth;
 
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
-      HIP_CHECK(dyn_hipDrvMemcpy3DAsync_ptr(&desc, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipDrvMemcpy3DAsync_ptr(&desc, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateHostArray(hostMem, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamDestroy(stream))
       free(hostMem);
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
     }
 
     // Device To Device
     {
       int* sDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&sDevMem, N * sizeof(int)));
+      HIP_CHECK(hipMalloc(&sDevMem, N * sizeof(int)))
       REQUIRE(sDevMem != nullptr);
       fillDeviceArray(sDevMem, N, value);
 
       int* dDevMem = nullptr;
-      HIP_CHECK(hipMalloc(&dDevMem, N * sizeof(int)));
+      HIP_CHECK(hipMalloc(&dDevMem, N * sizeof(int)))
       REQUIRE(dDevMem != nullptr);
 
       HIP_MEMCPY3D desc = {};
@@ -5309,16 +5309,16 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
       desc.Depth = depth;
 
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
-      HIP_CHECK(dyn_hipDrvMemcpy3DAsync_ptr(&desc, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipDrvMemcpy3DAsync_ptr(&desc, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       REQUIRE(validateDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipStreamDestroy(stream));
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
+      HIP_CHECK(hipStreamDestroy(stream))
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
     }
   }
 }
@@ -5339,7 +5339,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisAddressRelated) {
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   void* hipGetProcAddress_ptr = nullptr;
   HIP_CHECK(hipGetProcAddress("hipGetProcAddress", &hipGetProcAddress_ptr, currentHipVersion, 0,
@@ -5390,13 +5390,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
   void* hipStreamAttachMemAsync_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(
       hipGetProcAddress("hipMallocManaged", &hipMallocManaged_ptr, currentHipVersion, 0, nullptr));
   HIP_CHECK(hipGetProcAddress("hipMemPrefetchAsync", &hipMemPrefetchAsync_ptr, currentHipVersion, 0,
                               nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemAdvise", &hipMemAdvise_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemAdvise", &hipMemAdvise_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(hipGetProcAddress("hipMemRangeGetAttribute", &hipMemRangeGetAttribute_ptr,
                               currentHipVersion, 0, nullptr));
   HIP_CHECK(hipGetProcAddress("hipMemRangeGetAttributes", &hipMemRangeGetAttributes_ptr,
@@ -5437,10 +5437,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
       memPtr = nullptr;
       size = -1;
 
-      HIP_CHECK(dyn_hipMallocManaged_ptr(reinterpret_cast<void**>(&memPtr), Nbytes, flag));
+      HIP_CHECK(dyn_hipMallocManaged_ptr(reinterpret_cast<void**>(&memPtr), Nbytes, flag))
       REQUIRE(memPtr != nullptr);
 
-      HIP_CHECK(hipMemPtrGetInfo(memPtr, &size));
+      HIP_CHECK(hipMemPtrGetInfo(memPtr, &size))
       REQUIRE(size == Nbytes);
 
       fillDeviceArray(memPtr, N, value);
@@ -5449,7 +5449,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
       fillHostArray(memPtr, N, value + 1);
       validateHostArray(memPtr, N, value + 1);
 
-      HIP_CHECK(hipFree(memPtr));
+      HIP_CHECK(hipFree(memPtr))
     }
   }
 
@@ -5457,87 +5457,87 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
   {
     hipDevice_t device = hipCpuDeviceId;
 
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
 
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
 
     int* memPtr = nullptr;
-    HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal));
+    HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal))
     REQUIRE(memPtr != nullptr);
 
     fillDeviceArray(memPtr, N, value);
 
-    HIP_CHECK(dyn_hipMemPrefetchAsync_ptr(memPtr, Nbytes, device, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(dyn_hipMemPrefetchAsync_ptr(memPtr, Nbytes, device, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     fillHostArray(memPtr, N, value + 1);
     validateHostArray(memPtr, N, value + 1);
 
-    HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK(hipFree(memPtr));
+    HIP_CHECK(hipStreamDestroy(stream))
+    HIP_CHECK(hipFree(memPtr))
   }
 
   // Validating hipMemAdvise and hipMemRangeGetAttribute APIs
   {
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
 
     int attrData;
     int* memPtr = nullptr;
-    HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal));
+    HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal))
     REQUIRE(memPtr != nullptr);
 
     // With flag hipMemAdviseSetReadMostly
-    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetReadMostly, 0));
+    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetReadMostly, 0))
     attrData = -2;
     HIP_CHECK(dyn_hipMemRangeGetAttribute_ptr(&attrData, sizeof(int),
                                               hipMemRangeAttributeReadMostly, memPtr, Nbytes));
     REQUIRE(attrData == 1);
 
     // With flag hipMemAdviseUnsetReadMostly
-    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseUnsetReadMostly, 0));
+    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseUnsetReadMostly, 0))
     attrData = -2;
     HIP_CHECK(dyn_hipMemRangeGetAttribute_ptr(&attrData, sizeof(int),
                                               hipMemRangeAttributeReadMostly, memPtr, Nbytes));
     REQUIRE(attrData == 0);
 
     // With flag hipMemAdviseSetPreferredLocation
-    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetPreferredLocation, 0));
+    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetPreferredLocation, 0))
     attrData = -2;
     HIP_CHECK(dyn_hipMemRangeGetAttribute_ptr(
         &attrData, sizeof(int), hipMemRangeAttributePreferredLocation, memPtr, Nbytes));
     REQUIRE(attrData == 0);
 
     // With flag hipMemAdviseUnsetPreferredLocation
-    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseUnsetPreferredLocation, 0));
+    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseUnsetPreferredLocation, 0))
     attrData = -2;
     HIP_CHECK(dyn_hipMemRangeGetAttribute_ptr(
         &attrData, sizeof(int), hipMemRangeAttributePreferredLocation, memPtr, Nbytes));
     REQUIRE(attrData != 0);
 
     // With flag hipMemAdviseSetAccessedBy
-    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetAccessedBy, 0));
+    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetAccessedBy, 0))
     attrData = -2;
     HIP_CHECK(dyn_hipMemRangeGetAttribute_ptr(&attrData, sizeof(int),
                                               hipMemRangeAttributeAccessedBy, memPtr, Nbytes));
     REQUIRE(attrData == 0);
 
     // With flag hipMemAdviseUnsetAccessedBy
-    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseUnsetAccessedBy, 0));
+    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseUnsetAccessedBy, 0))
     attrData = -2;
     HIP_CHECK(dyn_hipMemRangeGetAttribute_ptr(&attrData, sizeof(int),
                                               hipMemRangeAttributeAccessedBy, memPtr, Nbytes));
     REQUIRE(attrData != 0);
 
     // With flag hipMemAdviseSetCoarseGrain
-    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetCoarseGrain, 0));
+    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetCoarseGrain, 0))
     attrData = -2;
     HIP_CHECK(dyn_hipMemRangeGetAttribute_ptr(&attrData, sizeof(int),
                                               hipMemRangeAttributeCoherencyMode, memPtr, Nbytes));
     REQUIRE(attrData == hipMemRangeCoherencyModeCoarseGrain);
 
     // With flag hipMemAdviseUnsetCoarseGrain
-    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseUnsetCoarseGrain, 0));
+    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseUnsetCoarseGrain, 0))
     attrData = -2;
     HIP_CHECK(dyn_hipMemRangeGetAttribute_ptr(&attrData, sizeof(int),
                                               hipMemRangeAttributeCoherencyMode, memPtr, Nbytes));
@@ -5546,31 +5546,31 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
     // With flag hipMemRangeAttributeLastPrefetchLocation
     // Prefetch the location and get the prefetched location
     hipDevice_t device = hipCpuDeviceId;
-    HIP_CHECK(hipMemPrefetchAsync(memPtr, Nbytes, device, NULL));
+    HIP_CHECK(hipMemPrefetchAsync(memPtr, Nbytes, device, NULL))
 
     attrData = -2;
     HIP_CHECK(hipMemRangeGetAttribute(&attrData, sizeof(int),
                                       hipMemRangeAttributeLastPrefetchLocation, memPtr, Nbytes));
     REQUIRE(attrData == device);
 
-    HIP_CHECK(hipFree(memPtr));
+    HIP_CHECK(hipFree(memPtr))
   }
 
   // Validating hipMemRangeGetAttributes API
   {
     int devCount = 0;
-    HIP_CHECK(hipGetDeviceCount(&devCount));
+    HIP_CHECK(hipGetDeviceCount(&devCount))
 
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
 
     int* memPtr = nullptr;
-    HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal));
+    HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal))
     REQUIRE(memPtr != nullptr);
 
-    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetReadMostly, 0));
-    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetPreferredLocation, 0));
-    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetAccessedBy, 0));
-    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetCoarseGrain, 0));
+    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetReadMostly, 0))
+    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetPreferredLocation, 0))
+    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetAccessedBy, 0))
+    HIP_CHECK(dyn_hipMemAdvise_ptr(memPtr, Nbytes, hipMemAdviseSetCoarseGrain, 0))
 
     const size_t num_attributes = 5;
 
@@ -5625,30 +5625,30 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
     delete dataWithFuncPtr[3];
     delete dataWithFuncPtr[4];
 
-    HIP_CHECK(hipFree(memPtr));
+    HIP_CHECK(hipFree(memPtr))
   }
 
   // Validating hipStreamAttachMemAsync API
   {
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
 
     int* memPtr = nullptr;
-    HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal));
+    HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal))
     REQUIRE(memPtr != nullptr);
 
     unsigned int flags[] = {hipMemAttachGlobal, hipMemAttachHost, hipMemAttachSingle};
 
     for (unsigned int flag : flags) {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
-      HIP_CHECK(dyn_hipStreamAttachMemAsync_ptr(stream, memPtr, Nbytes, flag));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(dyn_hipStreamAttachMemAsync_ptr(stream, memPtr, Nbytes, flag))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamDestroy(stream))
     }
 
-    HIP_CHECK(hipFree(memPtr));
+    HIP_CHECK(hipFree(memPtr))
   }
 }
 
@@ -5666,10 +5666,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   int mem_pool_support = 0;
 
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
 
   if (mem_pool_support != 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
@@ -5687,11 +5687,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
   void* hipMemPoolGetAttribute_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(
       hipGetProcAddress("hipMallocAsync", &hipMallocAsync_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipFreeAsync", &hipFreeAsync_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipFreeAsync", &hipFreeAsync_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(
       hipGetProcAddress("hipMemPoolCreate", &hipMemPoolCreate_ptr, currentHipVersion, 0, nullptr));
   HIP_CHECK(hipGetProcAddress("hipMallocFromPoolAsync", &hipMallocFromPoolAsync_ptr,
@@ -5738,23 +5738,23 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
   // Validating hipMallocAsync, hipFreeAsync API's
   {
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
 
     void* dPtr = nullptr;
-    HIP_CHECK(dyn_hipMallocAsync_ptr(&dPtr, 256, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(dyn_hipMallocAsync_ptr(&dPtr, 256, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
     REQUIRE(dPtr != nullptr);
 
     size_t size = -1;
-    HIP_CHECK(hipMemPtrGetInfo(dPtr, &size));
+    HIP_CHECK(hipMemPtrGetInfo(dPtr, &size))
     REQUIRE(size == 256);
 
-    HIP_CHECK(dyn_hipFreeAsync_ptr(dPtr, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(dyn_hipFreeAsync_ptr(dPtr, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     REQUIRE(hipMemPtrGetInfo(dPtr, &size) == hipErrorInvalidValue);
 
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 
   // Validating hipMemPoolCreate , hipMallocFromPoolAsync API's
@@ -5769,26 +5769,26 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
     pool_props.maxSize = 1024;
 
     hipMemPool_t mem_pool = nullptr;
-    HIP_CHECK(dyn_hipMemPoolCreate_ptr(&mem_pool, &pool_props));
+    HIP_CHECK(dyn_hipMemPoolCreate_ptr(&mem_pool, &pool_props))
     REQUIRE(mem_pool != nullptr);
 
     // hipMallocFromPoolAsync
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
 
     void* dPtr = nullptr;
-    HIP_CHECK(dyn_hipMallocFromPoolAsync_ptr(&dPtr, 1024, mem_pool, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(dyn_hipMallocFromPoolAsync_ptr(&dPtr, 1024, mem_pool, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
     REQUIRE(dPtr != nullptr);
     size_t size = -1;
-    HIP_CHECK(hipMemPtrGetInfo(dPtr, &size));
+    HIP_CHECK(hipMemPtrGetInfo(dPtr, &size))
     REQUIRE(size == 1024);
     void* dPtr2 = nullptr;
     REQUIRE(dyn_hipMallocFromPoolAsync_ptr(&dPtr2, 1, mem_pool, stream) == hipErrorOutOfMemory);
 
-    HIP_CHECK(dyn_hipFreeAsync_ptr(dPtr, stream));
-    HIP_CHECK(hipMemPoolDestroy(mem_pool));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(dyn_hipFreeAsync_ptr(dPtr, stream))
+    HIP_CHECK(hipMemPoolDestroy(mem_pool))
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 
   // Validating hipMemPoolDestroy API
@@ -5801,7 +5801,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
     pool_props.win32SecurityAttributes = nullptr;
     pool_props.maxSize = 1024;
     hipMemPool_t mem_pool = nullptr;
-    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
     REQUIRE(mem_pool != nullptr);
 
     REQUIRE(dyn_hipMemPoolDestroy_ptr(mem_pool) == hipSuccess);
@@ -5819,38 +5819,38 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
     pool_props.maxSize = 1024 * 1024;
 
     hipMemPool_t mem_pool = nullptr;
-    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
     REQUIRE(mem_pool != nullptr);
 
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
 
     void* dPtr1 = nullptr;
-    HIP_CHECK(hipMallocFromPoolAsync(&dPtr1, 1024 * 1024, mem_pool, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMallocFromPoolAsync(&dPtr1, 1024 * 1024, mem_pool, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
     REQUIRE(dPtr1 != nullptr);
 
-    HIP_CHECK(hipFreeAsync(dPtr1, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipFreeAsync(dPtr1, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
-    HIP_CHECK(dyn_hipMemPoolTrimTo_ptr(mem_pool, 1024));
+    HIP_CHECK(dyn_hipMemPoolTrimTo_ptr(mem_pool, 1024))
 
     void* dPtr2 = nullptr;
     REQUIRE(hipMallocFromPoolAsync(&dPtr2, 1024 * 1024, mem_pool, stream) == hipErrorOutOfMemory);
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
     REQUIRE(dPtr2 == nullptr);
 
-    HIP_CHECK(hipMemPoolDestroy(mem_pool));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipMemPoolDestroy(mem_pool))
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 
   // Validating hipMemPoolSetAccess, hipMemPoolGetAccess API's
   {
     int deviceCount = 0;
-    HIP_CHECK(hipGetDeviceCount(&deviceCount));
+    HIP_CHECK(hipGetDeviceCount(&deviceCount))
 
     if (deviceCount > 1) {
-      HIP_CHECK(hipSetDevice(0));
+      HIP_CHECK(hipSetDevice(0))
 
       hipMemPoolProps pool_props;
 
@@ -5862,7 +5862,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
       pool_props.maxSize = 1024;
 
       hipMemPool_t mem_pool = nullptr;
-      HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+      HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
       REQUIRE(mem_pool != nullptr);
 
       hipMemAccessFlags flagsList[] = {hipMemAccessFlagsProtRead, hipMemAccessFlagsProtReadWrite};
@@ -5872,19 +5872,19 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
         hipMemLocation location = {hipMemLocationTypeDevice, 1};
         desc.location = location;
         desc.flags = flag;
-        HIP_CHECK(dyn_hipMemPoolSetAccess_ptr(mem_pool, &desc, 1));
+        HIP_CHECK(dyn_hipMemPoolSetAccess_ptr(mem_pool, &desc, 1))
 
         hipMemAccessFlags flags;
-        HIP_CHECK(dyn_hipMemPoolGetAccess_ptr(&flags, mem_pool, &location));
+        HIP_CHECK(dyn_hipMemPoolGetAccess_ptr(&flags, mem_pool, &location))
         REQUIRE(flags == flag);
       }
-      HIP_CHECK(hipMemPoolDestroy(mem_pool));
+      HIP_CHECK(hipMemPoolDestroy(mem_pool))
     }
   }
 
   // Validating hipMemPoolSetAttribute, hipMemPoolGetAttribute API's
   {
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
 
     hipMemPoolProps pool_props{};
     pool_props.allocType = hipMemAllocationTypePinned;
@@ -5894,7 +5894,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
     pool_props.win32SecurityAttributes = nullptr;
     pool_props.maxSize = 1024 * 1024;
     hipMemPool_t mem_pool = nullptr;
-    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
     REQUIRE(mem_pool != nullptr);
 
     // Attribute - hipMemPoolReuseFollowEventDependencies
@@ -5902,10 +5902,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
       hipMemPoolAttr attr = hipMemPoolReuseFollowEventDependencies;
 
       int valueToSet = 0;
-      HIP_CHECK(dyn_hipMemPoolSetAttribute_ptr(mem_pool, attr, &valueToSet));
+      HIP_CHECK(dyn_hipMemPoolSetAttribute_ptr(mem_pool, attr, &valueToSet))
 
       int value;
-      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, attr, &value));
+      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, attr, &value))
       REQUIRE(value == 0);
     }
 
@@ -5914,10 +5914,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
       hipMemPoolAttr attr = hipMemPoolReuseAllowOpportunistic;
 
       int valueToSet = 0;
-      HIP_CHECK(dyn_hipMemPoolSetAttribute_ptr(mem_pool, attr, &valueToSet));
+      HIP_CHECK(dyn_hipMemPoolSetAttribute_ptr(mem_pool, attr, &valueToSet))
 
       int value;
-      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, attr, &value));
+      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, attr, &value))
       REQUIRE(value == 0);
     }
 
@@ -5926,10 +5926,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
       hipMemPoolAttr attr = hipMemPoolReuseAllowInternalDependencies;
 
       int valueToSet = 0;
-      HIP_CHECK(dyn_hipMemPoolSetAttribute_ptr(mem_pool, attr, &valueToSet));
+      HIP_CHECK(dyn_hipMemPoolSetAttribute_ptr(mem_pool, attr, &valueToSet))
 
       int value;
-      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, attr, &value));
+      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, attr, &value))
       REQUIRE(value == 0);
     }
 
@@ -5938,10 +5938,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
       hipMemPoolAttr attr = hipMemPoolAttrReleaseThreshold;
 
       uint64_t valueToSet = 1024;
-      HIP_CHECK(dyn_hipMemPoolSetAttribute_ptr(mem_pool, attr, &valueToSet));
+      HIP_CHECK(dyn_hipMemPoolSetAttribute_ptr(mem_pool, attr, &valueToSet))
 
       uint64_t value;
-      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, attr, &value));
+      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, attr, &value))
       REQUIRE(value == 1024);
     }
     /*
@@ -5953,47 +5953,47 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
     */
     {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
 
       void* dPtr1 = nullptr;
-      HIP_CHECK(hipMallocFromPoolAsync(&dPtr1, 1024, mem_pool, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipMallocFromPoolAsync(&dPtr1, 1024, mem_pool, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
       REQUIRE(dPtr1 != nullptr);
 
       uint64_t value = 0;
-      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, hipMemPoolAttrReservedMemCurrent, &value));
+      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, hipMemPoolAttrReservedMemCurrent, &value))
       REQUIRE(value >= 1024);
 
       value = 0;
-      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, hipMemPoolAttrReservedMemHigh, &value));
+      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, hipMemPoolAttrReservedMemHigh, &value))
       REQUIRE(value >= 1024);
 
       value = 0;
-      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, hipMemPoolAttrUsedMemCurrent, &value));
+      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, hipMemPoolAttrUsedMemCurrent, &value))
       REQUIRE(value >= 1024);
 
       value = 0;
-      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, hipMemPoolAttrUsedMemHigh, &value));
+      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, hipMemPoolAttrUsedMemHigh, &value))
       REQUIRE(value >= 1024);
 
-      HIP_CHECK(hipFreeAsync(dPtr1, stream));
+      HIP_CHECK(hipFreeAsync(dPtr1, stream))
 
       uint64_t valueToSet = 0;
       HIP_CHECK(
           dyn_hipMemPoolSetAttribute_ptr(mem_pool, hipMemPoolAttrReservedMemHigh, &valueToSet));
-      HIP_CHECK(dyn_hipMemPoolSetAttribute_ptr(mem_pool, hipMemPoolAttrUsedMemHigh, &valueToSet));
+      HIP_CHECK(dyn_hipMemPoolSetAttribute_ptr(mem_pool, hipMemPoolAttrUsedMemHigh, &valueToSet))
 
       value = -1;
-      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, hipMemPoolAttrReservedMemHigh, &value));
+      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, hipMemPoolAttrReservedMemHigh, &value))
       REQUIRE(value == 0);
 
       value = -1;
-      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, hipMemPoolAttrUsedMemHigh, &value));
+      HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool, hipMemPoolAttrUsedMemHigh, &value))
       REQUIRE(value == 0);
 
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamDestroy(stream))
     }
-    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+    HIP_CHECK(hipMemPoolDestroy(mem_pool))
   }
 }
 
@@ -6012,7 +6012,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
 
   if (deviceCount < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
@@ -6023,11 +6023,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
   void* hipMemcpyPeerAsync_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(hipGetProcAddress("hipMemGetAddressRange", &hipMemGetAddressRange_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpyPeer", &hipMemcpyPeer_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpyPeer", &hipMemcpyPeer_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(hipGetProcAddress("hipMemcpyPeerAsync", &hipMemcpyPeerAsync_ptr, currentHipVersion, 0,
                               nullptr));
 
@@ -6044,7 +6044,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
   int peerDeviceId = 1;
 
   int canAccessPeer = 0;
-  HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, deviceId, peerDeviceId));
+  HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, deviceId, peerDeviceId))
   if (!canAccessPeer) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
@@ -6056,70 +6056,70 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
   // Validating hipMemGetAddressRange API
   {
     int* devPtr = nullptr;
-    HIP_CHECK(hipMalloc(&devPtr, 4 * sizeof(int)));
+    HIP_CHECK(hipMalloc(&devPtr, 4 * sizeof(int)))
     REQUIRE(devPtr != nullptr);
 
     size_t size = -1;
     hipDeviceptr_t basePtr = nullptr;
 
-    HIP_CHECK(dyn_hipMemGetAddressRange_ptr(&basePtr, &size, devPtr + 3));
+    HIP_CHECK(dyn_hipMemGetAddressRange_ptr(&basePtr, &size, devPtr + 3))
 
     REQUIRE(basePtr == devPtr);
     REQUIRE(size == (4 * sizeof(int)));
-    HIP_CHECK(hipFree(devPtr));
+    HIP_CHECK(hipFree(devPtr))
   }
 
   // Validating hipMemcpyPeer API
   {
-    HIP_CHECK(hipSetDevice(deviceId));
+    HIP_CHECK(hipSetDevice(deviceId))
 
     int* srcDevPtr = nullptr;
-    HIP_CHECK(hipMalloc(&srcDevPtr, Nbytes));
+    HIP_CHECK(hipMalloc(&srcDevPtr, Nbytes))
     REQUIRE(srcDevPtr != nullptr);
     fillDeviceArray(srcDevPtr, N, value);
 
-    HIP_CHECK(hipSetDevice(peerDeviceId));
+    HIP_CHECK(hipSetDevice(peerDeviceId))
 
     int* dstDevPtr = nullptr;
-    HIP_CHECK(hipMalloc(&dstDevPtr, Nbytes));
+    HIP_CHECK(hipMalloc(&dstDevPtr, Nbytes))
     REQUIRE(dstDevPtr != nullptr);
 
-    HIP_CHECK(dyn_hipMemcpyPeer_ptr(dstDevPtr, peerDeviceId, srcDevPtr, deviceId, Nbytes));
+    HIP_CHECK(dyn_hipMemcpyPeer_ptr(dstDevPtr, peerDeviceId, srcDevPtr, deviceId, Nbytes))
 
     REQUIRE(validateDeviceArray(dstDevPtr, N, value) == true);
 
-    HIP_CHECK(hipSetDevice(deviceId));
-    HIP_CHECK(hipFree(srcDevPtr));
-    HIP_CHECK(hipSetDevice(peerDeviceId));
-    HIP_CHECK(hipFree(dstDevPtr));
+    HIP_CHECK(hipSetDevice(deviceId))
+    HIP_CHECK(hipFree(srcDevPtr))
+    HIP_CHECK(hipSetDevice(peerDeviceId))
+    HIP_CHECK(hipFree(dstDevPtr))
   }
 
   // Validating hipMemcpyPeerAsync API
   {
-    HIP_CHECK(hipSetDevice(deviceId));
+    HIP_CHECK(hipSetDevice(deviceId))
 
     int* srcDevPtr = nullptr;
-    HIP_CHECK(hipMalloc(&srcDevPtr, Nbytes));
+    HIP_CHECK(hipMalloc(&srcDevPtr, Nbytes))
     REQUIRE(srcDevPtr != nullptr);
     fillDeviceArray(srcDevPtr, N, value);
 
-    HIP_CHECK(hipSetDevice(peerDeviceId));
+    HIP_CHECK(hipSetDevice(peerDeviceId))
 
     int* dstDevPtr = nullptr;
-    HIP_CHECK(hipMalloc(&dstDevPtr, Nbytes));
+    HIP_CHECK(hipMalloc(&dstDevPtr, Nbytes))
     REQUIRE(dstDevPtr != nullptr);
 
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
 
     HIP_CHECK(
         dyn_hipMemcpyPeerAsync_ptr(dstDevPtr, peerDeviceId, srcDevPtr, deviceId, Nbytes, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     REQUIRE(validateDeviceArray(dstDevPtr, N, value) == true);
 
-    HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK(hipFree(srcDevPtr));
-    HIP_CHECK(hipFree(dstDevPtr));
+    HIP_CHECK(hipStreamDestroy(stream))
+    HIP_CHECK(hipFree(srcDevPtr))
+    HIP_CHECK(hipFree(dstDevPtr))
   }
 }

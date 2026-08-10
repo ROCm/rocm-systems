@@ -36,13 +36,13 @@ static void CreateTestExecutableGraph(hipGraphExec_t* graph_exec, int* number) {
   hipGraphNode_t node_add_one;
   hipHostNodeParams params_set_add_one = {HostFunctionAddOne, number};
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
-  HIP_CHECK(hipGraphAddHostNode(&node_set_zero, graph, nullptr, 0, &params_set_to_zero));
-  HIP_CHECK(hipGraphAddHostNode(&node_add_one, graph, &node_set_zero, 1, &params_set_add_one));
+  HIP_CHECK(hipGraphAddHostNode(&node_set_zero, graph, nullptr, 0, &params_set_to_zero))
+  HIP_CHECK(hipGraphAddHostNode(&node_add_one, graph, &node_set_zero, 1, &params_set_add_one))
 
-  HIP_CHECK(hipGraphInstantiate(graph_exec, graph, &node_error, nullptr, 0));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphInstantiate(graph_exec, graph, &node_error, nullptr, 0))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 static void HipGraphLaunch_Positive_Simple(hipStream_t stream) {
@@ -51,11 +51,11 @@ static void HipGraphLaunch_Positive_Simple(hipStream_t stream) {
   hipGraphExec_t graph_exec;
   CreateTestExecutableGraph(&graph_exec, &number);
 
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
   REQUIRE(number == 1);
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
 }
 
 
@@ -75,9 +75,9 @@ static void HipGraphLaunch_Positive_Simple(hipStream_t stream) {
 HIP_TEST_CASE(Unit_hipGraphLaunch_Positive) {
   SECTION("stream as a created stream") {
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     HipGraphLaunch_Positive_Simple(stream);
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 
   SECTION("with stream as hipStreamPerThread") {
@@ -104,9 +104,9 @@ HIP_TEST_CASE(Unit_hipGraphLaunch_Negative_Parameters) {
   SECTION("graphExec is nullptr and stream is a created stream") {
     hipStream_t stream;
     hipError_t ret;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     ret = hipGraphLaunch(nullptr, stream);
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
     REQUIRE(ret == hipErrorInvalidValue);
   }
 
@@ -123,10 +123,10 @@ HIP_TEST_CASE(Unit_hipGraphLaunch_Negative_Parameters) {
     int number = 5;
     hipGraphExec_t graph_exec;
     CreateTestExecutableGraph(&graph_exec, &number);
-    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread))
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
     REQUIRE(number == 1);
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec))
     HIP_CHECK_ERROR(hipGraphLaunch(graph_exec, hipStreamPerThread), hipErrorInvalidValue);
   }
 }

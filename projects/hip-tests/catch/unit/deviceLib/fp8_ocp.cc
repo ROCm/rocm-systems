@@ -21,8 +21,8 @@ static_assert(sizeof(unsigned int) == sizeof(float));
 std::string arch_type() {
   hipDeviceProp_t prop;
   int device;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&prop, device))
   std::string gfxName(prop.gcnArchName);
   return gfxName;
 }
@@ -97,7 +97,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_fp8_ocp_compare_host_device, float, double) {
   std::vector<TestType> numbers = {0.0f, 1.0f, 1.1f, 2.0f,  2.1f,  3.0f,  3.2f,
                                    3.3f, 4.0f, 4.5f, 10.0f, 11.0f, 12.2f, 14.1f};
   TestType* d_numbers;
-  HIP_CHECK(hipMalloc(&d_numbers, sizeof(TestType) * numbers.size()));
+  HIP_CHECK(hipMalloc(&d_numbers, sizeof(TestType) * numbers.size()))
   HIP_CHECK(hipMemcpy(d_numbers, numbers.data(), sizeof(TestType) * numbers.size(),
                       hipMemcpyHostToDevice));
 
@@ -127,7 +127,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_fp8_ocp_compare_host_device, float, double) {
     CHECK(cpu_result[i] == result[i]);
   }
 
-  HIP_CHECK(hipFree(d_numbers));
+  HIP_CHECK(hipFree(d_numbers))
 }
 
 __FP8_DEVICE__ void e4m3_fp8x2_ocp_device(float2* val) {
@@ -193,7 +193,7 @@ HIP_TEST_CASE(Unit_fp8x2_ocp_compare_host_device) {
   }
 
   float2* d_numbers;
-  HIP_CHECK(hipMalloc(&d_numbers, sizeof(float2) * numbers.size()));
+  HIP_CHECK(hipMalloc(&d_numbers, sizeof(float2) * numbers.size()))
   HIP_CHECK(
       hipMemcpy(d_numbers, numbers.data(), sizeof(float2) * numbers.size(), hipMemcpyHostToDevice));
 
@@ -221,7 +221,7 @@ HIP_TEST_CASE(Unit_fp8x2_ocp_compare_host_device) {
     CHECK(cpu_result[i] == result[i]);
   }
 
-  HIP_CHECK(hipFree(d_numbers));
+  HIP_CHECK(hipFree(d_numbers))
 }
 
 HIP_TEST_CASE(Unit_fp8x2_ocp_split_compare) {
@@ -237,7 +237,7 @@ HIP_TEST_CASE(Unit_fp8x2_ocp_split_compare) {
   }
 
   float2* d_numbers;
-  HIP_CHECK(hipMalloc(&d_numbers, sizeof(float2) * numbers.size()));
+  HIP_CHECK(hipMalloc(&d_numbers, sizeof(float2) * numbers.size()))
   HIP_CHECK(
       hipMemcpy(d_numbers, numbers.data(), sizeof(float2) * numbers.size(), hipMemcpyHostToDevice));
 
@@ -271,7 +271,7 @@ HIP_TEST_CASE(Unit_fp8x2_ocp_split_compare) {
                         hipMemcpyDeviceToHost));
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   REQUIRE(cpu_result.size() == result.size());
   for (size_t i = 0; i < result.size(); i++) {
     INFO("cpu x: " << cpu_result[i].x << " y: " << cpu_result[i].y << " gpu x: " << result[i].x
@@ -279,7 +279,7 @@ HIP_TEST_CASE(Unit_fp8x2_ocp_split_compare) {
     CHECK(cpu_result[i] == result[i]);
   }
 
-  HIP_CHECK(hipFree(d_numbers));
+  HIP_CHECK(hipFree(d_numbers))
 }
 
 __FP8_DEVICE__ void e4m3_fp8x4_ocp_device(float4* val) {
@@ -329,7 +329,7 @@ HIP_TEST_CASE(Unit_fp8x4_ocp_split_compare) {
   }
 
   float4* d_numbers;
-  HIP_CHECK(hipMalloc(&d_numbers, sizeof(float4) * numbers.size()));
+  HIP_CHECK(hipMalloc(&d_numbers, sizeof(float4) * numbers.size()))
   HIP_CHECK(
       hipMemcpy(d_numbers, numbers.data(), sizeof(float4) * numbers.size(), hipMemcpyHostToDevice));
 
@@ -367,7 +367,7 @@ HIP_TEST_CASE(Unit_fp8x4_ocp_split_compare) {
                         hipMemcpyDeviceToHost));
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   REQUIRE(cpu_result.size() == result.size());
   for (size_t i = 0; i < result.size(); i++) {
     INFO("original: x: " << numbers[i].x << " y: " << numbers[i].y << " z: " << numbers[i].z
@@ -379,7 +379,7 @@ HIP_TEST_CASE(Unit_fp8x4_ocp_split_compare) {
     CHECK(cpu_result[i] == result[i]);
   }
 
-  HIP_CHECK(hipFree(d_numbers));
+  HIP_CHECK(hipFree(d_numbers))
 }
 
 __FP8_DEVICE__ bool e4m3_bool_ocp_device(float val) {
@@ -431,33 +431,33 @@ HIP_TEST_CASE(Unit_fp8_ocp_bool_device) {
   SECTION("e4m3_ocp-gpu") {
     float* d_in{nullptr};
     bool* d_res{nullptr};
-    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * tvals.size()));
-    HIP_CHECK(hipMalloc(&d_res, sizeof(bool) * tvals.size()));
+    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * tvals.size()))
+    HIP_CHECK(hipMalloc(&d_res, sizeof(bool) * tvals.size()))
 
     auto kernel = fp8_2_bool<true>;
-    HIP_CHECK(hipMemcpy(d_in, fvals.data(), sizeof(float) * fvals.size(), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_in, fvals.data(), sizeof(float) * fvals.size(), hipMemcpyHostToDevice))
     kernel<<<1, tvals.size()>>>(d_in, d_res, tvals.size());
 
-    HIP_CHECK(hipMemcpy(result, d_res, sizeof(bool) * tvals.size(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(result, d_res, sizeof(bool) * tvals.size(), hipMemcpyDeviceToHost))
 
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_res));
+    HIP_CHECK(hipFree(d_in))
+    HIP_CHECK(hipFree(d_res))
   }
 
   SECTION("e5m2_ocp-gpu") {
     float* d_in{nullptr};
     bool* d_res{nullptr};
-    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * tvals.size()));
-    HIP_CHECK(hipMalloc(&d_res, sizeof(bool) * tvals.size()));
+    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * tvals.size()))
+    HIP_CHECK(hipMalloc(&d_res, sizeof(bool) * tvals.size()))
 
-    HIP_CHECK(hipMemcpy(d_in, fvals.data(), sizeof(float) * fvals.size(), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_in, fvals.data(), sizeof(float) * fvals.size(), hipMemcpyHostToDevice))
     auto kernel = fp8_2_bool<false>;
     kernel<<<1, tvals.size()>>>(d_in, d_res, tvals.size());
 
-    HIP_CHECK(hipMemcpy(result, d_res, sizeof(bool) * tvals.size(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(result, d_res, sizeof(bool) * tvals.size(), hipMemcpyDeviceToHost))
 
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_res));
+    HIP_CHECK(hipFree(d_in))
+    HIP_CHECK(hipFree(d_res))
   }
 
   for (size_t i = 0; i < tvals.size(); i++) {
@@ -570,8 +570,8 @@ HIP_TEST_CASE(Unit_all_fp8_ocp_cvt) {
   float* d_f_vals;
   __hip_fp8_storage_t* d_res;
 
-  HIP_CHECK(hipMalloc(&d_f_vals, sizeof(float) * f_vals.size()));
-  HIP_CHECK(hipMalloc(&d_res, sizeof(__hip_fp8_storage_t) * f_vals.size()));
+  HIP_CHECK(hipMalloc(&d_f_vals, sizeof(float) * f_vals.size()))
+  HIP_CHECK(hipMalloc(&d_res, sizeof(__hip_fp8_storage_t) * f_vals.size()))
 
   HIP_CHECK(
       hipMemcpy(d_f_vals, f_vals.data(), sizeof(float) * f_vals.size(), hipMemcpyHostToDevice));
@@ -609,8 +609,8 @@ HIP_TEST_CASE(Unit_all_fp8_ocp_cvt) {
     REQUIRE(cpu_cvt_res == gpu_cvt_res);
   }
 
-  HIP_CHECK(hipFree(d_f_vals));
-  HIP_CHECK(hipFree(d_res));
+  HIP_CHECK(hipFree(d_f_vals))
+  HIP_CHECK(hipFree(d_res))
 }
 
 template <typename T> __FP8_DEVICE__ void e4m3_ocp_fp8_cvt(T val, float* cvt1, float* cvt2) {
@@ -709,11 +709,11 @@ HIP_TEMPLATE_TEST_CASE(Unit_fp8_ocp_correctness_device, float, double) {
         -416,       -448};
     size_t totalnums = e4m3_ocp_nums.size();
     TestType* fnums;
-    HIP_CHECK(hipMalloc((void**)&fnums, totalnums * sizeof(TestType)));
+    HIP_CHECK(hipMalloc((void**)&fnums, totalnums * sizeof(TestType)))
     float* cvt1_dev;
-    HIP_CHECK(hipMalloc((void**)&cvt1_dev, totalnums * sizeof(TestType)));
+    HIP_CHECK(hipMalloc((void**)&cvt1_dev, totalnums * sizeof(TestType)))
     float* cvt2_dev;
-    HIP_CHECK(hipMalloc((void**)&cvt2_dev, totalnums * sizeof(TestType)));
+    HIP_CHECK(hipMalloc((void**)&cvt2_dev, totalnums * sizeof(TestType)))
 
     HIP_CHECK(hipMemcpy(fnums, e4m3_ocp_nums.data(), totalnums * sizeof(TestType),
                         hipMemcpyHostToDevice));
@@ -724,10 +724,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_fp8_ocp_correctness_device, float, double) {
     float* cvt1_host = (float*)malloc(sizeof(float) * totalnums);
     float* cvt2_host = (float*)malloc(sizeof(float) * totalnums);
 
-    HIP_CHECK(hipMemcpy(cvt1_host, cvt1_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(cvt2_host, cvt2_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(cvt1_host, cvt1_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost))
+    HIP_CHECK(hipMemcpy(cvt2_host, cvt2_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost))
 
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     for (size_t idx = 0; idx < totalnums; idx++) {
       TestType orig = e4m3_ocp_nums[idx];
@@ -740,9 +740,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_fp8_ocp_correctness_device, float, double) {
       REQUIRE(cvt2 == cvt1);
     }
 
-    HIP_CHECK(hipFree(fnums));
-    HIP_CHECK(hipFree(cvt1_dev));
-    HIP_CHECK(hipFree(cvt2_dev));
+    HIP_CHECK(hipFree(fnums))
+    HIP_CHECK(hipFree(cvt1_dev))
+    HIP_CHECK(hipFree(cvt2_dev))
     free(cvt1_host);
     free(cvt2_host);
   }
@@ -1001,11 +1001,11 @@ HIP_TEMPLATE_TEST_CASE(Unit_fp8_ocp_correctness_device, float, double) {
                                            -57344};
     size_t totalnums = e5m2_ocp_nums.size();
     TestType* fnums;
-    HIP_CHECK(hipMalloc((void**)&fnums, totalnums * sizeof(TestType)));
+    HIP_CHECK(hipMalloc((void**)&fnums, totalnums * sizeof(TestType)))
     float* cvt1_dev;
-    HIP_CHECK(hipMalloc((void**)&cvt1_dev, totalnums * sizeof(TestType)));
+    HIP_CHECK(hipMalloc((void**)&cvt1_dev, totalnums * sizeof(TestType)))
     float* cvt2_dev;
-    HIP_CHECK(hipMalloc((void**)&cvt2_dev, totalnums * sizeof(TestType)));
+    HIP_CHECK(hipMalloc((void**)&cvt2_dev, totalnums * sizeof(TestType)))
 
     HIP_CHECK(hipMemcpy(fnums, e5m2_ocp_nums.data(), totalnums * sizeof(TestType),
                         hipMemcpyHostToDevice));
@@ -1016,10 +1016,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_fp8_ocp_correctness_device, float, double) {
     float* cvt1_host = (float*)malloc(sizeof(float) * totalnums);
     float* cvt2_host = (float*)malloc(sizeof(float) * totalnums);
 
-    HIP_CHECK(hipMemcpy(cvt1_host, cvt1_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(cvt2_host, cvt2_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(cvt1_host, cvt1_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost))
+    HIP_CHECK(hipMemcpy(cvt2_host, cvt2_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost))
 
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     for (size_t idx = 0; idx < totalnums; idx++) {
       TestType orig = e5m2_ocp_nums[idx];
@@ -1032,9 +1032,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_fp8_ocp_correctness_device, float, double) {
       REQUIRE(cvt2 == cvt1);
     }
 
-    HIP_CHECK(hipFree(fnums));
-    HIP_CHECK(hipFree(cvt1_dev));
-    HIP_CHECK(hipFree(cvt2_dev));
+    HIP_CHECK(hipFree(fnums))
+    HIP_CHECK(hipFree(cvt1_dev))
+    HIP_CHECK(hipFree(cvt2_dev))
     free(cvt1_host);
     free(cvt2_host);
   }

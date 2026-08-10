@@ -47,7 +47,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Negative_Parameters) {
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
   hipGraph_t graph{nullptr};
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
 #if HT_NVIDIA  // EXSWHTEC-228
   SECTION("Pass stream as nullptr") {
     hipHostFn_t fn = hostNodeCallbackDummy;
@@ -57,8 +57,8 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Negative_Parameters) {
   SECTION("Pass functions as nullptr") {
     HIP_CHECK_ERROR(hipLaunchHostFunc(stream, nullptr, nullptr), hipErrorInvalidValue);
   }
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -85,29 +85,29 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Positive_Functional) {
 
   const hipStreamCaptureMode captureMode = hipStreamCaptureModeGlobal;
 
-  HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
+  HIP_CHECK(hipStreamBeginCapture(stream, captureMode))
   captureSequenceSimple(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), 1, stream);
 
   hipHostFn_t fn = hostNodeCallback;
   float* data[2] = {A_h.host_ptr(), B_h.host_ptr()};
-  HIP_CHECK(hipLaunchHostFunc(stream, fn, static_cast<void*>(data)));
+  HIP_CHECK(hipLaunchHostFunc(stream, fn, static_cast<void*>(data)))
 
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
   // Validate end capture is successful
   REQUIRE(graph != nullptr);
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   // Replay the recorded sequence multiple times
   for (size_t i = 0; i < kLaunchIters; i++) {
     std::fill_n(A_h.host_ptr(), 1, static_cast<float>(i));
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
     ArrayFindIfNot(B_h.host_ptr(), static_cast<float>(i), 1);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 static void thread_func_pos(hipStream_t* stream, hipHostFn_t fn, float** data) {
@@ -138,7 +138,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Positive_Thread) {
 
   const hipStreamCaptureMode captureMode = hipStreamCaptureModeGlobal;
 
-  HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
+  HIP_CHECK(hipStreamBeginCapture(stream, captureMode))
   captureSequenceSimple(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), 1, stream);
 
   hipHostFn_t fn = hostNodeCallback;
@@ -147,22 +147,22 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Positive_Thread) {
   t.join();
   HIP_CHECK_THREAD_FINALIZE();
 
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
   // Validate end capture is successful
   REQUIRE(graph != nullptr);
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   // Replay the recorded sequence multiple times
   for (size_t i = 0; i < kLaunchIters; i++) {
     std::fill_n(A_h.host_ptr(), 1, static_cast<float>(i));
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
     ArrayFindIfNot(B_h.host_ptr(), static_cast<float>(i), 1);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 namespace {
 __global__ void kernelA(double* arrayA, size_t size) {
@@ -194,10 +194,10 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
   std::vector<double> h_array(arraySize);
 
   hipStream_t captureStream{};
-  HIP_CHECK(hipStreamCreate(&captureStream));
+  HIP_CHECK(hipStreamCreate(&captureStream))
 
   // Begin stream capture
-  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeGlobal))
 
   // Device alloc (async so it belongs to the captured stream)
   HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&d_arrayA), arraySize * sizeof(double),
@@ -205,7 +205,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
 
   // Initialize host data via a host function in the stream
   set_vector_args args{h_array, initValue};
-  HIP_CHECK(hipLaunchHostFunc(captureStream, set_vector, &args));
+  HIP_CHECK(hipLaunchHostFunc(captureStream, set_vector, &args))
 
   // HtoD copy
   HIP_CHECK(hipMemcpyAsync(d_arrayA, h_array.data(), arraySize * sizeof(double),
@@ -213,25 +213,25 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
 
   // KernelA only
   kernelA<<<numOfBlocks, threadsPerBlock, 0, captureStream>>>(d_arrayA, arraySize);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   // DtoH copy
   HIP_CHECK(hipMemcpyAsync(h_array.data(), d_arrayA, arraySize * sizeof(double),
                            hipMemcpyDeviceToHost, captureStream));
 
   // Free device memory inside the graph
-  HIP_CHECK(hipFreeAsync(d_arrayA, captureStream));
+  HIP_CHECK(hipFreeAsync(d_arrayA, captureStream))
 
   // End capture -> graph
   hipGraph_t graph{};
-  HIP_CHECK(hipStreamEndCapture(captureStream, &graph));
+  HIP_CHECK(hipStreamEndCapture(captureStream, &graph))
 
   // Instantiate and launch
   hipGraphExec_t graphExec{};
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphLaunch(graphExec, captureStream));
-  HIP_CHECK(hipStreamSynchronize(captureStream));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipGraphLaunch(graphExec, captureStream))
+  HIP_CHECK(hipStreamSynchronize(captureStream))
 
   // Validate: each element should be initValue * 2.0
   const double expected = initValue * 2.0;
@@ -240,8 +240,8 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
   }
 
   // Cleanup
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipStreamDestroy(captureStream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipStreamDestroy(captureStream))
 }
 
 
@@ -304,9 +304,9 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_CrossStreamDep_UncapturedFirstNode) {
   // architectures and clock states (see catch/include/utils.hh).
   int ticks_per_ms = 0;
 #if HT_NVIDIA
-  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeClockRate, 0))
 #else
-  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0))
 #endif
   if (ticks_per_ms == 0) {
     ticks_per_ms = 1000;  // 1000 kHz fallback when the attribute is unavailable
@@ -317,15 +317,15 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_CrossStreamDep_UncapturedFirstNode) {
   int* h_flag{};   // written by K_prod's captured DtoH on HW queue 1
   int* h_cb_saw{}; // value h_flag had when the host callback fired
   int* h_out{};    // captured DtoH of d_flag after the barrier (sanity check)
-  HIP_CHECK(hipHostMalloc(&h_flag,   sizeof(int), hipHostMallocDefault));
-  HIP_CHECK(hipHostMalloc(&h_cb_saw, sizeof(int), hipHostMallocDefault));
-  HIP_CHECK(hipHostMalloc(&h_out,    sizeof(int), hipHostMallocDefault));
+  HIP_CHECK(hipHostMalloc(&h_flag,   sizeof(int), hipHostMallocDefault))
+  HIP_CHECK(hipHostMalloc(&h_cb_saw, sizeof(int), hipHostMallocDefault))
+  HIP_CHECK(hipHostMalloc(&h_out,    sizeof(int), hipHostMallocDefault))
 
   int *d_flag{};
-  HIP_CHECK(hipMalloc(&d_flag, sizeof(int)));
+  HIP_CHECK(hipMalloc(&d_flag, sizeof(int)))
 
   hipGraph_t graph{};
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   // K_dummy: forces a second level-0 segment so the scheduler allocates 2 HW queues.
   hipGraphNode_t dummy_node{};
@@ -333,7 +333,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_CrossStreamDep_UncapturedFirstNode) {
     hipKernelNodeParams p{};
     p.func = reinterpret_cast<void*>(noop);
     p.gridDim = dim3(1); p.blockDim = dim3(1);
-    HIP_CHECK(hipGraphAddKernelNode(&dummy_node, graph, nullptr, 0, &p));
+    HIP_CHECK(hipGraphAddKernelNode(&dummy_node, graph, nullptr, 0, &p))
   }
 
   // K_prod: spins then writes *d_flag=1 — runs on stream_id=1 (HW queue 1).
@@ -344,7 +344,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_CrossStreamDep_UncapturedFirstNode) {
     hipKernelNodeParams p{};
     p.func = reinterpret_cast<void*>(spin_then_set);
     p.gridDim = dim3(1); p.blockDim = dim3(1); p.kernelParams = args;
-    HIP_CHECK(hipGraphAddKernelNode(&prod_node, graph, nullptr, 0, &p));
+    HIP_CHECK(hipGraphAddKernelNode(&prod_node, graph, nullptr, 0, &p))
   }
 
   // Captured DtoH: d_flag→h_flag on the same segment as K_prod (stream_id=1).
@@ -368,7 +368,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_CrossStreamDep_UncapturedFirstNode) {
   host_params.userData = &cb_args;
   {
     hipGraphNode_t deps[] = {dummy_node, dtoh_flag_node};
-    HIP_CHECK(hipGraphAddHostNode(&host_node, graph, deps, 2, &host_params));
+    HIP_CHECK(hipGraphAddHostNode(&host_node, graph, deps, 2, &host_params))
   }
 
   // Captured DtoH after host_node: always gets the barrier via captured batch
@@ -378,36 +378,36 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_CrossStreamDep_UncapturedFirstNode) {
                                     h_out, d_flag, sizeof(int), hipMemcpyDeviceToHost));
 
   hipGraphExec_t graphExec{};
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   hipStream_t launch_stream{};
-  HIP_CHECK(hipStreamCreate(&launch_stream));
+  HIP_CHECK(hipStreamCreate(&launch_stream))
 
   for (int iter = 0; iter < 10; ++iter) {
     *h_flag = 0; *h_cb_saw = 0; *h_out = 0;
-    HIP_CHECK(hipMemset(d_flag, 0, sizeof(int)));
-    HIP_CHECK(hipGraphLaunch(graphExec, launch_stream));
-    HIP_CHECK(hipStreamSynchronize(launch_stream));
+    HIP_CHECK(hipMemset(d_flag, 0, sizeof(int)))
+    HIP_CHECK(hipGraphLaunch(graphExec, launch_stream))
+    HIP_CHECK(hipStreamSynchronize(launch_stream))
 
     INFO("iter=" << iter << " h_cb_saw=" << *h_cb_saw << " h_out=" << *h_out);
     REQUIRE(*h_cb_saw == kExpected); // 0 → barrier was missing, callback fired too early
     REQUIRE(*h_out == kExpected);    // sanity: K_prod always completes before graph sync
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(launch_stream));
-  HIP_CHECK(hipFree(d_flag));
-  HIP_CHECK(hipHostFree(h_out));
-  HIP_CHECK(hipHostFree(h_cb_saw));
-  HIP_CHECK(hipHostFree(h_flag));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(launch_stream))
+  HIP_CHECK(hipFree(d_flag))
+  HIP_CHECK(hipHostFree(h_out))
+  HIP_CHECK(hipHostFree(h_cb_saw))
+  HIP_CHECK(hipHostFree(h_flag))
 }
 
 HIP_TEST_CASE(Unit_hipLaunchHostFunc_BlitDtoHHostCallbackVisibility) {
   int ticks_per_ms = 0;
 #if HT_NVIDIA
-  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeClockRate, 0))
 #else
-  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0))
 #endif
   if (ticks_per_ms == 0) {
     ticks_per_ms = 1000;
@@ -419,16 +419,16 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_BlitDtoHHostCallbackVisibility) {
   int* h_cb_first{};
   int* h_cb_last{};
   int* h_out{};
-  HIP_CHECK(hipHostMalloc(&h_flag, sizeof(int), hipHostMallocDefault));
-  HIP_CHECK(hipHostMalloc(&h_cb_first, sizeof(int), hipHostMallocDefault));
-  HIP_CHECK(hipHostMalloc(&h_cb_last, sizeof(int), hipHostMallocDefault));
-  HIP_CHECK(hipHostMalloc(&h_out, sizeof(int), hipHostMallocDefault));
+  HIP_CHECK(hipHostMalloc(&h_flag, sizeof(int), hipHostMallocDefault))
+  HIP_CHECK(hipHostMalloc(&h_cb_first, sizeof(int), hipHostMallocDefault))
+  HIP_CHECK(hipHostMalloc(&h_cb_last, sizeof(int), hipHostMallocDefault))
+  HIP_CHECK(hipHostMalloc(&h_out, sizeof(int), hipHostMallocDefault))
 
   int* d_flag{};
-  HIP_CHECK(hipMalloc(&d_flag, sizeof(int)));
+  HIP_CHECK(hipMalloc(&d_flag, sizeof(int)))
 
   hipGraph_t graph{};
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t dummy_node{};
   {
@@ -436,7 +436,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_BlitDtoHHostCallbackVisibility) {
     p.func = reinterpret_cast<void*>(noop);
     p.gridDim = dim3(1);
     p.blockDim = dim3(1);
-    HIP_CHECK(hipGraphAddKernelNode(&dummy_node, graph, nullptr, 0, &p));
+    HIP_CHECK(hipGraphAddKernelNode(&dummy_node, graph, nullptr, 0, &p))
   }
 
   hipGraphNode_t prod_node{};
@@ -448,7 +448,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_BlitDtoHHostCallbackVisibility) {
     p.gridDim = dim3(1);
     p.blockDim = dim3(1);
     p.kernelParams = args;
-    HIP_CHECK(hipGraphAddKernelNode(&prod_node, graph, nullptr, 0, &p));
+    HIP_CHECK(hipGraphAddKernelNode(&prod_node, graph, nullptr, 0, &p))
   }
 
   hipGraphNode_t dtoh_flag_node{};
@@ -476,7 +476,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_BlitDtoHHostCallbackVisibility) {
   host_params.userData = &cb_args;
   {
     hipGraphNode_t deps[] = {dummy_node, dtoh_flag_node};
-    HIP_CHECK(hipGraphAddHostNode(&host_node, graph, deps, 2, &host_params));
+    HIP_CHECK(hipGraphAddHostNode(&host_node, graph, deps, 2, &host_params))
   }
 
   hipGraphNode_t check_node{};
@@ -484,18 +484,18 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_BlitDtoHHostCallbackVisibility) {
                                     h_out, d_flag, sizeof(int), hipMemcpyDeviceToHost));
 
   hipGraphExec_t graphExec{};
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   hipStream_t launch_stream{};
-  HIP_CHECK(hipStreamCreate(&launch_stream));
+  HIP_CHECK(hipStreamCreate(&launch_stream))
 
   for (int iter = 0; iter < 10; ++iter) {
     *h_flag = 0;
     *h_cb_first = 0;
     *h_cb_last = 0;
     *h_out = 0;
-    HIP_CHECK(hipMemset(d_flag, 0, sizeof(int)));
-    HIP_CHECK(hipGraphLaunch(graphExec, launch_stream));
-    HIP_CHECK(hipStreamSynchronize(launch_stream));
+    HIP_CHECK(hipMemset(d_flag, 0, sizeof(int)))
+    HIP_CHECK(hipGraphLaunch(graphExec, launch_stream))
+    HIP_CHECK(hipStreamSynchronize(launch_stream))
 
     const int after_sync_h_flag = *h_flag;
     INFO("iter=" << iter << " h_cb_first=" << *h_cb_first
@@ -508,14 +508,14 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_BlitDtoHHostCallbackVisibility) {
     REQUIRE(*h_cb_last == kExpected);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(launch_stream));
-  HIP_CHECK(hipFree(d_flag));
-  HIP_CHECK(hipHostFree(h_out));
-  HIP_CHECK(hipHostFree(h_cb_last));
-  HIP_CHECK(hipHostFree(h_cb_first));
-  HIP_CHECK(hipHostFree(h_flag));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(launch_stream))
+  HIP_CHECK(hipFree(d_flag))
+  HIP_CHECK(hipHostFree(h_out))
+  HIP_CHECK(hipHostFree(h_cb_last))
+  HIP_CHECK(hipHostFree(h_cb_first))
+  HIP_CHECK(hipHostFree(h_flag))
 }
 
 HIP_TEST_CASE(Unit_hipLaunchHostFunc_SdmaDtoHHostCallbackVisibilityNoProducer) {
@@ -526,15 +526,15 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_SdmaDtoHHostCallbackVisibilityNoProducer) {
   int* h_cb_first{};
   int* h_cb_last{};
   int* h_out{};
-  HIP_CHECK(hipHostMalloc(&h_cb_first, sizeof(int), hipHostMallocDefault));
-  HIP_CHECK(hipHostMalloc(&h_cb_last, sizeof(int), hipHostMallocDefault));
-  HIP_CHECK(hipHostMalloc(&h_out, sizeof(int), hipHostMallocDefault));
+  HIP_CHECK(hipHostMalloc(&h_cb_first, sizeof(int), hipHostMallocDefault))
+  HIP_CHECK(hipHostMalloc(&h_cb_last, sizeof(int), hipHostMallocDefault))
+  HIP_CHECK(hipHostMalloc(&h_out, sizeof(int), hipHostMallocDefault))
 
   int* d_flag{};
-  HIP_CHECK(hipMalloc(&d_flag, kSdmaCopyBytes));
+  HIP_CHECK(hipMalloc(&d_flag, kSdmaCopyBytes))
 
   hipGraph_t graph{};
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t dtoh_flag_node{};
   HIP_CHECK(hipGraphAddMemcpyNode1D(&dtoh_flag_node, graph, nullptr, 0,
@@ -560,25 +560,25 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_SdmaDtoHHostCallbackVisibilityNoProducer) {
     *a->h_cb_last = last;
   };
   host_params.userData = &cb_args;
-  HIP_CHECK(hipGraphAddHostNode(&host_node, graph, &dtoh_flag_node, 1, &host_params));
+  HIP_CHECK(hipGraphAddHostNode(&host_node, graph, &dtoh_flag_node, 1, &host_params))
 
   hipGraphNode_t check_node{};
   HIP_CHECK(hipGraphAddMemcpyNode1D(&check_node, graph, &host_node, 1,
                                     h_out, d_flag, sizeof(int), hipMemcpyDeviceToHost));
 
   hipGraphExec_t graphExec{};
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   hipStream_t launch_stream{};
-  HIP_CHECK(hipStreamCreate(&launch_stream));
+  HIP_CHECK(hipStreamCreate(&launch_stream))
 
   for (int iter = 0; iter < 10; ++iter) {
     std::fill(h_flag.begin(), h_flag.end(), 0);
     *h_cb_first = 0;
     *h_cb_last = 0;
     *h_out = 0;
-    HIP_CHECK(hipMemcpy(d_flag, h_src.data(), kSdmaCopyBytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipGraphLaunch(graphExec, launch_stream));
-    HIP_CHECK(hipStreamSynchronize(launch_stream));
+    HIP_CHECK(hipMemcpy(d_flag, h_src.data(), kSdmaCopyBytes, hipMemcpyHostToDevice))
+    HIP_CHECK(hipGraphLaunch(graphExec, launch_stream))
+    HIP_CHECK(hipStreamSynchronize(launch_stream))
 
     const int after_sync_h_flag = h_flag[0];
     INFO("iter=" << iter << " h_cb_first=" << *h_cb_first
@@ -591,13 +591,13 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_SdmaDtoHHostCallbackVisibilityNoProducer) {
     REQUIRE(*h_cb_last == kExpected);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(launch_stream));
-  HIP_CHECK(hipFree(d_flag));
-  HIP_CHECK(hipHostFree(h_out));
-  HIP_CHECK(hipHostFree(h_cb_last));
-  HIP_CHECK(hipHostFree(h_cb_first));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(launch_stream))
+  HIP_CHECK(hipFree(d_flag))
+  HIP_CHECK(hipHostFree(h_out))
+  HIP_CHECK(hipHostFree(h_cb_last))
+  HIP_CHECK(hipHostFree(h_cb_first))
 }
 
 /**
@@ -617,9 +617,9 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_SdmaDtoHHostCallbackVisibilityNoProducer) {
 HIP_TEST_CASE(Unit_hipLaunchHostFunc_KernelWritesManagedMem_HostNodeReads) {
   int ticks_per_ms = 0;
 #if HT_NVIDIA
-  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeClockRate, 0))
 #else
-  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0))
 #endif
   if (ticks_per_ms == 0) {
     ticks_per_ms = 1000;
@@ -628,17 +628,17 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_KernelWritesManagedMem_HostNodeReads) {
   constexpr int kExpected = 1;
 
   int* d_managed{};
-  HIP_CHECK(hipMallocManaged(&d_managed, sizeof(int)));
+  HIP_CHECK(hipMallocManaged(&d_managed, sizeof(int)))
 
   int* h_cb_first{};
   int* h_cb_last{};
   int* h_out{};
-  HIP_CHECK(hipHostMalloc(&h_cb_first, sizeof(int), hipHostMallocDefault));
-  HIP_CHECK(hipHostMalloc(&h_cb_last,  sizeof(int), hipHostMallocDefault));
-  HIP_CHECK(hipHostMalloc(&h_out,      sizeof(int), hipHostMallocDefault));
+  HIP_CHECK(hipHostMalloc(&h_cb_first, sizeof(int), hipHostMallocDefault))
+  HIP_CHECK(hipHostMalloc(&h_cb_last,  sizeof(int), hipHostMallocDefault))
+  HIP_CHECK(hipHostMalloc(&h_out,      sizeof(int), hipHostMallocDefault))
 
   hipGraph_t graph{};
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t prod_node{};
   {
@@ -649,7 +649,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_KernelWritesManagedMem_HostNodeReads) {
     p.gridDim = dim3(1);
     p.blockDim = dim3(1);
     p.kernelParams = args;
-    HIP_CHECK(hipGraphAddKernelNode(&prod_node, graph, nullptr, 0, &p));
+    HIP_CHECK(hipGraphAddKernelNode(&prod_node, graph, nullptr, 0, &p))
   }
 
   struct CbArgsMgd {
@@ -674,7 +674,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_KernelWritesManagedMem_HostNodeReads) {
   host_params.userData = &cb_args;
   {
     hipGraphNode_t deps[] = {prod_node};
-    HIP_CHECK(hipGraphAddHostNode(&host_node, graph, deps, 1, &host_params));
+    HIP_CHECK(hipGraphAddHostNode(&host_node, graph, deps, 1, &host_params))
   }
 
   hipGraphNode_t check_node{};
@@ -683,17 +683,17 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_KernelWritesManagedMem_HostNodeReads) {
                                     hipMemcpyDefault));
 
   hipGraphExec_t graphExec{};
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   hipStream_t launch_stream{};
-  HIP_CHECK(hipStreamCreate(&launch_stream));
+  HIP_CHECK(hipStreamCreate(&launch_stream))
 
   for (int iter = 0; iter < 10; ++iter) {
     *d_managed   = 0;
     *h_cb_first  = 0;
     *h_cb_last   = 0;
     *h_out       = 0;
-    HIP_CHECK(hipGraphLaunch(graphExec, launch_stream));
-    HIP_CHECK(hipStreamSynchronize(launch_stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, launch_stream))
+    HIP_CHECK(hipStreamSynchronize(launch_stream))
 
     const int after_sync = *d_managed;
     INFO("iter=" << iter
@@ -707,13 +707,13 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_KernelWritesManagedMem_HostNodeReads) {
     REQUIRE(*h_cb_last  == kExpected);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(launch_stream));
-  HIP_CHECK(hipFree(d_managed));
-  HIP_CHECK(hipHostFree(h_out));
-  HIP_CHECK(hipHostFree(h_cb_last));
-  HIP_CHECK(hipHostFree(h_cb_first));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(launch_stream))
+  HIP_CHECK(hipFree(d_managed))
+  HIP_CHECK(hipHostFree(h_out))
+  HIP_CHECK(hipHostFree(h_cb_last))
+  HIP_CHECK(hipHostFree(h_cb_first))
 }
 
 /**
@@ -732,9 +732,9 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_KernelWritesManagedMem_HostNodeReads) {
 HIP_TEST_CASE(Unit_hipLaunchHostFunc_KernelWritesPinnedMem_HostNodeReads) {
   int ticks_per_ms = 0;
 #if HT_NVIDIA
-  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeClockRate, 0))
 #else
-  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0))
 #endif
   if (ticks_per_ms == 0) {
     ticks_per_ms = 1000;
@@ -743,17 +743,17 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_KernelWritesPinnedMem_HostNodeReads) {
   constexpr int kExpected = 1;
 
   int* h_pinned{};
-  HIP_CHECK(hipHostMalloc(&h_pinned, sizeof(int), hipHostMallocDefault));
+  HIP_CHECK(hipHostMalloc(&h_pinned, sizeof(int), hipHostMallocDefault))
 
   int* h_cb_first{};
   int* h_cb_last{};
   int* h_out{};
-  HIP_CHECK(hipHostMalloc(&h_cb_first, sizeof(int), hipHostMallocDefault));
-  HIP_CHECK(hipHostMalloc(&h_cb_last,  sizeof(int), hipHostMallocDefault));
-  HIP_CHECK(hipHostMalloc(&h_out,      sizeof(int), hipHostMallocDefault));
+  HIP_CHECK(hipHostMalloc(&h_cb_first, sizeof(int), hipHostMallocDefault))
+  HIP_CHECK(hipHostMalloc(&h_cb_last,  sizeof(int), hipHostMallocDefault))
+  HIP_CHECK(hipHostMalloc(&h_out,      sizeof(int), hipHostMallocDefault))
 
   hipGraph_t graph{};
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t prod_node{};
   {
@@ -764,7 +764,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_KernelWritesPinnedMem_HostNodeReads) {
     p.gridDim = dim3(1);
     p.blockDim = dim3(1);
     p.kernelParams = args;
-    HIP_CHECK(hipGraphAddKernelNode(&prod_node, graph, nullptr, 0, &p));
+    HIP_CHECK(hipGraphAddKernelNode(&prod_node, graph, nullptr, 0, &p))
   }
 
   struct CbArgsPin {
@@ -789,7 +789,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_KernelWritesPinnedMem_HostNodeReads) {
   host_params.userData = &cb_args;
   {
     hipGraphNode_t deps[] = {prod_node};
-    HIP_CHECK(hipGraphAddHostNode(&host_node, graph, deps, 1, &host_params));
+    HIP_CHECK(hipGraphAddHostNode(&host_node, graph, deps, 1, &host_params))
   }
 
   hipGraphNode_t check_node{};
@@ -798,17 +798,17 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_KernelWritesPinnedMem_HostNodeReads) {
                                     hipMemcpyHostToHost));
 
   hipGraphExec_t graphExec{};
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   hipStream_t launch_stream{};
-  HIP_CHECK(hipStreamCreate(&launch_stream));
+  HIP_CHECK(hipStreamCreate(&launch_stream))
 
   for (int iter = 0; iter < 10; ++iter) {
     *h_pinned   = 0;
     *h_cb_first = 0;
     *h_cb_last  = 0;
     *h_out      = 0;
-    HIP_CHECK(hipGraphLaunch(graphExec, launch_stream));
-    HIP_CHECK(hipStreamSynchronize(launch_stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, launch_stream))
+    HIP_CHECK(hipStreamSynchronize(launch_stream))
 
     const int after_sync = *h_pinned;
     INFO("iter=" << iter
@@ -822,13 +822,13 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_KernelWritesPinnedMem_HostNodeReads) {
     REQUIRE(*h_cb_last  == kExpected);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(launch_stream));
-  HIP_CHECK(hipHostFree(h_pinned));
-  HIP_CHECK(hipHostFree(h_out));
-  HIP_CHECK(hipHostFree(h_cb_last));
-  HIP_CHECK(hipHostFree(h_cb_first));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(launch_stream))
+  HIP_CHECK(hipHostFree(h_pinned))
+  HIP_CHECK(hipHostFree(h_out))
+  HIP_CHECK(hipHostFree(h_cb_last))
+  HIP_CHECK(hipHostFree(h_cb_first))
 }
 
 /**

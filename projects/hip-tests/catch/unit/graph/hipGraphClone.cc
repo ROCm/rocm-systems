@@ -33,9 +33,9 @@ Functional:
 HIP_TEST_CASE(Unit_hipGraphClone_Negative) {
   SECTION("Passing nullptr to Cloned graph") {
     hipGraph_t graph;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
     REQUIRE(hipGraphClone(nullptr, graph) == hipErrorInvalidValue);
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphDestroy(graph))
   }
 
   SECTION("Passing nullptr to original graph") {
@@ -57,19 +57,19 @@ void hipGraphClone_DeviceContextChange() {
   hipGraphNode_t memcpyH2D_A, memcpyD2H_A;
   int *A_d{nullptr}, *A_h{nullptr}, *B_h{nullptr};
   HipTest::initArrays<int>(&A_d, nullptr, nullptr, &A_h, &B_h, nullptr, N, false);
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_A, graph, nullptr, 0, B_h, A_d, Nbytes,
                                     hipMemcpyDeviceToHost));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &memcpyD2H_A, 1));
-  HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipGraphClone(&clonedgraph, graph));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &memcpyD2H_A, 1))
+  HIP_CHECK(hipSetDevice(1))
+  HIP_CHECK(hipGraphClone(&clonedgraph, graph))
   // Instantiate and launch the original graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, clonedgraph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, clonedgraph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   for (size_t i = 0; i < N; i++) {
     if (A_h[i] != B_h[i]) {
@@ -78,10 +78,10 @@ void hipGraphClone_DeviceContextChange() {
     }
   }
   HipTest::freeArrays<int>(A_d, nullptr, nullptr, A_h, B_h, nullptr, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphDestroy(clonedgraph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipGraphDestroy(clonedgraph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 }
 /*
 This function does the following
@@ -109,11 +109,11 @@ void hipGraphClone_Func(bool ModifyOrigGraph = false) {
   int memsetVal{};
   size_t NElem{N};
 
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   memset(&memsetParams, 0, sizeof(memsetParams));
   memsetParams.dst = reinterpret_cast<void*>(A_d);
@@ -122,7 +122,7 @@ void hipGraphClone_Func(bool ModifyOrigGraph = false) {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = Nbytes;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams))
 
   memset(&memsetParams, 0, sizeof(memsetParams));
   memsetParams.dst = reinterpret_cast<void*>(B_d);
@@ -131,7 +131,7 @@ void hipGraphClone_Func(bool ModifyOrigGraph = false) {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = Nbytes;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memset_B, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memset_B, graph, nullptr, 0, &memsetParams))
 
   void* kernelArgs1[] = {&C_d, &memsetVal, reinterpret_cast<void*>(&NElem)};
   kernelNodeParams.func = reinterpret_cast<void*>(HipTest::memsetReverse<int>);
@@ -140,7 +140,7 @@ void hipGraphClone_Func(bool ModifyOrigGraph = false) {
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs1);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&memsetKer_C, graph, nullptr, 0, &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&memsetKer_C, graph, nullptr, 0, &kernelNodeParams))
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
@@ -158,17 +158,17 @@ void hipGraphClone_Func(bool ModifyOrigGraph = false) {
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs2);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kernelNodeParams))
 
   // Create dependencies
-  HIP_CHECK(hipGraphAddDependencies(graph, &memset_A, &memcpyH2D_A, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memset_B, &memcpyH2D_B, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &kernel_vecAdd, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_B, &kernel_vecAdd, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memsetKer_C, &kernel_vecAdd, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &kernel_vecAdd, &memcpyD2H_C, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memset_A, &memcpyH2D_A, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memset_B, &memcpyH2D_B, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &kernel_vecAdd, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_B, &kernel_vecAdd, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memsetKer_C, &kernel_vecAdd, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &kernel_vecAdd, &memcpyD2H_C, 1))
 
-  HIP_CHECK(hipGraphClone(&clonedgraph, graph));
+  HIP_CHECK(hipGraphClone(&clonedgraph, graph))
 
   if (ModifyOrigGraph) {
     // Modify Original graph by adding new dependency
@@ -178,14 +178,14 @@ void hipGraphClone_Func(bool ModifyOrigGraph = false) {
     HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C_new, graph, nullptr, 0, C_h, C_d, Nbytes,
                                       hipMemcpyDeviceToHost));
 
-    HIP_CHECK(hipGraphAddDependencies(graph, &kernel_vecAdd, &memcpyD2D_C, 1));
-    HIP_CHECK(hipGraphAddDependencies(graph, &memcpyD2D_C, &memcpyD2H_C_new, 1));
+    HIP_CHECK(hipGraphAddDependencies(graph, &kernel_vecAdd, &memcpyD2D_C, 1))
+    HIP_CHECK(hipGraphAddDependencies(graph, &memcpyD2D_C, &memcpyD2H_C_new, 1))
 
     // Instantiate and launch the original graph
-    HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-    HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-    HIP_CHECK(hipStreamSynchronize(streamForGraph));
-    HIP_CHECK(hipGraphExecDestroy(graphExec));
+    HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+    HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+    HIP_CHECK(hipStreamSynchronize(streamForGraph))
+    HIP_CHECK(hipGraphExecDestroy(graphExec))
 
     for (size_t i = 0; i < NElem; i++) {
       if (C_h[i] != B_h[i]) {
@@ -196,17 +196,17 @@ void hipGraphClone_Func(bool ModifyOrigGraph = false) {
   }
 
   // Instantiate and launch the cloned graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, clonedgraph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, clonedgraph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Verify graph execution result
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphDestroy(clonedgraph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipGraphDestroy(clonedgraph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 }
 
 /*
@@ -223,9 +223,9 @@ HIP_TEST_CASE(Unit_hipGraphClone_Functional) {
   SECTION("hipGraphClone Device context change") {
     int numDevices = 0;
     int canAccessPeer = 0;
-    HIP_CHECK(hipGetDeviceCount(&numDevices));
+    HIP_CHECK(hipGetDeviceCount(&numDevices))
     if (numDevices > 1) {
-      HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
+      HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1))
       if (canAccessPeer) {
         hipGraphClone_DeviceContextChange();
       } else {
@@ -254,12 +254,12 @@ HIP_TEST_CASE(Unit_hipGraphClone_MultiThreaded) {
   hipGraphNode_t memcpyH2D_A, memcpyD2H_A;
   int *A_d{nullptr}, *A_h{nullptr}, *B_h{nullptr};
   HipTest::initArrays<int>(&A_d, nullptr, nullptr, &A_h, &B_h, nullptr, N, false);
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_A, graph, nullptr, 0, B_h, A_d, Nbytes,
                                     hipMemcpyDeviceToHost));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &memcpyD2H_A, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &memcpyD2H_A, 1))
   std::vector<std::thread> threads;
   auto lambdaFunc = [&]() {
     hipGraph_t clonedgraph;
@@ -286,6 +286,6 @@ HIP_TEST_CASE(Unit_hipGraphClone_MultiThreaded) {
   }
   HIP_CHECK_THREAD_FINALIZE();
   HipTest::freeArrays<int>(A_d, nullptr, nullptr, A_h, B_h, nullptr, false);
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 #endif

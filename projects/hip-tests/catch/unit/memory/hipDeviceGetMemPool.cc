@@ -27,7 +27,7 @@ static bool checkMallocAsync() {
   streamMemAllocTest testObj(NUM_ELM);
   // create a stream
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   // Create host buffer with test data.
   testObj.createHostBufferWithData();
   // Allocate device memory and transfer data to it asyncronously on stream.
@@ -38,11 +38,11 @@ static bool checkMallocAsync() {
   testObj.transferFromMempool(stream);
   // Free Buffer Asynchronously on stream.
   testObj.freeDevBuf(stream);
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   // verify and validate
   REQUIRE(true == testObj.validateResult());
   // Destroy resources
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
   testObj.freeHostBuf();
   return true;
 }
@@ -61,9 +61,9 @@ HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Basic) {
   checkMempoolSupported(0) hipMemPool_t mem_pool_device = nullptr, mem_pool_default = nullptr;
   SECTION("Check current mempool is default mempool") {
     // assign default mem pool to device
-    HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool_default, 0));
+    HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool_default, 0))
     // assign device mem pool to device
-    HIP_CHECK(hipDeviceGetMemPool(&mem_pool_device, 0));
+    HIP_CHECK(hipDeviceGetMemPool(&mem_pool_device, 0))
     // validate both are same
     REQUIRE(mem_pool_device == mem_pool_default);
   }
@@ -73,15 +73,15 @@ HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Basic) {
     PoolProps.location.id = 0;
     PoolProps.location.type = hipMemLocationTypeDevice;
     // assign default mem pool to device
-    HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool_default, 0));
+    HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool_default, 0))
     // create explicit mem pool
     hipMemPool_t user_mempool;
-    HIP_CHECK(hipMemPoolCreate(&user_mempool, &PoolProps));
+    HIP_CHECK(hipMemPoolCreate(&user_mempool, &PoolProps))
     // assign device mem pool to device
-    HIP_CHECK(hipDeviceGetMemPool(&mem_pool_device, 0));
+    HIP_CHECK(hipDeviceGetMemPool(&mem_pool_device, 0))
     // validate both are same
     REQUIRE(mem_pool_device == mem_pool_default);
-    HIP_CHECK(hipMemPoolDestroy(user_mempool));
+    HIP_CHECK(hipMemPoolDestroy(user_mempool))
   }
 }
 
@@ -101,11 +101,11 @@ HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Functional) {
   hipMemPool_t mem_pool = nullptr;
   checkMempoolSupported(0)
       // assign current mem pool to device
-      HIP_CHECK(hipDeviceGetMemPool(&mem_pool, 0));
+      HIP_CHECK(hipDeviceGetMemPool(&mem_pool, 0))
   // set attribute hipMemPoolAttrReleaseThreshold as UINT64_MAX
   hipMemPoolAttr attr = hipMemPoolAttrReleaseThreshold;
   std::uint64_t value = UINT64_MAX;
-  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
+  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value))
   // call checkMallocAsync() and validate
   REQUIRE(true == checkMallocAsync());
 }
@@ -123,15 +123,15 @@ HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Functional) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Multidevice) {
   int num_devices;
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
 
   for (int i = 0; i < num_devices; i++) {
     checkMempoolSupported(i) HIP_CHECK(hipSetDevice(i));
     hipMemPool_t mem_pool_device = nullptr, mem_pool_default = nullptr;
     // assign default mem pool to device
-    HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool_default, i));
+    HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool_default, i))
     // assign device mem pool to device
-    HIP_CHECK(hipDeviceGetMemPool(&mem_pool_device, i));
+    HIP_CHECK(hipDeviceGetMemPool(&mem_pool_device, i))
     // validate both are same
     REQUIRE(mem_pool_device == mem_pool_default);
   }
@@ -153,11 +153,11 @@ HIP_TEST_CASE(Unit_hipDeviceGetDefaultMemPool_Functional) {
   hipMemPool_t mem_pool = nullptr;
   checkMempoolSupported(0)
       // assign current mem pool to device
-      HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, 0));
+      HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, 0))
   // set attribute hipMemPoolAttrReleaseThreshold as UINT64_MAX
   hipMemPoolAttr attr = hipMemPoolAttrReleaseThreshold;
   std::uint64_t value = UINT64_MAX;
-  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
+  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value))
   // call checkMallocAsync() and validate
   REQUIRE(true == checkMallocAsync());
 }

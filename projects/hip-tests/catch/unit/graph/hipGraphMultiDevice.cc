@@ -50,17 +50,17 @@ static void init_input(int* a, size_t size) {
 
 HIP_TEST_CASE(Unit_hipGraphMultiDevice) {
   int nGpus = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpus));
+  HIP_CHECK(hipGetDeviceCount(&nGpus))
   if (nGpus < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   int can_access_peer = 0;
-  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 1, 0));
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 1, 0))
   if (!can_access_peer) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
-  HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
+  HIP_CHECK(hipSetDevice(1))
+  HIP_CHECK(hipDeviceEnablePeerAccess(0, 0))
 
   hipStream_t streamdev1, streamdev2;
   hipEvent_t eventdev1, eventdev2;
@@ -76,59 +76,59 @@ HIP_TEST_CASE(Unit_hipGraphMultiDevice) {
   outbuf_h = new int[buffer_size];
   REQUIRE(ibuf_h != nullptr);
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipStreamCreate(&streamdev1));
-  HIP_CHECK(hipMalloc(&buf_d1, buffer_size * sizeof(int)));
-  HIP_CHECK(hipEventCreate(&eventdev1));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipStreamCreate(&streamdev1))
+  HIP_CHECK(hipMalloc(&buf_d1, buffer_size * sizeof(int)))
+  HIP_CHECK(hipEventCreate(&eventdev1))
 
-  HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipStreamCreate(&streamdev2));
-  HIP_CHECK(hipMalloc(&buf_d2, buffer_size * sizeof(int)));
-  HIP_CHECK(hipEventCreate(&eventdev2));
+  HIP_CHECK(hipSetDevice(1))
+  HIP_CHECK(hipStreamCreate(&streamdev2))
+  HIP_CHECK(hipMalloc(&buf_d2, buffer_size * sizeof(int)))
+  HIP_CHECK(hipEventCreate(&eventdev2))
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   init_input(ibuf_h, buffer_size);
   unsigned grid_size = HipTest::setNumBlocks(blocksPerCU, block_size, buffer_size);
 
-  HIP_CHECK(hipStreamBeginCapture(streamdev1, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(streamdev1, hipStreamCaptureModeGlobal))
 
   HIP_CHECK(
       hipMemcpyAsync(buf_d1, ibuf_h, sizeof(int) * buffer_size, hipMemcpyHostToDevice, streamdev1));
   HipTest::vector_square<int>
       <<<grid_size, block_size, 0, streamdev1>>>(buf_d1, buf_d1, buffer_size);
-  HIP_CHECK(hipEventRecord(eventdev1, streamdev1));
-  HIP_CHECK(hipStreamWaitEvent(streamdev2, eventdev1, 0));
+  HIP_CHECK(hipEventRecord(eventdev1, streamdev1))
+  HIP_CHECK(hipStreamWaitEvent(streamdev2, eventdev1, 0))
 
-  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipSetDevice(1))
   HIP_CHECK(
       hipMemcpyAsync(buf_d2, buf_d1, sizeof(int) * buffer_size, hipMemcpyDeviceToDevice, streamdev2));
   HipTest::vector_square<int>
       <<<grid_size, block_size, 0, streamdev2>>>(buf_d2, buf_d2, buffer_size);
-  HIP_CHECK(hipEventRecord(eventdev2, streamdev2));
-  HIP_CHECK(hipStreamWaitEvent(streamdev1, eventdev2, 0));
+  HIP_CHECK(hipEventRecord(eventdev2, streamdev2))
+  HIP_CHECK(hipStreamWaitEvent(streamdev1, eventdev2, 0))
 
-  HIP_CHECK(hipStreamEndCapture(streamdev1, &graph));
+  HIP_CHECK(hipStreamEndCapture(streamdev1, &graph))
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graph_exec, streamdev1));
-  HIP_CHECK(hipStreamSynchronize(streamdev1));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graph_exec, streamdev1))
+  HIP_CHECK(hipStreamSynchronize(streamdev1))
 
-  HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipMemcpy(outbuf_h, buf_d2, sizeof(int) * buffer_size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipSetDevice(1))
+  HIP_CHECK(hipMemcpy(outbuf_h, buf_d2, sizeof(int) * buffer_size, hipMemcpyDeviceToHost))
   check_output(ibuf_h, outbuf_h, buffer_size);
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
+  HIP_CHECK(hipGraphDestroy(graph))
 
   delete[] ibuf_h;
   delete[] outbuf_h;
-  HIP_CHECK(hipFree(buf_d1));
-  HIP_CHECK(hipFree(buf_d2));
-  HIP_CHECK(hipStreamDestroy(streamdev1));
-  HIP_CHECK(hipStreamDestroy(streamdev2));
-  HIP_CHECK(hipEventDestroy(eventdev1));
-  HIP_CHECK(hipEventDestroy(eventdev2));
+  HIP_CHECK(hipFree(buf_d1))
+  HIP_CHECK(hipFree(buf_d2))
+  HIP_CHECK(hipStreamDestroy(streamdev1))
+  HIP_CHECK(hipStreamDestroy(streamdev2))
+  HIP_CHECK(hipEventDestroy(eventdev1))
+  HIP_CHECK(hipEventDestroy(eventdev2))
 }
 
 /**

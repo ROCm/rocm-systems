@@ -43,8 +43,8 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_NegTsts) {
   int numBlocks = (totalThreads + blockSize - 1) / blockSize;
 
   int* d_output = nullptr;
-  HIP_CHECK(hipMalloc(&d_output, totalThreads * sizeof(int)));
-  HIP_CHECK(hipMemset(d_output, 0, totalThreads * sizeof(int)));
+  HIP_CHECK(hipMalloc(&d_output, totalThreads * sizeof(int)))
+  HIP_CHECK(hipMemset(d_output, 0, totalThreads * sizeof(int)))
 
   // Set up the HIP_LAUNCH_CONFIG structure
   HIP_LAUNCH_CONFIG config = {};
@@ -71,10 +71,10 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_NegTsts) {
   void* kernelParams[] = {&d_output, &totalThreads};
 
   hipModule_t module;
-  HIP_CHECK(hipModuleLoad(&module, CODE_OBJ_SINGLEARCH));
+  HIP_CHECK(hipModuleLoad(&module, CODE_OBJ_SINGLEARCH))
 
   hipFunction_t function;
-  HIP_CHECK(hipModuleGetFunction(&function, module, kernel_name));
+  HIP_CHECK(hipModuleGetFunction(&function, module, kernel_name))
 
   SECTION("Kernel config as nullptr") {
     HIP_CHECK_ERROR(hipDrvLaunchKernelEx(nullptr, function, kernelParams, NULL),
@@ -115,8 +115,8 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_NegTsts) {
     HIP_CHECK_ERROR(hipDrvLaunchKernelEx(&invalidConfig, function, kernelParams, NULL), err);
   }
 
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipFree(d_output));
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipFree(d_output))
 }
 
 bool runTestDrvLaunch(const char* testName, std::string kernelFunc, int totalThreads, int blockSize,
@@ -124,8 +124,8 @@ bool runTestDrvLaunch(const char* testName, std::string kernelFunc, int totalThr
   int numBlocks = (totalThreads + blockSize - 1) / blockSize;
 
   int* d_output = nullptr;
-  HIP_CHECK(hipMalloc(&d_output, totalThreads * sizeof(int)));
-  HIP_CHECK(hipMemset(d_output, 0, totalThreads * sizeof(int)));
+  HIP_CHECK(hipMalloc(&d_output, totalThreads * sizeof(int)))
+  HIP_CHECK(hipMemset(d_output, 0, totalThreads * sizeof(int)))
 
   // Set up the HIP_LAUNCH_CONFIG structure
   HIP_LAUNCH_CONFIG config = {};
@@ -152,23 +152,23 @@ bool runTestDrvLaunch(const char* testName, std::string kernelFunc, int totalThr
   void* kernelParams[] = {&d_output, &totalThreads};
 
   hipModule_t module;
-  HIP_CHECK(hipModuleLoad(&module, CODE_OBJ_SINGLEARCH));
+  HIP_CHECK(hipModuleLoad(&module, CODE_OBJ_SINGLEARCH))
 
   hipFunction_t function;
-  HIP_CHECK(hipModuleGetFunction(&function, module, kernelFunc.c_str()));
+  HIP_CHECK(hipModuleGetFunction(&function, module, kernelFunc.c_str()))
 
   // Launch the kernel using the driver API function.
   hipError_t err = hipDrvLaunchKernelEx(&config, function, kernelParams, NULL);
   if (err != hipSuccess) {
     printf("%s test failed to launch kernel: error code %d\n", testName, err);
-    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_output))
     return false;
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   int* h_output = (int*)malloc(totalThreads * sizeof(int));
-  HIP_CHECK(hipMemcpy(h_output, d_output, totalThreads * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(h_output, d_output, totalThreads * sizeof(int), hipMemcpyDeviceToHost))
 
   // Verify results.
   bool success = true;
@@ -187,8 +187,8 @@ bool runTestDrvLaunch(const char* testName, std::string kernelFunc, int totalThr
     }
   }
 
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipFree(d_output));
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipFree(d_output))
   free(h_output);
   return success;
 }
@@ -232,7 +232,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_Different_Kernels) {
   }
 
   hipModule_t module;
-  HIP_CHECK(hipModuleLoad(&module, "coopKernel.code"));
+  HIP_CHECK(hipModuleLoad(&module, "coopKernel.code"))
 
   HIP_LAUNCH_CONFIG config = {};
   config.gridDimX = 1;
@@ -253,40 +253,40 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_Different_Kernels) {
 
   SECTION("Normal kernel with no arguments") {
     hipFunction_t simpleKernel;
-    HIP_CHECK(hipModuleGetFunction(&simpleKernel, module, "emptyKernel"));
+    HIP_CHECK(hipModuleGetFunction(&simpleKernel, module, "emptyKernel"))
 
-    HIP_CHECK(hipDrvLaunchKernelEx(&config, simpleKernel, nullptr, nullptr));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDrvLaunchKernelEx(&config, simpleKernel, nullptr, nullptr))
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   SECTION("Kernel with arguments using kernelParams") {
     int* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, sizeof(int)));
+    HIP_CHECK(hipMalloc(&devMem, sizeof(int)))
 
     void* kernel_args[1] = {&devMem};
 
     hipFunction_t argKernel;
-    HIP_CHECK(hipModuleGetFunction(&argKernel, module, "argKernel"));
+    HIP_CHECK(hipModuleGetFunction(&argKernel, module, "argKernel"))
 
-    HIP_CHECK(hipDrvLaunchKernelEx(&config, argKernel, kernel_args, nullptr));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDrvLaunchKernelEx(&config, argKernel, kernel_args, nullptr))
+    HIP_CHECK(hipDeviceSynchronize())
 
     int result = 0;
-    HIP_CHECK(hipMemcpy(&result, devMem, sizeof(result), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(&result, devMem, sizeof(result), hipMemcpyDefault))
     REQUIRE(result == 100);
 
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
   }
 
   SECTION("Cooperative kernel with no arguments") {
     hipFunction_t coopKernel;
-    HIP_CHECK(hipModuleGetFunction(&coopKernel, module, "coopEmptykernel"));
+    HIP_CHECK(hipModuleGetFunction(&coopKernel, module, "coopEmptykernel"))
 
-    HIP_CHECK(hipDrvLaunchKernelEx(&config, coopKernel, nullptr, nullptr));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDrvLaunchKernelEx(&config, coopKernel, nullptr, nullptr))
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
   CTX_DESTROY();
 }
 
@@ -311,7 +311,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs) {
   }
 
   hipModule_t module;
-  HIP_CHECK(hipModuleLoad(&module, "coopKernel.code"));
+  HIP_CHECK(hipModuleLoad(&module, "coopKernel.code"))
 
   HIP_LAUNCH_CONFIG config = {};
   config.gridDimX = N;
@@ -336,29 +336,29 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs) {
   }
 
   int* devMem1 = nullptr;
-  HIP_CHECK(hipMalloc(&devMem1, N * sizeof(int)));
-  HIP_CHECK(hipMemcpy(devMem1, hostMem, N * sizeof(int), hipMemcpyDefault));
+  HIP_CHECK(hipMalloc(&devMem1, N * sizeof(int)))
+  HIP_CHECK(hipMemcpy(devMem1, hostMem, N * sizeof(int), hipMemcpyDefault))
   int* devMem2 = nullptr;
-  HIP_CHECK(hipMalloc(&devMem2, N * sizeof(int)));
-  HIP_CHECK(hipMemcpy(devMem2, hostMem, N * sizeof(int), hipMemcpyDefault));
+  HIP_CHECK(hipMalloc(&devMem2, N * sizeof(int)))
+  HIP_CHECK(hipMemcpy(devMem2, hostMem, N * sizeof(int), hipMemcpyDefault))
 
   int size = N;
   void* kernel_args[3] = {&devMem1, &devMem2, &size};
 
   hipFunction_t argKernel;
-  HIP_CHECK(hipModuleGetFunction(&argKernel, module, "coopFillArrayKernel"));
+  HIP_CHECK(hipModuleGetFunction(&argKernel, module, "coopFillArrayKernel"))
 
-  HIP_CHECK(hipDrvLaunchKernelEx(&config, argKernel, kernel_args, nullptr));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDrvLaunchKernelEx(&config, argKernel, kernel_args, nullptr))
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipMemcpy(hostMem, devMem2, N * sizeof(int), hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(hostMem, devMem2, N * sizeof(int), hipMemcpyDefault))
   for (int i = 0; i < N; i++) {
     REQUIRE(hostMem[i] == 550);
   }
 
-  HIP_CHECK(hipFree(devMem1));
-  HIP_CHECK(hipFree(devMem2));
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipFree(devMem1))
+  HIP_CHECK(hipFree(devMem2))
+  HIP_CHECK(hipModuleUnload(module))
   CTX_DESTROY();
 }
 
@@ -386,10 +386,10 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_MaxBlockDims) {
   }
 
   hipModule_t module;
-  HIP_CHECK(hipModuleLoad(&module, "coopKernel.code"));
+  HIP_CHECK(hipModuleLoad(&module, "coopKernel.code"))
 
   hipFunction_t kernel;
-  HIP_CHECK(hipModuleGetFunction(&kernel, module, "emptyKernel"));
+  HIP_CHECK(hipModuleGetFunction(&kernel, module, "emptyKernel"))
 
   HIP_LAUNCH_CONFIG config = {};
   config.gridDimX = 1;
@@ -412,27 +412,27 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_MaxBlockDims) {
     const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX, 0);
     config.blockDimX = x;
 
-    HIP_CHECK(hipDrvLaunchKernelEx(&config, kernel, nullptr, nullptr));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDrvLaunchKernelEx(&config, kernel, nullptr, nullptr))
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   SECTION("blockDim.y == maxBlockDimY") {
     const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimY, 0);
     config.blockDimY = y;
 
-    HIP_CHECK(hipDrvLaunchKernelEx(&config, kernel, nullptr, nullptr));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDrvLaunchKernelEx(&config, kernel, nullptr, nullptr))
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   SECTION("blockDim.z == maxBlockDimZ") {
     const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimZ, 0);
     config.blockDimY = z;
 
-    HIP_CHECK(hipDrvLaunchKernelEx(&config, kernel, nullptr, nullptr));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDrvLaunchKernelEx(&config, kernel, nullptr, nullptr))
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
   CTX_DESTROY();
 }
 #if !defined(_WIN32) && !HT_NVIDIA
@@ -456,7 +456,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_MaxBlockDims) {
  */
 HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
   hipDeviceProp_t prop{};
-  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0))
 
   if (!prop.clusterLaunch) {
     HIP_SKIP_TEST("Test requires a device with cluster launch support");
@@ -484,8 +484,8 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
 
   hipModule_t mod;
   hipFunction_t fn;
-  HIP_CHECK(hipModuleLoadData(&mod, code.data()));
-  HIP_CHECK(hipModuleGetFunction(&fn, mod, "fill"));
+  HIP_CHECK(hipModuleLoadData(&mod, code.data()))
+  HIP_CHECK(hipModuleGetFunction(&fn, mod, "fill"))
 
   constexpr int N_ELEM  = 1024;
   constexpr int BLOCK   = 64;
@@ -493,10 +493,10 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
   constexpr int CLUSTER = 4;              // 4 blocks per cluster
 
   int* d_out = nullptr;
-  HIP_CHECK(hipMalloc(&d_out, N_ELEM * sizeof(int)));
+  HIP_CHECK(hipMalloc(&d_out, N_ELEM * sizeof(int)))
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   // Warmup run before capture to ensure JIT compilation is done
   {
@@ -511,14 +511,14 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
     cfg.numAttrs = 1;
     int val = 0, n = N_ELEM;
     void* kargs[] = {&d_out, &val, &n};
-    HIP_CHECK(hipDrvLaunchKernelEx(&cfg, fn, kargs, nullptr));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipDrvLaunchKernelEx(&cfg, fn, kargs, nullptr))
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 
-  HIP_CHECK(hipMemset(d_out, 0, N_ELEM * sizeof(int)));
+  HIP_CHECK(hipMemset(d_out, 0, N_ELEM * sizeof(int)))
 
   // Capture a cluster-dim kernel launch into a graph
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
   {
     HIP_LAUNCH_CONFIG cfg{};
     cfg.gridDimX = GRID; cfg.gridDimY = 1; cfg.gridDimZ = 1;
@@ -531,25 +531,25 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
     cfg.numAttrs = 1;
     int val = 42, n = N_ELEM;
     void* kargs[] = {&d_out, &val, &n};
-    HIP_CHECK(hipDrvLaunchKernelEx(&cfg, fn, kargs, nullptr));
+    HIP_CHECK(hipDrvLaunchKernelEx(&cfg, fn, kargs, nullptr))
   }
 
   hipGraph_t graph;
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
 
   // 1) Verify at least one kernel node was captured
   size_t num_nodes = 0;
-  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &num_nodes));
+  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &num_nodes))
   REQUIRE(num_nodes >= 1);
 
   std::vector<hipGraphNode_t> nodes(num_nodes);
-  HIP_CHECK(hipGraphGetNodes(graph, nodes.data(), &num_nodes));
+  HIP_CHECK(hipGraphGetNodes(graph, nodes.data(), &num_nodes))
 
   // Find the kernel node
   hipGraphNode_t kernel_node = nullptr;
   for (auto node : nodes) {
     hipGraphNodeType type;
-    HIP_CHECK(hipGraphNodeGetType(node, &type));
+    HIP_CHECK(hipGraphNodeGetType(node, &type))
     if (type == hipGraphNodeTypeKernel) {
       kernel_node = node;
       break;
@@ -585,21 +585,21 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
 
   // 4) Instantiate and replay; verify correct kernel output
   hipGraphExec_t exec;
-  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   std::vector<int> h_out(N_ELEM);
-  HIP_CHECK(hipMemcpy(h_out.data(), d_out, N_ELEM * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(h_out.data(), d_out, N_ELEM * sizeof(int), hipMemcpyDeviceToHost))
   for (int i = 0; i < N_ELEM; i++) {
     REQUIRE(h_out[i] == 42);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(d_out));
-  HIP_CHECK(hipModuleUnload(mod));
+  HIP_CHECK(hipGraphExecDestroy(exec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(d_out))
+  HIP_CHECK(hipModuleUnload(mod))
 }
 #endif  // !defined(_WIN32) && !HT_NVIDIA
 

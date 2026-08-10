@@ -36,7 +36,7 @@ HIP_TEST_CASE(Unit_hipGetDriverEntryPoint_Positive) {
   hipDriverEntryPointQueryResult status;
 
   SECTION("hipEnableDefault search flag") {
-    HIP_CHECK(hipGetDriverEntryPoint("hipGetDeviceCount", &funcPtr, hipEnableDefault, &status));
+    HIP_CHECK(hipGetDriverEntryPoint("hipGetDeviceCount", &funcPtr, hipEnableDefault, &status))
   }
 
   SECTION("hipEnableLegacyStream search flag") {
@@ -53,10 +53,10 @@ HIP_TEST_CASE(Unit_hipGetDriverEntryPoint_Positive) {
 
   hipError_t (*hipGetDeviceCount_ptr)(int*) = (hipError_t(*)(int*))funcPtr;
   int countFuncPtr;
-  HIP_CHECK(hipGetDeviceCount_ptr(&countFuncPtr));
+  HIP_CHECK(hipGetDeviceCount_ptr(&countFuncPtr))
 
   int count;
-  HIP_CHECK(hipGetDeviceCount(&count));
+  HIP_CHECK(hipGetDeviceCount(&count))
 
   REQUIRE(count > 0);
   REQUIRE(countFuncPtr == count);
@@ -128,7 +128,7 @@ HIP_TEST_CASE(Unit_hipGetDriverEntryPoint_spt_Positive) {
   hipDriverEntryPointQueryResult status;
 
   SECTION("hipEnableDefault search flag") {
-    HIP_CHECK(hipGetDriverEntryPoint_spt("hipGetDeviceCount", &funcPtr, hipEnableDefault, &status));
+    HIP_CHECK(hipGetDriverEntryPoint_spt("hipGetDeviceCount", &funcPtr, hipEnableDefault, &status))
   }
 
   SECTION("hipEnableLegacyStream search flag") {
@@ -145,10 +145,10 @@ HIP_TEST_CASE(Unit_hipGetDriverEntryPoint_spt_Positive) {
 
   hipError_t (*hipGetDeviceCount_ptr)(int*) = (hipError_t(*)(int*))funcPtr;
   int countFuncPtr;
-  HIP_CHECK(hipGetDeviceCount_ptr(&countFuncPtr));
+  HIP_CHECK(hipGetDeviceCount_ptr(&countFuncPtr))
 
   int count;
-  HIP_CHECK(hipGetDeviceCount(&count));
+  HIP_CHECK(hipGetDeviceCount(&count))
 
   REQUIRE(count > 0);
   REQUIRE(countFuncPtr == count);

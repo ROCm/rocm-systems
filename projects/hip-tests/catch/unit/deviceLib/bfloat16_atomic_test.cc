@@ -35,20 +35,20 @@ HIP_TEST_CASE(Unit_bf16_atomic_add) {
 
     float* d_values;
     __hip_bfloat16* d_result;
-    HIP_CHECK(hipMalloc(&d_values, sizeof(float) * total_threads));
-    HIP_CHECK(hipMalloc(&d_result, sizeof(__hip_bfloat16)));
+    HIP_CHECK(hipMalloc(&d_values, sizeof(float) * total_threads))
+    HIP_CHECK(hipMalloc(&d_result, sizeof(__hip_bfloat16)))
 
     HIP_CHECK(
         hipMemcpy(d_values, h_values.data(), sizeof(float) * total_threads, hipMemcpyHostToDevice));
 
     __hip_bfloat16 zero = __float2bfloat16(0.0f);
-    HIP_CHECK(hipMemcpy(d_result, &zero, sizeof(__hip_bfloat16), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_result, &zero, sizeof(__hip_bfloat16), hipMemcpyHostToDevice))
 
     bf16_atomic_add_kernel<<<num_blocks, num_threads>>>(d_result, d_values, total_threads);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     __hip_bfloat16 h_result;
-    HIP_CHECK(hipMemcpy(&h_result, d_result, sizeof(__hip_bfloat16), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&h_result, d_result, sizeof(__hip_bfloat16), hipMemcpyDeviceToHost))
 
     float expected = static_cast<float>(total_threads);
     float actual = __bfloat162float(h_result);
@@ -57,8 +57,8 @@ HIP_TEST_CASE(Unit_bf16_atomic_add) {
     // Allow small error due to bfloat16 precision
     REQUIRE(std::fabs(actual - expected) / expected < 0.01f);
 
-    HIP_CHECK(hipFree(d_values));
-    HIP_CHECK(hipFree(d_result));
+    HIP_CHECK(hipFree(d_values))
+    HIP_CHECK(hipFree(d_result))
   }
 
   SECTION("bf162 atomic add") {
@@ -73,20 +73,20 @@ HIP_TEST_CASE(Unit_bf16_atomic_add) {
 
     float2* d_values;
     __hip_bfloat162* d_result;
-    HIP_CHECK(hipMalloc(&d_values, sizeof(float2) * total_threads));
-    HIP_CHECK(hipMalloc(&d_result, sizeof(__hip_bfloat162)));
+    HIP_CHECK(hipMalloc(&d_values, sizeof(float2) * total_threads))
+    HIP_CHECK(hipMalloc(&d_result, sizeof(__hip_bfloat162)))
 
     HIP_CHECK(hipMemcpy(d_values, h_values.data(), sizeof(float2) * total_threads,
                         hipMemcpyHostToDevice));
 
     __hip_bfloat162 zero = __float22bfloat162_rn(float2{0.0f, 0.0f});
-    HIP_CHECK(hipMemcpy(d_result, &zero, sizeof(__hip_bfloat162), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_result, &zero, sizeof(__hip_bfloat162), hipMemcpyHostToDevice))
 
     bf162_atomic_add_kernel<<<num_blocks, num_threads>>>(d_result, d_values, total_threads);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     __hip_bfloat162 h_result;
-    HIP_CHECK(hipMemcpy(&h_result, d_result, sizeof(__hip_bfloat162), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&h_result, d_result, sizeof(__hip_bfloat162), hipMemcpyDeviceToHost))
 
     float2 expected =
         float2{static_cast<float>(total_threads), static_cast<float>(total_threads * 2)};
@@ -97,7 +97,7 @@ HIP_TEST_CASE(Unit_bf16_atomic_add) {
     REQUIRE(std::fabs(actual.x - expected.x) / expected.x < 0.01f);
     REQUIRE(std::fabs(actual.y - expected.y) / expected.y < 0.01f);
 
-    HIP_CHECK(hipFree(d_values));
-    HIP_CHECK(hipFree(d_result));
+    HIP_CHECK(hipFree(d_values))
+    HIP_CHECK(hipFree(d_result))
   }
 }

@@ -38,7 +38,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemFreeNode_Negative_Params) {
   hipGraphNode_t alloc_node, free_node;
   std::vector<hipGraphNode_t> dependencies;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipMemAllocNodeParams alloc_param;
   memset(&alloc_param, 0, sizeof(alloc_param));
@@ -47,7 +47,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemFreeNode_Negative_Params) {
   alloc_param.poolProps.location.id = 0;
   alloc_param.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&alloc_node, graph, nullptr, 0, &alloc_param));
+  HIP_CHECK(hipGraphAddMemAllocNode(&alloc_node, graph, nullptr, 0, &alloc_param))
   REQUIRE(alloc_param.dptr != nullptr);
 
   SECTION("Passing nullptr to graph node") {
@@ -73,7 +73,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemFreeNode_Negative_Params) {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 /**
  * Test Description
@@ -95,10 +95,10 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemFreeNode_Positive) {
   hipStream_t streamForGraph;
   int deviceid = 0;
   hipGraphNode_t node = nullptr, memFreeNode = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipSetDevice(deviceid));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipCtxCreate(&context, 0, deviceid));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipSetDevice(deviceid))
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipCtxCreate(&context, 0, deviceid))
 
   hipMemAllocNodeParams alloc_param;
   memset(&alloc_param, 0, sizeof(alloc_param));
@@ -106,18 +106,18 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemFreeNode_Positive) {
   alloc_param.poolProps.allocType = hipMemAllocationTypePinned;
   alloc_param.poolProps.location.id = 0;
   alloc_param.poolProps.location.type = hipMemLocationTypeDevice;
-  HIP_CHECK(hipGraphAddMemAllocNode(&node, graph, nullptr, 0, &alloc_param));
+  HIP_CHECK(hipGraphAddMemAllocNode(&node, graph, nullptr, 0, &alloc_param))
   REQUIRE(alloc_param.dptr != nullptr);
 
   HIP_CHECK(
       hipDrvGraphAddMemFreeNode(&memFreeNode, graph, &node, 1, (hipDeviceptr_t)alloc_param.dptr));
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, 0));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
-  HIP_CHECK(hipCtxDestroy(context));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, 0))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
+  HIP_CHECK(hipCtxDestroy(context))
 }
 /**
  * End doxygen group GraphTest.

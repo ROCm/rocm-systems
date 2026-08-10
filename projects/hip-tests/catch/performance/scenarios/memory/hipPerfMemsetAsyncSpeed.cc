@@ -31,9 +31,9 @@ void checkData_(void* ptr, unsigned int size, char value) {
 bool extraWarmup_ = true;
 HIP_TEST_CASE(Performance_hipPerfMemsetAsyncSpeed_test) {
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
   CONSOLE_PRINT("Set device to %d : %s", 0, props.name);
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   unsigned int bufSize_;
   bool hostMalloc[2] = {false};
@@ -62,8 +62,8 @@ HIP_TEST_CASE(Performance_hipPerfMemsetAsyncSpeed_test) {
         kMaxSize = bufSize_;
       }
       totalSize = std::max(totalSize, kMaxSize);
-      HIP_CHECK(hipMalloc(&srcBuffer, totalSize));
-      HIP_CHECK(hipMemset(srcBuffer, 0xd0, totalSize));
+      HIP_CHECK(hipMalloc(&srcBuffer, totalSize))
+      HIP_CHECK(hipMemset(srcBuffer, 0xd0, totalSize))
 
       // warm up
       uint32_t warm_up = (extraWarmup_) ? numIter : 1;
@@ -77,10 +77,10 @@ HIP_TEST_CASE(Performance_hipPerfMemsetAsyncSpeed_test) {
         if ((t == 2) || (dst >= reinterpret_cast<char*>(dstBuffer) + kMaxSize)) {
           dst = reinterpret_cast<char*>(dstBuffer);
         }
-        HIP_CHECK(hipMemsetAsync(src, 0xd0, bufSize_warm));
+        HIP_CHECK(hipMemsetAsync(src, 0xd0, bufSize_warm))
       }
 
-      HIP_CHECK(hipStreamSynchronize(nullptr));
+      HIP_CHECK(hipStreamSynchronize(nullptr))
       auto start = std::chrono::steady_clock::now();
       for (unsigned int i = 0; i < numIter; i++) {
         char* src = reinterpret_cast<char*>(srcBuffer) + bufSize_ * i;
@@ -91,10 +91,10 @@ HIP_TEST_CASE(Performance_hipPerfMemsetAsyncSpeed_test) {
         if ((t == 2) || (dst >= reinterpret_cast<char*>(dstBuffer) + kMaxSize)) {
           dst = reinterpret_cast<char*>(dstBuffer);
         }
-        HIP_CHECK(hipMemsetAsync(src, 0xd0, bufSize_));
+        HIP_CHECK(hipMemsetAsync(src, 0xd0, bufSize_))
       }
       auto timer_cpu = std::chrono::steady_clock::now();
-      HIP_CHECK(hipStreamSynchronize(nullptr));
+      HIP_CHECK(hipStreamSynchronize(nullptr))
       auto timer = std::chrono::steady_clock::now();
       std::chrono::duration<double> sec = timer - start;
       std::chrono::duration<double> sec_cpu = timer_cpu - start;
@@ -113,12 +113,12 @@ HIP_TEST_CASE(Performance_hipPerfMemsetAsyncSpeed_test) {
       // Verification
       void* temp = malloc(bufSize_ + 4096);
       void* chkBuf = (void*)(((size_t)temp + 4095) & ~4095);
-      HIP_CHECK(hipMemcpy(chkBuf, srcBuffer, bufSize_, hipMemcpyDefault));
+      HIP_CHECK(hipMemcpy(chkBuf, srcBuffer, bufSize_, hipMemcpyDefault))
       checkData_(chkBuf, bufSize_, 0xd0);
       free(temp);
 
       // Free src
-      HIP_CHECK(hipFree(srcBuffer));
+      HIP_CHECK(hipFree(srcBuffer))
     }
   }
 }

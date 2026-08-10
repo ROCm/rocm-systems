@@ -33,12 +33,12 @@ constexpr std::array<hipFuncCache_t, 4> kCacheConfigs{
  */
 HIP_TEST_CASE(Unit_hipDeviceSetCacheConfig_Positive_Basic) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
   INFO("Current device is: " << device);
 
   const auto cache_config =
       GENERATE(from_range(std::begin(kCacheConfigs), std::end(kCacheConfigs)));
-  HIP_CHECK(hipDeviceSetCacheConfig(cache_config));
+  HIP_CHECK(hipDeviceSetCacheConfig(cache_config))
 }
 
 /**
@@ -58,12 +58,12 @@ HIP_TEST_CASE(Unit_hipDeviceSetCacheConfig_Positive_Carveout) {
   const auto cache_config =
       GENERATE(from_range(std::begin(kCacheConfigs), std::end(kCacheConfigs)));
 
-  HIP_CHECK(hipDeviceSetCacheConfig(cache_config));
+  HIP_CHECK(hipDeviceSetCacheConfig(cache_config))
 
   // Launch a kernel without per-function carveout to exercise the
   // device-level carveout fallback path in the dispatch packet.
   empty_kernel<<<1, 1>>>();
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 }
 
 /**
@@ -93,10 +93,10 @@ HIP_TEST_CASE(Unit_hipDeviceSetCacheConfig_Positive_Carveout) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetCacheConfig_Positive_Default) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
   INFO("Current device is: " << device);
 
   hipFuncCache_t cache_config;
-  HIP_CHECK(hipDeviceGetCacheConfig(&cache_config));
+  HIP_CHECK(hipDeviceGetCacheConfig(&cache_config))
   REQUIRE(cache_config == hipFuncCachePreferNone);
 }

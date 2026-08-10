@@ -61,12 +61,12 @@ template <bool dynamic, size_t tile_size> void BlockPartitionGettersBasicTestImp
     LinearAllocGuard<unsigned int> uint_arr(LinearAllocs::hipHostMalloc, alloc_size);
 
     thread_block_partition_size_getter<dynamic, tile_size><<<blocks, threads>>>(uint_arr_dev.ptr());
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
     thread_block_partition_thread_rank_getter<dynamic, tile_size>
         <<<blocks, threads>>>(uint_arr_dev.ptr());
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
 
     ArrayAllOf(uint_arr.ptr(), grid.thread_count_, [&grid](unsigned int i) {
       if constexpr (!dynamic) {
@@ -80,8 +80,8 @@ template <bool dynamic, size_t tile_size> void BlockPartitionGettersBasicTestImp
       return tile_size - tail * (rank_in_block >= (partitions_in_block - 1) * tile_size);
     });
 
-    HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
 
     ArrayAllOf(uint_arr.ptr(), grid.thread_count_, [&grid](unsigned int i) {
       return grid.thread_rank_in_block(i).value() % tile_size;
@@ -161,9 +161,9 @@ template <typename T, size_t tile_size> void BlockTileShflUpTestImpl() {
     LinearAllocGuard<T> arr(LinearAllocs::hipHostMalloc, alloc_size);
 
     block_tile_shfl_up<T, tile_size><<<blocks, threads>>>(arr_dev.ptr(), delta);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
 
     ArrayAllOf(arr.ptr(), grid.thread_count_, [delta, &grid](unsigned int i) -> std::optional<T> {
       const int rank_in_partition = grid.thread_rank_in_block(i).value() % tile_size;
@@ -228,9 +228,9 @@ template <typename T, size_t tile_size> void BlockTileShflDownTestImpl() {
     LinearAllocGuard<T> arr(LinearAllocs::hipHostMalloc, alloc_size);
 
     block_tile_shfl_down<T, tile_size><<<blocks, threads>>>(arr_dev.ptr(), delta);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
 
     ArrayAllOf(arr.ptr(), grid.thread_count_, [delta, &grid](unsigned int i) -> std::optional<T> {
       const auto partitions_in_block = (grid.threads_in_block_count_ + tile_size - 1) / tile_size;
@@ -307,9 +307,9 @@ template <typename T, size_t tile_size> void BlockTileShflXORTestImpl() {
     LinearAllocGuard<T> arr(LinearAllocs::hipHostMalloc, alloc_size);
 
     block_tile_shfl_xor<T, tile_size><<<blocks, threads>>>(arr_dev.ptr(), mask);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
 
     const auto f = [mask, &grid](unsigned int i) -> std::optional<T> {
       const auto partitions_in_block = (grid.threads_in_block_count_ + tile_size - 1) / tile_size;
@@ -387,9 +387,9 @@ template <typename T, size_t tile_size> void BlockTileShflTestImpl() {
     HIP_CHECK(hipMemcpy(target_lanes_dev.ptr(), target_lanes.ptr(), tile_size * sizeof(uint8_t),
                         hipMemcpyHostToDevice));
     block_tile_shfl<T, tile_size><<<blocks, threads>>>(arr_dev.ptr(), target_lanes_dev.ptr());
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
 
     const auto f = [&target_lanes, &grid](unsigned int i) -> std::optional<T> {
       const auto partitions_in_block = (grid.threads_in_block_count_ + tile_size - 1) / tile_size;
@@ -504,10 +504,10 @@ template <bool global_memory, typename T, size_t tile_size> void BlockTileSyncTe
 
     block_tile_sync_check<global_memory, tile_size>
         <<<blocks, threads, shared_memory_size>>>(arr_dev.ptr(), wait_modifiers_dev.ptr());
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
 
-    HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
 
     REQUIRE(
         std::all_of(arr.ptr(), arr.ptr() + grid.thread_count_, [](unsigned int e) { return e; }));
@@ -576,8 +576,8 @@ void testReduceForTileSize()
                                        args,
                                        0,
                                        nullptr));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipGetLastError())
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
   REQUIRE(*h_result.host_ptr() == TileSize);
@@ -588,8 +588,8 @@ void testReduceForTileSize()
                                        args,
                                        0,
                                        nullptr));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipGetLastError())
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
   REQUIRE(*h_result.host_ptr() == TileSize / 2);
@@ -718,13 +718,13 @@ void aggregateForTypeAndOp(AggregationType aggType,
   void* kernelPtr;
   T expected[64];
 
-  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice))
   genRandomBuffers(d_input, h_input, distInput, gen, kNumReduces * wavefrontSize);
 
   if (TileSize) {
     // tile block case
     std::memset(h_extraMasks.host_ptr(), 0xFF, h_extraMasks.size_bytes());
-    HIP_CHECK(hipMemset(d_extraMasks.ptr(), 0xFF, d_extraMasks.size_bytes()));
+    HIP_CHECK(hipMemset(d_extraMasks.ptr(), 0xFF, d_extraMasks.size_bytes()))
   } else {
     // coalesced_threads case
     genRandomMasks(d_extraMasks,
@@ -752,9 +752,9 @@ void aggregateForTypeAndOp(AggregationType aggType,
                                       args,
                                       0,
                                       nullptr);
-  HIP_CHECK(status);
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(status)
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipGetLastError())
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
 
@@ -977,10 +977,10 @@ HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Trivially_Copyable_Parameters)
     args[i] = &devicePtrs[i];
   }
 
-  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
-  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(maxMagnitude), gridDim, blockDim, args, 0, nullptr));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice))
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(maxMagnitude), gridDim, blockDim, args, 0, nullptr))
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipGetLastError())
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
 
@@ -1008,10 +1008,10 @@ TEST_CASE(Unit_Thread_Block_Tile_Scan_Trivially_Copyable_Parameters)
 
   SECTION("inclusive") {
     aggType = AggregationType::InclusiveScan;
-    HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
-    HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(maxMagnitude), gridDim, blockDim, args, 0, nullptr));
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice))
+    HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(maxMagnitude), gridDim, blockDim, args, 0, nullptr))
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipGetLastError())
     HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                         h_result.size_bytes(), hipMemcpyDeviceToHost));
     result = &h_result.host_ptr()[0];
@@ -1026,10 +1026,10 @@ TEST_CASE(Unit_Thread_Block_Tile_Scan_Trivially_Copyable_Parameters)
 
   SECTION("exclusive") {
     aggType = AggregationType::ExclusiveScan;
-    HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
-    HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(maxMagnitude), gridDim, blockDim, args, 0, nullptr));
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice))
+    HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(maxMagnitude), gridDim, blockDim, args, 0, nullptr))
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipGetLastError())
     HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                         h_result.size_bytes(), hipMemcpyDeviceToHost));
     result = &h_result.host_ptr()[0];
@@ -1141,8 +1141,8 @@ void testArgsDifferentSizesReduce()
 
   HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(applyFunctor<NumElems, Functor<NumElems>>),
                                        gridDim, blockDim, args, 0, nullptr));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipGetLastError())
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
   result = &h_result.host_ptr()[0];
@@ -1196,7 +1196,7 @@ void testArgsDifferentSizesScan(AggregationType aggType)
     h_devicePtrs[i] = d_result[i].ptr();
   }
 
-  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice))
   HIP_CHECK(hipMemcpy(d_devicePtrs.ptr(),
                       h_devicePtrs,
                       d_devicePtrs.size_bytes(),
@@ -1210,8 +1210,8 @@ void testArgsDifferentSizesScan(AggregationType aggType)
   }
   HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(applyScanFunctor<NumElems, Functor<NumElems>>),
                                        gridDim, blockDim, args, 0, nullptr));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipGetLastError())
 
   for (int i = 0; i < wavefrontSize; i++) {
     HIP_CHECK(hipMemcpy(h_result[i].host_ptr(), d_result[i].ptr(),
@@ -1324,9 +1324,9 @@ HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Standard_Op_Custom_Type)
   void* args[] = { &devicePtr };
   int expected = 31 * 16;
 
-  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(sumPoints), gridDim, blockDim, args, 0, nullptr));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(sumPoints), gridDim, blockDim, args, 0, nullptr))
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipGetLastError())
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
 
@@ -1414,15 +1414,15 @@ void testScanForTileSize()
     args[i] = &devicePtrs[i];
   }
 
-  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(AggType), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(AggType), hipMemcpyHostToDevice))
   HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleScan<TileSize, AggType, Op, T>),
                                        gridDim,
                                        blockDim,
                                        args,
                                        0,
                                        nullptr));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipGetLastError())
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
 
@@ -1731,8 +1731,8 @@ TEST_CASE(Unit_Thread_Block_Scan_partition)
                                         args,
                                         0,
                                         nullptr));
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipGetLastError())
     HIP_CHECK(hipMemcpy(h_ranks.host_ptr(), d_ranks.ptr(),
                         h_ranks.size_bytes(), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
@@ -1749,8 +1749,8 @@ TEST_CASE(Unit_Thread_Block_Scan_partition)
                                          args,
                                          0,
                                          nullptr));
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipGetLastError())
     HIP_CHECK(hipMemcpy(h_ranks.host_ptr(), d_ranks.ptr(),
                         h_ranks.size_bytes(), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
@@ -1787,9 +1787,9 @@ HIP_TEST_CASE(Unit_Thread_Block_Tile_Multi_Dimensional_Reduce)
                                       args,
                                       0,
                                       nullptr);
-  HIP_CHECK(status);
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(status)
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipGetLastError())
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
 

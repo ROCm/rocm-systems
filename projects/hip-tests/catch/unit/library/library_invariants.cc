@@ -31,10 +31,10 @@ HIP_TEST_CASE(Unit_hipLibraryEnumerateKernels_ZeroMax) {
                                    0));
 
   hipKernel_t k = reinterpret_cast<hipKernel_t>(0xDEADBEEF);
-  HIP_CHECK(hipLibraryEnumerateKernels(&k, 0, lib));
+  HIP_CHECK(hipLibraryEnumerateKernels(&k, 0, lib))
   REQUIRE(k == reinterpret_cast<hipKernel_t>(0xDEADBEEF));
 
-  HIP_CHECK(hipLibraryUnload(lib));
+  HIP_CHECK(hipLibraryUnload(lib))
 }
 
 // Enumerating exactly KernelCount slots fills every slot with a non-null
@@ -46,13 +46,13 @@ HIP_TEST_CASE(Unit_hipLibraryEnumerateKernels_PartialFill) {
                                    0));
 
   unsigned int count = 0;
-  HIP_CHECK(hipLibraryGetKernelCount(&count, lib));
+  HIP_CHECK(hipLibraryGetKernelCount(&count, lib))
   REQUIRE(count >= kMinKernelCount);
 
   const size_t alloc = static_cast<size_t>(count) + 1;
   std::vector<hipKernel_t> ks(alloc, reinterpret_cast<hipKernel_t>(0xDEADBEEF));
 
-  HIP_CHECK(hipLibraryEnumerateKernels(ks.data(), count, lib));
+  HIP_CHECK(hipLibraryEnumerateKernels(ks.data(), count, lib))
 
   for (unsigned int i = 0; i < count; ++i) {
     INFO("filled slot " << i);
@@ -62,7 +62,7 @@ HIP_TEST_CASE(Unit_hipLibraryEnumerateKernels_PartialFill) {
   INFO("guard slot at index " << count);
   REQUIRE(ks[count] == reinterpret_cast<hipKernel_t>(0xDEADBEEF));
 
-  HIP_CHECK(hipLibraryUnload(lib));
+  HIP_CHECK(hipLibraryUnload(lib))
 }
 
 // Every enumerated handle must resolve to a hipFunction_t via
@@ -74,20 +74,20 @@ HIP_TEST_CASE(Unit_hipLibraryEnumerateKernels_HandlesUsable) {
                                    0));
 
   unsigned int count = 0;
-  HIP_CHECK(hipLibraryGetKernelCount(&count, lib));
+  HIP_CHECK(hipLibraryGetKernelCount(&count, lib))
   REQUIRE(count >= kMinKernelCount);
 
   std::vector<hipKernel_t> ks(count, nullptr);
-  HIP_CHECK(hipLibraryEnumerateKernels(ks.data(), count, lib));
+  HIP_CHECK(hipLibraryEnumerateKernels(ks.data(), count, lib))
 
   for (auto k : ks) {
     REQUIRE(k != nullptr);
     hipFunction_t hf = nullptr;
-    HIP_CHECK(hipKernelGetFunction(&hf, k));
+    HIP_CHECK(hipKernelGetFunction(&hf, k))
     REQUIRE(hf != nullptr);
   }
 
-  HIP_CHECK(hipLibraryUnload(lib));
+  HIP_CHECK(hipLibraryUnload(lib))
   CTX_DESTROY();
 }
 
@@ -100,21 +100,21 @@ HIP_TEST_CASE(Unit_hipLibrary_RepeatedQueriesAreStable) {
                                    0));
 
   unsigned int first = 0;
-  HIP_CHECK(hipLibraryGetKernelCount(&first, lib));
+  HIP_CHECK(hipLibraryGetKernelCount(&first, lib))
   REQUIRE(first >= kMinKernelCount);
 
   for (int i = 0; i < 64; ++i) {
     unsigned int n = 0;
-    HIP_CHECK(hipLibraryGetKernelCount(&n, lib));
+    HIP_CHECK(hipLibraryGetKernelCount(&n, lib))
     REQUIRE(n == first);
   }
 
   hipKernel_t a = nullptr, b = nullptr;
-  HIP_CHECK(hipLibraryGetKernel(&a, lib, "add_kernel"));
-  HIP_CHECK(hipLibraryGetKernel(&b, lib, "add_kernel"));
+  HIP_CHECK(hipLibraryGetKernel(&a, lib, "add_kernel"))
+  HIP_CHECK(hipLibraryGetKernel(&b, lib, "add_kernel"))
   REQUIRE(a == b);
 
-  HIP_CHECK(hipLibraryUnload(lib));
+  HIP_CHECK(hipLibraryUnload(lib))
 }
 
 // Looking up the same global through hipModuleGetGlobal and
@@ -123,25 +123,25 @@ HIP_TEST_CASE(Unit_hipLibrary_RepeatedQueriesAreStable) {
 HIP_TEST_CASE(Unit_hipLibraryGetGlobal_MatchesModuleGetGlobal) {
   CTX_CREATE();
   hipModule_t mod = nullptr;
-  HIP_CHECK(hipModuleLoad(&mod, kCodeFile.c_str()));
+  HIP_CHECK(hipModuleLoad(&mod, kCodeFile.c_str()))
   hipDeviceptr_t mod_dptr = 0;
   size_t mod_bytes = 0;
-  HIP_CHECK(hipModuleGetGlobal(&mod_dptr, &mod_bytes, mod, "d_var"));
+  HIP_CHECK(hipModuleGetGlobal(&mod_dptr, &mod_bytes, mod, "d_var"))
 
   hipLibrary_t lib = nullptr;
   HIP_CHECK(hipLibraryLoadFromFile(&lib, kCodeFile.c_str(), nullptr, nullptr, 0, nullptr, nullptr,
                                    0));
   void* lib_dptr = nullptr;
   size_t lib_bytes = 0;
-  HIP_CHECK(hipLibraryGetGlobal(&lib_dptr, &lib_bytes, lib, "d_var"));
+  HIP_CHECK(hipLibraryGetGlobal(&lib_dptr, &lib_bytes, lib, "d_var"))
 
   REQUIRE(mod_dptr != 0);
   REQUIRE(lib_dptr != nullptr);
   REQUIRE(mod_bytes == lib_bytes);
   REQUIRE(mod_bytes == sizeof(float) * 32);
 
-  HIP_CHECK(hipLibraryUnload(lib));
-  HIP_CHECK(hipModuleUnload(mod));
+  HIP_CHECK(hipLibraryUnload(lib))
+  HIP_CHECK(hipModuleUnload(mod))
   CTX_DESTROY();
 }
 
@@ -154,22 +154,22 @@ HIP_TEST_CASE(Unit_hipLibrary_KernelGlobalLookupOrderIndependent) {
                                    0));
 
   hipKernel_t k1 = nullptr;
-  HIP_CHECK(hipLibraryGetKernel(&k1, lib, "add_kernel"));
+  HIP_CHECK(hipLibraryGetKernel(&k1, lib, "add_kernel"))
 
   void* dptr = nullptr;
   size_t bytes = 0;
-  HIP_CHECK(hipLibraryGetGlobal(&dptr, &bytes, lib, "d_var"));
+  HIP_CHECK(hipLibraryGetGlobal(&dptr, &bytes, lib, "d_var"))
   REQUIRE(dptr != nullptr);
 
   hipKernel_t k2 = nullptr;
-  HIP_CHECK(hipLibraryGetKernel(&k2, lib, "add_kernel"));
+  HIP_CHECK(hipLibraryGetKernel(&k2, lib, "add_kernel"))
   REQUIRE(k1 == k2);
 
   unsigned int count = 0;
-  HIP_CHECK(hipLibraryGetKernelCount(&count, lib));
+  HIP_CHECK(hipLibraryGetKernelCount(&count, lib))
   REQUIRE(count >= kMinKernelCount);
 
-  HIP_CHECK(hipLibraryUnload(lib));
+  HIP_CHECK(hipLibraryUnload(lib))
 }
 
 // Repeated load/unload of the same code object must remain clean across
@@ -183,9 +183,9 @@ HIP_TEST_CASE(Unit_hipLibrary_LoadUnloadCycle) {
                                      nullptr, 0));
     void* dptr = nullptr;
     size_t bytes = 0;
-    HIP_CHECK(hipLibraryGetGlobal(&dptr, &bytes, lib, "d_var"));
+    HIP_CHECK(hipLibraryGetGlobal(&dptr, &bytes, lib, "d_var"))
     REQUIRE(dptr != nullptr);
     REQUIRE(bytes == sizeof(float) * 32);
-    HIP_CHECK(hipLibraryUnload(lib));
+    HIP_CHECK(hipLibraryUnload(lib))
   }
 }

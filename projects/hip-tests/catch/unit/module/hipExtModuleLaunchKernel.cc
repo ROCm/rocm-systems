@@ -117,8 +117,8 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup) {
   // Get module and function from module
   hipModule_t Module;
   hipFunction_t Function;
-  HIP_CHECK(hipModuleLoad(&Module, fileName));
-  HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
+  HIP_CHECK(hipModuleLoad(&Module, fileName))
+  HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name))
   // Allocate resources
   int* A = new int[arraylength];
   REQUIRE(A != nullptr);
@@ -129,8 +129,8 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup) {
     A[i] = i;
   }
   int *Ad, *Bd;
-  HIP_CHECK(hipMalloc(&Ad, sizeBytes));
-  HIP_CHECK(hipMalloc(&Bd, sizeBytes));
+  HIP_CHECK(hipMalloc(&Ad, sizeBytes))
+  HIP_CHECK(hipMalloc(&Bd, sizeBytes))
   struct {
     void* _Ad;
     void* _Bd;
@@ -145,16 +145,16 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup) {
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
   // Memcpy from A to Ad
-  HIP_CHECK(hipMemcpy(Ad, A, sizeBytes, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(Ad, A, sizeBytes, hipMemcpyDefault))
   REQUIRE(hipErrorInvalidValue == hipExtModuleLaunchKernel(Function, arraylength, 1, 1,
                                                            localWorkSize, 1, 1, 0, 0, NULL,
                                                            reinterpret_cast<void**>(&config), 0));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
   delete[] A;
   delete[] B;
-  HIP_CHECK(hipModuleUnload(Module));
+  HIP_CHECK(hipModuleUnload(Module))
 }
 
 /**
@@ -184,16 +184,16 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_UniformWorkGroup) {
       WARN("Skipping section: generic target is not supported on this device.");
       return;
     }
-    HIP_CHECK(hipModuleLoad(&Module, fileNameGenericTarget));
+    HIP_CHECK(hipModuleLoad(&Module, fileNameGenericTarget))
   }
   SECTION("generic target in compressed fatbin") {
     if (!isGenericTargetSupported()) {
       WARN("Skipping section: generic target is not supported on this device.");
       return;
     }
-    HIP_CHECK(hipModuleLoad(&Module, fileNameGenericTargetCompressed));
+    HIP_CHECK(hipModuleLoad(&Module, fileNameGenericTargetCompressed))
   }
-  HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
+  HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name))
   // Allocate resources
   int* A = new int[arraylength];
   REQUIRE(A != nullptr);
@@ -204,8 +204,8 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_UniformWorkGroup) {
     A[i] = i;
   }
   int *Ad, *Bd;
-  HIP_CHECK(hipMalloc(&Ad, sizeBytes));
-  HIP_CHECK(hipMalloc(&Bd, sizeBytes));
+  HIP_CHECK(hipMalloc(&Ad, sizeBytes))
+  HIP_CHECK(hipMalloc(&Bd, sizeBytes))
   struct {
     void* _Ad;
     void* _Bd;
@@ -220,21 +220,21 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_UniformWorkGroup) {
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
   // Memcpy from A to Ad
-  HIP_CHECK(hipMemcpy(Ad, A, sizeBytes, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(Ad, A, sizeBytes, hipMemcpyDefault))
   HIP_CHECK(hipExtModuleLaunchKernel(Function, arraylength, 1, 1, localWorkSize, 1, 1, 0, 0, NULL,
                                      reinterpret_cast<void**>(&config), 0));
   // Memcpy results back to host
-  HIP_CHECK(hipMemcpy(B, Bd, sizeBytes, hipMemcpyDefault));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(B, Bd, sizeBytes, hipMemcpyDefault))
+  HIP_CHECK(hipDeviceSynchronize())
   // Verify results
   for (size_t i = 0; i < arraylength; i++) {
     REQUIRE(B[i] == i);
   }
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
   delete[] A;
   delete[] B;
-  HIP_CHECK(hipModuleUnload(Module));
+  HIP_CHECK(hipModuleUnload(Module))
 }
 
 HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_Positive_Parameters) {
@@ -242,24 +242,24 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_Positive_Parameters) {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   SECTION("Pass only start event") {
     hipEvent_t start_event = nullptr;
-    HIP_CHECK(hipEventCreate(&start_event));
+    HIP_CHECK(hipEventCreate(&start_event))
     const auto kernel = GetKernel(mg.module(), "NOPKernel");
     HIP_CHECK(hipExtModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr,
                                        start_event, nullptr));
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipEventQuery(start_event));
-    HIP_CHECK(hipEventDestroy(start_event));
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipEventQuery(start_event))
+    HIP_CHECK(hipEventDestroy(start_event))
   }
 
   SECTION("Pass only stop event") {
     hipEvent_t stop_event = nullptr;
-    HIP_CHECK(hipEventCreate(&stop_event));
+    HIP_CHECK(hipEventCreate(&stop_event))
     const auto kernel = GetKernel(mg.module(), "NOPKernel");
     HIP_CHECK(hipExtModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr,
                                        nullptr, stop_event));
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipEventQuery(stop_event));
-    HIP_CHECK(hipEventDestroy(stop_event));
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipEventQuery(stop_event))
+    HIP_CHECK(hipEventDestroy(stop_event))
   }
 }
 
@@ -342,19 +342,19 @@ void ModuleLaunchKernel::AllocateMemory() {
       B[i * N + j] = 1;
     }
   }
-  HIP_CHECK(hipStreamCreate(&stream1));
-  HIP_CHECK(hipStreamCreate(&stream2));
-  HIP_CHECK(hipMalloc(&Ad, SIZE * sizeof(int)));
-  HIP_CHECK(hipMalloc(&Bd, SIZE * sizeof(int)));
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&C), SIZE * sizeof(int)));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE * sizeof(int), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, B, SIZE * sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipStreamCreate(&stream1))
+  HIP_CHECK(hipStreamCreate(&stream2))
+  HIP_CHECK(hipMalloc(&Ad, SIZE * sizeof(int)))
+  HIP_CHECK(hipMalloc(&Bd, SIZE * sizeof(int)))
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&C), SIZE * sizeof(int)))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE * sizeof(int), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Bd, B, SIZE * sizeof(int), hipMemcpyHostToDevice))
   int clkRate = 0;
 #if HT_AMD
-  HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeWallClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeWallClockRate, 0))
 #endif
 #if HT_NVIDIA
-  HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeClockRate, 0))
 #endif
   args1._Ad = Ad;
   args1._Bd = Bd;
@@ -369,12 +369,12 @@ void ModuleLaunchKernel::AllocateMemory() {
   size1 = sizeof(args1);
   size2 = sizeof(args2);
   size3 = 0;
-  HIP_CHECK(hipEventCreate(&start_event1));
-  HIP_CHECK(hipEventCreate(&end_event1));
-  HIP_CHECK(hipEventCreate(&start_event2));
-  HIP_CHECK(hipEventCreate(&end_event2));
-  HIP_CHECK(hipEventCreateWithFlags(&start_timingDisabled, hipEventDisableTiming));
-  HIP_CHECK(hipEventCreateWithFlags(&end_timingDisabled, hipEventDisableTiming));
+  HIP_CHECK(hipEventCreate(&start_event1))
+  HIP_CHECK(hipEventCreate(&end_event1))
+  HIP_CHECK(hipEventCreate(&start_event2))
+  HIP_CHECK(hipEventCreate(&end_event2))
+  HIP_CHECK(hipEventCreateWithFlags(&start_timingDisabled, hipEventDisableTiming))
+  HIP_CHECK(hipEventCreateWithFlags(&end_timingDisabled, hipEventDisableTiming))
 }
 
 void ModuleLaunchKernel::ModuleLoad() {
@@ -387,31 +387,31 @@ void ModuleLaunchKernel::ModuleLoad() {
   constexpr auto globalDevVar = "deviceGlobal";
   constexpr auto dummyKernel = "dummyKernel";
 
-  HIP_CHECK(hipModuleLoad(&Module, matmulName));
-  HIP_CHECK(hipModuleGetFunction(&MultKernel, Module, matmulK));
-  HIP_CHECK(hipModuleGetFunction(&SixteenSecKernel, Module, SixteenSec));
-  HIP_CHECK(hipModuleGetFunction(&KernelandExtraParamKernel, Module, KernelandExtra));
-  HIP_CHECK(hipModuleGetFunction(&FourSecKernel, Module, FourSec));
-  HIP_CHECK(hipModuleGetFunction(&TwoSecKernel, Module, TwoSec));
-  HIP_CHECK(hipModuleGetFunction(&DummyKernel, Module, dummyKernel));
-  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, globalDevVar));
+  HIP_CHECK(hipModuleLoad(&Module, matmulName))
+  HIP_CHECK(hipModuleGetFunction(&MultKernel, Module, matmulK))
+  HIP_CHECK(hipModuleGetFunction(&SixteenSecKernel, Module, SixteenSec))
+  HIP_CHECK(hipModuleGetFunction(&KernelandExtraParamKernel, Module, KernelandExtra))
+  HIP_CHECK(hipModuleGetFunction(&FourSecKernel, Module, FourSec))
+  HIP_CHECK(hipModuleGetFunction(&TwoSecKernel, Module, TwoSec))
+  HIP_CHECK(hipModuleGetFunction(&DummyKernel, Module, dummyKernel))
+  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, globalDevVar))
 }
 
 void ModuleLaunchKernel::DeAllocateMemory() {
-  HIP_CHECK(hipEventDestroy(start_event1));
-  HIP_CHECK(hipEventDestroy(end_event1));
-  HIP_CHECK(hipEventDestroy(start_event2));
-  HIP_CHECK(hipEventDestroy(end_event2));
-  HIP_CHECK(hipEventDestroy(start_timingDisabled));
-  HIP_CHECK(hipEventDestroy(end_timingDisabled));
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
+  HIP_CHECK(hipEventDestroy(start_event1))
+  HIP_CHECK(hipEventDestroy(end_event1))
+  HIP_CHECK(hipEventDestroy(start_event2))
+  HIP_CHECK(hipEventDestroy(end_event2))
+  HIP_CHECK(hipEventDestroy(start_timingDisabled))
+  HIP_CHECK(hipEventDestroy(end_timingDisabled))
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipStreamDestroy(stream2))
   delete[] A;
   delete[] B;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
-  HIP_CHECK(hipHostFree(C));
-  HIP_CHECK(hipModuleUnload(Module));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
+  HIP_CHECK(hipHostFree(C))
+  HIP_CHECK(hipModuleUnload(Module))
 }
 /*
  * In this scenario,We launch the 4 sec kernel and 2 sec kernel
@@ -422,7 +422,7 @@ bool ModuleLaunchKernel::ExtModule_KernelExecutionTime() {
   constexpr auto FOURSEC_KERNEL{4999};
   constexpr auto TWOSEC_KERNEL{2999};
   bool testStatus = true;
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   AllocateMemory();
   ModuleLoad();
   float time_4sec, time_2sec;
@@ -435,9 +435,9 @@ bool ModuleLaunchKernel::ExtModule_KernelExecutionTime() {
   HIP_CHECK(hipExtModuleLaunchKernel(TwoSecKernel, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
                                      reinterpret_cast<void**>(&config2), start_event2, end_event2,
                                      0));
-  HIP_CHECK(hipStreamSynchronize(stream1));
-  HIP_CHECK(hipEventElapsedTime(&time_4sec, start_event1, end_event1));
-  HIP_CHECK(hipEventElapsedTime(&time_2sec, start_event2, end_event2));
+  HIP_CHECK(hipStreamSynchronize(stream1))
+  HIP_CHECK(hipEventElapsedTime(&time_4sec, start_event1, end_event1))
+  HIP_CHECK(hipEventElapsedTime(&time_2sec, start_event2, end_event2))
   if (time_4sec < FOURSEC_KERNEL && time_2sec < TWOSEC_KERNEL) {
     testStatus = true;
   } else {
@@ -463,7 +463,7 @@ bool ModuleLaunchKernel::ExtModule_Disabled_Timingflag() {
   HIP_CHECK(hipExtModuleLaunchKernel(TwoSecKernel, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
                                      reinterpret_cast<void**>(&config2), start_timingDisabled,
                                      end_timingDisabled, 0));
-  HIP_CHECK(hipStreamSynchronize(stream1));
+  HIP_CHECK(hipStreamSynchronize(stream1))
   e = hipEventElapsedTime(&time_2sec, start_timingDisabled, end_timingDisabled);
   if (e == hipErrorInvalidHandle) {
     testStatus = true;
@@ -497,8 +497,8 @@ bool ModuleLaunchKernel::ExtModule_ConcurencyCheck_GlobalVar(int conc_flag) {
   HIP_CHECK(hipExtModuleLaunchKernel(TwoSecKernel, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
                                      reinterpret_cast<void**>(&config2), start_event2, end_event2,
                                      conc_flag));
-  HIP_CHECK(hipStreamSynchronize(stream1));
-  HIP_CHECK(hipMemcpyDtoH(&deviceGlobal_h, hipDeviceptr_t(deviceGlobal), deviceGlobalSize));
+  HIP_CHECK(hipStreamSynchronize(stream1))
+  HIP_CHECK(hipMemcpyDtoH(&deviceGlobal_h, hipDeviceptr_t(deviceGlobal), deviceGlobalSize))
   if (conc_flag && deviceGlobal_h != 0x5555) {
     testStatus = true;
   } else if (!conc_flag && deviceGlobal_h == 0x5555) {
@@ -530,7 +530,7 @@ bool ModuleLaunchKernel::ExtModule_ConcurrencyCheck_TimeVer() {
                                      reinterpret_cast<void**>(&config2), NULL, NULL, 0));
   HIP_CHECK(hipExtModuleLaunchKernel(MultKernel, N, N, 1, 32, 32, 1, 0, stream1, NULL,
                                      reinterpret_cast<void**>(&config1), NULL, NULL, 0));
-  HIP_CHECK(hipStreamSynchronize(stream1));
+  HIP_CHECK(hipStreamSynchronize(stream1))
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration1 = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   start = std::chrono::high_resolution_clock::now();
@@ -538,7 +538,7 @@ bool ModuleLaunchKernel::ExtModule_ConcurrencyCheck_TimeVer() {
                                      reinterpret_cast<void**>(&config2), NULL, NULL, 1));
   HIP_CHECK(hipExtModuleLaunchKernel(MultKernel, N, N, 1, 32, 32, 1, 0, stream1, NULL,
                                      reinterpret_cast<void**>(&config1), NULL, NULL, 1));
-  HIP_CHECK(hipStreamSynchronize(stream1));
+  HIP_CHECK(hipStreamSynchronize(stream1))
   stop = std::chrono::high_resolution_clock::now();
   auto duration2 = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   if (!(duration2.count() < duration1.count())) {
@@ -557,7 +557,7 @@ bool ModuleLaunchKernel::ExtModule_ConcurrencyCheck_TimeVer() {
 }
 bool ModuleLaunchKernel::ExtModule_Negative_tests() {
   bool testStatus = true;
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipError_t err;
   AllocateMemory();
   ModuleLoad();
@@ -618,7 +618,7 @@ bool ModuleLaunchKernel::ExtModule_Negative_tests() {
   }
   // Passing more than maxthreadsperblock to block dimensions
   hipDeviceProp_t deviceProp;
-  HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0))
   err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1, deviceProp.maxThreadsPerBlock + 1,
                                  deviceProp.maxThreadsPerBlock + 1,
                                  deviceProp.maxThreadsPerBlock + 1, 0, stream1, NULL,
@@ -667,14 +667,14 @@ bool ModuleLaunchKernel::ExtModule_Negative_tests() {
 
 bool ModuleLaunchKernel::ExtModule_Corner_tests() {
   bool testStatus = true;
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipError_t err;
   AllocateMemory();
   ModuleLoad();
   void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args3, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size3,
                      HIP_LAUNCH_PARAM_END};
   hipDeviceProp_t deviceProp;
-  HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0))
   unsigned int maxblockX = deviceProp.maxThreadsDim[0];
   unsigned int maxblockY = deviceProp.maxThreadsDim[1];
   unsigned int maxblockZ = deviceProp.maxThreadsDim[2];
@@ -699,14 +699,14 @@ bool ModuleLaunchKernel::ExtModule_Corner_tests() {
 
 bool ModuleLaunchKernel::Module_WorkGroup_Test() {
   bool testStatus = true;
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipError_t err;
   AllocateMemory();
   ModuleLoad();
   void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args3, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size3,
                      HIP_LAUNCH_PARAM_END};
   hipDeviceProp_t deviceProp;
-  HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0))
   double cuberootVal = cbrt(static_cast<double>(deviceProp.maxThreadsPerBlock));
   uint32_t cuberoot_floor = floor(cuberootVal);
   uint32_t cuberoot_ceil = ceil(cuberootVal);
@@ -762,8 +762,8 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_Functional) {
 TEST_CASE("Unit_hipExtModuleLaunchKernel_AnyOrder") {
   int device = -1;
   hipDeviceProp_t props{};
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   const std::string arch(props.gcnArchName);
   // Meant to run on gfx11xx & gfx12xx only.
   if (!(arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0)) {
@@ -771,7 +771,7 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_AnyOrder") {
     return;
   }
   int ticks_per_ms = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, device));
+  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, device))
   //TODO: Remove this once we gets correct wall clock rate from ROCR/KFD.
   if (ticks_per_ms == 0) {
     ticks_per_ms = 1000000;
@@ -784,16 +784,16 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_AnyOrder") {
   hipFunction_t first;
   hipFunction_t second;
   hipModule_t module;
-  HIP_CHECK(hipModuleLoad(&module, "anyOrderLaunch.code"));
-  HIP_CHECK(hipModuleGetFunction(&first, module, "first"));
-  HIP_CHECK(hipModuleGetFunction(&second, module, "second"));
+  HIP_CHECK(hipModuleLoad(&module, "anyOrderLaunch.code"))
+  HIP_CHECK(hipModuleGetFunction(&first, module, "first"))
+  HIP_CHECK(hipModuleGetFunction(&second, module, "second"))
 
   int* res;
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&res), sizeof(int), hipHostAllocMapped));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&res), sizeof(int), hipHostAllocMapped))
   *res = 0;
 
   int *dres;
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&dres), res, 0));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&dres), res, 0))
 
   struct {
     int* _res;
@@ -807,18 +807,18 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_AnyOrder") {
   void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   HIP_CHECK(hipExtModuleLaunchKernel(first, 1, 1, 1, 1, 1, 1, 0, stream, nullptr,
                                     reinterpret_cast<void**>(&config1), 0, 0,
                                     hipExtAnyOrderLaunch));
   HIP_CHECK(hipExtModuleLaunchKernel(second, 1, 1, 1, 1, 1, 1, 0, stream, nullptr,
                                     nullptr, 0, 0,
                                     hipExtAnyOrderLaunch));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   REQUIRE(*res == 1);
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipHostFree(res));
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipHostFree(res))
 }
 /**
  * End doxygen group KernelTest.

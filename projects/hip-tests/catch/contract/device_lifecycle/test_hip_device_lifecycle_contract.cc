@@ -20,7 +20,7 @@ void RequireAcceptedOrBenign(hipError_t status) {
       status == hipErrorSetOnActiveProcess) {
     return;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 }
 
 hipDevice_t DeviceForOrdinalZero() {
@@ -30,9 +30,9 @@ hipDevice_t DeviceForOrdinalZero() {
   // ctest) no context exists yet and the call fails with an initialization/
   // invalid-context error. hipFree(0) is the canonical no-op that establishes
   // it. On AMD this is a harmless success.
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
   hipDevice_t device = 0;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   return device;
 }
 }  // namespace
@@ -43,7 +43,7 @@ HIP_TEST_CASE(Contract_DeviceLifecycle_HipSetDeviceFlags_Default_AcceptsCurrentF
   // accepted (or reported as not-settable on an already-active process). Writing
   // the current value keeps global device state unchanged for sibling tests.
   unsigned int flags = 0;
-  HIP_CHECK(hipGetDeviceFlags(&flags));
+  HIP_CHECK(hipGetDeviceFlags(&flags))
 
   RequireAcceptedOrBenign(hipSetDeviceFlags(flags));
 }
@@ -58,7 +58,7 @@ HIP_TEST_CASE(Contract_DeviceLifecycle_HipDeviceSetSharedMemConfig_Default_Round
   if (get_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Shared-memory bank configuration is not supported by this runtime path.");
   }
-  HIP_CHECK(get_status);
+  HIP_CHECK(get_status)
 
   RequireAcceptedOrBenign(hipDeviceSetSharedMemConfig(config));
 }
@@ -66,7 +66,7 @@ HIP_TEST_CASE(Contract_DeviceLifecycle_HipDeviceSetSharedMemConfig_Default_Round
 // @asserts: hipSetValidDevices - presenting the full set of visible device ordinals is accepted or reported unsupported
 HIP_TEST_CASE(Contract_DeviceLifecycle_HipSetValidDevices_Default_AcceptsFullDeviceList) {
   int count = 0;
-  HIP_CHECK(hipGetDeviceCount(&count));
+  HIP_CHECK(hipGetDeviceCount(&count))
   REQUIRE(count > 0);
 
   // Presenting the complete set of visible device ordinals to the deprecated
@@ -103,11 +103,11 @@ HIP_TEST_CASE(Contract_DeviceLifecycle_HipDevicePrimaryCtxReset_Default_LeavesDe
   if (reset_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Primary-context reset is not supported by this runtime path.");
   }
-  HIP_CHECK(reset_status);
+  HIP_CHECK(reset_status)
 
   hip::contract::ContractCleanup cleanup;
   void* ptr = nullptr;
-  HIP_CHECK(hipMalloc(&ptr, 64));
+  HIP_CHECK(hipMalloc(&ptr, 64))
   cleanup.Add([ptr] { (void)hipFree(ptr); });
   REQUIRE(ptr != nullptr);
 }

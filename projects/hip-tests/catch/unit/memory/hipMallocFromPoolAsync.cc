@@ -111,7 +111,7 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_Basic_Reuse) {
  */
 HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_Negative_Parameters) {
   int device_id = 0;
-  HIP_CHECK(hipSetDevice(device_id));
+  HIP_CHECK(hipSetDevice(device_id))
 
   checkMempoolSupported(0);
 
@@ -148,39 +148,39 @@ static bool checkMempoolMultStreamSync(int N) {
   streamMemAllocTest testObj(N);
   // create multiple streams
   hipStream_t streamMemCreate, streamMemAccess, streamMemDestroy;
-  HIP_CHECK(hipStreamCreate(&streamMemCreate));
-  HIP_CHECK(hipStreamCreate(&streamMemAccess));
-  HIP_CHECK(hipStreamCreate(&streamMemDestroy));
+  HIP_CHECK(hipStreamCreate(&streamMemCreate))
+  HIP_CHECK(hipStreamCreate(&streamMemAccess))
+  HIP_CHECK(hipStreamCreate(&streamMemDestroy))
   // Create host buffer with test data
   testObj.createHostBufferWithData();
   // Create mempool in current device = 0
   testObj.createMempool(hipMemPoolAttrReleaseThreshold, testdefault, 0);
   hipEvent_t Event1, Event2;
-  HIP_CHECK(hipEventCreate(&Event1));
-  HIP_CHECK(hipEventCreate(&Event2));
+  HIP_CHECK(hipEventCreate(&Event1))
+  HIP_CHECK(hipEventCreate(&Event2))
   // Allocate memory and initialize it on streamMemCreate
   testObj.allocFromMempool(streamMemCreate);
   testObj.transferToMempool(streamMemCreate);
-  HIP_CHECK(hipEventRecord(Event1, streamMemCreate));
+  HIP_CHECK(hipEventRecord(Event1, streamMemCreate))
   // Launch Kernel on streamMemAccess
-  HIP_CHECK(hipStreamWaitEvent(streamMemAccess, Event1, 0));
+  HIP_CHECK(hipStreamWaitEvent(streamMemAccess, Event1, 0))
   testObj.runKernel(streamMemAccess);
   testObj.transferFromMempool(streamMemAccess);
-  HIP_CHECK(hipEventRecord(Event2, streamMemAccess));
+  HIP_CHECK(hipEventRecord(Event2, streamMemAccess))
   // Launch Kernel on streamMemAccess
-  HIP_CHECK(hipStreamWaitEvent(streamMemDestroy, Event2, 0));
+  HIP_CHECK(hipStreamWaitEvent(streamMemDestroy, Event2, 0))
   testObj.freeDevBuf(streamMemDestroy);
-  HIP_CHECK(hipStreamSynchronize(streamMemDestroy));
+  HIP_CHECK(hipStreamSynchronize(streamMemDestroy))
   // Validate test result and clean all host buffers and mempool
   bool results = false;
   results = testObj.validateResult();
   testObj.freeMempool();
   testObj.freeHostBuf();
-  HIP_CHECK(hipEventDestroy(Event2));
-  HIP_CHECK(hipEventDestroy(Event1));
-  HIP_CHECK(hipStreamDestroy(streamMemDestroy));
-  HIP_CHECK(hipStreamDestroy(streamMemAccess));
-  HIP_CHECK(hipStreamDestroy(streamMemCreate));
+  HIP_CHECK(hipEventDestroy(Event2))
+  HIP_CHECK(hipEventDestroy(Event1))
+  HIP_CHECK(hipStreamDestroy(streamMemDestroy))
+  HIP_CHECK(hipStreamDestroy(streamMemAccess))
+  HIP_CHECK(hipStreamDestroy(streamMemCreate))
   return results;
 }
 
@@ -197,20 +197,20 @@ static bool checkMempoolMultStreamConcurrentExec(int N, bool useDefStrm = true) 
                                    streamMemAllocTest(N, false, 2)};
   // create multiple streams
   hipStream_t testStreams[3];
-  HIP_CHECK(hipStreamCreate(&testStreams[0]));
+  HIP_CHECK(hipStreamCreate(&testStreams[0]))
   if (useDefStrm) {
     testStreams[1] = 0;  // null stream
     testStreams[2] = hipStreamPerThread;
   } else {
-    HIP_CHECK(hipStreamCreate(&testStreams[1]));
-    HIP_CHECK(hipStreamCreate(&testStreams[2]));
+    HIP_CHECK(hipStreamCreate(&testStreams[1]))
+    HIP_CHECK(hipStreamCreate(&testStreams[2]))
   }
   // Create common mempool
   hipMemPoolProps pool_props{};
   pool_props.allocType = hipMemAllocationTypePinned;
   pool_props.location.id = 0;
   pool_props.location.type = hipMemLocationTypeDevice;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool_common, &pool_props));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool_common, &pool_props))
   bool results = true;
   for (int idx = 0; idx < 3; idx++) {
     // Create mempool in current device = 0
@@ -226,18 +226,18 @@ static bool checkMempoolMultStreamConcurrentExec(int N, bool useDefStrm = true) 
     testObj[idx].freeDevBuf(testStreams[idx]);
   }
   for (int idx = 0; idx < 3; idx++) {
-    HIP_CHECK(hipStreamSynchronize(testStreams[idx]));
+    HIP_CHECK(hipStreamSynchronize(testStreams[idx]))
     // Validate test result and clean all host buffers and mempool
     results &= testObj[idx].validateResult();
     testObj[idx].freeHostBuf();
   }
-  HIP_CHECK(hipStreamDestroy(testStreams[0]));
+  HIP_CHECK(hipStreamDestroy(testStreams[0]))
   if (!useDefStrm) {
-    HIP_CHECK(hipStreamDestroy(testStreams[1]));
-    HIP_CHECK(hipStreamDestroy(testStreams[2]));
+    HIP_CHECK(hipStreamDestroy(testStreams[1]))
+    HIP_CHECK(hipStreamDestroy(testStreams[2]))
   }
   // Destroy common mempool
-  HIP_CHECK(hipMemPoolDestroy(mem_pool_common));
+  HIP_CHECK(hipMemPoolDestroy(mem_pool_common))
   return results;
 }
 
@@ -284,7 +284,7 @@ static bool checkMaximumAndDefaultThreshold(hipStream_t stream, int N, enum eTes
  */
 static void checkMaximumAndDefaultThresholdMultiThreaded(hipStream_t stream, int N,
                                                          enum eTestValue testtype, int dev) {
-  HIP_CHECK_THREAD(hipSetDevice(dev));
+  HIP_CHECK_THREAD(hipSetDevice(dev))
 
   size_t byte_size = N * sizeof(int);
   int *A_h, *B_h, *C_h;
@@ -307,12 +307,12 @@ static void checkMaximumAndDefaultThresholdMultiThreaded(hipStream_t stream, int
   pool_props.allocType = hipMemAllocationTypePinned;
   pool_props.location.id = dev;
   pool_props.location.type = hipMemLocationTypeDevice;
-  HIP_CHECK_THREAD(hipMemPoolCreate(&mem_pool, &pool_props));
+  HIP_CHECK_THREAD(hipMemPoolCreate(&mem_pool, &pool_props))
   uint64_t setThreshold = 0;
   if (testtype == testMaximum) {
     setThreshold = UINT64_MAX;
   }
-  HIP_CHECK_THREAD(hipMemPoolSetAttribute(mem_pool, hipMemPoolAttrReleaseThreshold, &setThreshold));
+  HIP_CHECK_THREAD(hipMemPoolSetAttribute(mem_pool, hipMemPoolAttrReleaseThreshold, &setThreshold))
 
   for (int iter = 0; iter < LAUNCH_ITERATIONS; iter++) {
     HIP_CHECK_THREAD(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d),
@@ -322,22 +322,22 @@ static void checkMaximumAndDefaultThresholdMultiThreaded(hipStream_t stream, int
     HIP_CHECK_THREAD(hipMallocFromPoolAsync(reinterpret_cast<void**>(&C_d),
                      byte_size, mem_pool, stream));
 
-    HIP_CHECK_THREAD(hipMemcpyAsync(A_d, A_h, byte_size, hipMemcpyHostToDevice, stream));
-    HIP_CHECK_THREAD(hipMemcpyAsync(B_d, B_h, byte_size, hipMemcpyHostToDevice, stream));
+    HIP_CHECK_THREAD(hipMemcpyAsync(A_d, A_h, byte_size, hipMemcpyHostToDevice, stream))
+    HIP_CHECK_THREAD(hipMemcpyAsync(B_d, B_h, byte_size, hipMemcpyHostToDevice, stream))
 
     int blocks = (N % THREADS_PER_BLOCK == 0) ? (N / THREADS_PER_BLOCK)
                                               : ((N / THREADS_PER_BLOCK) + 1);
     hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(THREADS_PER_BLOCK), 0, stream,
                        static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d, N);
-    HIP_CHECK_THREAD(hipGetLastError());
+    HIP_CHECK_THREAD(hipGetLastError())
 
-    HIP_CHECK_THREAD(hipMemcpyAsync(C_h, C_d, byte_size, hipMemcpyDeviceToHost, stream));
+    HIP_CHECK_THREAD(hipMemcpyAsync(C_h, C_d, byte_size, hipMemcpyDeviceToHost, stream))
 
-    HIP_CHECK_THREAD(hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
-    HIP_CHECK_THREAD(hipFreeAsync(reinterpret_cast<void*>(B_d), stream));
-    HIP_CHECK_THREAD(hipFreeAsync(reinterpret_cast<void*>(C_d), stream));
+    HIP_CHECK_THREAD(hipFreeAsync(reinterpret_cast<void*>(A_d), stream))
+    HIP_CHECK_THREAD(hipFreeAsync(reinterpret_cast<void*>(B_d), stream))
+    HIP_CHECK_THREAD(hipFreeAsync(reinterpret_cast<void*>(C_d), stream))
 
-    HIP_CHECK_THREAD(hipStreamSynchronize(stream));
+    HIP_CHECK_THREAD(hipStreamSynchronize(stream))
 
     for (int i = 0; i < N; i++) {
       auto res = A_h[i] + B_h[i];
@@ -345,7 +345,7 @@ static void checkMaximumAndDefaultThresholdMultiThreaded(hipStream_t stream, int
     }
   }
 
-  HIP_CHECK_THREAD(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK_THREAD(hipMemPoolDestroy(mem_pool))
   free(A_h);
   free(B_h);
   free(C_h);
@@ -374,11 +374,11 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ReleaseThreshold) {
   checkMempoolSupported(0)
       // create a stream
       hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   constexpr int N = 1 << 20;
   REQUIRE(true == checkMaximumAndDefaultThreshold(stream, N, testdefault));
   REQUIRE(true == checkMaximumAndDefaultThreshold(stream, N, testMaximum));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -426,15 +426,15 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_hipStreamPerThread) {
 HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ReleaseThreshold_Mgpu) {
   constexpr int N = 1 << 20;
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   for (int dev = 0; dev < numDevices; dev++) {
     checkMempoolSupported(dev) HIP_CHECK(hipSetDevice(dev));
     // create a stream
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     REQUIRE(true == checkMaximumAndDefaultThreshold(stream, N, testdefault, dev));
     REQUIRE(true == checkMaximumAndDefaultThreshold(stream, N, testMaximum, dev));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 
@@ -524,7 +524,7 @@ static bool test_hipMallocFromPoolAsync_MThread_CommonMpool(enum eTestValue test
     pool_props.allocType = hipMemAllocationTypePinned;
     pool_props.location.id = kCommonMpoolDevice;
     pool_props.location.type = hipMemLocationTypeDevice;
-    HIP_CHECK(hipMemPoolCreate(&mem_pool_common, &pool_props));
+    HIP_CHECK(hipMemPoolCreate(&mem_pool_common, &pool_props))
   }
   if (testtype == testMaximum) {
     uint64_t setThreshold = UINT64_MAX;
@@ -563,7 +563,7 @@ static bool test_hipMallocFromPoolAsync_MThread_CommonMpool(enum eTestValue test
   }
   // Destroy common mempool
   if (!bUseDefault) {
-    HIP_CHECK(hipMemPoolDestroy(mem_pool_common));
+    HIP_CHECK(hipMemPoolDestroy(mem_pool_common))
   }
 
   HIP_CHECK_THREAD_FINALIZE();
@@ -580,20 +580,20 @@ static bool checkReuseFollowEventDepFlag(int N, enum eTestValue testtype) {
   // Create mempool in current device = 0
   testObj.createMempool(hipMemPoolReuseFollowEventDependencies, testtype, 0);
   hipStream_t testStream1, testStream2;
-  HIP_CHECK(hipStreamCreate(&testStream1));
-  HIP_CHECK(hipStreamCreate(&testStream2));
+  HIP_CHECK(hipStreamCreate(&testStream1))
+  HIP_CHECK(hipStreamCreate(&testStream2))
   bool results = true;
   for (int iter = 0; iter < LAUNCH_ITERATIONS; iter++) {
     hipEvent_t Event1;
-    HIP_CHECK(hipEventCreate(&Event1));
+    HIP_CHECK(hipEventCreate(&Event1))
     // Allocate memory and initialize it on testStream1
     testObj.allocFromMempool(testStream1);
     testObj.transferToMempool(testStream1);
     testObj.runKernel(testStream1);
     testObj.transferFromMempool(testStream1);
     testObj.freeDevBuf(testStream1);
-    HIP_CHECK(hipEventRecord(Event1, testStream1));
-    HIP_CHECK(hipStreamWaitEvent(testStream2, Event1, 0));
+    HIP_CHECK(hipEventRecord(Event1, testStream1))
+    HIP_CHECK(hipStreamWaitEvent(testStream2, Event1, 0))
     // Allocate memory and initialize it on testStream2
     testObj.allocFromMempool(testStream2);
     testObj.transferToMempool(testStream2);
@@ -601,8 +601,8 @@ static bool checkReuseFollowEventDepFlag(int N, enum eTestValue testtype) {
     testObj.transferFromMempool(testStream2);
     testObj.freeDevBuf(testStream2);
     // validate
-    HIP_CHECK(hipStreamSynchronize(testStream2));
-    HIP_CHECK(hipEventDestroy(Event1));
+    HIP_CHECK(hipStreamSynchronize(testStream2))
+    HIP_CHECK(hipEventDestroy(Event1))
     results = testObj.validateResult();
     if (!results) {
       break;
@@ -610,8 +610,8 @@ static bool checkReuseFollowEventDepFlag(int N, enum eTestValue testtype) {
   }
   testObj.freeMempool();
   testObj.freeHostBuf();
-  HIP_CHECK(hipStreamDestroy(testStream2));
-  HIP_CHECK(hipStreamDestroy(testStream1));
+  HIP_CHECK(hipStreamDestroy(testStream2))
+  HIP_CHECK(hipStreamDestroy(testStream1))
   return results;
 }
 
@@ -626,8 +626,8 @@ static bool checkReuseAllowOtherFlags(int N, hipMemPoolAttr attr, enum eTestValu
   // Create mempool in current device = 0
   testObj.createMempool(attr, testtype, 0);
   hipStream_t testStream1, testStream2;
-  HIP_CHECK(hipStreamCreate(&testStream1));
-  HIP_CHECK(hipStreamCreate(&testStream2));
+  HIP_CHECK(hipStreamCreate(&testStream1))
+  HIP_CHECK(hipStreamCreate(&testStream2))
   bool results = true;
   for (int iter = 0; iter < LAUNCH_ITERATIONS; iter++) {
     // Allocate memory and initialize it on testStream1
@@ -643,7 +643,7 @@ static bool checkReuseAllowOtherFlags(int N, hipMemPoolAttr attr, enum eTestValu
     testObj.transferFromMempool(testStream2);
     testObj.freeDevBuf(testStream2);
     // validate
-    HIP_CHECK(hipStreamSynchronize(testStream2));
+    HIP_CHECK(hipStreamSynchronize(testStream2))
     results = testObj.validateResult();
     if (!results) {
       break;
@@ -651,8 +651,8 @@ static bool checkReuseAllowOtherFlags(int N, hipMemPoolAttr attr, enum eTestValu
   }
   testObj.freeMempool();
   testObj.freeHostBuf();
-  HIP_CHECK(hipStreamDestroy(testStream2));
-  HIP_CHECK(hipStreamDestroy(testStream1));
+  HIP_CHECK(hipStreamDestroy(testStream2))
+  HIP_CHECK(hipStreamDestroy(testStream1))
   return results;
 }
 
@@ -674,7 +674,7 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_Multidevice_Concurrent) {
   auto testType = GENERATE(testdefault, testMaximum);
   constexpr int N = 1 << 20;
   int num_devices;
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
   checkIfMultiDev(num_devices) hipStream_t* stream_buf = new hipStream_t[num_devices];
   std::vector<streamMemAllocTest*> tesObjBuf;
   // Allocate resources in each device
@@ -687,15 +687,15 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_Multidevice_Concurrent) {
   }
   // Queue commands in each device
   for (int idx = 0; idx < num_devices; idx++) {
-    HIP_CHECK(hipSetDevice(idx));
+    HIP_CHECK(hipSetDevice(idx))
     std::thread test(threadQAsyncCommands, tesObjBuf[idx], stream_buf[idx], idx);
     test.join();
   }
   HIP_CHECK_THREAD_FINALIZE();
   // Wait for the streams
   for (int idx = 0; idx < num_devices; idx++) {
-    HIP_CHECK(hipSetDevice(idx));
-    HIP_CHECK(hipStreamSynchronize(stream_buf[idx]));
+    HIP_CHECK(hipSetDevice(idx))
+    HIP_CHECK(hipStreamSynchronize(stream_buf[idx]))
     // verify and validate
     REQUIRE(true == tesObjBuf[idx]->validateResult());
   }
@@ -705,7 +705,7 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_Multidevice_Concurrent) {
     tesObjBuf[idx]->setThreadSafe(false);
     tesObjBuf[idx]->freeMempool();
     tesObjBuf[idx]->freeHostBuf();
-    HIP_CHECK(hipStreamDestroy(stream_buf[idx]));
+    HIP_CHECK(hipStreamDestroy(stream_buf[idx]))
     delete tesObjBuf[idx];
   }
   delete[] stream_buf;
@@ -727,7 +727,7 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_Multidevice_MultiStream) {
   int num_devices;
   auto testType = GENERATE(testdefault, testMaximum);
   constexpr int N = 1 << 20;
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
   checkIfMultiDev(num_devices)
       // 2 stream per ASIC
       hipStream_t* stream_buf = new hipStream_t[streamPerAsic * num_devices];
@@ -746,7 +746,7 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_Multidevice_MultiStream) {
   }
   // Queue commands in each device
   for (int idx = 0; idx < num_devices; idx++) {
-    HIP_CHECK(hipSetDevice(idx));
+    HIP_CHECK(hipSetDevice(idx))
     std::thread test1(threadQAsyncCommands, tesObjBuf[streamPerAsic * idx],
                       stream_buf[streamPerAsic * idx], idx);
     std::thread test2(threadQAsyncCommands, tesObjBuf[streamPerAsic * idx + 1],
@@ -757,9 +757,9 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_Multidevice_MultiStream) {
   HIP_CHECK_THREAD_FINALIZE();
   // Wait for the streams
   for (int idx = 0; idx < num_devices; idx++) {
-    HIP_CHECK(hipSetDevice(idx));
-    HIP_CHECK(hipStreamSynchronize(stream_buf[streamPerAsic * idx]));
-    HIP_CHECK(hipStreamSynchronize(stream_buf[streamPerAsic * idx + 1]));
+    HIP_CHECK(hipSetDevice(idx))
+    HIP_CHECK(hipStreamSynchronize(stream_buf[streamPerAsic * idx]))
+    HIP_CHECK(hipStreamSynchronize(stream_buf[streamPerAsic * idx + 1]))
     // verify and validate
     REQUIRE(true == tesObjBuf[streamPerAsic * idx]->validateResult());
     REQUIRE(true == tesObjBuf[streamPerAsic * idx + 1]->validateResult());
@@ -773,8 +773,8 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_Multidevice_MultiStream) {
     tesObjBuf[streamPerAsic * idx]->freeHostBuf();
     tesObjBuf[streamPerAsic * idx + 1]->freeMempool();
     tesObjBuf[streamPerAsic * idx + 1]->freeHostBuf();
-    HIP_CHECK(hipStreamDestroy(stream_buf[streamPerAsic * idx]));
-    HIP_CHECK(hipStreamDestroy(stream_buf[streamPerAsic * idx + 1]));
+    HIP_CHECK(hipStreamDestroy(stream_buf[streamPerAsic * idx]))
+    HIP_CHECK(hipStreamDestroy(stream_buf[streamPerAsic * idx + 1]))
     delete tesObjBuf[streamPerAsic * idx];
     delete tesObjBuf[streamPerAsic * idx + 1];
   }
@@ -789,7 +789,7 @@ static void runMThreadReleaseThresholdTest(enum eTestValue testtype) {
   constexpr int N = 1 << 10;
 
   int num_devices = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
 
   // Determine which devices support memory pools
   std::vector<int> supported_devices;
@@ -814,8 +814,8 @@ static void runMThreadReleaseThresholdTest(enum eTestValue testtype) {
   // Initialize and create streams only on supported devices
   for (std::size_t i = 0; i < supported_devices.size(); ++i) {
     int device = supported_devices[i];
-    HIP_CHECK(hipSetDevice(device));
-    HIP_CHECK(hipStreamCreate(&streams[i]));
+    HIP_CHECK(hipSetDevice(device))
+    HIP_CHECK(hipStreamCreate(&streams[i]))
   }
 
   // Spawn the test threads for supported devices
@@ -833,8 +833,8 @@ static void runMThreadReleaseThresholdTest(enum eTestValue testtype) {
   // Destroy streams on supported devices
   for (std::size_t i = 0; i < supported_devices.size(); ++i) {
     int device = supported_devices[i];
-    HIP_CHECK(hipSetDevice(device));
-    HIP_CHECK(hipStreamDestroy(streams[i]));
+    HIP_CHECK(hipSetDevice(device))
+    HIP_CHECK(hipStreamDestroy(streams[i]))
   }
 
   HIP_CHECK_THREAD_FINALIZE();

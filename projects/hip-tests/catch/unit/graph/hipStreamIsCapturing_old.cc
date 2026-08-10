@@ -75,10 +75,10 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_ParentAndForkedStream) {
   REQUIRE(C_h != nullptr);
   REQUIRE(D_h != nullptr);
   // Memory allocation to Device pointers
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipMalloc(&B_d, Nbytes));
-  HIP_CHECK(hipMalloc(&C_d, Nbytes));
-  HIP_CHECK(hipMalloc(&D_d, Nbytes));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipMalloc(&B_d, Nbytes))
+  HIP_CHECK(hipMalloc(&C_d, Nbytes))
+  HIP_CHECK(hipMalloc(&D_d, Nbytes))
   REQUIRE(A_d != nullptr);
   REQUIRE(B_d != nullptr);
   REQUIRE(C_d != nullptr);
@@ -89,58 +89,58 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_ParentAndForkedStream) {
     A_h[i] = 3.146f + i;  // Pi
     B_h[i] = A_h[i];
   }
-  HIP_CHECK(hipStreamCreate(&stream1));
-  HIP_CHECK(hipStreamCreate(&stream2));
-  HIP_CHECK(hipEventCreate(&event2));
-  HIP_CHECK(hipEventCreate(&forkStreamEvent));
+  HIP_CHECK(hipStreamCreate(&stream1))
+  HIP_CHECK(hipStreamCreate(&stream2))
+  HIP_CHECK(hipEventCreate(&event2))
+  HIP_CHECK(hipEventCreate(&forkStreamEvent))
   // Start capture on stream1
-  HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipEventRecord(forkStreamEvent, stream1));
-  HIP_CHECK(hipStreamWaitEvent(stream2, forkStreamEvent, 0));
+  HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipEventRecord(forkStreamEvent, stream1))
+  HIP_CHECK(hipStreamWaitEvent(stream2, forkStreamEvent, 0))
   // Copy data to Device
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream1));
-  HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream2));
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream1))
+  HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream2))
   // Kernal Operations
   hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, stream1, A_d,
                      C_d, N);
   hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, stream2, B_d,
                      D_d, N);
   // Copy data back to the Host
-  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream1));
-  HIP_CHECK(hipMemcpyAsync(D_h, D_d, Nbytes, hipMemcpyDeviceToHost, stream2));
+  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream1))
+  HIP_CHECK(hipMemcpyAsync(D_h, D_d, Nbytes, hipMemcpyDeviceToHost, stream2))
 
   hipStreamCaptureStatus captureStatus1{hipStreamCaptureStatusNone},
       captureStatus2{hipStreamCaptureStatusNone}, captureStatus3{hipStreamCaptureStatusNone},
       captureStatus4{hipStreamCaptureStatusNone};
   // Capturing info
-  HIP_CHECK(hipStreamIsCapturing(stream1, &captureStatus1));
-  HIP_CHECK(hipStreamIsCapturing(stream2, &captureStatus2));
+  HIP_CHECK(hipStreamIsCapturing(stream1, &captureStatus1))
+  HIP_CHECK(hipStreamIsCapturing(stream2, &captureStatus2))
   // Verfication of results
   REQUIRE(captureStatus1 == hipStreamCaptureStatusActive);
   REQUIRE(captureStatus2 == hipStreamCaptureStatusActive);
 
-  HIP_CHECK(hipEventRecord(event2, stream2));
-  HIP_CHECK(hipStreamWaitEvent(stream1, event2, 0));
+  HIP_CHECK(hipEventRecord(event2, stream2))
+  HIP_CHECK(hipStreamWaitEvent(stream1, event2, 0))
   // End the capture
-  HIP_CHECK(hipStreamEndCapture(stream1, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream1, &graph))
   REQUIRE(graph != nullptr);
 
   // Capture Info
-  HIP_CHECK(hipStreamIsCapturing(stream1, &captureStatus3));
-  HIP_CHECK(hipStreamIsCapturing(stream2, &captureStatus4));
+  HIP_CHECK(hipStreamIsCapturing(stream1, &captureStatus3))
+  HIP_CHECK(hipStreamIsCapturing(stream2, &captureStatus4))
   // Verification of results
   REQUIRE(captureStatus3 == hipStreamCaptureStatusNone);
   REQUIRE(captureStatus4 == hipStreamCaptureStatusNone);
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
-  HIP_CHECK(hipEventDestroy(forkStreamEvent));
-  HIP_CHECK(hipEventDestroy(event2));
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
-  HIP_CHECK(hipFree(C_d));
-  HIP_CHECK(hipFree(D_d));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipStreamDestroy(stream2))
+  HIP_CHECK(hipEventDestroy(forkStreamEvent))
+  HIP_CHECK(hipEventDestroy(event2))
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
+  HIP_CHECK(hipFree(C_d))
+  HIP_CHECK(hipFree(D_d))
   free(A_h);
   free(B_h);
   free(C_h);
@@ -158,8 +158,8 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_ChkNullStrmStatus) {
   hipStream_t stream{nullptr}, streamForGraph{nullptr};
   hipGraph_t graph{nullptr};
   hipError_t ret;
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   float *A_d, *C_d;
   float *A_h, *C_h, *D_h;
   // Memory allocation to Host pointers
@@ -171,8 +171,8 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_ChkNullStrmStatus) {
   REQUIRE(D_h != nullptr);
 
   // Memory allocation to Device pointers
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipMalloc(&C_d, Nbytes));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipMalloc(&C_d, Nbytes))
   REQUIRE(A_d != nullptr);
   REQUIRE(C_d != nullptr);
 
@@ -181,23 +181,23 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_ChkNullStrmStatus) {
     A_h[i] = 1.0f + i;
     D_h[i] = 0.0f;
   }
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone},
       captureStatus1{hipStreamCaptureStatusNone}, captureStatus2{hipStreamCaptureStatusNone};
   // Verify the Error returned if null stream is passed.
   ret = hipStreamIsCapturing(0, &captureStatus);
   REQUIRE(ret == hipErrorStreamCaptureImplicit);
   // Check the capture status of the stream
-  HIP_CHECK(hipStreamIsCapturing(stream, &captureStatus1));
+  HIP_CHECK(hipStreamIsCapturing(stream, &captureStatus1))
   REQUIRE(captureStatus1 == hipStreamCaptureStatusActive);
   // Copy data to Device
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream))
   // Kernal Operations
   hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, stream, A_d,
                      C_d, N);
-  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream))
   // End the capture
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
   REQUIRE(graph != nullptr);
 
   ret = hipStreamIsCapturing(0, &captureStatus2);
@@ -205,20 +205,20 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_ChkNullStrmStatus) {
 
   // Launch graph
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
   // Verify Output
   for (size_t i = 0; i < N; i++) {
     D_h[i] = A_h[i] * A_h[i];
     REQUIRE(C_h[i] == D_h[i]);
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(C_d));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(C_d))
   free(A_h);
   free(C_h);
   free(D_h);

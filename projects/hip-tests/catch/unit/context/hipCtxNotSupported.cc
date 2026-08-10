@@ -54,7 +54,7 @@ HIP_TEST_CASE(Unit_hipDevicePrimaryCtxSetFlags_Negative) {
 HIP_TEST_CASE(Unit_hipDeviceAPIs_not_supported) {
   hipDevice_t device;
   int numDevices = -1;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   auto res = hipGetDeviceCount(&numDevices);
   REQUIRE(res == hipSuccess);
   REQUIRE(numDevices > 0);
@@ -68,7 +68,7 @@ HIP_TEST_CASE(Unit_hipDeviceAPIs_not_supported) {
     }
     SECTION("hipCtxGetDevice_deviceCount") {
       hipDevice_t dev = static_cast<hipDevice_t>(-1);
-      HIP_CHECK(hipCtxGetDevice(&dev));
+      HIP_CHECK(hipCtxGetDevice(&dev))
       // Ensure the returned device ID is within [0, numDevices]
       REQUIRE(dev >= 0);
       REQUIRE(dev < numDevices);
@@ -219,21 +219,21 @@ HIP_TEST_CASE(Unit_hipCtxAPIs_not_supported) {
  */
 HIP_TEST_CASE(Unit_hipDevicePrimaryCtxGetState_Negative) {
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   hipCtx_t primaryCtx = nullptr;
 
   SECTION("Valid device") {
-    HIP_CHECK(hipDevicePrimaryCtxRetain(&primaryCtx, device));
+    HIP_CHECK(hipDevicePrimaryCtxRetain(&primaryCtx, device))
     REQUIRE(primaryCtx != nullptr);
     // Make it current
-    HIP_CHECK(hipCtxSetCurrent(primaryCtx));
+    HIP_CHECK(hipCtxSetCurrent(primaryCtx))
     unsigned int flags = 0;
     int active = 0;
-    HIP_CHECK(hipDevicePrimaryCtxGetState(device, &flags, &active));
+    HIP_CHECK(hipDevicePrimaryCtxGetState(device, &flags, &active))
     // Reset the primary context
-    HIP_CHECK(hipDevicePrimaryCtxReset(device));
+    HIP_CHECK(hipDevicePrimaryCtxReset(device))
     // Release our retain-handle
-    HIP_CHECK(hipDevicePrimaryCtxRelease(device));
+    HIP_CHECK(hipDevicePrimaryCtxRelease(device))
   }
   SECTION("Invalid device") {
     device = -1;

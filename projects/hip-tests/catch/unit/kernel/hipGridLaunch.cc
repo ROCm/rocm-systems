@@ -38,11 +38,11 @@ int test_gl2(size_t N) {
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
   // Full vadd in one large chunk, to get things started:
-  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(vectorADD2, dim3(blocks), dim3(threadsPerBlock), 0, 0, A_d, B_d, C_d, N);
-  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
   // verify
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
@@ -58,11 +58,11 @@ int test_triple_chevron(size_t N) {
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   // Full vadd in one large chunk, to get things started:
-  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
   vectorADD2<<<dim3(blocks), dim3(threadsPerBlock)>>>(A_d, B_d, C_d, N);
-  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
   // verify
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
@@ -122,8 +122,8 @@ __global__ void emptyKernel() {}
 TEST_CASE("Unit_hipGridLaunch_MaxGridDim_DeviceProperties") {
   hipDeviceProp_t deviceProp;
   int device;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&deviceProp, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&deviceProp, device))
 
   unsigned int maxGridX = deviceProp.maxGridSize[0];
   unsigned int maxGridY = deviceProp.maxGridSize[1];
@@ -136,20 +136,20 @@ TEST_CASE("Unit_hipGridLaunch_MaxGridDim_DeviceProperties") {
 
   SECTION("Launch kernel with gridDim.x == maxGridDimX") {
     hipLaunchKernelGGL(emptyKernel, dim3(maxGridX, 1, 1), dim3(1, 1, 1), 0, 0);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   SECTION("Launch kernel with gridDim.y == maxGridDimY") {
     hipLaunchKernelGGL(emptyKernel, dim3(1, maxGridY, 1), dim3(1, 1, 1), 0, 0);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   SECTION("Launch kernel with gridDim.z == maxGridDimZ") {
     hipLaunchKernelGGL(emptyKernel, dim3(1, 1, maxGridZ), dim3(1, 1, 1), 0, 0);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipDeviceSynchronize())
   }
 }
 
@@ -164,20 +164,20 @@ TEST_CASE("Unit_hipGridLaunch_MaxGridDim_GetDeviceAttribute") {
 
   SECTION("Launch kernel with gridDim.x == maxGridDimX using attribute") {
     hipLaunchKernelGGL(emptyKernel, dim3(maxGridX, 1, 1), dim3(1, 1, 1), 0, 0);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   SECTION("Launch kernel with gridDim.y == maxGridDimY using attribute") {
     hipLaunchKernelGGL(emptyKernel, dim3(1, maxGridY, 1), dim3(1, 1, 1), 0, 0);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   SECTION("Launch kernel with gridDim.z == maxGridDimZ using attribute") {
     hipLaunchKernelGGL(emptyKernel, dim3(1, 1, maxGridZ), dim3(1, 1, 1), 0, 0);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipDeviceSynchronize())
   }
 }
 

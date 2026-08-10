@@ -20,13 +20,13 @@ HIP_TEST_CASE(Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Negative_P
   int blockSize = 0;
   int gridSize = 0;
 
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
 
-  HIP_CHECK(hipModuleLoad(&module, "simple_kernel.code"));
-  HIPCHECK(hipModuleGetFunction(&function, module, "SimpleKernel"));
+  HIP_CHECK(hipModuleLoad(&module, "simple_kernel.code"))
+  HIPCHECK(hipModuleGetFunction(&function, module, "SimpleKernel"))
 
   // Get potential blocksize
-  HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, function, 0, 0));
+  HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, function, 0, 0))
 
   // Common negative tests
   MaxActiveBlocksPerMultiprocessorNegative(
@@ -36,7 +36,7 @@ HIP_TEST_CASE(Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Negative_P
       },
       blockSize);
 
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
 }
 
 HIP_TEST_CASE(Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Positive_RangeValidation) {
@@ -46,16 +46,16 @@ HIP_TEST_CASE(Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Positive_R
   int blockSize = 0;
   int gridSize = 0;
 
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
 
-  HIP_CHECK(hipModuleLoad(&module, "simple_kernel.code"));
-  HIPCHECK(hipModuleGetFunction(&function, module, "SimpleKernel"));
+  HIP_CHECK(hipModuleLoad(&module, "simple_kernel.code"))
+  HIPCHECK(hipModuleGetFunction(&function, module, "SimpleKernel"))
 
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
 
   SECTION("dynSharedMemPerBlk = 0") {
     // Get potential blocksize
-    HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, function, 0, 0));
+    HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, function, 0, 0))
 
     MaxActiveBlocksPerMultiprocessor(
         [blockSize, &function](int* numBlocks) {
@@ -77,7 +77,7 @@ HIP_TEST_CASE(Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Positive_R
         blockSize, devProp.maxThreadsPerMultiProcessor);
   }
 
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
 }
 
 /**
@@ -93,13 +93,13 @@ HIP_TEST_CASE(Unit_OccupancyAPIs_StreamCapture) {
   GENERATE_CAPTURE();
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   hipModule_t module;
-  HIP_CHECK(hipModuleLoad(&module, "simple_kernel.code"));
+  HIP_CHECK(hipModuleLoad(&module, "simple_kernel.code"))
   REQUIRE(module != nullptr);
   hipFunction_t function;
-  HIP_CHECK(hipModuleGetFunction(&function, module, "SimpleKernel"));
+  HIP_CHECK(hipModuleGetFunction(&function, module, "SimpleKernel"))
   REQUIRE(function != nullptr);
 
   BEGIN_CAPTURE(stream);
@@ -121,7 +121,7 @@ HIP_TEST_CASE(Unit_OccupancyAPIs_StreamCapture) {
   REQUIRE(numBlocks > 0);
 
   gridSize = 0, blockSize = 0;
-  HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, function, 0, 0));
+  HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, function, 0, 0))
   REQUIRE(gridSize > 0);
   REQUIRE(blockSize > 0);
 
@@ -133,7 +133,7 @@ HIP_TEST_CASE(Unit_OccupancyAPIs_StreamCapture) {
   REQUIRE(blockSize > 0);
 
   numBlocks = 0;
-  HIP_CHECK(hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks, function, blockSize, 0));
+  HIP_CHECK(hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks, function, blockSize, 0))
   REQUIRE(numBlocks > 0);
 
   numBlocks = 0;
@@ -143,6 +143,6 @@ HIP_TEST_CASE(Unit_OccupancyAPIs_StreamCapture) {
 
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipStreamDestroy(stream))
 }

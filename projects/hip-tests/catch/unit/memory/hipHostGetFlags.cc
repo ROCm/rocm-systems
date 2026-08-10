@@ -80,8 +80,8 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_flagCombos) {
 
   hipDeviceProp_t prop;
   int device{};
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&prop, device))
 
   // Skip test if device does not support the property canMapHostMemory
   if (prop.canMapHostMemory != 1) {
@@ -89,14 +89,14 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_flagCombos) {
   } else {
     // Allocate using the generated flags combos
     INFO("Flag passed when allocating: 0x" << std::hex << FlagComp << "\n");
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), SIZE, FlagComp));
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), SIZE, FlagComp))
     unsigned int flagA{};
 
     // get the flags from allocations and check if they are the same as the one set
-    HIP_CHECK(hipHostGetFlags(&flagA, A_h));
+    HIP_CHECK(hipHostGetFlags(&flagA, A_h))
 
     checkFlags(FlagComp, flagA);
-    HIP_CHECK(hipHostFree(A_h));
+    HIP_CHECK(hipHostFree(A_h))
   }
 }
 
@@ -113,8 +113,8 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_DifferentThreads) {
 
   hipDeviceProp_t prop;
   int device{};
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&prop, device))
   if (prop.canMapHostMemory != 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
   } else {
@@ -124,11 +124,11 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_DifferentThreads) {
     malloc_thread.join();
     HIP_CHECK_THREAD_FINALIZE();
     unsigned int flagA{};
-    HIP_CHECK(hipHostGetFlags(&flagA, A_h));
+    HIP_CHECK(hipHostGetFlags(&flagA, A_h))
 
     checkFlags(FlagComp, flagA);
 
-    HIP_CHECK(hipHostFree(A_h));
+    HIP_CHECK(hipHostFree(A_h))
   }
 }
 
@@ -139,8 +139,8 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_InvalidArgs) {
 
   hipDeviceProp_t prop;
   int device{};
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&prop, device))
 
   // Skip test if device does not support the property canMapHostMemory
   if (prop.canMapHostMemory != 1) {
@@ -151,7 +151,7 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_InvalidArgs) {
       unsigned int FlagComp = 0x0;
 
       // Allocate using the generated flags combos
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), SIZE, FlagComp));
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), SIZE, FlagComp))
 
       // use a nullptr to return flags to
       unsigned int* flagA = nullptr;
@@ -159,14 +159,14 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_InvalidArgs) {
       // get the flags from allocations and check if they are the same as the one set
       HIP_CHECK_ERROR(hipHostGetFlags(flagA, A_h), hipErrorInvalidValue);
 
-      HIP_CHECK(hipHostFree(A_h));
+      HIP_CHECK(hipHostFree(A_h))
     }
 
     SECTION("Device ptr allocated with hipMalloc passed to hipHostGetFlags") {
       unsigned int FlagComp = 0x4;
 
       // Allocate memory on device
-      HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_h), SIZE));
+      HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_h), SIZE))
 
       unsigned int flagA{};
 
@@ -175,7 +175,7 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_InvalidArgs) {
       INFO("Flag passed when allocating: " << std::hex << FlagComp << " Returned flag: " << std::hex
                                            << flagA << "\n");
 
-      HIP_CHECK(hipFree(A_h));
+      HIP_CHECK(hipFree(A_h))
     }
 
     SECTION("Ptr from hipHostGetDevicePointer passed to hipHostGetFlags") {
@@ -183,13 +183,13 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_InvalidArgs) {
 
       int* A_d{nullptr};
       // Allocate memory on device
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), SIZE, FlagComp));
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), SIZE, FlagComp))
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
 
       unsigned int flagA;
 
       // get the flags from allocations and check if they are the same as the one set
-      HIP_CHECK(hipHostGetFlags(&flagA, A_d));
+      HIP_CHECK(hipHostGetFlags(&flagA, A_d))
       INFO("Flag passed when allocating: " << std::hex << FlagComp << " Returned flag: " << std::hex
                                            << flagA << "\n");
 #if HT_NVIDIA
@@ -197,7 +197,7 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_InvalidArgs) {
       FlagComp = FlagComp | hipHostMallocMapped;
 #endif
       REQUIRE(flagA == FlagComp);
-      HIP_CHECK(hipHostFree(A_h));
+      HIP_CHECK(hipHostFree(A_h))
     }
   }
 }
@@ -207,16 +207,16 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_Capture) {
   void* host_ptr = nullptr;
   constexpr size_t kAllocSize = 1024;
 
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&host_ptr), kAllocSize));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&host_ptr), kAllocSize))
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipHostGetFlags(&host_flags, host_ptr));
+  HIP_CHECK(hipHostGetFlags(&host_flags, host_ptr))
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipHostFree(host_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipHostFree(host_ptr))
+  HIP_CHECK(hipStreamDestroy(stream))
 }

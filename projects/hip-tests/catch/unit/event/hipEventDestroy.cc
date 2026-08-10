@@ -32,9 +32,9 @@ static inline void launchVectorAdd(float*& A_h, float*& B_h, float*& C_h,
   float* B_d{nullptr};
   float* C_d{nullptr};
   HipTest::initArraysForHost(&A_h, &B_h, &C_h, vectorSize, true);
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&B_d), B_h, 0));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&C_d), C_h, 0));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&B_d), B_h, 0))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&C_d), C_h, 0))
   LaunchDelayKernel(delay, stream);
   HipTest::vectorADD<<<1, 1, 0, stream>>>(A_d, B_d, C_d, vectorSize);
 }
@@ -54,17 +54,17 @@ static inline void launchVectorAdd(float*& A_h, float*& B_h, float*& C_h,
 HIP_TEST_CASE(Unit_hipEventDestroy_Unfinished) {
   hipEvent_t event;
 
-  HIP_CHECK(hipEventCreate(&event));
+  HIP_CHECK(hipEventCreate(&event))
 
   float *A_h, *B_h, *C_h;
   launchVectorAdd(A_h, B_h, C_h,
                   std::chrono::milliseconds(isQuickLevel() ? 100 : 1000));
 
-  HIP_CHECK(hipEventRecord(event));
+  HIP_CHECK(hipEventRecord(event))
   HIP_CHECK_ERROR(hipEventQuery(event), hipErrorNotReady);
-  HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipEventDestroy(event))
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   HipTest::checkVectorADD(A_h, B_h, C_h, vectorSize);
   HipTest::freeArraysForHost(A_h, B_h, C_h, true);
 }
@@ -83,21 +83,21 @@ HIP_TEST_CASE(Unit_hipEventDestroy_Unfinished) {
  */
 HIP_TEST_CASE(Unit_hipEventDestroy_WithWaitingStream) {
   hipEvent_t event;
-  HIP_CHECK(hipEventCreate(&event));
+  HIP_CHECK(hipEventCreate(&event))
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   float *A_h, *B_h, *C_h;
   launchVectorAdd(A_h, B_h, C_h, std::chrono::milliseconds(1000), stream);
 
-  HIP_CHECK(hipEventRecord(event, stream));
+  HIP_CHECK(hipEventRecord(event, stream))
   HIP_CHECK_ERROR(hipEventQuery(event), hipErrorNotReady);
   HIP_CHECK_ERROR(hipStreamQuery(stream), hipErrorNotReady);
-  HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipEventDestroy(event))
   HIP_CHECK_ERROR(hipStreamQuery(stream), hipErrorNotReady);
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipStreamDestroy(stream))
 
   HipTest::checkVectorADD(A_h, B_h, C_h, vectorSize);
   HipTest::freeArraysForHost(A_h, B_h, C_h, true);
@@ -128,20 +128,20 @@ HIP_TEST_CASE(Unit_hipEventDestroy_Negative) {
 
 HIP_TEST_CASE(Unit_hipEventDestroy_Verify_Capture) {
   hipEvent_t event;
-  HIP_CHECK(hipEventCreate(&event));
+  HIP_CHECK(hipEventCreate(&event))
   REQUIRE(event != nullptr);
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   hipStreamCaptureMode mode = GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
                                        hipStreamCaptureModeRelaxed);
-  HIP_CHECK(hipStreamBeginCapture(stream, mode));
-  HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipStreamBeginCapture(stream, mode))
+  HIP_CHECK(hipEventDestroy(event))
   hipGraph_t graph;
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**

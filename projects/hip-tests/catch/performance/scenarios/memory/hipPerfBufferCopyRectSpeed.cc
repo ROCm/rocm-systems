@@ -80,41 +80,41 @@ static bool hipPerfBufferCopyRectSpeed_test(int p_tests) {
     numIter = Iterations[test / (NUM_SIZES * NUM_SUBTESTS)];
 
     if (hostMalloc[0]) {
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&srcBuffer), bufSize_, 0));
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&srcBuffer), bufSize_, 0))
       setData(srcBuffer, bufSize_, 0xd0);
     } else if (hostRegister[0]) {
       memptr[0] = malloc(bufSize_ + 4096);
       alignedmemptr[0] = reinterpret_cast<void*>(memptr[0]);
       srcBuffer = alignedmemptr[0];
       setData(srcBuffer, bufSize_, 0xd0);
-      HIP_CHECK(hipHostRegister(srcBuffer, bufSize_, 0));
+      HIP_CHECK(hipHostRegister(srcBuffer, bufSize_, 0))
     } else if (unpinnedMalloc[0]) {
       memptr[0] = malloc(bufSize_ + 4096);
       alignedmemptr[0] = reinterpret_cast<void*>(memptr[0]);
       srcBuffer = alignedmemptr[0];
       setData(srcBuffer, bufSize_, 0xd0);
     } else {
-      HIP_CHECK(hipMalloc(&srcBuffer, bufSize_));
-      HIP_CHECK(hipMemset(srcBuffer, 0xd0, bufSize_));
+      HIP_CHECK(hipMalloc(&srcBuffer, bufSize_))
+      HIP_CHECK(hipMemset(srcBuffer, 0xd0, bufSize_))
     }
 
     if (hostMalloc[1]) {
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&dstBuffer), bufSize_, 0));
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&dstBuffer), bufSize_, 0))
     } else if (hostRegister[1]) {
       memptr[1] = malloc(bufSize_ + 4096);
       alignedmemptr[1] = reinterpret_cast<void*>(memptr[0]);
       dstBuffer = alignedmemptr[1];
-      HIP_CHECK(hipHostRegister(dstBuffer, bufSize_, 0));
+      HIP_CHECK(hipHostRegister(dstBuffer, bufSize_, 0))
     } else if (unpinnedMalloc[1]) {
       memptr[1] = malloc(bufSize_ + 4096);
       alignedmemptr[1] = reinterpret_cast<void*>(memptr[0]);
       dstBuffer = alignedmemptr[1];
     } else {
-      HIP_CHECK(hipMalloc(&dstBuffer, bufSize_));
+      HIP_CHECK(hipMalloc(&dstBuffer, bufSize_))
     }
 
     //  warm up
-    HIP_CHECK(hipMemcpy2D(dstBuffer, width, srcBuffer, width, width, width, hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy2D(dstBuffer, width, srcBuffer, width, width, width, hipMemcpyDefault))
 
     // measure performance based on host time
     auto all_start = std::chrono::steady_clock::now();
@@ -123,7 +123,7 @@ static bool hipPerfBufferCopyRectSpeed_test(int p_tests) {
       HIP_CHECK(hipMemcpy2DAsync(dstBuffer, width, srcBuffer, width, width, width, hipMemcpyDefault,
                                  NULL));
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     auto all_end = std::chrono::steady_clock::now();
     std::chrono::duration<double> elapsed_secs = all_end - all_start;
@@ -166,26 +166,26 @@ static bool hipPerfBufferCopyRectSpeed_test(int p_tests) {
 
     //  Free src
     if (hostMalloc[0]) {
-      HIP_CHECK(hipHostFree(srcBuffer));
+      HIP_CHECK(hipHostFree(srcBuffer))
     } else if (hostRegister[0]) {
-      HIP_CHECK(hipHostUnregister(srcBuffer));
+      HIP_CHECK(hipHostUnregister(srcBuffer))
       free(memptr[0]);
     } else if (unpinnedMalloc[0]) {
       free(memptr[0]);
     } else {
-      HIP_CHECK(hipFree(srcBuffer));
+      HIP_CHECK(hipFree(srcBuffer))
     }
 
     //  Free dst
     if (hostMalloc[1]) {
-      HIP_CHECK(hipHostFree(dstBuffer));
+      HIP_CHECK(hipHostFree(dstBuffer))
     } else if (hostRegister[1]) {
-      HIP_CHECK(hipHostUnregister(dstBuffer));
+      HIP_CHECK(hipHostUnregister(dstBuffer))
       free(memptr[1]);
     } else if (unpinnedMalloc[1]) {
       free(memptr[1]);
     } else {
-      HIP_CHECK(hipFree(dstBuffer));
+      HIP_CHECK(hipFree(dstBuffer))
     }
   }
   return true;
@@ -205,15 +205,15 @@ static bool hipPerfBufferCopyRectSpeed_test(int p_tests) {
 
 HIP_TEST_CASE(Performance_hipPerfBufferCopyRectSpeed_test) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   if (numDevices <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   } else {
     int deviceId = 0;
-    HIP_CHECK(hipSetDevice(deviceId));
+    HIP_CHECK(hipSetDevice(deviceId))
     hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+    HIP_CHECK(hipGetDeviceProperties(&props, deviceId))
 
     CONSOLE_PRINT(
         "hipPerfBufferCopyRectSpeed - info: Set device to %d : %s Legend: unp - unpinned(malloc), "

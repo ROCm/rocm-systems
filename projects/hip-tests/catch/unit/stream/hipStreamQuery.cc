@@ -17,9 +17,9 @@ HIP_TEST_CASE(Unit_hipStreamQuery_WithNoWork) {
   SECTION("Null Stream") { HIP_CHECK(hipStreamQuery(stream)); }
 
   SECTION("Created Stream") {
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipStreamQuery(stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamCreate(&stream))
+    HIP_CHECK(hipStreamQuery(stream))
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 
@@ -32,18 +32,18 @@ HIP_TEST_CASE(Unit_hipStreamQuery_WithFinishedWork) {
 
   SECTION("Null Stream") {
     hip::stream::empty_kernel<<<dim3(1), dim3(1), 0, stream>>>();
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
 
-    HIP_CHECK(hipStreamQuery(stream));
+    HIP_CHECK(hipStreamQuery(stream))
   }
 
   SECTION("Created Stream") {
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     hip::stream::empty_kernel<<<dim3(1), dim3(1), 0, stream>>>();
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
 
-    HIP_CHECK(hipStreamQuery(stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamQuery(stream))
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 
@@ -57,14 +57,14 @@ HIP_TEST_CASE(Unit_hipStreamQuery_WithFinishedWork) {
 HIP_TEST_CASE(Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream) {
   {
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
 
-    HIP_CHECK(hipStreamQuery(hip::nullStream));
+    HIP_CHECK(hipStreamQuery(hip::nullStream))
     LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 500), stream);
     HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 
@@ -74,11 +74,11 @@ HIP_TEST_CASE(Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream) {
  *
  */
 HIP_TEST_CASE(Unit_hipStreamQuery_NullStreamQuery) {
-  HIP_CHECK(hipStreamQuery(hip::nullStream));
+  HIP_CHECK(hipStreamQuery(hip::nullStream))
   LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 500), hip::nullStream);
   HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
 
-  HIP_CHECK(hipStreamSynchronize(hip::nullStream));
+  HIP_CHECK(hipStreamSynchronize(hip::nullStream))
 }
 
 /**
@@ -87,13 +87,13 @@ HIP_TEST_CASE(Unit_hipStreamQuery_NullStreamQuery) {
  **/
 HIP_TEST_CASE(Unit_hipStreamQuery_WithPendingWork) {
   hipStream_t waitingStream{nullptr};
-  HIP_CHECK(hipStreamCreate(&waitingStream));
+  HIP_CHECK(hipStreamCreate(&waitingStream))
 
   LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 500), waitingStream);
   HIP_CHECK_ERROR(hipStreamQuery(waitingStream), hipErrorNotReady);
-  HIP_CHECK(hipStreamSynchronize(waitingStream));
-  HIP_CHECK(hipStreamQuery(waitingStream));
+  HIP_CHECK(hipStreamSynchronize(waitingStream))
+  HIP_CHECK(hipStreamQuery(waitingStream))
 
-  HIP_CHECK(hipStreamDestroy(waitingStream));
+  HIP_CHECK(hipStreamDestroy(waitingStream))
 }
 #endif

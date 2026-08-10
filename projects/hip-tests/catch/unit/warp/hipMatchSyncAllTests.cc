@@ -38,26 +38,26 @@ template <typename T> static void runTestMatchAll_1() {
   T* d_Input;
   unsigned long long* d_Output;
   int* d_Predicate;
-  HIP_CHECK(hipMalloc(&d_Input, sizeof(T) * size));
-  HIP_CHECK(hipMalloc(&d_Output, 8 * size));
-  HIP_CHECK(hipMalloc(&d_Predicate, 4 * size));
+  HIP_CHECK(hipMalloc(&d_Input, sizeof(T) * size))
+  HIP_CHECK(hipMalloc(&d_Output, 8 * size))
+  HIP_CHECK(hipMalloc(&d_Predicate, 4 * size))
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, sizeof(T) * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, sizeof(T) * size, hipMemcpyDefault))
   hipLaunchKernelGGL(matchAll_1<T>, 1, warpSize, 0, 0, d_Input, d_Output, d_Predicate);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 8 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 8 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareMaskEqual(Output, Expected, i, warpSize));
   }
 
-  HIP_CHECK(hipMemcpy(&Predicate, d_Predicate, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Predicate, d_Predicate, 4 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Predicate[i] == ExpPredicate[i]);
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
-  HIP_CHECK(hipFree(d_Predicate));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
+  HIP_CHECK(hipFree(d_Predicate))
 }
 
 template <typename T>
@@ -98,26 +98,26 @@ template <typename T> static void runTestMatchAll_2() {
   T* d_Input;
   unsigned long long* d_Output;
   int* d_Predicate;
-  HIP_CHECK(hipMalloc(&d_Input, sizeof(T) * size));
-  HIP_CHECK(hipMalloc(&d_Output, 8 * size));
-  HIP_CHECK(hipMalloc(&d_Predicate, 4 * size));
+  HIP_CHECK(hipMalloc(&d_Input, sizeof(T) * size))
+  HIP_CHECK(hipMalloc(&d_Output, 8 * size))
+  HIP_CHECK(hipMalloc(&d_Predicate, 4 * size))
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, sizeof(T) * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, sizeof(T) * size, hipMemcpyDefault))
   hipLaunchKernelGGL(matchAll_2<T>, 1, warpSize, 0, 0, d_Input, d_Output, d_Predicate);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 8 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 8 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareMaskEqual(Output, Expected, i, warpSize));
   }
 
-  HIP_CHECK(hipMemcpy(&Predicate, d_Predicate, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Predicate, d_Predicate, 4 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Predicate[i] == ExpPredicate[i]);
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
-  HIP_CHECK(hipFree(d_Predicate));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
+  HIP_CHECK(hipFree(d_Predicate))
 }
 
 template <typename T>
@@ -221,26 +221,26 @@ template <typename T> static void runTestMatchAll_3() {
   T* d_Input;
   unsigned long long* d_Output;
   int* d_Predicate;
-  HIP_CHECK(hipMalloc(&d_Input, sizeof(T) * size));
-  HIP_CHECK(hipMalloc(&d_Output, 8 * size));
-  HIP_CHECK(hipMalloc(&d_Predicate, 4 * size));
+  HIP_CHECK(hipMalloc(&d_Input, sizeof(T) * size))
+  HIP_CHECK(hipMalloc(&d_Output, 8 * size))
+  HIP_CHECK(hipMalloc(&d_Predicate, 4 * size))
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, sizeof(T) * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, sizeof(T) * size, hipMemcpyDefault))
   hipLaunchKernelGGL(matchAll_3<T>, 1, warpSize, 0, 0, d_Input, d_Output, d_Predicate);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 8 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 8 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareMaskEqual(Output, Expected, i, warpSize));
   }
 
-  HIP_CHECK(hipMemcpy(&Predicate, d_Predicate, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Predicate, d_Predicate, 4 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Predicate[i] == ExpPredicate[i]);
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
-  HIP_CHECK(hipFree(d_Predicate));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
+  HIP_CHECK(hipFree(d_Predicate))
 }
 
 __global__ void matchAll_4(int* Input, int* Output) {
@@ -279,10 +279,10 @@ static void runTestMatchAll_4() {
 
   int* d_Input;
   int* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, Input.size() * sizeof(Input[0])));
-  HIP_CHECK(hipMalloc(&d_Output, Output.size() * sizeof(Output[0])));
+  HIP_CHECK(hipMalloc(&d_Input, Input.size() * sizeof(Input[0])))
+  HIP_CHECK(hipMalloc(&d_Output, Output.size() * sizeof(Output[0])))
 
-  HIP_CHECK(hipMemcpy(d_Input, Input.data(), Input.size() * sizeof(Input[0]), hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, Input.data(), Input.size() * sizeof(Input[0]), hipMemcpyDefault))
   hipLaunchKernelGGL(matchAll_4, 1, warpSize, 0, 0, d_Input, d_Output);
 
   HIP_CHECK(
@@ -291,8 +291,8 @@ static void runTestMatchAll_4() {
     REQUIRE(Output[i] == Expected[i]);
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 /**

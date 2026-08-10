@@ -65,7 +65,7 @@ HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetAddressMode_SetGetAddressMod
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipTexRefSetAddressMode is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   hipTextureAddressMode returned = hipAddressModeWrap;
   const hipError_t get_status = hipTexRefGetAddressMode(&returned, &tex_ref, 0);
@@ -73,7 +73,7 @@ HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetAddressMode_SetGetAddressMod
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipTexRefGetAddressMode is not supported by this runtime path.");
   }
-  HIP_CHECK(get_status);
+  HIP_CHECK(get_status)
 
   REQUIRE(returned == hipAddressModeMirror);
 }
@@ -89,7 +89,7 @@ HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetFilterMode_SetGetFilterMode_
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipTexRefSetFilterMode is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   hipTextureFilterMode returned = hipFilterModePoint;
   const hipError_t get_status = hipTexRefGetFilterMode(&returned, &tex_ref);
@@ -97,7 +97,7 @@ HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetFilterMode_SetGetFilterMode_
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipTexRefGetFilterMode is not supported by this runtime path.");
   }
-  HIP_CHECK(get_status);
+  HIP_CHECK(get_status)
 
   REQUIRE(returned == hipFilterModeLinear);
 }
@@ -113,7 +113,7 @@ HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetFlags_SetGetFlags_RoundTrips
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipTexRefSetFlags is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   unsigned int returned = 0;
   const hipError_t get_status = hipTexRefGetFlags(&returned, &tex_ref);
@@ -121,7 +121,7 @@ HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetFlags_SetGetFlags_RoundTrips
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipTexRefGetFlags is not supported by this runtime path.");
   }
-  HIP_CHECK(get_status);
+  HIP_CHECK(get_status)
 
   REQUIRE(returned == flags);
 }
@@ -138,7 +138,7 @@ HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetFormat_SetGetFormat_RoundTri
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipTexRefSetFormat is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   hipArray_Format returned_format = HIP_AD_FORMAT_UNSIGNED_INT8;
   int returned_channels = 0;
@@ -148,7 +148,7 @@ HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetFormat_SetGetFormat_RoundTri
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipTexRefGetFormat is not supported by this runtime path.");
   }
-  HIP_CHECK(get_status);
+  HIP_CHECK(get_status)
 
   REQUIRE(returned_format == format);
   REQUIRE(returned_channels == num_channels);
@@ -165,7 +165,7 @@ HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetMaxAnisotropy_SetGetMaxAniso
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipTexRefSetMaxAnisotropy is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   int returned = 0;
   const hipError_t get_status = hipTexRefGetMaxAnisotropy(&returned, &tex_ref);
@@ -173,7 +173,7 @@ HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetMaxAnisotropy_SetGetMaxAniso
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipTexRefGetMaxAnisotropy is not supported by this runtime path.");
   }
-  HIP_CHECK(get_status);
+  HIP_CHECK(get_status)
 
   REQUIRE(returned == static_cast<int>(max_aniso));
 }

@@ -32,7 +32,7 @@ template <typename T> void runAsyncTests(hipStream_t stream, allocType type, mem
   memsetCheck(aPtr.first, testValue1, memType, data1, stream);
   memsetCheck(aPtr.first, testValue2, memType, data2, stream);
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   verifyData(aPtr.first, testValue1, data1, type, memType);
   verifyData(aPtr.first, testValue2, data2, type, memType);
 

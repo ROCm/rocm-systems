@@ -40,17 +40,17 @@ HIP_TEST_CASE(Unit_hipMemsetD2D32_BasicFunctional) {
   hipDeviceptr_t A_d;
 
   std::vector<int>A_h(sizeElements, 1);
-  HIP_CHECK(hipMemAllocPitch(&A_d, &pitch_A, width, numH, sizeof(int)));
+  HIP_CHECK(hipMemAllocPitch(&A_d, &pitch_A, width, numH, sizeof(int)))
 
-  HIP_CHECK(hipMemsetD2D32(A_d, pitch_A, memsetval, width, numH));
-  HIP_CHECK(hipMemcpy2D(A_h.data(), width, reinterpret_cast<void *>(A_d), pitch_A, width, numH, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemsetD2D32(A_d, pitch_A, memsetval, width, numH))
+  HIP_CHECK(hipMemcpy2D(A_h.data(), width, reinterpret_cast<void *>(A_d), pitch_A, width, numH, hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < sizeElements; i++) {
     INFO("Memset2D mismatch at index:" << i << " computed:" << A_h[i]
                                        << " memsetval:" << memsetval);
     REQUIRE(A_h[i] == memsetval);
   }
-  HIP_CHECK(hipFree(reinterpret_cast<void *>(A_d)));
+  HIP_CHECK(hipFree(reinterpret_cast<void *>(A_d)))
 }
 /**
  * Test Description
@@ -78,7 +78,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D32_UnEvenRowsCols) {
   HIP_CHECK(hipMemAllocPitch(&A_d, &devPitch, sizeof(int) * cols, rows,
                              sizeof(int)));
 
-  HIP_CHECK(hipMemsetD2D32(A_d, devPitch, memsetval, sizeof(int) * cols, rows));
+  HIP_CHECK(hipMemsetD2D32(A_d, devPitch, memsetval, sizeof(int) * cols, rows))
   HIP_CHECK(hipMemcpy2D(B_h.data(), sizeof(int) * cols, reinterpret_cast<void *>(A_d), devPitch, sizeof(int) * cols, rows,
                         hipMemcpyDeviceToHost));
 
@@ -89,7 +89,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D32_UnEvenRowsCols) {
       REQUIRE(B_h[i * cols + j] == memsetval);
     }
   }
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)))
 }
 /**
  * Test Description
@@ -109,7 +109,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D32_NegTsts) {
   size_t width = numW * sizeof(int);
   size_t devPitch;
   constexpr int memsetval = static_cast<int>(0x26);
-  HIP_CHECK(hipMemAllocPitch(&A_d, &devPitch, width, numH, sizeof(int)));
+  HIP_CHECK(hipMemAllocPitch(&A_d, &devPitch, width, numH, sizeof(int)))
   SECTION("nullptr destination") {
     HIP_CHECK_ERROR(hipMemsetD2D32(NULL, devPitch, memsetval, numW, numH), hipErrorInvalidValue);
   }
@@ -133,7 +133,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D32_NegTsts) {
     HIP_CHECK_ERROR(hipMemsetD2D32(A_d, devPitch, memsetval, numW, -10), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipMemsetD2D32(A_d, devPitch, memsetval, -10, numH), hipErrorInvalidValue);
   }
-  HIP_CHECK(hipFree(reinterpret_cast<void *>(A_d)));
+  HIP_CHECK(hipFree(reinterpret_cast<void *>(A_d)))
 }
 /**
  * End doxygen group MemoryTest.

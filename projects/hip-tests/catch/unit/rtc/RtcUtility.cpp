@@ -101,7 +101,7 @@ int calling_combination_function(std::vector<std::string> combi_vec_list) {
     } else if (combi_vec_list[i] == "architecture") {
       std::string retrived_CO = get_string_parameters("compiler_option", "architecture");
       hipDeviceProp_t prop;
-      HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+      HIP_CHECK(hipGetDeviceProperties(&prop, 0))
       std::string actual_architecture = prop.gcnArchName;
       std::string complete_CO = retrived_CO + actual_architecture;
       hold_CO[i] = complete_CO;

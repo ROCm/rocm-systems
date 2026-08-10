@@ -34,12 +34,12 @@
 HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Negative_Open_In_Creating_Process) {
   hipDeviceptr_t ptr1, ptr2;
   hipIpcMemHandle_t handle;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptr1), 1024));
-  HIP_CHECK(hipIpcGetMemHandle(&handle, reinterpret_cast<void*>(ptr1)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptr1), 1024))
+  HIP_CHECK(hipIpcGetMemHandle(&handle, reinterpret_cast<void*>(ptr1)))
   HIP_CHECK_ERROR(
       hipIpcOpenMemHandle(reinterpret_cast<void**>(&ptr2), handle, hipIpcMemLazyEnablePeerAccess),
       hipErrorInvalidContext);
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(ptr1)));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(ptr1)))
 }
 
 
@@ -80,9 +80,9 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Negative_Open_In_Two_Contexts_Same_Device
     HIP_CHECK(hipIpcOpenMemHandle(reinterpret_cast<void**>(&ptr_child), handle,
                                   hipIpcMemLazyEnablePeerAccess));
 
-    HIP_CHECK(hipInit(0));
+    HIP_CHECK(hipInit(0))
     hipCtx_t ctx;
-    HIP_CHECK(hipCtxCreate(&ctx, 0, 0));
+    HIP_CHECK(hipCtxCreate(&ctx, 0, 0))
 
     hipDeviceptr_t ptr_child_ctx;
     HIP_CHECK_ERROR(hipIpcOpenMemHandle(reinterpret_cast<void**>(&ptr_child_ctx), handle,
@@ -95,15 +95,15 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Negative_Open_In_Two_Contexts_Same_Device
 
     hipDeviceptr_t ptr;
     hipIpcMemHandle_t handle;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptr), 1024));
-    HIP_CHECK(hipIpcGetMemHandle(&handle, reinterpret_cast<void*>(ptr)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptr), 1024))
+    HIP_CHECK(hipIpcGetMemHandle(&handle, reinterpret_cast<void*>(ptr)))
 
     REQUIRE(write(fd[1], &handle, sizeof(handle)) >= 0);
     REQUIRE(close(fd[1]) == 0);
 
     REQUIRE(wait(NULL) >= 0);
 
-    HIP_CHECK(hipFree(reinterpret_cast<void*>(ptr)));
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(ptr)))
   }
 }
 #endif
@@ -158,16 +158,16 @@ static hipIpcMemHandle_t hexToIpcHandle(const std::string& hex_str) {
  */
 HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc) {
   int* d_buf;
-  HIP_CHECK(hipMalloc(&d_buf, BYTE_SIZE));
+  HIP_CHECK(hipMalloc(&d_buf, BYTE_SIZE))
 
   std::vector<int> h_buf(DATA_SIZE);
   for (int i = 0; i < DATA_SIZE; i++) {
     h_buf[i] = i % 1024;
   }
-  HIP_CHECK(hipMemcpy(d_buf, h_buf.data(), BYTE_SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_buf, h_buf.data(), BYTE_SIZE, hipMemcpyHostToDevice))
 
   hipIpcMemHandle_t handle;
-  HIP_CHECK(hipIpcGetMemHandle(&handle, d_buf));
+  HIP_CHECK(hipIpcGetMemHandle(&handle, d_buf))
 
   std::string hex = ipcHandleToHex(handle);
 
@@ -176,13 +176,13 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc) {
   REQUIRE(child.spawn("Unit_hipIpcOpenMemHandle_Multiproc_Child") == 0);
   REQUIRE(child.wait() == 0);
 
-  HIP_CHECK(hipMemcpy(h_buf.data(), d_buf, BYTE_SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(h_buf.data(), d_buf, BYTE_SIZE, hipMemcpyDeviceToHost))
   for (int i = 0; i < DATA_SIZE; i++) {
     int expected = (i % 1024) * (i % 1024);
     REQUIRE(h_buf[i] == expected);
   }
 
-  HIP_CHECK(hipFree(d_buf));
+  HIP_CHECK(hipFree(d_buf))
 }
 
 /**
@@ -208,20 +208,20 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc_Child) {
   hipIpcMemHandle_t handle = hexToIpcHandle(hex);
 
   void* devPtr = nullptr;
-  HIP_CHECK(hipIpcOpenMemHandle(&devPtr, handle, hipIpcMemLazyEnablePeerAccess));
+  HIP_CHECK(hipIpcOpenMemHandle(&devPtr, handle, hipIpcMemLazyEnablePeerAccess))
 
   square_kernel<<<dim3(DATA_SIZE / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK)>>>(
       reinterpret_cast<int*>(devPtr));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   std::vector<int> result(DATA_SIZE);
-  HIP_CHECK(hipMemcpy(result.data(), devPtr, BYTE_SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(result.data(), devPtr, BYTE_SIZE, hipMemcpyDeviceToHost))
   for (int i = 0; i < DATA_SIZE; i++) {
     int expected = (i % 1024) * (i % 1024);
     REQUIRE(result[i] == expected);
   }
 
-  HIP_CHECK(hipIpcCloseMemHandle(devPtr));
+  HIP_CHECK(hipIpcCloseMemHandle(devPtr))
 }
 
 /**

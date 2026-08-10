@@ -23,20 +23,20 @@ void GraphMemcpyFromSymbolShell(void* symbol, size_t offset, const std::vector<T
   const auto f = [](void* dst, const void* symbol, size_t count, size_t offset,
                     hipMemcpyKind direction) {
     hipGraph_t graph = nullptr;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
 
     hipGraphNode_t node = nullptr;
     HIP_CHECK(hipGraphAddMemcpyNodeFromSymbol(&node, graph, nullptr, 0, dst, symbol, count, offset,
                                               direction));
 
     hipGraphExec_t graph_exec = nullptr;
-    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
-    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread))
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
 
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec))
+    HIP_CHECK(hipGraphDestroy(graph))
 
     return hipSuccess;
   };
@@ -115,7 +115,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_Positive_Basic) {
 HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   int var = 0;
   hipGraphNode_t node = nullptr;
@@ -129,7 +129,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_Negative_Parameters) {
       std::bind(hipGraphAddMemcpyNodeFromSymbol, &node, graph, nullptr, 0, _1, _2, _3, _4, _5),
       &var, SYMBOL(int_device_var), sizeof(var));
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**

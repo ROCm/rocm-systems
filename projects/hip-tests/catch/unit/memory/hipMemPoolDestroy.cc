@@ -46,15 +46,15 @@ HIP_TEST_CASE(Unit_hipMemPoolDestroy_Negative_Parameter) {
     kPoolProps.location.type = hipMemLocationTypeDevice;
     kPoolProps.location.id = 0;
     kPoolProps.win32SecurityAttributes = nullptr;
-    HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps));
-    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+    HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps))
+    HIP_CHECK(hipMemPoolDestroy(mem_pool))
     HIP_CHECK_ERROR(hipMemPoolDestroy(mem_pool), hipErrorInvalidValue);
   }
 
   SECTION("Attempt to destroy default mempool") {
     hipMemPool_t default_mem_pool = nullptr;
     int device = 0;
-    HIP_CHECK(hipDeviceGetDefaultMemPool(&default_mem_pool, device));
+    HIP_CHECK(hipDeviceGetDefaultMemPool(&default_mem_pool, device))
     HIP_CHECK_ERROR(hipMemPoolDestroy(default_mem_pool), hipErrorInvalidValue);
   }
 }

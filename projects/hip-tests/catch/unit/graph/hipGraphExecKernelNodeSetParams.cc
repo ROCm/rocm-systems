@@ -39,22 +39,22 @@ HIP_TEST_CASE(Unit_hipGraphExecKernelNodeSetParams_Negative) {
   hipGraphExec_t graphExec;
   size_t NElem{N};
 
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   void* kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
   kNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
   kNodeParams.gridDim = dim3(blocks);
   kNodeParams.blockDim = dim3(threadsPerBlock);
   kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
-  HIP_CHECK(hipGraphAddKernelNode(&kNode, graph, nullptr, 0, &kNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kNode, graph, nullptr, 0, &kNodeParams))
 
   hipGraphNode_t empty_node;
-  HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, &kNode, 1));
+  HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, &kNode, 1))
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   SECTION("Pass hipGraphExec as nullptr") {
     HIP_CHECK_ERROR(hipGraphExecKernelNodeSetParams(nullptr, kNode, &kNodeParams),
@@ -99,15 +99,15 @@ HIP_TEST_CASE(Unit_hipGraphExecKernelNodeSetParams_Negative) {
 #endif
 
   SECTION("node is not instantiated") {
-    HIP_CHECK(hipGraphAddKernelNode(&kNode, graph, nullptr, 0, &kNodeParams));
+    HIP_CHECK(hipGraphAddKernelNode(&kNode, graph, nullptr, 0, &kNodeParams))
     HIP_CHECK_ERROR(hipGraphExecKernelNodeSetParams(graphExec, kNode, &kNodeParams),
                     hipErrorInvalidValue);
   }
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 }
 
 /**
@@ -129,9 +129,9 @@ HIP_TEST_CASE(Unit_hipGraphExecKernelNodeSetParams_Functional) {
   hipGraphExec_t graphExec;
   size_t NElem{N};
 
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
@@ -159,22 +159,22 @@ HIP_TEST_CASE(Unit_hipGraphExecKernelNodeSetParams_Functional) {
                                     C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
-  HIP_CHECK(hipGraphNodeSetEnabled(graphExec, kNode, 0));
-  HIP_CHECK(hipGraphExecKernelNodeSetParams(graphExec, kNode, &kNodeParams1));
-  HIP_CHECK(hipMemset(C_d, 0, Nbytes));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphNodeSetEnabled(graphExec, kNode, 0))
+  HIP_CHECK(hipGraphExecKernelNodeSetParams(graphExec, kNode, &kNodeParams1))
+  HIP_CHECK(hipMemset(C_d, 0, Nbytes))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
-  HIP_CHECK(hipGraphNodeSetEnabled(graphExec, kNode, 1));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphNodeSetEnabled(graphExec, kNode, 1))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Verify graph execution result
   HipTest::checkVectorSUB<int>(A_h, B_h, C_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 }

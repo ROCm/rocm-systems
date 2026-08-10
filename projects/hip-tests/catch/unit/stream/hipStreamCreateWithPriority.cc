@@ -60,7 +60,7 @@ void funcTestsForAllPriorityLevelsWrtNullStrm(unsigned int flags, bool deviceSyn
   int priority_high{};
   size_t size = MEMCPYSIZE2() * sizeof(int);
   // Test is to get the Stream Priority Range
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high));
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high))
 
   // Check if priorities are indeed supported
   if (priority_low == priority_high) {
@@ -78,7 +78,7 @@ void funcTestsForAllPriorityLevelsWrtNullStrm(unsigned int flags, bool deviceSyn
   int count = 1;
   // Create a stream for each of the priority levels
   for (priority = priority_high; priority < priority_low; priority++) {
-    HIP_CHECK(hipStreamCreateWithPriority(&stream[count++], flags, priority));
+    HIP_CHECK(hipStreamCreateWithPriority(&stream[count++], flags, priority))
   }
   // Allocate memory
   int** A_d = reinterpret_cast<int**>(malloc(arr_size * sizeof(int*)));
@@ -96,8 +96,8 @@ void funcTestsForAllPriorityLevelsWrtNullStrm(unsigned int flags, bool deviceSyn
     REQUIRE(A_h[idx] != nullptr);
     C_h[idx] = reinterpret_cast<int*>(malloc(size));
     REQUIRE(C_h[idx] != nullptr);
-    HIP_CHECK(hipMalloc(&A_d[idx], size));
-    HIP_CHECK(hipMalloc(&C_d[idx], size));
+    HIP_CHECK(hipMalloc(&A_d[idx], size))
+    HIP_CHECK(hipMalloc(&C_d[idx], size))
   }
 
   // Initialize host memory
@@ -110,21 +110,21 @@ void funcTestsForAllPriorityLevelsWrtNullStrm(unsigned int flags, bool deviceSyn
 
   // Launch task on each stream
   for (int idx = 0; idx < arr_size; idx++) {
-    HIP_CHECK(hipMemcpyAsync(A_d[idx], A_h[idx], size, hipMemcpyHostToDevice, stream[idx]));
+    HIP_CHECK(hipMemcpyAsync(A_d[idx], A_h[idx], size, hipMemcpyHostToDevice, stream[idx]))
     hipLaunchKernelGGL((HipTest::vector_square), dim3(GRIDSIZE), dim3(BLOCKSIZE), 0, stream[idx],
                        A_d[idx], C_d[idx], MEMCPYSIZE2());
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemcpyAsync(C_h[idx], C_d[idx], size, hipMemcpyDeviceToHost, stream[idx]));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipMemcpyAsync(C_h[idx], C_d[idx], size, hipMemcpyDeviceToHost, stream[idx]))
   }
 
   if (deviceSynchronize) {
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   // Validate the output of each queue
   for (int idx = 0; idx < arr_size; idx++) {
     if (!deviceSynchronize) {
-      HIP_CHECK(hipStreamSynchronize(stream[idx]));
+      HIP_CHECK(hipStreamSynchronize(stream[idx]))
     }
     for (int idy = 0; idy < MEMCPYSIZE2(); idy++) {
       if (C_h[idx][idy] != A_h[idx][idy] * A_h[idx][idy]) {
@@ -136,8 +136,8 @@ void funcTestsForAllPriorityLevelsWrtNullStrm(unsigned int flags, bool deviceSyn
 
   // Deallocate memory
   for (int idx = 0; idx < arr_size; idx++) {
-    HIP_CHECK(hipFree(reinterpret_cast<void*>(C_d[idx])));
-    HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d[idx])));
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(C_d[idx])))
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d[idx])))
     free(C_h[idx]);
     free(A_h[idx]);
   }
@@ -145,7 +145,7 @@ void funcTestsForAllPriorityLevelsWrtNullStrm(unsigned int flags, bool deviceSyn
   // Destroy the stream for each of the priority levels
   count = 1;
   for (priority = priority_high; priority < priority_low; priority++) {
-    HIP_CHECK(hipStreamDestroy(stream[count++]));
+    HIP_CHECK(hipStreamDestroy(stream[count++]))
   }
   free(stream);
   free(A_d);
@@ -174,22 +174,22 @@ void queueTasksInStreams(std::vector<hipStream_t>& stream, size_t arrsize) {
   const int blocks = (MEMCPYSIZE2() / threads);
 
   for (int i = 0; i < arrsize; i++) {
-    HIP_CHECK_THREAD(hipMalloc(&A_d[i], size));
-    HIP_CHECK_THREAD(hipMalloc(&C_d[i], size));
+    HIP_CHECK_THREAD(hipMalloc(&A_d[i], size))
+    HIP_CHECK_THREAD(hipMalloc(&C_d[i], size))
   }
 
   // Launch task on each stream
   for (int i = 0; i < arrsize; i++) {
-    HIP_CHECK_THREAD(hipMemcpyAsync(A_d[i], A_h[i].data(), size, hipMemcpyHostToDevice, stream[i]));
+    HIP_CHECK_THREAD(hipMemcpyAsync(A_d[i], A_h[i].data(), size, hipMemcpyHostToDevice, stream[i]))
     hipLaunchKernelGGL((HipTest::vector_square), blocks, threads, 0, stream[i], A_d[i], C_d[i],
                        MEMCPYSIZE2());
-    HIP_CHECK_THREAD(hipGetLastError());
-    HIP_CHECK_THREAD(hipMemcpyAsync(C_h[i].data(), C_d[i], size, hipMemcpyDeviceToHost, stream[i]));
+    HIP_CHECK_THREAD(hipGetLastError())
+    HIP_CHECK_THREAD(hipMemcpyAsync(C_h[i].data(), C_d[i], size, hipMemcpyDeviceToHost, stream[i]))
   }
 
   // Validate the output of each queue
   for (int i = 0; i < arrsize; i++) {
-    HIP_CHECK_THREAD(hipStreamSynchronize(stream[i]));
+    HIP_CHECK_THREAD(hipStreamSynchronize(stream[i]))
     for (size_t j = 0; j < MEMCPYSIZE2(); j++) {
       REQUIRE_THREAD(C_h[i][j] == (A_h[i][j] * A_h[i][j]));
     }
@@ -197,8 +197,8 @@ void queueTasksInStreams(std::vector<hipStream_t>& stream, size_t arrsize) {
 
   // Deallocate memory
   for (int i = 0; i < arrsize; i++) {
-    HIP_CHECK_THREAD(hipFree(reinterpret_cast<void*>(C_d[i])));
-    HIP_CHECK_THREAD(hipFree(reinterpret_cast<void*>(A_d[i])));
+    HIP_CHECK_THREAD(hipFree(reinterpret_cast<void*>(C_d[i])))
+    HIP_CHECK_THREAD(hipFree(reinterpret_cast<void*>(A_d[i])))
   }
 }
 
@@ -217,7 +217,7 @@ bool runFuncTestsForAllPriorityLevelsMultThread(unsigned int flags) {
   std::vector<hipStream_t> stream_set{};
   hipStream_t stream{};
   // Test is to get the Stream Priority Range
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high));
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high))
 
   // Check if priorities are indeed supported
   if (priority_low == priority_high) {
@@ -229,7 +229,7 @@ bool runFuncTestsForAllPriorityLevelsMultThread(unsigned int flags) {
 
   // Create a stream for each of the priority levels
   for (auto priority = priority_high; priority <= priority_low; priority++) {
-    HIP_CHECK(hipStreamCreateWithPriority(&stream, flags, priority));
+    HIP_CHECK(hipStreamCreateWithPriority(&stream, flags, priority))
     stream_set.push_back(stream);
   }
 
@@ -246,7 +246,7 @@ bool runFuncTestsForAllPriorityLevelsMultThread(unsigned int flags) {
 
   // Destroy the stream for each of the priority levels
   for (auto stream : stream_set) {
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
   return true;
 }
@@ -263,7 +263,7 @@ template <typename T> bool verifyStreamPriorityKernelResults() {
   OP(normal)
   OP(high)
 #undef OP
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high));
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high))
 
   INFO("HIP stream priority range - low: " << priority_low << ",high: " << priority_high
                                            << ",normal: " << (priority_low + priority_high) / 2);
@@ -399,7 +399,7 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
   OP(normal)
   OP(high)
 #undef OP
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high));
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high))
   INFO("HIP stream priority range - low: " << priority_low << ",high: " << priority_high
                                            << ",normal: " << (priority_low + priority_high) / 2);
 
@@ -417,21 +417,21 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
   hipStream_t stream_low[LOW_PRIORITY_STREAMCOUNT];
   for (int i = 0; i < LOW_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_low) {
-      HIP_CHECK(hipStreamCreateWithPriority(&stream_low[i], hipStreamDefault, priority_low));
+      HIP_CHECK(hipStreamCreateWithPriority(&stream_low[i], hipStreamDefault, priority_low))
     }
   }
   // create streams with normal priority
   hipStream_t stream_normal[NORMAL_PRIORITY_STREAMCOUNT];
   for (int i = 0; i < NORMAL_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_normal) {
-      HIP_CHECK(hipStreamCreateWithPriority(&stream_normal[i], hipStreamDefault, priority_normal));
+      HIP_CHECK(hipStreamCreateWithPriority(&stream_normal[i], hipStreamDefault, priority_normal))
     }
   }
   // create streams with high priority
   hipStream_t stream_high[HIGH_PRIORITY_STREAMCOUNT];
   for (int i = 0; i < HIGH_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_high) {
-      HIP_CHECK(hipStreamCreateWithPriority(&stream_high[i], hipStreamDefault, priority_high));
+      HIP_CHECK(hipStreamCreateWithPriority(&stream_high[i], hipStreamDefault, priority_high))
     }
   }
   // allocate and initialise host source and destination buffers for
@@ -482,9 +482,9 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
   T* dst_d_low[LOW_PRIORITY_STREAMCOUNT];
   for (int i = 0; i < LOW_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_low) {
-      HIP_CHECK(hipMalloc(&src_d_low[i], size));
-      HIP_CHECK(hipMemcpy(src_d_low[i], src_h_low[i], size, hipMemcpyHostToDevice));
-      HIP_CHECK(hipMalloc(&dst_d_low[i], size));
+      HIP_CHECK(hipMalloc(&src_d_low[i], size))
+      HIP_CHECK(hipMemcpy(src_d_low[i], src_h_low[i], size, hipMemcpyHostToDevice))
+      HIP_CHECK(hipMalloc(&dst_d_low[i], size))
     }
   }
   // allocate and initialize device source and destination buffers for
@@ -493,9 +493,9 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
   T* dst_d_normal[NORMAL_PRIORITY_STREAMCOUNT];
   for (int i = 0; i < NORMAL_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_normal) {
-      HIP_CHECK(hipMalloc(&src_d_normal[i], size));
-      HIP_CHECK(hipMemcpy(src_d_normal[i], src_h_normal[i], size, hipMemcpyHostToDevice));
-      HIP_CHECK(hipMalloc(&dst_d_normal[i], size));
+      HIP_CHECK(hipMalloc(&src_d_normal[i], size))
+      HIP_CHECK(hipMemcpy(src_d_normal[i], src_h_normal[i], size, hipMemcpyHostToDevice))
+      HIP_CHECK(hipMalloc(&dst_d_normal[i], size))
     }
   }
   // allocate and initialize device source and destination buffers for
@@ -504,9 +504,9 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
   T* dst_d_high[HIGH_PRIORITY_STREAMCOUNT];
   for (int i = 0; i < HIGH_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_high) {
-      HIP_CHECK(hipMalloc(&src_d_high[i], size));
-      HIP_CHECK(hipMemcpy(src_d_high[i], src_h_high[i], size, hipMemcpyHostToDevice));
-      HIP_CHECK(hipMalloc(&dst_d_high[i], size));
+      HIP_CHECK(hipMalloc(&src_d_high[i], size))
+      HIP_CHECK(hipMemcpy(src_d_high[i], src_h_high[i], size, hipMemcpyHostToDevice))
+      HIP_CHECK(hipMalloc(&dst_d_high[i], size))
     }
   }
 
@@ -516,8 +516,8 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
   // priority streams
   for (int i = 0; i < LOW_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_low) {
-      HIP_CHECK(hipEventCreate(&event_start_low[i]));
-      HIP_CHECK(hipEventCreate(&event_end_low[i]));
+      HIP_CHECK(hipEventCreate(&event_start_low[i]))
+      HIP_CHECK(hipEventCreate(&event_end_low[i]))
     }
   }
 
@@ -527,8 +527,8 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
   // normal priority streams
   for (int i = 0; i < NORMAL_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_normal) {
-      HIP_CHECK(hipEventCreate(&event_start_normal[i]));
-      HIP_CHECK(hipEventCreate(&event_end_normal[i]));
+      HIP_CHECK(hipEventCreate(&event_start_normal[i]))
+      HIP_CHECK(hipEventCreate(&event_end_normal[i]))
     }
   }
 
@@ -538,26 +538,26 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
   // high priority streams
   for (int i = 0; i < HIGH_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_high) {
-      HIP_CHECK(hipEventCreate(&event_start_high[i]));
-      HIP_CHECK(hipEventCreate(&event_end_high[i]));
+      HIP_CHECK(hipEventCreate(&event_start_high[i]))
+      HIP_CHECK(hipEventCreate(&event_end_high[i]))
     }
   }
   // record start events for each of the low priority streams
   for (int i = 0; i < LOW_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_low) {
-      HIP_CHECK(hipEventRecord(event_start_low[i], stream_low[i]));
+      HIP_CHECK(hipEventRecord(event_start_low[i], stream_low[i]))
     }
   }
   // record start events for each of the normal priority streams
   for (int i = 0; i < NORMAL_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_normal) {
-      HIP_CHECK(hipEventRecord(event_start_normal[i], stream_normal[i]));
+      HIP_CHECK(hipEventRecord(event_start_normal[i], stream_normal[i]))
     }
   }
   // record start events for each of the high priority streams
   for (int i = 0; i < HIGH_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_high) {
-      HIP_CHECK(hipEventRecord(event_start_high[i], stream_high[i]));
+      HIP_CHECK(hipEventRecord(event_start_high[i], stream_high[i]))
     }
   }
   // launch kernels repeatedly on each of the low prioritiy stream
@@ -593,44 +593,44 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
   // record end events for each of the low priority streams
   for (int i = 0; i < LOW_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_low) {
-      HIP_CHECK(hipEventRecord(event_end_low[i], stream_low[i]));
+      HIP_CHECK(hipEventRecord(event_end_low[i], stream_low[i]))
     }
   }
   // record end events for each of the normal priority streams
   for (int i = 0; i < NORMAL_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_normal) {
-      HIP_CHECK(hipEventRecord(event_end_normal[i], stream_normal[i]));
+      HIP_CHECK(hipEventRecord(event_end_normal[i], stream_normal[i]))
     }
   }
   // record end events for each of the high priority streams
   for (int i = 0; i < HIGH_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_high) {
-      HIP_CHECK(hipEventRecord(event_end_high[i], stream_high[i]));
+      HIP_CHECK(hipEventRecord(event_end_high[i], stream_high[i]))
     }
   }
   // synchronize events for each of the low priority streams
   for (int i = 0; i < LOW_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_low) {
-      HIP_CHECK(hipEventSynchronize(event_end_low[i]));
+      HIP_CHECK(hipEventSynchronize(event_end_low[i]))
     }
   }
   // synchronize events for each of the normal priority streams
   for (int i = 0; i < NORMAL_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_normal) {
-      HIP_CHECK(hipEventSynchronize(event_end_normal[i]));
+      HIP_CHECK(hipEventSynchronize(event_end_normal[i]))
     }
   }
   // synchronize events for each of the high priority streams
   for (int i = 0; i < HIGH_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_high) {
-      HIP_CHECK(hipEventSynchronize(event_end_high[i]));
+      HIP_CHECK(hipEventSynchronize(event_end_high[i]))
     }
   }
   // compute time spent for memcpy in each low stream
   float time_spent_low[LOW_PRIORITY_STREAMCOUNT];
   for (int i = 0; i < LOW_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_low) {
-      HIP_CHECK(hipEventElapsedTime(&time_spent_low[i], event_start_low[i], event_end_low[i]));
+      HIP_CHECK(hipEventElapsedTime(&time_spent_low[i], event_start_low[i], event_end_low[i]))
     }
   }
   // compute time spent for memcpy in each normal stream
@@ -645,13 +645,13 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
   float time_spent_high[HIGH_PRIORITY_STREAMCOUNT];
   for (int i = 0; i < HIGH_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_high) {
-      HIP_CHECK(hipEventElapsedTime(&time_spent_high[i], event_start_high[i], event_end_high[i]));
+      HIP_CHECK(hipEventElapsedTime(&time_spent_high[i], event_start_high[i], event_end_high[i]))
     }
   }
   // sanity check for low priority streams
   for (int i = 0; i < LOW_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_low) {
-      HIP_CHECK(hipMemcpy(dst_h_low[i], dst_d_low[i], size, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(dst_h_low[i], dst_d_low[i], size, hipMemcpyDeviceToHost))
       REQUIRE(memcmp(dst_h_low[i], src_h_low[i], size) == 0);
       free(dst_h_low[i]);
       free(src_h_low[i]);
@@ -660,7 +660,7 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
   // sanity check for normal priority streams
   for (int i = 0; i < NORMAL_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_normal) {
-      HIP_CHECK(hipMemcpy(dst_h_normal[i], dst_d_normal[i], size, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(dst_h_normal[i], dst_d_normal[i], size, hipMemcpyDeviceToHost))
       REQUIRE(memcmp(dst_h_normal[i], src_h_normal[i], size) == 0);
       free(dst_h_normal[i]);
       free(src_h_normal[i]);
@@ -669,7 +669,7 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
   // sanity check for high priority streams
   for (int i = 0; i < HIGH_PRIORITY_STREAMCOUNT; ++i) {
     if (enable_priority_high) {
-      HIP_CHECK(hipMemcpy(dst_h_high[i], dst_d_high[i], size, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(dst_h_high[i], dst_d_high[i], size, hipMemcpyDeviceToHost))
       REQUIRE(memcmp(dst_h_high[i], src_h_high[i], size) == 0);
       free(dst_h_high[i]);
       free(src_h_high[i]);
@@ -678,35 +678,35 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
 
   for (int i = 0; i < LOW_PRIORITY_STREAMCOUNT; i++) {
     if (enable_priority_low) {
-      HIP_CHECK(hipFree(src_d_low[i]));
-      HIP_CHECK(hipFree(dst_d_low[i]));
-      HIP_CHECK(hipEventDestroy(event_start_low[i]));
-      HIP_CHECK(hipEventDestroy(event_end_low[i]));
+      HIP_CHECK(hipFree(src_d_low[i]))
+      HIP_CHECK(hipFree(dst_d_low[i]))
+      HIP_CHECK(hipEventDestroy(event_start_low[i]))
+      HIP_CHECK(hipEventDestroy(event_end_low[i]))
     }
 
-    HIP_CHECK(hipStreamDestroy(stream_low[i]));
+    HIP_CHECK(hipStreamDestroy(stream_low[i]))
   }
 
   for (int i = 0; i < NORMAL_PRIORITY_STREAMCOUNT; i++) {
     if (enable_priority_normal) {
-      HIP_CHECK(hipFree(src_d_normal[i]));
-      HIP_CHECK(hipFree(dst_d_normal[i]));
-      HIP_CHECK(hipEventDestroy(event_start_normal[i]));
-      HIP_CHECK(hipEventDestroy(event_end_normal[i]));
+      HIP_CHECK(hipFree(src_d_normal[i]))
+      HIP_CHECK(hipFree(dst_d_normal[i]))
+      HIP_CHECK(hipEventDestroy(event_start_normal[i]))
+      HIP_CHECK(hipEventDestroy(event_end_normal[i]))
     }
 
-    HIP_CHECK(hipStreamDestroy(stream_normal[i]));
+    HIP_CHECK(hipStreamDestroy(stream_normal[i]))
   }
 
   for (int i = 0; i < HIGH_PRIORITY_STREAMCOUNT; i++) {
     if (enable_priority_high) {
-      HIP_CHECK(hipFree(src_d_high[i]));
-      HIP_CHECK(hipFree(dst_d_high[i]));
-      HIP_CHECK(hipEventDestroy(event_start_high[i]));
-      HIP_CHECK(hipEventDestroy(event_end_high[i]));
+      HIP_CHECK(hipFree(src_d_high[i]))
+      HIP_CHECK(hipFree(dst_d_high[i]))
+      HIP_CHECK(hipEventDestroy(event_start_high[i]))
+      HIP_CHECK(hipEventDestroy(event_end_high[i]))
     }
 
-    HIP_CHECK(hipStreamDestroy(stream_high[i]));
+    HIP_CHECK(hipStreamDestroy(stream_high[i]))
   }
 }
 }  // namespace hipStreamCreateWithPriorityTest
@@ -810,7 +810,7 @@ HIP_TEST_CASE(Unit_hipStreamCreateWithPriority_NegTst) {
   int priority_high{0};
 
   // Test is to get the Stream Priority Range
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high));
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high))
   // Check if priorities are indeed supported
   if (priority_low == priority_high) {
     WARN("Stream priority range not supported. Skipping test.");
@@ -840,20 +840,20 @@ HIP_TEST_CASE(Unit_hipStreamCreateWithPriority_NegTst) {
 HIP_TEST_CASE(Unit_hipStreamCreateWithPriority_CheckPriorityVal) {
   int id = GENERATE(range(0, HipTest::getDeviceCount()));
 
-  HIP_CHECK(hipSetDevice(id));
+  HIP_CHECK(hipSetDevice(id))
 
   int priority_low = 0, priority_high = 0;
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high));
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high))
   hipStream_t stream{nullptr};
 
   SECTION("Setting high priority") {
-    HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, priority_high));
+    HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, priority_high))
     REQUIRE(stream != nullptr);
     REQUIRE(hip::checkStreamPriorityAndFlags(stream, priority_high));
   }
 
   SECTION("Setting low priority") {
-    HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, priority_low));
+    HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, priority_low))
     REQUIRE(stream != nullptr);
     REQUIRE(hip::checkStreamPriorityAndFlags(stream, priority_low));
   }
@@ -873,12 +873,12 @@ HIP_TEST_CASE(Unit_hipStreamCreateWithPriority_CheckPriorityVal) {
   }
 
   SECTION("Setting flags to hipStreamNonBlocking") {
-    HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamNonBlocking, priority_high));
+    HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamNonBlocking, priority_high))
     REQUIRE(stream != nullptr);
     REQUIRE(hip::checkStreamPriorityAndFlags(stream, priority_high, hipStreamNonBlocking));
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**

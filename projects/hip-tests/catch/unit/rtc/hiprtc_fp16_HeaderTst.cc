@@ -287,10 +287,10 @@ HIP_TEST_CASE(Unit_Rtc_fp16_header) {
   for (int i = 0; i < n; i++) {
     result_h[i] = 0;
   }
-  HIP_CHECK(hipMalloc(&result_d, Nbytes));
-  HIP_CHECK(hipMemcpy(result_d, result_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&result_d, Nbytes))
+  HIP_CHECK(hipMemcpy(result_d, result_h, Nbytes, hipMemcpyHostToDevice))
   hipDeviceProp_t prop;
-  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0))
   std::string architecture = prop.gcnArchName;
   std::string complete_CO = "--gpu-architecture=" + architecture;
   const char* compiler_option = complete_CO.c_str();
@@ -317,11 +317,11 @@ HIP_TEST_CASE(Unit_Rtc_fp16_header) {
                               HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
   hipModule_t module;
   hipFunction_t function;
-  HIP_CHECK(hipModuleLoadData(&module, codec.data()));
-  HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipModuleLoadData(&module, codec.data()))
+  HIP_CHECK(hipModuleGetFunction(&function, module, kername))
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter))
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost))
   for (int i = 0; i < n; i++) {
     if (result_h[i] != 1) {
       WARN("FAIL for " << i << " iteration");
@@ -329,9 +329,9 @@ HIP_TEST_CASE(Unit_Rtc_fp16_header) {
       REQUIRE(false);
     }
   }
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
-  HIP_CHECK(hipFree(result_d));
+  HIP_CHECK(hipFree(result_d))
   delete[] result_h;
   REQUIRE(true);
 }

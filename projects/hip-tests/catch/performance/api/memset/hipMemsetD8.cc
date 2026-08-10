@@ -21,7 +21,7 @@ class MemsetD8Benchmark : public Benchmark<MemsetD8Benchmark> {
 
   void operator()() {
     TIMED_SECTION(kTimerTypeEvent) {
-      HIP_CHECK(hipMemsetD8(reinterpret_cast<hipDeviceptr_t>(dst_.ptr()), 17, size_));
+      HIP_CHECK(hipMemsetD8(reinterpret_cast<hipDeviceptr_t>(dst_.ptr()), 17, size_))
     }
   }
 

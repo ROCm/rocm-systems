@@ -51,29 +51,29 @@ __global__ void mallocTest_1() {
  * - HIP_VERSION >= 6.5
  */
 HIP_TEST_CASE(Performance_DeviceHeapMemoryAllocation) {
-  HIP_CHECK(hipDeviceSetLimit(hipLimitMallocHeapSize, 128 * 1024 * 1024));
+  HIP_CHECK(hipDeviceSetLimit(hipLimitMallocHeapSize, 128 * 1024 * 1024))
   hipEvent_t event;
-  HIP_CHECK(hipEventCreate(&event));
+  HIP_CHECK(hipEventCreate(&event))
   REQUIRE(event != nullptr);
   hipStream_t stream{nullptr};
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   REQUIRE(stream != nullptr);
-  HIP_CHECK(hipEventRecord(event, stream));
-  HIP_CHECK(hipEventSynchronize(event));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipEventRecord(event, stream))
+  HIP_CHECK(hipEventSynchronize(event))
+  HIP_CHECK(hipStreamSynchronize(stream))
   // First Kernel Launch
   auto start = std::chrono::system_clock::now();
   mallocTest<<<1, 5, 0, stream>>>();
   auto end = std::chrono::system_clock::now();
   // Second Kernel Launch
   mallocTest_1<<<1, 5, 0, stream>>>();
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   auto end_1 = std::chrono::system_clock::now();
   auto time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   auto time_1 = std::chrono::duration_cast<std::chrono::microseconds>(end_1 - end).count();
   REQUIRE(time > time_1);
-  HIP_CHECK(hipEventDestroy(event));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipEventDestroy(event))
+  HIP_CHECK(hipStreamDestroy(stream))
   std::cout << "First Kernel Latency: " << time << " micro seconds" << std::endl;
   std::cout << "Second Kernel Latency: " << time_1 << " micro seconds" << std::endl;
 }

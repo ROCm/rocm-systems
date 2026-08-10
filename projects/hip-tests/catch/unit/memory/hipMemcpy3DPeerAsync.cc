@@ -45,16 +45,16 @@ HIP_TEST_CASE(Unit_hipMemcpy3DPeerAsync_BasicFunctional) {
     INFO("Src device: " << src_device << ", Dst device: " << dst_device);
     HIP_SKIP_TEST(HipTest::SkipReason::kMemcpyPeerSameSrcDstDevice);
   }
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
   int can_access_peer = 0;
-  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device))
   if (!can_access_peer) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
   // Array-1 Memory allocation
   hipChannelFormatDesc channelDesc_1 = hipCreateChannelDesc<char>();
   hipArray_t array_1;
-  HIP_CHECK(hipMalloc3DArray(&array_1, &channelDesc_1, extent, 0));
+  HIP_CHECK(hipMalloc3DArray(&array_1, &channelDesc_1, extent, 0))
 
   // Set the array memory
   std::vector<char>tmpHost(volume, 0xb);
@@ -65,18 +65,18 @@ HIP_TEST_CASE(Unit_hipMemcpy3DPeerAsync_BasicFunctional) {
   fillParms.dstArray = array_1;
   fillParms.extent = extent;
   fillParms.kind = hipMemcpyHostToDevice;
-  HIP_CHECK(hipMemcpy3D(&fillParms));
+  HIP_CHECK(hipMemcpy3D(&fillParms))
 
   // Array-2 Memory allocation
-  HIP_CHECK(hipSetDevice(dst_device));
+  HIP_CHECK(hipSetDevice(dst_device))
 
   hipChannelFormatDesc channelDesc_2 = hipCreateChannelDesc<char>();
   hipArray_t array_2;
-  HIP_CHECK(hipMalloc3DArray(&array_2, &channelDesc_2, extent, 0));
+  HIP_CHECK(hipMalloc3DArray(&array_2, &channelDesc_2, extent, 0))
 
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   // Copy data to peer-peer device
   hipMemcpy3DPeerParms peerCopyParams{};
   peerCopyParams.dstArray = array_2;
@@ -89,8 +89,8 @@ HIP_TEST_CASE(Unit_hipMemcpy3DPeerAsync_BasicFunctional) {
   peerCopyParams.srcPtr = make_hipPitchedPtr(0, 0, 0, 0);
   peerCopyParams.extent = extent;
 
-  HIP_CHECK(hipMemcpy3DPeerAsync(&peerCopyParams, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpy3DPeerAsync(&peerCopyParams, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
   // Copy data from Device Array- host ptr
   std::vector<char>hostBuf(volume, 0xa);
   hipMemcpy3DParms copyParms{};
@@ -98,16 +98,16 @@ HIP_TEST_CASE(Unit_hipMemcpy3DPeerAsync_BasicFunctional) {
   copyParms.dstPtr = make_hipPitchedPtr(hostBuf.data(), numW, numW, numH);
   copyParms.extent = extent;
   copyParms.kind = hipMemcpyDeviceToHost;
-  HIP_CHECK(hipMemcpy3D(&copyParms));
+  HIP_CHECK(hipMemcpy3D(&copyParms))
 
   // Validation
   for (size_t i = 0; i < volume; ++i) {
     INFO("Array FAILURE at Index: "<< i << "\nval : " <<hostBuf[i]);
     REQUIRE(hostBuf[i] == 0xb);
   }
-  HIP_CHECK(hipFreeArray(array_1));
-  HIP_CHECK(hipFreeArray(array_2));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFreeArray(array_1))
+  HIP_CHECK(hipFreeArray(array_2))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 /**
  * Test Description
@@ -131,7 +131,7 @@ HIP_TEST_CASE(Unit_hipMemcpy3DPeerAsync_BasicFunctional) {
 HIP_TEST_CASE(Unit_hipMemcpy3DPeerAsync_NegativeTsts) {
   CHECK_IMAGE_SUPPORT
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   int numW = 16;
   int numH = 16;
   int depth = 4;
@@ -139,18 +139,18 @@ HIP_TEST_CASE(Unit_hipMemcpy3DPeerAsync_NegativeTsts) {
   const auto device_count = HipTest::getDeviceCount();
   const auto src_device = GENERATE_COPY(range(0, device_count));
   const auto dst_device = GENERATE_COPY(range(0, device_count));
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
 
   // Array-2 Memory allocation
   hipArray_t array_1;
   hipChannelFormatDesc channelDesc_1 = hipCreateChannelDesc<char>();
-  HIP_CHECK(hipMalloc3DArray(&array_1, &channelDesc_1, extent, 0));
+  HIP_CHECK(hipMalloc3DArray(&array_1, &channelDesc_1, extent, 0))
 
   // Array-2 Memory allocation
-  HIP_CHECK(hipSetDevice(dst_device));
+  HIP_CHECK(hipSetDevice(dst_device))
   hipArray_t array_2;
   hipChannelFormatDesc channelDesc_2 = hipCreateChannelDesc<char>();
-  HIP_CHECK(hipMalloc3DArray(&array_2, &channelDesc_2, extent, 0));
+  HIP_CHECK(hipMalloc3DArray(&array_2, &channelDesc_2, extent, 0))
 
   hipMemcpy3DPeerParms peerCopyParams{};
   peerCopyParams.dstArray = array_2;
@@ -215,13 +215,13 @@ HIP_TEST_CASE(Unit_hipMemcpy3DPeerAsync_NegativeTsts) {
 
   SECTION("Memcpy3DPeer Params struct as nullptr") {
     hipStream_t stream = nullptr;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     HIP_CHECK_ERROR(hipMemcpy3DPeerAsync(nullptr, stream), hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipFreeArray(array_1));
-  HIP_CHECK(hipFreeArray(array_2));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFreeArray(array_1))
+  HIP_CHECK(hipFreeArray(array_2))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 /**
  * End doxygen group MemoryTest.

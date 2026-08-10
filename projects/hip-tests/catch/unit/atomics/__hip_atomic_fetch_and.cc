@@ -29,7 +29,7 @@ static void runHipAtomicFetchAndWavefrontSameAddressTest() {
 template <typename TestType>
 static void runHipAtomicFetchAndWavefrontAdjacentAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
@@ -44,7 +44,7 @@ static void runHipAtomicFetchAndWavefrontAdjacentAddressesTest() {
 template <typename TestType>
 static void runHipAtomicFetchAndWavefrontScatteredAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
@@ -71,7 +71,7 @@ static void runHipAtomicFetchAndWorkgroupSameAddressTest() {
 template <typename TestType>
 static void runHipAtomicFetchAndWorkgroupAdjacentAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
@@ -86,7 +86,7 @@ static void runHipAtomicFetchAndWorkgroupAdjacentAddressesTest() {
 template <typename TestType>
 static void runHipAtomicFetchAndWorkgroupScatteredAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {

@@ -21,7 +21,7 @@ class MemPoolCreateBenchmark : public Benchmark<MemPoolCreateBenchmark> {
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props)); }
 
     REQUIRE(mem_pool != nullptr);
-    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+    HIP_CHECK(hipMemPoolDestroy(mem_pool))
   }
 };
 

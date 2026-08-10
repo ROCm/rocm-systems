@@ -25,7 +25,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
   CHECK_MANAGED_MEMORY_SUPPORT
 #if HT_AMD
   int isPageableHMM = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM, hipDeviceAttributePageableMemoryAccess, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM, hipDeviceAttributePageableMemoryAccess, 0))
   if (!isPageableHMM) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
   }
@@ -35,19 +35,19 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
   bool IfTestPassed = true;
   int data = RND_NUM, *devPtr = nullptr;
   size_t TotGpuMem, TotGpuFreeMem;
-  HIP_CHECK(hipMemGetInfo(&TotGpuFreeMem, &TotGpuMem));
+  HIP_CHECK(hipMemGetInfo(&TotGpuFreeMem, &TotGpuMem))
 
-  HIP_CHECK(hipMallocManaged(&devPtr, MEM_SIZE, hipMemAttachGlobal));
-  HIP_CHECK(hipMemAdvise(devPtr, MEM_SIZE, hipMemAdviseSetReadMostly, 0));
+  HIP_CHECK(hipMallocManaged(&devPtr, MEM_SIZE, hipMemAttachGlobal))
+  HIP_CHECK(hipMemAdvise(devPtr, MEM_SIZE, hipMemAdviseSetReadMostly, 0))
   HIP_CHECK(hipMemRangeGetAttribute(reinterpret_cast<void*>(&data), sizeof(int),
                                     hipMemRangeAttributeReadMostly, devPtr, MEM_SIZE));
   if (data != FLG_READMOSTLY_ENBLD) {
     WARN("hipMemRangeGetAttribute() api didnt return expected value!\n");
     IfTestPassed = false;
   }
-  HIP_CHECK(hipFree(devPtr));
-  HIP_CHECK(hipMallocManaged(&devPtr, TotGpuFreeMem, hipMemAttachGlobal));
-  HIP_CHECK(hipMemAdvise(devPtr, TotGpuFreeMem, hipMemAdviseSetReadMostly, 0));
+  HIP_CHECK(hipFree(devPtr))
+  HIP_CHECK(hipMallocManaged(&devPtr, TotGpuFreeMem, hipMemAttachGlobal))
+  HIP_CHECK(hipMemAdvise(devPtr, TotGpuFreeMem, hipMemAdviseSetReadMostly, 0))
   HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(int), hipMemRangeAttributeReadMostly, devPtr,
                                     TotGpuFreeMem));
 
@@ -55,9 +55,9 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
     WARN("hipMemRangeGetAttribute() api didnt return expected value!\n");
     IfTestPassed = false;
   }
-  HIP_CHECK(hipFree(devPtr));
-  HIP_CHECK(hipMallocManaged(&devPtr, (TotGpuFreeMem - 1), hipMemAttachGlobal));
-  HIP_CHECK(hipMemAdvise(devPtr, (TotGpuFreeMem - 1), hipMemAdviseSetReadMostly, 0));
+  HIP_CHECK(hipFree(devPtr))
+  HIP_CHECK(hipMallocManaged(&devPtr, (TotGpuFreeMem - 1), hipMemAttachGlobal))
+  HIP_CHECK(hipMemAdvise(devPtr, (TotGpuFreeMem - 1), hipMemAdviseSetReadMostly, 0))
   HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(int), hipMemRangeAttributeReadMostly, devPtr,
                                     (TotGpuFreeMem - 1)));
 
@@ -65,7 +65,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
     WARN("hipMemRangeGetAttribute() api didnt return expected value!\n");
     IfTestPassed = false;
   }
-  HIP_CHECK(hipFree(devPtr));
+  HIP_CHECK(hipFree(devPtr))
 
   REQUIRE(IfTestPassed);
 }
@@ -75,13 +75,13 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
   CHECK_MANAGED_MEMORY_SUPPORT
   int Ngpus = 0, *Hmm = NULL, MEM_SZ = 4096, RND_NUM = 999;
-  HIP_CHECK(hipGetDeviceCount(&Ngpus));
+  HIP_CHECK(hipGetDeviceCount(&Ngpus))
   std::vector<int> OutData;
   for (int i = 0; i < Ngpus; ++i) {
     OutData.push_back(RND_NUM);
   }
-  HIP_CHECK(hipMallocManaged(&Hmm, MEM_SZ));
-  HIP_CHECK(hipMemAdvise(Hmm, MEM_SZ, hipMemAdviseSetAccessedBy, 0));
+  HIP_CHECK(hipMallocManaged(&Hmm, MEM_SZ))
+  HIP_CHECK(hipMemAdvise(Hmm, MEM_SZ, hipMemAdviseSetAccessedBy, 0))
   HIP_CHECK(hipMemRangeGetAttribute(OutData.data(), sizeof(int) * OutData.size(),
                                     hipMemRangeAttributeAccessedBy, Hmm, MEM_SZ));
   if (OutData[0] != 0) {
@@ -96,7 +96,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
   }
   if (Ngpus >= 2) {
     for (int i = 0; i < Ngpus; ++i) {
-      HIP_CHECK(hipMemAdvise(Hmm, MEM_SZ, hipMemAdviseSetAccessedBy, i));
+      HIP_CHECK(hipMemAdvise(Hmm, MEM_SZ, hipMemAdviseSetAccessedBy, i))
     }
     // checking the behavior with dataSize less than the number of gpus
     // This should not result in segfault.
@@ -116,7 +116,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
       REQUIRE(false);
     }
   }
-  HIP_CHECK(hipFree(Hmm));
+  HIP_CHECK(hipFree(Hmm))
 }
 
 /* The following scenarios tests that probing the attributes which are not set
@@ -126,36 +126,36 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_4) {
   CHECK_MANAGED_MEMORY_SUPPORT
   int *Hmm = NULL, PageSz = 4096, Ngpus, RND_NUM = 999;
-  HIP_CHECK(hipGetDeviceCount(&Ngpus));
+  HIP_CHECK(hipGetDeviceCount(&Ngpus))
   int* OutData = new int[Ngpus];
   for (int i = 0; i < Ngpus; ++i) {
     OutData[i] = RND_NUM;
   }
-  HIP_CHECK(hipMallocManaged(&Hmm, 4 * PageSz));
+  HIP_CHECK(hipMallocManaged(&Hmm, 4 * PageSz))
   SECTION("Set ReadMostly & probe other flags") {
-    HIP_CHECK(hipMemAdvise(Hmm, 4 * PageSz, hipMemAdviseSetReadMostly, 0));
+    HIP_CHECK(hipMemAdvise(Hmm, 4 * PageSz, hipMemAdviseSetReadMostly, 0))
     HIP_CHECK(hipMemRangeGetAttribute(OutData, 4 * Ngpus, hipMemRangeAttributeAccessedBy, Hmm,
                                       4 * PageSz));
     HIP_CHECK(hipMemRangeGetAttribute(OutData, 4, hipMemRangeAttributePreferredLocation, Hmm,
                                       4 * PageSz));
-    HIP_CHECK(hipMemAdvise(Hmm, 4 * PageSz, hipMemAdviseUnsetReadMostly, 0));
+    HIP_CHECK(hipMemAdvise(Hmm, 4 * PageSz, hipMemAdviseUnsetReadMostly, 0))
   }
   SECTION("Set AccessedBy & probe other flags") {
-    HIP_CHECK(hipMemAdvise(Hmm, 4 * PageSz, hipMemAdviseSetAccessedBy, 0));
+    HIP_CHECK(hipMemAdvise(Hmm, 4 * PageSz, hipMemAdviseSetAccessedBy, 0))
     HIP_CHECK(
         hipMemRangeGetAttribute(OutData, 4, hipMemRangeAttributeReadMostly, Hmm, 4 * PageSz));
     HIP_CHECK(hipMemRangeGetAttribute(OutData, 4, hipMemRangeAttributePreferredLocation, Hmm,
                                       4 * PageSz));
-    HIP_CHECK(hipMemAdvise(Hmm, 4 * PageSz, hipMemAdviseUnsetAccessedBy, 0));
+    HIP_CHECK(hipMemAdvise(Hmm, 4 * PageSz, hipMemAdviseUnsetAccessedBy, 0))
   }
   SECTION("Set AccessedBy & probe other flags") {
-    HIP_CHECK(hipMemAdvise(Hmm, 4 * PageSz, hipMemAdviseSetPreferredLocation, 0));
+    HIP_CHECK(hipMemAdvise(Hmm, 4 * PageSz, hipMemAdviseSetPreferredLocation, 0))
     HIP_CHECK(
         hipMemRangeGetAttribute(OutData, 4, hipMemRangeAttributeReadMostly, Hmm, 4 * PageSz));
     HIP_CHECK(hipMemRangeGetAttribute(OutData, 4 * Ngpus, hipMemRangeAttributeAccessedBy, Hmm,
                                       4 * PageSz));
-    HIP_CHECK(hipMemAdvise(Hmm, 4 * PageSz, hipMemAdviseUnsetPreferredLocation, 0));
+    HIP_CHECK(hipMemAdvise(Hmm, 4 * PageSz, hipMemAdviseUnsetPreferredLocation, 0))
   }
-  HIP_CHECK(hipFree(Hmm));
+  HIP_CHECK(hipFree(Hmm))
   delete[] OutData;
 }

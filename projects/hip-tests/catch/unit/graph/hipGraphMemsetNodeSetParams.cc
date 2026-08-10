@@ -40,7 +40,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Positive_Basic, uint8_t,
                    uint32_t) {
   const auto f = [](hipMemsetParams* params) {
     hipGraph_t graph = nullptr;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
 
     hipGraphNode_t node = nullptr;
     LinearAllocGuard<TestType> initial_alloc(LinearAllocs::hipMalloc, 2 * sizeof(TestType));
@@ -50,10 +50,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Positive_Basic, uint8_t,
     initial_params.elementSize = sizeof(TestType);
     initial_params.width = 2;
     initial_params.height = 1;
-    HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &initial_params));
+    HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &initial_params))
 
     hipMemsetParams retrieved_params = {};
-    HIP_CHECK(hipGraphMemsetNodeGetParams(node, &retrieved_params));
+    HIP_CHECK(hipGraphMemsetNodeGetParams(node, &retrieved_params))
     REQUIRE(initial_params.dst == retrieved_params.dst);
     REQUIRE(initial_params.elementSize == retrieved_params.elementSize);
     REQUIRE(initial_params.width == retrieved_params.width);
@@ -61,8 +61,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Positive_Basic, uint8_t,
     REQUIRE(initial_params.pitch == retrieved_params.pitch);
     REQUIRE(initial_params.value == retrieved_params.value);
 
-    HIP_CHECK(hipGraphMemsetNodeSetParams(node, params));
-    HIP_CHECK(hipGraphMemsetNodeGetParams(node, &retrieved_params));
+    HIP_CHECK(hipGraphMemsetNodeSetParams(node, params))
+    HIP_CHECK(hipGraphMemsetNodeGetParams(node, &retrieved_params))
     REQUIRE(params->dst == retrieved_params.dst);
     REQUIRE(params->elementSize == retrieved_params.elementSize);
     REQUIRE(params->width == retrieved_params.width);
@@ -71,13 +71,13 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Positive_Basic, uint8_t,
     REQUIRE(params->value == retrieved_params.value);
 
     hipGraphExec_t graph_exec = nullptr;
-    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
-    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread))
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
 
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec))
+    HIP_CHECK(hipGraphDestroy(graph))
 
     return hipSuccess;
   };
@@ -109,7 +109,7 @@ HIP_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Negative_Parameters) {
   using namespace std::placeholders;
 
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   LinearAllocGuard<int> alloc(LinearAllocs::hipMalloc, 4 * sizeof(int));
   hipMemsetParams params = {};
@@ -128,7 +128,7 @@ HIP_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Negative_Parameters) {
 
   MemsetCommonNegative(std::bind(hipGraphMemsetNodeSetParams, node, _1), params);
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**

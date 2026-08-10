@@ -21,19 +21,19 @@ class MemPoolImportPointerBenchmark : public Benchmark<MemPoolImportPointerBench
     hipMemPoolPtrExportData exp_data;
 
     hipMemPoolProps props = CreateMemPoolProps(0, kHandleType);
-    HIP_CHECK(hipMemPoolCreate(&mem_pool, &props));
-    HIP_CHECK(hipMallocFromPoolAsync(&device_ptr, array_size * sizeof(float), mem_pool, nullptr));
-    HIP_CHECK(hipStreamSynchronize(nullptr));
-    HIP_CHECK(hipMemPoolExportPointer(&exp_data, device_ptr));
+    HIP_CHECK(hipMemPoolCreate(&mem_pool, &props))
+    HIP_CHECK(hipMallocFromPoolAsync(&device_ptr, array_size * sizeof(float), mem_pool, nullptr))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
+    HIP_CHECK(hipMemPoolExportPointer(&exp_data, device_ptr))
 
     TIMED_SECTION(kTimerTypeCpu) {
       HIP_CHECK(hipMemPoolImportPointer(reinterpret_cast<void**>(&device_ptr_import), mem_pool,
                                         &exp_data));
     }
 
-    HIP_CHECK(hipFree(device_ptr));
-    HIP_CHECK(hipFree(device_ptr_import));
-    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+    HIP_CHECK(hipFree(device_ptr))
+    HIP_CHECK(hipFree(device_ptr_import))
+    HIP_CHECK(hipMemPoolDestroy(mem_pool))
   }
 };
 

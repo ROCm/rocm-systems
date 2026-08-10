@@ -17,21 +17,21 @@ class MemPoolSetAttributeBenchmark : public Benchmark<MemPoolSetAttributeBenchma
   void operator()(const hipMemPoolAttr attribute) {
     hipMemPool_t mem_pool{nullptr};
     hipMemPoolProps pool_props = CreateMemPoolProps(0, hipMemHandleTypeNone);
-    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
 
     if (attribute == hipMemPoolAttrReleaseThreshold) {
       uint64_t value{0};
       TIMED_SECTION(kTimerTypeCpu) {
-        HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attribute, &value));
+        HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attribute, &value))
       }
     } else {
       int value{0};
       TIMED_SECTION(kTimerTypeCpu) {
-        HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attribute, &value));
+        HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attribute, &value))
       }
     }
 
-    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+    HIP_CHECK(hipMemPoolDestroy(mem_pool))
   }
 };
 

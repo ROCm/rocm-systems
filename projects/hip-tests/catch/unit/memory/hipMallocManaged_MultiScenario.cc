@@ -68,15 +68,15 @@ HIP_TEST_CASE(Unit_hipMallocManaged_HostDeviceConcurrent) {
   hPtr = reinterpret_cast<float*>(malloc(N * sizeof(float)));
   resPtr = reinterpret_cast<float*>(malloc(N * sizeof(float)));
 
-  HIP_CHECK(hipMalloc(&dPtr, N * sizeof(float)));
-  HIP_CHECK(hipMallocManaged(&Hmm, N * sizeof(float)));
+  HIP_CHECK(hipMalloc(&dPtr, N * sizeof(float)))
+  HIP_CHECK(hipMallocManaged(&Hmm, N * sizeof(float)))
   memset(Hmm, 2.0, N * sizeof(float));
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   std::thread host_thread(HostKernelDouble, Hmm, hPtr, N);
   KernelDouble<<<dim3(blocks), dim3(threadsPerBlock), 0, 0>>>(Hmm, dPtr, N);
   host_thread.join();
-  HIP_CHECK(hipMemcpy(resPtr, dPtr, N * sizeof(float), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(resPtr, dPtr, N * sizeof(float), hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < N; i++) {
     REQUIRE(hPtr[i] == resPtr[i]);
@@ -84,8 +84,8 @@ HIP_TEST_CASE(Unit_hipMallocManaged_HostDeviceConcurrent) {
 
   free(hPtr);
   free(resPtr);
-  HIP_CHECK(hipFree(dPtr));
-  HIP_CHECK(hipFree(Hmm));
+  HIP_CHECK(hipFree(dPtr))
+  HIP_CHECK(hipFree(Hmm))
 }
 
 // The following Test case tests the following scenario:
@@ -103,11 +103,11 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkSingleDevice) {
   float *Ad[Chunks], *Hmm = nullptr, *Ah = new float[NUM_ELMS];
   hipStream_t stream[Chunks];
   for (int i = 0; i < Chunks; ++i) {
-    HIP_CHECK(hipMalloc(&Ad[i], NUM_ELMS * sizeof(float)));
-    HIP_CHECK(hipMemset(Ad[i], 0, NUM_ELMS * sizeof(float)));
-    HIP_CHECK(hipStreamCreate(&stream[i]));
+    HIP_CHECK(hipMalloc(&Ad[i], NUM_ELMS * sizeof(float)))
+    HIP_CHECK(hipMemset(Ad[i], 0, NUM_ELMS * sizeof(float)))
+    HIP_CHECK(hipStreamCreate(&stream[i]))
   }
-  HIP_CHECK(hipMallocManaged(&Hmm, (Chunks * NUM_ELMS * sizeof(float))));
+  HIP_CHECK(hipMallocManaged(&Hmm, (Chunks * NUM_ELMS * sizeof(float))))
   for (int i = 0; i < Chunks; ++i) {
     for (; Counter < ((i + 1) * NUM_ELMS); ++Counter) {
       Hmm[Counter] = (INIT_VAL + i);
@@ -118,9 +118,9 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkSingleDevice) {
     vector_sum<float>
         <<<blocks, threadsPerBlock, 0, stream[k]>>>(&Hmm[k * NUM_ELMS], Ad[k], NUM_ELMS);
   }
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   for (int m = 0; m < Chunks; ++m) {
-    HIP_CHECK(hipMemcpy(Ah, Ad[m], NUM_ELMS * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(Ah, Ad[m], NUM_ELMS * sizeof(float), hipMemcpyDeviceToHost))
     for (int n = 0; n < NUM_ELMS; ++n) {
       if (Ah[n] != ((INIT_VAL + m) * 2)) {
         DataMismatch++;
@@ -129,10 +129,10 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkSingleDevice) {
   }
   REQUIRE(DataMismatch.load() == 0);
   for (int i = 0; i < Chunks; ++i) {
-    HIP_CHECK(hipFree(Ad[i]));
-    HIP_CHECK(hipStreamDestroy(stream[i]));
+    HIP_CHECK(hipFree(Ad[i]))
+    HIP_CHECK(hipStreamDestroy(stream[i]))
   }
-  HIP_CHECK(hipFree(Hmm));
+  HIP_CHECK(hipFree(Hmm))
   delete[] Ah;
 }
 
@@ -147,7 +147,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
   std::atomic<int> DataMismatch{0};
   int Counter = 0;
   int NumDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&NumDevices));
+  HIP_CHECK(hipGetDeviceCount(&NumDevices))
   if (NumDevices < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
@@ -155,12 +155,12 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
   float *Ad[MAX_GPU], *Hmm = NULL, *Ah = new float[NUM_ELMS];
   hipStream_t stream[MAX_GPU];
   for (int Oloop = 0; Oloop < NumDevices; ++Oloop) {
-    HIP_CHECK(hipSetDevice(Oloop));
-    HIP_CHECK(hipMalloc(&Ad[Oloop], NUM_ELMS * sizeof(float)));
-    HIP_CHECK(hipMemset(Ad[Oloop], 0, NUM_ELMS * sizeof(float)));
-    HIP_CHECK(hipStreamCreate(&stream[Oloop]));
+    HIP_CHECK(hipSetDevice(Oloop))
+    HIP_CHECK(hipMalloc(&Ad[Oloop], NUM_ELMS * sizeof(float)))
+    HIP_CHECK(hipMemset(Ad[Oloop], 0, NUM_ELMS * sizeof(float)))
+    HIP_CHECK(hipStreamCreate(&stream[Oloop]))
   }
-  HIP_CHECK(hipMallocManaged(&Hmm, (NumDevices * NUM_ELMS * sizeof(float))));
+  HIP_CHECK(hipMallocManaged(&Hmm, (NumDevices * NUM_ELMS * sizeof(float))))
   for (int i = 0; i < NumDevices; ++i) {
     for (; Counter < static_cast<int>((i + 1) * NUM_ELMS); ++Counter) {
       Hmm[Counter] = INIT_VAL + i;
@@ -168,13 +168,13 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
   }
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   for (int Klaunch = 0; Klaunch < NumDevices; ++Klaunch) {
-    HIP_CHECK(hipSetDevice(Klaunch));
+    HIP_CHECK(hipSetDevice(Klaunch))
     vector_sum<float><<<blocks, threadsPerBlock, 0, stream[Klaunch]>>>(&Hmm[Klaunch * NUM_ELMS],
                                                                        Ad[Klaunch], NUM_ELMS);
   }
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   for (int m = 0; m < NumDevices; ++m) {
-    HIP_CHECK(hipMemcpy(Ah, Ad[m], NUM_ELMS * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(Ah, Ad[m], NUM_ELMS * sizeof(float), hipMemcpyDeviceToHost))
     for (size_t n = 0; n < NUM_ELMS; ++n) {
       if (Ah[n] != ((INIT_VAL + m) * 2)) {
         DataMismatch++;
@@ -184,10 +184,10 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
   }
   REQUIRE(DataMismatch.load() == 0);
   for (int i = 0; i < NumDevices; ++i) {
-    HIP_CHECK(hipFree(Ad[i]));
-    HIP_CHECK(hipStreamDestroy(stream[i]));
+    HIP_CHECK(hipFree(Ad[i]))
+    HIP_CHECK(hipStreamDestroy(stream[i]))
   }
-  HIP_CHECK(hipFree(Hmm));
+  HIP_CHECK(hipFree(Hmm))
   delete[] Ah;
 }
 
@@ -197,7 +197,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_OverSubscription) {
 
 #if HT_AMD
   int isPageableHMM = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM, hipDeviceAttributePageableMemoryAccess, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM, hipDeviceAttributePageableMemoryAccess, 0))
   if (!isPageableHMM) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
   }
@@ -205,8 +205,8 @@ HIP_TEST_CASE(Unit_hipMallocManaged_OverSubscription) {
 
   void* A = nullptr;
   size_t total = 0, free = 0;
-  HIP_CHECK(hipMemGetInfo(&free, &total));
-  HIP_CHECK(hipMallocManaged(&A, (free + 1), hipMemAttachGlobal));
+  HIP_CHECK(hipMemGetInfo(&free, &total))
+  HIP_CHECK(hipMallocManaged(&A, (free + 1), hipMemAttachGlobal))
 }
 
 // The following test does negative testing of hipMallocManaged() api
@@ -214,7 +214,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_OverSubscription) {
 HIP_TEST_CASE(Unit_hipMallocManaged_Negative) {
   void* A;
   size_t total = 0, free = 0;
-  HIP_CHECK(hipMemGetInfo(&free, &total));
+  HIP_CHECK(hipMemGetInfo(&free, &total))
 
   SECTION("Nullptr to devPtr") {
     HIP_CHECK_ERROR(hipMallocManaged(NULL, 1024, hipMemAttachGlobal), hipErrorInvalidValue);
@@ -230,7 +230,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Negative) {
 #if HT_AMD
     HIP_CHECK_ERROR(hipMallocManaged(&A, 0, hipMemAttachGlobal), hipErrorInvalidValue);
 #else
-    HIP_CHECK(hipMallocManaged(&A, 0, hipMemAttachGlobal));
+    HIP_CHECK(hipMallocManaged(&A, 0, hipMemAttachGlobal))
 #endif
   }
 
@@ -248,7 +248,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Negative) {
 #if HT_AMD
     HIP_CHECK_ERROR(hipMallocManaged(&A, 0, hipMemAttachHost), hipErrorInvalidValue);
 #else
-    HIP_CHECK(hipMallocManaged(&A, 0, hipMemAttachHost));
+    HIP_CHECK(hipMallocManaged(&A, 0, hipMemAttachHost))
 #endif
   }
 
@@ -276,30 +276,30 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_TwoPointers, int,
   CHECK_MANAGED_MEMORY_SUPPORT
 
   int NumDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&NumDevices));
+  HIP_CHECK(hipGetDeviceCount(&NumDevices))
   TestType *Hmm1 = nullptr, *Hmm2 = nullptr;
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
   for (int i = 0; i < NumDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     std::atomic<int> DataMismatch{0};
-    HIP_CHECK(hipMallocManaged(&Hmm1, N * sizeof(TestType)));
-    HIP_CHECK(hipMallocManaged(&Hmm2, N * sizeof(TestType)));
+    HIP_CHECK(hipMallocManaged(&Hmm1, N * sizeof(TestType)))
+    HIP_CHECK(hipMallocManaged(&Hmm2, N * sizeof(TestType)))
     for (size_t m = 0; m < N; ++m) {
       Hmm1[m] = m;
       Hmm2[m] = 0;
     }
     // Kernel launch
     vector_sum<<<blocks, threadsPerBlock>>>(Hmm1, Hmm2, N);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     for (size_t v = 0; v < N; ++v) {
       if (Hmm2[v] != static_cast<TestType>(v + v)) {
         DataMismatch++;
       }
     }
     REQUIRE(DataMismatch.load() == 0);
-    HIP_CHECK(hipFree(Hmm1));
-    HIP_CHECK(hipFree(Hmm2));
+    HIP_CHECK(hipFree(Hmm1))
+    HIP_CHECK(hipFree(Hmm2))
   }
 }
 
@@ -313,7 +313,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_DeviceContextChange,
   CHECK_MANAGED_MEMORY_SUPPORT
 
   int NumDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&NumDevices));
+  HIP_CHECK(hipGetDeviceCount(&NumDevices))
   if (NumDevices < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
@@ -328,13 +328,13 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_DeviceContextChange,
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   for (int Oloop = 0; Oloop < NumDevices; ++Oloop) {
     DataMismatch = 0;
-    HIP_CHECK(hipSetDevice(Oloop));
-    HIP_CHECK(hipMallocManaged(&Hmm, N * sizeof(TestType)));
+    HIP_CHECK(hipSetDevice(Oloop))
+    HIP_CHECK(hipMallocManaged(&Hmm, N * sizeof(TestType)))
     for (int Iloop = 0; Iloop < NumDevices; ++Iloop) {
-      HIP_CHECK(hipSetDevice(Iloop));
-      HIP_CHECK(hipMalloc(&Ad, N * sizeof(TestType)));
+      HIP_CHECK(hipSetDevice(Iloop))
+      HIP_CHECK(hipMalloc(&Ad, N * sizeof(TestType)))
       // Copy data from host to hipMallocMananged memory and verify
-      HIP_CHECK(hipMemcpy(Hmm, Ah1, N * sizeof(TestType), hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpy(Hmm, Ah1, N * sizeof(TestType), hipMemcpyHostToDevice))
       for (size_t v = 0; v < N; ++v) {
         if (Hmm[v] != INIT_VAL) {
           DataMismatch++;
@@ -343,29 +343,29 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_DeviceContextChange,
       REQUIRE(DataMismatch.load() == 0);
 
       // Executing D2D transfer with hipMallocManaged memory and verify
-      HIP_CHECK(hipMemcpy(Ad, Hmm, N * sizeof(TestType), hipMemcpyDeviceToDevice));
-      HIP_CHECK(hipMemcpy(Ah2, Ad, N * sizeof(TestType), hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(Ad, Hmm, N * sizeof(TestType), hipMemcpyDeviceToDevice))
+      HIP_CHECK(hipMemcpy(Ah2, Ad, N * sizeof(TestType), hipMemcpyDeviceToHost))
       for (size_t k = 0; k < N; ++k) {
         if (Ah2[k] != INIT_VAL) {
           DataMismatch++;
         }
       }
       REQUIRE(DataMismatch.load() == 0);
-      HIP_CHECK(hipMemset(Ad, 0, N * sizeof(TestType)));
+      HIP_CHECK(hipMemset(Ad, 0, N * sizeof(TestType)))
       // Launching the kernel to check if there is any access issue with
       // hipMallocManaged memory and local device's memory
       vector_sum<<<blocks, threadsPerBlock>>>(Hmm, Ad, N);
-      HIP_CHECK(hipDeviceSynchronize());
-      HIP_CHECK(hipMemcpy(Ah2, Ad, N * sizeof(TestType), hipMemcpyDeviceToHost));
+      HIP_CHECK(hipDeviceSynchronize())
+      HIP_CHECK(hipMemcpy(Ah2, Ad, N * sizeof(TestType), hipMemcpyDeviceToHost))
       for (size_t m = 0; m < N; ++m) {
         if (Ah2[m] != 246) {
           DataMismatch++;
         }
       }
       REQUIRE(DataMismatch.load() == 0);
-      HIP_CHECK(hipFree(Ad));
+      HIP_CHECK(hipFree(Ad))
     }
-    HIP_CHECK(hipFree(Hmm));
+    HIP_CHECK(hipFree(Hmm))
   }
   delete[] Ah1;
   delete[] Ah2;

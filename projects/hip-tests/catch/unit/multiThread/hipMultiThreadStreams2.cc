@@ -21,18 +21,18 @@ void run1(size_t size, hipStream_t stream) {
   float *Ah, *Bh, *Cd, *Dd, *Eh;
   float* snap = (float*)malloc(size);
 
-  HIPCHECK(hipHostMalloc((void**)&Ah, size, hipHostMallocDefault));
-  HIPCHECK(hipHostMalloc((void**)&Bh, size, hipHostMallocDefault));
-  HIPCHECK(hipMalloc(&Cd, size));
-  HIPCHECK(hipMalloc(&Dd, size));
-  HIPCHECK(hipHostMalloc((void**)&Eh, size, hipHostMallocDefault));
+  HIPCHECK(hipHostMalloc((void**)&Ah, size, hipHostMallocDefault))
+  HIPCHECK(hipHostMalloc((void**)&Bh, size, hipHostMallocDefault))
+  HIPCHECK(hipMalloc(&Cd, size))
+  HIPCHECK(hipMalloc(&Dd, size))
+  HIPCHECK(hipHostMalloc((void**)&Eh, size, hipHostMallocDefault))
 
   for (int i = 0; i < N; i++) {
     Ah[i] = 1.0f;
   }
 
-  HIPCHECK(hipMemcpyAsync(Bh, Ah, size, hipMemcpyHostToHost, stream));
-  HIPCHECK(hipMemcpyAsync(Cd, Bh, size, hipMemcpyHostToDevice, stream));
+  HIPCHECK(hipMemcpyAsync(Bh, Ah, size, hipMemcpyHostToHost, stream))
+  HIPCHECK(hipMemcpyAsync(Cd, Bh, size, hipMemcpyHostToDevice, stream))
   hipLaunchKernelGGL(HIP_KERNEL_NAME(Inc), dim3(N / 500), dim3(500), 0, stream, Cd);
   HIPCHECK(hipGetLastError());
   HIPCHECK(hipMemcpyAsync(Dd, Cd, size, hipMemcpyDeviceToDevice, stream));
@@ -44,11 +44,11 @@ void run1(size_t size, hipStream_t stream) {
     HIPASSERT(snap[i] == Ah[i] + 1.0f);
   }
   free(snap);
-  HIPCHECK(hipHostFree(Ah));
-  HIPCHECK(hipHostFree(Bh));
-  HIPCHECK(hipHostFree(Eh));
-  HIPCHECK(hipFree(Cd));
-  HIPCHECK(hipFree(Dd));
+  HIPCHECK(hipHostFree(Ah))
+  HIPCHECK(hipHostFree(Bh))
+  HIPCHECK(hipHostFree(Eh))
+  HIPCHECK(hipFree(Cd))
+  HIPCHECK(hipFree(Dd))
 }
 
 
@@ -60,21 +60,21 @@ void run(size_t size, hipStream_t stream1, hipStream_t stream2) {
   snap = (float*)malloc(size);
   snapp = (float*)malloc(size);
 
-  HIPCHECK(hipHostMalloc((void**)&Ah, size, hipHostMallocDefault));
-  HIPCHECK(hipHostMalloc((void**)&Bh, size, hipHostMallocDefault));
-  HIPCHECK(hipMalloc(&Cd, size));
-  HIPCHECK(hipMalloc(&Dd, size));
-  HIPCHECK(hipHostMalloc((void**)&Eh, size, hipHostMallocDefault));
-  HIPCHECK(hipHostMalloc((void**)&Ahh, size, hipHostMallocDefault));
-  HIPCHECK(hipHostMalloc((void**)&Bhh, size, hipHostMallocDefault));
-  HIPCHECK(hipMalloc(&Cdd, size));
-  HIPCHECK(hipMalloc(&Ddd, size));
-  HIPCHECK(hipHostMalloc((void**)&Ehh, size, hipHostMallocDefault));
+  HIPCHECK(hipHostMalloc((void**)&Ah, size, hipHostMallocDefault))
+  HIPCHECK(hipHostMalloc((void**)&Bh, size, hipHostMallocDefault))
+  HIPCHECK(hipMalloc(&Cd, size))
+  HIPCHECK(hipMalloc(&Dd, size))
+  HIPCHECK(hipHostMalloc((void**)&Eh, size, hipHostMallocDefault))
+  HIPCHECK(hipHostMalloc((void**)&Ahh, size, hipHostMallocDefault))
+  HIPCHECK(hipHostMalloc((void**)&Bhh, size, hipHostMallocDefault))
+  HIPCHECK(hipMalloc(&Cdd, size))
+  HIPCHECK(hipMalloc(&Ddd, size))
+  HIPCHECK(hipHostMalloc((void**)&Ehh, size, hipHostMallocDefault))
 
-  HIPCHECK(hipMemcpyAsync(Bh, Ah, size, hipMemcpyHostToHost, stream1));
-  HIPCHECK(hipMemcpyAsync(Bhh, Ahh, size, hipMemcpyHostToHost, stream2));
-  HIPCHECK(hipMemcpyAsync(Cd, Bh, size, hipMemcpyHostToDevice, stream1));
-  HIPCHECK(hipMemcpyAsync(Cdd, Bhh, size, hipMemcpyHostToDevice, stream2));
+  HIPCHECK(hipMemcpyAsync(Bh, Ah, size, hipMemcpyHostToHost, stream1))
+  HIPCHECK(hipMemcpyAsync(Bhh, Ahh, size, hipMemcpyHostToHost, stream2))
+  HIPCHECK(hipMemcpyAsync(Cd, Bh, size, hipMemcpyHostToDevice, stream1))
+  HIPCHECK(hipMemcpyAsync(Cdd, Bhh, size, hipMemcpyHostToDevice, stream2))
   hipLaunchKernelGGL(HIP_KERNEL_NAME(Inc), dim3(N / 500), dim3(500), 0, stream1, Cd);
   HIPCHECK(hipGetLastError());
   hipLaunchKernelGGL(HIP_KERNEL_NAME(Inc), dim3(N / 500), dim3(500), 0, stream2, Cdd);
@@ -94,23 +94,23 @@ void run(size_t size, hipStream_t stream1, hipStream_t stream2) {
   }
   free(snap);
   free(snapp);
-  HIPCHECK(hipHostFree(Ah));
-  HIPCHECK(hipHostFree(Bh));
-  HIPCHECK(hipHostFree(Eh));
-  HIPCHECK(hipHostFree(Ahh));
-  HIPCHECK(hipHostFree(Bhh));
-  HIPCHECK(hipHostFree(Ehh));
-  HIPCHECK(hipFree(Cd));
-  HIPCHECK(hipFree(Dd));
-  HIPCHECK(hipFree(Cdd));
-  HIPCHECK(hipFree(Ddd));
+  HIPCHECK(hipHostFree(Ah))
+  HIPCHECK(hipHostFree(Bh))
+  HIPCHECK(hipHostFree(Eh))
+  HIPCHECK(hipHostFree(Ahh))
+  HIPCHECK(hipHostFree(Bhh))
+  HIPCHECK(hipHostFree(Ehh))
+  HIPCHECK(hipFree(Cd))
+  HIPCHECK(hipFree(Dd))
+  HIPCHECK(hipFree(Cdd))
+  HIPCHECK(hipFree(Ddd))
 }
 HIP_TEST_CASE(Unit_hipMultiThreadStreams2) {
   int iterations = isQuickLevel() ? 5 : 100;
 
   hipStream_t stream[3];
   for (int i = 0; i < 3; i++) {
-    HIPCHECK(hipStreamCreate(&stream[i]));
+    HIPCHECK(hipStreamCreate(&stream[i]))
   }
 
   const size_t size = N * sizeof(float);
@@ -125,6 +125,6 @@ HIP_TEST_CASE(Unit_hipMultiThreadStreams2) {
   }
 
   for (int i = 0; i < 3; i++) {
-    HIPCHECK(hipStreamDestroy(stream[i]));
+    HIPCHECK(hipStreamDestroy(stream[i]))
   }
 }

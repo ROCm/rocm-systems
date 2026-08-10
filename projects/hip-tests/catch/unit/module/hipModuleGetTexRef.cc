@@ -12,7 +12,7 @@
 #if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
 
 static hipModule_t GetModule() {
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
   static const auto mg = ModuleGuard::LoadModule("get_tex_ref_module.code");
   return mg.module();
 }
@@ -20,7 +20,7 @@ static hipModule_t GetModule() {
 HIP_TEST_CASE(Unit_hipModuleGetTexRef_Positive_Basic) {
   CHECK_IMAGE_SUPPORT
   hipTexRef tex_ref = nullptr;
-  HIP_CHECK(hipModuleGetTexRef(&tex_ref, GetModule(), "tex"));
+  HIP_CHECK(hipModuleGetTexRef(&tex_ref, GetModule(), "tex"))
   REQUIRE(tex_ref != nullptr);
 }
 

@@ -102,14 +102,14 @@ HIP_TEST_CASE(Unit_RTC_LinkerAPI) {
   size_t bufferSize = n * sizeof(float);
 
   float *dX, *dY, *dOut;
-  HIP_CHECK(hipMalloc(&dX, bufferSize));
-  HIP_CHECK(hipMalloc(&dY, bufferSize));
-  HIP_CHECK(hipMalloc(&dOut, bufferSize));
+  HIP_CHECK(hipMalloc(&dX, bufferSize))
+  HIP_CHECK(hipMalloc(&dY, bufferSize))
+  HIP_CHECK(hipMalloc(&dOut, bufferSize))
 
   hipModule_t module;
   hipFunction_t kernel;
-  HIP_CHECK(hipModuleLoadData(&module, finaldata));
-  HIP_CHECK(hipModuleGetFunction(&kernel, module, "saxpy"));
+  HIP_CHECK(hipModuleLoadData(&module, finaldata))
+  HIP_CHECK(hipModuleGetFunction(&kernel, module, "saxpy"))
 
   float a = 5.1f;
   std::unique_ptr<float[]> hX{new float[n]};
@@ -120,8 +120,8 @@ HIP_TEST_CASE(Unit_RTC_LinkerAPI) {
     hY[i] = static_cast<float>(i * 2);
   }
 
-  HIP_CHECK(hipMemcpy(dX, hX.get(), bufferSize, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dY, hY.get(), bufferSize, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dX, hX.get(), bufferSize, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(dY, hY.get(), bufferSize, hipMemcpyHostToDevice))
 
   struct {
     float a_;
@@ -135,16 +135,16 @@ HIP_TEST_CASE(Unit_RTC_LinkerAPI) {
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
 
-  HIP_CHECK(hipModuleLaunchKernel(kernel, 32, 1, 1, 128, 1, 1, 0, nullptr, nullptr, config));
+  HIP_CHECK(hipModuleLaunchKernel(kernel, 32, 1, 1, 128, 1, 1, 0, nullptr, nullptr, config))
 
-  HIP_CHECK(hipMemcpy(hOut.get(), dOut, bufferSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOut.get(), dOut, bufferSize, hipMemcpyDeviceToHost))
 
-  HIP_CHECK(hipFree(dX));
-  HIP_CHECK(hipFree(dY));
-  HIP_CHECK(hipFree(dOut));
+  HIP_CHECK(hipFree(dX))
+  HIP_CHECK(hipFree(dY))
+  HIP_CHECK(hipFree(dOut))
 
   HIPRTC_CHECK(hiprtcLinkDestroy(linkstate));
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
 
   for (size_t i = 0; i < n; ++i) {
     REQUIRE(fabs(a * hX[i] + hY[i] - hOut[i]) <= fabs(hOut[i]) * 1e-6);

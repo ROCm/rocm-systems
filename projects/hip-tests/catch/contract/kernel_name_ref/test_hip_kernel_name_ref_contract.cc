@@ -72,7 +72,7 @@ HIP_TEST_CASE(Contract_KernelNameRef_HipKernelNameRefByPtr_ByPtr_NamesHostKernel
 // @asserts: hipKernelNameRef - resolves a hipFunction_t (from hipGetFuncBySymbol) to a non-empty name mentioning the kernel identifier
 HIP_TEST_CASE(Contract_KernelNameRef_HipKernelNameRef_ByFunction_NamesResolvedKernel) {
   hipFunction_t function = nullptr;
-  HIP_CHECK(hipGetFuncBySymbol(&function, reinterpret_cast<const void*>(KernelNameRefProbe)));
+  HIP_CHECK(hipGetFuncBySymbol(&function, reinterpret_cast<const void*>(KernelNameRefProbe)))
   REQUIRE(function != nullptr);
 
   const char* name = hipKernelNameRef(function);

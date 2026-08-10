@@ -74,15 +74,15 @@ void runTestFMA() {
     A[i] = 0;
   }
 
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
   hipLaunchKernelGGL(kernelTestFMA, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, Ad);
-  HIP_CHECK(hipMemcpy(A, Ad, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(A, Ad, SIZE, hipMemcpyDeviceToHost))
 
   for (unsigned i = 0; i < LEN; i++) {
     REQUIRE(A[i] == true);
   }
 
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Ad))
 }
 
 __global__ void kernelTestHalfFMA(bool* Ad) {
@@ -149,15 +149,15 @@ void runTestHalfFMA() {
     A[i] = 0;
   }
 
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
   hipLaunchKernelGGL(kernelTestHalfFMA, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, Ad);
-  HIP_CHECK(hipMemcpy(A, Ad, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(A, Ad, SIZE, hipMemcpyDeviceToHost))
 
   for (unsigned i = 0; i < LEN; i++) {
     REQUIRE(A[i] == true);
   }
 
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Ad))
 }
 
 HIP_TEST_CASE(Unit_hipTestFMA) {

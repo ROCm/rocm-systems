@@ -27,19 +27,19 @@
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_DeviceGetDevResource) {
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
 
   for (int dev = 0; dev < deviceCount; dev++) {
-    HIP_CHECK(hipSetDevice(dev));
+    HIP_CHECK(hipSetDevice(dev))
 
     hipDeviceProp_t prop{};
-    HIP_CHECK(hipGetDeviceProperties(&prop, dev));
+    HIP_CHECK(hipGetDeviceProperties(&prop, dev))
 
     hipDevice_t device;
-    HIP_CHECK(hipDeviceGet(&device, dev));
+    HIP_CHECK(hipDeviceGet(&device, dev))
 
     hipDevResource resource{};
-    HIP_CHECK(hipDeviceGetDevResource(device, &resource, hipDevResourceTypeSm));
+    HIP_CHECK(hipDeviceGetDevResource(device, &resource, hipDevResourceTypeSm))
 
     unsigned int alignment = resource.sm.smCoscheduledAlignment;
 
@@ -64,30 +64,30 @@ HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_DeviceGetDevResource) {
  *    and a user-created stream.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_StreamGetDevResource) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   hipDevResource devResource{};
-  HIP_CHECK(hipDeviceGetDevResource(device, &devResource, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(device, &devResource, hipDevResourceTypeSm))
 
   // NULL stream
   hipDevResource nullStreamRes{};
-  HIP_CHECK(hipStreamGetDevResource(nullptr, &nullStreamRes, hipDevResourceTypeSm));
+  HIP_CHECK(hipStreamGetDevResource(nullptr, &nullStreamRes, hipDevResourceTypeSm))
   REQUIRE(nullStreamRes.sm.smCoscheduledAlignment == devResource.sm.smCoscheduledAlignment);
   REQUIRE(nullStreamRes.sm.minSmPartitionSize == devResource.sm.minSmPartitionSize);
 
   // User-created stream
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   hipDevResource streamRes{};
-  HIP_CHECK(hipStreamGetDevResource(stream, &streamRes, hipDevResourceTypeSm));
+  HIP_CHECK(hipStreamGetDevResource(stream, &streamRes, hipDevResourceTypeSm))
   REQUIRE(streamRes.sm.smCoscheduledAlignment == devResource.sm.smCoscheduledAlignment);
   REQUIRE(streamRes.sm.minSmPartitionSize == devResource.sm.minSmPartitionSize);
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -101,19 +101,19 @@ HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_StreamGetDevResource) {
  *    may be less than the input alignment.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_PropagatesThroughSplit) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   hipDevResource input{};
-  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm))
 
   unsigned int alignment = input.sm.smCoscheduledAlignment;
   unsigned int minCount = alignment;
 
   unsigned int nbGroups = 0;
-  HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, minCount));
+  HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, minCount))
   REQUIRE(nbGroups > 0);
 
   unsigned int requestedGroups = std::min(nbGroups, 2u);
@@ -145,13 +145,13 @@ HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_PropagatesThroughSplit) {
  *    from a split resource preserves the alignment from the original resource.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_GreenCtxPreservesAlignment) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   hipDevResource input{};
-  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm))
 
   unsigned int alignment = input.sm.smCoscheduledAlignment;
   unsigned int groupSize = (input.sm.smCount / 2 / alignment) * alignment;
@@ -162,24 +162,24 @@ HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_GreenCtxPreservesAlignment) {
 
   hipDevResource splitResult[1] = {};
   hipDevResource remainder{};
-  HIP_CHECK(hipDevSmResourceSplit(splitResult, 1, &input, &remainder, 0, params));
+  HIP_CHECK(hipDevSmResourceSplit(splitResult, 1, &input, &remainder, 0, params))
 
   hipDevResourceDesc_t desc{};
-  HIP_CHECK(hipDevResourceGenerateDesc(&desc, splitResult, 1));
+  HIP_CHECK(hipDevResourceGenerateDesc(&desc, splitResult, 1))
 
   hipExecutionCtx_t ctx = nullptr;
-  HIP_CHECK(hipGreenCtxCreate(&ctx, desc, 0, 0));
+  HIP_CHECK(hipGreenCtxCreate(&ctx, desc, 0, 0))
   REQUIRE(ctx != nullptr);
 
   hipDevResource ctxResource{};
-  HIP_CHECK(hipExecutionCtxGetDevResource(ctx, &ctxResource, hipDevResourceTypeSm));
+  HIP_CHECK(hipExecutionCtxGetDevResource(ctx, &ctxResource, hipDevResourceTypeSm))
 
   REQUIRE(ctxResource.sm.smCoscheduledAlignment == alignment);
   REQUIRE(ctxResource.sm.minSmPartitionSize >= 1);
   REQUIRE(ctxResource.sm.minSmPartitionSize <= alignment);
   REQUIRE(ctxResource.sm.smCount == groupSize);
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 }
 
 /**

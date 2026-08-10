@@ -64,9 +64,9 @@ using TEST_WAIT64 = TEST_WAIT<uint64_t>;
 
 bool streamWaitValueSupported() {
   int device_num = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_num));
+  HIP_CHECK(hipGetDeviceCount(&device_num))
   for (int device_id = 0; device_id < device_num; ++device_id) {
-    HIP_CHECK(hipSetDevice(device_id));
+    HIP_CHECK(hipSetDevice(device_id))
     int waitValueSupport = 0;
     auto getAttributeError = hipDeviceGetAttribute(
         &waitValueSupport, hipDeviceAttributeCanUseStreamWaitValue, device_id);
@@ -104,7 +104,7 @@ template <PtrType type, typename UIntT, typename UniquePtrWithDeleter> class Tes
     } else {
       static_assert(type == PtrType::DevicePtr, "Expected DevicePtr");
       UIntT value;
-      HIP_CHECK(hipMemcpy(&value, ptr + offset, sizeof(UIntT), hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(&value, ptr + offset, sizeof(UIntT), hipMemcpyDeviceToHost))
       return value;
     }
   }
@@ -118,10 +118,10 @@ template <PtrType type, typename UIntT, typename UniquePtrWithDeleter> class Tes
       // hipMemcpy causes deadlock, so use hipStreamWriteValue
       static_assert(type == PtrType::DevicePtr, "Expected DevicePtr");
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-      HIP_CHECK(writeFunc<UIntT>(stream, ptr + offset, value, writeFlag));
-      HIP_CHECK(hipStreamSynchronize(stream));
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking))
+      HIP_CHECK(writeFunc<UIntT>(stream, ptr + offset, value, writeFlag))
+      HIP_CHECK(hipStreamSynchronize(stream))
+      HIP_CHECK(hipStreamDestroy(stream))
     }
   }
 };
@@ -152,54 +152,54 @@ template <PtrType type, typename UIntT> auto allocMem() {
 
     auto freeStuff = [](uint64_t* sPtr) { HIP_CHECK(hipFree(sPtr)); };
     // sync ensures the memory intialization is complete before using the memory
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     return TestPtr<type, UIntT, std::unique_ptr<uint64_t, decltype(freeStuff)>>{
         signalPtr, std::unique_ptr<uint64_t, decltype(freeStuff)>(signalPtr, freeStuff)};
   } else if constexpr (type == PtrType::DevicePtrToHost) {
     auto hostPtr = new UIntT[arraySize];
 
     // Register Host Memory
-    HIP_CHECK(hipHostRegister(hostPtr, sizeof(UIntT) * arraySize, 0));
+    HIP_CHECK(hipHostRegister(hostPtr, sizeof(UIntT) * arraySize, 0))
 
     // Init memory
     std::fill(hostPtr, hostPtr + arraySize, 0);
 
     UIntT* devicePtr;
     // Test writing device pointer
-    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&devicePtr), hostPtr, 0));
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&devicePtr), hostPtr, 0))
     auto freeStuff = [](UIntT* ptr) {
-      HIP_CHECK(hipHostUnregister(ptr));
+      HIP_CHECK(hipHostUnregister(ptr))
       delete[] ptr;
     };
     // sync ensures the memory intialization is complete before using the memory
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     return TestPtr<type, UIntT, std::unique_ptr<UIntT[], decltype(freeStuff)>>{
         devicePtr, std::unique_ptr<UIntT[], decltype(freeStuff)>(hostPtr, freeStuff)};
   } else if constexpr (type == PtrType::HostPtr) {
     auto hostPtr = new UIntT[arraySize];
 
     // Register Host Memory
-    HIP_CHECK(hipHostRegister(hostPtr, sizeof(UIntT) * arraySize, 0));
+    HIP_CHECK(hipHostRegister(hostPtr, sizeof(UIntT) * arraySize, 0))
 
     // Init memory
     std::fill(hostPtr, hostPtr + arraySize, 0);
 
     auto freeStuff = [](UIntT* ptr) {
-      HIP_CHECK(hipHostUnregister(ptr));
+      HIP_CHECK(hipHostUnregister(ptr))
       delete[] ptr;
     };
     // sync ensures the memory intialization is complete before using the memory
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     return TestPtr<type, UIntT, std::unique_ptr<UIntT[], decltype(freeStuff)>>{
         hostPtr, std::unique_ptr<UIntT[], decltype(freeStuff)>(hostPtr, freeStuff)};
   } else {
     static_assert(type == PtrType::DevicePtr, "Expected DevicePtr");
     UIntT* devicePtr;
-    HIP_CHECK(hipMalloc(&devicePtr, sizeof(UIntT) * arraySize));
-    HIP_CHECK(hipMemset(devicePtr, 0, sizeof(UIntT) * arraySize));
+    HIP_CHECK(hipMalloc(&devicePtr, sizeof(UIntT) * arraySize))
+    HIP_CHECK(hipMemset(devicePtr, 0, sizeof(UIntT) * arraySize))
     auto freeStuff = [](UIntT* ptr) { HIP_CHECK(hipFree(ptr)); };
     // sync ensures the memory intialization is complete before using the memory
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     return TestPtr<type, UIntT, std::unique_ptr<UIntT, decltype(freeStuff)>>{
         devicePtr, std::unique_ptr<UIntT, decltype(freeStuff)>(devicePtr, freeStuff)};
   }
@@ -244,7 +244,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Write, (TestParams<uint32_t, PtrType:
   constexpr auto writeValue = testValue<UIntT>::value;
 
   hipStream_t stream{nullptr};
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   const auto offsets = get_offsets<ptrType>();
   const auto offset = GENERATE_COPY(from_range(std::begin(offsets), std::end(offsets)));
@@ -254,19 +254,19 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Write, (TestParams<uint32_t, PtrType:
   // Allocate Host Memory
   auto ptr = allocMem<ptrType, UIntT>();
   UIntT* target = ptr.ptr + offset;
-  HIP_CHECK(writeFunc<UIntT>(stream, target, writeValue, writeFlag));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(writeFunc<UIntT>(stream, target, writeValue, writeFlag))
+  HIP_CHECK(hipStreamSynchronize(stream))
   REQUIRE(ptr.getValue(offset) == writeValue);
 
   // Cleanup
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 template <bool isBlocking, typename UIntT, typename TestPtr>
 void syncAndCheckData(hipStream_t stream, UIntT* dataPtr, TestPtr signalPtr, size_t offset,
                       TEST_WAIT<UIntT> tc, std::array<hipEvent_t, 2>& events) {
   // Ensure first part of host memory is updated
-  HIP_CHECK(hipEventSynchronize(events[0]));
+  HIP_CHECK(hipEventSynchronize(events[0]))
   REQUIRE(dataPtr[0] == DATA_UPDATE);
 
   if constexpr (isBlocking) {
@@ -277,8 +277,8 @@ void syncAndCheckData(hipStream_t stream, UIntT* dataPtr, TestPtr signalPtr, siz
     signalPtr.setValue(tc.signalValuePass, offset);
   }
 
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipEventQuery(events[1]));
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipEventQuery(events[1]))
   // Finally ensure that second part of host memory is updated
   REQUIRE(dataPtr[1] == DATA_UPDATE);
 }
@@ -295,18 +295,18 @@ void testWait(TEST_WAIT<typename TestType::UIntType> tc) {
 
   // Initialize stream
   hipStream_t stream{};
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   // Allocate Host Memory
   auto dataPtr = std::make_unique<UIntT[]>(2);
   // Register Host Memory
-  HIP_CHECK(hipHostRegister(dataPtr.get(), sizeof(UIntT), 0));
-  HIP_CHECK(hipHostRegister(dataPtr.get() + 1, sizeof(UIntT), 0));
+  HIP_CHECK(hipHostRegister(dataPtr.get(), sizeof(UIntT), 0))
+  HIP_CHECK(hipHostRegister(dataPtr.get() + 1, sizeof(UIntT), 0))
   std::fill(dataPtr.get(), dataPtr.get() + 2, DATA_INIT);
 
   std::array<hipEvent_t, 2> events;
-  HIP_CHECK(hipEventCreate(&events[0]));
-  HIP_CHECK(hipEventCreate(&events[1]));
+  HIP_CHECK(hipEventCreate(&events[0]))
+  HIP_CHECK(hipEventCreate(&events[1]))
 
 
   const auto offsets = get_offsets<ptrType>();
@@ -316,27 +316,27 @@ void testWait(TEST_WAIT<typename TestType::UIntType> tc) {
   UIntT* const target = waitPtr.ptr + offset;
   waitPtr.setValue(isBlocking ? tc.signalValueFail : tc.signalValuePass, offset);
 
-  HIP_CHECK(writeFunc<UIntT>(stream, &(dataPtr.get()[0]), DATA_UPDATE, writeFlag));
-  HIP_CHECK(hipEventRecord(events[0], stream));
+  HIP_CHECK(writeFunc<UIntT>(stream, &(dataPtr.get()[0]), DATA_UPDATE, writeFlag))
+  HIP_CHECK(hipEventRecord(events[0], stream))
 
   if (tc.mask != defaultMask) {
-    HIP_CHECK(waitFunc<UIntT>(stream, target, tc.waitValue, tc.compareOp, tc.mask));
+    HIP_CHECK(waitFunc<UIntT>(stream, target, tc.waitValue, tc.compareOp, tc.mask))
   } else {
-    HIP_CHECK(waitFunc<UIntT>(stream, target, tc.waitValue, tc.compareOp));
+    HIP_CHECK(waitFunc<UIntT>(stream, target, tc.waitValue, tc.compareOp))
   }
 
-  HIP_CHECK(writeFunc<UIntT>(stream, &(dataPtr.get()[1]), DATA_UPDATE, writeFlag));
+  HIP_CHECK(writeFunc<UIntT>(stream, &(dataPtr.get()[1]), DATA_UPDATE, writeFlag))
 
-  HIP_CHECK(hipEventRecord(events[1], stream));
+  HIP_CHECK(hipEventRecord(events[1], stream))
 
   syncAndCheckData<isBlocking>(stream, dataPtr.get(), std::move(waitPtr), offset, tc, events);
 
   // Cleanup
-  HIP_CHECK(hipEventDestroy(events[0]));
-  HIP_CHECK(hipEventDestroy(events[1]));
-  HIP_CHECK(hipHostUnregister(dataPtr.get()));
-  HIP_CHECK(hipHostUnregister(dataPtr.get() + 1));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipEventDestroy(events[0]))
+  HIP_CHECK(hipEventDestroy(events[1]))
+  HIP_CHECK(hipHostUnregister(dataPtr.get()))
+  HIP_CHECK(hipHostUnregister(dataPtr.get() + 1))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 // Combined blocking test case for both uint32_t and uint64_t
@@ -556,7 +556,7 @@ HIP_TEST_CASE(Unit_hipStreamValue_Negative_InvalidMemory) {
   }
 
   hipStream_t stream{nullptr};
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   REQUIRE(stream != nullptr);
 
   const auto compareOp = hipStreamWaitValueGte;
@@ -577,7 +577,7 @@ HIP_TEST_CASE(Unit_hipStreamValue_Negative_InvalidMemory) {
   }
 
   // Cleanup
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 // Merge the two similar negative tests
@@ -593,7 +593,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Negative_StreamAndFlag, uint32_t, uin
     auto hostPtr = std::make_unique<TestType>();
 
     // Register Host Memory
-    HIP_CHECK(hipHostRegister(hostPtr.get(), sizeof(TestType), 0));
+    HIP_CHECK(hipHostRegister(hostPtr.get(), sizeof(TestType), 0))
 
     // Set dummy data
     *hostPtr = 0x0;
@@ -610,19 +610,19 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Negative_StreamAndFlag, uint32_t, uin
     }
 
     // Cleanup
-    HIP_CHECK(hipHostUnregister(hostPtr.get()));
+    HIP_CHECK(hipHostUnregister(hostPtr.get()))
   }
 
   SECTION("Invalid Flag") {
     hipStream_t stream{nullptr};
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     REQUIRE(stream != nullptr);
 
     // Allocate Host Memory
     auto hostPtr = std::make_unique<TestType>();
 
     // Register Host Memory
-    HIP_CHECK(hipHostRegister(hostPtr.get(), sizeof(TestType), 0));
+    HIP_CHECK(hipHostRegister(hostPtr.get(), sizeof(TestType), 0))
 
     // Set dummy data
     *hostPtr = 0x0;
@@ -630,8 +630,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Negative_StreamAndFlag, uint32_t, uin
     HIP_CHECK_ERROR(waitFunc<TestType>(stream, hostPtr.get(), 0, -1), hipErrorInvalidValue);
 
     // Cleanup
-    HIP_CHECK(hipHostUnregister(hostPtr.get()));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipHostUnregister(hostPtr.get()))
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 
@@ -641,23 +641,23 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamWriteValue_Default, uint32_t, uint64_t) {
   }
 
   hipStream_t stream{nullptr};
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   REQUIRE(stream != nullptr);
 
   // Allocate Host Memory
   auto hostPtr = std::make_unique<TestType>();
 
   // Register Host Memory
-  HIP_CHECK(hipHostRegister(hostPtr.get(), sizeof(TestType), 0));
+  HIP_CHECK(hipHostRegister(hostPtr.get(), sizeof(TestType), 0))
 
   // Set dummy data
   *hostPtr = 0x0;
 
-  HIP_CHECK(writeFunc<TestType>(stream, hostPtr.get(), 0, writeFlag));
+  HIP_CHECK(writeFunc<TestType>(stream, hostPtr.get(), 0, writeFlag))
 
   // Cleanup
-  HIP_CHECK(hipHostUnregister(hostPtr.get()));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipHostUnregister(hostPtr.get()))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 #if HT_AMD
@@ -667,23 +667,23 @@ TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Increment_Default", "", uint32_t, u
   }
 
   hipStream_t stream{nullptr};
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   REQUIRE(stream != nullptr);
 
   TestType initial_value = 10;
   TestType* mem;
-  HIP_CHECK(hipHostMalloc(&mem, sizeof(TestType), hipMallocSignalMemory));
+  HIP_CHECK(hipHostMalloc(&mem, sizeof(TestType), hipMallocSignalMemory))
   __atomic_store(mem, &initial_value, __ATOMIC_RELEASE);
 
   const TestType increment_value = 2;
-  HIP_CHECK(writeFunc<TestType>(stream, mem, increment_value, hipExtStreamWriteValueIncrement));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(writeFunc<TestType>(stream, mem, increment_value, hipExtStreamWriteValueIncrement))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   const TestType expected_value = initial_value + increment_value;
   REQUIRE(*mem == expected_value);
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipHostFree(mem));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipHostFree(mem))
 }
 
 TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Decrement_Default", "", uint32_t, uint64_t) {
@@ -692,22 +692,22 @@ TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Decrement_Default", "", uint32_t, u
   }
 
   hipStream_t stream{nullptr};
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   REQUIRE(stream != nullptr);
 
   TestType initial_value = 0;
   TestType* mem;
-  HIP_CHECK(hipHostMalloc(&mem, sizeof(TestType), hipMallocSignalMemory));
+  HIP_CHECK(hipHostMalloc(&mem, sizeof(TestType), hipMallocSignalMemory))
   __atomic_store(mem, &initial_value, __ATOMIC_RELEASE);
 
   const TestType decrement_value = 10;
-  HIP_CHECK(writeFunc<TestType>(stream, mem, decrement_value, hipExtStreamWriteValueDecrement));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(writeFunc<TestType>(stream, mem, decrement_value, hipExtStreamWriteValueDecrement))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   const TestType expected_value = initial_value - decrement_value;
   REQUIRE(*mem == expected_value);
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipHostFree(mem));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipHostFree(mem))
 }
 
 template <typename TestType>
@@ -722,20 +722,20 @@ void testIncrementDecrementMultiStreamMultiDevice(uint32_t operationFlag) {
   TestType initial_value = 10;
 
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
 
   std::vector<std::vector<hipStream_t>> streams(deviceCount);
 
   TestType* mem;
-  HIP_CHECK(hipHostMalloc(&mem, sizeof(TestType), hipMallocSignalMemory));
+  HIP_CHECK(hipHostMalloc(&mem, sizeof(TestType), hipMallocSignalMemory))
   __atomic_store(mem, &initial_value, __ATOMIC_RELEASE);
 
   for (int stream_idx = 0; stream_idx < streams_per_device; ++stream_idx) {
     for (int device_idx = 0; device_idx < deviceCount; ++device_idx) {
-      HIP_CHECK(hipSetDevice(device_idx));
+      HIP_CHECK(hipSetDevice(device_idx))
 
       hipStream_t stream{nullptr};
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
       REQUIRE(stream != nullptr);
 
       streams[device_idx].push_back(stream);
@@ -744,7 +744,7 @@ void testIncrementDecrementMultiStreamMultiDevice(uint32_t operationFlag) {
 
   for (int cur_iter = 0; cur_iter < iterations; ++cur_iter) {
     for (int device_idx = 0; device_idx < deviceCount; ++device_idx) {
-      HIP_CHECK(hipSetDevice(device_idx));
+      HIP_CHECK(hipSetDevice(device_idx))
       for (int stream_idx = 0; stream_idx < streams_per_device; ++stream_idx) {
         HIP_CHECK(writeFunc<TestType>(streams[device_idx][stream_idx], mem, increment_value,
                                       operationFlag));
@@ -753,9 +753,9 @@ void testIncrementDecrementMultiStreamMultiDevice(uint32_t operationFlag) {
   }
 
   for (int device_idx = 0; device_idx < deviceCount; ++device_idx) {
-    HIP_CHECK(hipSetDevice(device_idx));
+    HIP_CHECK(hipSetDevice(device_idx))
     for (int stream_idx = 0; stream_idx < streams_per_device; ++stream_idx) {
-      HIP_CHECK(hipStreamSynchronize(streams[device_idx][stream_idx]));
+      HIP_CHECK(hipStreamSynchronize(streams[device_idx][stream_idx]))
     }
   }
 
@@ -780,13 +780,13 @@ void testIncrementDecrementMultiStreamMultiDevice(uint32_t operationFlag) {
   REQUIRE(*mem == expected_value);
 
   for (int device_idx = 0; device_idx < deviceCount; ++device_idx) {
-    HIP_CHECK(hipSetDevice(device_idx));
+    HIP_CHECK(hipSetDevice(device_idx))
     for (int stream_idx = 0; stream_idx < streams_per_device; ++stream_idx) {
-      HIP_CHECK(hipStreamDestroy(streams[device_idx][stream_idx]));
+      HIP_CHECK(hipStreamDestroy(streams[device_idx][stream_idx]))
     }
   }
 
-  HIP_CHECK(hipHostFree(mem));
+  HIP_CHECK(hipHostFree(mem))
 }
 
 TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Increment_MultiStream_MultiDevice", "", uint32_t,
@@ -821,23 +821,23 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamWaitValue_Default, uint32_t, uint64_t) {
 
   // Allocate IO memory to be used in kernel
   uint32_t *d_a, *d_b, *d_c;
-  HIP_CHECK(hipMalloc(&d_a, sizeof(uint32_t) * size));
-  HIP_CHECK(hipMalloc(&d_b, sizeof(uint32_t) * size));
-  HIP_CHECK(hipMalloc(&d_c, sizeof(uint32_t) * size));
+  HIP_CHECK(hipMalloc(&d_a, sizeof(uint32_t) * size))
+  HIP_CHECK(hipMalloc(&d_b, sizeof(uint32_t) * size))
+  HIP_CHECK(hipMalloc(&d_c, sizeof(uint32_t) * size))
 
   // Create 2 separate streams. Once would be used for data copy, other will be used to execute
   // kernel
   hipStream_t dataCopyStream{nullptr};
   hipStream_t kernelExecStream{nullptr};
-  HIP_CHECK(hipStreamCreate(&dataCopyStream));
-  HIP_CHECK(hipStreamCreate(&kernelExecStream));
+  HIP_CHECK(hipStreamCreate(&dataCopyStream))
+  HIP_CHECK(hipStreamCreate(&kernelExecStream))
   REQUIRE(dataCopyStream != nullptr);
   REQUIRE(kernelExecStream != nullptr);
 
   // Create memory for streams to operate on. Kernel execution stream will wait for data stream to
   // finish copies
   auto hostPtr = std::make_unique<TestType>();
-  HIP_CHECK(hipHostRegister(hostPtr.get(), sizeof(TestType), 0));
+  HIP_CHECK(hipHostRegister(hostPtr.get(), sizeof(TestType), 0))
   *hostPtr = 0x0;
 
   // Perform copy operations on dataCopyStream
@@ -845,28 +845,28 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamWaitValue_Default, uint32_t, uint64_t) {
                            dataCopyStream));
   HIP_CHECK(hipMemcpyAsync(d_b, b.data(), sizeof(uint32_t) * size, hipMemcpyHostToDevice,
                            dataCopyStream));
-  HIP_CHECK(writeFunc<TestType>(dataCopyStream, hostPtr.get(), 1, writeFlag));
+  HIP_CHECK(writeFunc<TestType>(dataCopyStream, hostPtr.get(), 1, writeFlag))
 
   // Perform operations on kernelExecStream
-  HIP_CHECK(waitFunc<TestType>(kernelExecStream, hostPtr.get(), 1, hipStreamWaitValueGte));
+  HIP_CHECK(waitFunc<TestType>(kernelExecStream, hostPtr.get(), 1, hipStreamWaitValueGte))
   add<<<1, size, 0, kernelExecStream>>>(d_a, d_b, d_c, size);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   // Synchronize both streams, copy output to host and synchronize globally
-  HIP_CHECK(hipStreamSynchronize(dataCopyStream));
-  HIP_CHECK(hipStreamSynchronize(kernelExecStream));
+  HIP_CHECK(hipStreamSynchronize(dataCopyStream))
+  HIP_CHECK(hipStreamSynchronize(kernelExecStream))
 
   HIP_CHECK(hipMemcpyAsync(a.data(), d_c, sizeof(uint32_t) * size, hipMemcpyDeviceToHost,
                            dataCopyStream));
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Resource cleanup and validation
-  HIP_CHECK(hipFree(d_a));
-  HIP_CHECK(hipFree(d_b));
-  HIP_CHECK(hipFree(d_c));
-  HIP_CHECK(hipHostUnregister(hostPtr.get()));
-  HIP_CHECK(hipStreamDestroy(dataCopyStream));
-  HIP_CHECK(hipStreamDestroy(kernelExecStream));
+  HIP_CHECK(hipFree(d_a))
+  HIP_CHECK(hipFree(d_b))
+  HIP_CHECK(hipFree(d_c))
+  HIP_CHECK(hipHostUnregister(hostPtr.get()))
+  HIP_CHECK(hipStreamDestroy(dataCopyStream))
+  HIP_CHECK(hipStreamDestroy(kernelExecStream))
   REQUIRE(a == c);
 }

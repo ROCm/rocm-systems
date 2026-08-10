@@ -25,7 +25,7 @@ template <typename TestType> static void runAtomicExchSameAddressCompileTimeTest
 // Helper function to run atomicExch tests (single kernel)
 template <typename TestType> static void runAtomicExchTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
@@ -48,7 +48,7 @@ template <typename TestType> static void runAtomicExchTest() {
 // Helper function to run atomicExch tests (multi kernel)
 template <typename TestType> static void runAtomicExchMultiKernelTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {

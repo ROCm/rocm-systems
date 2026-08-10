@@ -48,13 +48,13 @@ HIP_TEST_CASE(Unit_kernel_Assign_threadIdx_to_auto) {
   }
 
   // Transfer data and perform operations on GPU
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipMemcpy(A_d, A_h.data(), Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipMemcpy(A_d, A_h.data(), Nbytes, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(vecSqrSingBlk, dim3(blocks), dim3(threadsPerBlock), 0, 0, A_d, N);
-  HIP_CHECK(hipMemcpy(C_h.data(), A_d, Nbytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(C_h.data(), A_d, Nbytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
   for (size_t i = 0; i < N; i++) {
     REQUIRE(C_h[i] == (i * i));
   }
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(A_d))
 }

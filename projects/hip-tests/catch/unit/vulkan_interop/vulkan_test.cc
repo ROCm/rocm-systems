@@ -714,7 +714,7 @@ hipExternalSemaphore_t ImportBinarySemaphore(VulkanTest& vkt) {
   const auto semaphore = vkt.CreateExternalSemaphore(VK_SEMAPHORE_TYPE_BINARY);
   const auto sem_handle_desc = vkt.BuildSemaphoreDescriptor(semaphore, VK_SEMAPHORE_TYPE_BINARY);
   hipExternalSemaphore_t hip_ext_semaphore;
-  HIP_CHECK(hipImportExternalSemaphore(&hip_ext_semaphore, &sem_handle_desc));
+  HIP_CHECK(hipImportExternalSemaphore(&hip_ext_semaphore, &sem_handle_desc))
 
   return hip_ext_semaphore;
 }

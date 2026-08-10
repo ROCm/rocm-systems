@@ -24,16 +24,16 @@ HIP_TEST_CASE(Unit_hipKernelSetAttribute_Positive_LaunchAfterSet) {
   }
 
   float *d_in1, *d_in2, *d_out;
-  HIP_CHECK(hipMalloc(&d_in1, sizeof(float) * size));
-  HIP_CHECK(hipMalloc(&d_in2, sizeof(float) * size));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size));
+  HIP_CHECK(hipMalloc(&d_in1, sizeof(float) * size))
+  HIP_CHECK(hipMalloc(&d_in2, sizeof(float) * size))
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size))
 
-  HIP_CHECK(hipMemset(d_out, 0, sizeof(float) * size));
-  HIP_CHECK(hipMemcpy(d_in1, input1.data(), sizeof(float) * size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_in2, input2.data(), sizeof(float) * size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemset(d_out, 0, sizeof(float) * size))
+  HIP_CHECK(hipMemcpy(d_in1, input1.data(), sizeof(float) * size, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(d_in2, input2.data(), sizeof(float) * size, hipMemcpyHostToDevice))
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   std::string lib_co = "library_code_load.code";
 
   hipLibrary_t library;
@@ -42,33 +42,33 @@ HIP_TEST_CASE(Unit_hipKernelSetAttribute_Positive_LaunchAfterSet) {
 
   HIP_CHECK(
       hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
-  HIP_CHECK(hipLibraryGetKernel(&kernel, library, "add_kernel"));
-  HIP_CHECK(hipKernelGetFunction(&function, kernel));
-  HIP_CHECK(hipKernelSetAttribute(HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES ,sizeof(float) * size_overwrite, kernel, 0));
+  HIP_CHECK(hipLibraryGetKernel(&kernel, library, "add_kernel"))
+  HIP_CHECK(hipKernelGetFunction(&function, kernel))
+  HIP_CHECK(hipKernelSetAttribute(HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES ,sizeof(float) * size_overwrite, kernel, 0))
 
   void* args[] = {&d_out, &d_in1, &d_in2};
 
-  HIP_CHECK(hipLaunchKernel(function, 1, size, args, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipLibraryUnload(library));
+  HIP_CHECK(hipLaunchKernel(function, 1, size, args, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipLibraryUnload(library))
 
   std::vector<float> out(size, 0);
-  HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
   for (size_t i = 0; i < size; i++) {
     float tmp = input1[i] + input2[i];
     INFO("Index: " << i << " cpu res: " << tmp << " gpu res: " << out[i]);
     REQUIRE(out[i] == tmp);
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(d_in1));
-  HIP_CHECK(hipFree(d_in2));
-  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(d_in1))
+  HIP_CHECK(hipFree(d_in2))
+  HIP_CHECK(hipFree(d_out))
 }
 
 HIP_TEST_CASE(Unit_hipKernelSetAttribute_Negative_Parameters) {
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   std::string lib_co = "library_code_load.code";
 
   hipLibrary_t library;
@@ -76,7 +76,7 @@ HIP_TEST_CASE(Unit_hipKernelSetAttribute_Negative_Parameters) {
 
   HIP_CHECK(
       hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
-  HIP_CHECK(hipLibraryGetKernel(&kernel, library, "add_kernel"));
+  HIP_CHECK(hipLibraryGetKernel(&kernel, library, "add_kernel"))
 
   int device_id = 0;
 
@@ -126,20 +126,20 @@ HIP_TEST_CASE(Unit_hipKernelSetAttribute_Negative_Parameters) {
 
   SECTION("invalid device id") {
     int device_count = 0;
-    HIP_CHECK(hipGetDeviceCount(&device_count));
+    HIP_CHECK(hipGetDeviceCount(&device_count))
     HIP_CHECK_ERROR(
         hipKernelSetAttribute(HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, 0, kernel,
                               device_count),
         hipErrorInvalidDevice);
   }
 
-  HIP_CHECK(hipLibraryUnload(library));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipLibraryUnload(library))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 HIP_TEST_CASE(Unit_hipKernelGetFunction_Negative_Parameters) {
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   std::string lib_co = "library_code_load.code";
 
   hipLibrary_t library;
@@ -147,7 +147,7 @@ HIP_TEST_CASE(Unit_hipKernelGetFunction_Negative_Parameters) {
 
   HIP_CHECK(
       hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
-  HIP_CHECK(hipLibraryGetKernel(&kernel, library, "add_kernel"));
+  HIP_CHECK(hipLibraryGetKernel(&kernel, library, "add_kernel"))
 
   SECTION("pFunc == nullptr") {
     HIP_CHECK_ERROR(hipKernelGetFunction(nullptr, kernel), hipErrorInvalidValue);
@@ -158,6 +158,6 @@ HIP_TEST_CASE(Unit_hipKernelGetFunction_Negative_Parameters) {
     HIP_CHECK_ERROR(hipKernelGetFunction(&function, nullptr), hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipLibraryUnload(library));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipLibraryUnload(library))
+  HIP_CHECK(hipStreamDestroy(stream))
 }

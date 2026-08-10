@@ -35,7 +35,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_KernelLaunchApis) {
   void* hipLaunchHostFunc_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(
       hipGetProcAddress("hipConfigureCall", &hipConfigureCall_ptr, currentHipVersion, 0, nullptr));
@@ -88,24 +88,24 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_KernelLaunchApis) {
     dim3 blocksPerGrid(1, 1, 1);
     dim3 threadsPerBlock(1, 1, 1);
 
-    HIP_CHECK(dyn_hipConfigureCall_ptr(blocksPerGrid, threadsPerBlock, 0, nullptr));
+    HIP_CHECK(dyn_hipConfigureCall_ptr(blocksPerGrid, threadsPerBlock, 0, nullptr))
 
     // hipSetupArgument
     int hostInt = 10;
     int* devInt = nullptr;
-    HIP_CHECK(hipMalloc(&devInt, sizeof(int)));
+    HIP_CHECK(hipMalloc(&devInt, sizeof(int)))
     REQUIRE(devInt != nullptr);
-    HIP_CHECK(hipMemcpy(devInt, &hostInt, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(devInt, &hostInt, sizeof(int), hipMemcpyHostToDevice))
 
-    HIP_CHECK(dyn_hipSetupArgument_ptr(&devInt, sizeof(int*), 0));
+    HIP_CHECK(dyn_hipSetupArgument_ptr(&devInt, sizeof(int*), 0))
 
     // hipLaunchByPtr
-    HIP_CHECK(dyn_hipLaunchByPtr_ptr(reinterpret_cast<void*>(addTenKernel)));
+    HIP_CHECK(dyn_hipLaunchByPtr_ptr(reinterpret_cast<void*>(addTenKernel)))
 
-    HIP_CHECK(hipMemcpy(&hostInt, devInt, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&hostInt, devInt, sizeof(int), hipMemcpyDeviceToHost))
     REQUIRE(hostInt == 20);
 
-    HIP_CHECK(hipFree(devInt));
+    HIP_CHECK(hipFree(devInt))
   }
 
   // Validating __hipPushCallConfiguration, __hipPopCallConfiguration APIs
@@ -113,14 +113,14 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_KernelLaunchApis) {
     // __hipPushCallConfiguration
     dim3 blocksPerGrid(4, 6, 8);
     dim3 threadsPerBlock(20, 30, 40);
-    HIP_CHECK(dyn__hipPushCallConfiguration_ptr(blocksPerGrid, threadsPerBlock, 512, nullptr));
+    HIP_CHECK(dyn__hipPushCallConfiguration_ptr(blocksPerGrid, threadsPerBlock, 512, nullptr))
 
     // __hipPopCallConfiguration
     dim3 gridDim, blockDim;
     size_t sharedMem = -1;
     hipStream_t stream;
 
-    HIP_CHECK(dyn__hipPopCallConfiguration_ptr(&gridDim, &blockDim, &sharedMem, &stream));
+    HIP_CHECK(dyn__hipPopCallConfiguration_ptr(&gridDim, &blockDim, &sharedMem, &stream))
 
     REQUIRE(gridDim.x == blocksPerGrid.x);
     REQUIRE(gridDim.y == blocksPerGrid.y);
@@ -139,19 +139,19 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_KernelLaunchApis) {
 
     int hostInt = 10;
     int* devInt = nullptr;
-    HIP_CHECK(hipMalloc(&devInt, sizeof(int)));
+    HIP_CHECK(hipMalloc(&devInt, sizeof(int)))
     REQUIRE(devInt != nullptr);
-    HIP_CHECK(hipMemcpy(devInt, &hostInt, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(devInt, &hostInt, sizeof(int), hipMemcpyHostToDevice))
 
     void* kernel_args[] = {&devInt};
     HIP_CHECK(dyn_hipExtLaunchKernel_ptr(reinterpret_cast<void*>(addTenKernel), blocksPerGrid,
                                          threadsPerBlock, kernel_args, 0, nullptr, nullptr, nullptr,
                                          0));
 
-    HIP_CHECK(hipMemcpy(&hostInt, devInt, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&hostInt, devInt, sizeof(int), hipMemcpyDeviceToHost))
     REQUIRE(hostInt == 20);
 
-    HIP_CHECK(hipFree(devInt));
+    HIP_CHECK(hipFree(devInt))
   }
 
   // Validating hipDrvMemcpy2DUnaligned API
@@ -182,7 +182,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_KernelLaunchApis) {
       desc.WidthInBytes = width * sizeof(char);
       desc.Height = height;
 
-      HIP_CHECK(dyn_hipDrvMemcpy2DUnaligned_ptr(&desc));
+      HIP_CHECK(dyn_hipDrvMemcpy2DUnaligned_ptr(&desc))
 
       REQUIRE(validateCharHostArray(dHostMem, N, value) == true);
 
@@ -197,7 +197,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_KernelLaunchApis) {
       fillCharHostArray(hostMem, N, value);
 
       char* devMem = nullptr;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
       REQUIRE(devMem != nullptr);
 
       hip_Memcpy2D desc = {};
@@ -210,20 +210,20 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_KernelLaunchApis) {
       desc.WidthInBytes = width * sizeof(char);
       desc.Height = height;
 
-      HIP_CHECK(dyn_hipDrvMemcpy2DUnaligned_ptr(&desc));
+      HIP_CHECK(dyn_hipDrvMemcpy2DUnaligned_ptr(&desc))
 
       REQUIRE(validateCharDeviceArray(devMem, N, value) == true);
 
       free(hostMem);
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
     }
 
     // Device To Host
     {
       char* devMem = nullptr;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMem), &pitch, width, height))
       REQUIRE(devMem != nullptr);
-      HIP_CHECK(hipMemset2D(devMem, pitch, value, width, height));
+      HIP_CHECK(hipMemset2D(devMem, pitch, value, width, height))
 
       char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
       REQUIRE(hostMem != nullptr);
@@ -239,11 +239,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_KernelLaunchApis) {
       desc.WidthInBytes = width * sizeof(char);
       desc.Height = height;
 
-      HIP_CHECK(dyn_hipDrvMemcpy2DUnaligned_ptr(&desc));
+      HIP_CHECK(dyn_hipDrvMemcpy2DUnaligned_ptr(&desc))
 
       REQUIRE(validateCharHostArray(hostMem, N, value) == true);
 
-      HIP_CHECK(hipFree(devMem));
+      HIP_CHECK(hipFree(devMem))
       free(hostMem);
     }
 
@@ -251,13 +251,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_KernelLaunchApis) {
     {
       char* sDevMem = nullptr;
       size_t sPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&sDevMem), &sPitch, width, height))
       REQUIRE(sDevMem != nullptr);
-      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height));
+      HIP_CHECK(hipMemset2D(sDevMem, sPitch, value, width, height))
 
       char* dDevMem = nullptr;
       size_t dPitch;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dDevMem), &dPitch, width, height))
       REQUIRE(dDevMem != nullptr);
 
       hip_Memcpy2D desc = {};
@@ -270,12 +270,12 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_KernelLaunchApis) {
       desc.WidthInBytes = width * sizeof(char);
       desc.Height = height;
 
-      HIP_CHECK(dyn_hipDrvMemcpy2DUnaligned_ptr(&desc));
+      HIP_CHECK(dyn_hipDrvMemcpy2DUnaligned_ptr(&desc))
 
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-      HIP_CHECK(hipFree(sDevMem));
-      HIP_CHECK(hipFree(dDevMem));
+      HIP_CHECK(hipFree(sDevMem))
+      HIP_CHECK(hipFree(dDevMem))
     }
   }
 
@@ -289,9 +289,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_KernelLaunchApis) {
     fillHostArray(hostArr, N, 10);
 
     int* devArr = nullptr;
-    HIP_CHECK(hipMalloc(&devArr, Nbytes));
+    HIP_CHECK(hipMalloc(&devArr, Nbytes))
     REQUIRE(devArr != nullptr);
-    HIP_CHECK(hipMemcpy(devArr, hostArr, Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(devArr, hostArr, Nbytes, hipMemcpyHostToDevice))
 
     dim3 blocksPerGrid(1, 1, 1);
     dim3 threadsPerBlock(1, 1, N);
@@ -308,11 +308,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_KernelLaunchApis) {
     HIP_CHECK(dyn_hipLaunchKernel_ptr(reinterpret_cast<void*>(addOneKernel), blocksPerGrid,
                                       threadsPerBlock, kernel_args, 0, nullptr));
 
-    HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost))
     REQUIRE(validateHostArray(hostArr, N, 11) == true);
 
     free(hostArr);
-    HIP_CHECK(hipFree(devArr));
+    HIP_CHECK(hipFree(devArr))
   }
 
   // Validating hipLaunchHostFunc API
@@ -321,13 +321,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_KernelLaunchApis) {
     hipHostFn_t fn = addTen;
 
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
 
-    HIP_CHECK(dyn_hipLaunchHostFunc_ptr(stream, fn, reinterpret_cast<void*>(&data)));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(dyn_hipLaunchHostFunc_ptr(stream, fn, reinterpret_cast<void*>(&data)))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     REQUIRE(data == 40);
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 
@@ -351,11 +351,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_CallbackActivityAPIs) {
   void* hipKernelNameRef_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(hipGetProcAddress("hipGetStreamDeviceId", &hipGetStreamDeviceId_ptr, currentHipVersion,
                               0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipApiName", &hipApiName_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipApiName", &hipApiName_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(
       hipGetProcAddress("hipKernelNameRef", &hipKernelNameRef_ptr, currentHipVersion, 0, nullptr));
 
@@ -369,16 +369,16 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_CallbackActivityAPIs) {
   // Validating hipGetStreamDeviceId API
   {
     int deviceId = 0;
-    HIP_CHECK(hipSetDevice(deviceId));
+    HIP_CHECK(hipSetDevice(deviceId))
 
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
 
     REQUIRE(hipGetStreamDeviceId(stream) == dyn_hipGetStreamDeviceId_ptr(stream));
 
     REQUIRE(dyn_hipGetStreamDeviceId_ptr(stream) == deviceId);
 
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 
   // Validating hipApiName API
@@ -417,7 +417,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ExecutionControlAPIs) {
   void* hipFuncSetSharedMemConfig_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(hipGetProcAddress("hipFuncSetAttribute", &hipFuncSetAttribute_ptr, currentHipVersion, 0,
                               nullptr));
@@ -450,13 +450,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ExecutionControlAPIs) {
   hipFuncCache_t funcCacheConfig[] = {hipFuncCachePreferNone, hipFuncCachePreferShared,
                                       hipFuncCachePreferL1, hipFuncCachePreferEqual};
   for (auto config : funcCacheConfig) {
-    HIP_CHECK(dyn_hipFuncSetCacheConfig_ptr(reinterpret_cast<void*>(addOneKernel), config));
+    HIP_CHECK(dyn_hipFuncSetCacheConfig_ptr(reinterpret_cast<void*>(addOneKernel), config))
   }
 
   // Validating hipFuncSetSharedMemConfig API
   hipSharedMemConfig sharedMemConfig[] = {hipSharedMemBankSizeDefault, hipSharedMemBankSizeFourByte,
                                           hipSharedMemBankSizeEightByte};
   for (auto config : sharedMemConfig) {
-    HIP_CHECK(dyn_hipFuncSetSharedMemConfig_ptr(reinterpret_cast<void*>(addOneKernel), config));
+    HIP_CHECK(dyn_hipFuncSetSharedMemConfig_ptr(reinterpret_cast<void*>(addOneKernel), config))
   }
 }

@@ -33,7 +33,7 @@ static void validate_hipGraphGetEdges_fromto(size_t testNumEdges, GraphGetNodesT
   size_t numEdges = testNumEdges;
   hipGraphNode_t* fromnode = new hipGraphNode_t[numEdges]{};
   hipGraphNode_t* tonode = new hipGraphNode_t[numEdges]{};
-  HIP_CHECK(hipGraphGetEdges(graph, fromnode, tonode, &numEdges));
+  HIP_CHECK(hipGraphGetEdges(graph, fromnode, tonode, &numEdges))
   bool nodeFound;
   int found_count = 0;
   for (int idx_from = 0; idx_from < nodes_from.size(); idx_from++) {
@@ -99,7 +99,7 @@ HIP_TEST_CASE(Unit_hipGraphGetEdges_Positive_Functional) {
 
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   std::vector<hipGraphNode_t> from_nodes;
   std::vector<hipGraphNode_t> to_nodes;
@@ -107,13 +107,13 @@ HIP_TEST_CASE(Unit_hipGraphGetEdges_Positive_Functional) {
   graphNodesCommon(graph, A_h, A_d, B_h, B_d, C_h, C_d, N, from_nodes, to_nodes, nodelist);
 
   // Create dependencies
-  HIP_CHECK(hipGraphAddDependencies(graph, &from_nodes[0], &to_nodes[0], 6));
+  HIP_CHECK(hipGraphAddDependencies(graph, &from_nodes[0], &to_nodes[0], 6))
 
   // Validate hipGraphGetEdges() API
   // Scenario 1
   SECTION("Validate number of edges") {
     size_t numEdges = 0;
-    HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &numEdges));
+    HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &numEdges))
     REQUIRE(numEdges == kNumOfEdges);
   }
   // Scenario 2
@@ -135,18 +135,18 @@ HIP_TEST_CASE(Unit_hipGraphGetEdges_Positive_Functional) {
   SECTION("Validate number of edges when zero or one node in graph") {
     size_t numEdges = 0;
     hipGraph_t graphempty;
-    HIP_CHECK(hipGraphCreate(&graphempty, 0));
-    HIP_CHECK(hipGraphGetEdges(graphempty, nullptr, nullptr, &numEdges));
+    HIP_CHECK(hipGraphCreate(&graphempty, 0))
+    HIP_CHECK(hipGraphGetEdges(graphempty, nullptr, nullptr, &numEdges))
     REQUIRE(numEdges == 0);
     // Add an empty node
     hipGraphNode_t emptyNode{};
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graphempty, nullptr, 0));
-    HIP_CHECK(hipGraphGetEdges(graphempty, nullptr, nullptr, &numEdges));
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graphempty, nullptr, 0))
+    HIP_CHECK(hipGraphGetEdges(graphempty, nullptr, nullptr, &numEdges))
     REQUIRE(numEdges == 0);
-    HIP_CHECK(hipGraphDestroy(graphempty));
+    HIP_CHECK(hipGraphDestroy(graphempty))
   }
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -181,7 +181,7 @@ HIP_TEST_CASE(Unit_hipGraphGetEdges_Positive_CapturedStream) {
   REQUIRE(graph != nullptr);
 
   size_t numEdges = 0;
-  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &numEdges));
+  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &numEdges))
   REQUIRE(numEdges == kNumOfEdges);
 
   int numBytes = sizeof(hipGraphNode_t) * numEdges;
@@ -190,11 +190,11 @@ HIP_TEST_CASE(Unit_hipGraphGetEdges_Positive_CapturedStream) {
   hipGraphNode_t* to_nodes = reinterpret_cast<hipGraphNode_t*>(malloc(numBytes));
   REQUIRE(to_nodes != nullptr);
 
-  HIP_CHECK(hipGraphGetEdges(graph, from_nodes, to_nodes, &numEdges));
+  HIP_CHECK(hipGraphGetEdges(graph, from_nodes, to_nodes, &numEdges))
   for (size_t i = 0; i < 2; i++) {
     hipGraphNode_t* current_nodes = (i == 0) ? from_nodes : to_nodes;
     for (size_t j = 0; j < numEdges; j++) {
-      HIP_CHECK(hipGraphNodeGetType(current_nodes[j], &nodeType));
+      HIP_CHECK(hipGraphNodeGetType(current_nodes[j], &nodeType))
       switch (nodeType) {
         case hipGraphNodeTypeMemcpy:
           cntMemcpy[i]++;
@@ -218,7 +218,7 @@ HIP_TEST_CASE(Unit_hipGraphGetEdges_Positive_CapturedStream) {
     REQUIRE(cntMemset[i] == numMemset[i]);
   }
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
   free(from_nodes);
   free(to_nodes);
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
@@ -242,20 +242,20 @@ HIP_TEST_CASE(Unit_hipGraphGetEdges_Positive_CapturedStream) {
  */
 HIP_TEST_CASE(Unit_hipGraphGetEdges_Negative_Parameters) {
   hipGraph_t graph{}, graph_uninit{};
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   hipGraphNode_t nodes_from[kNumOfEdges]{}, nodes_to[kNumOfEdges]{};
 
   hipEvent_t event_start, event_end;
-  HIP_CHECK(hipEventCreateWithFlags(&event_start, hipEventDisableTiming));
-  HIP_CHECK(hipEventCreateWithFlags(&event_end, hipEventDisableTiming));
+  HIP_CHECK(hipEventCreateWithFlags(&event_start, hipEventDisableTiming))
+  HIP_CHECK(hipEventCreateWithFlags(&event_end, hipEventDisableTiming))
 
   // create event record nodes
   hipGraphNode_t event_node_start, event_node_end;
-  HIP_CHECK(hipGraphAddEventRecordNode(&event_node_start, graph, nullptr, 0, event_start));
-  HIP_CHECK(hipGraphAddEventRecordNode(&event_node_end, graph, nullptr, 0, event_end));
+  HIP_CHECK(hipGraphAddEventRecordNode(&event_node_start, graph, nullptr, 0, event_start))
+  HIP_CHECK(hipGraphAddEventRecordNode(&event_node_end, graph, nullptr, 0, event_end))
 
   // Add dependency between nodes
-  HIP_CHECK(hipGraphAddDependencies(graph, &event_node_start, &event_node_end, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &event_node_start, &event_node_end, 1))
 
   size_t numEdges = 0;
   SECTION("graph is nullptr") {
@@ -280,9 +280,9 @@ HIP_TEST_CASE(Unit_hipGraphGetEdges_Negative_Parameters) {
     HIP_CHECK_ERROR(hipGraphGetEdges(graph, nodes_from, nodes_to, nullptr), hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipEventDestroy(event_end));
-  HIP_CHECK(hipEventDestroy(event_start));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipEventDestroy(event_end))
+  HIP_CHECK(hipEventDestroy(event_start))
 }
 
 /**

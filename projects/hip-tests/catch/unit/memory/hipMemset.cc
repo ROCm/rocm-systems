@@ -35,25 +35,25 @@ static bool testhipMemset(T* A_h, T* A_d, T memsetval, enum MemsetType type, siz
   bool testResult = true;
   constexpr auto MAX_OFFSET = 3;  // To memset on unaligned ptr.
 
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
   A_h = reinterpret_cast<T*>(malloc(Nbytes));
   REQUIRE(A_h != nullptr);
 
   for (int offset = MAX_OFFSET; offset >= 0; offset--) {
     if (type == hipMemsetTypeDefault) {
-      HIP_CHECK(hipMemset(A_d + offset, memsetval, numElements - offset));
+      HIP_CHECK(hipMemset(A_d + offset, memsetval, numElements - offset))
 
     } else if (type == hipMemsetTypeD8) {
-      HIP_CHECK(hipMemsetD8((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset));
+      HIP_CHECK(hipMemsetD8((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset))
 
     } else if (type == hipMemsetTypeD16) {
-      HIP_CHECK(hipMemsetD16((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset));
+      HIP_CHECK(hipMemsetD16((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset))
 
     } else if (type == hipMemsetTypeD32) {
-      HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset));
+      HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset))
     }
 
-    HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost))
     for (size_t i = offset; i < numElements; i++) {
       if (A_h[i] != memsetval) {
         testResult = false;
@@ -63,7 +63,7 @@ static bool testhipMemset(T* A_h, T* A_d, T memsetval, enum MemsetType type, siz
     }
   }
 
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(A_d))
   free(A_h);
   return testResult;
 }
@@ -76,14 +76,14 @@ template <typename T> static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval
   constexpr auto MAX_OFFSET = 3;  // To memset on unaligned ptr.
   hipStream_t stream;
 
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
   A_h = reinterpret_cast<T*>(malloc(Nbytes));
   REQUIRE(A_h != nullptr);
 
   for (int offset = MAX_OFFSET; offset >= 0; offset--) {
     if (type == hipMemsetTypeDefault) {
-      HIP_CHECK(hipMemsetAsync(A_d + offset, memsetval, numElements - offset, stream));
+      HIP_CHECK(hipMemsetAsync(A_d + offset, memsetval, numElements - offset, stream))
 
     } else if (type == hipMemsetTypeD8) {
       HIP_CHECK(hipMemsetD8Async((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset,
@@ -98,8 +98,8 @@ template <typename T> static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval
                                   stream));
     }
 
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipStreamSynchronize(stream))
+    HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost))
     for (size_t i = offset; i < numElements; i++) {
       if (A_h[i] != memsetval) {
         testResult = false;
@@ -109,8 +109,8 @@ template <typename T> static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval
     }
   }
 
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipStreamDestroy(stream))
   free(A_h);
   return testResult;
 }
@@ -209,11 +209,11 @@ HIP_TEST_CASE(Unit_hipMemset_SmallBufferSizes) {
   auto numElements = GENERATE(range(1, 4));
   int numBytes = numElements * sizeof(char);
 
-  HIP_CHECK(hipMalloc(&A_d, numBytes));
+  HIP_CHECK(hipMalloc(&A_d, numBytes))
   A_h = reinterpret_cast<char*>(malloc(numBytes));
 
-  HIP_CHECK(hipMemset(A_d, memsetval, numBytes));
-  HIP_CHECK(hipMemcpy(A_h, A_d, numBytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemset(A_d, memsetval, numBytes))
+  HIP_CHECK(hipMemcpy(A_h, A_d, numBytes, hipMemcpyDeviceToHost))
 
   for (int i = 0; i < numBytes; i++) {
     if (A_h[i] != memsetval) {
@@ -222,7 +222,7 @@ HIP_TEST_CASE(Unit_hipMemset_SmallBufferSizes) {
     }
   }
 
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(A_d))
   free(A_h);
 }
 
@@ -234,27 +234,27 @@ HIP_TEST_CASE(Unit_hipMemset_2AsyncOperations) {
   std::vector<float> v;
   v.resize(2048);
   float *p2, *p3;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&p2), 4096 + 4096 * 2));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&p2), 4096 + 4096 * 2))
   p3 = p2 + 2048;
   hipStream_t s;
-  HIP_CHECK(hipStreamCreate(&s));
-  HIP_CHECK(hipMemsetAsync(p2, 0, 32 * 32 * 4, s));
-  HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)p3, 0x3fe00000, 32 * 32, s));
-  HIP_CHECK(hipStreamSynchronize(s));
+  HIP_CHECK(hipStreamCreate(&s))
+  HIP_CHECK(hipMemsetAsync(p2, 0, 32 * 32 * 4, s))
+  HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)p3, 0x3fe00000, 32 * 32, s))
+  HIP_CHECK(hipStreamSynchronize(s))
   for (int i = 0; i < 256; ++i) {
-    HIP_CHECK(hipMemsetAsync(p2, 0, 32 * 32 * 4, s));
-    HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)p3, 0x3fe00000, 32 * 32, s));
+    HIP_CHECK(hipMemsetAsync(p2, 0, 32 * 32 * 4, s))
+    HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)p3, 0x3fe00000, 32 * 32, s))
   }
-  HIP_CHECK(hipStreamSynchronize(s));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipMemcpy(&v[0], p2, 1024, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(&v[1024], p3, 1024, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipStreamSynchronize(s))
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipMemcpy(&v[0], p2, 1024, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(&v[1024], p3, 1024, hipMemcpyDeviceToHost))
 
   REQUIRE(v[0] == 0);
   REQUIRE(v[1024] == 1.75f);
 
-  HIP_CHECK(hipFree(p2));
-  HIP_CHECK(hipStreamDestroy(s));
+  HIP_CHECK(hipFree(p2))
+  HIP_CHECK(hipStreamDestroy(s))
 }
 
 /**
@@ -271,14 +271,14 @@ HIP_TEST_CASE(Unit_hipMemset_2AsyncOperations) {
 HIP_TEST_CASE(Unit_hipMemset_Capture) {
   const size_t N = 1024;
   void* dst = nullptr;
-  HIP_CHECK(hipMalloc(&dst, N));
+  HIP_CHECK(hipMalloc(&dst, N))
 
   hipError_t memcpy_err = hipSuccess;
   BEGIN_CAPTURE_SYNC(memcpy_err, false);
   HIP_CHECK_ERROR(hipMemset(dst, 0xAB, N), memcpy_err);
   END_CAPTURE_SYNC(memcpy_err);
 
-  HIP_CHECK(hipFree(dst));
+  HIP_CHECK(hipFree(dst))
 }
 
 /**
@@ -295,12 +295,12 @@ HIP_TEST_CASE(Unit_hipMemset_Capture) {
 HIP_TEST_CASE(Unit_hipMemsetD8_Capture) {
   const size_t N = 512;
   void* dst = nullptr;
-  HIP_CHECK(hipMalloc(&dst, N * sizeof(uint8_t)));
+  HIP_CHECK(hipMalloc(&dst, N * sizeof(uint8_t)))
 
   hipError_t memcpy_err = hipSuccess;
   BEGIN_CAPTURE_SYNC(memcpy_err, false);
   HIP_CHECK_ERROR(hipMemsetD8(reinterpret_cast<hipDeviceptr_t>(dst), 0xCD, N), memcpy_err);
   END_CAPTURE_SYNC(memcpy_err);
 
-  HIP_CHECK(hipFree(dst));
+  HIP_CHECK(hipFree(dst))
 }

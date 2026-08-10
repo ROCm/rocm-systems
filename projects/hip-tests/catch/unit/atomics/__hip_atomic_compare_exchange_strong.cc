@@ -17,7 +17,7 @@
 // Helper function to run __hip_atomic_compare_exchange_strong tests with WAVEFRONT scope
 template <typename TestType> static void runHipAtomicCompareExchangeStrongWavefrontTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
@@ -41,7 +41,7 @@ template <typename TestType> static void runHipAtomicCompareExchangeStrongWavefr
 // Helper function to run __hip_atomic_compare_exchange_strong tests with WORKGROUP scope
 template <typename TestType> static void runHipAtomicCompareExchangeStrongWorkgroupTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {

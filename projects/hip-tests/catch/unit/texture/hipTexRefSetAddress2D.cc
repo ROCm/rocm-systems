@@ -19,13 +19,13 @@ HIP_TEST_CASE(Unit_hipTexRefSetAddress2D_Negative_Parameters) {
   hipCtx_t ctx;
   hipDevice_t device;
 
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipCtxCreate(&ctx, 0, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipCtxCreate(&ctx, 0, device))
 
   hipTexRef tex_ref = nullptr;
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"));
-  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"));
+  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"))
+  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"))
 
   int size = width * height * sizeof(float);
   float* h_data = new float[size];
@@ -35,7 +35,7 @@ HIP_TEST_CASE(Unit_hipTexRefSetAddress2D_Negative_Parameters) {
 
   hipDeviceptr_t d_data;
   size_t dest_pitch;
-  HIP_CHECK(hipMemAllocPitch(&d_data, &dest_pitch, width * sizeof(float), height, sizeof(float)));
+  HIP_CHECK(hipMemAllocPitch(&d_data, &dest_pitch, width * sizeof(float), height, sizeof(float)))
   HIP_CHECK(hipMemcpy2D((void*)d_data, dest_pitch, h_data, width * sizeof(float),
                         width * sizeof(float), height, hipMemcpyHostToDevice));
 
@@ -61,9 +61,9 @@ HIP_TEST_CASE(Unit_hipTexRefSetAddress2D_Negative_Parameters) {
   }
 
   free(h_data);
-  HIP_CHECK(hipFree((void*)d_data));
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipCtxDestroy(ctx));
+  HIP_CHECK(hipFree((void*)d_data))
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipCtxDestroy(ctx))
 }
 
 HIP_TEST_CASE(Unit_hipTexRefSetAddress2D_Positive) {
@@ -75,13 +75,13 @@ HIP_TEST_CASE(Unit_hipTexRefSetAddress2D_Positive) {
   hipCtx_t ctx;
   hipDevice_t device;
 
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipCtxCreate(&ctx, 0, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipCtxCreate(&ctx, 0, device))
 
   hipTexRef tex_ref = nullptr;
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"));
-  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"));
+  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"))
+  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"))
 
   int size = width * height * sizeof(float);
   float* h_data = new float[size];
@@ -91,7 +91,7 @@ HIP_TEST_CASE(Unit_hipTexRefSetAddress2D_Positive) {
 
   hipDeviceptr_t d_data;
   size_t dest_pitch;
-  HIP_CHECK(hipMemAllocPitch(&d_data, &dest_pitch, width * sizeof(float), height, sizeof(float)));
+  HIP_CHECK(hipMemAllocPitch(&d_data, &dest_pitch, width * sizeof(float), height, sizeof(float)))
   HIP_CHECK(hipMemcpy2D((void*)d_data, dest_pitch, h_data, width * sizeof(float),
                         width * sizeof(float), height, hipMemcpyHostToDevice));
 
@@ -100,12 +100,12 @@ HIP_TEST_CASE(Unit_hipTexRefSetAddress2D_Positive) {
   array_desc.Height = height;
   array_desc.Width = width;
   array_desc.NumChannels = 1;
-  HIP_CHECK(hipTexRefSetAddress2D(tex_ref, &array_desc, d_data, dest_pitch));
+  HIP_CHECK(hipTexRefSetAddress2D(tex_ref, &array_desc, d_data, dest_pitch))
 
   free(h_data);
-  HIP_CHECK(hipFree((void*)d_data));
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipCtxDestroy(ctx));
+  HIP_CHECK(hipFree((void*)d_data))
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipCtxDestroy(ctx))
 }
 
 #endif

@@ -26,24 +26,24 @@ HIP_TEST_CASE(Unit_hipGraph_BasicCyclic1) {
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
   hipGraphNode_t emptyNode1, emptyNode2, emptyNode3, emptyNode4, emptyNode5, emptyNode6;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   // Create emptyNode and add it to graph with dependency
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode2, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode3, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode4, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode5, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode6, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &emptyNode2, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode2, &emptyNode3, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode3, &emptyNode1, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode4, &emptyNode1, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode5, &emptyNode4, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode5, &emptyNode6, 1));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode2, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode3, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode4, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode5, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode6, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &emptyNode2, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode2, &emptyNode3, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode3, &emptyNode1, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode4, &emptyNode1, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode5, &emptyNode4, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode5, &emptyNode6, 1))
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   REQUIRE(hipErrorInvalidValue == hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -56,24 +56,24 @@ HIP_TEST_CASE(Unit_hipGraph_BasicCyclic2) {
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
   hipGraphNode_t emptyNode1, emptyNode2, emptyNode3, emptyNode4, emptyNode5;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   // Create emptyNode and add it to graph with dependency
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode2, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode3, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode4, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode5, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &emptyNode2, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode2, &emptyNode3, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode3, &emptyNode1, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode4, &emptyNode1, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode5, &emptyNode4, 1));
-  HIP_CHECK(hipGraphRemoveDependencies(graph, &emptyNode3, &emptyNode1, 1));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode2, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode3, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode4, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode5, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &emptyNode2, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode2, &emptyNode3, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode3, &emptyNode1, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode4, &emptyNode1, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode5, &emptyNode4, 1))
+  HIP_CHECK(hipGraphRemoveDependencies(graph, &emptyNode3, &emptyNode1, 1))
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 }
 
 /**
@@ -87,25 +87,25 @@ HIP_TEST_CASE(Unit_hipGraph_BasicCyclic3) {
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
   hipGraphNode_t emptyNode1, emptyNode2, emptyNode3, emptyNode4, emptyNode5, emptyNode6;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   // Create emptyNode and add it to graph with dependency
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode2, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode3, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode4, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode5, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode6, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &emptyNode2, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode2, &emptyNode3, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode3, &emptyNode1, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode4, &emptyNode1, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode5, &emptyNode4, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode5, &emptyNode6, 1));
-  HIP_CHECK(hipGraphRemoveDependencies(graph, &emptyNode5, &emptyNode4, 1));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode2, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode3, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode4, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode5, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode6, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &emptyNode2, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode2, &emptyNode3, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode3, &emptyNode1, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode4, &emptyNode1, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode5, &emptyNode4, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode5, &emptyNode6, 1))
+  HIP_CHECK(hipGraphRemoveDependencies(graph, &emptyNode5, &emptyNode4, 1))
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   REQUIRE(hipErrorInvalidValue == hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -125,8 +125,8 @@ HIP_TEST_CASE(Unit_hipGraph_BasicCyclic4) {
 
   hipGraphNode_t kMemCpyH2D_X, memcpyD2D, memcpyD2H_RC, emptyNode1;
 
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&kMemCpyH2D_X, graph, nullptr, 0, X_d, X_h, Nbytes,
                                     hipMemcpyHostToDevice));
@@ -136,22 +136,22 @@ HIP_TEST_CASE(Unit_hipGraph_BasicCyclic4) {
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_RC, graph, nullptr, 0, Y_h, Y_d, Nbytes,
                                     hipMemcpyDeviceToHost));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0))
 
-  HIP_CHECK(hipGraphAddDependencies(graph, &kMemCpyH2D_X, &emptyNode1, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &memcpyD2D, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyD2D, &memcpyD2H_RC, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &kMemCpyH2D_X, &emptyNode1, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &memcpyD2D, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyD2D, &memcpyD2H_RC, 1))
 
-  HIP_CHECK(hipGraphRemoveDependencies(graph, &kMemCpyH2D_X, &emptyNode1, 1));
-  HIP_CHECK(hipGraphRemoveDependencies(graph, &emptyNode1, &memcpyD2D, 1));
-  HIP_CHECK(hipGraphDestroyNode(emptyNode1));
+  HIP_CHECK(hipGraphRemoveDependencies(graph, &kMemCpyH2D_X, &emptyNode1, 1))
+  HIP_CHECK(hipGraphRemoveDependencies(graph, &emptyNode1, &memcpyD2D, 1))
+  HIP_CHECK(hipGraphDestroyNode(emptyNode1))
 
-  HIP_CHECK(hipGraphAddDependencies(graph, &kMemCpyH2D_X, &memcpyD2D, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &kMemCpyH2D_X, &memcpyD2D, 1))
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Verify graph result as X_h == Y_h
   for (size_t i = 0; i < N; i++) {
@@ -162,9 +162,9 @@ HIP_TEST_CASE(Unit_hipGraph_BasicCyclic4) {
     }
   }
   HipTest::freeArrays<int>(X_d, Y_d, nullptr, X_h, Y_h, nullptr, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -184,8 +184,8 @@ HIP_TEST_CASE(Unit_hipGraph_BasicCyclic5) {
 
   hipGraphNode_t kMemCpyH2D_X, memcpyD2D, memcpyD2H_RC, emptyNode1, emptyNode2, emptyNode3;
 
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&kMemCpyH2D_X, graph, nullptr, 0, X_d, X_h, Nbytes,
                                     hipMemcpyHostToDevice));
@@ -195,28 +195,28 @@ HIP_TEST_CASE(Unit_hipGraph_BasicCyclic5) {
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_RC, graph, nullptr, 0, Y_h, Y_d, Nbytes,
                                     hipMemcpyDeviceToHost));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode2, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode3, graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode2, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode3, graph, nullptr, 0))
 
-  HIP_CHECK(hipGraphAddDependencies(graph, &kMemCpyH2D_X, &emptyNode1, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &memcpyD2D, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyD2D, &memcpyD2H_RC, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyD2H_RC, &emptyNode2, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode2, &emptyNode3, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode3, &memcpyD2H_RC, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &kMemCpyH2D_X, &emptyNode1, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &memcpyD2D, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyD2D, &memcpyD2H_RC, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyD2H_RC, &emptyNode2, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode2, &emptyNode3, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode3, &memcpyD2H_RC, 1))
 
-  HIP_CHECK(hipGraphRemoveDependencies(graph, &kMemCpyH2D_X, &emptyNode1, 1));
-  HIP_CHECK(hipGraphRemoveDependencies(graph, &emptyNode1, &memcpyD2D, 1));
-  HIP_CHECK(hipGraphDestroyNode(emptyNode1));
+  HIP_CHECK(hipGraphRemoveDependencies(graph, &kMemCpyH2D_X, &emptyNode1, 1))
+  HIP_CHECK(hipGraphRemoveDependencies(graph, &emptyNode1, &memcpyD2D, 1))
+  HIP_CHECK(hipGraphDestroyNode(emptyNode1))
 
-  HIP_CHECK(hipGraphAddDependencies(graph, &kMemCpyH2D_X, &memcpyD2D, 1));
-  HIP_CHECK(hipGraphRemoveDependencies(graph, &emptyNode3, &memcpyD2H_RC, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &kMemCpyH2D_X, &memcpyD2D, 1))
+  HIP_CHECK(hipGraphRemoveDependencies(graph, &emptyNode3, &memcpyD2H_RC, 1))
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Verify graph result as X_h == Y_h
   for (size_t i = 0; i < N; i++) {
@@ -227,9 +227,9 @@ HIP_TEST_CASE(Unit_hipGraph_BasicCyclic5) {
     }
   }
   HipTest::freeArrays<int>(X_d, Y_d, nullptr, X_h, Y_h, nullptr, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 HIP_TEST_CASE(Unit_hipGraph_CyclicChildInstantiation) {
@@ -241,17 +241,17 @@ HIP_TEST_CASE(Unit_hipGraph_CyclicChildInstantiation) {
   hipGraphNode_t second_node = nullptr;
   hipGraphNode_t third_node = nullptr;
 
-  HIP_CHECK(hipGraphCreate(&parent_graph, 0));
-  HIP_CHECK(hipGraphCreate(&child_graph, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&first_node, child_graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&second_node, child_graph, &first_node, 1));
-  HIP_CHECK(hipGraphAddEmptyNode(&third_node, child_graph, &second_node, 1));
-  HIP_CHECK(hipGraphAddDependencies(child_graph, &third_node, &second_node, 1));
-  HIP_CHECK(hipGraphAddChildGraphNode(&child_node, parent_graph, nullptr, 0, child_graph));
+  HIP_CHECK(hipGraphCreate(&parent_graph, 0))
+  HIP_CHECK(hipGraphCreate(&child_graph, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&first_node, child_graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&second_node, child_graph, &first_node, 1))
+  HIP_CHECK(hipGraphAddEmptyNode(&third_node, child_graph, &second_node, 1))
+  HIP_CHECK(hipGraphAddDependencies(child_graph, &third_node, &second_node, 1))
+  HIP_CHECK(hipGraphAddChildGraphNode(&child_node, parent_graph, nullptr, 0, child_graph))
 
   REQUIRE(hipGraphInstantiate(&graph_exec, parent_graph, nullptr, nullptr, 0) ==
           hipErrorInvalidValue);
 
-  HIP_CHECK(hipGraphDestroy(parent_graph));
-  HIP_CHECK(hipGraphDestroy(child_graph));
+  HIP_CHECK(hipGraphDestroy(parent_graph))
+  HIP_CHECK(hipGraphDestroy(child_graph))
 }

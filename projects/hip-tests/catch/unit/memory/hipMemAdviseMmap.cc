@@ -22,16 +22,16 @@ HIP_TEST_CASE(Unit_hipMemAdvise_MmapMem) {
   INFO(
       "The following are the attribute values related to HMM for"
       " device 0:\n");
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeDirectManagedMemAccessFromHost, 0))
   INFO("hipDeviceAttributeDirectManagedMemAccessFromHost: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeConcurrentManagedAccess, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeConcurrentManagedAccess, 0))
   INFO("hipDeviceAttributeConcurrentManagedAccess: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&PageableMem, hipDeviceAttributePageableMemoryAccess, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&PageableMem, hipDeviceAttributePageableMemoryAccess, 0))
   INFO("hipDeviceAttributePageableMemoryAccess: " << PageableMem);
   HIP_CHECK(
       hipDeviceGetAttribute(&managed, hipDeviceAttributePageableMemoryAccessUsesHostPageTables, 0));
   INFO("hipDeviceAttributePageableMemoryAccessUsesHostPageTables:" << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0))
   INFO("hipDeviceAttributeManagedMemory: " << managed);
   if (PageableMem == 1) {
 #ifdef __linux__
@@ -56,9 +56,9 @@ HIP_TEST_CASE(Unit_hipMemAdvise_MmapMem) {
       INFO("mmap() call failed!\n. Cant proceed with the test.");
       REQUIRE(false);
     }
-    HIP_CHECK(hipMemAdvise(MmpdFile, sb.st_size, hipMemAdviseSetReadMostly, 0));
-    HIP_CHECK(hipMemAdvise(MmpdFile, sb.st_size, hipMemAdviseSetPreferredLocation, 0));
-    HIP_CHECK(hipMemAdvise(MmpdFile, sb.st_size, hipMemAdviseSetAccessedBy, 0));
+    HIP_CHECK(hipMemAdvise(MmpdFile, sb.st_size, hipMemAdviseSetReadMostly, 0))
+    HIP_CHECK(hipMemAdvise(MmpdFile, sb.st_size, hipMemAdviseSetPreferredLocation, 0))
+    HIP_CHECK(hipMemAdvise(MmpdFile, sb.st_size, hipMemAdviseSetAccessedBy, 0))
     munmap(MmpdFile, sb.st_size);
     close(fd);
 #endif

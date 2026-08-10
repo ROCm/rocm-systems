@@ -23,13 +23,13 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyHtoAAsync_Basic, char, int, float) {
   std::iota(host_src.begin(), host_src.end(), 0);
 
   auto channel_descriptor = hipCreateChannelDesc<TestType>();
-  HIP_CHECK(hipMallocArray(&dst_array, &channel_descriptor, copy_size));
+  HIP_CHECK(hipMallocArray(&dst_array, &channel_descriptor, copy_size))
 
-  HIP_CHECK(hipMemcpyHtoAAsync(dst_array, offset, host_src.data(), copy_size - offset, nullptr));
+  HIP_CHECK(hipMemcpyHtoAAsync(dst_array, offset, host_src.data(), copy_size - offset, nullptr))
 
-  HIP_CHECK(hipStreamSynchronize(nullptr));
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
-  HIP_CHECK(hipMemcpyAtoH(host_dst.data(), dst_array, offset, copy_size - offset));
+  HIP_CHECK(hipMemcpyAtoH(host_dst.data(), dst_array, offset, copy_size - offset))
 
   for (int i = 0; i < offset / sizeof(TestType); i++) {
     if (host_src[i] != host_dst[i]) {
@@ -37,7 +37,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyHtoAAsync_Basic, char, int, float) {
     }
   }
 
-  HIP_CHECK(hipFreeArray(dst_array));
+  HIP_CHECK(hipFreeArray(dst_array))
 }
 
 HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_Negative) {
@@ -50,7 +50,7 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_Negative) {
   std::iota(host_src.begin(), host_src.end(), 0);
 
   auto channel_descriptor = hipCreateChannelDesc<int>();
-  HIP_CHECK(hipMallocArray(&dst_array, &channel_descriptor, copy_size));
+  HIP_CHECK(hipMallocArray(&dst_array, &channel_descriptor, copy_size))
 
   SECTION("dst array is null") {
     HIP_CHECK_ERROR(hipMemcpyHtoAAsync(nullptr, 0, host_src.data(), copy_size, nullptr),
@@ -67,7 +67,7 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_Negative) {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipFreeArray(dst_array));
+  HIP_CHECK(hipFreeArray(dst_array))
 }
 /**
 * @addtogroup hipMemcpyHtoAAsync hipMemcpyHtoAAsync
@@ -96,7 +96,7 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams) {
   HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
 #else
   CHECK_IMAGE_SUPPORT
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   int row, col;
   row = 1;
   col = GENERATE(3, 4, 100);
@@ -107,35 +107,35 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams) {
   }
   hipArray_t A_a;
   hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
-  HIP_CHECK(hipMallocArray(&A_a, &desc, col, row, hipArrayDefault));
+  HIP_CHECK(hipMallocArray(&A_a, &desc, col, row, hipArrayDefault))
   SECTION("With Default Stream") {
-    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, 0));
-    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, 0));
-    HIP_CHECK(hipStreamSynchronize(0));
+    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, 0))
+    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, 0))
+    HIP_CHECK(hipStreamSynchronize(0))
   }
   SECTION("With User Stream") {
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, stream));
-    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamCreate(&stream))
+    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, stream))
+    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
+    HIP_CHECK(hipStreamDestroy(stream))
   }
   SECTION("With Stream per thread") {
-    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, hipStreamPerThread));
-    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, hipStreamPerThread));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, hipStreamPerThread))
+    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, hipStreamPerThread))
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
   }
   SECTION("With Legacy Stream") {
-    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, hipStreamLegacy));
-    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, hipStreamLegacy));
-    HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
+    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, hipStreamLegacy))
+    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, hipStreamLegacy))
+    HIP_CHECK(hipStreamSynchronize(hipStreamLegacy))
   }
 
   for (int i = 0; i < (row * col); i++) {
     REQUIRE(A_h[i] == B_h[i]);
   }
-  HIP_CHECK(hipFreeArray(A_a));
+  HIP_CHECK(hipFreeArray(A_a))
   free(A_h);
   free(B_h);
 #endif
@@ -158,9 +158,9 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_MultiDevice) {
 #else
   CHECK_IMAGE_SUPPORT
   int devCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&devCount));
+  HIP_CHECK(hipGetDeviceCount(&devCount))
   for (int i = 0; i < devCount; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     int row, col;
     row = 1;
     col = GENERATE(3, 4, 100);
@@ -171,18 +171,18 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_MultiDevice) {
     }
     hipArray_t A_a;
     hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
-    HIP_CHECK(hipMallocArray(&A_a, &desc, col, row, hipArrayDefault));
+    HIP_CHECK(hipMallocArray(&A_a, &desc, col, row, hipArrayDefault))
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, stream));
-    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamCreate(&stream))
+    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, stream))
+    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     for (int i = 0; i < (row * col); i++) {
       REQUIRE(A_h[i] == B_h[i]);
     }
-    HIP_CHECK(hipFreeArray(A_a));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipFreeArray(A_a))
+    HIP_CHECK(hipStreamDestroy(stream))
     free(A_h);
     free(B_h);
   }
@@ -201,26 +201,26 @@ HIP_TEST_CASE(Unit_HipMemcpyHtoAAsync_Capture) {
 
   auto channel_desc = hipCreateChannelDesc<int>();
   hipArray_t dst_array = nullptr;
-  HIP_CHECK(hipMallocArray(&dst_array, &channel_desc, kCopySize));
+  HIP_CHECK(hipMallocArray(&dst_array, &channel_desc, kCopySize))
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemcpyHtoAAsync(dst_array, offset, host_src->data(), kCopySize - offset, nullptr));
+  HIP_CHECK(hipMemcpyHtoAAsync(dst_array, offset, host_src->data(), kCopySize - offset, nullptr))
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamSynchronize(nullptr));
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
-  HIP_CHECK(hipMemcpyAtoH(host_dst->data(), dst_array, offset, kCopySize - offset));
+  HIP_CHECK(hipMemcpyAtoH(host_dst->data(), dst_array, offset, kCopySize - offset))
 
   for (size_t i = 0; i < offset / sizeof(int); ++i) {
     REQUIRE((*host_src)[i] == (*host_dst)[i]);
   }
 
-  HIP_CHECK(hipFreeArray(dst_array));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFreeArray(dst_array))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 /**
  * End doxygen group MemoryTest.

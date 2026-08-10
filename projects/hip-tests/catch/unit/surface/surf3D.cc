@@ -84,7 +84,7 @@ template <typename T> static void runTestR(const int width, const int height, co
   myparms.extent = make_hipExtent(width, height, depth);
   myparms.kind = hipMemcpyHostToDevice;
 
-  HIP_CHECK(hipMemcpy3D(&myparms));
+  HIP_CHECK(hipMemcpy3D(&myparms))
 
   hipResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(resDesc));
@@ -93,10 +93,10 @@ template <typename T> static void runTestR(const int width, const int height, co
 
   // Create surface object
   hipSurfaceObject_t surfaceObject = 0;
-  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc));
+  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc))
 
   T* hOutputData = nullptr;
-  HIP_CHECK(hipHostMalloc((void**)&hOutputData, size));
+  HIP_CHECK(hipHostMalloc((void**)&hOutputData, size))
   memset(hOutputData, 0, size);
 
   dim3 dimBlock(8, 8, 8);  // 512 threads
@@ -105,8 +105,8 @@ template <typename T> static void runTestR(const int width, const int height, co
 
   surf3DKernelR<T><<<dimGrid, dimBlock>>>(surfaceObject, hOutputData, width, height, depth);
 
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
@@ -121,16 +121,16 @@ template <typename T> static void runTestR(const int width, const int height, co
     }
   }
 
-  HIP_CHECK(hipDestroySurfaceObject(surfaceObject));
-  HIP_CHECK(hipFreeArray(hipArray));
+  HIP_CHECK(hipDestroySurfaceObject(surfaceObject))
+  HIP_CHECK(hipFreeArray(hipArray))
   free(hData);
-  HIP_CHECK(hipHostFree(hOutputData));
+  HIP_CHECK(hipHostFree(hOutputData))
 }
 
 template <typename T> static void runTestW(const int width, const int height, const int depth) {
   unsigned int size = width * height * depth * sizeof(T);
   T* hData = nullptr;
-  HIP_CHECK(hipHostMalloc((void**)&hData, size));
+  HIP_CHECK(hipHostMalloc((void**)&hData, size))
   memset(hData, 0, size);
 
   // Allocate array and copy image data
@@ -148,7 +148,7 @@ template <typename T> static void runTestW(const int width, const int height, co
   myparms.extent = make_hipExtent(width, height, depth);
   myparms.kind = hipMemcpyHostToDevice;
 
-  HIP_CHECK(hipMemcpy3D(&myparms));
+  HIP_CHECK(hipMemcpy3D(&myparms))
 
   hipResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(resDesc));
@@ -157,7 +157,7 @@ template <typename T> static void runTestW(const int width, const int height, co
 
   // Create surface object
   hipSurfaceObject_t surfaceObject = 0;
-  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc));
+  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc))
 
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
@@ -173,8 +173,8 @@ template <typename T> static void runTestW(const int width, const int height, co
 
   surf3DKernelW<T><<<dimGrid, dimBlock>>>(surfaceObject, hData, width, height, depth);
 
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   T* hOutputData = (T*)malloc(size);
   memset(hOutputData, 0, size);
@@ -187,7 +187,7 @@ template <typename T> static void runTestW(const int width, const int height, co
   myparms.extent = make_hipExtent(width, height, depth);
   myparms.kind = hipMemcpyDeviceToHost;
 
-  HIP_CHECK(hipMemcpy3D(&myparms));
+  HIP_CHECK(hipMemcpy3D(&myparms))
 
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
@@ -202,9 +202,9 @@ template <typename T> static void runTestW(const int width, const int height, co
     }
   }
 
-  HIP_CHECK(hipDestroySurfaceObject(surfaceObject));
-  HIP_CHECK(hipFreeArray(hipArray));
-  HIP_CHECK(hipHostFree(hData));
+  HIP_CHECK(hipDestroySurfaceObject(surfaceObject))
+  HIP_CHECK(hipFreeArray(hipArray))
+  HIP_CHECK(hipHostFree(hData))
   free(hOutputData);
 }
 
@@ -235,7 +235,7 @@ template <typename T> static void runTestRW(const int width, const int height, c
   myparms.extent = make_hipExtent(width, height, depth);
   myparms.kind = hipMemcpyHostToDevice;
 
-  HIP_CHECK(hipMemcpy3D(&myparms));
+  HIP_CHECK(hipMemcpy3D(&myparms))
 
   hipResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(resDesc));
@@ -244,7 +244,7 @@ template <typename T> static void runTestRW(const int width, const int height, c
 
   // Create surface object
   hipSurfaceObject_t surfaceObject = 0;
-  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc));
+  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc))
 
   HIP_CHECK(hipMalloc3DArray(&hipOutArray, &channelDesc, make_hipExtent(width, height, depth),
                              hipArraySurfaceLoadStore));
@@ -255,7 +255,7 @@ template <typename T> static void runTestRW(const int width, const int height, c
   resOutDesc.res.array.array = hipOutArray;
 
   hipSurfaceObject_t outSurfaceObject = 0;
-  HIP_CHECK(hipCreateSurfaceObject(&outSurfaceObject, &resOutDesc));
+  HIP_CHECK(hipCreateSurfaceObject(&outSurfaceObject, &resOutDesc))
 
   dim3 dimBlock(8, 8, 8);  // 512 threads
   dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y,
@@ -263,8 +263,8 @@ template <typename T> static void runTestRW(const int width, const int height, c
 
   surf3DKernelRW<T><<<dimGrid, dimBlock>>>(surfaceObject, outSurfaceObject, width, height, depth);
 
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   T* hOutputData = (T*)malloc(size);
   memset(hOutputData, 0, size);
@@ -277,7 +277,7 @@ template <typename T> static void runTestRW(const int width, const int height, c
   myparms.extent = make_hipExtent(width, height, depth);
   myparms.kind = hipMemcpyDeviceToHost;
 
-  HIP_CHECK(hipMemcpy3D(&myparms));
+  HIP_CHECK(hipMemcpy3D(&myparms))
 
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
@@ -292,10 +292,10 @@ template <typename T> static void runTestRW(const int width, const int height, c
     }
   }
 
-  HIP_CHECK(hipDestroySurfaceObject(surfaceObject));
-  HIP_CHECK(hipDestroySurfaceObject(outSurfaceObject));
-  HIP_CHECK(hipFreeArray(hipArray));
-  HIP_CHECK(hipFreeArray(hipOutArray));
+  HIP_CHECK(hipDestroySurfaceObject(surfaceObject))
+  HIP_CHECK(hipDestroySurfaceObject(outSurfaceObject))
+  HIP_CHECK(hipFreeArray(hipArray))
+  HIP_CHECK(hipFreeArray(hipOutArray))
   free(hData);
   free(hOutputData);
 }

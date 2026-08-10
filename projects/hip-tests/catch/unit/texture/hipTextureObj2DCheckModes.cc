@@ -44,7 +44,7 @@ static void runTest(const int width, const int height, const float offsetX, cons
 
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
   hipArray_t hipArray;
-  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height));
+  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height))
 
   HIP_CHECK(hipMemcpy2DToArray(hipArray, 0, 0, hData, width * sizeof(float), width * sizeof(float),
                                height, hipMemcpyHostToDevice));
@@ -65,23 +65,23 @@ static void runTest(const int width, const int height, const float offsetX, cons
 
   // Create texture object
   hipTextureObject_t textureObject = 0;
-  HIP_CHECK(hipCreateTextureObject(&textureObject, &resDesc, &texDesc, NULL));
+  HIP_CHECK(hipCreateTextureObject(&textureObject, &resDesc, &texDesc, NULL))
 
   float* dData = nullptr;
-  HIP_CHECK(hipMalloc((void**)&dData, size));
+  HIP_CHECK(hipMalloc((void**)&dData, size))
 
   dim3 dimBlock(16, 16, 1);
   dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y, 1);
 
   hipLaunchKernelGGL(tex2DKernel<normalizedCoords>, dimGrid, dimBlock, 0, 0, dData, textureObject,
                      width, height, offsetX, offsetY);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   float* hOutputData = (float*)malloc(size);
   memset(hOutputData, 0, size);
-  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost))
 
   bool result = true;
   for (int i = 0; i < height; i++) {
@@ -98,9 +98,9 @@ static void runTest(const int width, const int height, const float offsetX, cons
     }
   }
 line1:
-  HIP_CHECK(hipDestroyTextureObject(textureObject));
-  HIP_CHECK(hipFree(dData));
-  HIP_CHECK(hipFreeArray(hipArray));
+  HIP_CHECK(hipDestroyTextureObject(textureObject))
+  HIP_CHECK(hipFree(dData))
+  HIP_CHECK(hipFreeArray(hipArray))
   free(hData);
   free(hOutputData);
   REQUIRE(result);

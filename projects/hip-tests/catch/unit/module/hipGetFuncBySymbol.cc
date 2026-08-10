@@ -87,10 +87,10 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_PositiveTest) {
   size_t Nbytes = N * sizeof(uint32_t);
 
   hipDevice_t device;
-  HIPCHECK(hipGetDevice(&device));
+  HIPCHECK(hipGetDevice(&device))
 
   hipDeviceProp_t props;
-  HIPCHECK(hipGetDeviceProperties(&props, device));
+  HIPCHECK(hipGetDeviceProperties(&props, device))
   A_h = reinterpret_cast<uint32_t*>(malloc(Nbytes));
   REQUIRE(A_h != NULL);
   C_h = reinterpret_cast<uint32_t*>(malloc(Nbytes));
@@ -100,10 +100,10 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_PositiveTest) {
     A_h[i] = i;
   }
 
-  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&A_d), Nbytes));
-  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&C_d), Nbytes));
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&A_d), Nbytes))
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&C_d), Nbytes))
 
-  HIPCHECK(hipMemcpyHtoD((hipDeviceptr_t)(A_d), A_h, Nbytes));
+  HIPCHECK(hipMemcpyHtoD((hipDeviceptr_t)(A_d), A_h, Nbytes))
 
   struct {
     void* _Cd;
@@ -119,20 +119,20 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_PositiveTest) {
                     HIP_LAUNCH_PARAM_END};
 
   hipFunction_t Function;
-  HIPCHECK(hipGetFuncBySymbol(&Function, reinterpret_cast<void*>(bit_extract_kernel)));
+  HIPCHECK(hipGetFuncBySymbol(&Function, reinterpret_cast<void*>(bit_extract_kernel)))
 
   HIPCHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, 0, NULL,
                                  reinterpret_cast<void**>(&config)));
 
-  HIPCHECK(hipMemcpyDtoH(C_h, (hipDeviceptr_t)(C_d), Nbytes));
+  HIPCHECK(hipMemcpyDtoH(C_h, (hipDeviceptr_t)(C_d), Nbytes))
 
   for (size_t i = 0; i < N; i++) {
     unsigned Agold = ((A_h[i] & 0xf00) >> 8);
     REQUIRE(C_h[i] == Agold);
   }
 
-  HIPCHECK(hipFree(A_d));
-  HIPCHECK(hipFree(C_d));
+  HIPCHECK(hipFree(A_d))
+  HIPCHECK(hipFree(C_d))
 
   free(A_h);
   free(C_h);
@@ -196,7 +196,7 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_InChildProcess) {
  */
 HIP_TEST_CASE(Unit_hipGetFuncBySymbol_MultiDev) {
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   if (deviceCount < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
@@ -204,7 +204,7 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_MultiDev) {
   hipFunction_t funcPointer;
 
   for (int deviceId = 0; deviceId < deviceCount; deviceId++) {
-    HIP_CHECK(hipSetDevice(deviceId));
+    HIP_CHECK(hipSetDevice(deviceId))
 
     REQUIRE(hipGetFuncBySymbol(&funcPointer, reinterpret_cast<const void*>(hipKernel)) ==
             hipSuccess);
@@ -220,9 +220,9 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_MultiDev) {
     }
 
     int* d_a = nullptr;
-    HIP_CHECK(hipMalloc(&d_a, SIZE_BYTES));
+    HIP_CHECK(hipMalloc(&d_a, SIZE_BYTES))
     REQUIRE(d_a != nullptr);
-    HIP_CHECK(hipMemcpy(d_a, h_a, SIZE_BYTES, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_a, h_a, SIZE_BYTES, hipMemcpyHostToDevice))
 
     dim3 blocksPerGrid(1, 1, 1);
     dim3 threadsPerBlock(1, 1, 64);
@@ -236,13 +236,13 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_MultiDev) {
                                   threadsPerBlock.x, threadsPerBlock.y, threadsPerBlock.z, 0, 0,
                                   nullptr, kernel_parameter) == hipSuccess);
 
-    HIP_CHECK(hipMemcpy(h_a, d_a, SIZE_BYTES, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(h_a, d_a, SIZE_BYTES, hipMemcpyDeviceToHost))
 
     REQUIRE(verifyResult(h_a, output_ref, ARR_SIZE) == true);
 
     free(h_a);
     free(output_ref);
-    HIP_CHECK(hipFree(d_a));
+    HIP_CHECK(hipFree(d_a))
   }
 }
 
@@ -250,7 +250,7 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_MultiDev) {
  * Local function useful to create stream and memory copy and launch kernel
  */
 void MultiThreadMultiDevFunc(int DevId) {
-  HIP_CHECK_THREAD(hipSetDevice(DevId));
+  HIP_CHECK_THREAD(hipSetDevice(DevId))
 
   int* h_a = reinterpret_cast<int*>(malloc(SIZE_BYTES));
   REQUIRE_THREAD(h_a != nullptr);
@@ -263,13 +263,13 @@ void MultiThreadMultiDevFunc(int DevId) {
   }
 
   hipStream_t stream;
-  HIP_CHECK_THREAD(hipSetDevice(DevId));
-  HIP_CHECK_THREAD(hipStreamCreate(&stream));
+  HIP_CHECK_THREAD(hipSetDevice(DevId))
+  HIP_CHECK_THREAD(hipStreamCreate(&stream))
 
   int* d_a = nullptr;
-  HIP_CHECK_THREAD(hipMalloc(&d_a, SIZE_BYTES));
+  HIP_CHECK_THREAD(hipMalloc(&d_a, SIZE_BYTES))
   REQUIRE_THREAD(d_a != nullptr);
-  HIP_CHECK_THREAD(hipMemcpyAsync(d_a, h_a, SIZE_BYTES, hipMemcpyHostToDevice, stream));
+  HIP_CHECK_THREAD(hipMemcpyAsync(d_a, h_a, SIZE_BYTES, hipMemcpyHostToDevice, stream))
 
   dim3 blocksPerGrid(1, 1, 1);
   dim3 threadsPerBlock(1, 1, 64);
@@ -288,15 +288,15 @@ void MultiThreadMultiDevFunc(int DevId) {
                                        threadsPerBlock.z, 0, stream, nullptr,
                                        kernel_parameter) == hipSuccess);
 
-  HIP_CHECK_THREAD(hipMemcpyAsync(h_a, d_a, SIZE_BYTES, hipMemcpyDeviceToHost, stream));
-  HIP_CHECK_THREAD(hipStreamSynchronize(stream));
+  HIP_CHECK_THREAD(hipMemcpyAsync(h_a, d_a, SIZE_BYTES, hipMemcpyDeviceToHost, stream))
+  HIP_CHECK_THREAD(hipStreamSynchronize(stream))
 
   REQUIRE_THREAD(verifyResult(h_a, output_ref, ARR_SIZE) == true);
 
   free(h_a);
   free(output_ref);
-  HIP_CHECK_THREAD(hipStreamDestroy(stream));
-  HIP_CHECK_THREAD(hipFree(d_a));
+  HIP_CHECK_THREAD(hipStreamDestroy(stream))
+  HIP_CHECK_THREAD(hipFree(d_a))
 }
 
 /**
@@ -314,7 +314,7 @@ void MultiThreadMultiDevFunc(int DevId) {
  */
 HIP_TEST_CASE(Unit_hipGetFuncBySymbol_MultiDevMultiThread) {
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   if (deviceCount < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }

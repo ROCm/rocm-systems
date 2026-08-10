@@ -39,7 +39,7 @@ bool TryMemAllocPitch(hipDeviceptr_t* ptr, size_t* pitch, size_t width, size_t h
   if (status == hipErrorOutOfMemory) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 
@@ -120,7 +120,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_HipMemsetD2D32_Default_RoundTripsWord
   }
   cleanup.Add([device_ptr] { (void)hipFree(reinterpret_cast<void*>(device_ptr)); });
 
-  HIP_CHECK(hipMemsetD2D32(device_ptr, pitch, static_cast<int>(pattern), width_bytes, kHeight));
+  HIP_CHECK(hipMemsetD2D32(device_ptr, pitch, static_cast<int>(pattern), width_bytes, kHeight))
   HIP_CHECK(hipMemcpy2D(dst.data(), width_bytes, reinterpret_cast<void*>(device_ptr), pitch,
                         width_bytes, kHeight, hipMemcpyDeviceToHost));
 
@@ -140,7 +140,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_HipFree_PitchedAllocation_Succeeds) {
     SkipPitchedAllocationUnsupported();
   }
 
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(device_ptr)));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(device_ptr)))
 }
 
 // @asserts: hipDrvMemcpy2DUnaligned - an unaligned host->device 2D copy transfers every byte intact
@@ -154,13 +154,13 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_HipDrvMemcpy2DUnaligned_HostToDevice_
   }
 
   void* device_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   auto h2d = HostToDeviceUnaligned(reinterpret_cast<hipDeviceptr_t>(device_ptr), src.data(),
                                    kUnalignedWidthBytes, kUnalignedHeight);
-  HIP_CHECK(hipDrvMemcpy2DUnaligned(&h2d));
-  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipDrvMemcpy2DUnaligned(&h2d))
+  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost))
 
   REQUIRE(dst == src);
 }
@@ -171,10 +171,10 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_HipDrvMemcpy2DUnaligned_NullInner_IsR
   EnsureContext();
   std::array<uint8_t, kUnalignedWidthBytes * kUnalignedHeight> host{};
   void* device_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&device_ptr, host.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, host.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   auto null_src = HostToDeviceUnaligned(reinterpret_cast<hipDeviceptr_t>(device_ptr), nullptr,
                                         kUnalignedWidthBytes, kUnalignedHeight);
   // The contract is that the driver-style copy rejects a null inner source
@@ -188,7 +188,7 @@ HIP_TEST_CASE(Contract_DriverPitchedMemory_HipDrvMemcpy2DUnaligned_NullInner_IsR
 
   auto valid_copy = HostToDeviceUnaligned(reinterpret_cast<hipDeviceptr_t>(device_ptr),
                                           host.data(), kUnalignedWidthBytes, kUnalignedHeight);
-  HIP_CHECK(hipDrvMemcpy2DUnaligned(&valid_copy));
+  HIP_CHECK(hipDrvMemcpy2DUnaligned(&valid_copy))
 
   REQUIRE(null_src_status != hipSuccess);
 }

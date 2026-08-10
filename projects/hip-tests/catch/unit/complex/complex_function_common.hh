@@ -227,8 +227,8 @@ template <typename T> void ComplexFunctionUnaryDeviceTest(ComplexFunction functi
     LinearAllocGuard<T> result_h{LinearAllocs::hipHostMalloc, sizeof(T)};
 
     ComplexResultKernel<<<1, 1>>>(function, result_d.ptr(), input_val, input_val, input_val);
-    HIP_CHECK(hipMemcpy(result_h.ptr(), result_d.ptr(), sizeof(T), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemcpy(result_h.ptr(), result_d.ptr(), sizeof(T), hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
     ValidateComplexResultFunction(function, input_val, input_val, input_val, result_h.ptr()[0]);
   } else {
     LinearAllocGuard<decltype(T().x)> result_d{LinearAllocs::hipMalloc, sizeof(decltype(T().x))};
@@ -238,7 +238,7 @@ template <typename T> void ComplexFunctionUnaryDeviceTest(ComplexFunction functi
     ScalarResultKernel<<<1, 1>>>(function, result_d.ptr(), input_val);
     HIP_CHECK(
         hipMemcpy(result_h.ptr(), result_d.ptr(), sizeof(decltype(T().x)), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     ValidateScalarResultFunction(function, input_val, result_h.ptr()[0]);
   }
 }
@@ -263,8 +263,8 @@ void ComplexFunctionBinaryDeviceTest(ComplexFunction function, T input_val1, T i
   LinearAllocGuard<T> result_h{LinearAllocs::hipHostMalloc, sizeof(T)};
 
   ComplexResultKernel<<<1, 1>>>(function, result_d.ptr(), input_val1, input_val2, input_val2);
-  HIP_CHECK(hipMemcpy(result_h.ptr(), result_d.ptr(), sizeof(T), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(result_h.ptr(), result_d.ptr(), sizeof(T), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
   ValidateComplexResultFunction(function, input_val1, input_val2, input_val2, result_h.ptr()[0]);
 }
 
@@ -284,8 +284,8 @@ void ComplexFunctionTernaryDeviceTest(ComplexFunction function, T input_val1, T 
   LinearAllocGuard<T> result_h{LinearAllocs::hipHostMalloc, sizeof(T)};
 
   ComplexResultKernel<<<1, 1>>>(function, result_d.ptr(), input_val1, input_val2, input_val3);
-  HIP_CHECK(hipMemcpy(result_h.ptr(), result_d.ptr(), sizeof(T), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(result_h.ptr(), result_d.ptr(), sizeof(T), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
   ValidateComplexResultFunction(function, input_val1, input_val2, input_val3, result_h.ptr()[0]);
 }
 

@@ -29,7 +29,7 @@ HIP_TEST_CASE(Contract_Stream_HipStreamCreate_Destroy_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   REQUIRE(stream != nullptr);
@@ -40,9 +40,9 @@ HIP_TEST_CASE(Contract_Stream_HipStreamSynchronize_EmptyStream_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 }
 
 // @asserts: hipStreamQuery - querying an empty stream reports completion with hipSuccess
@@ -50,9 +50,9 @@ HIP_TEST_CASE(Contract_Stream_HipStreamQuery_QueryEmptyStream_ReturnsSuccess) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipStreamQuery(stream));
+  HIP_CHECK(hipStreamQuery(stream))
 }
 
 // @asserts: hipEventCreate - creating an event yields a non-null handle that destroys cleanly
@@ -60,7 +60,7 @@ HIP_TEST_CASE(Contract_Event_HipEventCreate_Destroy_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   hipEvent_t event = nullptr;
 
-  HIP_CHECK(hipEventCreate(&event));
+  HIP_CHECK(hipEventCreate(&event))
   cleanup.Add([event] { (void)hipEventDestroy(event); });
 
   REQUIRE(event != nullptr);
@@ -72,14 +72,14 @@ HIP_TEST_CASE(Contract_Event_HipEventRecord_ThenSynchronize_Succeeds) {
   hipStream_t stream = nullptr;
   hipEvent_t event = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipEventCreate(&event));
+  HIP_CHECK(hipEventCreate(&event))
   cleanup.Add([event] { (void)hipEventDestroy(event); });
 
-  HIP_CHECK(hipEventRecord(event, stream));
-  HIP_CHECK(hipEventSynchronize(event));
-  HIP_CHECK(hipEventQuery(event));
+  HIP_CHECK(hipEventRecord(event, stream))
+  HIP_CHECK(hipEventSynchronize(event))
+  HIP_CHECK(hipEventQuery(event))
 }
 
 // @asserts: hipEventQuery - querying a just-recorded event returns either hipSuccess or hipErrorNotReady
@@ -88,16 +88,16 @@ HIP_TEST_CASE(Contract_Event_HipEventQuery_QueryBeforeCompletion_ReturnsNotReady
   hipStream_t stream = nullptr;
   hipEvent_t event = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipEventCreate(&event));
+  HIP_CHECK(hipEventCreate(&event))
   cleanup.Add([event] { (void)hipEventDestroy(event); });
-  HIP_CHECK(hipEventRecord(event, stream));
+  HIP_CHECK(hipEventRecord(event, stream))
 
   const hipError_t query_result = hipEventQuery(event);
   REQUIRE((query_result == hipSuccess || query_result == hipErrorNotReady));
 
-  HIP_CHECK(hipEventSynchronize(event));
+  HIP_CHECK(hipEventSynchronize(event))
 }
 
 // @asserts: hipStreamWaitEvent - a cross-stream event dependency orders dependent work so the consumer observes the producer's copy
@@ -110,22 +110,22 @@ HIP_TEST_CASE(Contract_Stream_HipStreamWaitEvent_Default_OrdersDependentWork) {
   hipStream_t consumer_stream = nullptr;
   hipEvent_t copy_ready = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&producer_stream));
+  HIP_CHECK(hipStreamCreate(&producer_stream))
   cleanup.Add([producer_stream] { (void)hipStreamDestroy(producer_stream); });
-  HIP_CHECK(hipStreamCreate(&consumer_stream));
+  HIP_CHECK(hipStreamCreate(&consumer_stream))
   cleanup.Add([consumer_stream] { (void)hipStreamDestroy(consumer_stream); });
-  HIP_CHECK(hipEventCreate(&copy_ready));
+  HIP_CHECK(hipEventCreate(&copy_ready))
   cleanup.Add([copy_ready] { (void)hipEventDestroy(copy_ready); });
 
   HIP_CHECK(hipMemcpyAsync(device_ptr, src.data(), src.size(), hipMemcpyHostToDevice,
                            producer_stream));
-  HIP_CHECK(hipEventRecord(copy_ready, producer_stream));
-  HIP_CHECK(hipStreamWaitEvent(consumer_stream, copy_ready, 0));
+  HIP_CHECK(hipEventRecord(copy_ready, producer_stream))
+  HIP_CHECK(hipStreamWaitEvent(consumer_stream, copy_ready, 0))
   HIP_CHECK(hipMemcpyAsync(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost,
                            consumer_stream));
-  HIP_CHECK(hipStreamSynchronize(consumer_stream));
+  HIP_CHECK(hipStreamSynchronize(consumer_stream))
 
   REQUIRE(dst == src);
 }

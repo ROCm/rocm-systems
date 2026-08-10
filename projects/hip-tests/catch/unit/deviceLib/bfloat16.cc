@@ -275,8 +275,8 @@ HIP_TEST_CASE(Unit_bf16_basic) {
     constexpr size_t size = 256;
 
     float *d_a, *d_c;
-    HIP_CHECK(hipMalloc(&d_a, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&d_c, sizeof(float) * size));
+    HIP_CHECK(hipMalloc(&d_a, sizeof(float) * size))
+    HIP_CHECK(hipMalloc(&d_c, sizeof(float) * size))
 
     auto h_a = std::make_unique<float[]>(size);
     auto h_c = std::make_unique<float[]>(size);
@@ -285,11 +285,11 @@ HIP_TEST_CASE(Unit_bf16_basic) {
       h_a[i] = i + 1.25;
     }
 
-    HIP_CHECK(hipMemcpy(d_a, h_a.get(), sizeof(float) * size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_a, h_a.get(), sizeof(float) * size, hipMemcpyHostToDevice))
 
     fp32_bf16_fp32<<<1, size>>>(d_a, d_c, size);
 
-    HIP_CHECK(hipMemcpy(h_c.get(), d_c, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(h_c.get(), d_c, sizeof(float) * size, hipMemcpyDeviceToHost))
 
     for (size_t i = 0; i < size; i++) {
       INFO("Initial: " << h_a[i] << " - After Conv: " << h_c[i]);
@@ -297,8 +297,8 @@ HIP_TEST_CASE(Unit_bf16_basic) {
       REQUIRE((std::fabs(h_c[i] - h_a[i]) / h_a[i]) < (1.0 / 128.0f));
     }
 
-    HIP_CHECK(hipFree(d_a));
-    HIP_CHECK(hipFree(d_c));
+    HIP_CHECK(hipFree(d_a))
+    HIP_CHECK(hipFree(d_c))
   }
 
   SECTION("Math Op Accuracy") {
@@ -311,23 +311,23 @@ HIP_TEST_CASE(Unit_bf16_basic) {
     }
 
     float *df_val1, *df_val2, *float_res, *bf16_res;
-    HIP_CHECK(hipMalloc(&df_val1, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&df_val2, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&float_res, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&bf16_res, sizeof(float) * size));
+    HIP_CHECK(hipMalloc(&df_val1, sizeof(float) * size))
+    HIP_CHECK(hipMalloc(&df_val2, sizeof(float) * size))
+    HIP_CHECK(hipMalloc(&float_res, sizeof(float) * size))
+    HIP_CHECK(hipMalloc(&bf16_res, sizeof(float) * size))
 
-    HIP_CHECK(hipMemcpy(df_val1, f_val1, sizeof(float) * size, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(df_val2, f_val2, sizeof(float) * size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(df_val1, f_val1, sizeof(float) * size, hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(df_val2, f_val2, sizeof(float) * size, hipMemcpyHostToDevice))
 
     do_math<<<1, 1>>>(df_val1, df_val2, float_res, bf16_res);
 
-    HIP_CHECK(hipMemcpy(f_res, float_res, sizeof(float) * size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(bf_res, bf16_res, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(f_res, float_res, sizeof(float) * size, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipMemcpy(bf_res, bf16_res, sizeof(float) * size, hipMemcpyDeviceToHost))
 
-    HIP_CHECK(hipFree(df_val1));
-    HIP_CHECK(hipFree(df_val2));
-    HIP_CHECK(hipFree(float_res));
-    HIP_CHECK(hipFree(bf16_res));
+    HIP_CHECK(hipFree(df_val1))
+    HIP_CHECK(hipFree(df_val2))
+    HIP_CHECK(hipFree(float_res))
+    HIP_CHECK(hipFree(bf16_res))
 
     for (size_t i = 0; i < size; i++) {
       INFO("FP res: " << f_res[i] << " - BF16 res: " << bf_res[i]);
@@ -340,46 +340,46 @@ HIP_TEST_CASE(Unit_bf16_basic) {
     constexpr size_t size = 5;
     float in[size] = {1.0f, 0.5f, -0.33333f, 0.0f, -0.0f}, *d_in;
     unsigned* d_res;
-    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned) * size));
+    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size))
+    HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned) * size))
 
-    HIP_CHECK(hipMemcpy(d_in, in, sizeof(float) * size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_in, in, sizeof(float) * size, hipMemcpyHostToDevice))
 
     bf16_is_equal<<<1, size>>>(d_in, d_res, size);
 
     std::vector<unsigned> res(size, 0);
-    HIP_CHECK(hipMemcpy(res.data(), d_res, sizeof(unsigned) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_res, sizeof(unsigned) * size, hipMemcpyDeviceToHost))
 
     for (size_t i = 0; i < res.size(); i++) {
       INFO("Index: " << i << " input: " << in[i] << " output: " << res[i]);
       REQUIRE(res[i] == 1);
     }
 
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_res));
+    HIP_CHECK(hipFree(d_in))
+    HIP_CHECK(hipFree(d_res))
   }
 
   SECTION("MathOp Compare") {
     constexpr size_t size = 7;
     float in[size] = {0.5f, 1.0f, 1.5f, 0.33333f, 2.5f, 3.0f, 3.5f}, *d_in;
     unsigned* d_res;
-    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned) * size));
+    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size))
+    HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned) * size))
 
-    HIP_CHECK(hipMemcpy(d_in, in, sizeof(float) * size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_in, in, sizeof(float) * size, hipMemcpyHostToDevice))
 
     bf16_compare<<<1, size>>>(d_in, d_res, size);
 
     std::vector<unsigned> res(size, 0);
-    HIP_CHECK(hipMemcpy(res.data(), d_res, sizeof(unsigned) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_res, sizeof(unsigned) * size, hipMemcpyDeviceToHost))
 
     for (size_t i = 0; i < res.size(); i++) {
       INFO("Index: " << i << " input: " << in[i] << " output: " << res[i]);
       REQUIRE(res[i] == 1);
     }
 
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_res));
+    HIP_CHECK(hipFree(d_in))
+    HIP_CHECK(hipFree(d_res))
   }
 
   SECTION("NaN comparison semantics") {
@@ -403,12 +403,12 @@ HIP_TEST_CASE(Unit_bf16_basic) {
     float b[size] = {qnan, 1.0f, qnan, -3.0f, qnan, 0.0f};
     float *d_a, *d_b;
     unsigned* d_res;
-    HIP_CHECK(hipMalloc(&d_a, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&d_b, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned) * size * kBf16NanPredicateCount));
+    HIP_CHECK(hipMalloc(&d_a, sizeof(float) * size))
+    HIP_CHECK(hipMalloc(&d_b, sizeof(float) * size))
+    HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned) * size * kBf16NanPredicateCount))
 
-    HIP_CHECK(hipMemcpy(d_a, a, sizeof(float) * size, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_b, b, sizeof(float) * size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_a, a, sizeof(float) * size, hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(d_b, b, sizeof(float) * size, hipMemcpyHostToDevice))
 
     bf16_compare_nan<<<1, size>>>(d_a, d_b, d_res, size);
 
@@ -423,9 +423,9 @@ HIP_TEST_CASE(Unit_bf16_basic) {
       }
     }
 
-    HIP_CHECK(hipFree(d_a));
-    HIP_CHECK(hipFree(d_b));
-    HIP_CHECK(hipFree(d_res));
+    HIP_CHECK(hipFree(d_a))
+    HIP_CHECK(hipFree(d_b))
+    HIP_CHECK(hipFree(d_res))
   }
 
   SECTION("NaN operator semantics") {
@@ -439,7 +439,7 @@ HIP_TEST_CASE(Unit_bf16_basic) {
         {"one != one", 0},   {"one == one", 1}};
 
     unsigned* d_res;
-    HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned) * kBf16NanOpCount));
+    HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned) * kBf16NanOpCount))
 
     bf16_nan_operators<<<1, 1>>>(d_res);
 
@@ -452,26 +452,26 @@ HIP_TEST_CASE(Unit_bf16_basic) {
       CHECK(res[p] == kOps[p].expected);
     }
 
-    HIP_CHECK(hipFree(d_res));
+    HIP_CHECK(hipFree(d_res))
   }
 
   SECTION("Bits equal") {
     constexpr size_t size = 5;
     float in[size] = {1.0f, 0.5f, 0.33333f, 3.38e38f, 3.40e38f}, *d_in;
     unsigned short* d_res;
-    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned short) * size));
+    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size))
+    HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned short) * size))
 
-    HIP_CHECK(hipMemcpy(d_in, in, sizeof(float) * size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_in, in, sizeof(float) * size, hipMemcpyHostToDevice))
 
     bf16_conv_bits<<<1, size>>>(d_in, d_res, size);
 
     std::vector<unsigned short> res_cmp = {0x3f80, 0x3f00, 0x3eab, 0x7f7e, 0x7f80 /*Inf*/};
     std::vector<unsigned short> res(size, 0);
-    HIP_CHECK(hipMemcpy(res.data(), d_res, sizeof(unsigned short) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_res, sizeof(unsigned short) * size, hipMemcpyDeviceToHost))
 
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_res));
+    HIP_CHECK(hipFree(d_in))
+    HIP_CHECK(hipFree(d_res))
     for (size_t i = 0; i < res.size(); i++) {
       INFO("Index: " << i << " input: " << in[i] << " expected: " << res_cmp[i]
                      << " result: " << res[i]);
@@ -484,34 +484,34 @@ HIP_TEST_CASE(Unit_bf16_basic) {
     float *d_in, *d_out;
     std::vector<float> in = {
         std::numeric_limits<float>::infinity(), -1.0f, -0.5f, -0.0f, 0.0f, 0.5f, 1.0f};
-    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size));
+    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size))
+    HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size))
 
-    HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice))
 
     fp32_bf16_fp32<<<1, size>>>(d_in, d_out, size);
 
     std::vector<float> res(size, 0.0f);
 
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(unsigned) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(unsigned) * size, hipMemcpyDeviceToHost))
 
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_out));
+    HIP_CHECK(hipFree(d_in))
+    HIP_CHECK(hipFree(d_out))
     REQUIRE(in == res);
   }
 
   SECTION("Round trip subsection") {
     float *in, *out;
-    HIP_CHECK(hipMalloc(&in, sizeof(float) * max_bf16_num));
-    HIP_CHECK(hipMalloc(&out, sizeof(float) * max_bf16_num));
-    HIP_CHECK(hipMemcpy(in, f_in.data(), sizeof(float) * max_bf16_num, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&in, sizeof(float) * max_bf16_num))
+    HIP_CHECK(hipMalloc(&out, sizeof(float) * max_bf16_num))
+    HIP_CHECK(hipMemcpy(in, f_in.data(), sizeof(float) * max_bf16_num, hipMemcpyHostToDevice))
 
     fp32_bf16_fp32<<<(max_bf16_num / 256) + 1, 256>>>(in, out, max_bf16_num);  // round-trip
 
     std::vector<float> f_out(f_in.size(), 0.0f);
-    HIP_CHECK(hipMemcpy(f_out.data(), out, sizeof(float) * max_bf16_num, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipFree(in));
-    HIP_CHECK(hipFree(out));
+    HIP_CHECK(hipMemcpy(f_out.data(), out, sizeof(float) * max_bf16_num, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipFree(in))
+    HIP_CHECK(hipFree(out))
 
     REQUIRE(f_in.size() == f_out.size());  // Size should be equal
     for (size_t i = 0; i < f_in.size(); i++) {
@@ -526,16 +526,16 @@ HIP_TEST_CASE(Unit_bf16_basic) {
 
   SECTION("Neg Subsection") {
     float *in, *out;
-    HIP_CHECK(hipMalloc(&in, sizeof(float) * max_bf16_num));
-    HIP_CHECK(hipMalloc(&out, sizeof(float) * max_bf16_num));
-    HIP_CHECK(hipMemcpy(in, f_in.data(), sizeof(float) * max_bf16_num, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&in, sizeof(float) * max_bf16_num))
+    HIP_CHECK(hipMalloc(&out, sizeof(float) * max_bf16_num))
+    HIP_CHECK(hipMemcpy(in, f_in.data(), sizeof(float) * max_bf16_num, hipMemcpyHostToDevice))
 
     bf16_neg<<<(max_bf16_num / 256) + 1, 256>>>(in, out, max_bf16_num);  // round-trip
 
     std::vector<float> f_out(f_in.size(), 0.0f);
-    HIP_CHECK(hipMemcpy(f_out.data(), out, sizeof(float) * max_bf16_num, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipFree(in));
-    HIP_CHECK(hipFree(out));
+    HIP_CHECK(hipMemcpy(f_out.data(), out, sizeof(float) * max_bf16_num, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipFree(in))
+    HIP_CHECK(hipFree(out))
 
     REQUIRE(f_in.size() == f_out.size());  // Size should be equal
     for (size_t i = 0; i < f_in.size(); i++) {
@@ -558,16 +558,16 @@ HIP_TEST_CASE(Unit_bf16_basic) {
       in2.push_back(i * 0.6f);
     }
     float *d_in1, *d_in2, *d_out;
-    HIP_CHECK(hipMalloc(&d_in1, sizeof(float) * in1.size()));
-    HIP_CHECK(hipMalloc(&d_in2, sizeof(float) * in2.size()));
-    HIP_CHECK(hipMalloc(&d_out, sizeof(float) * in2.size()));
+    HIP_CHECK(hipMalloc(&d_in1, sizeof(float) * in1.size()))
+    HIP_CHECK(hipMalloc(&d_in2, sizeof(float) * in2.size()))
+    HIP_CHECK(hipMalloc(&d_out, sizeof(float) * in2.size()))
 
-    HIP_CHECK(hipMemcpy(d_in1, in1.data(), sizeof(float) * in1.size(), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_in2, in2.data(), sizeof(float) * in2.size(), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_in1, in1.data(), sizeof(float) * in1.size(), hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(d_in2, in2.data(), sizeof(float) * in2.size(), hipMemcpyHostToDevice))
 
     bf16_fma<<<1, size>>>(d_in1, d_in2, 1.0f, d_out, size);
     std::vector<float> gpu_res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(gpu_res.data(), d_out, sizeof(float) * in2.size(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(gpu_res.data(), d_out, sizeof(float) * in2.size(), hipMemcpyDeviceToHost))
 
     for (size_t i = 0; i < size; i++) {
       auto expected = in1[i] * in2[i] + 1.0f;
@@ -576,8 +576,8 @@ HIP_TEST_CASE(Unit_bf16_basic) {
     }
 
     HIP_CHECK(hipFree(d_in1))
-    HIP_CHECK(hipFree(d_in2));
-    HIP_CHECK(hipFree(d_out));
+    HIP_CHECK(hipFree(d_in2))
+    HIP_CHECK(hipFree(d_out))
   }
 
   SECTION("abs") {
@@ -611,8 +611,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_bf16_conversion_to_integral_type, unsigned short, sh
 
   TestType* d_input;
   float* d_res;
-  HIP_CHECK(hipMalloc(&d_input, sizeof(TestType) * size));
-  HIP_CHECK(hipMalloc(&d_res, sizeof(float) * size));
+  HIP_CHECK(hipMalloc(&d_input, sizeof(TestType) * size))
+  HIP_CHECK(hipMalloc(&d_res, sizeof(float) * size))
 
   std::vector<float> res, gpu_res;
   std::vector<TestType> input;
@@ -630,10 +630,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_bf16_conversion_to_integral_type, unsigned short, sh
   auto cvt_kernel = bf16_cvt_to_integral<TestType>;
   uint32_t blocks = static_cast<uint32_t>(size / 256) + 1;
   cvt_kernel<<<blocks, 256>>>(d_input, d_res, size);
-  HIP_CHECK(hipMemcpy(gpu_res.data(), d_res, sizeof(float) * res.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(gpu_res.data(), d_res, sizeof(float) * res.size(), hipMemcpyDeviceToHost))
 
-  HIP_CHECK(hipFree(d_res));
-  HIP_CHECK(hipFree(d_input));
+  HIP_CHECK(hipFree(d_res))
+  HIP_CHECK(hipFree(d_input))
 
   for (size_t i = 0; i < size; i++) {
     if (!(std::isnan(res[i]) || std::isnan(gpu_res[i]))) {
@@ -668,13 +668,13 @@ HIP_TEST_CASE(Unit_bf162_basic) {
 
   SECTION("Eq Operation") {
     float* in;
-    HIP_CHECK(hipMalloc(&in, sizeof(float) * max_bf16_num));
-    HIP_CHECK(hipMemcpy(in, f_in.data(), sizeof(float) * max_bf16_num, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&in, sizeof(float) * max_bf16_num))
+    HIP_CHECK(hipMemcpy(in, f_in.data(), sizeof(float) * max_bf16_num, hipMemcpyHostToDevice))
     char* out;
-    HIP_CHECK(hipMalloc(&out, sizeof(char) * max_bf16_num));
+    HIP_CHECK(hipMalloc(&out, sizeof(char) * max_bf16_num))
     bf162_eq<<<(max_bf16_num / 256) + 1, 256>>>(in, out, max_bf16_num);
     std::vector<char> result(max_bf16_num, 0);
-    HIP_CHECK(hipMemcpy(result.data(), out, sizeof(char) * max_bf16_num, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(result.data(), out, sizeof(char) * max_bf16_num, hipMemcpyDeviceToHost))
     // Cant use allof, incase of mismatch we need to show which value had a mismatch
     for (size_t i = 0; i < max_bf16_num; i++) {
       if (!std::isnan(f_in[i])) {
@@ -682,19 +682,19 @@ HIP_TEST_CASE(Unit_bf162_basic) {
         REQUIRE(result[i] == 1);
       }
     }
-    HIP_CHECK(hipFree(in));
-    HIP_CHECK(hipFree(out));
+    HIP_CHECK(hipFree(in))
+    HIP_CHECK(hipFree(out))
   }
 
   SECTION("Neq Operation") {
     float* in;
-    HIP_CHECK(hipMalloc(&in, sizeof(float) * max_bf16_num));
-    HIP_CHECK(hipMemcpy(in, f_in.data(), sizeof(float) * max_bf16_num, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&in, sizeof(float) * max_bf16_num))
+    HIP_CHECK(hipMemcpy(in, f_in.data(), sizeof(float) * max_bf16_num, hipMemcpyHostToDevice))
     char* out;
-    HIP_CHECK(hipMalloc(&out, sizeof(char) * max_bf16_num));
+    HIP_CHECK(hipMalloc(&out, sizeof(char) * max_bf16_num))
     bf162_neq<<<(max_bf16_num / 256) + 1, 256>>>(in, out, max_bf16_num);
     std::vector<char> result(max_bf16_num, 0);
-    HIP_CHECK(hipMemcpy(result.data(), out, sizeof(char) * max_bf16_num, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(result.data(), out, sizeof(char) * max_bf16_num, hipMemcpyDeviceToHost))
     // Cant use allof, incase of mismatch we need to show which value had a mismatch
     for (size_t i = 0; i < max_bf16_num; i++) {
       if (!std::isnan(f_in[i])) {
@@ -702,8 +702,8 @@ HIP_TEST_CASE(Unit_bf162_basic) {
         REQUIRE(result[i] == 1);
       }
     }
-    HIP_CHECK(hipFree(in));
-    HIP_CHECK(hipFree(out));
+    HIP_CHECK(hipFree(in))
+    HIP_CHECK(hipFree(out))
   }
 }
 
@@ -946,39 +946,39 @@ HIP_TEST_CASE(Unit_bf16_shfl) {
   }
 
   float *d_in, *d_out;
-  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * in.size()));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * in.size()));
+  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * in.size()))
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * in.size()))
 
-  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * in.size(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * in.size(), hipMemcpyHostToDevice))
 
   std::vector<float> out(warp_size, 0.0f);
 
   SECTION("shfl_down") {
     bf16_shfl_down<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * out.size(), hipMemcpyDeviceToHost))
     REQUIRE(out[0] == (warp_size * (warp_size + 1) / 2));
   }
 
   SECTION("shfl_up") {
     bf16_shfl_up<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * out.size(), hipMemcpyDeviceToHost))
     REQUIRE(out[warp_size - 1] == (warp_size * (warp_size + 1) / 2));
   }
 
   SECTION("shfl_xor") {
     bf16_shfl_xor<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * out.size(), hipMemcpyDeviceToHost))
     REQUIRE(out[0] == (warp_size * (warp_size + 1) / 2));
   }
 
   SECTION("shfl_sync") {
     bf16_shfl_sync<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * out.size(), hipMemcpyDeviceToHost))
     REQUIRE(out[0] == (warp_size + 1));
   }
 
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipFree(d_in))
+  HIP_CHECK(hipFree(d_out))
 }
 
 __global__ void bf162_shfl_down(float2* in, float2* out, int size) {
@@ -1031,16 +1031,16 @@ HIP_TEST_CASE(Unit_bf162_shfl) {
   }
 
   float2 *d_in, *d_out;
-  HIP_CHECK(hipMalloc(&d_in, sizeof(float2) * in.size()));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float2) * in.size()));
+  HIP_CHECK(hipMalloc(&d_in, sizeof(float2) * in.size()))
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float2) * in.size()))
 
-  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float2) * in.size(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float2) * in.size(), hipMemcpyHostToDevice))
 
   std::vector<float2> out(warp_size, float2{0.0f, 0.0f});
 
   SECTION("shfl_down") {
     bf162_shfl_down<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float2) * out.size(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float2) * out.size(), hipMemcpyDeviceToHost))
     auto res = (warp_size * (warp_size + 1) / 2);
     INFO("Expected: x: " << res << " y: " << (res * 2));
     INFO("Got:      x: " << out[0].x << " y: " << out[0].y);
@@ -1049,7 +1049,7 @@ HIP_TEST_CASE(Unit_bf162_shfl) {
 
   SECTION("shfl_up") {
     bf162_shfl_up<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float2) * out.size(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float2) * out.size(), hipMemcpyDeviceToHost))
     auto res = (warp_size * (warp_size + 1) / 2);
     INFO("Expected: x: " << res << " y: " << (res * 2));
     INFO("Got:      x: " << out[warp_size - 1].x << " y: " << out[warp_size - 1].y);
@@ -1058,7 +1058,7 @@ HIP_TEST_CASE(Unit_bf162_shfl) {
 
   SECTION("shfl_xor") {
     bf162_shfl_xor<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float2) * out.size(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float2) * out.size(), hipMemcpyDeviceToHost))
     auto res = (warp_size * (warp_size + 1) / 2);
     INFO("Expected: x: " << res << " y: " << (res * 2));
     INFO("Got:      x: " << out[0].x << " y: " << out[0].y);
@@ -1067,15 +1067,15 @@ HIP_TEST_CASE(Unit_bf162_shfl) {
 
   SECTION("shfl_sync") {
     bf162_shfl_sync<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float2) * out.size(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float2) * out.size(), hipMemcpyDeviceToHost))
     auto res = warp_size + 1;
     INFO("Expected: x: " << res << " y: " << (res * 2));
     INFO("Got:      x: " << out[warp_size - 1].x << " y: " << out[warp_size - 1].y);
     REQUIRE(out[0] == float2{res, res * 2});
   }
 
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipFree(d_in))
+  HIP_CHECK(hipFree(d_out))
 }
 
 __global__ void bf16_hrcp(float* in, float* out) {
@@ -1141,8 +1141,8 @@ __global__ void bf16_hrsqrt(float* in, float* out) {
 HIP_TEST_CASE(Unit_bf16_value_ops) {
   constexpr size_t size = 32;
   float *d_in, *d_out;
-  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size));
+  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size))
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size))
 
   std::vector<float> in;
   in.reserve(size);
@@ -1150,12 +1150,12 @@ HIP_TEST_CASE(Unit_bf16_value_ops) {
     in.push_back(static_cast<float>(i));
   }
 
-  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice))
 
   SECTION("hrcp") {
     bf16_hrcp<<<1, size>>>(d_in, d_out);
     std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float rcp_res = 1.0f / in[i];
       INFO("From GPU : " << res[i] << " from cpu: " << rcp_res);
@@ -1166,7 +1166,7 @@ HIP_TEST_CASE(Unit_bf16_value_ops) {
   SECTION("hlog2") {
     bf16_hlog2<<<1, size>>>(d_in, d_out);
     std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float rcp_res = std::log2f(in[i]);
       INFO("From GPU : " << res[i] << " from cpu: " << rcp_res);
@@ -1177,7 +1177,7 @@ HIP_TEST_CASE(Unit_bf16_value_ops) {
   SECTION("hlog10") {
     bf16_hlog10<<<1, size>>>(d_in, d_out);
     std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float rcp_res = std::log10f(in[i]);
       INFO("From GPU : " << res[i] << " from cpu: " << rcp_res);
@@ -1188,7 +1188,7 @@ HIP_TEST_CASE(Unit_bf16_value_ops) {
   SECTION("hlog") {
     bf16_hlog<<<1, size>>>(d_in, d_out);
     std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float rcp_res = std::logf(in[i]);
       INFO("From GPU : " << res[i] << " from cpu: " << rcp_res);
@@ -1199,7 +1199,7 @@ HIP_TEST_CASE(Unit_bf16_value_ops) {
   SECTION("hcos") {
     bf16_hcos<<<1, size>>>(d_in, d_out);
     std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float rcp_res = std::cos(in[i]);
       INFO("From GPU : " << res[i] << " from cpu: " << rcp_res);
@@ -1210,7 +1210,7 @@ HIP_TEST_CASE(Unit_bf16_value_ops) {
   SECTION("hsin") {
     bf16_hsin<<<1, size>>>(d_in, d_out);
     std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float rcp_res = std::sin(in[i]);
       INFO("From GPU : " << res[i] << " from cpu: " << rcp_res);
@@ -1222,7 +1222,7 @@ HIP_TEST_CASE(Unit_bf16_value_ops) {
     constexpr size_t size_override = 7;  // the exp values goes too high and hence we limit it to 7
     bf16_hexp<<<1, size_override>>>(d_in, d_out);
     std::vector<float> res(size_override, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size_override, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size_override, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size_override; i++) {
       float rcp_res = std::exp(in[i]);
       INFO("Input: " << in[i] << " From GPU : " << res[i] << " from cpu: " << rcp_res);
@@ -1233,7 +1233,7 @@ HIP_TEST_CASE(Unit_bf16_value_ops) {
   SECTION("hexp2") {
     bf16_hexp2<<<1, size>>>(d_in, d_out);
     std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float rcp_res = std::exp2f(in[i]);
       INFO("Input: " << in[i] << " From GPU : " << res[i] << " from cpu: " << rcp_res);
@@ -1244,7 +1244,7 @@ HIP_TEST_CASE(Unit_bf16_value_ops) {
   SECTION("hsqrt") {
     bf16_hsqrt<<<1, size>>>(d_in, d_out);
     std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float rcp_res = std::sqrt(in[i]);
       INFO("Input: " << in[i] << " from GPU : " << res[i] << " from cpu: " << rcp_res);
@@ -1255,7 +1255,7 @@ HIP_TEST_CASE(Unit_bf16_value_ops) {
   SECTION("hrsqrt") {
     bf16_hrsqrt<<<1, size>>>(d_in, d_out);
     std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float rcp_res = 1.0f / std::sqrt(in[i]);
       INFO("Input: " << in[i] << " from GPU : " << res[i] << " from cpu: " << rcp_res);
@@ -1263,8 +1263,8 @@ HIP_TEST_CASE(Unit_bf16_value_ops) {
     }
   }
 
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipFree(d_in))
+  HIP_CHECK(hipFree(d_out))
 }
 
 __global__ void bf16_hfloor(float* in, float* out) {
@@ -1294,8 +1294,8 @@ __global__ void bf16_htrunc(float* in, float* out) {
 HIP_TEST_CASE(Unit_bf16_floor_ceil) {
   constexpr size_t size = 32;
   float *d_in, *d_out;
-  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size));
+  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size))
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size))
 
   std::vector<float> in;
   in.reserve(size);
@@ -1307,12 +1307,12 @@ HIP_TEST_CASE(Unit_bf16_floor_ceil) {
       in.push_back(tmp + 0.1f);
   }
 
-  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice))
 
   SECTION("hceil") {
     bf16_hceil<<<1, size>>>(d_in, d_out);
     std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float rcp_res = std::ceil(in[i]);
       INFO("Input: " << in[i] << "from GPU : " << res[i] << " from cpu: " << rcp_res);
@@ -1323,7 +1323,7 @@ HIP_TEST_CASE(Unit_bf16_floor_ceil) {
   SECTION("hfloor") {
     bf16_hfloor<<<1, size>>>(d_in, d_out);
     std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float rcp_res = std::floor(in[i]);
       INFO("Input: " << in[i] << "from GPU : " << res[i] << " from cpu: " << rcp_res);
@@ -1334,7 +1334,7 @@ HIP_TEST_CASE(Unit_bf16_floor_ceil) {
   SECTION("hrint") {
     bf16_hrint<<<1, size>>>(d_in, d_out);
     std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float rcp_res = std::round(in[i]);
       INFO("Input: " << in[i] << "from GPU : " << res[i] << " from cpu: " << rcp_res);
@@ -1345,7 +1345,7 @@ HIP_TEST_CASE(Unit_bf16_floor_ceil) {
   SECTION("htrunc") {
     bf16_htrunc<<<1, size>>>(d_in, d_out);
     std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float rcp_res = std::trunc(in[i]);
       INFO("Input: " << in[i] << "from GPU : " << res[i] << " from cpu: " << rcp_res);
@@ -1353,8 +1353,8 @@ HIP_TEST_CASE(Unit_bf16_floor_ceil) {
     }
   }
 
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipFree(d_in))
+  HIP_CHECK(hipFree(d_out))
 }
 
 __global__ void bf162_hfloor(float2* in, float2* out) {
@@ -1384,8 +1384,8 @@ __global__ void bf162_htrunc(float2* in, float2* out) {
 HIP_TEST_CASE(Unit_bf162_floor_ceil) {
   constexpr size_t size = 32;
   float2 *d_in, *d_out;
-  HIP_CHECK(hipMalloc(&d_in, sizeof(float2) * size));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float2) * size));
+  HIP_CHECK(hipMalloc(&d_in, sizeof(float2) * size))
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float2) * size))
 
   std::vector<float2> in;
   in.reserve(size);
@@ -1394,12 +1394,12 @@ HIP_TEST_CASE(Unit_bf162_floor_ceil) {
     in.push_back(float2{tmp - 0.1f, tmp + 0.1f});
   }
 
-  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float2) * size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float2) * size, hipMemcpyHostToDevice))
 
   SECTION("hceil") {
     bf162_hceil<<<1, size>>>(d_in, d_out);
     std::vector<float2> res(size);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float2) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float2) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float2 rcp_res{std::ceil(in[i].x), std::ceil(in[i].y)};
       INFO("Input: " << in[i].x << ", " << in[i].y << " from GPU : " << res[i].x << ", " << res[i].y
@@ -1411,7 +1411,7 @@ HIP_TEST_CASE(Unit_bf162_floor_ceil) {
   SECTION("hfloor") {
     bf162_hfloor<<<1, size>>>(d_in, d_out);
     std::vector<float2> res(size);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float2) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float2) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float2 rcp_res{std::floor(in[i].x), std::floor(in[i].y)};
       INFO("Input: " << in[i].x << ", " << in[i].y << " from GPU : " << res[i].x << ", " << res[i].y
@@ -1423,7 +1423,7 @@ HIP_TEST_CASE(Unit_bf162_floor_ceil) {
   SECTION("hrint") {
     bf162_hrint<<<1, size>>>(d_in, d_out);
     std::vector<float2> res(size);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float2) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float2) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float2 rcp_res{std::round(in[i].x), std::round(in[i].y)};
       INFO("Input: " << in[i].x << ", " << in[i].y << " from GPU : " << res[i].x << ", " << res[i].y
@@ -1435,7 +1435,7 @@ HIP_TEST_CASE(Unit_bf162_floor_ceil) {
   SECTION("htrunc") {
     bf162_htrunc<<<1, size>>>(d_in, d_out);
     std::vector<float2> res(size);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float2) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float2) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float2 rcp_res{std::trunc(in[i].x), std::trunc(in[i].y)};
       INFO("Input: " << in[i].x << ", " << in[i].y << " from GPU : " << res[i].x << ", " << res[i].y
@@ -1444,6 +1444,6 @@ HIP_TEST_CASE(Unit_bf162_floor_ceil) {
     }
   }
 
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipFree(d_in))
+  HIP_CHECK(hipFree(d_out))
 }

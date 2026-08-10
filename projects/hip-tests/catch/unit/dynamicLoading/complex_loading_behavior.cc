@@ -50,16 +50,16 @@ static bool launch_local_kernel() {
   size_t Nbytes = N * sizeof(float);
   static int device = 0;
 
-  HIPCHECK(hipSetDevice(device));
+  HIPCHECK(hipSetDevice(device))
   hipDeviceProp_t props;
-  HIPCHECK(hipGetDeviceProperties(&props, device));
+  HIPCHECK(hipGetDeviceProperties(&props, device))
 
   A_h = reinterpret_cast<float*>(malloc(Nbytes));
-  HIPCHECK(A_h == nullptr ? hipErrorOutOfMemory : hipSuccess);
+  HIPCHECK(A_h == nullptr ? hipErrorOutOfMemory : hipSuccess)
   B_h = reinterpret_cast<float*>(malloc(Nbytes));
-  HIPCHECK(B_h == nullptr ? hipErrorOutOfMemory : hipSuccess);
+  HIPCHECK(B_h == nullptr ? hipErrorOutOfMemory : hipSuccess)
   C_h = reinterpret_cast<float*>(malloc(Nbytes));
-  HIPCHECK(C_h == nullptr ? hipErrorOutOfMemory : hipSuccess);
+  HIPCHECK(C_h == nullptr ? hipErrorOutOfMemory : hipSuccess)
 
   // Fill with Phi + i
   for (size_t i = 0; i < N; i++) {
@@ -67,16 +67,16 @@ static bool launch_local_kernel() {
     B_h[i] = 1.618f + i;
   }
 
-  HIPCHECK(hipMalloc(&A_d, Nbytes));
-  HIPCHECK(hipMalloc(&B_d, Nbytes));
-  HIPCHECK(hipMalloc(&C_d, Nbytes));
-  HIPCHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-  HIPCHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  HIPCHECK(hipMalloc(&A_d, Nbytes))
+  HIPCHECK(hipMalloc(&B_d, Nbytes))
+  HIPCHECK(hipMalloc(&C_d, Nbytes))
+  HIPCHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
+  HIPCHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
 
   const unsigned blocks = 512;
   const unsigned threadsPerBlock = 256;
   hipLaunchKernelGGL(vector_add, dim3(blocks), dim3(threadsPerBlock), 0, 0, C_d, A_d, B_d, N);
-  HIPCHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+  HIPCHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < N; i++) {
     if (C_h[i] != (A_h[i] + B_h[i])) {
@@ -85,9 +85,9 @@ static bool launch_local_kernel() {
     }
   }
 
-  HIPCHECK(hipFree(A_d));
-  HIPCHECK(hipFree(B_d));
-  HIPCHECK(hipFree(C_d));
+  HIPCHECK(hipFree(A_d))
+  HIPCHECK(hipFree(B_d))
+  HIPCHECK(hipFree(C_d))
 
   free(A_h);
   free(B_h);

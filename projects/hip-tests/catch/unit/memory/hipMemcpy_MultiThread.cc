@@ -66,17 +66,17 @@ template <typename T> memcpyTests<T>::memcpyTests(apiToTest val) {
 
 
 template <typename T> void memcpyTests<T>::Memcpy_And_verify(bool* ret_val) {
-  HIPCHECK(hipGetDeviceCount(&Available_Gpus));
+  HIPCHECK(hipGetDeviceCount(&Available_Gpus))
   T* A_d[MAX_GPU];
   hipStream_t stream[MAX_GPU];
   for (int i = 0; i < Available_Gpus; ++i) {
-    HIPCHECK(hipSetDevice(i));
-    HIPCHECK(hipMalloc(&A_d[i], NUM_ELM * sizeof(T)));
+    HIPCHECK(hipSetDevice(i))
+    HIPCHECK(hipMalloc(&A_d[i], NUM_ELM * sizeof(T)))
     if (api >= TEST_MEMCPYD2D) {
-      HIPCHECK(hipStreamCreate(&stream[i]));
+      HIPCHECK(hipStreamCreate(&stream[i]))
     }
   }
-  HIPCHECK(hipSetDevice(0));
+  HIPCHECK(hipSetDevice(0))
   int canAccessPeer = 0;
   switch (api) {
     case TEST_MEMCPY: {
@@ -84,22 +84,22 @@ template <typename T> void memcpyTests<T>::Memcpy_And_verify(bool* ret_val) {
       // Copying data from host to individual devices followed by copying
       // back to host and verifying the data consistency.
       for (int i = 0; i < Available_Gpus; ++i) {
-        HIPCHECK(hipMemcpy(A_d[i], A_h, NUM_ELM * sizeof(T), hipMemcpyHostToDevice));
-        HIPCHECK(hipMemcpy(B_h, A_d[i], NUM_ELM * sizeof(T), hipMemcpyDeviceToHost));
+        HIPCHECK(hipMemcpy(A_d[i], A_h, NUM_ELM * sizeof(T), hipMemcpyHostToDevice))
+        HIPCHECK(hipMemcpy(B_h, A_d[i], NUM_ELM * sizeof(T), hipMemcpyDeviceToHost))
         *ret_val = CheckTests(A_h, B_h, NUM_ELM);
       }
       // Device to Device copying for all combinations
       for (int i = 0; i < Available_Gpus; ++i) {
         for (int j = i + 1; j < Available_Gpus; ++j) {
           canAccessPeer = 0;
-          HIPCHECK(hipDeviceCanAccessPeer(&canAccessPeer, i, j));
+          HIPCHECK(hipDeviceCanAccessPeer(&canAccessPeer, i, j))
           if (canAccessPeer) {
-            HIPCHECK(hipMemcpy(A_d[j], A_d[i], NUM_ELM * sizeof(T), hipMemcpyDefault));
+            HIPCHECK(hipMemcpy(A_d[j], A_d[i], NUM_ELM * sizeof(T), hipMemcpyDefault))
             // Copying in reverse dir of above to check if bidirectional
             // access is happening without any error
-            HIPCHECK(hipMemcpy(A_d[i], A_d[j], NUM_ELM * sizeof(T), hipMemcpyDefault));
+            HIPCHECK(hipMemcpy(A_d[i], A_d[j], NUM_ELM * sizeof(T), hipMemcpyDefault))
             // Copying data to host to verify the content
-            HIPCHECK(hipMemcpy(B_h, A_d[j], NUM_ELM * sizeof(T), hipMemcpyDefault));
+            HIPCHECK(hipMemcpy(B_h, A_d[j], NUM_ELM * sizeof(T), hipMemcpyDefault))
             *ret_val &= CheckTests(A_h, B_h, NUM_ELM);
           }
         }
@@ -109,9 +109,9 @@ template <typename T> void memcpyTests<T>::Memcpy_And_verify(bool* ret_val) {
     case TEST_MEMCPYH2D:  // To test hipMemcpyHtoD()
     {
       for (int i = 0; i < Available_Gpus; ++i) {
-        HIPCHECK(hipMemcpyHtoD(hipDeviceptr_t(A_d[i]), A_h, NUM_ELM * sizeof(T)));
+        HIPCHECK(hipMemcpyHtoD(hipDeviceptr_t(A_d[i]), A_h, NUM_ELM * sizeof(T)))
         // Copying data from device to host to check data consistency
-        HIPCHECK(hipMemcpy(B_h, A_d[i], NUM_ELM * sizeof(T), hipMemcpyDeviceToHost));
+        HIPCHECK(hipMemcpy(B_h, A_d[i], NUM_ELM * sizeof(T), hipMemcpyDeviceToHost))
         *ret_val &= CheckTests(A_h, B_h, NUM_ELM);
       }
       break;
@@ -119,8 +119,8 @@ template <typename T> void memcpyTests<T>::Memcpy_And_verify(bool* ret_val) {
     case TEST_MEMCPYD2H:  // To test hipMemcpyDtoH()--done
     {
       for (int i = 0; i < Available_Gpus; ++i) {
-        HIPCHECK(hipMemcpy(A_d[i], A_h, NUM_ELM * sizeof(T), hipMemcpyHostToDevice));
-        HIPCHECK(hipMemcpyDtoH(B_h, hipDeviceptr_t(A_d[i]), NUM_ELM * sizeof(T)));
+        HIPCHECK(hipMemcpy(A_d[i], A_h, NUM_ELM * sizeof(T), hipMemcpyHostToDevice))
+        HIPCHECK(hipMemcpyDtoH(B_h, hipDeviceptr_t(A_d[i]), NUM_ELM * sizeof(T)))
         *ret_val &= CheckTests(A_h, B_h, NUM_ELM);
       }
       break;
@@ -135,9 +135,9 @@ template <typename T> void memcpyTests<T>::Memcpy_And_verify(bool* ret_val) {
         int canAccessPeer = 0;
         for (int i = 0; i < Available_Gpus; ++i) {
           for (int j = i + 1; j < Available_Gpus; ++j) {
-            HIPCHECK(hipDeviceCanAccessPeer(&canAccessPeer, i, j));
+            HIPCHECK(hipDeviceCanAccessPeer(&canAccessPeer, i, j))
             if (canAccessPeer) {
-              HIPCHECK(hipMemcpyHtoD(hipDeviceptr_t(A_d[i]), A_h, NUM_ELM * sizeof(T)));
+              HIPCHECK(hipMemcpyHtoD(hipDeviceptr_t(A_d[i]), A_h, NUM_ELM * sizeof(T)))
               HIPCHECK(hipMemcpyDtoD(hipDeviceptr_t(A_d[j]), hipDeviceptr_t(A_d[i]),
                                      NUM_ELM * sizeof(T)));
               // Copying in direction reverse of above to check if
@@ -145,7 +145,7 @@ template <typename T> void memcpyTests<T>::Memcpy_And_verify(bool* ret_val) {
               // access is happening without any error
               HIPCHECK(hipMemcpyDtoD(hipDeviceptr_t(A_d[i]), hipDeviceptr_t(A_d[j]),
                                      NUM_ELM * sizeof(T)));
-              HIPCHECK(hipMemcpy(B_h, A_d[i], NUM_ELM * sizeof(T), hipMemcpyDeviceToHost));
+              HIPCHECK(hipMemcpy(B_h, A_d[i], NUM_ELM * sizeof(T), hipMemcpyDeviceToHost))
               *ret_val &= CheckTests(A_h, B_h, NUM_ELM);
             }
           }
@@ -153,7 +153,7 @@ template <typename T> void memcpyTests<T>::Memcpy_And_verify(bool* ret_val) {
       } else {
         // As DtoD is not possible transfer data from HtH(A_h to B_h)
         // so as to get through verification step
-        HIPCHECK(hipMemcpy(B_h, A_h, NUM_ELM * sizeof(T), hipMemcpyHostToHost));
+        HIPCHECK(hipMemcpy(B_h, A_h, NUM_ELM * sizeof(T), hipMemcpyHostToHost))
         *ret_val &= CheckTests(A_h, B_h, NUM_ELM);
       }
       break;
@@ -167,14 +167,14 @@ template <typename T> void memcpyTests<T>::Memcpy_And_verify(bool* ret_val) {
             hipMemcpyAsync(A_d[i], A_h, NUM_ELM * sizeof(T), hipMemcpyHostToDevice, stream[i]));
         HIPCHECK(
             hipMemcpyAsync(B_h, A_d[i], NUM_ELM * sizeof(T), hipMemcpyDeviceToHost, stream[i]));
-        HIPCHECK(hipStreamSynchronize(stream[i]));
+        HIPCHECK(hipStreamSynchronize(stream[i]))
         *ret_val &= CheckTests(A_h, B_h, NUM_ELM);
       }
       // Device to Device copying for all combinations
       for (int i = 0; i < Available_Gpus; ++i) {
         for (int j = i + 1; j < Available_Gpus; ++j) {
           canAccessPeer = 0;
-          HIPCHECK(hipDeviceCanAccessPeer(&canAccessPeer, i, j));
+          HIPCHECK(hipDeviceCanAccessPeer(&canAccessPeer, i, j))
           if (canAccessPeer) {
             HIPCHECK(
                 hipMemcpyAsync(A_d[j], A_d[i], NUM_ELM * sizeof(T), hipMemcpyDefault, stream[i]));
@@ -183,8 +183,8 @@ template <typename T> void memcpyTests<T>::Memcpy_And_verify(bool* ret_val) {
             // access is happening without any error
             HIPCHECK(
                 hipMemcpyAsync(A_d[i], A_d[j], NUM_ELM * sizeof(T), hipMemcpyDefault, stream[i]));
-            HIPCHECK(hipStreamSynchronize(stream[i]));
-            HIPCHECK(hipMemcpy(B_h, A_d[j], NUM_ELM * sizeof(T), hipMemcpyDefault));
+            HIPCHECK(hipStreamSynchronize(stream[i]))
+            HIPCHECK(hipMemcpy(B_h, A_d[j], NUM_ELM * sizeof(T), hipMemcpyDefault))
             *ret_val &= CheckTests(A_h, B_h, NUM_ELM);
           }
         }
@@ -194,10 +194,10 @@ template <typename T> void memcpyTests<T>::Memcpy_And_verify(bool* ret_val) {
     case TEST_MEMCPYH2DASYNC:  // To test hipMemcpyHtoDAsync()
     {
       for (int i = 0; i < Available_Gpus; ++i) {
-        HIPCHECK(hipMemcpyHtoDAsync(hipDeviceptr_t(A_d[i]), A_h, NUM_ELM * sizeof(T), stream[i]));
-        HIPCHECK(hipStreamSynchronize(stream[i]));
+        HIPCHECK(hipMemcpyHtoDAsync(hipDeviceptr_t(A_d[i]), A_h, NUM_ELM * sizeof(T), stream[i]))
+        HIPCHECK(hipStreamSynchronize(stream[i]))
         // Copying data from device to host to check data consistency
-        HIPCHECK(hipMemcpy(B_h, A_d[i], NUM_ELM * sizeof(T), hipMemcpyDeviceToHost));
+        HIPCHECK(hipMemcpy(B_h, A_d[i], NUM_ELM * sizeof(T), hipMemcpyDeviceToHost))
         *ret_val &= CheckTests(A_h, B_h, NUM_ELM);
       }
       break;
@@ -205,9 +205,9 @@ template <typename T> void memcpyTests<T>::Memcpy_And_verify(bool* ret_val) {
     case TEST_MEMCPYD2HASYNC:  // To test hipMemcpyDtoHAsync()
     {
       for (int i = 0; i < Available_Gpus; ++i) {
-        HIPCHECK(hipMemcpy(A_d[i], A_h, NUM_ELM * sizeof(T), hipMemcpyHostToDevice));
-        HIPCHECK(hipMemcpyDtoHAsync(B_h, hipDeviceptr_t(A_d[i]), NUM_ELM * sizeof(T), stream[i]));
-        HIPCHECK(hipStreamSynchronize(stream[i]));
+        HIPCHECK(hipMemcpy(A_d[i], A_h, NUM_ELM * sizeof(T), hipMemcpyHostToDevice))
+        HIPCHECK(hipMemcpyDtoHAsync(B_h, hipDeviceptr_t(A_d[i]), NUM_ELM * sizeof(T), stream[i]))
+        HIPCHECK(hipStreamSynchronize(stream[i]))
         *ret_val &= CheckTests(A_h, B_h, NUM_ELM);
       }
       break;
@@ -216,13 +216,13 @@ template <typename T> void memcpyTests<T>::Memcpy_And_verify(bool* ret_val) {
     {
       if (Available_Gpus > 1) {
         // First copy data from H to D and then from D to D followed by D2H
-        HIPCHECK(hipMemcpyHtoD(hipDeviceptr_t(A_d[0]), A_h, NUM_ELM * sizeof(T)));
+        HIPCHECK(hipMemcpyHtoD(hipDeviceptr_t(A_d[0]), A_h, NUM_ELM * sizeof(T)))
         for (int i = 0; i < Available_Gpus; ++i) {
           for (int j = i + 1; j < Available_Gpus; ++j) {
             canAccessPeer = 0;
-            HIPCHECK(hipDeviceCanAccessPeer(&canAccessPeer, i, j));
+            HIPCHECK(hipDeviceCanAccessPeer(&canAccessPeer, i, j))
             if (canAccessPeer) {
-              HIPCHECK(hipSetDevice(j));
+              HIPCHECK(hipSetDevice(j))
               HIPCHECK(hipMemcpyDtoDAsync(hipDeviceptr_t(A_d[j]), hipDeviceptr_t(A_d[i]),
                                           NUM_ELM * sizeof(T), stream[i]));
               // Copying in direction reverse of above to check if
@@ -230,8 +230,8 @@ template <typename T> void memcpyTests<T>::Memcpy_And_verify(bool* ret_val) {
               // access is happening without any error
               HIPCHECK(hipMemcpyDtoDAsync(hipDeviceptr_t(A_d[i]), hipDeviceptr_t(A_d[j]),
                                           NUM_ELM * sizeof(T), stream[i]));
-              HIPCHECK(hipStreamSynchronize(stream[i]));
-              HIPCHECK(hipMemcpy(B_h, A_d[i], NUM_ELM * sizeof(T), hipMemcpyDeviceToHost));
+              HIPCHECK(hipStreamSynchronize(stream[i]))
+              HIPCHECK(hipMemcpy(B_h, A_d[i], NUM_ELM * sizeof(T), hipMemcpyDeviceToHost))
               *ret_val &= CheckTests(A_h, B_h, NUM_ELM);
             }
           }
@@ -240,17 +240,17 @@ template <typename T> void memcpyTests<T>::Memcpy_And_verify(bool* ret_val) {
         // As DtoD is not possible we will transfer data
         // from HtH(A_h to B_h)
         // so as to get through verification step
-        HIPCHECK(hipMemcpy(B_h, A_h, NUM_ELM * sizeof(T), hipMemcpyHostToHost));
+        HIPCHECK(hipMemcpy(B_h, A_h, NUM_ELM * sizeof(T), hipMemcpyHostToHost))
         *ret_val &= CheckTests(A_h, B_h, NUM_ELM);
       }
       break;
     }
   }
   for (int i = 0; i < Available_Gpus; ++i) {
-    HIPCHECK(hipSetDevice(i));
-    HIPCHECK(hipFree((A_d[i])));
+    HIPCHECK(hipSetDevice(i))
+    HIPCHECK(hipFree((A_d[i])))
     if (api >= TEST_MEMCPYD2D) {
-      HIPCHECK(hipStreamDestroy(stream[i]));
+      HIPCHECK(hipStreamDestroy(stream[i]))
     }
   }
 }

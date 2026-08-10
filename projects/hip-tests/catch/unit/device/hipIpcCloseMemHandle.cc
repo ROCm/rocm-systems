@@ -52,17 +52,17 @@ HIP_TEST_CASE(Unit_hipIpcCloseMemHandle_Positive_Reference_Counting) {
     REQUIRE(close(fd[0]) == 0);
 
     void *child_ptr1, *child_ptr2;
-    HIP_CHECK(hipIpcOpenMemHandle(&child_ptr1, handle, hipIpcMemLazyEnablePeerAccess));
-    HIP_CHECK(hipIpcOpenMemHandle(&child_ptr2, handle, hipIpcMemLazyEnablePeerAccess));
+    HIP_CHECK(hipIpcOpenMemHandle(&child_ptr1, handle, hipIpcMemLazyEnablePeerAccess))
+    HIP_CHECK(hipIpcOpenMemHandle(&child_ptr2, handle, hipIpcMemLazyEnablePeerAccess))
 
     REQUIRE(child_ptr1 == child_ptr2);
 
-    HIP_CHECK(hipIpcCloseMemHandle(child_ptr1));
+    HIP_CHECK(hipIpcCloseMemHandle(child_ptr1))
     hipPointerAttribute_t attributes;
-    HIP_CHECK(hipPointerGetAttributes(&attributes, child_ptr1));
-    HIP_CHECK(hipPointerGetAttributes(&attributes, child_ptr2));
+    HIP_CHECK(hipPointerGetAttributes(&attributes, child_ptr1))
+    HIP_CHECK(hipPointerGetAttributes(&attributes, child_ptr2))
 
-    HIP_CHECK(hipIpcCloseMemHandle(child_ptr2));
+    HIP_CHECK(hipIpcCloseMemHandle(child_ptr2))
     HIP_CHECK_ERROR(hipPointerGetAttributes(&attributes, child_ptr1), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipPointerGetAttributes(&attributes, child_ptr2), hipErrorInvalidValue);
 
@@ -72,8 +72,8 @@ HIP_TEST_CASE(Unit_hipIpcCloseMemHandle_Positive_Reference_Counting) {
 
     void* ptr;
     hipIpcMemHandle_t handle;
-    HIP_CHECK(hipMalloc(&ptr, 1024));
-    HIP_CHECK(hipIpcGetMemHandle(&handle, ptr));
+    HIP_CHECK(hipMalloc(&ptr, 1024))
+    HIP_CHECK(hipIpcGetMemHandle(&handle, ptr))
 
     REQUIRE(write(fd[1], &handle, sizeof(handle)) >= 0);
     REQUIRE(close(fd[1]) == 0);
@@ -81,9 +81,9 @@ HIP_TEST_CASE(Unit_hipIpcCloseMemHandle_Positive_Reference_Counting) {
     REQUIRE(wait(NULL) >= 0);
 
     hipPointerAttribute_t attributes;
-    HIP_CHECK(hipPointerGetAttributes(&attributes, ptr));
+    HIP_CHECK(hipPointerGetAttributes(&attributes, ptr))
 
-    HIP_CHECK(hipFree(ptr));
+    HIP_CHECK(hipFree(ptr))
   }
 }
 #endif
@@ -103,11 +103,11 @@ HIP_TEST_CASE(Unit_hipIpcCloseMemHandle_Positive_Reference_Counting) {
 HIP_TEST_CASE(Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process) {
   void* ptr;
   hipIpcMemHandle_t handle;
-  HIP_CHECK(hipMalloc(&ptr, 1024));
-  HIP_CHECK(hipIpcGetMemHandle(&handle, ptr));
+  HIP_CHECK(hipMalloc(&ptr, 1024))
+  HIP_CHECK(hipIpcGetMemHandle(&handle, ptr))
 
   HIP_CHECK_ERROR(hipIpcCloseMemHandle(ptr), hipErrorInvalidValue);
-  HIP_CHECK(hipFree(ptr));
+  HIP_CHECK(hipFree(ptr))
 }
 
 /**

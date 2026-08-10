@@ -50,39 +50,39 @@ HIP_TEST_CASE(Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check) {
   hipError_t ret;
   int* x;
 
-  HIP_CHECK(hipMallocManaged(&x, N * sizeof(int)));
+  HIP_CHECK(hipMallocManaged(&x, N * sizeof(int)))
   REQUIRE(x != nullptr);
 
   SECTION("Passing threadsPerBlock same as kernel launch_bounds") {
     hipLaunchKernelGGL(MyKernel_2, dim3(4), dim3(64), 0, 0, N, x, 2);
     ret = hipGetLastError();
     REQUIRE(hipSuccess == ret);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(true == verify(N, x, 2));
   }
   SECTION("Passing threadsPerBlock less than kernel launch_bounds") {
     hipLaunchKernelGGL(MyKernel_2, dim3(4), dim3(32), 0, 0, N, x, 22);
     ret = hipGetLastError();
     REQUIRE(hipSuccess == ret);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(true == verify(N, x, 22));
   }
   SECTION("Passing threadsPerBlock more than kernel launch_bounds") {
     hipLaunchKernelGGL(MyKernel_2, dim3(4), dim3(128), 0, 0, N, x, 9);
     ret = hipGetLastError();
     REQUIRE(hipSuccess != ret);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(true != verify(N, x, 9));
   }
   SECTION("Passing threadsPerBlock as 0 to kernel launch_bounds") {
     hipLaunchKernelGGL(MyKernel_2, dim3(4), dim3(0), 0, 0, N, x, 19);
     ret = hipGetLastError();
     REQUIRE(hipSuccess != ret);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(true != verify(N, x, 19));
   }
 
-  HIP_CHECK(hipFree(x));
+  HIP_CHECK(hipFree(x))
 }
 
 HIP_TEST_CASE(Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check) {
@@ -90,35 +90,35 @@ HIP_TEST_CASE(Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check) {
   hipError_t ret;
   int* x;
 
-  HIP_CHECK(hipMallocManaged(&x, N * sizeof(int)));
+  HIP_CHECK(hipMallocManaged(&x, N * sizeof(int)))
   REQUIRE(x != nullptr);
 
   SECTION("Passing threadsPerBlock same as kernel launch_bounds") {
     hipLaunchKernelGGL(MyKernel, dim3(1), dim3(128), 0, 0, N, x, 1);
     ret = hipGetLastError();
     REQUIRE(hipSuccess == ret);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(true == verify(N, x, 1));
   }
   SECTION("Passing threadsPerBlock less than kernel launch_bounds") {
     hipLaunchKernelGGL(MyKernel, dim3(2), dim3(64), 0, 0, N, x, 11);
     ret = hipGetLastError();
     REQUIRE(hipSuccess == ret);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(true == verify(N, x, 11));
   }
   SECTION("Passing threadsPerBlock more than kernel launch_bounds") {
     hipLaunchKernelGGL(MyKernel, dim3(2), dim3(256), 0, 0, N, x, 3);
     ret = hipGetLastError();
     REQUIRE(hipSuccess != ret);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(true != verify(N, x, 3));
   }
   SECTION("Passing threadsPerBlock as 0 to kernel launch_bounds") {
     hipLaunchKernelGGL(MyKernel, dim3(2), dim3(0), 0, 0, N, x, 13);
     ret = hipGetLastError();
     REQUIRE(hipSuccess != ret);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(true != verify(N, x, 13));
   }
 
@@ -126,30 +126,30 @@ HIP_TEST_CASE(Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check) {
     hipLaunchKernelGGL(MyKernel, dim3(2), dim3(128), 0, 0, N, x, 5);
     ret = hipGetLastError();
     REQUIRE(hipSuccess == ret);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(true == verify(N, x, 5));
   }
   SECTION("Passing blocksPerCU less than kernel launch_bounds") {
     hipLaunchKernelGGL(MyKernel, dim3(1), dim3(128), 0, 0, N, x, 25);
     ret = hipGetLastError();
     REQUIRE(hipSuccess == ret);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(true == verify(N, x, 25));
   }
   SECTION("Passing blocksPerCU more than kernel launch_bounds") {
     hipLaunchKernelGGL(MyKernel, dim3(4), dim3(128), 0, 0, N, x, 7);
     ret = hipGetLastError();
     REQUIRE(hipSuccess == ret);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(true == verify(N, x, 7));
   }
   SECTION("Passing blocksPerCU as 0 to kernel launch_bounds") {
     hipLaunchKernelGGL(MyKernel, dim3(0), dim3(128), 0, 0, N, x, 37);
     ret = hipGetLastError();
     REQUIRE(hipSuccess != ret);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(true != verify(N, x, 37));
   }
 
-  HIP_CHECK(hipFree(x));
+  HIP_CHECK(hipFree(x))
 }

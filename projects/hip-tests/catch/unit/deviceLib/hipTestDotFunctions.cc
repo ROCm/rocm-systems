@@ -33,10 +33,10 @@ __global__ static void DotFunctions(bool* result) {
 
 HIP_TEST_CASE(Unit_hipTestDotFunctions) {
   bool* result{nullptr};
-  HIP_CHECK(hipHostMalloc(&result, 1));
+  HIP_CHECK(hipHostMalloc(&result, 1))
   result[0] = true;
   hipLaunchKernelGGL(DotFunctions, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, result);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   REQUIRE(result[0] == true);
-  HIP_CHECK(hipHostFree(result));
+  HIP_CHECK(hipHostFree(result))
 }

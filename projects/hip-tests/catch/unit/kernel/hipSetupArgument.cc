@@ -18,10 +18,10 @@ HIP_TEST_CASE(Unit_hipSetupArgument_Simple) {
   dim3 grid_dim(1, 1, 1);
   dim3 block_dim(1, 1, 1);
 
-  HIP_CHECK(hipConfigureCall(grid_dim, block_dim, 0, 0));
+  HIP_CHECK(hipConfigureCall(grid_dim, block_dim, 0, 0))
 
   int arg = 42;
-  HIP_CHECK(hipSetupArgument(&arg, sizeof(int), 0));
+  HIP_CHECK(hipSetupArgument(&arg, sizeof(int), 0))
 }
 
 /**
@@ -42,7 +42,7 @@ HIP_TEST_CASE(Unit_hipSetupArgument_Execute_Kernel_And_Check_Result) {
   dim3 grid_dim(block_num, 1, 1);
   dim3 block_dim(block_size, 1, 1);
 
-  HIP_CHECK(hipConfigureCall(grid_dim, block_dim, 0, 0));
+  HIP_CHECK(hipConfigureCall(grid_dim, block_dim, 0, 0))
 
   std::vector<int> vec_a, vec_b, vec_c;
   for (size_t i = 0; i < vec_size; i++) {
@@ -53,25 +53,25 @@ HIP_TEST_CASE(Unit_hipSetupArgument_Execute_Kernel_And_Check_Result) {
 
   size_t vec_size_in_bytes = sizeof(int) * vec_size;
   int *dev_a, *dev_b, *dev_c;
-  HIP_CHECK(hipMalloc(&dev_a, vec_size_in_bytes));
-  HIP_CHECK(hipMalloc(&dev_b, vec_size_in_bytes));
-  HIP_CHECK(hipMalloc(&dev_c, vec_size_in_bytes));
+  HIP_CHECK(hipMalloc(&dev_a, vec_size_in_bytes))
+  HIP_CHECK(hipMalloc(&dev_b, vec_size_in_bytes))
+  HIP_CHECK(hipMalloc(&dev_c, vec_size_in_bytes))
 
-  HIP_CHECK(hipMemcpy(dev_a, vec_a.data(), vec_size_in_bytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dev_b, vec_b.data(), vec_size_in_bytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dev_a, vec_a.data(), vec_size_in_bytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(dev_b, vec_b.data(), vec_size_in_bytes, hipMemcpyHostToDevice))
 
-  HIP_CHECK(hipSetupArgument(&dev_a, sizeof(int*), 0));
-  HIP_CHECK(hipSetupArgument(&dev_b, sizeof(int*), sizeof(int*)));
-  HIP_CHECK(hipSetupArgument(&dev_c, sizeof(int*), 2 * sizeof(int*)));
-  HIP_CHECK(hipSetupArgument(&vec_size, sizeof(int), 3 * sizeof(int*)));
+  HIP_CHECK(hipSetupArgument(&dev_a, sizeof(int*), 0))
+  HIP_CHECK(hipSetupArgument(&dev_b, sizeof(int*), sizeof(int*)))
+  HIP_CHECK(hipSetupArgument(&dev_c, sizeof(int*), 2 * sizeof(int*)))
+  HIP_CHECK(hipSetupArgument(&vec_size, sizeof(int), 3 * sizeof(int*)))
 
-  HIP_CHECK(hipLaunchByPtr((const void*)add_vectors));
+  HIP_CHECK(hipLaunchByPtr((const void*)add_vectors))
 
   std::vector<int> vec_res(vec_size);
-  HIP_CHECK(hipMemcpy(vec_res.data(), dev_c, vec_size_in_bytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(vec_res.data(), dev_c, vec_size_in_bytes, hipMemcpyDeviceToHost))
   REQUIRE(vec_res == vec_c);
 
-  HIP_CHECK(hipFree(dev_c));
-  HIP_CHECK(hipFree(dev_b));
-  HIP_CHECK(hipFree(dev_a));
+  HIP_CHECK(hipFree(dev_c))
+  HIP_CHECK(hipFree(dev_b))
+  HIP_CHECK(hipFree(dev_a))
 }

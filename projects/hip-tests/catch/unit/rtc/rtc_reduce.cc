@@ -36,7 +36,7 @@ void runRtcReduceOp(hiprtcProgram& prog, T* output, const T* input, const MaskTy
   hipModule_t module;
   LinearAllocGuard<int> d_numReduces(LinearAllocs::hipMalloc, sizeof(int));
 
-  HIP_CHECK(hipMemcpy(d_numReduces.ptr(), &numReduces, sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_numReduces.ptr(), &numReduces, sizeof(int), hipMemcpyHostToDevice))
   std::vector<const void*> args = {output, input, masks, d_numReduces.ptr()};
   std::size_t sizeBytes = args.size() * sizeof(void*);
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, args.data(), HIP_LAUNCH_PARAM_BUFFER_SIZE,
@@ -51,12 +51,12 @@ void runRtcReduceOp(hiprtcProgram& prog, T* output, const T* input, const MaskTy
   HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
   code.resize(codeSize);
   HIPRTC_CHECK(hiprtcGetCode(prog, code.data()));
-  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()))
   HIPRTC_CHECK(hiprtcGetLoweredName(prog, expression.c_str(), &loweredName));
-  HIP_CHECK(hipModuleGetFunction(&kernel, module, loweredName));
+  HIP_CHECK(hipModuleGetFunction(&kernel, module, loweredName))
   HIP_CHECK(hipModuleLaunchKernel(kernel, grdDim.x, grdDim.y, grdDim.z, blkDim.x, blkDim.y,
                                   blkDim.z, 0, 0, nullptr, config));
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
 }
 
 template <template <typename> class Op, class Type = void>

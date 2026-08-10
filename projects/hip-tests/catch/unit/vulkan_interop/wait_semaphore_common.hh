@@ -35,12 +35,12 @@ template <typename F> void WaitExternalSemaphoreCommon(F f) {
       vkt.BuildSemaphoreDescriptor(semaphore, VK_SEMAPHORE_TYPE_BINARY);
 
   hipExternalSemaphore_t hip_ext_semaphore;
-  HIP_CHECK(hipImportExternalSemaphore(&hip_ext_semaphore, &hip_sem_handle_desc));
+  HIP_CHECK(hipImportExternalSemaphore(&hip_ext_semaphore, &hip_sem_handle_desc))
 
   hipExternalSemaphoreWaitParams hip_ext_semaphore_wait_params = {};
   hip_ext_semaphore_wait_params.flags = 0;
   hip_ext_semaphore_wait_params.params.fence.value = 0;
-  HIP_CHECK(f(&hip_ext_semaphore, &hip_ext_semaphore_wait_params, 1, nullptr));
+  HIP_CHECK(f(&hip_ext_semaphore, &hip_ext_semaphore_wait_params, 1, nullptr))
   PollStream(nullptr, hipErrorNotReady);
 
   VkSubmitInfo submit_info = {};
@@ -61,7 +61,7 @@ template <typename F> void WaitExternalSemaphoreCommon(F f) {
 
   REQUIRE(42 == *dst_storage.host_ptr);
 
-  HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore));
+  HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore))
 }
 
 #if HT_NVIDIA
@@ -76,12 +76,12 @@ template <typename F> void WaitExternalTimelineSemaphoreCommon(F f) {
   const auto hip_sem_handle_desc =
       vkt.BuildSemaphoreDescriptor(semaphore, VK_SEMAPHORE_TYPE_TIMELINE);
   hipExternalSemaphore_t hip_ext_semaphore;
-  HIP_CHECK(hipImportExternalSemaphore(&hip_ext_semaphore, &hip_sem_handle_desc));
+  HIP_CHECK(hipImportExternalSemaphore(&hip_ext_semaphore, &hip_sem_handle_desc))
 
   hipExternalSemaphoreWaitParams hip_ext_semaphore_wait_params = {};
   hip_ext_semaphore_wait_params.flags = 0;
   hip_ext_semaphore_wait_params.params.fence.value = wait_value;
-  HIP_CHECK(f(&hip_ext_semaphore, &hip_ext_semaphore_wait_params, 1, nullptr));
+  HIP_CHECK(f(&hip_ext_semaphore, &hip_ext_semaphore_wait_params, 1, nullptr))
   PollStream(nullptr, hipErrorNotReady);
 
   VkSemaphoreSignalInfo signal_info = {};
@@ -96,7 +96,7 @@ template <typename F> void WaitExternalTimelineSemaphoreCommon(F f) {
   }
   PollStream(nullptr, hipSuccess);
 
-  HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore));
+  HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore))
 }
 #endif
 
@@ -128,13 +128,13 @@ template <typename F> void WaitExternalMultipleSemaphoresCommon(F f) {
   const auto hip_binary_sem_handle_desc =
       vkt.BuildSemaphoreDescriptor(binary_semaphore, VK_SEMAPHORE_TYPE_BINARY);
   hipExternalSemaphore_t hip_binary_ext_semaphore;
-  HIP_CHECK(hipImportExternalSemaphore(&hip_binary_ext_semaphore, &hip_binary_sem_handle_desc));
+  HIP_CHECK(hipImportExternalSemaphore(&hip_binary_ext_semaphore, &hip_binary_sem_handle_desc))
 
   const auto timeline_semaphore = vkt.CreateExternalSemaphore(second_semaphore_type);
   const auto hip_timeline_sem_handle_desc =
       vkt.BuildSemaphoreDescriptor(timeline_semaphore, second_semaphore_type);
   hipExternalSemaphore_t hip_timeline_ext_semaphore;
-  HIP_CHECK(hipImportExternalSemaphore(&hip_timeline_ext_semaphore, &hip_timeline_sem_handle_desc));
+  HIP_CHECK(hipImportExternalSemaphore(&hip_timeline_ext_semaphore, &hip_timeline_sem_handle_desc))
 
   hipExternalSemaphoreWaitParams binary_semaphore_wait_params = {};
   binary_semaphore_wait_params.params.fence.value = 0;
@@ -146,7 +146,7 @@ template <typename F> void WaitExternalMultipleSemaphoresCommon(F f) {
   hipExternalSemaphore_t ext_semaphores[] = {hip_binary_ext_semaphore, hip_timeline_ext_semaphore};
   hipExternalSemaphoreWaitParams wait_params[] = {binary_semaphore_wait_params,
                                                   timeline_semaphore_wait_params};
-  HIP_CHECK(f(ext_semaphores, wait_params, 2, nullptr));
+  HIP_CHECK(f(ext_semaphores, wait_params, 2, nullptr))
 
   PollStream(nullptr, hipErrorNotReady);
 
@@ -176,8 +176,8 @@ template <typename F> void WaitExternalMultipleSemaphoresCommon(F f) {
 
   PollStream(nullptr, hipSuccess);
 
-  HIP_CHECK(hipDestroyExternalSemaphore(hip_timeline_ext_semaphore));
-  HIP_CHECK(hipDestroyExternalSemaphore(hip_binary_ext_semaphore));
+  HIP_CHECK(hipDestroyExternalSemaphore(hip_timeline_ext_semaphore))
+  HIP_CHECK(hipDestroyExternalSemaphore(hip_binary_ext_semaphore))
 }
 
 static inline bool operator==(const hipExternalSemaphoreWaitNodeParams& lhs,
@@ -201,7 +201,7 @@ hipError_t GraphExtSemaphoreWaitWrapper(hipExternalSemaphore_t* extSemArray,
                                         hipExternalSemaphoreWaitParams* paramsArray,
                                         unsigned int numExtSems, hipStream_t stream) {
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   hipGraphNode_t node = nullptr;
   hipExternalSemaphoreWaitNodeParams retrieved_params = {};
   memset(&retrieved_params, 0, sizeof(retrieved_params));
@@ -223,28 +223,28 @@ hipError_t GraphExtSemaphoreWaitWrapper(hipExternalSemaphore_t* extSemArray,
     initial_params.paramsArray = wait_params;
     initial_params.numExtSems = numExtSems;
 
-    HIP_CHECK(hipGraphAddExternalSemaphoresWaitNode(&node, graph, nullptr, 0, &initial_params));
+    HIP_CHECK(hipGraphAddExternalSemaphoresWaitNode(&node, graph, nullptr, 0, &initial_params))
 
-    HIP_CHECK(hipGraphExternalSemaphoresWaitNodeGetParams(node, &retrieved_params));
+    HIP_CHECK(hipGraphExternalSemaphoresWaitNodeGetParams(node, &retrieved_params))
     REQUIRE(initial_params == retrieved_params);
-    HIP_CHECK(hipGraphExternalSemaphoresWaitNodeSetParams(node, &node_params));
+    HIP_CHECK(hipGraphExternalSemaphoresWaitNodeSetParams(node, &node_params))
 
     delete[] wait_params;
   } else {
-    HIP_CHECK(hipGraphAddExternalSemaphoresWaitNode(&node, graph, nullptr, 0, &node_params));
+    HIP_CHECK(hipGraphAddExternalSemaphoresWaitNode(&node, graph, nullptr, 0, &node_params))
   }
 
-  HIP_CHECK(hipGraphExternalSemaphoresWaitNodeGetParams(node, &retrieved_params));
+  HIP_CHECK(hipGraphExternalSemaphoresWaitNodeGetParams(node, &retrieved_params))
   REQUIRE(node_params == retrieved_params);
 
   hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
+  HIP_CHECK(hipGraphDestroy(graph))
 
   return hipSuccess;
 }

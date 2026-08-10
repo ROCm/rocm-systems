@@ -29,7 +29,7 @@ void GraphMemcpyFromSymbolSetParamsShell(const void* symbol, const void* alt_sym
                                                             size_t count, size_t offset,
                                                             hipMemcpyKind direction) {
     hipGraph_t graph = nullptr;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
 
     hipGraphNode_t node = nullptr;
 
@@ -37,16 +37,16 @@ void GraphMemcpyFromSymbolSetParamsShell(const void* symbol, const void* alt_sym
         &node, graph, nullptr, 0, reinterpret_cast<T*>(dst) + is_arr, alt_symbol,
         count - is_arr * sizeof(T), offset + is_arr * sizeof(T), hipMemcpyDefault));
 
-    HIP_CHECK(hipGraphMemcpyNodeSetParamsFromSymbol(node, dst, symbol, count, offset, direction));
+    HIP_CHECK(hipGraphMemcpyNodeSetParamsFromSymbol(node, dst, symbol, count, offset, direction))
 
     hipGraphExec_t graph_exec = nullptr;
-    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
-    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread))
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
 
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec))
+    HIP_CHECK(hipGraphDestroy(graph))
 
     return hipSuccess;
   };
@@ -124,7 +124,7 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Positive_Basic) {
 HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   int var = 0;
   hipGraphNode_t node = nullptr;
@@ -141,7 +141,7 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative_Parameters) {
       std::bind(hipGraphMemcpyNodeSetParamsFromSymbol, node, _1, _2, _3, _4, _5), &var,
       SYMBOL(int_device_var), sizeof(var));
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**

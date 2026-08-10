@@ -217,15 +217,15 @@ template <typename F> static void common_group_partition(F kernel_func, unsigned
   }
 
   int* result_dev = NULL;
-  HIP_CHECK(hipMalloc((void**)&result_dev, num_tiles * sizeof(int)));
+  HIP_CHECK(hipMalloc((void**)&result_dev, num_tiles * sizeof(int)))
 
   int* global_mem = NULL;
   if (use_global_mem) {
-    HIP_CHECK(hipMalloc((void**)&global_mem, threads_per_blk * sizeof(int)));
+    HIP_CHECK(hipMalloc((void**)&global_mem, threads_per_blk * sizeof(int)))
   }
 
   int* result_host = NULL;
-  HIP_CHECK(hipHostMalloc(&result_host, num_tiles * sizeof(int), hipHostMallocDefault));
+  HIP_CHECK(hipHostMalloc(&result_host, num_tiles * sizeof(int), hipHostMallocDefault))
   memset(result_host, 0, num_tiles * sizeof(int));
 
   params[num_params + 0] = &result_dev;
@@ -234,24 +234,24 @@ template <typename F> static void common_group_partition(F kernel_func, unsigned
 
   if (use_global_mem) {
     // Launch Kernel
-    HIP_CHECK(hipLaunchCooperativeKernel(kernel_func, block_size, threads_per_blk, params, 0, 0));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipLaunchCooperativeKernel(kernel_func, block_size, threads_per_blk, params, 0, 0))
+    HIP_CHECK(hipDeviceSynchronize())
   } else {
     // Launch Kernel
     HIP_CHECK(hipLaunchCooperativeKernel(kernel_func, block_size, threads_per_blk, params,
                                          threads_per_blk * sizeof(int), 0));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
-  HIP_CHECK(hipMemcpy(result_host, result_dev, num_tiles * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(result_host, result_dev, num_tiles * sizeof(int), hipMemcpyDeviceToHost))
 
   verifyResults(expected_sum, result_host, num_tiles);
 
   // Free all allocated memory on host and device
-  HIP_CHECK(hipFree(result_dev));
-  HIP_CHECK(hipHostFree(result_host));
+  HIP_CHECK(hipFree(result_dev))
+  HIP_CHECK(hipHostFree(result_host))
   if (use_global_mem) {
-    HIP_CHECK(hipFree(global_mem));
+    HIP_CHECK(hipFree(global_mem))
   }
   delete[] expected_sum;
 }
@@ -290,15 +290,15 @@ static void test_group_partition_nested(unsigned int outer_tile_size,
   }
 
   int* result_dev = nullptr;
-  HIP_CHECK(hipMalloc(&result_dev, num_subtiles * sizeof(int)));
+  HIP_CHECK(hipMalloc(&result_dev, num_subtiles * sizeof(int)))
 
   int* global_mem = nullptr;
   if (use_global_mem) {
-    HIP_CHECK(hipMalloc(&global_mem, threads_per_blk * sizeof(int)));
+    HIP_CHECK(hipMalloc(&global_mem, threads_per_blk * sizeof(int)))
   }
 
   int* result_host = nullptr;
-  HIP_CHECK(hipHostMalloc(&result_host, num_subtiles * sizeof(int), hipHostMallocDefault));
+  HIP_CHECK(hipHostMalloc(&result_host, num_subtiles * sizeof(int), hipHostMallocDefault))
   memset(result_host, 0, num_subtiles * sizeof(int));
 
   void* params[] = {&outer_tile_size, &inner_tile_size,
@@ -309,17 +309,17 @@ static void test_group_partition_nested(unsigned int outer_tile_size,
   HIP_CHECK(hipLaunchCooperativeKernel(
       (void*)kernel_cg_group_partition_nested,
       block_size, threads_per_blk, params, shared_mem_bytes, 0));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   HIP_CHECK(hipMemcpy(result_host, result_dev, num_subtiles * sizeof(int),
                       hipMemcpyDeviceToHost));
 
   verifyResults(expected_sum.data(), result_host, num_subtiles);
 
-  HIP_CHECK(hipFree(result_dev));
-  HIP_CHECK(hipHostFree(result_host));
+  HIP_CHECK(hipFree(result_dev))
+  HIP_CHECK(hipHostFree(result_host))
   if (use_global_mem) {
-    HIP_CHECK(hipFree(global_mem));
+    HIP_CHECK(hipFree(global_mem))
   }
 }
 
@@ -327,8 +327,8 @@ HIP_TEST_CASE(Unit_hipCGThreadBlockTileType) {
   // Use default device for validating the test
   int device;
   hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&device_properties, device))
 
   if (!device_properties.cooperativeLaunch) {
     HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);

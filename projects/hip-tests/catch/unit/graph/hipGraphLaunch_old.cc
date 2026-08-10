@@ -44,8 +44,8 @@ static void hipGraphLaunch_test() {
   hipStream_t streamForGraph;
   hipGraphNode_t memsetNode;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
 
   hipMemsetParams memsetParams{};
   memset(&memsetParams, 0, sizeof(memsetParams));
@@ -55,7 +55,7 @@ static void hipGraphLaunch_test() {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = Nbytes;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
 
   std::vector<hipGraphNode_t> dependencies;
   dependencies.push_back(memsetNode);
@@ -69,14 +69,14 @@ static void hipGraphLaunch_test() {
   memsetParams.height = 1;
   HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, dependencies.data(), dependencies.size(),
                                   &memsetParams));
-  HIP_CHECK(hipGraphMemsetNodeSetParams(memsetNode, &memsetParams));
+  HIP_CHECK(hipGraphMemsetNodeSetParams(memsetNode, &memsetParams))
   dependencies.push_back(memsetNode);
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
-  HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost))
 
   // Validating the result
   for (size_t i = 0; i < Nbytes; i++) {
@@ -87,18 +87,18 @@ static void hipGraphLaunch_test() {
   }
 
   HipTest::freeArrays<char>(A_d, B_d, C_d, A_h, B_h, nullptr, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 }
 
 HIP_TEST_CASE(Unit_hipGraphLaunch_Functional_multidevice_test) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   if (numDevices > 0) {
     for (int i = 0; i < numDevices; i++) {
-      HIP_CHECK(hipSetDevice(i));
+      HIP_CHECK(hipSetDevice(i))
       hipGraphLaunch_test();
     }
   } else {
@@ -136,7 +136,7 @@ HIP_TEST_CASE(Unit_hipGraphLaunch_Functional_MultipleLaunch) {
   hipGraph_t graph;
   std::vector<hipGraphNode_t> nodeDependencies;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   int *A_h{nullptr}, *A_d{nullptr}, *C_d{nullptr}, *C_h{nullptr};
 
   HipTest::initArrays<int>(&A_d, &C_d, nullptr, &A_h, &C_h, nullptr, SIZE, false);
@@ -171,29 +171,29 @@ HIP_TEST_CASE(Unit_hipGraphLaunch_Functional_MultipleLaunch) {
   // Create executable graph
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec{nullptr};
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   // Execute graph
   SECTION("Multiple Graph Launch") {
     for (int iter = 0; iter < TEST_LOOP_SIZE; iter++) {
       fillRandInpData(A_h, C_h, SIZE);
-      HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-      HIP_CHECK(hipStreamSynchronize(streamForGraph));
+      HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+      HIP_CHECK(hipStreamSynchronize(streamForGraph))
       validateOutData(A_h, C_h, SIZE);
     }
   }
   SECTION("Graph launch on Null stream") {
     for (int iter = 0; iter < TEST_LOOP_SIZE; iter++) {
       fillRandInpData(A_h, C_h, SIZE);
-      HIP_CHECK(hipGraphLaunch(graphExec, 0));
-      HIP_CHECK(hipStreamSynchronize(0));
+      HIP_CHECK(hipGraphLaunch(graphExec, 0))
+      HIP_CHECK(hipStreamSynchronize(0))
       validateOutData(A_h, C_h, SIZE);
     }
   }
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 
   // Free
   HipTest::freeArrays<int>(A_d, C_d, nullptr, A_h, C_h, nullptr, false);

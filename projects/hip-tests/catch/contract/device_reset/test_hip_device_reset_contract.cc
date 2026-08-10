@@ -17,7 +17,7 @@
 namespace {
 void RequireDevice() {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -38,22 +38,22 @@ HIP_TEST_CASE(Contract_DeviceReset_HipDeviceReset_Default_DiscardsStateAndLeaves
   RequireDevice();
 
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   // Allocate a buffer that the reset is expected to invalidate. Ownership stays
   // in this test case; because this is the only case in the process there is no
   // sibling that could hold a handle across the reset.
   void* stale_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&stale_ptr, 256));
+  HIP_CHECK(hipMalloc(&stale_ptr, 256))
   REQUIRE(stale_ptr != nullptr);
 
   // Resetting the device must succeed and return it to a fresh state.
-  HIP_CHECK(hipDeviceReset());
+  HIP_CHECK(hipDeviceReset())
 
   // The device flags are queryable after the reset and report a documented
   // scheduling mode (the runtime re-established a fresh device state).
   unsigned int flags = 0;
-  HIP_CHECK(hipGetDeviceFlags(&flags));
+  HIP_CHECK(hipGetDeviceFlags(&flags))
   REQUIRE(IsKnownScheduleFlag(flags));
 
   // The allocation made before the reset is discarded: freeing it must not
@@ -68,13 +68,13 @@ HIP_TEST_CASE(Contract_DeviceReset_HipDeviceReset_Default_DiscardsStateAndLeaves
   // and a device-to-host copy must round-trip, and the fresh allocation frees
   // cleanly. This proves the runtime re-established a working device context.
   int* fresh_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&fresh_ptr, sizeof(int)));
+  HIP_CHECK(hipMalloc(&fresh_ptr, sizeof(int)))
   REQUIRE(fresh_ptr != nullptr);
-  HIP_CHECK(hipMemset(fresh_ptr, 0, sizeof(int)));
+  HIP_CHECK(hipMemset(fresh_ptr, 0, sizeof(int)))
 
   int host_value = -1;
-  HIP_CHECK(hipMemcpy(&host_value, fresh_ptr, sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&host_value, fresh_ptr, sizeof(int), hipMemcpyDeviceToHost))
   REQUIRE(host_value == 0);
 
-  HIP_CHECK(hipFree(fresh_ptr));
+  HIP_CHECK(hipFree(fresh_ptr))
 }

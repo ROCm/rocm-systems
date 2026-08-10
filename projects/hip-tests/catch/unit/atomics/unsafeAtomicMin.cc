@@ -31,7 +31,7 @@ static void runUnsafeAtomicMinSameAddressTest() {
 template <typename TestType>
 static void runUnsafeAtomicMinAdjacentAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
@@ -45,7 +45,7 @@ static void runUnsafeAtomicMinAdjacentAddressesTest() {
 template <typename TestType>
 static void runUnsafeAtomicMinScatteredAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
@@ -71,7 +71,7 @@ static void runUnsafeAtomicMinMultiKernelSameAddressTest() {
 template <typename TestType>
 static void runUnsafeAtomicMinMultiKernelAdjacentAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
@@ -85,7 +85,7 @@ static void runUnsafeAtomicMinMultiKernelAdjacentAddressesTest() {
 template <typename TestType>
 static void runUnsafeAtomicMinMultiKernelScatteredAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {

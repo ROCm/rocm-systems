@@ -30,10 +30,10 @@
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Positive_Basic) {
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
 
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   checkVMMSupported(device);
 
   hipMemAllocationProp prop = {};
@@ -47,14 +47,14 @@ HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Positive_Basic) {
       hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
 
   hipMemGenericAllocationHandle_t handle;
-  HIP_CHECK(hipMemCreate(&handle, granularity * 2, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle, granularity * 2, &prop, 0))
 
   void* shareable_handle = nullptr;
   HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, handle,
                                           hipMemHandleTypePosixFileDescriptor, 0));
   REQUIRE(shareable_handle != nullptr);
 
-  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemRelease(handle))
 }
 
 /**
@@ -69,10 +69,10 @@ HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Positive_Basic) {
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Negative_Parameters) {
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
 
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   checkVMMSupported(device);
 
   hipMemAllocationProp prop = {};
@@ -86,7 +86,7 @@ HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Negative_Parameters) {
       hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
 
   hipMemGenericAllocationHandle_t handle;
-  HIP_CHECK(hipMemCreate(&handle, granularity * 2, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle, granularity * 2, &prop, 0))
 
   void* shareable_handle = nullptr;
   SECTION("shareableHandle == nullptr") {
@@ -114,14 +114,14 @@ HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Negative_Parameters) {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemRelease(handle))
 }
 
 HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Capture) {
   CTX_CREATE();
 
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   checkVMMSupported(device);
 
   hipMemAllocationProp allocation_prop = {};
@@ -135,10 +135,10 @@ HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Capture) {
                                            hipMemAllocationGranularityMinimum));
 
   hipMemGenericAllocationHandle_t allocation_handle;
-  HIP_CHECK(hipMemCreate(&allocation_handle, allocation_granularity * 2, &allocation_prop, 0));
+  HIP_CHECK(hipMemCreate(&allocation_handle, allocation_granularity * 2, &allocation_prop, 0))
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
@@ -149,9 +149,9 @@ HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Capture) {
 
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
   REQUIRE(shareable_handle != nullptr);
-  HIP_CHECK(hipMemRelease(allocation_handle));
+  HIP_CHECK(hipMemRelease(allocation_handle))
 
   CTX_DESTROY();
 }
@@ -171,7 +171,7 @@ TEST_CASE("Unit_hipMemExportFabricHandleToStdout_Positive_Basic") {
   CTX_CREATE();
 
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   checkVMMSupported(device);
   checkFabricHandleSupported(device);
 
@@ -189,17 +189,17 @@ TEST_CASE("Unit_hipMemExportFabricHandleToStdout_Positive_Basic") {
   allocSize = ((granularity + allocSize -1) / granularity) * granularity;
 
   hipDeviceptr_t addr = 0;
-  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&addr), allocSize, 0, 0, 0));
+  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&addr), allocSize, 0, 0, 0))
 
   hipMemGenericAllocationHandle_t allocHandle;
-  HIP_CHECK(hipMemCreate(&allocHandle, granularity * 2, &prop, 0));
+  HIP_CHECK(hipMemCreate(&allocHandle, granularity * 2, &prop, 0))
 
-  HIP_CHECK(hipMemMap(reinterpret_cast<void*>(addr), allocSize, 0, allocHandle, 0));
+  HIP_CHECK(hipMemMap(reinterpret_cast<void*>(addr), allocSize, 0, allocHandle, 0))
 
   hipMemAccessDesc accessDesc{};
   accessDesc.location = prop.location;
   accessDesc.flags = hipMemAccessFlagsProtReadWrite;
-  HIP_CHECK(hipMemSetAccess(reinterpret_cast<void*>(addr), allocSize, &accessDesc, 1));
+  HIP_CHECK(hipMemSetAccess(reinterpret_cast<void*>(addr), allocSize, &accessDesc, 1))
 
   int fabrichandle;
   hipError_t err = hipMemExportToShareableHandle(reinterpret_cast<void*>(&fabrichandle), allocHandle,
@@ -207,13 +207,13 @@ TEST_CASE("Unit_hipMemExportFabricHandleToStdout_Positive_Basic") {
   if (err == hipErrorNotReady) {
     HIP_SKIP_TEST("Accelerator not ready for fabric handle export.");
   }
-  HIP_CHECK(err);
+  HIP_CHECK(err)
 
   REQUIRE(fabrichandle != 0);
 
-  HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(addr), allocSize));
-  HIP_CHECK(hipMemRelease(allocHandle));
-  HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(addr), allocSize));
+  HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(addr), allocSize))
+  HIP_CHECK(hipMemRelease(allocHandle))
+  HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(addr), allocSize))
 
   CTX_DESTROY();
 }

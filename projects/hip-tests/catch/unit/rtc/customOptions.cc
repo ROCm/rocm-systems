@@ -33,7 +33,7 @@ HIP_TEST_CASE(Unit_hiprtc_cpp17) {
                       0, nullptr, nullptr);
   hipDeviceProp_t props;
   int device = 0;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
 #ifdef __HIP_PLATFORM_AMD__
   std::string sarg = std::string("--gpu-architecture=") + props.gcnArchName;
 #else
@@ -102,7 +102,7 @@ HIP_TEST_CASE(Unit_hiprtc_namehandling) {
                       0, nullptr, nullptr);
   hipDeviceProp_t props;
   int device = 0;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
 #ifdef __HIP_PLATFORM_AMD__
   std::string sarg = std::string("--gpu-architecture=") + props.gcnArchName;
 #else

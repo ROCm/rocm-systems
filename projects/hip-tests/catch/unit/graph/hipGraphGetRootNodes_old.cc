@@ -57,11 +57,11 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Functional) {
   hipGraphExec_t graphExec;
   size_t NElem{N};
 
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, NULL, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   dependencies.push_back(memcpyNode);
@@ -88,7 +88,7 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Functional) {
   // Get numRootNodes by passing rootnodes list as nullptr.
   // verify : numRootNodes is set to actual number of root nodes added
   size_t numRootNodes{};
-  HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes));
+  HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes))
   INFO("Num of nodes returned by GetRootNodes : " << numRootNodes);
   REQUIRE(numRootNodes == rootnodelist.size());
 
@@ -99,7 +99,7 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Functional) {
   int numBytes = sizeof(hipGraphNode_t) * totNodes;
   hipGraphNode_t* rootnodes = reinterpret_cast<hipGraphNode_t*>(malloc(numBytes));
   REQUIRE(rootnodes != nullptr);
-  HIP_CHECK(hipGraphGetRootNodes(graph, rootnodes, &totNodes));
+  HIP_CHECK(hipGraphGetRootNodes(graph, rootnodes, &totNodes))
   REQUIRE(totNodes == rootnodelist.size());
   for (auto i = numRootNodes; i < numRootNodes + addlEntries; i++) {
     REQUIRE(rootnodes[i] == nullptr);
@@ -123,17 +123,17 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Functional) {
   }
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Verify graph execution result
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
   free(rootnodes);
 }
 
@@ -160,42 +160,42 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_CapturedStream) {
   C_h = reinterpret_cast<float*>(malloc(Nbytes));
   REQUIRE(A_h != nullptr);
   REQUIRE(C_h != nullptr);
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipMalloc(&C_d, Nbytes));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipMalloc(&C_d, Nbytes))
   REQUIRE(A_d != nullptr);
   REQUIRE(C_d != nullptr);
 
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
 
   // Initialize input buffer
   for (size_t i = 0; i < N; ++i) {
     A_h[i] = 3.146f + i;  // Pi
   }
 
-  HIP_CHECK(hipStreamCreate(&stream1));
-  HIP_CHECK(hipStreamCreate(&stream2));
-  HIP_CHECK(hipStreamCreate(&mstream));
-  HIP_CHECK(hipEventCreate(&memsetEvent1));
-  HIP_CHECK(hipEventCreate(&memsetEvent2));
-  HIP_CHECK(hipEventCreate(&forkStreamEvent));
-  HIP_CHECK(hipStreamBeginCapture(mstream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipEventRecord(forkStreamEvent, mstream));
-  HIP_CHECK(hipStreamWaitEvent(stream1, forkStreamEvent, 0));
-  HIP_CHECK(hipStreamWaitEvent(stream2, forkStreamEvent, 0));
-  HIP_CHECK(hipMemsetAsync(A_d, 0, Nbytes, stream1));
-  HIP_CHECK(hipEventRecord(memsetEvent1, stream1));
-  HIP_CHECK(hipMemsetAsync(C_d, 0, Nbytes, stream2));
-  HIP_CHECK(hipEventRecord(memsetEvent2, stream2));
-  HIP_CHECK(hipStreamWaitEvent(mstream, memsetEvent1, 0));
-  HIP_CHECK(hipStreamWaitEvent(mstream, memsetEvent2, 0));
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mstream));
+  HIP_CHECK(hipStreamCreate(&stream1))
+  HIP_CHECK(hipStreamCreate(&stream2))
+  HIP_CHECK(hipStreamCreate(&mstream))
+  HIP_CHECK(hipEventCreate(&memsetEvent1))
+  HIP_CHECK(hipEventCreate(&memsetEvent2))
+  HIP_CHECK(hipEventCreate(&forkStreamEvent))
+  HIP_CHECK(hipStreamBeginCapture(mstream, hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipEventRecord(forkStreamEvent, mstream))
+  HIP_CHECK(hipStreamWaitEvent(stream1, forkStreamEvent, 0))
+  HIP_CHECK(hipStreamWaitEvent(stream2, forkStreamEvent, 0))
+  HIP_CHECK(hipMemsetAsync(A_d, 0, Nbytes, stream1))
+  HIP_CHECK(hipEventRecord(memsetEvent1, stream1))
+  HIP_CHECK(hipMemsetAsync(C_d, 0, Nbytes, stream2))
+  HIP_CHECK(hipEventRecord(memsetEvent2, stream2))
+  HIP_CHECK(hipStreamWaitEvent(mstream, memsetEvent1, 0))
+  HIP_CHECK(hipStreamWaitEvent(mstream, memsetEvent2, 0))
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mstream))
   hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, mstream, A_d,
                      C_d, N);
-  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mstream));
-  HIP_CHECK(hipStreamEndCapture(mstream, &graph));
+  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mstream))
+  HIP_CHECK(hipStreamEndCapture(mstream, &graph))
 
   // Verify numof root nodes
-  HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes));
+  HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes))
   REQUIRE(numRootNodes == numMemsetNodes);
   INFO("Num of nodes returned by GetRootNodes : " << numRootNodes);
 
@@ -204,19 +204,19 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_CapturedStream) {
   REQUIRE(nodes != nullptr);
 
   hipGraphNodeType nodeType;
-  HIP_CHECK(hipGraphGetRootNodes(graph, nodes, &numRootNodes));
+  HIP_CHECK(hipGraphGetRootNodes(graph, nodes, &numRootNodes))
   REQUIRE(numRootNodes == numMemsetNodes);
 
   // Verify root nodes returned are memset nodes.
-  HIP_CHECK(hipGraphNodeGetType(nodes[0], &nodeType));
+  HIP_CHECK(hipGraphNodeGetType(nodes[0], &nodeType))
   REQUIRE(nodeType == hipGraphNodeTypeMemset);
-  HIP_CHECK(hipGraphNodeGetType(nodes[1], &nodeType));
+  HIP_CHECK(hipGraphNodeGetType(nodes[1], &nodeType))
   REQUIRE(nodeType == hipGraphNodeTypeMemset);
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Validate the computation
   for (size_t i = 0; i < N; i++) {
@@ -226,20 +226,20 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_CapturedStream) {
     }
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
-  HIP_CHECK(hipStreamDestroy(mstream));
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
-  HIP_CHECK(hipEventDestroy(forkStreamEvent));
-  HIP_CHECK(hipEventDestroy(memsetEvent1));
-  HIP_CHECK(hipEventDestroy(memsetEvent2));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
+  HIP_CHECK(hipStreamDestroy(mstream))
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipStreamDestroy(stream2))
+  HIP_CHECK(hipEventDestroy(forkStreamEvent))
+  HIP_CHECK(hipEventDestroy(memsetEvent1))
+  HIP_CHECK(hipEventDestroy(memsetEvent2))
   free(A_h);
   free(C_h);
   free(nodes);
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(C_d));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(C_d))
 }
 
 
@@ -262,33 +262,33 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_ParamValidation) {
   C_h = reinterpret_cast<float*>(malloc(Nbytes));
   REQUIRE(A_h != nullptr);
   REQUIRE(C_h != nullptr);
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipMalloc(&C_d, Nbytes));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipMalloc(&C_d, Nbytes))
   REQUIRE(A_d != nullptr);
   REQUIRE(C_d != nullptr);
 
-  HIP_CHECK(hipStreamCreate(&stream1));
-  HIP_CHECK(hipStreamCreate(&stream2));
-  HIP_CHECK(hipStreamCreate(&mstream));
-  HIP_CHECK(hipEventCreate(&memsetEvent1));
-  HIP_CHECK(hipEventCreate(&memsetEvent2));
-  HIP_CHECK(hipEventCreate(&forkStreamEvent));
-  HIP_CHECK(hipStreamBeginCapture(mstream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipEventRecord(forkStreamEvent, mstream));
-  HIP_CHECK(hipStreamWaitEvent(stream1, forkStreamEvent, 0));
-  HIP_CHECK(hipStreamWaitEvent(stream2, forkStreamEvent, 0));
-  HIP_CHECK(hipMemsetAsync(A_d, 0, Nbytes, stream1));
-  HIP_CHECK(hipEventRecord(memsetEvent1, stream1));
-  HIP_CHECK(hipMemsetAsync(C_d, 0, Nbytes, stream2));
-  HIP_CHECK(hipEventRecord(memsetEvent2, stream2));
-  HIP_CHECK(hipStreamWaitEvent(mstream, memsetEvent1, 0));
-  HIP_CHECK(hipStreamWaitEvent(mstream, memsetEvent2, 0));
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mstream));
+  HIP_CHECK(hipStreamCreate(&stream1))
+  HIP_CHECK(hipStreamCreate(&stream2))
+  HIP_CHECK(hipStreamCreate(&mstream))
+  HIP_CHECK(hipEventCreate(&memsetEvent1))
+  HIP_CHECK(hipEventCreate(&memsetEvent2))
+  HIP_CHECK(hipEventCreate(&forkStreamEvent))
+  HIP_CHECK(hipStreamBeginCapture(mstream, hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipEventRecord(forkStreamEvent, mstream))
+  HIP_CHECK(hipStreamWaitEvent(stream1, forkStreamEvent, 0))
+  HIP_CHECK(hipStreamWaitEvent(stream2, forkStreamEvent, 0))
+  HIP_CHECK(hipMemsetAsync(A_d, 0, Nbytes, stream1))
+  HIP_CHECK(hipEventRecord(memsetEvent1, stream1))
+  HIP_CHECK(hipMemsetAsync(C_d, 0, Nbytes, stream2))
+  HIP_CHECK(hipEventRecord(memsetEvent2, stream2))
+  HIP_CHECK(hipStreamWaitEvent(mstream, memsetEvent1, 0))
+  HIP_CHECK(hipStreamWaitEvent(mstream, memsetEvent2, 0))
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mstream))
   hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, mstream, A_d,
                      C_d, N);
-  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mstream));
-  HIP_CHECK(hipStreamEndCapture(mstream, &graph));
-  HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes));
+  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mstream))
+  HIP_CHECK(hipStreamEndCapture(mstream, &graph))
+  HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes))
   INFO("Num of nodes returned by GetRootNodes : " << numRootNodes);
   int numBytes = sizeof(hipGraphNode_t) * numRootNodes;
   hipGraphNode_t* nodes = reinterpret_cast<hipGraphNode_t*>(malloc(numBytes));
@@ -306,39 +306,39 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_ParamValidation) {
 
   SECTION("no nodes in graph") {
     hipGraph_t emptyGraph{};
-    HIP_CHECK(hipGraphCreate(&emptyGraph, 0));
-    HIP_CHECK(hipGraphGetRootNodes(emptyGraph, nullptr, &numRootNodes));
+    HIP_CHECK(hipGraphCreate(&emptyGraph, 0))
+    HIP_CHECK(hipGraphGetRootNodes(emptyGraph, nullptr, &numRootNodes))
     REQUIRE(numRootNodes == 0);
-    HIP_CHECK(hipGraphDestroy(emptyGraph));
+    HIP_CHECK(hipGraphDestroy(emptyGraph))
   }
 
   SECTION("numRootNodes less than actual number of nodes") {
     size_t numPartNodes = numRootNodes - 1;
     hipGraphNodeType nodeType;
-    HIP_CHECK(hipGraphGetRootNodes(graph, nodes, &numPartNodes));
+    HIP_CHECK(hipGraphGetRootNodes(graph, nodes, &numPartNodes))
 
     // verify numPartNodes is unchanged
     REQUIRE(numPartNodes == numRootNodes - 1);
     // verify partial node list returned has valid nodes
     for (size_t i = 0; i < numPartNodes; i++) {
-      HIP_CHECK(hipGraphNodeGetType(nodes[i], &nodeType));
+      HIP_CHECK(hipGraphNodeGetType(nodes[i], &nodeType))
       REQUIRE(nodeType >= 0);
       REQUIRE(nodeType < hipGraphNodeTypeCount);
     }
   }
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(mstream));
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
-  HIP_CHECK(hipEventDestroy(forkStreamEvent));
-  HIP_CHECK(hipEventDestroy(memsetEvent1));
-  HIP_CHECK(hipEventDestroy(memsetEvent2));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(mstream))
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipStreamDestroy(stream2))
+  HIP_CHECK(hipEventDestroy(forkStreamEvent))
+  HIP_CHECK(hipEventDestroy(memsetEvent1))
+  HIP_CHECK(hipEventDestroy(memsetEvent2))
   free(A_h);
   free(C_h);
   free(nodes);
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(C_d));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(C_d))
 }
 
 /**
@@ -349,7 +349,7 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Complx_NumRootNodes) {
   hipGraph_t graph;
   hipGraphNode_t kernelnode[NUM_OF_DUMMY_NODES];
   hipKernelNodeParams kernelNodeParams[NUM_OF_DUMMY_NODES];
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   // Create graph with no dependencies
   for (int i = 0; i < NUM_OF_DUMMY_NODES; i++) {
     void* kernelArgs[] = {nullptr};
@@ -359,19 +359,19 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Complx_NumRootNodes) {
     kernelNodeParams[i].sharedMemBytes = 0;
     kernelNodeParams[i].kernelParams = reinterpret_cast<void**>(kernelArgs);
     kernelNodeParams[i].extra = nullptr;
-    HIP_CHECK(hipGraphAddKernelNode(&kernelnode[i], graph, nullptr, 0, &kernelNodeParams[i]));
+    HIP_CHECK(hipGraphAddKernelNode(&kernelnode[i], graph, nullptr, 0, &kernelNodeParams[i]))
   }
   size_t numRootNodes{};
-  HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes));
+  HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes))
   REQUIRE(numRootNodes == NUM_OF_DUMMY_NODES);
   // Start creating dependencies in a chain
   for (size_t i = 0; i < (NUM_OF_DUMMY_NODES - 1); i++) {
     numRootNodes = 0;
-    HIP_CHECK(hipGraphAddDependencies(graph, &kernelnode[i], &kernelnode[i + 1], 1));
-    HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes));
+    HIP_CHECK(hipGraphAddDependencies(graph, &kernelnode[i], &kernelnode[i + 1], 1))
+    HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes))
     REQUIRE(numRootNodes == (NUM_OF_DUMMY_NODES - i - 1));
   }
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -382,7 +382,7 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Complx_NumRootNodes_ClonedGrph) {
   hipGraph_t graph, clonedgraph;
   hipGraphNode_t kernelnode[NUM_OF_DUMMY_NODES];
   hipKernelNodeParams kernelNodeParams[NUM_OF_DUMMY_NODES];
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   // Create graph with no dependencies
   for (int i = 0; i < NUM_OF_DUMMY_NODES; i++) {
     void* kernelArgs[] = {nullptr};
@@ -392,24 +392,24 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Complx_NumRootNodes_ClonedGrph) {
     kernelNodeParams[i].sharedMemBytes = 0;
     kernelNodeParams[i].kernelParams = reinterpret_cast<void**>(kernelArgs);
     kernelNodeParams[i].extra = nullptr;
-    HIP_CHECK(hipGraphAddKernelNode(&kernelnode[i], graph, nullptr, 0, &kernelNodeParams[i]));
+    HIP_CHECK(hipGraphAddKernelNode(&kernelnode[i], graph, nullptr, 0, &kernelNodeParams[i]))
   }
   size_t numRootNodes{};
-  HIP_CHECK(hipGraphClone(&clonedgraph, graph));
-  HIP_CHECK(hipGraphGetRootNodes(clonedgraph, nullptr, &numRootNodes));
+  HIP_CHECK(hipGraphClone(&clonedgraph, graph))
+  HIP_CHECK(hipGraphGetRootNodes(clonedgraph, nullptr, &numRootNodes))
   REQUIRE(numRootNodes == NUM_OF_DUMMY_NODES);
   // Start creating dependencies in a chain
   for (size_t i = 0; i < (NUM_OF_DUMMY_NODES - 1); i++) {
     numRootNodes = 0;
     hipGraphNode_t node1, node2;
-    HIP_CHECK(hipGraphNodeFindInClone(&node1, kernelnode[i], clonedgraph));
-    HIP_CHECK(hipGraphNodeFindInClone(&node2, kernelnode[i + 1], clonedgraph));
-    HIP_CHECK(hipGraphAddDependencies(clonedgraph, &node1, &node2, 1));
-    HIP_CHECK(hipGraphGetRootNodes(clonedgraph, nullptr, &numRootNodes));
+    HIP_CHECK(hipGraphNodeFindInClone(&node1, kernelnode[i], clonedgraph))
+    HIP_CHECK(hipGraphNodeFindInClone(&node2, kernelnode[i + 1], clonedgraph))
+    HIP_CHECK(hipGraphAddDependencies(clonedgraph, &node1, &node2, 1))
+    HIP_CHECK(hipGraphGetRootNodes(clonedgraph, nullptr, &numRootNodes))
     REQUIRE(numRootNodes == (NUM_OF_DUMMY_NODES - i - 1));
   }
-  HIP_CHECK(hipGraphDestroy(clonedgraph));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(clonedgraph))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -421,8 +421,8 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Complx_NRootNodesAsChildGraph) {
   hipGraphNode_t kernelnode[NUM_OF_DUMMY_NODES];
   hipKernelNodeParams kernelNodeParams[NUM_OF_DUMMY_NODES];
   hipGraphNode_t child_node;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipGraphCreate(&graph1, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipGraphCreate(&graph1, 0))
   // Create graph with no dependencies
   for (int i = 0; i < NUM_OF_DUMMY_NODES; i++) {
     void* kernelArgs[] = {nullptr};
@@ -432,12 +432,12 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Complx_NRootNodesAsChildGraph) {
     kernelNodeParams[i].sharedMemBytes = 0;
     kernelNodeParams[i].kernelParams = reinterpret_cast<void**>(kernelArgs);
     kernelNodeParams[i].extra = nullptr;
-    HIP_CHECK(hipGraphAddKernelNode(&kernelnode[i], graph, nullptr, 0, &kernelNodeParams[i]));
+    HIP_CHECK(hipGraphAddKernelNode(&kernelnode[i], graph, nullptr, 0, &kernelNodeParams[i]))
   }
-  HIP_CHECK(hipGraphAddChildGraphNode(&child_node, graph1, nullptr, 0, graph));
+  HIP_CHECK(hipGraphAddChildGraphNode(&child_node, graph1, nullptr, 0, graph))
   size_t numRootNodes{};
-  HIP_CHECK(hipGraphGetRootNodes(graph1, nullptr, &numRootNodes));
+  HIP_CHECK(hipGraphGetRootNodes(graph1, nullptr, &numRootNodes))
   REQUIRE(numRootNodes == 1);
-  HIP_CHECK(hipGraphDestroy(graph1));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph1))
+  HIP_CHECK(hipGraphDestroy(graph))
 }

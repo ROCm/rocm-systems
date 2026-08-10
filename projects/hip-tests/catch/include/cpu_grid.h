@@ -103,7 +103,7 @@ struct CPUMultiGrid {
 /* Generate dimensions for 1D, 2D and 3D blocks of threads */
 inline dim3 GenerateThreadDimensionsImpl(const std::initializer_list<double>& multipliers) {
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
   return GENERATE_COPY(
       dim3(1, 1, 1), dim3(props.maxThreadsDim[0], 1, 1), dim3(1, props.maxThreadsDim[1], 1),
       dim3(1, 1, props.maxThreadsDim[2]),
@@ -140,7 +140,7 @@ inline dim3 GenerateThreadDimensionsForShuffleWarp() {
 /* Generate dimensions for 1D, 2D and 3D grids of blocks */
 inline dim3 GenerateBlockDimensionsImpl(const std::initializer_list<double>& multipliers) {
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
   return GENERATE_COPY(dim3(1, 1, 1),
                        map([sm = props.multiProcessorCount](
                                double i) { return dim3(static_cast<int>(i * sm), 1, 1); },

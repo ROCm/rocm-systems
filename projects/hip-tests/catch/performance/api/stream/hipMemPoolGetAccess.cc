@@ -17,13 +17,13 @@ class MemPoolGetAccessBenchmark : public Benchmark<MemPoolGetAccessBenchmark> {
   void operator()() {
     hipMemPool_t mem_pool{nullptr};
     hipMemPoolProps pool_props = CreateMemPoolProps(0, hipMemHandleTypeNone);
-    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
 
     hipMemAccessFlags flags = hipMemAccessFlagsProtNone;
     hipMemLocation location = {hipMemLocationTypeDevice, 0};
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, location)); }
 
-    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+    HIP_CHECK(hipMemPoolDestroy(mem_pool))
   }
 };
 

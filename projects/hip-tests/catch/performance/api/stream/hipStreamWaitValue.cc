@@ -35,13 +35,13 @@ class StreamWaitValue32Benchmark : public Benchmark<StreamWaitValue32Benchmark> 
     if (flag == hipStreamWaitValueAnd) {
       value = 1;
     }
-    HIP_CHECK(hipMalloc(&value_ptr, sizeof(uint32_t) * array_size));
-    HIP_CHECK(hipMemset(value_ptr, value, sizeof(uint32_t) * array_size));
+    HIP_CHECK(hipMalloc(&value_ptr, sizeof(uint32_t) * array_size))
+    HIP_CHECK(hipMemset(value_ptr, value, sizeof(uint32_t) * array_size))
 
     TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipStreamWaitValue32(stream, value_ptr, value, flag));
+      HIP_CHECK(hipStreamWaitValue32(stream, value_ptr, value, flag))
     }
-    HIP_CHECK(hipFree(value_ptr));
+    HIP_CHECK(hipFree(value_ptr))
   }
 };
 
@@ -55,13 +55,13 @@ class StreamWaitValue64Benchmark : public Benchmark<StreamWaitValue64Benchmark> 
     if (flag == hipStreamWaitValueAnd) {
       value = 1;
     }
-    HIP_CHECK(hipMalloc(&value_ptr, sizeof(uint64_t) * array_size));
-    HIP_CHECK(hipMemset(value_ptr, value, sizeof(uint64_t) * array_size));
+    HIP_CHECK(hipMalloc(&value_ptr, sizeof(uint64_t) * array_size))
+    HIP_CHECK(hipMemset(value_ptr, value, sizeof(uint64_t) * array_size))
 
     TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipStreamWaitValue64(stream, value_ptr, value, flag));
+      HIP_CHECK(hipStreamWaitValue64(stream, value_ptr, value, flag))
     }
-    HIP_CHECK(hipFree(value_ptr));
+    HIP_CHECK(hipFree(value_ptr))
   }
 };
 

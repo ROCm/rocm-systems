@@ -55,7 +55,7 @@ __global__ void WriteValueKernel(int* output, int value) {
 
 int ReadDeviceInt(int* device_ptr) {
   int value = 0;
-  HIP_CHECK(hipMemcpy(&value, device_ptr, sizeof(value), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&value, device_ptr, sizeof(value), hipMemcpyDeviceToHost))
   return value;
 }
 
@@ -63,7 +63,7 @@ int ReadDeviceInt(int* device_ptr) {
 // cooperative-launch contracts can skip cleanly on paths that lack it.
 bool CooperativeLaunchSupported() {
   int current_device = 0;
-  HIP_CHECK(hipGetDevice(&current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
   int cooperative_launch = 0;
   HIP_CHECK(hipDeviceGetAttribute(&cooperative_launch, hipDeviceAttributeCooperativeLaunch,
                                   current_device));
@@ -86,9 +86,9 @@ HIP_TEST_CASE(Contract_KernelLaunch_HipLaunchCooperativeKernel_Default_WritesExp
 
   hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
-  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)))
   cleanup.Add([device_value] { (void)hipFree(device_value); });
-  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
+  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)))
 
   // A cooperative launch of the host-function pointer with a single-thread grid
   // must execute and publish the expected value deterministically.
@@ -96,7 +96,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_HipLaunchCooperativeKernel_Default_WritesExp
   void* kernel_args[] = {&device_value, &value};
   HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<const void*>(WriteValueKernel), dim3(1),
                                        dim3(1), kernel_args, 0, nullptr));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
 }
@@ -129,8 +129,8 @@ HIP_TEST_CASE(Contract_KernelLaunch_HipGetSymbolAddress_Default_ReturnsUsableDev
   hipLaunchKernelGGL(TouchSymbolScalarKernel, dim3(1), dim3(1), 0, 0);
   // Check launch/enqueue status first, then synchronize to surface any
   // asynchronous execution error before resolving the device symbol.
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Resolving a device global through the public symbol API must yield a non-null
   // device pointer that behaves like any other device allocation for copies.
@@ -140,7 +140,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_HipGetSymbolAddress_Default_ReturnsUsableDev
   REQUIRE(symbol_ptr != nullptr);
 
   const int written = kExpectedValue;
-  HIP_CHECK(hipMemcpy(symbol_ptr, &written, sizeof(written), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(symbol_ptr, &written, sizeof(written), hipMemcpyHostToDevice))
 
   REQUIRE(ReadDeviceInt(symbol_ptr) == kExpectedValue);
 }
@@ -152,12 +152,12 @@ HIP_TEST_CASE(Contract_KernelLaunch_HipGetSymbolSize_Default_MatchesDeclaredSize
   hipLaunchKernelGGL(TouchSymbolArrayKernel, dim3(1), dim3(1), 0, 0);
   // Check launch/enqueue status first, then synchronize to surface any
   // asynchronous execution error before resolving the device symbol.
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   // The reported size of a device global array must match its declared byte size.
   size_t symbol_size = 0;
-  HIP_CHECK(hipGetSymbolSize(&symbol_size, CONTRACT_SYMBOL(g_contract_symbol_array)));
+  HIP_CHECK(hipGetSymbolSize(&symbol_size, CONTRACT_SYMBOL(g_contract_symbol_array)))
   REQUIRE(symbol_size == sizeof(g_contract_symbol_array));
 }
 
@@ -187,9 +187,9 @@ HIP_TEST_CASE(Contract_KernelLaunch_HipLaunchKernelEx_Default_WritesExpectedValu
 #else
   hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
-  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)))
   cleanup.Add([device_value] { (void)hipFree(device_value); });
-  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
+  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)))
 
   // A minimal extended-launch configuration (single-thread grid, no dynamic
   // shared memory, default stream, no attributes) must execute the kernel and
@@ -202,8 +202,8 @@ HIP_TEST_CASE(Contract_KernelLaunch_HipLaunchKernelEx_Default_WritesExpectedValu
   config.attrs = nullptr;
   config.numAttrs = 0;
 
-  HIP_CHECK(hipLaunchKernelEx(&config, WriteValueKernel, device_value, kExpectedValue));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipLaunchKernelEx(&config, WriteValueKernel, device_value, kExpectedValue))
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
 #endif  // _WIN32
@@ -219,15 +219,15 @@ HIP_TEST_CASE(Contract_KernelLaunch_HipExtLaunchKernel_Default_WritesExpectedVal
   int value = kExpectedValue;
   void* kernel_args[] = {&device_value, &value};
 
-  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)))
   cleanup.Add([device_value] { (void)hipFree(device_value); });
-  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
+  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)))
 
   // The AMD extended launch entry point (no start/stop events, no flags) must
   // execute the kernel and publish the expected value deterministically.
   HIP_CHECK(hipExtLaunchKernel(reinterpret_cast<const void*>(WriteValueKernel), dim3(1), dim3(1),
                                kernel_args, 0, nullptr, nullptr, nullptr, 0));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
 }

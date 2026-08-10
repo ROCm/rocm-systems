@@ -60,8 +60,8 @@ __global__ void sumFromPrivateMem(int* global, size_t size, unsigned long long* 
 size_t GetMaxStackSize() {
   int device = -1;
   hipDeviceProp_t props{};
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   std::string arch = std::string(props.gcnArchName);
   if (arch.find("gfx12") != std::string::npos) {
     return maxStackSize12X;
@@ -87,16 +87,16 @@ HIP_TEST_CASE(Unit_KernelStackSize) {
   }
 
   int *d_a;
-  HIP_CHECK(hipMalloc(&d_a, maxArrayBytes));
-  HIP_CHECK(hipMemcpy(d_a, h_a, maxArrayBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&d_a, maxArrayBytes))
+  HIP_CHECK(hipMemcpy(d_a, h_a, maxArrayBytes, hipMemcpyHostToDevice))
 
   unsigned long long *d_sum;
-  HIP_CHECK(hipMalloc(&d_sum, sizeof(unsigned long long)));
-  HIP_CHECK(hipMemset(d_sum, 0, sizeof(unsigned long long)));
+  HIP_CHECK(hipMalloc(&d_sum, sizeof(unsigned long long)))
+  HIP_CHECK(hipMemset(d_sum, 0, sizeof(unsigned long long)))
 
   sumFromPrivateMem<<<1,1,0,0>>>(d_a, maxArraySize, d_sum);
   unsigned long long h_sum = 0;
-  HIP_CHECK(hipMemcpy(&h_sum, d_sum, sizeof(unsigned long long), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&h_sum, d_sum, sizeof(unsigned long long), hipMemcpyDeviceToHost))
 
   size_t stackSize = GetMaxStackSize() / sizeof(int);
   int* privateArray = new int[stackSize];
@@ -112,8 +112,8 @@ HIP_TEST_CASE(Unit_KernelStackSize) {
   }
   // printf("\nfrom host : %zu, %llu , %llu\n", stackSize, h_sum, sum);
   REQUIRE(sum == h_sum);
-  HIP_CHECK(hipFree(d_a));
-  HIP_CHECK(hipFree(d_sum));
+  HIP_CHECK(hipFree(d_a))
+  HIP_CHECK(hipFree(d_sum))
   delete [] privateArray;
   delete [] h_a;
 }

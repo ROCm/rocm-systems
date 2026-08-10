@@ -19,7 +19,7 @@ constexpr size_t kDwordCount = 64;
 
 void* AllocateDeviceBytes(size_t bytes) {
   void* ptr = nullptr;
-  HIP_CHECK(hipMalloc(&ptr, bytes));
+  HIP_CHECK(hipMalloc(&ptr, bytes))
   return ptr;
 }
 }
@@ -32,8 +32,8 @@ HIP_TEST_CASE(Contract_Memset_HipMemset_DeviceBuffer_IsFilledWithBytePattern) {
   void* device_ptr = AllocateDeviceBytes(dst.size());
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
-  HIP_CHECK(hipMemset(device_ptr, pattern, dst.size()));
-  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemset(device_ptr, pattern, dst.size()))
+  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost))
 
   for (const auto value : dst) {
     REQUIRE(value == pattern);
@@ -47,7 +47,7 @@ HIP_TEST_CASE(Contract_Memset_HipMemset_ZeroBytes_Succeeds) {
   void* device_ptr = AllocateDeviceBytes(sizeof(value));
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
-  HIP_CHECK(hipMemset(device_ptr, 0x7f, 0));
+  HIP_CHECK(hipMemset(device_ptr, 0x7f, 0))
 }
 
 // @asserts: hipMemsetAsync - after the stream synchronizes the buffer holds the requested byte pattern
@@ -59,11 +59,11 @@ HIP_TEST_CASE(Contract_MemsetAsync_HipMemsetAsync_DeviceBuffer_IsFilledAfterStre
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipMemsetAsync(device_ptr, pattern, dst.size(), stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemsetAsync(device_ptr, pattern, dst.size(), stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost))
 
   for (const auto value : dst) {
     REQUIRE(value == pattern);
@@ -78,8 +78,8 @@ HIP_TEST_CASE(Contract_MemsetD8_HipMemsetD8_DeviceBuffer_IsFilledWithBytePattern
   void* device_ptr = AllocateDeviceBytes(dst.size());
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
-  HIP_CHECK(hipMemsetD8(reinterpret_cast<hipDeviceptr_t>(device_ptr), pattern, dst.size()));
-  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemsetD8(reinterpret_cast<hipDeviceptr_t>(device_ptr), pattern, dst.size()))
+  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost))
 
   for (const auto value : dst) {
     REQUIRE(value == pattern);
@@ -94,8 +94,8 @@ HIP_TEST_CASE(Contract_MemsetD16_HipMemsetD16_DeviceBuffer_IsFilledWithWordPatte
   void* device_ptr = AllocateDeviceBytes(dst.size() * sizeof(uint16_t));
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
-  HIP_CHECK(hipMemsetD16(reinterpret_cast<hipDeviceptr_t>(device_ptr), pattern, dst.size()));
-  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size() * sizeof(uint16_t), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemsetD16(reinterpret_cast<hipDeviceptr_t>(device_ptr), pattern, dst.size()))
+  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size() * sizeof(uint16_t), hipMemcpyDeviceToHost))
 
   for (const auto value : dst) {
     REQUIRE(value == pattern);
@@ -110,8 +110,8 @@ HIP_TEST_CASE(Contract_MemsetD32_HipMemsetD32_DeviceBuffer_IsFilledWithDwordPatt
   void* device_ptr = AllocateDeviceBytes(dst.size() * sizeof(int));
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
-  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(device_ptr), pattern, dst.size()));
-  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size() * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(device_ptr), pattern, dst.size()))
+  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size() * sizeof(int), hipMemcpyDeviceToHost))
 
   for (const auto value : dst) {
     REQUIRE(value == pattern);

@@ -43,14 +43,14 @@ int main() {
   }
 
   int* devArr1 = nullptr;
-  HIP_CHECK(hipMalloc(&devArr1, NBYTES));
+  HIP_CHECK(hipMalloc(&devArr1, NBYTES))
   if (devArr1 == nullptr) {
     std::cout << "Invalid devArr1" << std::endl;
     return -1;
   }
 
   int* devArr2 = nullptr;
-  HIP_CHECK(hipMalloc(&devArr2, NBYTES));
+  HIP_CHECK(hipMalloc(&devArr2, NBYTES))
   if (devArr2 == nullptr) {
     std::cout << "Invalid devArr2" << std::endl;
     return -1;
@@ -62,11 +62,11 @@ int main() {
     return -1;
   }
 
-  HIP_CHECK(hipMemcpyAsync(hostArr2, hostArr1, NBYTES, hipMemcpyHostToHost, hipStreamLegacy));
-  HIP_CHECK(hipMemcpyAsync(devArr1, hostArr2, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy));
-  HIP_CHECK(hipMemcpyAsync(devArr2, devArr1, NBYTES, hipMemcpyDeviceToDevice, hipStreamLegacy));
-  HIP_CHECK(hipMemcpyAsync(hostArr3, devArr2, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
-  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(hostArr2, hostArr1, NBYTES, hipMemcpyHostToHost, hipStreamLegacy))
+  HIP_CHECK(hipMemcpyAsync(devArr1, hostArr2, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy))
+  HIP_CHECK(hipMemcpyAsync(devArr2, devArr1, NBYTES, hipMemcpyDeviceToDevice, hipStreamLegacy))
+  HIP_CHECK(hipMemcpyAsync(hostArr3, devArr2, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy))
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy))
 
   for (int i = 0; i < N; i++) {
     if (hostArr3[i] != elementVal) {
@@ -78,8 +78,8 @@ int main() {
 
   delete[] hostArr1;
   delete[] hostArr2;
-  HIP_CHECK(hipFree(devArr1));
-  HIP_CHECK(hipFree(devArr2));
+  HIP_CHECK(hipFree(devArr1))
+  HIP_CHECK(hipFree(devArr2))
   delete[] hostArr3;
 
   return 0;

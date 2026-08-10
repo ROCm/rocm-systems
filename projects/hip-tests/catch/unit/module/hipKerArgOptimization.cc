@@ -23,12 +23,12 @@ static void fillDataTransfer2Dev(int* hostBuf, int* devBuf, size_t len) {
   for (size_t i = 0; i < len; i++) {
     hostBuf[i] = (HipTest::RAND_R(&seed) & 0xFF);
   }
-  HIP_CHECK(hipMemcpy(devBuf, hostBuf, len * sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(devBuf, hostBuf, len * sizeof(int), hipMemcpyHostToDevice))
 }
 
 static void verifyDevResult(int* hostBuf, int* devBuf, int coef1, int coef2, size_t len) {
   int* buf = new int[len];
-  HIP_CHECK(hipMemcpy(buf, devBuf, len * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(buf, devBuf, len * sizeof(int), hipMemcpyDeviceToHost))
   for (size_t i = 0; i < len; i++) {
     REQUIRE(buf[i] == (coef1 * hostBuf[i] + coef2));
   }
@@ -54,12 +54,12 @@ HIP_TEST_CASE(Unit_KerArgOptimization_Saxpy) {
   REQUIRE(x6_h != nullptr);
   // Allocate device resources
   int *x1_d, *x2_d, *x3_d, *x4_d, *x5_d, *x6_d;
-  HIP_CHECK(hipMalloc(&x1_d, arraylenBytes));
-  HIP_CHECK(hipMalloc(&x2_d, arraylenBytes));
-  HIP_CHECK(hipMalloc(&x3_d, arraylenBytes));
-  HIP_CHECK(hipMalloc(&x4_d, arraylenBytes));
-  HIP_CHECK(hipMalloc(&x5_d, arraylenBytes));
-  HIP_CHECK(hipMalloc(&x6_d, arraylenBytes));
+  HIP_CHECK(hipMalloc(&x1_d, arraylenBytes))
+  HIP_CHECK(hipMalloc(&x2_d, arraylenBytes))
+  HIP_CHECK(hipMalloc(&x3_d, arraylenBytes))
+  HIP_CHECK(hipMalloc(&x4_d, arraylenBytes))
+  HIP_CHECK(hipMalloc(&x5_d, arraylenBytes))
+  HIP_CHECK(hipMalloc(&x6_d, arraylenBytes))
   // Fill data and transfer to device
   fillDataTransfer2Dev(x1_h, x1_d, arraylen);
   fillDataTransfer2Dev(x2_h, x2_d, arraylen);
@@ -115,36 +115,36 @@ HIP_TEST_CASE(Unit_KerArgOptimization_Saxpy) {
   hipModule_t Module;
   hipFunction_t Function;
   SECTION("No amdgpu-kernarg-preload-count") {
-    HIP_CHECK(hipModuleLoad(&Module, fileName));
-    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
+    HIP_CHECK(hipModuleLoad(&Module, fileName))
+    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name))
   }
   SECTION("amdgpu-kernarg-preload-count = 0") {
-    HIP_CHECK(hipModuleLoad(&Module, fileName0));
-    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
+    HIP_CHECK(hipModuleLoad(&Module, fileName0))
+    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name))
   }
   SECTION("amdgpu-kernarg-preload-count = 1") {
-    HIP_CHECK(hipModuleLoad(&Module, fileName1));
-    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
+    HIP_CHECK(hipModuleLoad(&Module, fileName1))
+    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name))
   }
   SECTION("amdgpu-kernarg-preload-count = 2") {
-    HIP_CHECK(hipModuleLoad(&Module, fileName2));
-    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
+    HIP_CHECK(hipModuleLoad(&Module, fileName2))
+    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name))
   }
   SECTION("amdgpu-kernarg-preload-count = 3") {
-    HIP_CHECK(hipModuleLoad(&Module, fileName3));
-    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
+    HIP_CHECK(hipModuleLoad(&Module, fileName3))
+    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name))
   }
   SECTION("amdgpu-kernarg-preload-count = 16") {
-    HIP_CHECK(hipModuleLoad(&Module, fileName16));
-    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
+    HIP_CHECK(hipModuleLoad(&Module, fileName16))
+    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name))
   }
   SECTION("amdgpu-kernarg-preload-count = 17") {
-    HIP_CHECK(hipModuleLoad(&Module, fileName17));
-    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
+    HIP_CHECK(hipModuleLoad(&Module, fileName17))
+    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name))
   }
   HIP_CHECK(hipExtModuleLaunchKernel(Function, arraylen, 1, 1, blocksize, 1, 1, 0, 0, NULL,
                                      reinterpret_cast<void**>(&config), 0));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   // Verify results
   verifyDevResult(x1_h, x1_d, coeff[0], coeff[1], arraylen);
   verifyDevResult(x2_h, x2_d, coeff[2], coeff[3], arraylen);
@@ -153,13 +153,13 @@ HIP_TEST_CASE(Unit_KerArgOptimization_Saxpy) {
   verifyDevResult(x5_h, x5_d, coeff[8], coeff[9], arraylen);
   verifyDevResult(x6_h, x6_d, coeff[10], coeff[11], arraylen);
   // Delete resources
-  HIP_CHECK(hipFree(x1_d));
-  HIP_CHECK(hipFree(x2_d));
-  HIP_CHECK(hipFree(x3_d));
-  HIP_CHECK(hipFree(x4_d));
-  HIP_CHECK(hipFree(x5_d));
-  HIP_CHECK(hipFree(x6_d));
-  HIP_CHECK(hipModuleUnload(Module));
+  HIP_CHECK(hipFree(x1_d))
+  HIP_CHECK(hipFree(x2_d))
+  HIP_CHECK(hipFree(x3_d))
+  HIP_CHECK(hipFree(x4_d))
+  HIP_CHECK(hipFree(x5_d))
+  HIP_CHECK(hipFree(x6_d))
+  HIP_CHECK(hipModuleUnload(Module))
   delete[] x1_h;
   delete[] x2_h;
   delete[] x3_h;

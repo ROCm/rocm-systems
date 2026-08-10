@@ -59,10 +59,10 @@ HIP_TEST_CASE(Unit_hipDeviceGetUuid_Positive) {
   bool uuidValid = false;
 
   const int deviceId = GENERATE(range(0, HipTest::getDeviceCount()));
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
 
   // Scenario 1
-  HIP_CHECK(hipDeviceGetUuid(&uuid, device));
+  HIP_CHECK(hipDeviceGetUuid(&uuid, device))
   // Atleast one non zero value
   size_t uuidSize = sizeof(uuid.bytes) / sizeof(uuid.bytes[0]);
   for (size_t i = 0; i < uuidSize; i++) {
@@ -95,10 +95,10 @@ HIP_TEST_CASE(Unit_hipDeviceGetUuid_Negative) {
   int numDevices = 0;
   hipDevice_t device;
   hipUUID uuid;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   if (numDevices > 0) {
-    HIP_CHECK(hipDeviceGet(&device, 0));
+    HIP_CHECK(hipDeviceGet(&device, 0))
     REQUIRE_FALSE(hipSuccess == hipDeviceGetUuid(nullptr, device));
     REQUIRE_FALSE(hipSuccess == hipDeviceGetUuid(&uuid, -1));
     REQUIRE_FALSE(hipSuccess == hipDeviceGetUuid(&uuid, numDevices));
@@ -139,7 +139,7 @@ static inline std::vector<int> parseVisibleDevices() {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetUuid_From_RocmInfo) {
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   assert(deviceCount > 0);
 
   FILE* fpipe;
@@ -189,11 +189,11 @@ HIP_TEST_CASE(Unit_hipDeviceGetUuid_From_RocmInfo) {
       continue;
     }
     auto dev = i.first;
-    HIP_CHECK(hipSetDevice(dev));
+    HIP_CHECK(hipSetDevice(dev))
     hipDevice_t device;
-    HIP_CHECK(hipDeviceGet(&device, dev));
+    HIP_CHECK(hipDeviceGet(&device, dev))
     hipUUID d_uuid{0};
-    HIP_CHECK(hipDeviceGetUuid(&d_uuid, device));
+    HIP_CHECK(hipDeviceGetUuid(&d_uuid, device))
     REQUIRE(memcmp(d_uuid.bytes, i.second.data(), UUID_LEN) == 0);
   }
 }
@@ -216,13 +216,13 @@ HIP_TEST_CASE(Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties) {
   hipDevice_t device;
   hipDeviceProp_t prop;
   hipUUID uuid{0};
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   assert(deviceCount > 0);
   for (int dev = 0; dev < deviceCount; dev++) {
-    HIP_CHECK(hipSetDevice(dev));
-    HIP_CHECK(hipDeviceGet(&device, dev));
-    HIP_CHECK(hipDeviceGetUuid(&uuid, device));
-    HIP_CHECK(hipGetDeviceProperties(&prop, dev));
+    HIP_CHECK(hipSetDevice(dev))
+    HIP_CHECK(hipDeviceGet(&device, dev))
+    HIP_CHECK(hipDeviceGetUuid(&uuid, device))
+    HIP_CHECK(hipGetDeviceProperties(&prop, dev))
     REQUIRE(memcmp(uuid.bytes, prop.uuid.bytes, UUID_LEN) == 0);
   }
 }
@@ -451,7 +451,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
       hip::SpawnProc proc("setEnvInChildProc", true);
       REQUIRE(proc.run(uuidEnv) == 1);
       int devCount = 0;
-      HIP_CHECK(hipGetDeviceCount(&devCount));
+      HIP_CHECK(hipGetDeviceCount(&devCount))
       REQUIRE(devCount == uuid_map.size());
     }
 #ifdef __linux__

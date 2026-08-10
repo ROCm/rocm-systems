@@ -30,9 +30,9 @@ HIP_TEST_CASE(Unit_hipHostFree_InvalidMemory) {
     auto ptr = std::make_unique<char[]>(kPtrSize);
     auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped);
 
-    HIP_CHECK(hipHostRegister(ptr.get(), kPtrSize, flag));
+    HIP_CHECK(hipHostRegister(ptr.get(), kPtrSize, flag))
     HIP_CHECK_ERROR(hipHostFree(ptr.get()), hipErrorInvalidValue);
-    HIP_CHECK(hipHostUnregister(ptr.get()));
+    HIP_CHECK(hipHostUnregister(ptr.get()))
   }
 
 #if (HT_AMD == 1) && (HT_LINUX == 1)
@@ -41,9 +41,9 @@ HIP_TEST_CASE(Unit_hipHostFree_InvalidMemory) {
     char* ptr = new char[ptr_size];
     auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped,
                          hipHostRegisterIoMemory);
-    HIP_CHECK(hipHostRegister(ptr, ptr_size, flag));
+    HIP_CHECK(hipHostRegister(ptr, ptr_size, flag))
     HIP_CHECK_ERROR(hipHostFree(ptr), hipErrorInvalidValue);
-    HIP_CHECK(hipHostUnregister(ptr));
+    HIP_CHECK(hipHostUnregister(ptr))
     delete[] ptr;
   }
 #endif
@@ -64,8 +64,8 @@ HIP_TEST_CASE(Unit_hipHostFree_DoubleFree) {
   void* ptr = NULL;
   size_t ptr_size = 1024;
 
-  HIP_CHECK(hipHostMalloc(&ptr, ptr_size));
-  HIP_CHECK(hipHostFree(ptr));
+  HIP_CHECK(hipHostMalloc(&ptr, ptr_size))
+  HIP_CHECK(hipHostFree(ptr))
   HIP_CHECK_ERROR(hipHostFree(ptr), hipErrorInvalidValue);
 }
 
@@ -85,15 +85,15 @@ HIP_TEST_CASE(Unit_hipHostFree_Multithreading) {
   size_t ptr_size = 1024;
 
   for (auto& ptr : ptrs) {
-    HIP_CHECK(hipHostMalloc(&ptr, ptr_size));
+    HIP_CHECK(hipHostMalloc(&ptr, ptr_size))
   }
 
   std::vector<std::thread> threads;
 
   for (auto ptr : ptrs) {
     threads.emplace_back(([ptr] {
-      HIP_CHECK_THREAD(hipHostFree(ptr));
-      HIP_CHECK_THREAD(hipStreamQuery(nullptr));
+      HIP_CHECK_THREAD(hipHostFree(ptr))
+      HIP_CHECK_THREAD(hipStreamQuery(nullptr))
     }));
   }
 
@@ -106,7 +106,7 @@ HIP_TEST_CASE(Unit_hipHostFree_Multithreading) {
 HIP_TEST_CASE(Unit_hipHostFree_Capture) {
   void* host_ptr = nullptr;
   constexpr size_t kAllocSize = 1024;
-  HIP_CHECK(hipHostMalloc(&host_ptr, kAllocSize));
+  HIP_CHECK(hipHostMalloc(&host_ptr, kAllocSize))
 
   hipError_t capture_error = hipSuccess;
   constexpr bool kRelaxedModeAllowed = true;
@@ -117,6 +117,6 @@ HIP_TEST_CASE(Unit_hipHostFree_Capture) {
   // When the free is rejected during capture it is a no-op, so the allocation
   // is still owned by the test and must be released to avoid leaking it.
   if (capture_error != hipSuccess) {
-    HIP_CHECK(hipHostFree(host_ptr));
+    HIP_CHECK(hipHostFree(host_ptr))
   }
 }

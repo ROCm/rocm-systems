@@ -73,21 +73,21 @@ void spawnAnalysisTask(int location) { printf("found target at location %d\n", l
 */
 HIP_TEST_CASE(Unit_svm_fine_grain_sync_buffers) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   size_t num_pixels = 1024 * 1024 * 2;
   hipStream_t stream;
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipStreamCreate(&stream))
   hipEvent_t event;
-  HIP_CHECK(hipEventCreate(&event));
+  HIP_CHECK(hipEventCreate(&event))
   unsigned int *pInputImage, *pNumTargetsFound, *pTargetLocations;
   HIP_CHECK(
       hipHostMalloc(&pInputImage, sizeof(unsigned int) * num_pixels, hipHostMallocNonCoherent));
-  HIP_CHECK(hipHostMalloc(&pNumTargetsFound, sizeof(unsigned int), hipHostMallocCoherent));
-  HIP_CHECK(hipHostMalloc(&pTargetLocations, sizeof(int) * MAX_TARGETS, hipHostMallocCoherent));
+  HIP_CHECK(hipHostMalloc(&pNumTargetsFound, sizeof(unsigned int), hipHostMallocCoherent))
+  HIP_CHECK(hipHostMalloc(&pTargetLocations, sizeof(int) * MAX_TARGETS, hipHostMallocCoherent))
   unsigned int targetDescriptor = 777;
   *pNumTargetsFound = 0;
 
@@ -100,8 +100,8 @@ HIP_TEST_CASE(Unit_svm_fine_grain_sync_buffers) {
 
   find_targets<<<(num_pixels + 255) / 256, 256, 0, stream>>>(pInputImage, targetDescriptor,
                                                              pNumTargetsFound, pTargetLocations);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipEventRecord(event, stream));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipEventRecord(event, stream))
 
   i = 0;
   hipError_t status = hipSuccess;
@@ -121,10 +121,10 @@ HIP_TEST_CASE(Unit_svm_fine_grain_sync_buffers) {
     }
   } while (status == hipErrorNotReady || AtomicLoad32(&pTargetLocations[i]) != -1);
 
-  HIP_CHECK(hipHostFree(pInputImage));
-  HIP_CHECK(hipHostFree(pNumTargetsFound));
-  HIP_CHECK(hipHostFree(pTargetLocations));
-  HIP_CHECK(hipEventDestroy(event));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipHostFree(pInputImage))
+  HIP_CHECK(hipHostFree(pNumTargetsFound))
+  HIP_CHECK(hipHostFree(pTargetLocations))
+  HIP_CHECK(hipEventDestroy(event))
+  HIP_CHECK(hipStreamDestroy(stream))
   REQUIRE(i == 3);
 }

@@ -21,7 +21,7 @@ class HipEventCreateWithFlagsBenchmark : public Benchmark<HipEventCreateWithFlag
 
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipEventCreateWithFlags(&event, flag)); }
 
-    HIP_CHECK(hipEventDestroy(event));
+    HIP_CHECK(hipEventDestroy(event))
   }
 };
 

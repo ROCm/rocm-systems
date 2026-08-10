@@ -46,12 +46,12 @@ void MemcpyDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = nu
   const auto block_count = element_count / thread_count + 1;
   constexpr int expected_value = 42;
   VectorSet<<<block_count, thread_count>>>(device_allocation.ptr(), expected_value, element_count);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(memcpy_func(host_allocation.host_ptr(), device_allocation.ptr(), allocation_size));
+  HIP_CHECK(memcpy_func(host_allocation.host_ptr(), device_allocation.ptr(), allocation_size))
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   ArrayFindIfNot(host_allocation.host_ptr(), expected_value, element_count);
@@ -74,9 +74,9 @@ void MemcpyHostToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = nu
   std::fill_n(src_host_allocation.host_ptr(), element_count, fill_value);
   std::fill_n(dst_host_allocation.host_ptr(), element_count, 0);
 
-  HIP_CHECK(memcpy_func(device_allocation.ptr(), src_host_allocation.host_ptr(), allocation_size));
+  HIP_CHECK(memcpy_func(device_allocation.ptr(), src_host_allocation.host_ptr(), allocation_size))
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   HIP_CHECK(hipMemcpy(dst_host_allocation.host_ptr(), device_allocation.ptr(), allocation_size,
@@ -101,9 +101,9 @@ void MemcpyHostToHostShell(F memcpy_func, const hipStream_t kernel_stream = null
   constexpr auto expected_value = 42;
   std::fill_n(src_allocation.host_ptr(), element_count, expected_value);
 
-  HIP_CHECK(memcpy_func(dst_allocation.host_ptr(), src_allocation.host_ptr(), allocation_size));
+  HIP_CHECK(memcpy_func(dst_allocation.host_ptr(), src_allocation.host_ptr(), allocation_size))
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   ArrayFindIfNot(dst_allocation.host_ptr(), expected_value, element_count);
@@ -118,15 +118,15 @@ void MemcpyDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = 
 
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
 
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
   if (src_device != dst_device) {
     int can_access_peer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
+    HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device))
     if (!can_access_peer) {
       HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
     if constexpr (enable_peer_access) {
-      HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0));
+      HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0))
     }
   } else if constexpr (enable_peer_access) {
     return;
@@ -134,21 +134,21 @@ void MemcpyDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = 
 
   LinearAllocGuard<int> src_allocation(LinearAllocs::hipMalloc, allocation_size);
   LinearAllocGuard<int> result(LinearAllocs::hipHostMalloc, allocation_size, hipHostMallocPortable);
-  HIP_CHECK(hipSetDevice(dst_device));
+  HIP_CHECK(hipSetDevice(dst_device))
   LinearAllocGuard<int> dst_allocation(LinearAllocs::hipMalloc, allocation_size);
 
   const auto element_count = allocation_size / sizeof(*src_allocation.ptr());
   constexpr auto thread_count = 1024;
   const auto block_count = element_count / thread_count + 1;
   constexpr int expected_value = 42;
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
   VectorSet<<<block_count, thread_count>>>(src_allocation.ptr(), expected_value, element_count);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(memcpy_func(dst_allocation.ptr(), src_allocation.ptr(), allocation_size));
+  HIP_CHECK(memcpy_func(dst_allocation.ptr(), src_allocation.ptr(), allocation_size))
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   HIP_CHECK(
@@ -156,7 +156,7 @@ void MemcpyDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = 
   if constexpr (enable_peer_access) {
     // If we've gotten this far, EnablePeerAccess must have succeeded, so we
     // only need to check this condition
-    HIP_CHECK(hipDeviceDisablePeerAccess(dst_device));
+    HIP_CHECK(hipDeviceDisablePeerAccess(dst_device))
   }
 
   ArrayFindIfNot(result.host_ptr(), expected_value, element_count);
@@ -231,9 +231,9 @@ template <typename F>
 void MemcpySyncBehaviorCheck(F memcpy_func, const bool should_sync,
                              const hipStream_t kernel_stream) {
   LaunchDelayKernel(std::chrono::milliseconds{100}, kernel_stream);
-  HIP_CHECK(memcpy_func());
+  HIP_CHECK(memcpy_func())
   if (should_sync) {
-    HIP_CHECK(hipStreamQuery(kernel_stream));
+    HIP_CHECK(hipStreamQuery(kernel_stream))
   } else {
     HIP_CHECK_ERROR(hipStreamQuery(kernel_stream), hipErrorNotReady);
   }

@@ -68,7 +68,7 @@ static void runTest(const int width, const int height, const int depth, const fl
   myparms.extent = make_hipExtent(width, height, depth);
   myparms.kind = hipMemcpyHostToDevice;
 
-  HIP_CHECK(hipMemcpy3D(&myparms));
+  HIP_CHECK(hipMemcpy3D(&myparms))
 
   hipResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(resDesc));
@@ -89,7 +89,7 @@ static void runTest(const int width, const int height, const int depth, const fl
   hipTextureObject_t textureObject = 0;
   hipError_t res = hipCreateTextureObject(&textureObject, &resDesc, &texDesc, NULL);
   if (res != hipSuccess) {
-    HIP_CHECK(hipFreeArray(arr));
+    HIP_CHECK(hipFreeArray(arr))
     free(hData);
     if (res == hipErrorNotSupported && LinearFilter3D) {
       WARN("Skipping section: 3D linear texture filter is not supported on this device.");
@@ -101,8 +101,8 @@ static void runTest(const int width, const int height, const int depth, const fl
   }
 
   float* dData = nullptr;
-  HIP_CHECK(hipMalloc((void**)&dData, size));
-  HIP_CHECK(hipMemset(dData, 0, size));
+  HIP_CHECK(hipMalloc((void**)&dData, size))
+  HIP_CHECK(hipMemset(dData, 0, size))
   dim3 dimBlock(8, 8, 8);  // 512 threads
   dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y,
                (depth + dimBlock.z - 1) / dimBlock.z);
@@ -112,13 +112,13 @@ static void runTest(const int width, const int height, const int depth, const fl
   res = hipGetLastError();
   hipLaunchKernelGGL(tex3DKernel<normalizedCoords>, dimGrid, dimBlock, 0, 0, dData, textureObject,
                      width, height, depth, offsetX, offsetY, offsetZ);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   float* hOutputData = (float*)malloc(size);
   memset(hOutputData, 0, size);
-  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost))
 
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
@@ -137,10 +137,10 @@ static void runTest(const int width, const int height, const int depth, const fl
     }
   }
 line1:
-  HIP_CHECK(hipDestroyTextureObject(textureObject));
+  HIP_CHECK(hipDestroyTextureObject(textureObject))
   free(hOutputData);
-  HIP_CHECK(hipFree(dData));
-  HIP_CHECK(hipFreeArray(arr));
+  HIP_CHECK(hipFree(dData))
+  HIP_CHECK(hipFreeArray(arr))
   free(hData);
   REQUIRE(result);
 }
@@ -162,7 +162,7 @@ HIP_TEST_CASE(Unit_hipTextureObj3DCheckModes) {
 
   int device = 0;
   hipDeviceProp_t props;
-  HIPCHECK(hipGetDeviceProperties(&props, device));
+  HIPCHECK(hipGetDeviceProperties(&props, device))
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_TEXTURES_NOT_SUPPORTED, props.gcnArchName)) {
     LinearFilter3D = true;
   }

@@ -28,32 +28,32 @@ static void hipGraphUploadFunctional_with_hipStreamBeginCapture(hipStream_t iStr
   HipTest::initArrays<int>(&A_d, nullptr, &C_d, &A_h, nullptr, &C_h, N, false);
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
 
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream))
 
-  HIP_CHECK(hipMemsetAsync(C_d, 0, Nbytes, stream));
+  HIP_CHECK(hipMemsetAsync(C_d, 0, Nbytes, stream))
   hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, stream, A_d,
                      C_d, N);
-  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream))
 
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
 
   // Validate end capture is successful
   REQUIRE(graph != nullptr);
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   REQUIRE(graphExec != nullptr);
 
-  HIP_CHECK(hipGraphUpload(graphExec, iStream));
-  HIP_CHECK(hipGraphLaunch(graphExec, iStream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipStreamSynchronize(iStream));
+  HIP_CHECK(hipGraphUpload(graphExec, iStream))
+  HIP_CHECK(hipGraphLaunch(graphExec, iStream))
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipStreamSynchronize(iStream))
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 
   // Validate the computation
   for (size_t i = 0; i < N; i++) {
@@ -86,7 +86,7 @@ static void hipGraphUploadFunctional_with_stream(hipStream_t stream) {
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_A, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_B, graph, nullptr, 0, B_d, B_h, Nbytes,
@@ -99,36 +99,36 @@ static void hipGraphUploadFunctional_with_stream(hipStream_t stream) {
   kNodeParams.sharedMemBytes = 0;
   kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kNodeAdd, graph, nullptr, 0, &kNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kNodeAdd, graph, nullptr, 0, &kNodeParams))
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_C, graph, nullptr, 0, C_h, C_d, Nbytes,
                                     hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &kNodeAdd, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_B, &kNodeAdd, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &kNodeAdd, &memcpy_C, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &kNodeAdd, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_B, &kNodeAdd, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &kNodeAdd, &memcpy_C, 1))
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
 
-  HIP_CHECK(hipGraphUpload(graphExec, stream));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphUpload(graphExec, stream))
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Verify graph execution result
   HipTest::checkVectorADD<int>(A_h, B_h, C_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 HIP_TEST_CASE(Unit_hipGraphUpload_Functional) {
   SECTION("Pass a stream") {
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     hipGraphUploadFunctional_with_hipStreamBeginCapture(stream);
     hipGraphUploadFunctional_with_stream(stream);
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
   SECTION("Pass stream as default stream") {
     hipGraphUploadFunctional_with_hipStreamBeginCapture(0);
@@ -142,51 +142,51 @@ HIP_TEST_CASE(Unit_hipGraphUpload_Functional) {
 
 HIP_TEST_CASE(Unit_hipGraphUpload_Functional_multidevice_test) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   if (numDevices > 0) {
     SECTION("Pass a common stream for all device") {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipStreamCreate(&stream))
       int currDevice = -1;
-      HIP_CHECK(hipGetDevice(&currDevice));
+      HIP_CHECK(hipGetDevice(&currDevice))
       for (int i = 0; i < numDevices; i++) {
         if (i != currDevice) {
           int can_access_peer = 0;
-          HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, currDevice, i));
+          HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, currDevice, i))
           if (!can_access_peer) {
             INFO("Peer access cannot be enabled between devices " << currDevice << " " << i);
             continue;
           }
         }
-        HIP_CHECK(hipSetDevice(i));
+        HIP_CHECK(hipSetDevice(i))
         hipGraphUploadFunctional_with_hipStreamBeginCapture(stream);
         hipGraphUploadFunctional_with_stream(stream);
       }
 
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamDestroy(stream))
     }
     SECTION("Pass a separate stream for each device") {
       for (int i = 0; i < numDevices; i++) {
-        HIP_CHECK(hipSetDevice(i));
+        HIP_CHECK(hipSetDevice(i))
 
         hipStream_t dStream;
-        HIP_CHECK(hipStreamCreate(&dStream));
+        HIP_CHECK(hipStreamCreate(&dStream))
         hipGraphUploadFunctional_with_hipStreamBeginCapture(dStream);
         hipGraphUploadFunctional_with_stream(dStream);
-        HIP_CHECK(hipStreamDestroy(dStream));
+        HIP_CHECK(hipStreamDestroy(dStream))
       }
     }
     SECTION("Pass stream as default stream for each device") {
       for (int i = 0; i < numDevices; i++) {
-        HIP_CHECK(hipSetDevice(i));
+        HIP_CHECK(hipSetDevice(i))
         hipGraphUploadFunctional_with_hipStreamBeginCapture(0);
         hipGraphUploadFunctional_with_stream(0);
       }
     }
     SECTION("Pass stream as hipStreamPerThread for each device") {
       for (int i = 0; i < numDevices; i++) {
-        HIP_CHECK(hipSetDevice(i));
+        HIP_CHECK(hipSetDevice(i))
         hipGraphUploadFunctional_with_hipStreamBeginCapture(hipStreamPerThread);
         hipGraphUploadFunctional_with_stream(hipStreamPerThread);
       }
@@ -213,32 +213,32 @@ HIP_TEST_CASE(Unit_hipGraphUpload_Functional_With_Priority_Stream) {
 
   hipStream_t stream1, stream2;
   int minPriority = 0, maxPriority = 0;
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&minPriority, &maxPriority));
-  HIP_CHECK(hipStreamCreateWithPriority(&stream1, hipStreamDefault, minPriority));
-  HIP_CHECK(hipStreamCreateWithPriority(&stream2, hipStreamDefault, maxPriority));
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&minPriority, &maxPriority))
+  HIP_CHECK(hipStreamCreateWithPriority(&stream1, hipStreamDefault, minPriority))
+  HIP_CHECK(hipStreamCreateWithPriority(&stream2, hipStreamDefault, maxPriority))
 
-  HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream1));
-  HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream1));
+  HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream1))
+  HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream1))
   HipTest::vectorADD<int><<<1, N, 0, stream1>>>(A_d, B_d, C_d, N);
-  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream1));
-  HIP_CHECK(hipStreamEndCapture(stream1, &graph));
+  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream1))
+  HIP_CHECK(hipStreamEndCapture(stream1, &graph))
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
-  HIP_CHECK(hipGraphUpload(graphExec, stream2));
+  HIP_CHECK(hipGraphUpload(graphExec, stream2))
 
-  HIP_CHECK(hipGraphLaunch(graphExec, stream2));
-  HIP_CHECK(hipStreamSynchronize(stream2));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream2))
+  HIP_CHECK(hipStreamSynchronize(stream2))
 
   // Verify graph execution result
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipStreamDestroy(stream2))
 }
 
 /**
@@ -253,7 +253,7 @@ HIP_TEST_CASE(Unit_hipGraphUpload_Negative_Parameters) {
   hipGraphExec_t graphExec{};
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   SECTION("Pass graphExec node as nullptr") {
     HIP_CHECK_ERROR(hipGraphUpload(nullptr, stream), hipErrorInvalidValue);
@@ -264,24 +264,24 @@ HIP_TEST_CASE(Unit_hipGraphUpload_Negative_Parameters) {
   SECTION("Pass stream as uninitialize object") {
     hipStream_t stream1{};
     hipGraph_t graph;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
-    HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
+    HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
-    HIP_CHECK(hipGraphUpload(graphExec, stream1));
-    HIP_CHECK(hipGraphExecDestroy(graphExec));
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphUpload(graphExec, stream1))
+    HIP_CHECK(hipGraphExecDestroy(graphExec))
+    HIP_CHECK(hipGraphDestroy(graph))
   }
   SECTION("graphExec is destroyed") {
     hipGraphExec_t graph_exec;
     hipGraph_t graph;
 
-    HIP_CHECK(hipGraphCreate(&graph, 0));
-    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
-    HIP_CHECK(hipGraphUpload(graph_exec, hipStreamPerThread));
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphUpload(graph_exec, hipStreamPerThread))
+    HIP_CHECK(hipGraphExecDestroy(graph_exec))
     HIP_CHECK_ERROR(hipGraphUpload(graph_exec, hipStreamPerThread), hipErrorInvalidValue);
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphDestroy(graph))
   }
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }

@@ -16,7 +16,7 @@
 // Helper function to run atomicExch_system tests for peer GPUs
 template <typename TestType> static void runAtomicExchSystemPeerGPUsTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   SECTION("Same address") {
@@ -36,7 +36,7 @@ template <typename TestType> static void runAtomicExchSystemPeerGPUsTest() {
 // Helper function to run atomicExch_system tests for host and GPU
 template <typename TestType> static void runAtomicExchSystemHostAndGPUTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   SECTION("Same address") {
@@ -57,7 +57,7 @@ template <typename TestType> static void runAtomicExchSystemHostAndGPUTest() {
 // Helper function to run atomicExch_system tests for host and peer GPUs
 template <typename TestType> static void runAtomicExchSystemHostAndPeerGPUsTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   SECTION("Same address") {

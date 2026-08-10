@@ -354,7 +354,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
 
   GLBufferObject buffer1;
   hipGraphicsResource* resource1 = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone));
+  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone))
   REQUIRE(resource1 != nullptr);
 
   // Switch to context 2: create another buffer (larger size)
@@ -363,31 +363,31 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
 
   GLBufferWithData buffer2(kLargeBufferSize);
   hipGraphicsResource* resource2 = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone));
+  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone))
   REQUIRE(resource2 != nullptr);
 
   // Verify sizes match expectations
-  HIP_CHECK(hipGraphicsMapResources(1, &resource2, 0));
+  HIP_CHECK(hipGraphicsMapResources(1, &resource2, 0))
   void* devPtr2 = nullptr;
   size_t size2 = 0;
-  HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr2, &size2, resource2));
+  HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr2, &size2, resource2))
   REQUIRE(size2 == kLargeBufferSize);
-  HIP_CHECK(hipGraphicsUnmapResources(1, &resource2, 0));
+  HIP_CHECK(hipGraphicsUnmapResources(1, &resource2, 0))
 
   // Switch back to context 1: verify original resource
   window1.makeCurrent();
-  HIP_CHECK(hipGraphicsMapResources(1, &resource1, 0));
+  HIP_CHECK(hipGraphicsMapResources(1, &resource1, 0))
   void* devPtr1 = nullptr;
   size_t size1 = 0;
-  HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr1, &size1, resource1));
+  HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr1, &size1, resource1))
   REQUIRE(size1 == GLBufferObject::kSize);
-  HIP_CHECK(hipGraphicsUnmapResources(1, &resource1, 0));
+  HIP_CHECK(hipGraphicsUnmapResources(1, &resource1, 0))
 
    // Cleanup
    window1.makeCurrent();
-   HIP_CHECK(hipGraphicsUnregisterResource(resource1));
+   HIP_CHECK(hipGraphicsUnregisterResource(resource1))
    window2.makeCurrent();
-   HIP_CHECK(hipGraphicsUnregisterResource(resource2));
+   HIP_CHECK(hipGraphicsUnregisterResource(resource2))
  }
 
  //==============================================================================
@@ -540,10 +540,10 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
 
   GLBufferObject buffer1;
   hipGraphicsResource* resource1 = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone));
-  HIP_CHECK(hipGraphicsMapResources(1, &resource1, 0));
-  HIP_CHECK(hipGraphicsUnmapResources(1, &resource1, 0));
-  HIP_CHECK(hipGraphicsUnregisterResource(resource1));
+  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone))
+  HIP_CHECK(hipGraphicsMapResources(1, &resource1, 0))
+  HIP_CHECK(hipGraphicsUnmapResources(1, &resource1, 0))
+  HIP_CHECK(hipGraphicsUnregisterResource(resource1))
 
   // Second context - NO explicit hipGLGetDevices call
   GLUTWindow window2;
@@ -555,16 +555,16 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   // the context change and re-setup the interop
   GLBufferObject buffer2;
    hipGraphicsResource* resource2 = nullptr;
-   HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone));
+   HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone))
    REQUIRE(resource2 != nullptr);
 
-   HIP_CHECK(hipGraphicsMapResources(1, &resource2, 0));
+   HIP_CHECK(hipGraphicsMapResources(1, &resource2, 0))
    void* devPtr = nullptr;
    size_t size = 0;
-   HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr, &size, resource2));
+   HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr, &size, resource2))
    REQUIRE(devPtr != nullptr);
-   HIP_CHECK(hipGraphicsUnmapResources(1, &resource2, 0));
-   HIP_CHECK(hipGraphicsUnregisterResource(resource2));
+   HIP_CHECK(hipGraphicsUnmapResources(1, &resource2, 0))
+   HIP_CHECK(hipGraphicsUnregisterResource(resource2))
 
    INFO("Successfully used GL interop after context switch without hipGLGetDevices");
  }
@@ -593,9 +593,9 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
     // Don't call hipGLGetDevices, directly try to register
     GLBufferObject buffer;
     hipGraphicsResource* resource = nullptr;
-    HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource, buffer, hipGraphicsRegisterFlagsNone));
+    HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource, buffer, hipGraphicsRegisterFlagsNone))
     REQUIRE(resource != nullptr);
-    HIP_CHECK(hipGraphicsUnregisterResource(resource));
+    HIP_CHECK(hipGraphicsUnregisterResource(resource))
   }
 
   SECTION("hipGraphicsGLRegisterImage detects switch") {
@@ -605,29 +605,29 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
     HIP_CHECK(hipGraphicsGLRegisterImage(&resource, texture, GL_TEXTURE_2D,
                                          hipGraphicsRegisterFlagsNone));
     REQUIRE(resource != nullptr);
-    HIP_CHECK(hipGraphicsUnregisterResource(resource));
+    HIP_CHECK(hipGraphicsUnregisterResource(resource))
   }
 
   SECTION("hipGraphicsMapResources detects switch") {
     // Register in context 1
     GLBufferObject buffer1;
     hipGraphicsResource* resource1 = nullptr;
-    HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone));
+    HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone))
 
     // Switch to context 2 and register new buffer
     window2.makeCurrent();
     GLBufferObject buffer2;
     hipGraphicsResource* resource2 = nullptr;
-    HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone));
+    HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone))
 
      // Map should work with context 2's buffer
-     HIP_CHECK(hipGraphicsMapResources(1, &resource2, 0));
-     HIP_CHECK(hipGraphicsUnmapResources(1, &resource2, 0));
+     HIP_CHECK(hipGraphicsMapResources(1, &resource2, 0))
+     HIP_CHECK(hipGraphicsUnmapResources(1, &resource2, 0))
 
      // Cleanup
-     HIP_CHECK(hipGraphicsUnregisterResource(resource2));
+     HIP_CHECK(hipGraphicsUnregisterResource(resource2))
      window1.makeCurrent();
-     HIP_CHECK(hipGraphicsUnregisterResource(resource1));
+     HIP_CHECK(hipGraphicsUnregisterResource(resource1))
    }
  }
 
@@ -890,7 +890,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
 
   // Register buffer from context 1
   hipGraphicsResource* resource1 = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone));
+  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone))
 
   // Create buffer in context 2
   window2.makeCurrent();
@@ -899,26 +899,26 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
 
   // Register buffer from context 2
   hipGraphicsResource* resource2 = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone));
+  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone))
 
    // Use context 2's resource
-   HIP_CHECK(hipGraphicsMapResources(1, &resource2, 0));
+   HIP_CHECK(hipGraphicsMapResources(1, &resource2, 0))
    void* devPtr2 = nullptr;
    size_t size2 = 0;
-   HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr2, &size2, resource2));
+   HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr2, &size2, resource2))
    REQUIRE(devPtr2 != nullptr);
-   HIP_CHECK(hipGraphicsUnmapResources(1, &resource2, 0));
-   HIP_CHECK(hipGraphicsUnregisterResource(resource2));
+   HIP_CHECK(hipGraphicsUnmapResources(1, &resource2, 0))
+   HIP_CHECK(hipGraphicsUnregisterResource(resource2))
 
    // Switch back and use context 1's resource
    window1.makeCurrent();
-   HIP_CHECK(hipGraphicsMapResources(1, &resource1, 0));
+   HIP_CHECK(hipGraphicsMapResources(1, &resource1, 0))
    void* devPtr1 = nullptr;
    size_t size1 = 0;
-   HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr1, &size1, resource1));
+   HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr1, &size1, resource1))
    REQUIRE(devPtr1 != nullptr);
-   HIP_CHECK(hipGraphicsUnmapResources(1, &resource1, 0));
-   HIP_CHECK(hipGraphicsUnregisterResource(resource1));
+   HIP_CHECK(hipGraphicsUnmapResources(1, &resource1, 0))
+   HIP_CHECK(hipGraphicsUnregisterResource(resource1))
  }
 
  //==============================================================================
@@ -955,12 +955,12 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
 
    // Register and map buffer
    hipGraphicsResource* resource = nullptr;
-   HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource, buffer, hipGraphicsRegisterFlagsNone));
-   HIP_CHECK(hipGraphicsMapResources(1, &resource, 0));
+   HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource, buffer, hipGraphicsRegisterFlagsNone))
+   HIP_CHECK(hipGraphicsMapResources(1, &resource, 0))
 
    void* devPtr = nullptr;
    size_t size = 0;
-   HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr, &size, resource));
+   HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr, &size, resource))
    REQUIRE(devPtr != nullptr);
 
    // Modify data on device
@@ -968,9 +968,9 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
    int blockSize = 256;
    int numBlocks = (kFloatCount + blockSize - 1) / blockSize;
    simpleAddKernel<<<numBlocks, blockSize>>>(static_cast<float*>(devPtr), kFloatCount, kAddValue);
-   HIP_CHECK(hipDeviceSynchronize());
+   HIP_CHECK(hipDeviceSynchronize())
 
-   HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0));
+   HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0))
 
    // Switch to another context and back
    window2.makeCurrent();
@@ -990,7 +990,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      REQUIRE(outputData[i] == Catch::Approx(expected).epsilon(0.001f));
    }
 
-   HIP_CHECK(hipGraphicsUnregisterResource(resource));
+   HIP_CHECK(hipGraphicsUnregisterResource(resource))
    INFO("Data integrity verified after context switch");
  }
 
@@ -1031,28 +1031,28 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      // Modify buffer1
      window1.makeCurrent();
      hipGraphicsResource* res1 = nullptr;
-     HIP_CHECK(hipGraphicsGLRegisterBuffer(&res1, buffer1, hipGraphicsRegisterFlagsNone));
-     HIP_CHECK(hipGraphicsMapResources(1, &res1, 0));
+     HIP_CHECK(hipGraphicsGLRegisterBuffer(&res1, buffer1, hipGraphicsRegisterFlagsNone))
+     HIP_CHECK(hipGraphicsMapResources(1, &res1, 0))
      void* devPtr1 = nullptr;
      size_t size1 = 0;
-     HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr1, &size1, res1));
+     HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr1, &size1, res1))
      simpleAddKernel<<<1, kFloatCount>>>(static_cast<float*>(devPtr1), kFloatCount, 0.1f);
-     HIP_CHECK(hipDeviceSynchronize());
-     HIP_CHECK(hipGraphicsUnmapResources(1, &res1, 0));
-     HIP_CHECK(hipGraphicsUnregisterResource(res1));
+     HIP_CHECK(hipDeviceSynchronize())
+     HIP_CHECK(hipGraphicsUnmapResources(1, &res1, 0))
+     HIP_CHECK(hipGraphicsUnregisterResource(res1))
 
      // Modify buffer2
      window2.makeCurrent();
      hipGraphicsResource* res2 = nullptr;
-     HIP_CHECK(hipGraphicsGLRegisterBuffer(&res2, buffer2, hipGraphicsRegisterFlagsNone));
-     HIP_CHECK(hipGraphicsMapResources(1, &res2, 0));
+     HIP_CHECK(hipGraphicsGLRegisterBuffer(&res2, buffer2, hipGraphicsRegisterFlagsNone))
+     HIP_CHECK(hipGraphicsMapResources(1, &res2, 0))
      void* devPtr2 = nullptr;
      size_t size2 = 0;
-     HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr2, &size2, res2));
+     HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr2, &size2, res2))
      simpleAddKernel<<<1, kFloatCount>>>(static_cast<float*>(devPtr2), kFloatCount, 0.2f);
-     HIP_CHECK(hipDeviceSynchronize());
-     HIP_CHECK(hipGraphicsUnmapResources(1, &res2, 0));
-     HIP_CHECK(hipGraphicsUnregisterResource(res2));
+     HIP_CHECK(hipDeviceSynchronize())
+     HIP_CHECK(hipGraphicsUnmapResources(1, &res2, 0))
+     HIP_CHECK(hipGraphicsUnregisterResource(res2))
    }
 
    // Verify data
@@ -1098,11 +1098,11 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
                                        hipGraphicsRegisterFlagsNone));
   REQUIRE(texResource1 != nullptr);
 
-  HIP_CHECK(hipGraphicsMapResources(1, &texResource1, 0));
+  HIP_CHECK(hipGraphicsMapResources(1, &texResource1, 0))
   hipArray_t array1 = nullptr;
-  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array1, texResource1, 0, 0));
+  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array1, texResource1, 0, 0))
   REQUIRE(array1 != nullptr);
-  HIP_CHECK(hipGraphicsUnmapResources(1, &texResource1, 0));
+  HIP_CHECK(hipGraphicsUnmapResources(1, &texResource1, 0))
 
   // Context 2: register another texture
   window2.makeCurrent();
@@ -1114,16 +1114,16 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
                                        hipGraphicsRegisterFlagsNone));
   REQUIRE(texResource2 != nullptr);
 
-   HIP_CHECK(hipGraphicsMapResources(1, &texResource2, 0));
+   HIP_CHECK(hipGraphicsMapResources(1, &texResource2, 0))
    hipArray_t array2 = nullptr;
-   HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array2, texResource2, 0, 0));
+   HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array2, texResource2, 0, 0))
    REQUIRE(array2 != nullptr);
-   HIP_CHECK(hipGraphicsUnmapResources(1, &texResource2, 0));
+   HIP_CHECK(hipGraphicsUnmapResources(1, &texResource2, 0))
 
    // Cleanup
-   HIP_CHECK(hipGraphicsUnregisterResource(texResource2));
+   HIP_CHECK(hipGraphicsUnregisterResource(texResource2))
    window1.makeCurrent();
-   HIP_CHECK(hipGraphicsUnregisterResource(texResource1));
+   HIP_CHECK(hipGraphicsUnregisterResource(texResource1))
 
    INFO("Successfully tested texture interop across context switches");
  }
@@ -1145,7 +1145,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
 
   GLBufferObject buffer1;
   hipGraphicsResource* bufResource = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&bufResource, buffer1, hipGraphicsRegisterFlagsNone));
+  HIP_CHECK(hipGraphicsGLRegisterBuffer(&bufResource, buffer1, hipGraphicsRegisterFlagsNone))
 
   // Context 2: texture
   window2.makeCurrent();
@@ -1157,25 +1157,25 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
                                        hipGraphicsRegisterFlagsNone));
 
    // Use texture in context 2
-   HIP_CHECK(hipGraphicsMapResources(1, &texResource, 0));
+   HIP_CHECK(hipGraphicsMapResources(1, &texResource, 0))
    hipArray_t array = nullptr;
-   HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, texResource, 0, 0));
+   HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, texResource, 0, 0))
    REQUIRE(array != nullptr);
-   HIP_CHECK(hipGraphicsUnmapResources(1, &texResource, 0));
+   HIP_CHECK(hipGraphicsUnmapResources(1, &texResource, 0))
 
    // Switch back to context 1 and use buffer
    window1.makeCurrent();
-   HIP_CHECK(hipGraphicsMapResources(1, &bufResource, 0));
+   HIP_CHECK(hipGraphicsMapResources(1, &bufResource, 0))
    void* devPtr = nullptr;
    size_t size = 0;
-   HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr, &size, bufResource));
+   HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr, &size, bufResource))
    REQUIRE(devPtr != nullptr);
-   HIP_CHECK(hipGraphicsUnmapResources(1, &bufResource, 0));
+   HIP_CHECK(hipGraphicsUnmapResources(1, &bufResource, 0))
 
    // Cleanup
-   HIP_CHECK(hipGraphicsUnregisterResource(bufResource));
+   HIP_CHECK(hipGraphicsUnregisterResource(bufResource))
    window2.makeCurrent();
-   HIP_CHECK(hipGraphicsUnregisterResource(texResource));
+   HIP_CHECK(hipGraphicsUnregisterResource(texResource))
  }
 
  //==============================================================================
@@ -1201,23 +1201,23 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
 
   // Create stream
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   GLBufferObject buffer1;
   hipGraphicsResource* resource1 = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone));
+  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone))
 
    // Map with stream
-   HIP_CHECK(hipGraphicsMapResources(1, &resource1, stream));
+   HIP_CHECK(hipGraphicsMapResources(1, &resource1, stream))
 
    void* devPtr = nullptr;
    size_t size = 0;
-   HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr, &size, resource1));
+   HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr, &size, resource1))
    REQUIRE(devPtr != nullptr);
 
    // Unmap with stream
-   HIP_CHECK(hipGraphicsUnmapResources(1, &resource1, stream));
-   HIP_CHECK(hipStreamSynchronize(stream));
+   HIP_CHECK(hipGraphicsUnmapResources(1, &resource1, stream))
+   HIP_CHECK(hipStreamSynchronize(stream))
 
   // Switch context and do same with new buffer
   window2.makeCurrent();
@@ -1225,19 +1225,19 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
 
   GLBufferObject buffer2;
   hipGraphicsResource* resource2 = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone));
+  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone))
 
-  HIP_CHECK(hipGraphicsMapResources(1, &resource2, stream));
-  HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr, &size, resource2));
+  HIP_CHECK(hipGraphicsMapResources(1, &resource2, stream))
+  HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr, &size, resource2))
   REQUIRE(devPtr != nullptr);
-  HIP_CHECK(hipGraphicsUnmapResources(1, &resource2, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphicsUnmapResources(1, &resource2, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Cleanup
-  HIP_CHECK(hipGraphicsUnregisterResource(resource2));
+  HIP_CHECK(hipGraphicsUnregisterResource(resource2))
   window1.makeCurrent();
-  HIP_CHECK(hipGraphicsUnregisterResource(resource1));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphicsUnregisterResource(resource1))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
  /**
@@ -1255,7 +1255,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
    std::array<hipStream_t, kNumStreams> streams;
 
    for (int i = 0; i < kNumStreams; ++i) {
-     HIP_CHECK(hipStreamCreate(&streams[i]));
+     HIP_CHECK(hipStreamCreate(&streams[i]))
    }
 
    for (int iter = 0; iter < kDefaultIterations; ++iter) {
@@ -1266,10 +1266,10 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
     for (int s = 0; s < kNumStreams; ++s) {
       GLBufferObject buffer;
       hipGraphicsResource* resource = nullptr;
-      HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource, buffer, hipGraphicsRegisterFlagsNone));
-      HIP_CHECK(hipGraphicsMapResources(1, &resource, streams[s]));
-      HIP_CHECK(hipGraphicsUnmapResources(1, &resource, streams[s]));
-      HIP_CHECK(hipGraphicsUnregisterResource(resource));
+      HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource, buffer, hipGraphicsRegisterFlagsNone))
+      HIP_CHECK(hipGraphicsMapResources(1, &resource, streams[s]))
+      HIP_CHECK(hipGraphicsUnmapResources(1, &resource, streams[s]))
+      HIP_CHECK(hipGraphicsUnregisterResource(resource))
     }
 
     // Context 2
@@ -1279,17 +1279,17 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
     for (int s = 0; s < kNumStreams; ++s) {
       GLBufferObject buffer;
       hipGraphicsResource* resource = nullptr;
-      HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource, buffer, hipGraphicsRegisterFlagsNone));
-      HIP_CHECK(hipGraphicsMapResources(1, &resource, streams[s]));
-      HIP_CHECK(hipGraphicsUnmapResources(1, &resource, streams[s]));
-      HIP_CHECK(hipGraphicsUnregisterResource(resource));
+      HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource, buffer, hipGraphicsRegisterFlagsNone))
+      HIP_CHECK(hipGraphicsMapResources(1, &resource, streams[s]))
+      HIP_CHECK(hipGraphicsUnmapResources(1, &resource, streams[s]))
+      HIP_CHECK(hipGraphicsUnregisterResource(resource))
     }
   }
 
    // Synchronize and cleanup streams
    for (int i = 0; i < kNumStreams; ++i) {
-     HIP_CHECK(hipStreamSynchronize(streams[i]));
-     HIP_CHECK(hipStreamDestroy(streams[i]));
+     HIP_CHECK(hipStreamSynchronize(streams[i]))
+     HIP_CHECK(hipStreamDestroy(streams[i]))
    }
  }
 
@@ -1357,23 +1357,23 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
     for (int i = 0; i < kBuffersPerContext; ++i) {
       buffers1.push_back(std::make_unique<GLBufferObject>());
       hipGraphicsResource* res = nullptr;
-      HIP_CHECK(hipGraphicsGLRegisterBuffer(&res, *buffers1.back(), hipGraphicsRegisterFlagsNone));
+      HIP_CHECK(hipGraphicsGLRegisterBuffer(&res, *buffers1.back(), hipGraphicsRegisterFlagsNone))
       resources1.push_back(res);
     }
 
     // Map all
     for (auto res : resources1) {
-      HIP_CHECK(hipGraphicsMapResources(1, &res, 0));
+      HIP_CHECK(hipGraphicsMapResources(1, &res, 0))
     }
 
     // Unmap all
     for (auto res : resources1) {
-      HIP_CHECK(hipGraphicsUnmapResources(1, &res, 0));
+      HIP_CHECK(hipGraphicsUnmapResources(1, &res, 0))
     }
 
     // Unregister all
     for (auto res : resources1) {
-      HIP_CHECK(hipGraphicsUnregisterResource(res));
+      HIP_CHECK(hipGraphicsUnregisterResource(res))
     }
 
     // Context 2: repeat
@@ -1386,18 +1386,18 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
     for (int i = 0; i < kBuffersPerContext; ++i) {
       buffers2.push_back(std::make_unique<GLBufferObject>());
       hipGraphicsResource* res = nullptr;
-      HIP_CHECK(hipGraphicsGLRegisterBuffer(&res, *buffers2.back(), hipGraphicsRegisterFlagsNone));
+      HIP_CHECK(hipGraphicsGLRegisterBuffer(&res, *buffers2.back(), hipGraphicsRegisterFlagsNone))
       resources2.push_back(res);
     }
 
      for (auto res : resources2) {
-       HIP_CHECK(hipGraphicsMapResources(1, &res, 0));
+       HIP_CHECK(hipGraphicsMapResources(1, &res, 0))
      }
      for (auto res : resources2) {
-       HIP_CHECK(hipGraphicsUnmapResources(1, &res, 0));
+       HIP_CHECK(hipGraphicsUnmapResources(1, &res, 0))
      }
      for (auto res : resources2) {
-       HIP_CHECK(hipGraphicsUnregisterResource(res));
+       HIP_CHECK(hipGraphicsUnregisterResource(res))
      }
    }
 
@@ -1477,10 +1477,10 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
 
     GLBufferObject buffer1;
     hipGraphicsResource* res1 = nullptr;
-    HIP_CHECK(hipGraphicsGLRegisterBuffer(&res1, buffer1, flag));
-    HIP_CHECK(hipGraphicsMapResources(1, &res1, 0));
-    HIP_CHECK(hipGraphicsUnmapResources(1, &res1, 0));
-    HIP_CHECK(hipGraphicsUnregisterResource(res1));
+    HIP_CHECK(hipGraphicsGLRegisterBuffer(&res1, buffer1, flag))
+    HIP_CHECK(hipGraphicsMapResources(1, &res1, 0))
+    HIP_CHECK(hipGraphicsUnmapResources(1, &res1, 0))
+    HIP_CHECK(hipGraphicsUnregisterResource(res1))
 
     // Context 2
     window2.makeCurrent();
@@ -1488,10 +1488,10 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
 
     GLBufferObject buffer2;
     hipGraphicsResource* res2 = nullptr;
-    HIP_CHECK(hipGraphicsGLRegisterBuffer(&res2, buffer2, flag));
-    HIP_CHECK(hipGraphicsMapResources(1, &res2, 0));
-    HIP_CHECK(hipGraphicsUnmapResources(1, &res2, 0));
-    HIP_CHECK(hipGraphicsUnregisterResource(res2));
+    HIP_CHECK(hipGraphicsGLRegisterBuffer(&res2, buffer2, flag))
+    HIP_CHECK(hipGraphicsMapResources(1, &res2, 0))
+    HIP_CHECK(hipGraphicsUnmapResources(1, &res2, 0))
+    HIP_CHECK(hipGraphicsUnregisterResource(res2))
   }
 }
 
@@ -1574,7 +1574,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
      std::vector<int> devices1(device_count, -1);
      // Note: hipGLDeviceListNextFrame is not supported
      if (listType != hipGLDeviceListNextFrame) {
-       HIP_CHECK(hipGLGetDevices(&count1, devices1.data(), device_count, listType));
+       HIP_CHECK(hipGLGetDevices(&count1, devices1.data(), device_count, listType))
        REQUIRE(count1 >= 1);
      }
 
@@ -1582,7 +1582,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
      unsigned int count2 = 0;
      std::vector<int> devices2(device_count, -1);
      if (listType != hipGLDeviceListNextFrame) {
-       HIP_CHECK(hipGLGetDevices(&count2, devices2.data(), device_count, listType));
+       HIP_CHECK(hipGLGetDevices(&count2, devices2.data(), device_count, listType))
        REQUIRE(count2 >= 1);
      }
    };
@@ -1606,7 +1606,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
    const int device_count = HipTest::getDeviceCount();
    unsigned int gl_device_count = 0;
    std::vector<int> gl_devices(device_count, -1);
-   HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll));
+   HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll))
    REQUIRE(gl_device_count >= 1);
 
    // Subsequent operations should work

@@ -65,8 +65,8 @@ template <typename T> void testExternShared(size_t N, unsigned groupElements) {
   unsigned blocks = N / threadsPerBlock;
   REQUIRE(N == blocks * threadsPerBlock);
 
-  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
 
   // calculate the amount of dynamic shared memory required
   size_t groupMemBytes = groupElements * sizeof(T);
@@ -75,8 +75,8 @@ template <typename T> void testExternShared(size_t N, unsigned groupElements) {
   hipLaunchKernelGGL(HIP_KERNEL_NAME(testExternSharedKernel<T>), dim3(blocks),
                      dim3(threadsPerBlock), groupMemBytes, 0, A_d, B_d, C_d, N, groupElements);
 
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
 
   // verify
   for (size_t i = 0; i < N; ++i) {
@@ -148,7 +148,7 @@ HIP_TEST_CASE(Unit_hipDynamicShared) {
 #if !defined(ENABLE_ADDRESS_SANITIZER)
   SECTION("test case with float for max LDS size") {
     int maxLDS = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&maxLDS, hipDeviceAttributeMaxSharedMemoryPerBlock, 0));
+    HIP_CHECK(hipDeviceGetAttribute(&maxLDS, hipDeviceAttributeMaxSharedMemoryPerBlock, 0))
     testExternShared<float>(1024, maxLDS / sizeof(float));
   }
 #endif

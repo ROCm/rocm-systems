@@ -12,7 +12,7 @@
 HIP_TEST_CASE(Unit_hipModuleGetFunction_Positive_Basic) {
   auto mg = ModuleGuard::InitModule("get_function_module.code");
   hipFunction_t kernel = nullptr;
-  HIP_CHECK(hipModuleGetFunction(&kernel, mg.module(), "GlobalKernel"));
+  HIP_CHECK(hipModuleGetFunction(&kernel, mg.module(), "GlobalKernel"))
   REQUIRE(kernel != nullptr);
 }
 
@@ -58,14 +58,14 @@ HIP_TEST_CASE(Unit_hipModuleGetFunction_Negative_Parameters) {
 // is loaded
 HIP_TEST_CASE(Unit_hipModuleGetFunction_DiffDevice) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   auto mg = ModuleGuard::InitModule("get_function_module.code");
   hipFunction_t kernel = nullptr;
-  HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipModuleGetFunction(&kernel, mg.module(), "GlobalKernel"));
+  HIP_CHECK(hipSetDevice(1))
+  HIP_CHECK(hipModuleGetFunction(&kernel, mg.module(), "GlobalKernel"))
   REQUIRE(kernel != nullptr);
 }

@@ -91,7 +91,7 @@ HIP_TEST_CASE(Unit_hipGraphExternalSemaphoresWaitNodeSetParams_Vulkan_Positive_M
  */
 HIP_TEST_CASE(Unit_hipGraphExternalSemaphoresWaitNodeSetParams_Vulkan_Negative_Parameters) {
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   VulkanTest vkt(enable_validation);
   hipExternalSemaphoreWaitParams wait_params = {};
@@ -109,15 +109,15 @@ HIP_TEST_CASE(Unit_hipGraphExternalSemaphoresWaitNodeSetParams_Vulkan_Negative_P
   }
 
   hipGraphNode_t node = nullptr;
-  HIP_CHECK(hipGraphAddExternalSemaphoresWaitNode(&node, graph, nullptr, 0, &node_params));
+  HIP_CHECK(hipGraphAddExternalSemaphoresWaitNode(&node, graph, nullptr, 0, &node_params))
 
   SECTION("params == nullptr") {
     HIP_CHECK_ERROR(hipGraphExternalSemaphoresWaitNodeSetParams(node, nullptr),
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**

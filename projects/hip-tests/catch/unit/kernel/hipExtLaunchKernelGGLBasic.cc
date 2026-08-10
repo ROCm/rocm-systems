@@ -32,26 +32,26 @@ __global__ void mKernel(char f, int16_t a, int b, double c, int16_t d, int e, do
 void testMixData() {
   double m = 0;
   double* d_m;
-  HIP_CHECK(hipMalloc(&d_m, sizeof(double)));
+  HIP_CHECK(hipMalloc(&d_m, sizeof(double)))
   int a = 1, e = 10;
   int16_t b = 2, d = 4;
   double c = 3.0;
   char ff = 10;
   hipExtLaunchKernelGGL(mKernel, 1, 1, 0, 0, nullptr, nullptr, 0, ff, b, a, c, d, e, d_m);
-  HIP_CHECK(hipMemcpy(&m, d_m, sizeof(double), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&m, d_m, sizeof(double), hipMemcpyDeviceToHost))
   REQUIRE(m == 30.0);
-  HIP_CHECK(hipFree(d_m));
+  HIP_CHECK(hipFree(d_m))
 }
 
 void testStruct() {
   double m = 0;
   double* d_m;
-  HIP_CHECK(hipMalloc(&d_m, sizeof(double)));
+  HIP_CHECK(hipMalloc(&d_m, sizeof(double)))
   _T s{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
   hipExtLaunchKernelGGL(sKernel, 1, 1, 0, 0, nullptr, nullptr, 0, s, d_m);
-  HIP_CHECK(hipMemcpy(&m, d_m, sizeof(double), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&m, d_m, sizeof(double), hipMemcpyDeviceToHost))
   REQUIRE(m == 55.0);
-  HIP_CHECK(hipFree(d_m));
+  HIP_CHECK(hipFree(d_m))
 }
 
 void test(size_t N) {
@@ -63,15 +63,15 @@ void test(size_t N) {
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
 
   hipExtLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0, nullptr,
                         nullptr, 0, static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d,
                         N);
 
-  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }

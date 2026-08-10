@@ -41,7 +41,7 @@ HIP_TEST_CASE(Unit_hip_library_load_rtc) {
       "threadIdx.x; out[i] = a[i] * b[i]; }\n";
 
   hipDeviceProp_t prop;
-  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0))
   std::string gpu_arch = prop.gcnArchName;
 
   std::vector<float> input1, input2;
@@ -53,16 +53,16 @@ HIP_TEST_CASE(Unit_hip_library_load_rtc) {
   }
 
   float *d_in1, *d_in2, *d_out;
-  HIP_CHECK(hipMalloc(&d_in1, sizeof(float) * size));
-  HIP_CHECK(hipMalloc(&d_in2, sizeof(float) * size));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size));
+  HIP_CHECK(hipMalloc(&d_in1, sizeof(float) * size))
+  HIP_CHECK(hipMalloc(&d_in2, sizeof(float) * size))
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size))
 
-  HIP_CHECK(hipMemset(d_out, 0, sizeof(float) * size));
-  HIP_CHECK(hipMemcpy(d_in1, input1.data(), sizeof(float) * size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_in2, input2.data(), sizeof(float) * size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemset(d_out, 0, sizeof(float) * size))
+  HIP_CHECK(hipMemcpy(d_in1, input1.data(), sizeof(float) * size, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(d_in2, input2.data(), sizeof(float) * size, hipMemcpyHostToDevice))
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   SECTION("One Kernel") {
     auto kernel = kernel1;
@@ -71,22 +71,22 @@ HIP_TEST_CASE(Unit_hip_library_load_rtc) {
     hipLibrary_t library;
     hipKernel_t function;
 
-    HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
-    HIP_CHECK(hipLibraryGetKernel(&function, library, "add_kernel"));
+    HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0))
+    HIP_CHECK(hipLibraryGetKernel(&function, library, "add_kernel"))
 
     unsigned int count = 0;
-    HIP_CHECK(hipLibraryGetKernelCount(&count, library));
+    HIP_CHECK(hipLibraryGetKernelCount(&count, library))
     REQUIRE(count == 1);
 
     void* args[] = {&d_out, &d_in1, &d_in2};
 
-    HIP_CHECK(hipLaunchKernel(function, 1, size, args, 0, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipLibraryUnload(library));
+    HIP_CHECK(hipLaunchKernel(function, 1, size, args, 0, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
+    HIP_CHECK(hipLibraryUnload(library))
 
 
     std::vector<float> out(size, 0);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float tmp = input1[i] + input2[i];
       INFO("Index: " << i << " cpu res: " << tmp << " gpu res: " << out[i]);
@@ -101,22 +101,22 @@ HIP_TEST_CASE(Unit_hip_library_load_rtc) {
     hipLibrary_t library;
     hipKernel_t function;
 
-    HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
-    HIP_CHECK(hipLibraryGetKernel(&function, library, "sub_kernel"));
+    HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0))
+    HIP_CHECK(hipLibraryGetKernel(&function, library, "sub_kernel"))
 
     unsigned int count = 0;
-    HIP_CHECK(hipLibraryGetKernelCount(&count, library));
+    HIP_CHECK(hipLibraryGetKernelCount(&count, library))
     REQUIRE(count == 2);
 
     void* args[] = {&d_out, &d_in1, &d_in2};
 
-    HIP_CHECK(hipLaunchKernel(function, 1, size, args, 0, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipLibraryUnload(library));
+    HIP_CHECK(hipLaunchKernel(function, 1, size, args, 0, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
+    HIP_CHECK(hipLibraryUnload(library))
 
 
     std::vector<float> out(size, 0);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float tmp = input1[i] - input2[i];
       INFO("Index: " << i << " cpu res: " << tmp << " gpu res: " << out[i]);
@@ -131,22 +131,22 @@ HIP_TEST_CASE(Unit_hip_library_load_rtc) {
     hipLibrary_t library;
     hipKernel_t function;
 
-    HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
-    HIP_CHECK(hipLibraryGetKernel(&function, library, "mul_kernel"));
+    HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0))
+    HIP_CHECK(hipLibraryGetKernel(&function, library, "mul_kernel"))
 
     unsigned int count = 0;
-    HIP_CHECK(hipLibraryGetKernelCount(&count, library));
+    HIP_CHECK(hipLibraryGetKernelCount(&count, library))
     REQUIRE(count == 3);
 
     void* args[] = {&d_out, &d_in1, &d_in2};
 
-    HIP_CHECK(hipLaunchKernel(function, 1, size, args, 0, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipLibraryUnload(library));
+    HIP_CHECK(hipLaunchKernel(function, 1, size, args, 0, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
+    HIP_CHECK(hipLibraryUnload(library))
 
 
     std::vector<float> out(size, 0);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < size; i++) {
       float tmp = input1[i] * input2[i];
       INFO("Index: " << i << " cpu res: " << tmp << " gpu res: " << out[i]);
@@ -154,8 +154,8 @@ HIP_TEST_CASE(Unit_hip_library_load_rtc) {
     }
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(d_in1));
-  HIP_CHECK(hipFree(d_in2));
-  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(d_in1))
+  HIP_CHECK(hipFree(d_in2))
+  HIP_CHECK(hipFree(d_out))
 }

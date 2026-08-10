@@ -44,10 +44,10 @@ constexpr int kNodesPerThread = 256;
 
 void BuildAndDumpGraph(std::atomic<int>* start_gate, std::string dot_path,
                        std::vector<int>* ids_out) {
-  HIP_CHECK_THREAD(hipSetDevice(0));
+  HIP_CHECK_THREAD(hipSetDevice(0))
 
   hipGraph_t graph{};
-  HIP_CHECK_THREAD(hipGraphCreate(&graph, 0));
+  HIP_CHECK_THREAD(hipGraphCreate(&graph, 0))
 
   // Release the gate so every thread enters the AddNode loop at the same
   // moment, maximising concurrent nextID++ contention.
@@ -58,10 +58,10 @@ void BuildAndDumpGraph(std::atomic<int>* start_gate, std::string dot_path,
 
   for (int i = 0; i < kNodesPerThread; ++i) {
     hipGraphNode_t n{};
-    HIP_CHECK_THREAD(hipGraphAddEmptyNode(&n, graph, nullptr, 0));
+    HIP_CHECK_THREAD(hipGraphAddEmptyNode(&n, graph, nullptr, 0))
   }
 
-  HIP_CHECK_THREAD(hipGraphDebugDotPrint(graph, dot_path.c_str(), 0));
+  HIP_CHECK_THREAD(hipGraphDebugDotPrint(graph, dot_path.c_str(), 0))
 
   // hipGraphDebugDotPrint emits one "graph_<G>_node_<id>"[ declaration
   // line per GraphNode. <id> is GraphNode::id_; if two nodes share id_,
@@ -79,7 +79,7 @@ void BuildAndDumpGraph(std::atomic<int>* start_gate, std::string dot_path,
   in.close();
   std::remove(dot_path.c_str());
 
-  HIP_CHECK_THREAD(hipGraphDestroy(graph));
+  HIP_CHECK_THREAD(hipGraphDestroy(graph))
 }
 
 }  // namespace
@@ -101,7 +101,7 @@ HIP_TEST_CASE(Unit_hipGraph_ConcurrentCreate_GraphIDRace) {
   std::vector<std::vector<hipGraph_t>> per_thread_graphs(kGraphThreads);
 
   auto worker = [&](int t) {
-    HIP_CHECK_THREAD(hipSetDevice(0));
+    HIP_CHECK_THREAD(hipSetDevice(0))
     start_gate.fetch_add(1, std::memory_order_release);
     while (start_gate.load(std::memory_order_acquire) < kGraphThreads) {
       std::this_thread::yield();
@@ -109,7 +109,7 @@ HIP_TEST_CASE(Unit_hipGraph_ConcurrentCreate_GraphIDRace) {
     per_thread_graphs[t].reserve(kGraphsPerThread);
     for (int i = 0; i < kGraphsPerThread; ++i) {
       hipGraph_t g{};
-      HIP_CHECK_THREAD(hipGraphCreate(&g, 0));
+      HIP_CHECK_THREAD(hipGraphCreate(&g, 0))
       per_thread_graphs[t].push_back(g);
     }
   };
@@ -127,7 +127,7 @@ HIP_TEST_CASE(Unit_hipGraph_ConcurrentCreate_GraphIDRace) {
        "hipGraphAddNodeConcurrent_graphid.dot").string();
   for (int t = 0; t < kGraphThreads; ++t) {
     for (hipGraph_t g : per_thread_graphs[t]) {
-      HIP_CHECK(hipGraphDebugDotPrint(g, dot_path.c_str(), 0));
+      HIP_CHECK(hipGraphDebugDotPrint(g, dot_path.c_str(), 0))
       std::ifstream in(dot_path);
       std::string line;
       while (std::getline(in, line)) {
@@ -139,7 +139,7 @@ HIP_TEST_CASE(Unit_hipGraph_ConcurrentCreate_GraphIDRace) {
       }
       in.close();
       std::remove(dot_path.c_str());
-      HIP_CHECK(hipGraphDestroy(g));
+      HIP_CHECK(hipGraphDestroy(g))
     }
   }
 
@@ -201,17 +201,17 @@ HIP_TEST_CASE(Unit_hipGraph_ConcurrentConstruct_LaunchDropSmoke) {
   std::atomic<int> total_dropped{0};
 
   auto worker = [&]() {
-    HIP_CHECK_THREAD(hipSetDevice(0));
+    HIP_CHECK_THREAD(hipSetDevice(0))
     const size_t bytes = sizeof(uint32_t) * kSmokeChainLen;
     uint32_t* d_buf = nullptr;
-    HIP_CHECK_THREAD(hipMalloc(&d_buf, bytes));
+    HIP_CHECK_THREAD(hipMalloc(&d_buf, bytes))
     std::vector<uint32_t> sentinel(kSmokeChainLen, kSentinel);
 
     for (int iter = 0; iter < kSmokeIters; ++iter) {
-      HIP_CHECK_THREAD(hipMemcpy(d_buf, sentinel.data(), bytes, hipMemcpyHostToDevice));
+      HIP_CHECK_THREAD(hipMemcpy(d_buf, sentinel.data(), bytes, hipMemcpyHostToDevice))
 
       hipGraph_t graph{};
-      HIP_CHECK_THREAD(hipGraphCreate(&graph, 0));
+      HIP_CHECK_THREAD(hipGraphCreate(&graph, 0))
 
       // Release the gate once per thread, before the first iter's build
       // loop, to maximise concurrent overlap on nextID++.
@@ -234,30 +234,30 @@ HIP_TEST_CASE(Unit_hipGraph_ConcurrentConstruct_LaunchDropSmoke) {
         p.height = 1;
         hipGraphNode_t n{};
         if (i == 0) {
-          HIP_CHECK_THREAD(hipGraphAddMemsetNode(&n, graph, nullptr, 0, &p));
+          HIP_CHECK_THREAD(hipGraphAddMemsetNode(&n, graph, nullptr, 0, &p))
         } else {
-          HIP_CHECK_THREAD(hipGraphAddMemsetNode(&n, graph, &prev, 1, &p));
+          HIP_CHECK_THREAD(hipGraphAddMemsetNode(&n, graph, &prev, 1, &p))
         }
         prev = n;
       }
 
       hipGraphExec_t exec{};
-      HIP_CHECK_THREAD(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
-      HIP_CHECK_THREAD(hipGraphLaunch(exec, 0));
-      HIP_CHECK_THREAD(hipDeviceSynchronize());
+      HIP_CHECK_THREAD(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0))
+      HIP_CHECK_THREAD(hipGraphLaunch(exec, 0))
+      HIP_CHECK_THREAD(hipDeviceSynchronize())
 
       std::vector<uint32_t> host(kSmokeChainLen);
-      HIP_CHECK_THREAD(hipMemcpy(host.data(), d_buf, bytes, hipMemcpyDeviceToHost));
+      HIP_CHECK_THREAD(hipMemcpy(host.data(), d_buf, bytes, hipMemcpyDeviceToHost))
       int dropped = 0;
       for (int i = 0; i < kSmokeChainLen; ++i) {
         if (host[i] == kSentinel) ++dropped;
       }
       total_dropped.fetch_add(dropped, std::memory_order_relaxed);
 
-      HIP_CHECK_THREAD(hipGraphExecDestroy(exec));
-      HIP_CHECK_THREAD(hipGraphDestroy(graph));
+      HIP_CHECK_THREAD(hipGraphExecDestroy(exec))
+      HIP_CHECK_THREAD(hipGraphDestroy(graph))
     }
-    HIP_CHECK_THREAD(hipFree(d_buf));
+    HIP_CHECK_THREAD(hipFree(d_buf))
   };
 
   std::vector<std::thread> workers2;

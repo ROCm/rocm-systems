@@ -71,7 +71,7 @@ HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_ValidFlag) {
   auto validFlags = getValidFlags();
 
   unsigned int flag = 0;
-  HIP_CHECK(hipGetDeviceFlags(&flag));
+  HIP_CHECK(hipGetDeviceFlags(&flag))
   REQUIRE(std::find(std::begin(validFlags), std::end(validFlags), flag) != std::end(validFlags));
 }
 
@@ -92,13 +92,13 @@ HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_SetThenGet) {
   auto validFlags = getValidFlags();
 
   auto devNo = GENERATE(range(0, HipTest::getDeviceCount()));
-  HIP_CHECK(hipSetDevice(devNo));
+  HIP_CHECK(hipSetDevice(devNo))
 
   const unsigned int flag = GENERATE_COPY(from_range(std::begin(validFlags), std::end(validFlags)));
-  HIP_CHECK(hipSetDeviceFlags(flag));
+  HIP_CHECK(hipSetDeviceFlags(flag))
 
   unsigned int getFlag;
-  HIP_CHECK(hipGetDeviceFlags(&getFlag));
+  HIP_CHECK(hipGetDeviceFlags(&getFlag))
 // flags other than hipDeviceSchedule* are ignore on the ROCm backend
 #if HT_NVIDIA
   // CUDA backend will sometimes set other flags
@@ -123,7 +123,7 @@ HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_Threaded) {
   auto validFlags = getValidFlags();
 
   auto devNo = GENERATE(range(0, HipTest::getDeviceCount()));
-  HIP_CHECK(hipSetDevice(devNo));
+  HIP_CHECK(hipSetDevice(devNo))
 
   std::mutex mut;
   std::condition_variable cv;
@@ -134,8 +134,8 @@ HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_Threaded) {
     std::unique_lock<std::mutex> lock(mut);
     cv.wait(lock, [&ready] { return ready; });
     unsigned int getFlag;
-    HIP_CHECK_THREAD(hipSetDevice(devNo));
-    HIP_CHECK_THREAD(hipGetDeviceFlags(&getFlag));
+    HIP_CHECK_THREAD(hipSetDevice(devNo))
+    HIP_CHECK_THREAD(hipGetDeviceFlags(&getFlag))
 // flags other than hipDeviceSchedule* are ignore on the ROCm backend
 #if HT_NVIDIA
     // CUDA backend will set other flags we aren't concerned about
@@ -146,7 +146,7 @@ HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_Threaded) {
 
   {
     std::lock_guard<std::mutex> lock(mut);
-    HIP_CHECK(hipSetDeviceFlags(flag));
+    HIP_CHECK(hipSetDeviceFlags(flag))
     ready = true;
   }
 
@@ -174,18 +174,18 @@ HIP_TEST_CASE(Unit_hipGetDeviceFlags_Positive_Context) {
   const unsigned int flags =
       GENERATE_COPY(from_range(std::begin(validFlags), std::end(validFlags)));
 
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
 
   hipCtx_t ctx;
-  HIP_CHECK(hipCtxCreate(&ctx, flags, 0));
+  HIP_CHECK(hipCtxCreate(&ctx, flags, 0))
 
   unsigned int actual_flags;
-  HIP_CHECK(hipGetDeviceFlags(&actual_flags));
+  HIP_CHECK(hipGetDeviceFlags(&actual_flags))
 
   REQUIRE(actual_flags == flags);
 
-  HIP_CHECK(hipCtxPopCurrent(&ctx));
-  HIP_CHECK(hipCtxDestroy(ctx));
+  HIP_CHECK(hipCtxPopCurrent(&ctx))
+  HIP_CHECK(hipCtxDestroy(ctx))
 }
 
 /**

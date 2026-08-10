@@ -27,10 +27,10 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer, char* globTest
   int *A_d, *B_d;
   int *A_h, *B_h;
   int deviceid;
-  HIP_CHECK(hipGetDevice(&deviceid));
+  HIP_CHECK(hipGetDevice(&deviceid))
   // allocate host and device buffer
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipMalloc(&B_d, Nbytes));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipMalloc(&B_d, Nbytes))
 
   A_h = reinterpret_cast<int*>(malloc(Nbytes));
   B_h = reinterpret_cast<int*>(malloc(Nbytes));
@@ -39,7 +39,7 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer, char* globTest
     A_h[idx] = deviceid;
   }
   // Copy buffer from host to device
-  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
   hipModule_t Module;
   hipFunction_t Function;
   int check = atoi(globTestID);
@@ -50,16 +50,16 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer, char* globTest
    */
   switch (check) {
     case 1:
-      HIP_CHECK(hipModuleLoad(&Module, CODEOBJ_FILE));
+      HIP_CHECK(hipModuleLoad(&Module, CODEOBJ_FILE))
       break;
     case 2:
-      HIP_CHECK(hipModuleLoadData(&Module, &buffer[0]));
+      HIP_CHECK(hipModuleLoadData(&Module, &buffer[0]))
       break;
     case 3:
-      HIP_CHECK(hipModuleLoadDataEx(&Module, &buffer[0], 0, nullptr, nullptr));
+      HIP_CHECK(hipModuleLoadDataEx(&Module, &buffer[0], 0, nullptr, nullptr))
       break;
   }
-  HIP_CHECK(hipModuleGetFunction(&Function, Module, CODEOBJ_GLOB_KERNEL1));
+  HIP_CHECK(hipModuleGetFunction(&Function, Module, CODEOBJ_GLOB_KERNEL1))
   float deviceGlobalFloatH = 3.14;
   int deviceGlobalInt1H = 100 * deviceid;
   int deviceGlobalInt2H = 50 * deviceid;
@@ -67,20 +67,20 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer, char* globTest
   char deviceGlobalCharH = 13 * deviceid;
   hipDeviceptr_t deviceGlobal;
   size_t deviceGlobalSize;
-  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalFloat"));
-  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal), &deviceGlobalFloatH, deviceGlobalSize));
-  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalInt1"));
-  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal), &deviceGlobalInt1H, deviceGlobalSize));
-  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalInt2"));
-  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal), &deviceGlobalInt2H, deviceGlobalSize));
-  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalShort"));
-  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal), &deviceGlobalShortH, deviceGlobalSize));
-  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalChar"));
-  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal), &deviceGlobalCharH, deviceGlobalSize));
+  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalFloat"))
+  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal), &deviceGlobalFloatH, deviceGlobalSize))
+  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalInt1"))
+  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal), &deviceGlobalInt1H, deviceGlobalSize))
+  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalInt2"))
+  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal), &deviceGlobalInt2H, deviceGlobalSize))
+  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalShort"))
+  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal), &deviceGlobalShortH, deviceGlobalSize))
+  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalChar"))
+  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal), &deviceGlobalCharH, deviceGlobalSize))
   // Launch Function kernel function
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   struct {
     void* _Ad;
@@ -95,9 +95,9 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer, char* globTest
   HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, N, 1, 1, 0, stream, NULL,
                                   reinterpret_cast<void**>(&config)));
   // Copy buffer from decice to host
-  HIP_CHECK(hipMemcpyAsync(B_h, B_d, Nbytes, hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemcpyAsync(B_h, B_d, Nbytes, hipMemcpyDeviceToHost, stream))
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipStreamDestroy(stream))
 
   // Check the results
   for (size_t idx = 0; idx < N; idx++) {
@@ -108,10 +108,10 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer, char* globTest
       return false;
     }
   }
-  HIP_CHECK(hipModuleUnload(Module));
+  HIP_CHECK(hipModuleUnload(Module))
   // free memory
-  HIP_CHECK(hipFree(B_d));
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(B_d))
+  HIP_CHECK(hipFree(A_d))
   free(B_h);
   free(A_h);
 

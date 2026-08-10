@@ -21,7 +21,7 @@ HIP_TEST_CASE(Contract_GreenContext_HipDeviceGetDevResource_NvidiaCuda12Unsuppor
 namespace {
 int CurrentDevice() {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   return device;
 }
 
@@ -33,7 +33,7 @@ bool TryGetDeviceSmResource(hipDevResource* resource) {
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 
@@ -62,7 +62,7 @@ bool TryCreateGreenContext(hipExecutionCtx_t* ctx) {
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   if (group_count == 0) {
     return false;
   }
@@ -72,13 +72,13 @@ bool TryCreateGreenContext(hipExecutionCtx_t* ctx) {
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   status = hipGreenCtxCreate(ctx, desc, CurrentDevice(), 0);
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 }  // namespace
@@ -92,15 +92,15 @@ HIP_TEST_CASE(Contract_GreenContext_HipDeviceGetDevResource_Default_ReportsSmCou
   // stream draws from the whole device, so its SM resource reports the same
   // count.
   hipDevResource device_resource{};
-  HIP_CHECK(hipDeviceGetDevResource(CurrentDevice(), &device_resource, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(CurrentDevice(), &device_resource, hipDevResourceTypeSm))
   REQUIRE(device_resource.type == hipDevResourceTypeSm);
   REQUIRE(device_resource.sm.smCount > 0);
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   hipDevResource stream_resource{};
-  HIP_CHECK(hipStreamGetDevResource(stream, &stream_resource, hipDevResourceTypeSm));
+  HIP_CHECK(hipStreamGetDevResource(stream, &stream_resource, hipDevResourceTypeSm))
   REQUIRE(stream_resource.sm.smCount == device_resource.sm.smCount);
 }
 
@@ -109,7 +109,7 @@ HIP_TEST_CASE(Contract_GreenContext_HipDevSmResourceSplitByCount_Default_Produce
   SkipIfDevResourceUnsupported();
 
   hipDevResource device_resource{};
-  HIP_CHECK(hipDeviceGetDevResource(CurrentDevice(), &device_resource, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(CurrentDevice(), &device_resource, hipDevResourceTypeSm))
 
   // Splitting the device SM resource into groups of at least one SM must yield
   // at least one group whose SM count is within (0, device SM count]. The
@@ -122,7 +122,7 @@ HIP_TEST_CASE(Contract_GreenContext_HipDevSmResourceSplitByCount_Default_Produce
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("SM resource splitting is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   REQUIRE(group_count > 0);
   REQUIRE(groups.sm.smCount > 0);
@@ -141,23 +141,23 @@ HIP_TEST_CASE(Contract_GreenContext_HipGreenCtxCreate_Default_QueriesDeviceAndRe
   // A green context is bound to the device it was created on and exposes a
   // stable identifier. Its SM resource is a subset of the device's SMs.
   int ctx_device = -1;
-  HIP_CHECK(hipExecutionCtxGetDevice(&ctx_device, ctx));
+  HIP_CHECK(hipExecutionCtxGetDevice(&ctx_device, ctx))
   REQUIRE(ctx_device == CurrentDevice());
 
   unsigned long long ctx_id = 0;
-  HIP_CHECK(hipExecutionCtxGetId(ctx, &ctx_id));
+  HIP_CHECK(hipExecutionCtxGetId(ctx, &ctx_id))
 
   hipDevResource device_resource{};
-  HIP_CHECK(hipDeviceGetDevResource(CurrentDevice(), &device_resource, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(CurrentDevice(), &device_resource, hipDevResourceTypeSm))
 
   hipDevResource ctx_resource{};
-  HIP_CHECK(hipExecutionCtxGetDevResource(ctx, &ctx_resource, hipDevResourceTypeSm));
+  HIP_CHECK(hipExecutionCtxGetDevResource(ctx, &ctx_resource, hipDevResourceTypeSm))
   REQUIRE(ctx_resource.sm.smCount > 0);
   REQUIRE(ctx_resource.sm.smCount <= device_resource.sm.smCount);
 
   // The device's default execution context is also queryable.
   hipExecutionCtx_t default_ctx = nullptr;
-  HIP_CHECK(hipDeviceGetExecutionCtx(&default_ctx, CurrentDevice()));
+  HIP_CHECK(hipDeviceGetExecutionCtx(&default_ctx, CurrentDevice()))
 }
 
 // @asserts: hipExecutionCtxStreamCreate - work on a green-context stream runs and is observable after context sync (accepted-or-unsupported)
@@ -173,17 +173,17 @@ HIP_TEST_CASE(Contract_GreenContext_HipExecutionCtxStreamCreate_Stream_LaunchesO
   // complete: a memset on that stream is visible after the context is
   // synchronized.
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipExecutionCtxStreamCreate(&stream, ctx, 0, 0));
+  HIP_CHECK(hipExecutionCtxStreamCreate(&stream, ctx, 0, 0))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   void* device_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&device_ptr, 64));
+  HIP_CHECK(hipMalloc(&device_ptr, 64))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipMemsetAsync(device_ptr, 0x5A, 64, stream));
-  HIP_CHECK(hipExecutionCtxSynchronize(ctx));
+  HIP_CHECK(hipMemsetAsync(device_ptr, 0x5A, 64, stream))
+  HIP_CHECK(hipExecutionCtxSynchronize(ctx))
 
   uint8_t host = 0;
-  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost))
   REQUIRE(host == 0x5A);
 }
 
@@ -199,10 +199,10 @@ HIP_TEST_CASE(Contract_GreenContext_HipExecutionCtxRecordEvent_Event_RecordAndWa
   // Recording an event on the green context and then waiting on it must be
   // accepted, and the context must synchronize cleanly afterward.
   hipEvent_t event = nullptr;
-  HIP_CHECK(hipEventCreate(&event));
+  HIP_CHECK(hipEventCreate(&event))
   cleanup.Add([event] { (void)hipEventDestroy(event); });
-  HIP_CHECK(hipExecutionCtxRecordEvent(ctx, event));
-  HIP_CHECK(hipExecutionCtxWaitEvent(ctx, event));
-  HIP_CHECK(hipExecutionCtxSynchronize(ctx));
+  HIP_CHECK(hipExecutionCtxRecordEvent(ctx, event))
+  HIP_CHECK(hipExecutionCtxWaitEvent(ctx, event))
+  HIP_CHECK(hipExecutionCtxSynchronize(ctx))
 }
 #endif  // HT_NVIDIA && CUDA_VERSION < 13000

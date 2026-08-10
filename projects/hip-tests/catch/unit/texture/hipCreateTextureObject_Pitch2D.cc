@@ -63,7 +63,7 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_Pitch2DResource) {
   // Initialization
   HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devPtrA), &devPitchA, SIZE_W * sizeof(float),
                            SIZE_H));
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
   memset(&resDesc, 0, sizeof(resDesc));
   memset(&texDesc, 0, sizeof(texDesc));
   resDesc.resType = hipResourceTypePitch2D;
@@ -127,8 +127,8 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_Pitch2DResource) {
     // Populate texture descriptor
     texDesc.readMode = hipReadModeElementType;
 
-    HIP_CHECK(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr));
-    HIP_CHECK(hipDestroyTextureObject(texObj));
+    HIP_CHECK(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr))
+    HIP_CHECK(hipDestroyTextureObject(texObj))
   }
 
   SECTION("hipResourceTypePitch2D and height(0)/devptr(nullptr)") {
@@ -173,8 +173,8 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_Pitch2DResource) {
     // Populate texture descriptor
     texDesc.readMode = hipReadModeElementType;
 
-    HIP_CHECK(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr));
-    HIP_CHECK(hipDestroyTextureObject(texObj));
+    HIP_CHECK(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr))
+    HIP_CHECK(hipDestroyTextureObject(texObj))
   }
 
   SECTION("hipResourceTypePitch2D and width(0)/devPtr(nullptr)") {
@@ -223,7 +223,7 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_Pitch2DResource) {
   }
 
   // De-Initialization
-  HIP_CHECK(hipFree(devPtrA));
+  HIP_CHECK(hipFree(devPtrA))
 }
 
 

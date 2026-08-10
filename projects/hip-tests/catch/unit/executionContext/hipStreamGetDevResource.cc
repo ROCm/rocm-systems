@@ -25,13 +25,13 @@
  *    context.
  */
 HIP_TEST_CASE(Unit_hipStreamGetDevResource_GreenCtxStream_Functional) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   hipDevResource input{};
-  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm))
 
   unsigned int alignment = input.sm.smCoscheduledAlignment;
   unsigned int groupSize = (input.sm.smCount / 2 / alignment) * alignment;
@@ -42,30 +42,30 @@ HIP_TEST_CASE(Unit_hipStreamGetDevResource_GreenCtxStream_Functional) {
 
   hipDevResource splitResult[1] = {};
   hipDevResource remainder{};
-  HIP_CHECK(hipDevSmResourceSplit(splitResult, 1, &input, &remainder, 0, params));
+  HIP_CHECK(hipDevSmResourceSplit(splitResult, 1, &input, &remainder, 0, params))
   REQUIRE(splitResult[0].sm.smCount == groupSize);
 
   hipDevResourceDesc_t desc{};
-  HIP_CHECK(hipDevResourceGenerateDesc(&desc, splitResult, 1));
+  HIP_CHECK(hipDevResourceGenerateDesc(&desc, splitResult, 1))
 
   hipExecutionCtx_t ctx = nullptr;
-  HIP_CHECK(hipGreenCtxCreate(&ctx, desc, 0, 0));
+  HIP_CHECK(hipGreenCtxCreate(&ctx, desc, 0, 0))
   REQUIRE(ctx != nullptr);
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipExecutionCtxStreamCreate(&stream, ctx, hipStreamNonBlocking, 0));
+  HIP_CHECK(hipExecutionCtxStreamCreate(&stream, ctx, hipStreamNonBlocking, 0))
   REQUIRE(stream != nullptr);
 
   // Query the stream's SM resource
   hipDevResource streamRes{};
-  HIP_CHECK(hipStreamGetDevResource(stream, &streamRes, hipDevResourceTypeSm));
+  HIP_CHECK(hipStreamGetDevResource(stream, &streamRes, hipDevResourceTypeSm))
 
   REQUIRE(streamRes.type == hipDevResourceTypeSm);
   REQUIRE(streamRes.sm.smCount == groupSize);
   REQUIRE(streamRes.sm.smCoscheduledAlignment >= 1);
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 }
 
 /**
@@ -78,28 +78,28 @@ HIP_TEST_CASE(Unit_hipStreamGetDevResource_GreenCtxStream_Functional) {
  *    stream from the partition, launches a vectorADD kernel, and verifies output.
  */
 HIP_TEST_CASE(Unit_hipStreamGetDevResource_RegularStream_Functional) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   // Get device resource for comparison
   hipDevResource devResource{};
-  HIP_CHECK(hipDeviceGetDevResource(device, &devResource, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(device, &devResource, hipDevResourceTypeSm))
 
   // Create a regular stream and get its resource
   hipStream_t regularStream = nullptr;
-  HIP_CHECK(hipStreamCreate(&regularStream));
+  HIP_CHECK(hipStreamCreate(&regularStream))
 
   hipDevResource streamRes{};
-  HIP_CHECK(hipStreamGetDevResource(regularStream, &streamRes, hipDevResourceTypeSm));
+  HIP_CHECK(hipStreamGetDevResource(regularStream, &streamRes, hipDevResourceTypeSm))
 
   REQUIRE(streamRes.type == hipDevResourceTypeSm);
   REQUIRE(streamRes.sm.smCount == devResource.sm.smCount);
   REQUIRE(streamRes.sm.smCoscheduledAlignment == devResource.sm.smCoscheduledAlignment);
   REQUIRE(streamRes.sm.minSmPartitionSize == devResource.sm.minSmPartitionSize);
 
-  HIP_CHECK(hipStreamDestroy(regularStream));
+  HIP_CHECK(hipStreamDestroy(regularStream))
 
   // Partition the stream-derived resource
   unsigned int alignment = streamRes.sm.smCoscheduledAlignment;
@@ -111,7 +111,7 @@ HIP_TEST_CASE(Unit_hipStreamGetDevResource_RegularStream_Functional) {
 
   hipDevResource splitResult[1] = {};
   hipDevResource remainder{};
-  HIP_CHECK(hipDevSmResourceSplit(splitResult, 1, &streamRes, &remainder, 0, params));
+  HIP_CHECK(hipDevSmResourceSplit(splitResult, 1, &streamRes, &remainder, 0, params))
   REQUIRE(splitResult[0].sm.smCount == groupSize);
 
   // Create green context from the partitioned resource and launch kernel
@@ -126,10 +126,10 @@ HIP_TEST_CASE(Unit_hipStreamGetDevResource_RegularStream_Functional) {
  *    config), and invalid resource type.
  */
 HIP_TEST_CASE(Unit_hipStreamGetDevResource_Negative) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   // NULL resource pointer
   REQUIRE(hipStreamGetDevResource(stream, nullptr, hipDevResourceTypeSm)
@@ -146,7 +146,7 @@ HIP_TEST_CASE(Unit_hipStreamGetDevResource_Negative) {
   REQUIRE(hipStreamGetDevResource(stream, &resource, hipDevResourceTypeInvalid)
           == hipErrorInvalidResourceType);
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**

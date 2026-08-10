@@ -43,7 +43,7 @@ static void runTest(const int width, const int height, const float offsetX, cons
 
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<uchar4>();
   hipArray_t hipArray;
-  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height));
+  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height))
 
   HIP_CHECK(hipMemcpy2DToArray(hipArray, 0, 0, hData, width * sizeof(uchar4),
                                width * sizeof(uchar4), height, hipMemcpyHostToDevice));
@@ -65,20 +65,20 @@ static void runTest(const int width, const int height, const float offsetX, cons
 
   // Create texture object
   hipTextureObject_t textureObject = 0;
-  HIP_CHECK(hipCreateTextureObject(&textureObject, &resDesc, &texDesc, NULL));
+  HIP_CHECK(hipCreateTextureObject(&textureObject, &resDesc, &texDesc, NULL))
 
   float4* dData = nullptr;
   size = width * height * sizeof(float4);
-  HIP_CHECK(hipMalloc((void**)&dData, size));
+  HIP_CHECK(hipMalloc((void**)&dData, size))
 
   dim3 dimBlock(16, 16, 1);
   dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y, 1);
 
   hipLaunchKernelGGL(tex2DRGBAKernel<normalizedCoords>, dimGrid, dimBlock, 0, 0, dData,
                      textureObject, width, height, offsetX, offsetY);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   float4* hInputData = (float4*)malloc(size);   // CPU expected values
   float4* hOutputData = (float4*)malloc(size);  // GPU output values
@@ -94,7 +94,7 @@ static void runTest(const int width, const int height, const float offsetX, cons
       hInputData[index].w = hData[index].w / uCharMax;
     }
   }
-  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost))
 
   bool result = true;
 
@@ -130,9 +130,9 @@ static void runTest(const int width, const int height, const float offsetX, cons
   }
 
 line1:
-  HIP_CHECK(hipDestroyTextureObject(textureObject));
-  HIP_CHECK(hipFree(dData));
-  HIP_CHECK(hipFreeArray(hipArray));
+  HIP_CHECK(hipDestroyTextureObject(textureObject))
+  HIP_CHECK(hipFree(dData))
+  HIP_CHECK(hipFreeArray(hipArray))
   free(hData);
   free(hOutputData);
   free(hInputData);

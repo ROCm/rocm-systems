@@ -178,19 +178,19 @@ __host__ __device__ testDeviceClass::testDeviceClass(int a) { iVar = a; }
 
 bool* AllocateHostMemory(void) {
   bool* result_ech;
-  HIPCHECK(hipHostMalloc(&result_ech, NBOOL, hipHostMallocDefault));
+  HIPCHECK(hipHostMalloc(&result_ech, NBOOL, hipHostMallocDefault))
   return result_ech;
 }
 
 bool* AllocateDeviceMemory(void) {
   bool* result_ecd;
-  HIPCHECK(hipMalloc(&result_ecd, NBOOL));
-  HIPCHECK(hipMemset(result_ecd, false, NBOOL));
+  HIPCHECK(hipMalloc(&result_ecd, NBOOL))
+  HIPCHECK(hipMemset(result_ecd, false, NBOOL))
   return result_ecd;
 }
 
 void VerifyResult(bool* result_ech, bool* result_ecd) {
-  HIPCHECK(hipMemcpy(result_ech, result_ecd, BLOCKS * sizeof(bool), hipMemcpyDeviceToHost));
+  HIPCHECK(hipMemcpy(result_ech, result_ecd, BLOCKS * sizeof(bool), hipMemcpyDeviceToHost))
   // validation on host side
   for (int i = 0; i < BLOCKS; i++) {
     HIPASSERT(result_ech[i] == true);
@@ -198,8 +198,8 @@ void VerifyResult(bool* result_ech, bool* result_ecd) {
 }
 
 void FreeMem(bool* result_ech, bool* result_ecd) {
-  HIPCHECK(hipHostFree(result_ech));
-  HIPCHECK(hipFree(result_ecd));
+  HIPCHECK(hipHostFree(result_ech))
+  HIPCHECK(hipFree(result_ecd))
 }
 
 #endif  // _HIPCLASSKERNEL_H_

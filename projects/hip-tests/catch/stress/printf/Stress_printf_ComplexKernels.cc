@@ -199,29 +199,29 @@ bool test_printf_multistream(uint32_t num_blocks, uint32_t threads_per_block, ui
     Ah[i] = i + 1;
     Bh[i] = buffsize - i;
   }
-  HIP_CHECK(hipMalloc(&Ad, buffsize * sizeof(uint32_t)));
-  HIP_CHECK(hipMalloc(&Bd, buffsize * sizeof(uint32_t)));
-  HIP_CHECK(hipMemcpy(Ad, Ah, buffsize * sizeof(uint32_t), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, Bh, buffsize * sizeof(uint32_t), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&Ad, buffsize * sizeof(uint32_t)))
+  HIP_CHECK(hipMalloc(&Bd, buffsize * sizeof(uint32_t)))
+  HIP_CHECK(hipMemcpy(Ad, Ah, buffsize * sizeof(uint32_t), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Bd, Bh, buffsize * sizeof(uint32_t), hipMemcpyHostToDevice))
   // DO NOT PUT ANY PRINTF WITHIN THIS BLOCK OF CODE
   {
     CaptureStream captured(stdout);
     hipStream_t stream[NUM_STREAM];
     for (int i = 0; i < NUM_STREAM; i++) {
-      HIP_CHECK(hipStreamCreate(&stream[i]));
+      HIP_CHECK(hipStreamCreate(&stream[i]))
       hipLaunchKernelGGL(kernel_complex_opX, dim3(num_blocks, 1, 1), dim3(threads_per_block, 1, 1),
                          0, stream[i], Ad, Bd, iterCount);
-      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipGetLastError())
       hipLaunchKernelGGL(kernel_complex_opY, dim3(1, num_blocks, 1), dim3(1, threads_per_block, 1),
                          0, stream[i], Ad, Bd, iterCount);
-      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipGetLastError())
       hipLaunchKernelGGL(kernel_complex_opZ, dim3(1, 1, num_blocks), dim3(1, 1, threads_per_block),
                          0, stream[i], Ad, Bd, iterCount);
-      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipGetLastError())
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     for (int i = 0; i < NUM_STREAM; i++) {
-      HIP_CHECK(hipStreamDestroy(stream[i]));
+      HIP_CHECK(hipStreamDestroy(stream[i]))
     }
     std::ifstream CapturedData = captured.getCapturedData();
     char* buffer = new char[CHUNK_SIZE];
@@ -263,8 +263,8 @@ bool test_printf_multistream(uint32_t num_blocks, uint32_t threads_per_block, ui
   }
   printf("estimatedPrintSize = %zu, actualFileSize = %zu\n", estimatedPrintSize, actualFileSize);
   printf("estimatedLinesPrinted = %u, actualLinesPrinted = %u\n", lop, totalActualLinecount - 1);
-  HIP_CHECK(hipFree(Bd));
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Bd))
+  HIP_CHECK(hipFree(Ad))
   delete[] Bh;
   delete[] Ah;
   if ((estimatedPrintSize != actualFileSize) || (lop != (totalActualLinecount - 1))) {
@@ -279,30 +279,30 @@ bool test_printf_multigpu(int gpu, uint32_t num_blocks, uint32_t threads_per_blo
   uint32_t buffsize = num_blocks * threads_per_block;
   uint32_t *Ah, *Bh;
   uint32_t *Ad, *Bd;
-  HIP_CHECK(hipSetDevice(gpu));
+  HIP_CHECK(hipSetDevice(gpu))
   Ah = new uint32_t[buffsize];
   Bh = new uint32_t[buffsize];
   for (uint32_t i = 0; i < buffsize; i++) {
     Ah[i] = i + 1;
     Bh[i] = buffsize - i;
   }
-  HIP_CHECK(hipMalloc(&Ad, buffsize * sizeof(uint32_t)));
-  HIP_CHECK(hipMalloc(&Bd, buffsize * sizeof(uint32_t)));
-  HIP_CHECK(hipMemcpy(Ad, Ah, buffsize * sizeof(uint32_t), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, Bh, buffsize * sizeof(uint32_t), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&Ad, buffsize * sizeof(uint32_t)))
+  HIP_CHECK(hipMalloc(&Bd, buffsize * sizeof(uint32_t)))
+  HIP_CHECK(hipMemcpy(Ad, Ah, buffsize * sizeof(uint32_t), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Bd, Bh, buffsize * sizeof(uint32_t), hipMemcpyHostToDevice))
   // DO NOT PUT ANY PRINTF WITHIN THIS BLOCK OF CODE
   {
     CaptureStream captured(stdout);
     hipLaunchKernelGGL(kernel_complex_opX, dim3(num_blocks, 1, 1), dim3(threads_per_block, 1, 1), 0,
                        0, Ad, Bd, iterCount);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
     hipLaunchKernelGGL(kernel_complex_opY, dim3(1, num_blocks, 1), dim3(1, threads_per_block, 1), 0,
                        0, Ad, Bd, iterCount);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
     hipLaunchKernelGGL(kernel_complex_opZ, dim3(1, 1, num_blocks), dim3(1, 1, threads_per_block), 0,
                        0, Ad, Bd, iterCount);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipDeviceSynchronize())
     std::ifstream CapturedData = captured.getCapturedData();
     char* buffer = new char[CHUNK_SIZE];
     while (CapturedData.good()) {
@@ -317,12 +317,12 @@ bool test_printf_multigpu(int gpu, uint32_t num_blocks, uint32_t threads_per_blo
     }
     *actualFileSize += st.st_size;
   }
-  HIP_CHECK(hipFree(Bd));
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Bd))
+  HIP_CHECK(hipFree(Ad))
   delete[] Bh;
   delete[] Ah;
   *totalActualLinecount -= 1;  // Removing Empty Line
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   return true;
 }
 
@@ -412,7 +412,7 @@ HIP_TEST_CASE(Stress_printf_ComplexKernelMultStreamMultGpu) {
   unsigned int print_limit = 4;  // = 4 GB
   uint32_t iterCount = 1;
   int numOfGPUs = 0;
-  HIP_CHECK(hipGetDeviceCount(&numOfGPUs));
+  HIP_CHECK(hipGetDeviceCount(&numOfGPUs))
   if (numOfGPUs < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }

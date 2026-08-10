@@ -31,10 +31,10 @@
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemMapArrayAsync_Positive_Basic) {
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
 
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   checkVMMSupported(device);
 
   CHECK_IMAGE_SUPPORT;
@@ -51,7 +51,7 @@ HIP_TEST_CASE(Unit_hipMemMapArrayAsync_Positive_Basic) {
 
   unsigned int levels = 2;
 
-  HIP_CHECK(hipMipmappedArrayCreate(&array, &desc, levels));
+  HIP_CHECK(hipMipmappedArrayCreate(&array, &desc, levels))
 
   hipMemAllocationProp prop = {};
   prop.type = hipMemAllocationTypePinned;
@@ -64,7 +64,7 @@ HIP_TEST_CASE(Unit_hipMemMapArrayAsync_Positive_Basic) {
       hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityRecommended));
 
   hipMemGenericAllocationHandle_t handle;
-  HIP_CHECK(hipMemCreate(&handle, granularity, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle, granularity, &prop, 0))
 
   hipArrayMapInfo map_info_list = {};
   map_info_list.resourceType = HIP_RESOURCE_TYPE_MIPMAPPED_ARRAY;
@@ -80,17 +80,17 @@ HIP_TEST_CASE(Unit_hipMemMapArrayAsync_Positive_Basic) {
 
   StreamGuard stream(Streams::created);
 
-  HIP_CHECK(hipMemMapArrayAsync(&map_info_list, 1, stream.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  HIP_CHECK(hipMemMapArrayAsync(&map_info_list, 1, stream.stream()))
+  HIP_CHECK(hipStreamSynchronize(stream.stream()))
 
   map_info_list.memOperationType = hipMemOperationTypeUnmap;
   map_info_list.memHandle.memHandle = NULL;
-  HIP_CHECK(hipMemMapArrayAsync(&map_info_list, 1, stream.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  HIP_CHECK(hipMemMapArrayAsync(&map_info_list, 1, stream.stream()))
+  HIP_CHECK(hipStreamSynchronize(stream.stream()))
 
-  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemRelease(handle))
 
-  HIP_CHECK(hipMipmappedArrayDestroy(array));
+  HIP_CHECK(hipMipmappedArrayDestroy(array))
 }
 
 /**

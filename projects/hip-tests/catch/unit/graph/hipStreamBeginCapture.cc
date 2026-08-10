@@ -86,29 +86,29 @@ void captureStreamAndLaunchGraph(F graphFunc, hipStreamCaptureMode mode, hipStre
   LinearAllocGuard<T> B_d(LinearAllocs::hipMalloc, Nbytes);
 
   // Capture stream sequence
-  HIP_CHECK(hipStreamBeginCapture(stream, mode));
+  HIP_CHECK(hipStreamBeginCapture(stream, mode))
   graphFunc(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), B_d.ptr(), N, stream);
 
   captureSequenceCompute(A_d.ptr(), B_h.ptr(), B_d.ptr(), N, stream);
 
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
 
   // Validate end capture is successful
   REQUIRE(graph != nullptr);
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   REQUIRE(graphExec != nullptr);
 
   // Replay the recorded sequence multiple times
   for (size_t i = 0; i < kLaunchIters; i++) {
     std::fill_n(A_h.host_ptr(), N, static_cast<float>(i));
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
     ArrayFindIfNot(B_h.host_ptr(), static_cast<float>(i) * static_cast<float>(i), N);
   }
 
   HIP_CHECK(hipGraphExecDestroy(graphExec))
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -181,12 +181,12 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_Parameters) {
                     hipErrorStreamCaptureUnsupported);
   }
   SECTION("Capturing hipStream status with same stream again") {
-    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
     HIP_CHECK_ERROR(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal),
                     hipErrorIllegalState);
     hipGraph_t graph;
-    HIP_CHECK(hipStreamEndCapture(stream, &graph));
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipStreamEndCapture(stream, &graph))
+    HIP_CHECK(hipGraphDestroy(graph))
   }
   SECTION("Creating hipStream with invalid mode") {
     HIP_CHECK_ERROR(hipStreamBeginCapture(stream, hipStreamCaptureMode(-1)), hipErrorInvalidValue);
@@ -214,10 +214,10 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_Basic) {
   const hipStreamCaptureMode captureMode = GENERATE(
       hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
 
-  HIP_CHECK(hipStreamBeginCapture(s, captureMode));
+  HIP_CHECK(hipStreamBeginCapture(s, captureMode))
 
-  HIP_CHECK(hipStreamEndCapture(s, &graph));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamEndCapture(s, &graph))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /* Local function for inter stream event synchronization
@@ -229,41 +229,41 @@ static void interStrmEventSyncCapture(const hipStream_t& stream1, const hipStrea
   EventsGuard events_guard(1);
   hipEvent_t event = events_guard[0];
 
-  HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipEventRecord(event, stream1));
-  HIP_CHECK(hipStreamWaitEvent(stream2, event, 0));
+  HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipEventRecord(event, stream1))
+  HIP_CHECK(hipStreamWaitEvent(stream2, event, 0))
   dummyKernel<<<1, 1, 0, stream1>>>();
-  HIP_CHECK(hipStreamEndCapture(stream1, &graph1));
-  HIP_CHECK(hipStreamBeginCapture(stream2, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamEndCapture(stream1, &graph1))
+  HIP_CHECK(hipStreamBeginCapture(stream2, hipStreamCaptureModeGlobal))
   dummyKernel<<<1, 1, 0, stream2>>>();
   dummyKernel<<<1, 1, 0, stream2>>>();
-  HIP_CHECK(hipStreamEndCapture(stream2, &graph2));
+  HIP_CHECK(hipStreamEndCapture(stream2, &graph2))
 
   size_t numNodes1 = 0, numNodes2 = 0;
-  HIP_CHECK(hipGraphGetNodes(graph1, nullptr, &numNodes1));
-  HIP_CHECK(hipGraphGetNodes(graph2, nullptr, &numNodes2));
+  HIP_CHECK(hipGraphGetNodes(graph1, nullptr, &numNodes1))
+  HIP_CHECK(hipGraphGetNodes(graph2, nullptr, &numNodes2))
   REQUIRE(numNodes1 == 1);
   REQUIRE(numNodes2 == 2);
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0))
   REQUIRE(graphExec1 != nullptr);
-  HIP_CHECK(hipGraphInstantiate(&graphExec2, graph2, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec2, graph2, nullptr, nullptr, 0))
   REQUIRE(graphExec2 != nullptr);
 
   // Replay the recorded sequence multiple times
   for (size_t i = 0; i < kLaunchIters; i++) {
     // Execute the Graphs
-    HIP_CHECK(hipGraphLaunch(graphExec1, stream1));
-    HIP_CHECK(hipGraphLaunch(graphExec2, stream2));
-    HIP_CHECK(hipStreamSynchronize(stream1));
-    HIP_CHECK(hipStreamSynchronize(stream2));
+    HIP_CHECK(hipGraphLaunch(graphExec1, stream1))
+    HIP_CHECK(hipGraphLaunch(graphExec2, stream2))
+    HIP_CHECK(hipStreamSynchronize(stream1))
+    HIP_CHECK(hipStreamSynchronize(stream2))
   }
 
   // Free
-  HIP_CHECK(hipGraphExecDestroy(graphExec2));
-  HIP_CHECK(hipGraphExecDestroy(graphExec1));
-  HIP_CHECK(hipGraphDestroy(graph2));
-  HIP_CHECK(hipGraphDestroy(graph1));
+  HIP_CHECK(hipGraphExecDestroy(graphExec2))
+  HIP_CHECK(hipGraphExecDestroy(graphExec1))
+  HIP_CHECK(hipGraphDestroy(graph2))
+  HIP_CHECK(hipGraphDestroy(graph1))
 }
 
 /* Local function for colligated stream capture
@@ -275,39 +275,39 @@ static void colligatedStrmCapture(const hipStream_t& stream1, const hipStream_t&
   EventsGuard events_guard(1);
   hipEvent_t event = events_guard[0];
 
-  HIP_CHECK(hipEventCreate(&event));
-  HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipEventRecord(event, stream1));
-  HIP_CHECK(hipStreamBeginCapture(stream2, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipStreamWaitEvent(stream1, event, 0));
+  HIP_CHECK(hipEventCreate(&event))
+  HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipEventRecord(event, stream1))
+  HIP_CHECK(hipStreamBeginCapture(stream2, hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipStreamWaitEvent(stream1, event, 0))
   dummyKernel<<<1, 1, 0, stream1>>>();
-  HIP_CHECK(hipStreamEndCapture(stream1, &graph1));
+  HIP_CHECK(hipStreamEndCapture(stream1, &graph1))
   dummyKernel<<<1, 1, 0, stream2>>>();
-  HIP_CHECK(hipStreamEndCapture(stream2, &graph2));
+  HIP_CHECK(hipStreamEndCapture(stream2, &graph2))
   // Validate end capture is successful
   REQUIRE(graph2 != nullptr);
   REQUIRE(graph1 != nullptr);
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0))
   REQUIRE(graphExec1 != nullptr);
-  HIP_CHECK(hipGraphInstantiate(&graphExec2, graph2, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec2, graph2, nullptr, nullptr, 0))
   REQUIRE(graphExec2 != nullptr);
 
   // Replay the recorded sequence multiple times
   for (size_t i = 0; i < kLaunchIters; i++) {
     // Execute the Graphs
-    HIP_CHECK(hipGraphLaunch(graphExec1, stream1));
-    HIP_CHECK(hipGraphLaunch(graphExec2, stream2));
-    HIP_CHECK(hipStreamSynchronize(stream1));
-    HIP_CHECK(hipStreamSynchronize(stream2));
+    HIP_CHECK(hipGraphLaunch(graphExec1, stream1))
+    HIP_CHECK(hipGraphLaunch(graphExec2, stream2))
+    HIP_CHECK(hipStreamSynchronize(stream1))
+    HIP_CHECK(hipStreamSynchronize(stream2))
   }
 
   // Free
-  HIP_CHECK(hipGraphExecDestroy(graphExec2));
-  HIP_CHECK(hipGraphExecDestroy(graphExec1));
-  HIP_CHECK(hipGraphDestroy(graph2));
-  HIP_CHECK(hipGraphDestroy(graph1));
-  HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipGraphExecDestroy(graphExec2))
+  HIP_CHECK(hipGraphExecDestroy(graphExec1))
+  HIP_CHECK(hipGraphDestroy(graph2))
+  HIP_CHECK(hipGraphDestroy(graph1))
+  HIP_CHECK(hipEventDestroy(event))
 }
 
 /* Local function for colligated stream capture functionality
@@ -330,41 +330,41 @@ static void colligatedStrmCaptureFunc(const hipStream_t& stream1, const hipStrea
   LinearAllocGuard<int> D_d(LinearAllocs::hipMalloc, Nbytes);
 
   // Capture 2 streams
-  HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipStreamBeginCapture(stream2, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipStreamBeginCapture(stream2, hipStreamCaptureModeGlobal))
   captureSequenceLinear(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), B_d.ptr(), N, stream1);
   captureSequenceLinear(C_h.host_ptr(), C_d.ptr(), D_h.host_ptr(), D_d.ptr(), N, stream2);
   captureSequenceCompute(A_d.ptr(), B_h.host_ptr(), B_d.ptr(), N, stream1);
   captureSequenceCompute(C_d.ptr(), D_h.host_ptr(), D_d.ptr(), N, stream2);
-  HIP_CHECK(hipStreamEndCapture(stream1, &graph1));
-  HIP_CHECK(hipStreamEndCapture(stream2, &graph2));
+  HIP_CHECK(hipStreamEndCapture(stream1, &graph1))
+  HIP_CHECK(hipStreamEndCapture(stream2, &graph2))
   // Validate end capture is successful
   REQUIRE(graph2 != nullptr);
   REQUIRE(graph1 != nullptr);
 
   // Create Executable Graphs
-  HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0))
   REQUIRE(graphExec1 != nullptr);
-  HIP_CHECK(hipGraphInstantiate(&graphExec2, graph2, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec2, graph2, nullptr, nullptr, 0))
   REQUIRE(graphExec2 != nullptr);
 
   // Execute the Graphs
   for (size_t iter = 0; iter < kLaunchIters; iter++) {
     std::fill_n(A_h.host_ptr(), N, iter);
     std::fill_n(C_h.host_ptr(), N, iter);
-    HIP_CHECK(hipGraphLaunch(graphExec1, stream1));
-    HIP_CHECK(hipGraphLaunch(graphExec2, stream2));
-    HIP_CHECK(hipStreamSynchronize(stream1));
-    HIP_CHECK(hipStreamSynchronize(stream2));
+    HIP_CHECK(hipGraphLaunch(graphExec1, stream1))
+    HIP_CHECK(hipGraphLaunch(graphExec2, stream2))
+    HIP_CHECK(hipStreamSynchronize(stream1))
+    HIP_CHECK(hipStreamSynchronize(stream2))
     ArrayFindIfNot(B_h.host_ptr(), static_cast<int>(iter * iter), N);
     ArrayFindIfNot(D_h.host_ptr(), static_cast<int>(iter * iter), N);
   }
 
   // Free
-  HIP_CHECK(hipGraphExecDestroy(graphExec2));
-  HIP_CHECK(hipGraphExecDestroy(graphExec1));
-  HIP_CHECK(hipGraphDestroy(graph2));
-  HIP_CHECK(hipGraphDestroy(graph1));
+  HIP_CHECK(hipGraphExecDestroy(graphExec2))
+  HIP_CHECK(hipGraphExecDestroy(graphExec1))
+  HIP_CHECK(hipGraphDestroy(graph2))
+  HIP_CHECK(hipGraphDestroy(graph1))
 }
 
 /* Stream Capture thread function
@@ -411,28 +411,28 @@ static void multithreadedTest(hipStreamCaptureMode mode) {
   HIP_CHECK_THREAD_FINALIZE();
 
   // Create Executable Graphs
-  HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0))
   REQUIRE(graphExec1 != nullptr);
-  HIP_CHECK(hipGraphInstantiate(&graphExec2, graph2, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec2, graph2, nullptr, nullptr, 0))
   REQUIRE(graphExec2 != nullptr);
 
   // Execute the Graphs
   for (size_t iter = 0; iter < kLaunchIters; iter++) {
     std::fill_n(A_h.host_ptr(), N, iter);
     std::fill_n(C_h.host_ptr(), N, iter);
-    HIP_CHECK(hipGraphLaunch(graphExec1, stream1));
-    HIP_CHECK(hipGraphLaunch(graphExec2, stream2));
-    HIP_CHECK(hipStreamSynchronize(stream1));
-    HIP_CHECK(hipStreamSynchronize(stream2));
+    HIP_CHECK(hipGraphLaunch(graphExec1, stream1))
+    HIP_CHECK(hipGraphLaunch(graphExec2, stream2))
+    HIP_CHECK(hipStreamSynchronize(stream1))
+    HIP_CHECK(hipStreamSynchronize(stream2))
     ArrayFindIfNot(B_h.host_ptr(), static_cast<int>(iter * iter), N);
     ArrayFindIfNot(D_h.host_ptr(), static_cast<int>(iter * iter), N);
   }
 
   // Free
-  HIP_CHECK(hipGraphExecDestroy(graphExec2));
-  HIP_CHECK(hipGraphExecDestroy(graphExec1));
-  HIP_CHECK(hipGraphDestroy(graph2));
-  HIP_CHECK(hipGraphDestroy(graph1));
+  HIP_CHECK(hipGraphExecDestroy(graphExec2))
+  HIP_CHECK(hipGraphExecDestroy(graphExec1))
+  HIP_CHECK(hipGraphDestroy(graph2))
+  HIP_CHECK(hipGraphDestroy(graph1))
 }
 
 /**
@@ -478,7 +478,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Flags) {
  */
 HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Priority) {
   int minPriority = 0, maxPriority = 0;
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&minPriority, &maxPriority));
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&minPriority, &maxPriority))
   StreamGuard stream_guard1(Streams::withPriority, hipStreamDefault, minPriority);
   hipStream_t stream1 = stream_guard1.stream();
   StreamGuard stream_guard2(Streams::withPriority, hipStreamDefault, maxPriority);
@@ -529,7 +529,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Flags) {
  */
 HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Prio) {
   int minPriority = 0, maxPriority = 0;
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&minPriority, &maxPriority));
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&minPriority, &maxPriority))
   StreamGuard stream_guard1(Streams::withPriority, hipStreamDefault, minPriority);
   hipStream_t stream1 = stream_guard1.stream();
   StreamGuard stream_guard2(Streams::withPriority, hipStreamDefault, maxPriority);
@@ -604,22 +604,22 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_Multiplestrms) {
   SECTION("Capture Multiple stream with interdependent events") {
     EventsGuard events(2);
 
-    HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal));
-    HIP_CHECK(hipEventRecord(events[0], streams[0]));
-    HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0));
+    HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal))
+    HIP_CHECK(hipEventRecord(events[0], streams[0]))
+    HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0))
     dummyKernel<<<1, 1, 0, streams[0]>>>();
-    HIP_CHECK(hipStreamEndCapture(streams[0], &graphs[0]));
-    HIP_CHECK(hipStreamBeginCapture(streams[1], hipStreamCaptureModeGlobal));
-    HIP_CHECK(hipEventRecord(events[1], streams[1]));
-    HIP_CHECK(hipStreamWaitEvent(streams[2], events[1], 0));
+    HIP_CHECK(hipStreamEndCapture(streams[0], &graphs[0]))
+    HIP_CHECK(hipStreamBeginCapture(streams[1], hipStreamCaptureModeGlobal))
+    HIP_CHECK(hipEventRecord(events[1], streams[1]))
+    HIP_CHECK(hipStreamWaitEvent(streams[2], events[1], 0))
     dummyKernel<<<1, 1, 0, streams[1]>>>();
-    HIP_CHECK(hipStreamEndCapture(streams[1], &graphs[1]));
-    HIP_CHECK(hipStreamBeginCapture(streams[2], hipStreamCaptureModeGlobal));
+    HIP_CHECK(hipStreamEndCapture(streams[1], &graphs[1]))
+    HIP_CHECK(hipStreamBeginCapture(streams[2], hipStreamCaptureModeGlobal))
     dummyKernel<<<1, 1, 0, streams[2]>>>();
-    HIP_CHECK(hipStreamEndCapture(streams[2], &graphs[2]));
-    HIP_CHECK(hipGraphGetNodes(graphs[0], nullptr, &numNodes1));
-    HIP_CHECK(hipGraphGetNodes(graphs[1], nullptr, &numNodes2));
-    HIP_CHECK(hipGraphGetNodes(graphs[2], nullptr, &numNodes3));
+    HIP_CHECK(hipStreamEndCapture(streams[2], &graphs[2]))
+    HIP_CHECK(hipGraphGetNodes(graphs[0], nullptr, &numNodes1))
+    HIP_CHECK(hipGraphGetNodes(graphs[1], nullptr, &numNodes2))
+    HIP_CHECK(hipGraphGetNodes(graphs[2], nullptr, &numNodes3))
     REQUIRE(numNodes1 == 1);
     REQUIRE(numNodes2 == 1);
     REQUIRE(numNodes3 == 1);
@@ -628,30 +628,30 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_Multiplestrms) {
     EventsGuard events(1);
     hipEvent_t event = events[0];
 
-    HIP_CHECK(hipEventCreate(&event));
-    HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal));
-    HIP_CHECK(hipEventRecord(event, streams[0]));
-    HIP_CHECK(hipStreamWaitEvent(streams[1], event, 0));
-    HIP_CHECK(hipStreamWaitEvent(streams[2], event, 0));
+    HIP_CHECK(hipEventCreate(&event))
+    HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal))
+    HIP_CHECK(hipEventRecord(event, streams[0]))
+    HIP_CHECK(hipStreamWaitEvent(streams[1], event, 0))
+    HIP_CHECK(hipStreamWaitEvent(streams[2], event, 0))
     dummyKernel<<<1, 1, 0, streams[0]>>>();
-    HIP_CHECK(hipStreamEndCapture(streams[0], &graphs[0]));
-    HIP_CHECK(hipStreamBeginCapture(streams[1], hipStreamCaptureModeGlobal));
+    HIP_CHECK(hipStreamEndCapture(streams[0], &graphs[0]))
+    HIP_CHECK(hipStreamBeginCapture(streams[1], hipStreamCaptureModeGlobal))
     dummyKernel<<<1, 1, 0, streams[1]>>>();
-    HIP_CHECK(hipStreamEndCapture(streams[1], &graphs[1]));
-    HIP_CHECK(hipStreamBeginCapture(streams[2], hipStreamCaptureModeGlobal));
+    HIP_CHECK(hipStreamEndCapture(streams[1], &graphs[1]))
+    HIP_CHECK(hipStreamBeginCapture(streams[2], hipStreamCaptureModeGlobal))
     dummyKernel<<<1, 1, 0, streams[2]>>>();
-    HIP_CHECK(hipStreamEndCapture(streams[2], &graphs[2]));
-    HIP_CHECK(hipGraphGetNodes(graphs[0], nullptr, &numNodes1));
-    HIP_CHECK(hipGraphGetNodes(graphs[1], nullptr, &numNodes2));
-    HIP_CHECK(hipGraphGetNodes(graphs[2], nullptr, &numNodes3));
+    HIP_CHECK(hipStreamEndCapture(streams[2], &graphs[2]))
+    HIP_CHECK(hipGraphGetNodes(graphs[0], nullptr, &numNodes1))
+    HIP_CHECK(hipGraphGetNodes(graphs[1], nullptr, &numNodes2))
+    HIP_CHECK(hipGraphGetNodes(graphs[2], nullptr, &numNodes3))
     REQUIRE(numNodes1 == 1);
     REQUIRE(numNodes2 == 1);
     REQUIRE(numNodes3 == 1);
-    HIP_CHECK(hipEventDestroy(event));
+    HIP_CHECK(hipEventDestroy(event))
   }
 
   for (int i = 0; i < 3; i++) {
-    HIP_CHECK(hipGraphDestroy(graphs[i]));
+    HIP_CHECK(hipGraphDestroy(graphs[i]))
   }
 }
 
@@ -682,17 +682,17 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_CapturingFromWithinStrms) {
   LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
   int* hostMem = hostMem_g.host_ptr();
   int* devMem = devMem_g.ptr();
-  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)))
+  HIP_CHECK(hipDeviceSynchronize())
   // Start Capturing
   incrementKernel<<<1, 1, 0, streams[0]>>>(devMem);
-  HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipEventRecord(events[0], streams[0]));
+  HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipEventRecord(events[0], streams[0]))
   incrementKernel<<<1, 1, 0, streams[1]>>>(devMem);
   incrementKernel<<<1, 1, 0, streams[1]>>>(devMem);
   incrementKernel<<<1, 1, 0, streams[2]>>>(devMem);
-  HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0));
-  HIP_CHECK(hipStreamWaitEvent(streams[2], events[0], 0));
+  HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0))
+  HIP_CHECK(hipStreamWaitEvent(streams[2], events[0], 0))
   incrementKernel<<<1, 1, 0, streams[0]>>>(devMem);
   incrementKernel<<<1, 1, 0, streams[1]>>>(devMem);
   incrementKernel<<<1, 1, 0, streams[2]>>>(devMem);
@@ -700,26 +700,26 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_CapturingFromWithinStrms) {
   incrementKernel<<<1, 1, 0, streams[1]>>>(devMem);
   incrementKernel<<<1, 1, 0, streams[2]>>>(devMem);
   incrementKernel<<<1, 1, 0, streams[2]>>>(devMem);
-  HIP_CHECK(hipEventRecord(events[1], streams[1]));
-  HIP_CHECK(hipEventRecord(events[2], streams[2]));
-  HIP_CHECK(hipStreamWaitEvent(streams[0], events[1], 0));
-  HIP_CHECK(hipStreamWaitEvent(streams[0], events[2], 0));
-  HIP_CHECK(hipMemcpyAsync(hostMem, devMem, sizeof(int), hipMemcpyDefault, streams[0]));
+  HIP_CHECK(hipEventRecord(events[1], streams[1]))
+  HIP_CHECK(hipEventRecord(events[2], streams[2]))
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[1], 0))
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[2], 0))
+  HIP_CHECK(hipMemcpyAsync(hostMem, devMem, sizeof(int), hipMemcpyDefault, streams[0]))
   HIP_CHECK(hipStreamEndCapture(streams[0], &graph));  // End Capture
   // Reset device memory
-  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)))
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Create Executable Graphs
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   REQUIRE(graphExec != nullptr);
 
-  HIP_CHECK(hipGraphLaunch(graphExec, streams[0]));
-  HIP_CHECK(hipStreamSynchronize(streams[0]));
+  HIP_CHECK(hipGraphLaunch(graphExec, streams[0]))
+  HIP_CHECK(hipStreamSynchronize(streams[0]))
   REQUIRE((*hostMem) == INCREMENT_KERNEL_FINALEXP_VAL);
 
   HIP_CHECK(hipGraphExecDestroy(graphExec))
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -740,16 +740,16 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_DetectingInvalidCapture) {
   EventsGuard events(1);
   hipEvent_t event = events[0];
   hipGraph_t graph;
-  HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipEventRecord(event, streams[0]));
-  HIP_CHECK(hipStreamWaitEvent(streams[1], event, 0));
+  HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipEventRecord(event, streams[0]))
+  HIP_CHECK(hipStreamWaitEvent(streams[1], event, 0))
   dummyKernel<<<1, 1, 0, streams[0]>>>();
   // Since stream[1] is already in capture mode due to event wait
   // hipStreamBeginCapture on stream[1] is expected to return error.
   HIP_CHECK_ERROR(hipStreamBeginCapture(streams[1], hipStreamCaptureModeGlobal),
                   hipErrorIllegalState);
-  HIP_CHECK(hipStreamEndCapture(streams[0], &graph));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamEndCapture(streams[0], &graph))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -775,25 +775,25 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_CapturingMultGraphsFrom1Strm) 
   LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
   int* hostMem = hostMem_g.host_ptr();
   int* devMem = devMem_g.ptr();
-  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)))
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int i = 0; i < 3; i++) {
-    HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal));
+    HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal))
     for (int j = 0; j <= i; j++) incrementKernel<<<1, 1, 0, stream1>>>(devMem);
-    HIP_CHECK(hipMemcpyAsync(hostMem, devMem, sizeof(int), hipMemcpyDefault, stream1));
-    HIP_CHECK(hipStreamEndCapture(stream1, &graphs[i]));
+    HIP_CHECK(hipMemcpyAsync(hostMem, devMem, sizeof(int), hipMemcpyDefault, stream1))
+    HIP_CHECK(hipStreamEndCapture(stream1, &graphs[i]))
   }
   // Instantiate and execute all graphs
   for (int i = 0; i < 3; i++) {
     hipGraphExec_t graphExec{nullptr};
-    HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
-    HIP_CHECK(hipGraphInstantiate(&graphExec, graphs[i], nullptr, nullptr, 0));
-    HIP_CHECK(hipGraphLaunch(graphExec, stream1));
-    HIP_CHECK(hipStreamSynchronize(stream1));
+    HIP_CHECK(hipMemset(devMem, 0, sizeof(int)))
+    HIP_CHECK(hipGraphInstantiate(&graphExec, graphs[i], nullptr, nullptr, 0))
+    HIP_CHECK(hipGraphLaunch(graphExec, stream1))
+    HIP_CHECK(hipStreamSynchronize(stream1))
     REQUIRE((*hostMem) == (i + 1));
-    HIP_CHECK(hipGraphExecDestroy(graphExec));
-    HIP_CHECK(hipGraphDestroy(graphs[i]));
+    HIP_CHECK(hipGraphExecDestroy(graphExec))
+    HIP_CHECK(hipGraphDestroy(graphs[i]))
   }
 }
 
@@ -824,7 +824,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_CheckingSyncDuringCapture) {
   EventsGuard events_guard(1);
   hipEvent_t e = events_guard[0];
 
-  HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
+  HIP_CHECK(hipStreamBeginCapture(stream, captureMode))
   SECTION("Synchronize stream during capture") {
     HIP_CHECK_ERROR(hipStreamSynchronize(stream), hipErrorStreamCaptureUnsupported);
   }
@@ -835,11 +835,11 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_CheckingSyncDuringCapture) {
     HIP_CHECK_ERROR(hipDeviceSynchronize(), hipErrorStreamCaptureUnsupported);
   }
   SECTION("Synchronize event during capture") {
-    HIP_CHECK(hipEventRecord(e, stream));
+    HIP_CHECK(hipEventRecord(e, stream))
     HIP_CHECK_ERROR(hipEventSynchronize(e), hipErrorCapturedEvent);
   }
   SECTION("Query for an event during capture") {
-    HIP_CHECK(hipEventRecord(e, stream));
+    HIP_CHECK(hipEventRecord(e, stream))
     HIP_CHECK_ERROR(hipEventQuery(e), hipErrorCapturedEvent);
   }
 
@@ -876,7 +876,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringC
   EventsGuard events_guard(1);
   hipEvent_t e = events_guard[0];
 
-  HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
+  HIP_CHECK(hipStreamBeginCapture(stream, captureMode))
   SECTION("Synchronize stream during capture") {
     streamSync func;
     hipGraph_t gr;
@@ -892,7 +892,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringC
     REQUIRE(func.result_status == expected);
     HIP_CHECK_ERROR(hipStreamEndCapture(stream, &gr), capture_err);
     if (capture_err == hipSuccess) {
-      HIP_CHECK(hipGraphDestroy(gr));
+      HIP_CHECK(hipGraphDestroy(gr))
     }
   }
   SECTION("Query stream during capture") {
@@ -911,7 +911,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringC
 
     HIP_CHECK_ERROR(hipStreamEndCapture(stream, &gr), capture_err);
     if (capture_err == hipSuccess) {
-      HIP_CHECK(hipGraphDestroy(gr));
+      HIP_CHECK(hipGraphDestroy(gr))
     }
   }
   SECTION("Synchronize device during capture") {
@@ -932,8 +932,8 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringC
     t.join();
     REQUIRE(func.result_status == expected);
     hipGraph_t gr;
-    HIP_CHECK(hipStreamEndCapture(stream, &gr));
-    HIP_CHECK(hipGraphDestroy(gr));
+    HIP_CHECK(hipStreamEndCapture(stream, &gr))
+    HIP_CHECK(hipGraphDestroy(gr))
   }
   SECTION("Query for an event during capture") {
     eventQuery func;
@@ -943,8 +943,8 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringC
     t.join();
     REQUIRE(func.result_status == expected);
     hipGraph_t gr;
-    HIP_CHECK(hipStreamEndCapture(stream, &gr));
-    HIP_CHECK(hipGraphDestroy(gr));
+    HIP_CHECK(hipStreamEndCapture(stream, &gr))
+    HIP_CHECK(hipGraphDestroy(gr))
   }
 }
 
@@ -976,7 +976,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_UnsafeCallsDuringCapture) {
   const hipStreamCaptureMode captureMode =
       GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal);
 
-  HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
+  HIP_CHECK(hipStreamBeginCapture(stream, captureMode))
   SECTION("hipMalloc during capture") {
     HIP_CHECK_ERROR(hipMalloc(&devMem2, sizeof(int)), hipErrorStreamCaptureUnsupported);
   }
@@ -1018,26 +1018,26 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_EndingCapwhenCapInProg) {
   SECTION("Abruptly end strm capture when in progress in forked strm") {
     EventsGuard events_guard(1);
     hipEvent_t e = events_guard[0];
-    HIP_CHECK(hipEventCreate(&e));
-    HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal));
+    HIP_CHECK(hipEventCreate(&e))
+    HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal))
     dummyKernel<<<1, 1, 0, stream1>>>();
-    HIP_CHECK(hipEventRecord(e, stream1));
-    HIP_CHECK(hipStreamWaitEvent(stream2, e, 0));
+    HIP_CHECK(hipEventRecord(e, stream1))
+    HIP_CHECK(hipStreamWaitEvent(stream2, e, 0))
     dummyKernel<<<1, 1, 0, stream2>>>();
     HIP_CHECK_ERROR(hipStreamEndCapture(stream1, &graph), hipErrorStreamCaptureUnjoined);
-    HIP_CHECK(hipEventDestroy(e));
+    HIP_CHECK(hipEventDestroy(e))
   }
   SECTION("End strm capture when forked strm still has operations") {
     EventsGuard events_guard(2);
     hipEvent_t e1 = events_guard[0];
     hipEvent_t e2 = events_guard[1];
-    HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal));
+    HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal))
     dummyKernel<<<1, 1, 0, stream1>>>();
-    HIP_CHECK(hipEventRecord(e1, stream1));
-    HIP_CHECK(hipStreamWaitEvent(stream2, e1, 0));
+    HIP_CHECK(hipEventRecord(e1, stream1))
+    HIP_CHECK(hipStreamWaitEvent(stream2, e1, 0))
     dummyKernel<<<1, 1, 0, stream2>>>();
-    HIP_CHECK(hipEventRecord(e2, stream2));
-    HIP_CHECK(hipStreamWaitEvent(stream1, e2, 0));
+    HIP_CHECK(hipEventRecord(e2, stream2))
+    HIP_CHECK(hipStreamWaitEvent(stream1, e2, 0))
     dummyKernel<<<1, 1, 0, stream2>>>();
     HIP_CHECK_ERROR(hipStreamEndCapture(stream1, &graph), hipErrorStreamCaptureUnjoined);
   }
@@ -1056,7 +1056,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_EndingCapwhenCapInProg) {
  */
 HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_MultiGPU) {
   int devcount = 0;
-  HIP_CHECK(hipGetDeviceCount(&devcount));
+  HIP_CHECK(hipGetDeviceCount(&devcount))
   // If only single GPU is detected then return
   if (devcount < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
@@ -1074,38 +1074,38 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_MultiGPU) {
       reinterpret_cast<hipGraphExec_t*>(malloc(devcount * sizeof(hipGraphExec_t)));
   // Capture stream in each device
   for (int dev = 0; dev < devcount; dev++) {
-    HIP_CHECK(hipSetDevice(dev));
-    HIP_CHECK(hipStreamCreate(&stream[dev]));
+    HIP_CHECK(hipSetDevice(dev))
+    HIP_CHECK(hipStreamCreate(&stream[dev]))
     hostMem[dev] = reinterpret_cast<int*>(malloc(sizeof(int)));
-    HIP_CHECK(hipMalloc(&devMem[dev], sizeof(int)));
-    HIP_CHECK(hipStreamBeginCapture(stream[dev], hipStreamCaptureModeGlobal));
-    HIP_CHECK(hipMemsetAsync(devMem[dev], 0, sizeof(int), stream[dev]));
+    HIP_CHECK(hipMalloc(&devMem[dev], sizeof(int)))
+    HIP_CHECK(hipStreamBeginCapture(stream[dev], hipStreamCaptureModeGlobal))
+    HIP_CHECK(hipMemsetAsync(devMem[dev], 0, sizeof(int), stream[dev]))
     for (int i = 0; i < (dev + 1); i++) {
       incrementKernel<<<1, 1, 0, stream[dev]>>>(devMem[dev]);
     }
     HIP_CHECK(
         hipMemcpyAsync(hostMem[dev], devMem[dev], sizeof(int), hipMemcpyDefault, stream[dev]));
-    HIP_CHECK(hipStreamEndCapture(stream[dev], &graph[dev]));
+    HIP_CHECK(hipStreamEndCapture(stream[dev], &graph[dev]))
   }
   // Launch the captured graphs in the respective device
   for (int dev = 0; dev < devcount; dev++) {
-    HIP_CHECK(hipSetDevice(dev));
-    HIP_CHECK(hipGraphInstantiate(&graphExec[dev], graph[dev], nullptr, nullptr, 0));
-    HIP_CHECK(hipGraphLaunch(graphExec[dev], stream[dev]));
+    HIP_CHECK(hipSetDevice(dev))
+    HIP_CHECK(hipGraphInstantiate(&graphExec[dev], graph[dev], nullptr, nullptr, 0))
+    HIP_CHECK(hipGraphLaunch(graphExec[dev], stream[dev]))
   }
   // Validate output
   for (int dev = 0; dev < devcount; dev++) {
-    HIP_CHECK(hipSetDevice(dev));
-    HIP_CHECK(hipStreamSynchronize(stream[dev]));
+    HIP_CHECK(hipSetDevice(dev))
+    HIP_CHECK(hipStreamSynchronize(stream[dev]))
     REQUIRE((*hostMem[dev]) == (dev + 1));
   }
   // Destroy all device resources
   for (int dev = 0; dev < devcount; dev++) {
-    HIP_CHECK(hipSetDevice(dev));
-    HIP_CHECK(hipFree(devMem[dev]));
-    HIP_CHECK(hipGraphExecDestroy(graphExec[dev]));
-    HIP_CHECK(hipStreamDestroy(stream[dev]));
-    HIP_CHECK(hipGraphDestroy(graph[dev]));
+    HIP_CHECK(hipSetDevice(dev))
+    HIP_CHECK(hipFree(devMem[dev]))
+    HIP_CHECK(hipGraphExecDestroy(graphExec[dev]))
+    HIP_CHECK(hipStreamDestroy(stream[dev]))
+    HIP_CHECK(hipGraphDestroy(graph[dev]))
     free(hostMem[dev]);
   }
   free(graphExec);
@@ -1141,14 +1141,14 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_nestedStreamCapture) {
   // Create a device memory of size int and initialize it to 0
   LinearAllocGuard<int> hostMem_g(LinearAllocs::malloc, sizeof(int));
   LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
-  HIP_CHECK(hipMemset(devMem_g.ptr(), 0, sizeof(int)));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemset(devMem_g.ptr(), 0, sizeof(int)))
+  HIP_CHECK(hipDeviceSynchronize())
   // Start Capturing stream1
-  HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipEventRecord(events[0], streams[0]));
-  HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0));
-  HIP_CHECK(hipEventRecord(events[1], streams[1]));
-  HIP_CHECK(hipStreamWaitEvent(streams[2], events[1], 0));
+  HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipEventRecord(events[0], streams[0]))
+  HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0))
+  HIP_CHECK(hipEventRecord(events[1], streams[1]))
+  HIP_CHECK(hipStreamWaitEvent(streams[2], events[1], 0))
   incrementKernel<<<1, 1, 0, streams[0]>>>(devMem_g.ptr());
   incrementKernel<<<1, 1, 0, streams[1]>>>(devMem_g.ptr());
   incrementKernel<<<1, 1, 0, streams[2]>>>(devMem_g.ptr());
@@ -1156,25 +1156,25 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_nestedStreamCapture) {
   incrementKernel<<<1, 1, 0, streams[1]>>>(devMem_g.ptr());
   incrementKernel<<<1, 1, 0, streams[2]>>>(devMem_g.ptr());
   incrementKernel<<<1, 1, 0, streams[2]>>>(devMem_g.ptr());
-  HIP_CHECK(hipEventRecord(events[2], streams[1]));
-  HIP_CHECK(hipEventRecord(events[3], streams[2]));
-  HIP_CHECK(hipStreamWaitEvent(streams[0], events[3], 0));
-  HIP_CHECK(hipStreamWaitEvent(streams[0], events[2], 0));
+  HIP_CHECK(hipEventRecord(events[2], streams[1]))
+  HIP_CHECK(hipEventRecord(events[3], streams[2]))
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[3], 0))
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[2], 0))
   HIP_CHECK(hipMemcpyAsync(hostMem_g.host_ptr(), devMem_g.ptr(), sizeof(int), hipMemcpyDefault,
                            streams[0]));
   HIP_CHECK(hipStreamEndCapture(streams[0], &graph));  // End Capture
   // Reset device memory
-  HIP_CHECK(hipMemset(devMem_g.ptr(), 0, sizeof(int)));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemset(devMem_g.ptr(), 0, sizeof(int)))
+  HIP_CHECK(hipDeviceSynchronize())
   // Create Executable Graphs
   hipGraphExec_t graphExec{nullptr};
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streams[0]));
-  HIP_CHECK(hipStreamSynchronize(streams[0]));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streams[0]))
+  HIP_CHECK(hipStreamSynchronize(streams[0]))
   REQUIRE((*hostMem_g.host_ptr()) == INCREMENT_KERNEL_FINALEXP_VAL);
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -1211,15 +1211,15 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_streamReuse) {
   // Create a device memory of size int and initialize it to 0
   for (int i = 0; i < 3; i++) {
     memset(hostMem[i], 0, sizeof(int));
-    HIP_CHECK(hipMemset(devMem[i], 0, sizeof(int)));
+    HIP_CHECK(hipMemset(devMem[i], 0, sizeof(int)))
   }
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   // Start Capturing stream1
-  HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipEventRecord(events[0], streams[0]));
-  HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0));
-  HIP_CHECK(hipEventRecord(events[1], streams[1]));
-  HIP_CHECK(hipStreamWaitEvent(streams[2], events[1], 0));
+  HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipEventRecord(events[0], streams[0]))
+  HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0))
+  HIP_CHECK(hipEventRecord(events[1], streams[1]))
+  HIP_CHECK(hipStreamWaitEvent(streams[2], events[1], 0))
   incrementKernel<<<1, 1, 0, streams[0]>>>(devMem[0]);
   incrementKernel<<<1, 1, 0, streams[1]>>>(devMem[0]);
   incrementKernel<<<1, 1, 0, streams[2]>>>(devMem[0]);
@@ -1227,45 +1227,45 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_streamReuse) {
   incrementKernel<<<1, 1, 0, streams[1]>>>(devMem[0]);
   incrementKernel<<<1, 1, 0, streams[2]>>>(devMem[0]);
   incrementKernel<<<1, 1, 0, streams[2]>>>(devMem[0]);
-  HIP_CHECK(hipEventRecord(events[2], streams[1]));
-  HIP_CHECK(hipEventRecord(events[3], streams[2]));
-  HIP_CHECK(hipStreamWaitEvent(streams[0], events[3], 0));
-  HIP_CHECK(hipStreamWaitEvent(streams[0], events[2], 0));
-  HIP_CHECK(hipMemcpyAsync(hostMem[0], devMem[0], sizeof(int), hipMemcpyDefault, streams[0]));
+  HIP_CHECK(hipEventRecord(events[2], streams[1]))
+  HIP_CHECK(hipEventRecord(events[3], streams[2]))
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[3], 0))
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[2], 0))
+  HIP_CHECK(hipMemcpyAsync(hostMem[0], devMem[0], sizeof(int), hipMemcpyDefault, streams[0]))
   HIP_CHECK(hipStreamEndCapture(streams[0], &graphs[0]));  // End Capture
   // Start capturing graph2 from stream 2
-  HIP_CHECK(hipStreamBeginCapture(streams[1], hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(streams[1], hipStreamCaptureModeGlobal))
   incrementKernel<<<1, 1, 0, streams[1]>>>(devMem[1]);
   incrementKernel<<<1, 1, 0, streams[1]>>>(devMem[1]);
   incrementKernel<<<1, 1, 0, streams[1]>>>(devMem[1]);
-  HIP_CHECK(hipMemcpyAsync(hostMem[1], devMem[1], sizeof(int), hipMemcpyDefault, streams[1]));
+  HIP_CHECK(hipMemcpyAsync(hostMem[1], devMem[1], sizeof(int), hipMemcpyDefault, streams[1]))
   HIP_CHECK(hipStreamEndCapture(streams[1], &graphs[1]));  // End Capture
   // Start capturing graph3 from stream 3
-  HIP_CHECK(hipStreamBeginCapture(streams[2], hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(streams[2], hipStreamCaptureModeGlobal))
   incrementKernel<<<1, 1, 0, streams[2]>>>(devMem[2]);
   incrementKernel<<<1, 1, 0, streams[2]>>>(devMem[2]);
   incrementKernel<<<1, 1, 0, streams[2]>>>(devMem[2]);
   incrementKernel<<<1, 1, 0, streams[2]>>>(devMem[2]);
   incrementKernel<<<1, 1, 0, streams[2]>>>(devMem[2]);
-  HIP_CHECK(hipMemcpyAsync(hostMem[2], devMem[2], sizeof(int), hipMemcpyDefault, streams[2]));
+  HIP_CHECK(hipMemcpyAsync(hostMem[2], devMem[2], sizeof(int), hipMemcpyDefault, streams[2]))
   HIP_CHECK(hipStreamEndCapture(streams[2], &graphs[2]));  // End Capture
   // Reset device memory
-  HIP_CHECK(hipMemset(devMem[0], 0, sizeof(int)));
-  HIP_CHECK(hipMemset(devMem[1], 0, sizeof(int)));
-  HIP_CHECK(hipMemset(devMem[2], 0, sizeof(int)));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemset(devMem[0], 0, sizeof(int)))
+  HIP_CHECK(hipMemset(devMem[1], 0, sizeof(int)))
+  HIP_CHECK(hipMemset(devMem[2], 0, sizeof(int)))
+  HIP_CHECK(hipDeviceSynchronize())
   // Create Executable Graphs and verify graphs
   for (int i = 0; i < 3; i++) {
     hipGraphExec_t graphExec{nullptr};
-    HIP_CHECK(hipMemset(devMem[i], 0, sizeof(int)));
+    HIP_CHECK(hipMemset(devMem[i], 0, sizeof(int)))
     // hipMemset to device memory can be asynchronous; keep the reset ordered before graph launch.
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipGraphInstantiate(&graphExec, graphs[i], nullptr, nullptr, 0));
-    HIP_CHECK(hipGraphLaunch(graphExec, streams[i]));
-    HIP_CHECK(hipStreamSynchronize(streams[i]));
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipGraphInstantiate(&graphExec, graphs[i], nullptr, nullptr, 0))
+    HIP_CHECK(hipGraphLaunch(graphExec, streams[i]))
+    HIP_CHECK(hipStreamSynchronize(streams[i]))
     REQUIRE((*hostMem[i]) == increment_kernel_vals[i]);
-    HIP_CHECK(hipGraphExecDestroy(graphExec));
-    HIP_CHECK(hipGraphDestroy(graphs[i]));
+    HIP_CHECK(hipGraphExecDestroy(graphExec))
+    HIP_CHECK(hipGraphDestroy(graphs[i]))
   }
 }
 
@@ -1300,47 +1300,47 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_captureComplexGraph) {
   LinearAllocGuard<int> Bd = LinearAllocGuard<int>(LinearAllocs::hipMalloc, N * sizeof(int));
 
   // Capture streams into graph
-  HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipEventRecord(events[0], streams[0]));
-  HIP_CHECK(hipStreamWaitEvent(streams[3], events[0], 0));
-  HIP_CHECK(hipStreamWaitEvent(streams[4], events[0], 0));
+  HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipEventRecord(events[0], streams[0]))
+  HIP_CHECK(hipStreamWaitEvent(streams[3], events[0], 0))
+  HIP_CHECK(hipStreamWaitEvent(streams[4], events[0], 0))
   HIP_CHECK(
       hipMemcpyAsync(Ad.ptr(), Ah.host_ptr(), (N * sizeof(int)), hipMemcpyDefault, streams[0]));
   HIP_CHECK(
       hipMemcpyAsync(Bd.ptr(), Bh.host_ptr(), (N * sizeof(int)), hipMemcpyDefault, streams[4]));
   hipHostFn_t fn = hostNodeCallback;
-  HIPCHECK(hipLaunchHostFunc(streams[3], fn, nullptr));
-  HIP_CHECK(hipEventRecord(events[1], streams[0]));
-  HIP_CHECK(hipStreamWaitEvent(streams[1], events[1], 0));
+  HIPCHECK(hipLaunchHostFunc(streams[3], fn, nullptr))
+  HIP_CHECK(hipEventRecord(events[1], streams[0]))
+  HIP_CHECK(hipStreamWaitEvent(streams[1], events[1], 0))
   int* Ad_2nd_half = Ad.ptr() + N / 2;
   int* Ad_1st_half = Ad.ptr();
   mymul<<<GRIDSIZE / 2, BLOCKSIZE, 0, streams[0]>>>(Ad_2nd_half, CONST_KER2_VAL);
   mymul<<<GRIDSIZE / 2, BLOCKSIZE, 0, streams[1]>>>(Ad_1st_half, CONST_KER1_VAL);
-  HIP_CHECK(hipEventRecord(events[2], streams[1]));
-  HIP_CHECK(hipStreamWaitEvent(streams[2], events[2], 0));
+  HIP_CHECK(hipEventRecord(events[2], streams[1]))
+  HIP_CHECK(hipStreamWaitEvent(streams[2], events[2], 0))
   mymul<<<GRIDSIZE / 2, BLOCKSIZE, 0, streams[1]>>>(Ad_1st_half, CONST_KER3_VAL);
-  HIPCHECK(hipLaunchHostFunc(streams[2], fn, nullptr));
-  HIP_CHECK(hipEventRecord(events[6], streams[1]));
-  HIP_CHECK(hipStreamWaitEvent(streams[0], events[6], 0));
-  HIP_CHECK(hipEventRecord(events[5], streams[4]));
-  HIP_CHECK(hipStreamWaitEvent(streams[0], events[5], 0));
+  HIPCHECK(hipLaunchHostFunc(streams[2], fn, nullptr))
+  HIP_CHECK(hipEventRecord(events[6], streams[1]))
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[6], 0))
+  HIP_CHECK(hipEventRecord(events[5], streams[4]))
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[5], 0))
   myadd<<<GRIDSIZE, BLOCKSIZE, 0, streams[0]>>>(Ad.ptr(), Bd.ptr());
-  HIP_CHECK(hipEventRecord(events[3], streams[2]));
-  HIP_CHECK(hipStreamWaitEvent(streams[0], events[3], 0));
-  HIP_CHECK(hipEventRecord(events[4], streams[3]));
-  HIP_CHECK(hipStreamWaitEvent(streams[0], events[4], 0));
+  HIP_CHECK(hipEventRecord(events[3], streams[2]))
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[3], 0))
+  HIP_CHECK(hipEventRecord(events[4], streams[3]))
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[4], 0))
   HIP_CHECK(
       hipMemcpyAsync(Ch.host_ptr(), Ad.ptr(), (N * sizeof(int)), hipMemcpyDefault, streams[0]));
   HIP_CHECK(hipStreamEndCapture(streams[0], &graph));  // End Capture
   // Execute and test the graph
   hipGraphExec_t graphExec{nullptr};
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   // Verify graph
   for (size_t iter = 0; iter < kLaunchIters; iter++) {
     std::fill_n(Ah.host_ptr(), N, iter);
     std::fill_n(Bh.host_ptr(), N, iter);
-    HIP_CHECK(hipGraphLaunch(graphExec, streams[0]));
-    HIP_CHECK(hipStreamSynchronize(streams[0]));
+    HIP_CHECK(hipGraphLaunch(graphExec, streams[0]))
+    HIP_CHECK(hipStreamSynchronize(streams[0]))
     for (size_t i = 0; i < N; i++) {
       if (i > (N / 2 - 1)) {
         REQUIRE(Ch.host_ptr()[i] == (Bh.host_ptr()[i] + Ah.host_ptr()[i] * CONST_KER2_VAL));
@@ -1352,8 +1352,8 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_captureComplexGraph) {
   }
   REQUIRE(gCbackIter == (2 * kLaunchIters));
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -1376,20 +1376,20 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_captureEmptyStreams) {
   EventsGuard events(3);
 
   // Capture streams into graph
-  HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipEventRecord(events[0], streams[0]));
-  HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0));
-  HIP_CHECK(hipStreamWaitEvent(streams[2], events[0], 0));
-  HIP_CHECK(hipEventRecord(events[1], streams[1]));
-  HIP_CHECK(hipStreamWaitEvent(streams[0], events[1], 0));
-  HIP_CHECK(hipEventRecord(events[2], streams[2]));
-  HIP_CHECK(hipStreamWaitEvent(streams[0], events[2], 0));
+  HIP_CHECK(hipStreamBeginCapture(streams[0], hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipEventRecord(events[0], streams[0]))
+  HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0))
+  HIP_CHECK(hipStreamWaitEvent(streams[2], events[0], 0))
+  HIP_CHECK(hipEventRecord(events[1], streams[1]))
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[1], 0))
+  HIP_CHECK(hipEventRecord(events[2], streams[2]))
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[2], 0))
   HIP_CHECK(hipStreamEndCapture(streams[0], &graph));  // End Capture
   size_t numNodes = 0;
-  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes));
+  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes))
   REQUIRE(numNodes == 0);
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -1427,35 +1427,35 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_StreamSync_OngoingCapture) {
   // Capture streams into graph
   SECTION("Stream Creation Before Capture") {
     StreamsGuard stream1(1);
-    HIP_CHECK(hipStreamBeginCapture(stream0[0], flag));
+    HIP_CHECK(hipStreamBeginCapture(stream0[0], flag))
     HIP_CHECK(hipMemcpyAsync(Ad.ptr(), Ah.host_ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDefault,
                              stream1[0]));
     HIP_CHECK(hipMemcpyAsync(Bd.ptr(), Bh.host_ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDefault,
                              stream1[0]));
-    HIP_CHECK(hipStreamSynchronize(stream1[0]));
+    HIP_CHECK(hipStreamSynchronize(stream1[0]))
     myadd<<<GRIDSIZE, BLOCKSIZE, 0, stream0[0]>>>(Ad.ptr(), Bd.ptr());
     HIP_CHECK(hipStreamEndCapture(stream0[0], &graph));  // End Capture
   }
   SECTION("Synchronizing multiple streams during Capture") {
     StreamsGuard stream1(1), stream2(1);
-    HIP_CHECK(hipStreamBeginCapture(stream0[0], flag));
+    HIP_CHECK(hipStreamBeginCapture(stream0[0], flag))
     HIP_CHECK(hipMemcpyAsync(Ad.ptr(), Ah.host_ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDefault,
                              stream1[0]));
     HIP_CHECK(hipMemcpyAsync(Bd.ptr(), Bh.host_ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDefault,
                              stream2[0]));
-    HIP_CHECK(hipStreamSynchronize(stream1[0]));
-    HIP_CHECK(hipStreamSynchronize(stream2[0]));
+    HIP_CHECK(hipStreamSynchronize(stream1[0]))
+    HIP_CHECK(hipStreamSynchronize(stream2[0]))
     myadd<<<GRIDSIZE, BLOCKSIZE, 0, stream0[0]>>>(Ad.ptr(), Bd.ptr());
     HIP_CHECK(hipStreamEndCapture(stream0[0], &graph));  // End Capture
   }
   SECTION("Stream Creation After Capture") {
-    HIP_CHECK(hipStreamBeginCapture(stream0[0], flag));
+    HIP_CHECK(hipStreamBeginCapture(stream0[0], flag))
     StreamsGuard stream1(1);
     HIP_CHECK(hipMemcpyAsync(Ad.ptr(), Ah.host_ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDefault,
                              stream1[0]));
     HIP_CHECK(hipMemcpyAsync(Bd.ptr(), Bh.host_ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDefault,
                              stream1[0]));
-    HIP_CHECK(hipStreamSynchronize(stream1[0]));
+    HIP_CHECK(hipStreamSynchronize(stream1[0]))
     myadd<<<GRIDSIZE, BLOCKSIZE, 0, stream0[0]>>>(Ad.ptr(), Bd.ptr());
     HIP_CHECK(hipStreamEndCapture(stream0[0], &graph));  // End Capture
   }
@@ -1465,13 +1465,13 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_StreamSync_OngoingCapture) {
                              stream1[0]));
     HIP_CHECK(hipMemcpyAsync(Bd.ptr(), Bh.host_ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDefault,
                              stream1[0]));
-    HIP_CHECK(hipStreamSynchronize(stream1[0]));
-    HIP_CHECK(hipStreamBeginCapture(stream0[0], flag));
+    HIP_CHECK(hipStreamSynchronize(stream1[0]))
+    HIP_CHECK(hipStreamBeginCapture(stream0[0], flag))
     myadd<<<GRIDSIZE, BLOCKSIZE, 0, stream0[0]>>>(Ad.ptr(), Bd.ptr());
     HIP_CHECK(hipStreamEndCapture(stream0[0], &graph));  // End Capture
   }
   SECTION("Stream Synchronize After Capture") {
-    HIP_CHECK(hipStreamBeginCapture(stream0[0], flag));
+    HIP_CHECK(hipStreamBeginCapture(stream0[0], flag))
     myadd<<<GRIDSIZE, BLOCKSIZE, 0, stream0[0]>>>(Ad.ptr(), Bd.ptr());
     HIP_CHECK(hipStreamEndCapture(stream0[0], &graph));  // End Capture
     StreamsGuard stream1(1);
@@ -1479,19 +1479,19 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_StreamSync_OngoingCapture) {
                              stream1[0]));
     HIP_CHECK(hipMemcpyAsync(Bd.ptr(), Bh.host_ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDefault,
                              stream1[0]));
-    HIP_CHECK(hipStreamSynchronize(stream1[0]));
+    HIP_CHECK(hipStreamSynchronize(stream1[0]))
   }
   // Execute and test the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream0[0]));
-  HIP_CHECK(hipStreamSynchronize(stream0[0]));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, stream0[0]))
+  HIP_CHECK(hipStreamSynchronize(stream0[0]))
   // Check output
-  HIP_CHECK(hipMemcpy(Ah.host_ptr(), Ad.ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(Ah.host_ptr(), Ad.ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDeviceToHost))
   for (int idx = 0; idx < BLOCKSIZE; idx++) {
     REQUIRE(Ah.host_ptr()[idx] == (VALUE1 + VALUE2));
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -1519,7 +1519,7 @@ static void captureStrmThread(hipGraph_t* graph, int* Ah, int* Ad, int* Bh, int*
                               int GRIDSIZE, hipStreamCaptureMode flag, hipError_t* error) {
   StreamsGuard stream(1);
   // Capture streams into graph
-  HIP_CHECK(hipStreamBeginCapture(stream[0], flag));
+  HIP_CHECK(hipStreamBeginCapture(stream[0], flag))
   std::thread t1(strmSyncThread, Ah, Ad, Bh, Bd, BLOCKSIZE, error);
   t1.join();
   HIP_CHECK_THREAD_FINALIZE();
@@ -1552,7 +1552,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread) {
   SECTION("Capture Flag = hipStreamCaptureModeGlobal Single Threaded") {
     StreamsGuard stream(2);
     // Capture streams into graph
-    HIP_CHECK(hipStreamBeginCapture(stream[0], hipStreamCaptureModeGlobal));
+    HIP_CHECK(hipStreamBeginCapture(stream[0], hipStreamCaptureModeGlobal))
     HIP_CHECK(hipMemcpyAsync(Ad.ptr(), Ah.host_ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDefault,
                              stream[1]));
     HIP_CHECK(hipMemcpyAsync(Bd.ptr(), Bh.host_ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDefault,
@@ -1565,7 +1565,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread) {
   SECTION("Capture Flag = hipStreamCaptureModeThreadLocal Single Threaded") {
     StreamsGuard stream(2);
     // Capture streams into graph
-    HIP_CHECK(hipStreamBeginCapture(stream[0], hipStreamCaptureModeThreadLocal));
+    HIP_CHECK(hipStreamBeginCapture(stream[0], hipStreamCaptureModeThreadLocal))
     HIP_CHECK(hipMemcpyAsync(Ad.ptr(), Ah.host_ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDefault,
                              stream[1]));
     HIP_CHECK(hipMemcpyAsync(Bd.ptr(), Bh.host_ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDefault,
@@ -1594,16 +1594,16 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread) {
     hipGraphExec_t graphExec{nullptr};
     StreamsGuard stream(1);
     // Execute and test the graph
-    HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-    HIP_CHECK(hipGraphLaunch(graphExec, stream[0]));
-    HIP_CHECK(hipStreamSynchronize(stream[0]));
+    HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+    HIP_CHECK(hipGraphLaunch(graphExec, stream[0]))
+    HIP_CHECK(hipStreamSynchronize(stream[0]))
     // Check output
-    HIP_CHECK(hipMemcpy(Ah.host_ptr(), Ad.ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(Ah.host_ptr(), Ad.ptr(), BLOCKSIZE * sizeof(int), hipMemcpyDeviceToHost))
     for (int idx = 0; idx < BLOCKSIZE; idx++) {
       REQUIRE(Ah.host_ptr()[idx] == (VALUE1 + VALUE2));
     }
-    HIP_CHECK(hipGraphExecDestroy(graphExec));
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphExecDestroy(graphExec))
+    HIP_CHECK(hipGraphDestroy(graph))
   }
 }
 
@@ -1630,66 +1630,66 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_MultipleStreams_ReuseEvent) {
   hipGraphExec_t graphExec1;
 
   // Create streams
-  HIP_CHECK(hipStreamCreate(&str0));
-  HIP_CHECK(hipStreamCreate(&str1));
-  HIP_CHECK(hipStreamCreate(&str2));
+  HIP_CHECK(hipStreamCreate(&str0))
+  HIP_CHECK(hipStreamCreate(&str1))
+  HIP_CHECK(hipStreamCreate(&str2))
 
   // Create events
-  HIP_CHECK(hipEventCreate(&ev0));
-  HIP_CHECK(hipEventCreate(&ev1));
-  HIP_CHECK(hipEventCreate(&ev2));
+  HIP_CHECK(hipEventCreate(&ev0))
+  HIP_CHECK(hipEventCreate(&ev1))
+  HIP_CHECK(hipEventCreate(&ev2))
 
   // Enable capture on streams str0 and str1
-  HIP_CHECK(hipStreamBeginCapture(str0, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(str0, hipStreamCaptureModeGlobal))
   // str1 in relaxed mode so hipGraphInstantiate can be called on cuda without error
-  HIP_CHECK(hipStreamBeginCapture(str1, hipStreamCaptureModeRelaxed));
+  HIP_CHECK(hipStreamBeginCapture(str1, hipStreamCaptureModeRelaxed))
 
   dummyKernel<<<1, 1, 0, str0>>>();
-  HIP_CHECK(hipPeekAtLastError());
-  HIP_CHECK(hipEventRecord(ev0, str0));
-  HIP_CHECK(hipEventRecord(ev1, str1));
-  HIP_CHECK(hipStreamWaitEvent(str2, ev0, 0));
+  HIP_CHECK(hipPeekAtLastError())
+  HIP_CHECK(hipEventRecord(ev0, str0))
+  HIP_CHECK(hipEventRecord(ev1, str1))
+  HIP_CHECK(hipStreamWaitEvent(str2, ev0, 0))
   dummyKernel<<<1, 1, 0, str2>>>();
-  HIP_CHECK(hipPeekAtLastError());
-  HIP_CHECK(hipEventRecord(ev2, str2));
+  HIP_CHECK(hipPeekAtLastError())
+  HIP_CHECK(hipEventRecord(ev2, str2))
 
-  HIP_CHECK(hipStreamWaitEvent(str0, ev2, 0));
+  HIP_CHECK(hipStreamWaitEvent(str0, ev2, 0))
   dummyKernel<<<1, 1, 0, str0>>>();
-  HIP_CHECK(hipPeekAtLastError());
+  HIP_CHECK(hipPeekAtLastError())
 
   // Instantiate graph for str0
-  HIP_CHECK(hipStreamEndCapture(str0, &graph0));
-  HIP_CHECK(hipGraphInstantiate(&graphExec0, graph0, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphDestroy(graph0));
+  HIP_CHECK(hipStreamEndCapture(str0, &graph0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec0, graph0, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphDestroy(graph0))
 
-  HIP_CHECK(hipStreamWaitEvent(str2, ev1, 0));
-  HIP_CHECK(hipEventRecord(ev2, str2));
+  HIP_CHECK(hipStreamWaitEvent(str2, ev1, 0))
+  HIP_CHECK(hipEventRecord(ev2, str2))
 
-  HIP_CHECK(hipStreamWaitEvent(str1, ev2, 0));
+  HIP_CHECK(hipStreamWaitEvent(str1, ev2, 0))
   dummyKernel<<<1, 1, 0, str1>>>();
-  HIP_CHECK(hipPeekAtLastError());
+  HIP_CHECK(hipPeekAtLastError())
 
-  HIP_CHECK(hipStreamEndCapture(str1, &graph1));
+  HIP_CHECK(hipStreamEndCapture(str1, &graph1))
 
   // Launch graph0
-  HIP_CHECK(hipGraphLaunch(graphExec0, str0));
-  HIP_CHECK(hipStreamSynchronize(str0));
-  HIP_CHECK(hipGraphExecDestroy(graphExec0));
+  HIP_CHECK(hipGraphLaunch(graphExec0, str0))
+  HIP_CHECK(hipStreamSynchronize(str0))
+  HIP_CHECK(hipGraphExecDestroy(graphExec0))
 
   // Instantiate and launch graph for str1
-  HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec1, str1));
-  HIP_CHECK(hipStreamSynchronize(str1));
-  HIP_CHECK(hipGraphExecDestroy(graphExec1));
-  HIP_CHECK(hipGraphDestroy(graph1));
+  HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec1, str1))
+  HIP_CHECK(hipStreamSynchronize(str1))
+  HIP_CHECK(hipGraphExecDestroy(graphExec1))
+  HIP_CHECK(hipGraphDestroy(graph1))
 
   // Clean up resources
-  HIP_CHECK(hipEventDestroy(ev0));
-  HIP_CHECK(hipEventDestroy(ev1));
-  HIP_CHECK(hipEventDestroy(ev2));
-  HIP_CHECK(hipStreamDestroy(str0));
-  HIP_CHECK(hipStreamDestroy(str1));
-  HIP_CHECK(hipStreamDestroy(str2));
+  HIP_CHECK(hipEventDestroy(ev0))
+  HIP_CHECK(hipEventDestroy(ev1))
+  HIP_CHECK(hipEventDestroy(ev2))
+  HIP_CHECK(hipStreamDestroy(str0))
+  HIP_CHECK(hipStreamDestroy(str1))
+  HIP_CHECK(hipStreamDestroy(str2))
 }
 
 /**

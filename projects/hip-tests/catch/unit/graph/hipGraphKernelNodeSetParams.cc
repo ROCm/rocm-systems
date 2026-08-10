@@ -34,17 +34,17 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetParams_Negative) {
   hipGraphNode_t kNode;
   hipKernelNodeParams kNodeParams{};
 
-  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N))
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   void* kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
   kNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
   kNodeParams.gridDim = dim3(blocks);
   kNodeParams.blockDim = dim3(threadsPerBlock);
   kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
-  HIP_CHECK(hipGraphAddKernelNode(&kNode, graph, nullptr, 0, &kNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kNode, graph, nullptr, 0, &kNodeParams))
 
   SECTION("Pass node as nullptr") {
     HIP_CHECK_ERROR(hipGraphKernelNodeSetParams(nullptr, &kNodeParams), hipErrorInvalidValue);
@@ -72,15 +72,15 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetParams_Negative) {
 #if HT_NVIDIA  // segfaults on AMD
   SECTION("node is not a kernel node") {
     hipGraphNode_t empty_node;
-    HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, nullptr, 0));
+    HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, nullptr, 0))
     HIP_CHECK_ERROR(hipGraphKernelNodeSetParams(empty_node, &kNodeParams), hipErrorInvalidValue);
   }
 #endif
 
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
-  HIP_CHECK(hipFree(C_d));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
+  HIP_CHECK(hipFree(C_d))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -102,9 +102,9 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetParams_Functional) {
   hipGraphExec_t graphExec;
   size_t NElem{N};
 
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
@@ -125,7 +125,7 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetParams_Functional) {
   kNodeParams1.gridDim = dim3(blocks);
   kNodeParams1.blockDim = dim3(threadsPerBlock);
   kNodeParams1.kernelParams = reinterpret_cast<void**>(kernelArgs);
-  HIP_CHECK(hipGraphKernelNodeSetParams(kNode, &kNodeParams1));
+  HIP_CHECK(hipGraphKernelNodeSetParams(kNode, &kNodeParams1))
 
   dependencies.clear();
   dependencies.push_back(kNode);
@@ -133,17 +133,17 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetParams_Functional) {
                                     C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Verify graph execution result
   HipTest::checkVectorSUB<int>(A_h, B_h, C_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 }
 
 static __global__ void ker_vec_add(int* A, int* B) {
@@ -172,8 +172,8 @@ class GraphKernelNodeGetSetParam {
   GraphKernelNodeGetSetParam() {
     Nbytes = N * sizeof(int);
     // Allocate device buffers
-    HIP_CHECK(hipMalloc(&A1_d, Nbytes));
-    HIP_CHECK(hipMalloc(&A2_d, Nbytes));
+    HIP_CHECK(hipMalloc(&A1_d, Nbytes))
+    HIP_CHECK(hipMalloc(&A2_d, Nbytes))
     // Allocate host buffers
     A1_h = reinterpret_cast<int*>(malloc(Nbytes));
     REQUIRE(A1_h != nullptr);
@@ -182,13 +182,13 @@ class GraphKernelNodeGetSetParam {
     A3_h = reinterpret_cast<int*>(malloc(Nbytes));
     REQUIRE(A3_h != nullptr);
     // Create all the 3 level graphs
-    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
     void* kernelArgs[] = {&A1_d, &A2_d};
     kerNodeParams.func = reinterpret_cast<void*>(ker_vec_add);
     kerNodeParams.gridDim = dim3(blocks);
     kerNodeParams.blockDim = dim3(threadsPerBlock);
     kerNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
-    HIP_CHECK(hipGraphAddKernelNode(&vec_maths, graph, nullptr, 0, &kerNodeParams));
+    HIP_CHECK(hipGraphAddKernelNode(&vec_maths, graph, nullptr, 0, &kerNodeParams))
     // Add nodes to graph
     HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A1, graph, nullptr, 0, A1_d, A1_h, Nbytes,
                                       hipMemcpyHostToDevice));
@@ -196,9 +196,9 @@ class GraphKernelNodeGetSetParam {
                                       hipMemcpyHostToDevice));
     HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_A3, graph, nullptr, 0, A3_h, A1_d, Nbytes,
                                       hipMemcpyDeviceToHost));
-    HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A1, &vec_maths, 1));
-    HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A2, &vec_maths, 1));
-    HIP_CHECK(hipGraphAddDependencies(graph, &vec_maths, &memcpyD2H_A3, 1));
+    HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A1, &vec_maths, 1))
+    HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A2, &vec_maths, 1))
+    HIP_CHECK(hipGraphAddDependencies(graph, &vec_maths, &memcpyD2H_A3, 1))
   }
 
   // Fill Random Input Data
@@ -213,24 +213,24 @@ class GraphKernelNodeGetSetParam {
 
   void updateNode() {
     size_t numNodes = 0;
-    HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes));
+    HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes))
     hipGraphNode_t* nodes =
         reinterpret_cast<hipGraphNode_t*>(malloc(numNodes * sizeof(hipGraphNode_t)));
-    HIP_CHECK(hipGraphGetNodes(graph, nodes, &numNodes));
+    HIP_CHECK(hipGraphGetNodes(graph, nodes, &numNodes))
     // Get the Graph node from the embedded graph
     size_t nodeIdx = 0;
     for (size_t idx = 0; idx < numNodes; idx++) {
       hipGraphNodeType nodeType;
-      HIP_CHECK(hipGraphNodeGetType(nodes[idx], &nodeType));
+      HIP_CHECK(hipGraphNodeGetType(nodes[idx], &nodeType))
       if (nodeType == hipGraphNodeTypeKernel) {
         nodeIdx = idx;
         break;
       }
     }
     hipKernelNodeParams nodeParam;
-    HIP_CHECK(hipGraphKernelNodeGetParams(nodes[nodeIdx], &nodeParam));
+    HIP_CHECK(hipGraphKernelNodeGetParams(nodes[nodeIdx], &nodeParam))
     nodeParam.func = reinterpret_cast<void*>(ker_vec_sub);
-    HIP_CHECK(hipGraphKernelNodeSetParams(nodes[nodeIdx], &nodeParam));
+    HIP_CHECK(hipGraphKernelNodeSetParams(nodes[nodeIdx], &nodeParam))
     free(nodes);
   }
 
@@ -240,12 +240,12 @@ class GraphKernelNodeGetSetParam {
   // Destroy resources
   ~GraphKernelNodeGetSetParam() {
     // Free all allocated buffers
-    HIP_CHECK(hipFree(A2_d));
-    HIP_CHECK(hipFree(A1_d));
+    HIP_CHECK(hipFree(A2_d))
+    HIP_CHECK(hipFree(A1_d))
     free(A3_h);
     free(A2_h);
     free(A1_h);
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphDestroy(graph))
   }
 };
 
@@ -256,13 +256,13 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeGetSetParams_Functional) {
   GraphKernelNodeGetSetParam GraphKernelNodeGetSetParamObj;
   graph = GraphKernelNodeGetSetParamObj.getRootGraph();
   GraphKernelNodeGetSetParamObj.updateNode();
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   // Instantiate and launch the childgraph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, (*graph), nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, (*graph), nullptr, nullptr, 0))
   GraphKernelNodeGetSetParamObj.fillRandInpData();
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
   GraphKernelNodeGetSetParamObj.validateOutData();
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
 }

@@ -40,8 +40,8 @@ class TexObjectTestWrapper {
     array_desc.Width = width;
     array_desc.Height = 0;
 
-    HIP_CHECK(hipArrayCreate(&array_member, &array_desc));
-    HIP_CHECK(hipMemcpyHtoA(reinterpret_cast<hipArray_t>(array_member), 0, host_data_, size));
+    HIP_CHECK(hipArrayCreate(&array_member, &array_desc))
+    HIP_CHECK(hipMemcpyHtoA(reinterpret_cast<hipArray_t>(array_member), 0, host_data_, size))
 
     memset(&res_desc, 0, sizeof(res_desc));
     res_desc.resType = HIP_RESOURCE_TYPE_ARRAY;
@@ -72,9 +72,9 @@ class TexObjectTestWrapper {
 
   ~TexObjectTestWrapper() {
     if (!ommit_destroy_) {
-      HIP_CHECK(hipTexObjectDestroy(texture_object));
+      HIP_CHECK(hipTexObjectDestroy(texture_object))
     }
-    HIP_CHECK(hipArrayDestroy(array_member));
+    HIP_CHECK(hipArrayDestroy(array_member))
     free(host_data_);
   }
 };
@@ -111,7 +111,7 @@ HIP_TEST_CASE(Unit_hipGetTexObjectResourceDesc_positive) {
   HIP_RESOURCE_DESC check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
 
-  HIP_CHECK(hipTexObjectGetResourceDesc(&check_desc, tex_obj_wrapper->texture_object));
+  HIP_CHECK(hipTexObjectGetResourceDesc(&check_desc, tex_obj_wrapper->texture_object))
 
   REQUIRE(check_desc.resType == tex_obj_wrapper->res_desc.resType);
   REQUIRE(check_desc.res.array.hArray == tex_obj_wrapper->res_desc.res.array.hArray);
@@ -195,7 +195,7 @@ HIP_TEST_CASE(Unit_hipGetTexObjectResourceViewDesc_positive) {
   HIP_RESOURCE_VIEW_DESC check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
 
-  HIP_CHECK(hipTexObjectGetResourceViewDesc(&check_desc, tex_obj_wrapper->texture_object));
+  HIP_CHECK(hipTexObjectGetResourceViewDesc(&check_desc, tex_obj_wrapper->texture_object))
 
   REQUIRE(check_desc.format == tex_obj_wrapper->res_view_desc.format);
   REQUIRE(check_desc.width == tex_obj_wrapper->res_view_desc.width);
@@ -281,7 +281,7 @@ HIP_TEST_CASE(Unit_hipGetTexObjectTextureDesc_positive) {
   HIP_TEXTURE_DESC check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
 
-  HIP_CHECK(hipTexObjectGetTextureDesc(&check_desc, tex_obj_wrapper->texture_object));
+  HIP_CHECK(hipTexObjectGetTextureDesc(&check_desc, tex_obj_wrapper->texture_object))
 
   REQUIRE(check_desc.filterMode == tex_obj_wrapper->tex_desc.filterMode);
   REQUIRE(check_desc.flags == tex_obj_wrapper->tex_desc.flags);

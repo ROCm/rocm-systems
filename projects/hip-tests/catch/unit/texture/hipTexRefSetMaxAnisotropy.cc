@@ -16,13 +16,13 @@ HIP_TEST_CASE(Unit_hipTexRefSetMaxAnisotropy_Negative_Parameters) {
   hipCtx_t ctx;
   hipDevice_t device;
 
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipCtxCreate(&ctx, 0, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipCtxCreate(&ctx, 0, device))
 
   hipTexRef tex_ref = nullptr;
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"));
-  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"));
+  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"))
+  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"))
 
   int max_anisotropy = 4;
 
@@ -35,8 +35,8 @@ HIP_TEST_CASE(Unit_hipTexRefSetMaxAnisotropy_Negative_Parameters) {
 #endif
   }
 
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipCtxDestroy(ctx));
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipCtxDestroy(ctx))
 }
 
 HIP_TEST_CASE(Unit_hipTexRefSetMaxAnisotropy_Positive) {
@@ -45,19 +45,19 @@ HIP_TEST_CASE(Unit_hipTexRefSetMaxAnisotropy_Positive) {
   hipCtx_t ctx;
   hipDevice_t device;
 
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipCtxCreate(&ctx, 0, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipCtxCreate(&ctx, 0, device))
 
   hipTexRef tex_ref = nullptr;
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"));
-  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"));
+  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"))
+  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"))
 
   unsigned int max_anisotropy = GENERATE(1, 2, 4, 16);
-  HIP_CHECK(hipTexRefSetMaxAnisotropy(tex_ref, max_anisotropy));
+  HIP_CHECK(hipTexRefSetMaxAnisotropy(tex_ref, max_anisotropy))
 
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipCtxDestroy(ctx));
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipCtxDestroy(ctx))
 }
 
 #endif

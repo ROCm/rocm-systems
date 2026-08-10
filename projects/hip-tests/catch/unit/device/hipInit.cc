@@ -27,11 +27,11 @@
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipInit_Positive) {
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
 
   // Verify that HIP runtime is successfully initialized by calling a HIP API
   int count = -1;
-  HIP_CHECK(hipGetDeviceCount(&count));
+  HIP_CHECK(hipGetDeviceCount(&count))
   REQUIRE(count >= 0);
 }
 

@@ -61,7 +61,7 @@ std::vector<std::pair<int, int>> GetPeerAccessibleDevicePairs() {
         continue;
       }
       int can_access_peer = 0;
-      HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
+      HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device))
       if (can_access_peer != 0) {
         peer_pairs.emplace_back(src_device, dst_device);
       }
@@ -103,7 +103,7 @@ void FillDeviceBuffers(const std::vector<void*>& ptrs, size_t copy_size, int val
 
   for (size_t i = 0; i < ptrs.size(); ++i) {
     std::fill(source.begin(), source.end(), value + static_cast<int>(i));
-    HIP_CHECK(hipMemcpy(ptrs[i], source.data(), copy_size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(ptrs[i], source.data(), copy_size, hipMemcpyHostToDevice))
   }
 }
 
@@ -140,7 +140,7 @@ void VerifyDeviceBuffers(const std::vector<void*>& ptrs, size_t copy_size,
   std::vector<int> result(copy_elements);
 
   for (size_t i = 0; i < ptrs.size(); ++i) {
-    HIP_CHECK(hipMemcpy(result.data(), ptrs[i], copy_size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(result.data(), ptrs[i], copy_size, hipMemcpyDeviceToHost))
     const int value = expected + (add_index ? static_cast<int>(i) : 0);
     VerifyArrayFromBothEnds(result.data(), copy_elements, value, i);
   }
@@ -408,7 +408,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_Functional) {
 
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), copy_count, &attr,
                                 attrs_idxs, 1, nullptr, stream_guard.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
   if (pointer_pattern == PointerPattern::kBroadcastSource) {
     VerifyDeviceBuffers(dst_ptrs, copy_size, kPatternValue, false);
@@ -446,7 +446,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2D_Functional) {
 
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), copy_count, nullptr,
                                 nullptr, 0, nullptr, stream_guard.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
   VerifyDeviceBuffers(dst_ptrs, copy_size);
 }
@@ -483,7 +483,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2D_Pageable_DuringApiCall_SourceAccess) 
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), copy_count, &attr,
                                 attrs_idxs, 1, nullptr, stream_guard.stream()));
   FillHostBuffers(src, copy_size, kAlteredValue);
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
   VerifyDeviceBuffers(dst_ptrs, copy_size, kOriginalValue);
   VerifyHostBuffers(src, copy_size, kAlteredValue);
 }
@@ -524,7 +524,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2D_Pageable_Stream_SourceAccess) {
   }
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), copy_count, &attr,
                                 attrs_idxs, 1, nullptr, stream_guard.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
   VerifyDeviceBuffers(dst_ptrs, copy_size, kStreamProducedValue);
 }
@@ -558,7 +558,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2H_Functional) {
 
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), copy_count, nullptr,
                                 nullptr, 0, nullptr, stream_guard.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
   VerifyHostBuffers(dst, copy_size);
 }
@@ -593,7 +593,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2H_Functional) {
 
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), copy_count, nullptr,
                                 nullptr, 0, nullptr, stream_guard.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
   VerifyHostBuffers(dst, copy_size);
 }
@@ -617,24 +617,24 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_Functional) {
     HIP_SKIP_TEST("Test requires at least three GPUs.");
   }
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   StreamGuard stream_guard(Streams::created);
 
   LinearAllocGuard<int> h2d_src(LinearAllocs::malloc, copy_size);
   LinearAllocGuard<int> h2d_dst(LinearAllocs::hipMalloc, copy_size);
 
-  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipSetDevice(1))
   LinearAllocGuard<int> d2d_src(LinearAllocs::hipMalloc, copy_size);
   LinearAllocGuard<int> d2d_dst(LinearAllocs::hipMalloc, copy_size);
 
-  HIP_CHECK(hipSetDevice(2));
+  HIP_CHECK(hipSetDevice(2))
   LinearAllocGuard<int> d2h_src(LinearAllocs::hipMalloc, copy_size);
 
   LinearAllocGuard<int> d2h_dst(LinearAllocs::malloc, copy_size);
   LinearAllocGuard<int> h2h_src(LinearAllocs::malloc, copy_size);
   LinearAllocGuard<int> h2h_dst(LinearAllocs::malloc, copy_size);
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   std::array<void*, 4> src_ptrs{h2d_src.ptr(), d2d_src.ptr(), d2h_src.ptr(), h2h_src.ptr()};
   std::array<void*, 4> dst_ptrs{h2d_dst.ptr(), d2d_dst.ptr(), d2h_dst.ptr(), h2h_dst.ptr()};
   std::array<size_t, 4> sizes{copy_size, copy_size, copy_size, copy_size};
@@ -643,18 +643,18 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_Functional) {
   std::fill_n(h2h_src.host_ptr(), copy_elements, kPatternValue + 3);
   std::vector<int> source(copy_elements);
   std::fill(source.begin(), source.end(), kPatternValue + 1);
-  HIP_CHECK(hipMemcpy(d2d_src.ptr(), source.data(), copy_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2d_src.ptr(), source.data(), copy_size, hipMemcpyHostToDevice))
   std::fill(source.begin(), source.end(), kPatternValue + 2);
-  HIP_CHECK(hipMemcpy(d2h_src.ptr(), source.data(), copy_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2h_src.ptr(), source.data(), copy_size, hipMemcpyHostToDevice))
 
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), sizes.size(),
                                 nullptr, nullptr, 0, nullptr, stream_guard.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
   std::vector<int> result(copy_elements);
-  HIP_CHECK(hipMemcpy(result.data(), h2d_dst.ptr(), copy_size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(result.data(), h2d_dst.ptr(), copy_size, hipMemcpyDeviceToHost))
   VerifyArrayFromBothEnds(result.data(), copy_elements, kPatternValue, 0);
-  HIP_CHECK(hipMemcpy(result.data(), d2d_dst.ptr(), copy_size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(result.data(), d2d_dst.ptr(), copy_size, hipMemcpyDeviceToHost))
   VerifyArrayFromBothEnds(result.data(), copy_elements, kPatternValue + 1, 1);
   VerifyArrayFromBothEnds(d2h_dst.host_ptr(), copy_elements, kPatternValue + 2, 2);
   VerifyArrayFromBothEnds(h2h_dst.host_ptr(), copy_elements, kPatternValue + 3, 3);
@@ -687,7 +687,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Stream) {
 
     HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount, nullptr,
                                   nullptr, 0, nullptr, nullptr));
-    HIP_CHECK(hipStreamSynchronize(nullptr));
+    HIP_CHECK(hipStreamSynchronize(nullptr))
 
     VerifyDeviceBuffers(dst_ptrs, kSmallCopySize);
   }
@@ -704,10 +704,10 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Stream) {
       VectorSet<<<1, 256, 0, stream_guard.stream()>>>(
           static_cast<int*>(src_ptrs[i]), kPatternValue + static_cast<int>(i), kCopyElements);
     }
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
     HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount, nullptr,
                                   nullptr, 0, nullptr, stream_guard.stream()));
-    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
     VerifyDeviceBuffers(dst_ptrs, kSmallCopySize);
   }
@@ -726,12 +726,12 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Stream) {
       VectorSet<<<1, 256, 0, producer_stream.stream()>>>(
           static_cast<int*>(src_ptrs[i]), kPatternValue + static_cast<int>(i), kCopyElements);
     }
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipEventRecord(events[0], producer_stream.stream()));
-    HIP_CHECK(hipStreamWaitEvent(copy_stream.stream(), events[0], 0));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipEventRecord(events[0], producer_stream.stream()))
+    HIP_CHECK(hipStreamWaitEvent(copy_stream.stream(), events[0], 0))
     HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount, nullptr,
                                   nullptr, 0, nullptr, copy_stream.stream()));
-    HIP_CHECK(hipStreamSynchronize(copy_stream.stream()));
+    HIP_CHECK(hipStreamSynchronize(copy_stream.stream()))
 
     VerifyDeviceBuffers(dst_ptrs, kSmallCopySize);
   }
@@ -772,27 +772,27 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Functional) {
   EnablePeerAccess(peer_pairs);
   for (const auto& [src_device, dst_device] : peer_pairs) {
     for (size_t i = 0; i < batch_count; ++i) {
-      HIP_CHECK(hipSetDevice(src_device));
+      HIP_CHECK(hipSetDevice(src_device))
       src_allocations.emplace_back(LinearAllocs::hipMalloc, copy_size);
       src_ptrs.push_back(src_allocations.back().ptr());
 
-      HIP_CHECK(hipSetDevice(dst_device));
+      HIP_CHECK(hipSetDevice(dst_device))
       dst_allocations.emplace_back(LinearAllocs::hipMalloc, copy_size);
       dst_ptrs.push_back(dst_allocations.back().ptr());
     }
   }
 
-  HIP_CHECK(hipSetDevice(stream_device));
+  HIP_CHECK(hipSetDevice(stream_device))
   StreamGuard stream_guard(Streams::created);
   FillDeviceBuffers(src_ptrs, copy_size, kPatternValue);
-  HIP_CHECK(hipSetDevice(stream_device));
+  HIP_CHECK(hipSetDevice(stream_device))
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), sizes.size(), &attr,
                                 attrs_idxs, 1, nullptr, stream_guard.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
   VerifyDeviceBuffers(dst_ptrs, copy_size);
   DisablePeerAccess(peer_pairs);
-  HIP_CHECK(hipSetDevice(stream_device));
+  HIP_CHECK(hipSetDevice(stream_device))
 }
 
 #if HT_AMD
@@ -821,7 +821,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap) {
   std::vector<void*> swapPtrsB(count);
   std::vector<LinearAllocGuard<unsigned char>> allocations;
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   StreamGuard stream_guard(Streams::created);
   for (size_t i = 0; i < count; ++i) {
     LinearAllocGuard<unsigned char> allocB(allocTypeB, size_in_bytes);
@@ -847,7 +847,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap) {
   // Unsupported allocation/device combinations are asserted to fail above; only the supported
   // combinations reach a real exchange worth verifying.
   if (expectedError == hipSuccess) {
-    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
     for (size_t i = 0; i < count; ++i) {
       requireBufferEquals(swapPtrsA[i], initialValuesB[i], allocTypeA);
       requireBufferEquals(swapPtrsB[i], initialValuesA[i], allocTypeB);
@@ -863,7 +863,7 @@ static void RunMulticastCopyTest(size_t count, size_t size_in_bytes, LinearAlloc
   std::vector<void*> dstPtrs(count);
   std::vector<LinearAllocGuard<unsigned char>> allocations;
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   StreamGuard stream_guard(Streams::created);
   LinearAllocGuard<unsigned char> srcAlloc(srcAllocType, size_in_bytes);
   void* srcMem = srcAlloc.ptr();
@@ -883,7 +883,7 @@ static void RunMulticastCopyTest(size_t count, size_t size_in_bytes, LinearAlloc
   size_t fail_index = 0;
   HIP_CHECK(hipMemcpyBatchAsync(dstPtrs.data(), srcPtrs.data(), sizes.data(), count, &attr,
                                 attrs_idxs, 1, &fail_index, stream_guard.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
   for (size_t i = 0; i < count; ++i) {
     requireBufferEquals(dstPtrs[i], initialValues, dstAllocType);
@@ -929,7 +929,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources) {
   constexpr int k_count = 7;
   const size_t size_in_bytes = 4096;
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   std::vector<unsigned char> pattern_a(size_in_bytes, 10);
   std::vector<unsigned char> pattern_b(size_in_bytes, 4);
 
@@ -948,7 +948,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources) {
   std::vector<void*> dst_ptrs;
   for (int i = 0; i < k_count; ++i) {
     LinearAllocGuard<unsigned char> dstAlloc(LinearAllocs::hipMalloc, size_in_bytes);
-    HIP_CHECK(hipMemset(dstAlloc.ptr(), 0, size_in_bytes));
+    HIP_CHECK(hipMemset(dstAlloc.ptr(), 0, size_in_bytes))
     dst_ptrs.push_back(dstAlloc.ptr());
     allocations.push_back(std::move(dstAlloc));
   }
@@ -964,7 +964,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources) {
   size_t fail_index = 0;
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), k_count, &attr,
                                 attrs_idxs, 1, &fail_index, stream_guard.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
   for (int i = 0; i < k_count; ++i) {
     const std::vector<unsigned char>& expected = (i == 3) ? pattern_b : pattern_a;

@@ -32,7 +32,7 @@ HIP_TEST_CASE(Unit_hipMemcpyParam2D_Positive_Basic) {
 }
 
 HIP_TEST_CASE(Unit_hipMemcpyParam2D_Positive_Synchronization_Behavior) {
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   SECTION("Host to Device") { Memcpy2DHtoDSyncBehavior(MemcpyParam2DAdapter<>(), true); }
 
@@ -95,7 +95,7 @@ HIP_TEST_CASE(Unit_hipMemcpyParam2D_Negative_Parameters) {
 
     SECTION("dstPitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       HIP_CHECK_ERROR(MemcpyParam2DAdapter<>()(dst, static_cast<size_t>(attr) + 1, src, spitch,
                                                width, height, kind),
                       hipErrorInvalidValue);
@@ -103,7 +103,7 @@ HIP_TEST_CASE(Unit_hipMemcpyParam2D_Negative_Parameters) {
 
     SECTION("srcPitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       HIP_CHECK_ERROR(MemcpyParam2DAdapter<>()(dst, dpitch, src, static_cast<size_t>(attr) + 1,
                                                width, height, kind),
                       hipErrorInvalidValue);

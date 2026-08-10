@@ -22,11 +22,11 @@ HIP_TEST_CASE(Unit_hipMallocManaged_FlgParam) {
   bool IfTestPassed = true;
   float *HmmAG = NULL, *HmmAH1 = NULL, *HmmAH2 = NULL, INIT_VAL = 2.5;
   int NumDevs = 0, NUM_ELMS = 4096;
-  HIP_CHECK(hipGetDeviceCount(&NumDevs));
+  HIP_CHECK(hipGetDeviceCount(&NumDevs))
   float *Ad = NULL, *Ah = NULL;
   Ah = new float[NUM_ELMS];
   // Testing hipMemAttachGlobal Flag
-  HIP_CHECK(hipMallocManaged(&HmmAG, NUM_ELMS * sizeof(float), hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&HmmAG, NUM_ELMS * sizeof(float), hipMemAttachGlobal))
 
   // Initializing HmmAG memory
   for (int i = 0; i < NUM_ELMS; i++) {
@@ -40,13 +40,13 @@ HIP_TEST_CASE(Unit_hipMallocManaged_FlgParam) {
   dim3 dimBlock(blockSize, 1, 1);
   hipStream_t strm;
   for (int i = 0; i < NumDevs; i++) {
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipStreamCreate(&strm));
-    HIP_CHECK(hipMalloc(&Ad, NUM_ELMS * sizeof(float)));
-    HIP_CHECK(hipMemset(Ad, 0, NUM_ELMS * sizeof(float)));
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipStreamCreate(&strm))
+    HIP_CHECK(hipMalloc(&Ad, NUM_ELMS * sizeof(float)))
+    HIP_CHECK(hipMemset(Ad, 0, NUM_ELMS * sizeof(float)))
     MallcMangdFlgTst<<<dimGrid, dimBlock, 0, strm>>>(NUM_ELMS, HmmAG, Ad);
-    HIP_CHECK(hipStreamSynchronize(strm));
-    HIP_CHECK(hipMemcpy(Ah, Ad, NUM_ELMS * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipStreamSynchronize(strm))
+    HIP_CHECK(hipMemcpy(Ah, Ad, NUM_ELMS * sizeof(float), hipMemcpyDeviceToHost))
     for (int j = 0; j < NUM_ELMS; ++j) {
       if (Ah[j] != (INIT_VAL * INIT_VAL)) {
         DataMismatch++;
@@ -59,15 +59,15 @@ HIP_TEST_CASE(Unit_hipMallocManaged_FlgParam) {
     }
     DataMismatch = 0;
 
-    HIP_CHECK(hipFree(Ad));
-    HIP_CHECK(hipStreamDestroy(strm));
+    HIP_CHECK(hipFree(Ad))
+    HIP_CHECK(hipStreamDestroy(strm))
   }
   delete[] Ah;
-  HIP_CHECK(hipFree(HmmAG));
+  HIP_CHECK(hipFree(HmmAG))
 
   DataMismatch = 0;
-  HIP_CHECK(hipMallocManaged(&HmmAH1, NUM_ELMS * sizeof(float), hipMemAttachHost));
-  HIP_CHECK(hipMallocManaged(&HmmAH2, NUM_ELMS * sizeof(float), hipMemAttachHost));
+  HIP_CHECK(hipMallocManaged(&HmmAH1, NUM_ELMS * sizeof(float), hipMemAttachHost))
+  HIP_CHECK(hipMallocManaged(&HmmAH2, NUM_ELMS * sizeof(float), hipMemAttachHost))
 
   // Initializing HmmAH memory
   for (int i = 0; i < NUM_ELMS; i++) {
@@ -75,11 +75,11 @@ HIP_TEST_CASE(Unit_hipMallocManaged_FlgParam) {
     HmmAH2[i] = 0;
   }
   for (int i = 0; i < NumDevs; i++) {
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipStreamCreate(&strm));
-    HIP_CHECK(hipMemset(HmmAH2, 0, NUM_ELMS * sizeof(float)));
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipStreamCreate(&strm))
+    HIP_CHECK(hipMemset(HmmAH2, 0, NUM_ELMS * sizeof(float)))
     MallcMangdFlgTst<<<dimGrid, dimBlock, 0, strm>>>(NUM_ELMS, HmmAH1, HmmAH2);
-    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipStreamSynchronize(strm))
     for (int j = 0; j < NUM_ELMS; ++j) {
       if (HmmAH2[j] != (INIT_VAL * INIT_VAL)) {
         DataMismatch++;
@@ -90,10 +90,10 @@ HIP_TEST_CASE(Unit_hipMallocManaged_FlgParam) {
       WARN(" device: " << i);
       IfTestPassed = false;
     }
-    HIP_CHECK(hipStreamDestroy(strm));
+    HIP_CHECK(hipStreamDestroy(strm))
   }
-  HIP_CHECK(hipFree(HmmAH1));
-  HIP_CHECK(hipFree(HmmAH2));
+  HIP_CHECK(hipFree(HmmAH1))
+  HIP_CHECK(hipFree(HmmAH2))
   REQUIRE(IfTestPassed);
 }
 
@@ -106,9 +106,9 @@ HIP_TEST_CASE(Unit_hipMallocManaged_AccessMultiStream) {
   bool IfTestPassed = true;
   float *HmmAG = NULL, *HmmAH1 = NULL, *HmmAH2 = NULL, INIT_VAL = 2.5;
   int NumStrms = 0, MultiDevice = 0, NUM_ELMS = 4096;
-  HIP_CHECK(hipGetDeviceCount(&MultiDevice));
+  HIP_CHECK(hipGetDeviceCount(&MultiDevice))
   if (MultiDevice >= 2) {
-    HIP_CHECK(hipGetDeviceCount(&NumStrms));
+    HIP_CHECK(hipGetDeviceCount(&NumStrms))
   } else {
     NumStrms = 4;
   }
@@ -117,13 +117,13 @@ HIP_TEST_CASE(Unit_hipMallocManaged_AccessMultiStream) {
   Ah = new float[NUM_ELMS];
   for (int i = 0; i < NumStrms; ++i) {
     if (MultiDevice >= 2) {
-      HIP_CHECK(hipSetDevice(i));
+      HIP_CHECK(hipSetDevice(i))
     }
-    HIP_CHECK(hipStreamCreate(&streams[i]));
+    HIP_CHECK(hipStreamCreate(&streams[i]))
   }
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   // Testing hipMemAttachGlobal Flag
-  HIP_CHECK(hipMallocManaged(&HmmAG, NUM_ELMS * sizeof(float), hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&HmmAG, NUM_ELMS * sizeof(float), hipMemAttachGlobal))
 
   // Initializing HmmAG memory
   for (int i = 0; i < NUM_ELMS; i++) {
@@ -137,14 +137,14 @@ HIP_TEST_CASE(Unit_hipMallocManaged_AccessMultiStream) {
   dim3 dimBlock(blockSize, 1, 1);
   for (int i = 0; i < NumStrms; i++) {
     if (MultiDevice >= 2) {
-      HIP_CHECK(hipSetDevice(i));
+      HIP_CHECK(hipSetDevice(i))
     }
-    HIP_CHECK(hipMalloc(&Ad, NUM_ELMS * sizeof(float)));
-    HIP_CHECK(hipMemset(Ad, 0, NUM_ELMS * sizeof(float)));
+    HIP_CHECK(hipMalloc(&Ad, NUM_ELMS * sizeof(float)))
+    HIP_CHECK(hipMemset(Ad, 0, NUM_ELMS * sizeof(float)))
     MallcMangdFlgTst<<<dimGrid, dimBlock, 0, streams[i]>>>(NUM_ELMS, HmmAG, Ad);
-    HIP_CHECK(hipStreamSynchronize(streams[i]));
+    HIP_CHECK(hipStreamSynchronize(streams[i]))
     // Validating the results
-    HIP_CHECK(hipMemcpy(Ah, Ad, NUM_ELMS * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(Ah, Ad, NUM_ELMS * sizeof(float), hipMemcpyDeviceToHost))
     for (int j = 0; j < NUM_ELMS; ++j) {
       if (Ah[j] != (INIT_VAL * INIT_VAL)) {
         DataMismatch++;
@@ -157,14 +157,14 @@ HIP_TEST_CASE(Unit_hipMallocManaged_AccessMultiStream) {
     }
     DataMismatch = 0;
 
-    HIP_CHECK(hipFree(Ad));
+    HIP_CHECK(hipFree(Ad))
   }
   delete[] Ah;
-  HIP_CHECK(hipFree(HmmAG));
+  HIP_CHECK(hipFree(HmmAG))
 
   DataMismatch = 0;
-  HIP_CHECK(hipMallocManaged(&HmmAH1, NUM_ELMS * sizeof(float), hipMemAttachHost));
-  HIP_CHECK(hipMallocManaged(&HmmAH2, NUM_ELMS * sizeof(float), hipMemAttachHost));
+  HIP_CHECK(hipMallocManaged(&HmmAH1, NUM_ELMS * sizeof(float), hipMemAttachHost))
+  HIP_CHECK(hipMallocManaged(&HmmAH2, NUM_ELMS * sizeof(float), hipMemAttachHost))
 
   // Initializing HmmAH memory
   for (int i = 0; i < NUM_ELMS; i++) {
@@ -173,11 +173,11 @@ HIP_TEST_CASE(Unit_hipMallocManaged_AccessMultiStream) {
   }
   for (int i = 0; i < NumStrms; i++) {
     if (MultiDevice >= 2) {
-      HIP_CHECK(hipSetDevice(i));
+      HIP_CHECK(hipSetDevice(i))
     }
-    HIP_CHECK(hipMemset(HmmAH2, 0, NUM_ELMS * sizeof(float)));
+    HIP_CHECK(hipMemset(HmmAH2, 0, NUM_ELMS * sizeof(float)))
     MallcMangdFlgTst<<<dimGrid, dimBlock, 0, streams[i]>>>(NUM_ELMS, HmmAH1, HmmAH2);
-    HIP_CHECK(hipStreamSynchronize(streams[i]));
+    HIP_CHECK(hipStreamSynchronize(streams[i]))
     for (int j = 0; j < NUM_ELMS; ++j) {
       if (HmmAH2[j] != (INIT_VAL * INIT_VAL)) {
         DataMismatch++;
@@ -191,10 +191,10 @@ HIP_TEST_CASE(Unit_hipMallocManaged_AccessMultiStream) {
     }
   }
 
-  HIP_CHECK(hipFree(HmmAH1));
-  HIP_CHECK(hipFree(HmmAH2));
+  HIP_CHECK(hipFree(HmmAH1))
+  HIP_CHECK(hipFree(HmmAH2))
   for (int i = 0; i < NumStrms; ++i) {
-    HIP_CHECK(hipStreamDestroy(streams[i]));
+    HIP_CHECK(hipStreamDestroy(streams[i]))
   }
   REQUIRE(IfTestPassed);
 }

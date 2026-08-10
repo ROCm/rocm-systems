@@ -22,8 +22,8 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_Basic) {
   int* hostMem = nullptr;
   int* devMem = nullptr;
 
-  HIP_CHECK(hipHostMalloc(&hostMem, size));
-  HIP_CHECK(hipMalloc(&devMem, size));
+  HIP_CHECK(hipHostMalloc(&hostMem, size))
+  HIP_CHECK(hipMalloc(&devMem, size))
 
   // Init host mem with different values
   for (int i = 0; i < MEM_SIZE; ++i) {
@@ -38,9 +38,9 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_Basic) {
    */
   copy_kernl<<<1, 1, 0, hipStreamPerThread>>>(devMem);
 
-  HIP_CHECK(hipMemcpyAsync(hostMem, devMem, size, hipMemcpyDeviceToHost, hipStreamPerThread));
+  HIP_CHECK(hipMemcpyAsync(hostMem, devMem, size, hipMemcpyDeviceToHost, hipStreamPerThread))
 
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipStreamSynchronize(0))
 
   // validate result
   for (int i = MEM_SIZE - 1; i >= 0; --i) {
@@ -48,8 +48,8 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_Basic) {
   }
 
   // Clean-up
-  HIP_CHECK(hipHostFree(hostMem));
-  HIP_CHECK(hipFree(devMem));
+  HIP_CHECK(hipHostFree(hostMem))
+  HIP_CHECK(hipFree(devMem))
 }
 
 HIP_TEST_CASE(Unit_hipStreamPerThread_StreamQuery) {
@@ -83,12 +83,12 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_StreamSynchronize) {
 
 HIP_TEST_CASE(Unit_hipStreamPerThread_StreamGetPriority) {
   int priority = 0;
-  HIP_CHECK(hipStreamGetPriority(hipStreamPerThread, &priority));
+  HIP_CHECK(hipStreamGetPriority(hipStreamPerThread, &priority))
 }
 
 HIP_TEST_CASE(Unit_hipStreamPerThread_StreamGetFlags) {
   unsigned int flags = 0;
-  HIP_CHECK(hipStreamGetFlags(hipStreamPerThread, &flags));
+  HIP_CHECK(hipStreamGetFlags(hipStreamPerThread, &flags))
 }
 
 HIP_TEST_CASE(Unit_hipStreamPerThread_StreamDestroy) {
@@ -101,14 +101,14 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_MemcpyAsync) {
   int* A_h = nullptr;
   int* A_d = nullptr;
 
-  HIP_CHECK(hipHostMalloc(&A_h, ele_size * sizeof(int)));
-  HIP_CHECK(hipMalloc(&A_d, ele_size * sizeof(int)));
+  HIP_CHECK(hipHostMalloc(&A_h, ele_size * sizeof(int)))
+  HIP_CHECK(hipMalloc(&A_d, ele_size * sizeof(int)))
 
   for (unsigned int i = 0; i < ele_size; ++i) {
     A_h[i] = 123;
   }
 
-  HIP_CHECK(hipMemcpy(A_d, A_h, ele_size * sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(A_d, A_h, ele_size * sizeof(int), hipMemcpyHostToDevice))
 
   // Rest host memory
   for (unsigned int i = 0; i < ele_size; ++i) {
@@ -117,7 +117,7 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_MemcpyAsync) {
 
   HIP_CHECK(
       hipMemcpyAsync(A_h, A_d, ele_size * sizeof(int), hipMemcpyDeviceToHost, hipStreamPerThread));
-  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
 
   // Verify result
   for (unsigned int i = 0; i < ele_size; ++i) {
@@ -125,6 +125,6 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_MemcpyAsync) {
   }
 
   // Clean-up
-  HIP_CHECK(hipHostFree(A_h));
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipHostFree(A_h))
+  HIP_CHECK(hipFree(A_d))
 }

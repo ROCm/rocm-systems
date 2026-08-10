@@ -62,9 +62,9 @@ template <typename T> static void runTestR(const int width) {
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<T>();
 
   hipArray_t hipArray = nullptr;
-  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, 0, hipArraySurfaceLoadStore));
+  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, 0, hipArraySurfaceLoadStore))
 
-  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size, hipMemcpyHostToDevice))
 
   hipResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(resDesc));
@@ -73,10 +73,10 @@ template <typename T> static void runTestR(const int width) {
 
   // Create surface object
   hipSurfaceObject_t surfaceObject = 0;
-  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc));
+  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc))
 
   T* hOutputData = nullptr;
-  HIP_CHECK(hipHostMalloc((void**)&hOutputData, size));
+  HIP_CHECK(hipHostMalloc((void**)&hOutputData, size))
   memset(hOutputData, 0, size);
 
   dim3 dimBlock(16, 1, 1);
@@ -84,8 +84,8 @@ template <typename T> static void runTestR(const int width) {
 
   surf1DKernelR<T><<<dimGrid, dimBlock>>>(surfaceObject, hOutputData, width);
 
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int j = 0; j < width; j++) {
     if (!isEqual(hData[j], hOutputData[j])) {
@@ -95,24 +95,24 @@ template <typename T> static void runTestR(const int width) {
     }
   }
 
-  HIP_CHECK(hipDestroySurfaceObject(surfaceObject));
-  HIP_CHECK(hipFreeArray(hipArray));
+  HIP_CHECK(hipDestroySurfaceObject(surfaceObject))
+  HIP_CHECK(hipFreeArray(hipArray))
   free(hData);
-  HIP_CHECK(hipHostFree(hOutputData));
+  HIP_CHECK(hipHostFree(hOutputData))
 }
 
 template <typename T> static void runTestW(const int width) {
   unsigned int size = width * sizeof(T);
   T* hData = nullptr;
-  HIP_CHECK(hipHostMalloc((void**)&hData, size));
+  HIP_CHECK(hipHostMalloc((void**)&hData, size))
   memset(hData, 0, size);
 
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<T>();
 
   hipArray_t hipArray = nullptr;
-  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, 0, hipArraySurfaceLoadStore));
+  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, 0, hipArraySurfaceLoadStore))
 
-  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size, hipMemcpyHostToDevice))
 
   hipResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(resDesc));
@@ -121,7 +121,7 @@ template <typename T> static void runTestW(const int width) {
 
   // Create surface object
   hipSurfaceObject_t surfaceObject = 0;
-  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc));
+  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc))
 
   for (int j = 0; j < width; j++) {
     initVal(hData[j]);
@@ -132,12 +132,12 @@ template <typename T> static void runTestW(const int width) {
 
   surf1DKernelW<T><<<dimGrid, dimBlock>>>(surfaceObject, hData, width);
 
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   T* hOutputData = (T*)malloc(size);
   memset(hOutputData, 0, size);
-  HIP_CHECK(hipMemcpyFromArray(hOutputData, hipArray, 0, 0, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpyFromArray(hOutputData, hipArray, 0, 0, size, hipMemcpyDeviceToHost))
 
   for (int j = 0; j < width; j++) {
     if (!isEqual(hData[j], hOutputData[j])) {
@@ -147,9 +147,9 @@ template <typename T> static void runTestW(const int width) {
     }
   }
 
-  HIP_CHECK(hipDestroySurfaceObject(surfaceObject));
-  HIP_CHECK(hipFreeArray(hipArray));
-  HIP_CHECK(hipHostFree(hData));
+  HIP_CHECK(hipDestroySurfaceObject(surfaceObject))
+  HIP_CHECK(hipFreeArray(hipArray))
+  HIP_CHECK(hipHostFree(hData))
   free(hOutputData);
 }
 
@@ -164,9 +164,9 @@ template <typename T> static void runTestRW(const int width) {
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<T>();
 
   hipArray_t hipArray = nullptr, hipOutArray = nullptr;
-  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, 0, hipArraySurfaceLoadStore));
+  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, 0, hipArraySurfaceLoadStore))
 
-  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size, hipMemcpyHostToDevice))
 
   hipResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(resDesc));
@@ -175,9 +175,9 @@ template <typename T> static void runTestRW(const int width) {
 
   // Create surface object
   hipSurfaceObject_t surfaceObject = 0;
-  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc));
+  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc))
 
-  HIP_CHECK(hipMallocArray(&hipOutArray, &channelDesc, width, 0, hipArraySurfaceLoadStore));
+  HIP_CHECK(hipMallocArray(&hipOutArray, &channelDesc, width, 0, hipArraySurfaceLoadStore))
 
   hipResourceDesc resOutDesc;
   memset(&resOutDesc, 0, sizeof(resOutDesc));
@@ -185,19 +185,19 @@ template <typename T> static void runTestRW(const int width) {
   resOutDesc.res.array.array = hipOutArray;
 
   hipSurfaceObject_t outSurfaceObject = 0;
-  HIP_CHECK(hipCreateSurfaceObject(&outSurfaceObject, &resOutDesc));
+  HIP_CHECK(hipCreateSurfaceObject(&outSurfaceObject, &resOutDesc))
 
   dim3 dimBlock(16, 1, 1);
   dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, 1, 1);
 
   surf1DKernelRW<T><<<dimGrid, dimBlock>>>(surfaceObject, outSurfaceObject, width);
 
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   T* hOutputData = (T*)malloc(size);
   memset(hOutputData, 0, size);
-  HIP_CHECK(hipMemcpyFromArray(hOutputData, hipOutArray, 0, 0, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpyFromArray(hOutputData, hipOutArray, 0, 0, size, hipMemcpyDeviceToHost))
 
   for (int j = 0; j < width; j++) {
     if (!isEqual(hData[j], hOutputData[j])) {
@@ -207,10 +207,10 @@ template <typename T> static void runTestRW(const int width) {
     }
   }
 
-  HIP_CHECK(hipDestroySurfaceObject(surfaceObject));
-  HIP_CHECK(hipDestroySurfaceObject(outSurfaceObject));
-  HIP_CHECK(hipFreeArray(hipArray));
-  HIP_CHECK(hipFreeArray(hipOutArray));
+  HIP_CHECK(hipDestroySurfaceObject(surfaceObject))
+  HIP_CHECK(hipDestroySurfaceObject(outSurfaceObject))
+  HIP_CHECK(hipFreeArray(hipArray))
+  HIP_CHECK(hipFreeArray(hipOutArray))
   free(hData);
   free(hOutputData);
 }

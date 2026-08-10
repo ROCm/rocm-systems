@@ -40,7 +40,7 @@ static inline std::pair<T*, T*> deviceMallocHelper(memType memType, size_t dataW
       hipPitchedPtr pitchedAPtr;
       hipExtent extent = make_hipExtent(dataW * elementSize, dataH, dataD);
 
-      HIP_CHECK(hipMalloc3D(&pitchedAPtr, extent));
+      HIP_CHECK(hipMalloc3D(&pitchedAPtr, extent))
       aPtr = reinterpret_cast<T*>(pitchedAPtr.ptr);
       dataPitch = pitchedAPtr.pitch;
       break;
@@ -53,7 +53,7 @@ static inline std::pair<T*, T*> deviceMallocHelper(memType memType, size_t dataW
       break;
 
     default:
-      HIP_CHECK(hipMalloc(&aPtr, sizeInBytes));
+      HIP_CHECK(hipMalloc(&aPtr, sizeInBytes))
       dataPitch = dataW * elementSize;
       break;
   }
@@ -67,7 +67,7 @@ static inline std::pair<T*, T*> hostMallocHelper(size_t dataW, size_t dataH, siz
   size_t sizeInBytes = elementSize * dataW * dataH * dataD;
   T* aPtr;
 
-  HIP_CHECK(hipHostMalloc(&aPtr, sizeInBytes));
+  HIP_CHECK(hipHostMalloc(&aPtr, sizeInBytes))
   dataPitch = dataW * elementSize;
 
   return {aPtr, nullptr};
@@ -80,7 +80,7 @@ static inline std::pair<T*, T*> hostRegisteredHelper(size_t dataW, size_t dataH,
   size_t sizeInBytes = elementSize * dataW * dataH * dataD;
   T* aPtr = new T[dataW * dataH * dataD];
 
-  HIP_CHECK(hipHostRegister(aPtr, sizeInBytes, hipHostRegisterDefault));
+  HIP_CHECK(hipHostRegister(aPtr, sizeInBytes, hipHostRegisterDefault))
 
   dataPitch = dataW * elementSize;
   return {aPtr, nullptr};
@@ -94,8 +94,8 @@ static inline std::pair<T*, T*> devRegisteredHelper(size_t dataW, size_t dataH, 
   T* aPtr = new T[dataW * dataH * dataD];
   T* retPtr{};
 
-  HIP_CHECK(hipHostRegister(aPtr, sizeInBytes, hipHostRegisterDefault));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&retPtr), aPtr, 0));
+  HIP_CHECK(hipHostRegister(aPtr, sizeInBytes, hipHostRegisterDefault))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&retPtr), aPtr, 0))
 
   dataPitch = dataW * elementSize;
   // keep the address of the host memory
@@ -167,7 +167,7 @@ static inline void deviceMallocCopy(memType memType, T* aPtr, T* hostMem, size_t
     case memType::hipMem3D: {
       hipMemcpy3DParms params =
           createParams(hipMemcpyDeviceToHost, aPtr, hostMem, dataPitch, dataW, dataH, dataD);
-      HIP_CHECK(hipMemcpy3D(&params));
+      HIP_CHECK(hipMemcpy3D(&params))
       break;
     }
 
@@ -177,7 +177,7 @@ static inline void deviceMallocCopy(memType memType, T* aPtr, T* hostMem, size_t
       break;
 
     default:
-      HIP_CHECK(hipMemcpy(hostMem, aPtr, sizeInBytes, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(hostMem, aPtr, sizeInBytes, hipMemcpyDeviceToHost))
       break;
   }
 }
@@ -192,7 +192,7 @@ static inline void hostCopy(memType memType, T* aPtr, T* hostMem, size_t dataW, 
       hipMemcpy3DParms params =
           createParams(hipMemcpyHostToHost, aPtr, hostMem, dataPitch, dataW, dataH, dataD);
 
-      HIP_CHECK(hipMemcpy3D(&params));
+      HIP_CHECK(hipMemcpy3D(&params))
       break;
     }
 
@@ -202,7 +202,7 @@ static inline void hostCopy(memType memType, T* aPtr, T* hostMem, size_t dataW, 
       break;
 
     default:
-      HIP_CHECK(hipMemcpy(hostMem, aPtr, sizeInBytes, hipMemcpyHostToHost));
+      HIP_CHECK(hipMemcpy(hostMem, aPtr, sizeInBytes, hipMemcpyHostToHost))
       break;
   }
 }
@@ -217,7 +217,7 @@ static inline void devRegisteredCopy(memType memType, T* aPtr, T* hostMem, size_
       hipMemcpy3DParms params =
           createParams(hipMemcpyDeviceToHost, aPtr, hostMem, dataPitch, dataW, dataH, dataD);
 
-      HIP_CHECK(hipMemcpy3D(&params));
+      HIP_CHECK(hipMemcpy3D(&params))
       break;
     }
 
@@ -228,7 +228,7 @@ static inline void devRegisteredCopy(memType memType, T* aPtr, T* hostMem, size_
 
     default: {
       size_t sizeInBytes = elementSize * dataW * dataH * dataD;
-      HIP_CHECK(hipMemcpy(hostMem, aPtr, sizeInBytes, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(hostMem, aPtr, sizeInBytes, hipMemcpyDeviceToHost))
       break;
     }
   }
@@ -261,9 +261,9 @@ static inline void memsetCheck(T* aPtr, size_t value, memType memType, MultiDDat
   switch (memType) {
     case memType::hipMem:
       if (async) {
-        HIP_CHECK(hipMemsetAsync(aPtr + data.offset, value, count * sizeof(T), stream));
+        HIP_CHECK(hipMemsetAsync(aPtr + data.offset, value, count * sizeof(T), stream))
       } else {
-        HIP_CHECK(hipMemset(aPtr + data.offset, value, count * sizeof(T)));
+        HIP_CHECK(hipMemset(aPtr + data.offset, value, count * sizeof(T)))
       }
       break;
 
@@ -272,7 +272,7 @@ static inline void memsetCheck(T* aPtr, size_t value, memType memType, MultiDDat
         HIP_CHECK(hipMemsetD8Async(reinterpret_cast<hipDeviceptr_t>(aPtr + data.offset), value,
                                    count, stream));
       } else {
-        HIP_CHECK(hipMemsetD8(reinterpret_cast<hipDeviceptr_t>(aPtr + data.offset), value, count));
+        HIP_CHECK(hipMemsetD8(reinterpret_cast<hipDeviceptr_t>(aPtr + data.offset), value, count))
       }
       break;
 
@@ -281,7 +281,7 @@ static inline void memsetCheck(T* aPtr, size_t value, memType memType, MultiDDat
         HIP_CHECK(hipMemsetD16Async(reinterpret_cast<hipDeviceptr_t>(aPtr + data.offset), value,
                                     count, stream));
       } else {
-        HIP_CHECK(hipMemsetD16(reinterpret_cast<hipDeviceptr_t>(aPtr + data.offset), value, count));
+        HIP_CHECK(hipMemsetD16(reinterpret_cast<hipDeviceptr_t>(aPtr + data.offset), value, count))
       }
       break;
 
@@ -290,7 +290,7 @@ static inline void memsetCheck(T* aPtr, size_t value, memType memType, MultiDDat
         HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(aPtr + data.offset), value,
                                     count, stream));
       } else {
-        HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(aPtr + data.offset), value, count));
+        HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(aPtr + data.offset), value, count))
       }
       break;
 
@@ -300,7 +300,7 @@ static inline void memsetCheck(T* aPtr, size_t value, memType memType, MultiDDat
         HIP_CHECK(
             hipMemset2DAsync(aPtr + ptrOffset, data.pitch, value, data.width, data.height, stream));
       } else {
-        HIP_CHECK(hipMemset2D(aPtr + ptrOffset, data.pitch, value, data.width, data.height));
+        HIP_CHECK(hipMemset2D(aPtr + ptrOffset, data.pitch, value, data.width, data.height))
       }
       break;
 
@@ -328,13 +328,13 @@ static inline void memsetCheck(T* aPtr, size_t value, memType memType, MultiDDat
 template <typename T> static inline void freeStuff(T* aPtr, allocType type) {
   switch (type) {
     case allocType::deviceMalloc:
-      HIP_CHECK(hipFree(aPtr));
+      HIP_CHECK(hipFree(aPtr))
       break;
     case allocType::hostMalloc:
-      HIP_CHECK(hipHostFree(aPtr));
+      HIP_CHECK(hipHostFree(aPtr))
       break;
     default:  // for host and device registered
-      HIP_CHECK(hipHostUnregister(aPtr));
+      HIP_CHECK(hipHostUnregister(aPtr))
       delete[] aPtr;
       break;
   }
@@ -383,9 +383,9 @@ static inline void doMemTest(F func, fArgs... funcArgs) {
   SECTION("Asynchronous - null stream") { func(nullptr, true, funcArgs...); }
   SECTION("Asynchronous - created stream") {
     hipStream_t stream{};
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     func(stream, true, funcArgs...);
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 }  // namespace mem_utils

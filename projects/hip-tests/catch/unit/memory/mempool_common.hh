@@ -80,15 +80,15 @@ template <typename T> __global__ void notifiedKernel(T* host_res, volatile unsig
 
 template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemPools mempool_type) {
   int device_id = 0;
-  HIP_CHECK(hipSetDevice(device_id));
+  HIP_CHECK(hipSetDevice(device_id))
 
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int *notified = nullptr;
-  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)))
   *notified = 0;
   const auto allocation_size = GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, allocation_size);
@@ -114,40 +114,40 @@ template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemP
   HIP_CHECK(hipMemcpyAsync(host_alloc.host_ptr(), alloc_mem, allocation_size, hipMemcpyDeviceToHost,
                            stream.stream()));
 
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem), stream.stream()));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem), stream.stream()))
 
   attr = hipMemPoolAttrReservedMemCurrent;
   std::uint64_t res_before_sync = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_before_sync));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_before_sync))
   *notified = 1;
-  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream.stream()))
 
   std::uint64_t res_after_sync = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_after_sync));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_after_sync))
   // Sync must release memory to OS
   REQUIRE(res_after_sync <= res_before_sync);
 
   std::uint64_t used_mem = 10;
   attr = hipMemPoolAttrUsedMemCurrent;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &used_mem));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &used_mem))
   REQUIRE(0 == used_mem);
 
   ArrayFindIfNot(host_alloc.host_ptr(), expected_value, element_count);
-  HIP_CHECK(hipHostFree(notified));
+  HIP_CHECK(hipHostFree(notified))
 }
 
 template <typename F>
 void MallocMemPoolAsync_TwoAllocs(F malloc_func, const MemPools mempool_type) {
   int device_id = 0;
-  HIP_CHECK(hipSetDevice(device_id));
+  HIP_CHECK(hipSetDevice(device_id))
 
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int *notified = nullptr;
-  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)))
   *notified = 0;
   const auto allocation_size = GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, allocation_size);
@@ -172,7 +172,7 @@ void MallocMemPoolAsync_TwoAllocs(F malloc_func, const MemPools mempool_type) {
   constexpr int expected_value = 17;
   VectorSet<<<block_count, thread_count, 0, stream.stream()>>>(alloc_mem1, expected_value,
                                                                element_count);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   HIP_CHECK(hipMemcpyAsync(alloc_mem2, alloc_mem1, allocation_size, hipMemcpyDeviceToDevice,
                            stream.stream()));
@@ -180,53 +180,53 @@ void MallocMemPoolAsync_TwoAllocs(F malloc_func, const MemPools mempool_type) {
   HIP_CHECK(hipMemcpyAsync(host_alloc.host_ptr(), alloc_mem2, allocation_size,
                            hipMemcpyDeviceToHost, stream.stream()));
 
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream.stream()));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream.stream()))
 
   attr = hipMemPoolAttrReservedMemCurrent;
   std::uint64_t res_before_sync = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_before_sync));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_before_sync))
   *notified = 1;
-  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream.stream()))
 
   std::uint64_t res_after_sync = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_after_sync));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_after_sync))
   // Sync must release memory to OS
   REQUIRE(res_after_sync <= res_before_sync);
 
   std::uint64_t used_mem = 0;
   attr = hipMemPoolAttrUsedMemCurrent;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &used_mem));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &used_mem))
   // Make sure the current usage query works - just second buffer is left
   REQUIRE(allocation_size == used_mem);
 
   attr = hipMemPoolAttrUsedMemHigh;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &used_mem));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &used_mem))
   // Make sure the high watermark usage works - both buffers must be reported
   REQUIRE((2 * allocation_size) == used_mem);
 
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem2), stream.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem2), stream.stream()))
+  HIP_CHECK(hipStreamSynchronize(stream.stream()))
 
   attr = hipMemPoolAttrUsedMemCurrent;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &used_mem));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &used_mem))
   // Make sure the current usage query works - none of the buffers are used
   REQUIRE(0 == used_mem);
 
   ArrayFindIfNot(host_alloc.host_ptr(), expected_value, element_count);
-  HIP_CHECK(hipHostFree(notified));
+  HIP_CHECK(hipHostFree(notified))
 }
 
 template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPools mempool_type) {
   int device_id = 0;
-  HIP_CHECK(hipSetDevice(device_id));
+  HIP_CHECK(hipSetDevice(device_id))
 
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int *notified = nullptr;
-  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)))
   *notified = 0;
   MemPoolGuard mempool(mempool_type, device_id);
 
@@ -247,7 +247,7 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
 
   hipMemPoolAttr attr;
   // Not a real free, since kernel isn't done
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream.stream()));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream.stream()))
 
   HIP_CHECK(malloc_func(reinterpret_cast<void**>(&alloc_mem2), allocation_size1, mempool.mempool(),
                         stream.stream()));
@@ -256,32 +256,32 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
 
   // Make a sync before the second kernel launch to make sure memory B isn't gone
   *notified = 1;
-  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream.stream()))
   *notified = 0;
   // Second kernel launch with new memory
   notifiedKernel<<<blocks, 32, 0, stream.stream()>>>(alloc_mem2, notified);
   *notified = 1;
-  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream.stream()))
 
   attr = hipMemPoolAttrUsedMemCurrent;
   std::uint64_t value64 = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &value64))
   // Make sure the current usage reports the both buffers
   REQUIRE((allocation_size1 + allocation_size2) == value64);
 
   attr = hipMemPoolAttrUsedMemHigh;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &value64))
   // Make sure the high watermark usage works - the both buffers must be reported
   REQUIRE((allocation_size1 + allocation_size2) == value64);
 
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem2), stream.stream()));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem2), stream.stream()))
   attr = hipMemPoolAttrUsedMemCurrent;
-  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &value64))
   // Make sure the current usage reports just one buffer, because the above free doesn't hold memory
   REQUIRE(allocation_size2 == value64);
 
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem3), stream.stream()));
-  HIP_CHECK(hipHostFree(notified));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem3), stream.stream()))
+  HIP_CHECK(hipHostFree(notified))
 }
 
 // definitions

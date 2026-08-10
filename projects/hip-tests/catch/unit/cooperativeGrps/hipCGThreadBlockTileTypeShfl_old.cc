@@ -139,25 +139,25 @@ template <unsigned int tile_size> static void test_group_partition(TiledGroupShf
   int* result_dev = NULL;
   int* result_host = NULL;
 
-  HIP_CHECK(hipHostMalloc(&result_host, num_elem * sizeof(int), hipHostMallocDefault));
+  HIP_CHECK(hipHostMalloc(&result_host, num_elem * sizeof(int), hipHostMallocDefault))
   memset(result_host, 0, num_elem * sizeof(int));
 
-  HIP_CHECK(hipMalloc(&result_dev, num_elem * sizeof(int)));
+  HIP_CHECK(hipMalloc(&result_dev, num_elem * sizeof(int)))
 
   // Launch Kernel
   hipLaunchKernelGGL(kernel_cg_group_partition_static<tile_size>, block_size, threads_per_blk,
                      threads_per_blk * sizeof(int), 0, result_dev, shfl_test);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
 
-  HIP_CHECK(hipMemcpy(result_host, result_dev, sizeof(int) * num_elem, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(result_host, result_dev, sizeof(int) * num_elem, hipMemcpyDeviceToHost))
 
   expected_result_calc(expected_result, tile_size, num_elem, shfl_test);
   compareResults(expected_result, result_host, num_elem * sizeof(int));
 
   // Free all allocated memory on host and device
-  HIP_CHECK(hipFree(result_dev));
-  HIP_CHECK(hipHostFree(result_host));
+  HIP_CHECK(hipFree(result_dev))
+  HIP_CHECK(hipHostFree(result_host))
   delete[] expected_result;
 }
 
@@ -165,8 +165,8 @@ HIP_TEST_CASE(Unit_hipCGThreadBlockTileType_Shfl) {
   // Use default device for validating the test
   int device;
   hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&device_properties, device))
 
   if (!device_properties.cooperativeLaunch) {
     HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);

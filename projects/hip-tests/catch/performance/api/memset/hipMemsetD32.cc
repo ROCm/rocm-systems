@@ -21,7 +21,7 @@ class MemsetD32Benchmark : public Benchmark<MemsetD32Benchmark> {
 
   void operator()() {
     TIMED_SECTION(kTimerTypeEvent) {
-      HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(dst_.ptr()), 123'456, size_));
+      HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(dst_.ptr()), 123'456, size_))
     }
   }
 

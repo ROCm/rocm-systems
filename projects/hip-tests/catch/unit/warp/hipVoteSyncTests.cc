@@ -24,21 +24,21 @@ static void runTestAny_1() {
 
   int* d_Input;
   int* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, 4 * size));
-  HIP_CHECK(hipMalloc(&d_Output, 4 * size));
+  HIP_CHECK(hipMalloc(&d_Input, 4 * size))
+  HIP_CHECK(hipMalloc(&d_Output, 4 * size))
 
   int warpSize = getWarpSize();
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault))
   hipLaunchKernelGGL(any_1, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 __global__ void any_2(int* Input, int* Output) {
@@ -63,19 +63,19 @@ static void runTestAny_2_w64() {
 
   int* d_Input;
   int* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, 4 * size));
-  HIP_CHECK(hipMalloc(&d_Output, 4 * size));
+  HIP_CHECK(hipMalloc(&d_Input, 4 * size))
+  HIP_CHECK(hipMalloc(&d_Output, 4 * size))
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault))
   hipLaunchKernelGGL(any_2, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 static void runTestAny_2_w32() {
@@ -93,21 +93,21 @@ static void runTestAny_2_w32() {
 
   int* d_Input;
   int* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, 4 * size));
-  HIP_CHECK(hipMalloc(&d_Output, 4 * size));
+  HIP_CHECK(hipMalloc(&d_Input, 4 * size))
+  HIP_CHECK(hipMalloc(&d_Output, 4 * size))
 
   int warpSize = getWarpSize();
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault))
   hipLaunchKernelGGL(any_2, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 __global__ void any_3(int* Input, int* Output) {
@@ -128,21 +128,21 @@ static void runTestAny_3() {
                         0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
   int* d_Input;
   int* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, 4 * size));
-  HIP_CHECK(hipMalloc(&d_Output, 4 * size));
+  HIP_CHECK(hipMalloc(&d_Input, 4 * size))
+  HIP_CHECK(hipMalloc(&d_Output, 4 * size))
 
   int warpSize = getWarpSize();
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault))
   hipLaunchKernelGGL(any_3, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 __global__ void any_4(int* Input, int* Output) {
@@ -179,21 +179,21 @@ static void runTestAny_4() {
 
   int* d_Input;
   int* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, 4 * size));
-  HIP_CHECK(hipMalloc(&d_Output, 4 * size));
+  HIP_CHECK(hipMalloc(&d_Input, 4 * size))
+  HIP_CHECK(hipMalloc(&d_Output, 4 * size))
 
   int warpSize = getWarpSize();
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault))
   hipLaunchKernelGGL(any_4, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 __global__ void all_1(int* Input, int* Output) {
@@ -217,19 +217,19 @@ static void runTestAll_1_w64() {
 
   int* d_Input;
   int* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, 4 * size));
-  HIP_CHECK(hipMalloc(&d_Output, 4 * size));
+  HIP_CHECK(hipMalloc(&d_Input, 4 * size))
+  HIP_CHECK(hipMalloc(&d_Output, 4 * size))
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault))
   hipLaunchKernelGGL(all_1, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 static void runTestAll_1_w32() {
@@ -247,19 +247,19 @@ static void runTestAll_1_w32() {
 
   int* d_Input;
   int* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, 4 * size));
-  HIP_CHECK(hipMalloc(&d_Output, 4 * size));
+  HIP_CHECK(hipMalloc(&d_Input, 4 * size))
+  HIP_CHECK(hipMalloc(&d_Output, 4 * size))
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault))
   hipLaunchKernelGGL(all_1, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 __global__ void all_2(int* Input, int* Output) {
@@ -280,21 +280,21 @@ static void runTestAll_2() {
 
   int* d_Input;
   int* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, 4 * size));
-  HIP_CHECK(hipMalloc(&d_Output, 4 * size));
+  HIP_CHECK(hipMalloc(&d_Input, 4 * size))
+  HIP_CHECK(hipMalloc(&d_Output, 4 * size))
 
   int warpSize = getWarpSize();
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault))
   hipLaunchKernelGGL(all_2, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 __global__ void all_3(int* Input, int* Output) {
@@ -315,21 +315,21 @@ static void runTestAll_3() {
                         1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   int* d_Input;
   int* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, 4 * size));
-  HIP_CHECK(hipMalloc(&d_Output, 4 * size));
+  HIP_CHECK(hipMalloc(&d_Input, 4 * size))
+  HIP_CHECK(hipMalloc(&d_Output, 4 * size))
 
   int warpSize = getWarpSize();
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault))
   hipLaunchKernelGGL(all_3, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 __global__ void all_4(int* Input, int* Output) {
@@ -365,21 +365,21 @@ static void runTestAll_4() {
 
   int* d_Input;
   int* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, 4 * size));
-  HIP_CHECK(hipMalloc(&d_Output, 4 * size));
+  HIP_CHECK(hipMalloc(&d_Input, 4 * size))
+  HIP_CHECK(hipMalloc(&d_Output, 4 * size))
 
   int warpSize = getWarpSize();
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault))
   hipLaunchKernelGGL(all_4, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 4 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 __global__ void ballot_1(int* Input, unsigned long long* Output) {
@@ -413,21 +413,21 @@ static void runTestBallot_1() {
 
   int* d_Input;
   unsigned long long* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, 4 * size));
-  HIP_CHECK(hipMalloc(&d_Output, 8 * size));
+  HIP_CHECK(hipMalloc(&d_Input, 4 * size))
+  HIP_CHECK(hipMalloc(&d_Output, 8 * size))
 
   int warpSize = getWarpSize();
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault))
   hipLaunchKernelGGL(ballot_1, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 8 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 8 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareMaskEqual(Output, Expected, i, warpSize));
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 __global__ void ballot_2(int* Input, unsigned long long* Output) {
@@ -462,21 +462,21 @@ static void runTestBallot_2() {
 
   int* d_Input;
   unsigned long long* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, 4 * size));
-  HIP_CHECK(hipMalloc(&d_Output, 8 * size));
+  HIP_CHECK(hipMalloc(&d_Input, 4 * size))
+  HIP_CHECK(hipMalloc(&d_Output, 8 * size))
 
   int warpSize = getWarpSize();
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault))
   hipLaunchKernelGGL(ballot_2, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 8 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 8 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareMaskEqual(Output, Expected, i, warpSize));
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 __global__ void ballot_3(int* Input, unsigned long long* Output) {
@@ -511,21 +511,21 @@ static void runTestBallot_3() {
 
   int* d_Input;
   unsigned long long* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, 4 * size));
-  HIP_CHECK(hipMalloc(&d_Output, 8 * size));
+  HIP_CHECK(hipMalloc(&d_Input, 4 * size))
+  HIP_CHECK(hipMalloc(&d_Output, 8 * size))
 
   int warpSize = getWarpSize();
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, 4 * size, hipMemcpyDefault))
   hipLaunchKernelGGL(ballot_3, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, 8 * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, 8 * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareMaskEqual(Output, Expected, i, warpSize));
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 /**

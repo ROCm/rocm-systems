@@ -38,11 +38,11 @@
 HIP_TEST_CASE(Unit_hipStreamGetDevice_Negative) {
   hipStream_t stream;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   HIP_CHECK_ERROR(hipStreamGetDevice(nullptr, nullptr), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipStreamGetDevice(hipStreamPerThread, nullptr), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipStreamGetDevice(stream, nullptr), hipErrorInvalidValue);
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -62,16 +62,16 @@ HIP_TEST_CASE(Unit_hipStreamGetDevice_Negative) {
 
 HIP_TEST_CASE(Unit_hipStreamGetDevice_Usecase) {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   REQUIRE(device_count != 0);
 
   SECTION("Null Stream") {
     CTX_CREATE();
 
     hipDevice_t device_from_stream, device_from_ordinal;
-    HIP_CHECK(hipStreamGetDevice(nullptr, &device_from_stream));
+    HIP_CHECK(hipStreamGetDevice(nullptr, &device_from_stream))
 
-    HIP_CHECK(hipDeviceGet(&device_from_ordinal, 0));
+    HIP_CHECK(hipDeviceGet(&device_from_ordinal, 0))
     REQUIRE(device_from_stream == device_from_ordinal);
 
     CTX_DESTROY();
@@ -81,9 +81,9 @@ HIP_TEST_CASE(Unit_hipStreamGetDevice_Usecase) {
     CTX_CREATE();
 
     hipDevice_t device_from_stream, device_from_ordinal;
-    HIP_CHECK(hipStreamGetDevice(hipStreamPerThread, &device_from_stream));
+    HIP_CHECK(hipStreamGetDevice(hipStreamPerThread, &device_from_stream))
 
-    HIP_CHECK(hipDeviceGet(&device_from_ordinal, 0));
+    HIP_CHECK(hipDeviceGet(&device_from_ordinal, 0))
     REQUIRE(device_from_stream == device_from_ordinal);
 
     CTX_DESTROY();
@@ -91,17 +91,17 @@ HIP_TEST_CASE(Unit_hipStreamGetDevice_Usecase) {
 
   SECTION("Created Stream") {
     for (int i = 0; i < device_count; i++) {
-      HIP_CHECK(hipSetDevice(i));
+      HIP_CHECK(hipSetDevice(i))
 
       hipDevice_t device_from_stream, device_from_ordinal;
       hipStream_t stream;
 
-      HIP_CHECK(hipStreamCreate(&stream));
-      HIP_CHECK(hipStreamGetDevice(stream, &device_from_stream));
+      HIP_CHECK(hipStreamCreate(&stream))
+      HIP_CHECK(hipStreamGetDevice(stream, &device_from_stream))
 
-      HIP_CHECK(hipDeviceGet(&device_from_ordinal, i));
+      HIP_CHECK(hipDeviceGet(&device_from_ordinal, i))
       REQUIRE(device_from_stream == device_from_ordinal);
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamDestroy(stream))
     }
   }
 }
@@ -166,22 +166,22 @@ HIP_TEST_CASE(Unit_hipStreamGetDevice_MThread) { test_hipStreamGetDevice_MThread
 HIP_TEST_CASE(Unit_hipStreamGetDevice_SetDiffDevice) {
   hipDevice_t device_from_stream;
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   for (int i = 0; i < device_count; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     for (int j = 0; j < device_count; ++j) {
       if (i != j) {
-        HIP_CHECK(hipSetDevice(j));
-        HIP_CHECK(hipStreamGetDevice(stream, &device_from_stream));
+        HIP_CHECK(hipSetDevice(j))
+        HIP_CHECK(hipStreamGetDevice(stream, &device_from_stream))
         REQUIRE(device_from_stream == i);
       }
     }
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 
@@ -203,13 +203,13 @@ HIP_TEST_CASE(Unit_hipStreamGetDevice_SetDiffDevice) {
 #if HT_AMD
 HIP_TEST_CASE(Unit_hipStreamGetDevice_NullStream) {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   REQUIRE(device_count != 0);
 
   for (int i = 0; i < device_count; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     hipDevice_t device_from_stream;
-    HIP_CHECK(hipStreamGetDevice(0, &device_from_stream));
+    HIP_CHECK(hipStreamGetDevice(0, &device_from_stream))
     REQUIRE(device_from_stream == i);
   }
 }

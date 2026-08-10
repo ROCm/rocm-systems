@@ -49,7 +49,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity) {
   int deviceId = 0;
   CTX_CREATE();
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
 
@@ -71,8 +71,8 @@ HIP_TEST_CASE(Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity) {
   hipMemGenericAllocationHandle_t handle;
   // Allocate physical memory
   for (int mul = 1; mul < 64; mul++) {
-    HIP_CHECK(hipMemCreate(&handle, granularity * mul, &prop, 0));
-    HIP_CHECK(hipMemRelease(handle));
+    HIP_CHECK(hipMemCreate(&handle, granularity * mul, &prop, 0))
+    HIP_CHECK(hipMemRelease(handle))
   }
 
   CTX_DESTROY();
@@ -98,7 +98,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap) {
   CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
 
@@ -120,30 +120,30 @@ HIP_TEST_CASE(Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap) {
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   hipMemGenericAllocationHandle_t handle;
   // Allocate physical memory
-  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
-  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   // Set access
   hipMemAccessDesc accessDesc = {};
   accessDesc.location.type = hipMemLocationTypeDevice;
   accessDesc.location.id = device;
   accessDesc.flags = hipMemAccessFlagsProtReadWrite;
   // Make the address accessible to GPU 0
-  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
+  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1))
   // Allocate host memory and intialize data
   std::vector<int> A_h(N), B_h(N);
   // Initialize with data
   for (size_t idx = 0; idx < N; idx++) {
     A_h[idx] = idx;
   }
-  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
-  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size))
+  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size))
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
-  HIP_CHECK(hipMemUnmap(ptrA, size_mem));
-  HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
-  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemUnmap(ptrA, size_mem))
+  HIP_CHECK(hipMemAddressFree(ptrA, size_mem))
+  HIP_CHECK(hipMemRelease(handle))
   CTX_DESTROY();
 }
 
@@ -167,7 +167,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse) {
   CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
 
@@ -189,30 +189,30 @@ HIP_TEST_CASE(Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse) {
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   hipMemGenericAllocationHandle_t handle;
   // Allocate physical memory
-  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
-  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
-  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
+  HIP_CHECK(hipMemRelease(handle))
   // Set access
   hipMemAccessDesc accessDesc = {};
   accessDesc.location.type = hipMemLocationTypeDevice;
   accessDesc.location.id = device;
   accessDesc.flags = hipMemAccessFlagsProtReadWrite;
   // Make the address accessible to GPU 0
-  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
+  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1))
   // Allocate host memory and intialize data
   std::vector<int> A_h(N), B_h(N);
   // Initialize with data
   for (size_t idx = 0; idx < N; idx++) {
     A_h[idx] = idx;
   }
-  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
-  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size))
+  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size))
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
-  HIP_CHECK(hipMemUnmap(ptrA, size_mem));
-  HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  HIP_CHECK(hipMemUnmap(ptrA, size_mem))
+  HIP_CHECK(hipMemAddressFree(ptrA, size_mem))
   CTX_DESTROY();
 }
 
@@ -236,7 +236,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_ChkWithKerLaunch) {
   CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
 
@@ -258,34 +258,34 @@ HIP_TEST_CASE(Unit_hipMemCreate_ChkWithKerLaunch) {
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   hipMemGenericAllocationHandle_t handle;
   // Allocate physical memory
-  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
-  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
-  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
+  HIP_CHECK(hipMemRelease(handle))
   // Set access
   hipMemAccessDesc accessDesc = {};
   accessDesc.location.type = hipMemLocationTypeDevice;
   accessDesc.location.id = device;
   accessDesc.flags = hipMemAccessFlagsProtReadWrite;
   // Make the address accessible to GPU 0
-  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
+  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1))
   std::vector<int> A_h(N), B_h(N), C_h(N);
   // Initialize with data
   for (size_t idx = 0; idx < N; idx++) {
     A_h[idx] = idx;
     C_h[idx] = idx * idx;
   }
-  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size))
   // Invoke kernel
   hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
                      reinterpret_cast<int*>(ptrA));
-  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size))
+  HIP_CHECK(hipDeviceSynchronize())
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
-  HIP_CHECK(hipMemUnmap(ptrA, size_mem));
-  HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  HIP_CHECK(hipMemUnmap(ptrA, size_mem))
+  HIP_CHECK(hipMemAddressFree(ptrA, size_mem))
   CTX_DESTROY();
 }
 
@@ -310,7 +310,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_MapNonContiguousChunks) {
   CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
 
@@ -333,23 +333,23 @@ HIP_TEST_CASE(Unit_hipMemCreate_MapNonContiguousChunks) {
   hipMemGenericAllocationHandle_t handle[NUM_OF_BUFFERS];
   // Allocate 3 physical memory chunks
   for (int count = 0; count < numOfBuffers; count++) {
-    HIP_CHECK(hipMemCreate(&handle[count], size_mem, &prop, 0));
+    HIP_CHECK(hipMemCreate(&handle[count], size_mem, &prop, 0))
   }
   // Allocate virtual address range for all the memory chunks
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, (numOfBuffers * size_mem), 0, 0, 0));
+  HIP_CHECK(hipMemAddressReserve(&ptrA, (numOfBuffers * size_mem), 0, 0, 0))
   for (int idx = 0; idx < numOfBuffers; idx++) {
     unsigned long long uiptr = reinterpret_cast<unsigned long long>(ptrA);
     uiptr = uiptr + idx * size_mem;
-    HIP_CHECK(hipMemMap(reinterpret_cast<void*>(uiptr), size_mem, 0, handle[idx], 0));
-    HIP_CHECK(hipMemRelease(handle[idx]));
+    HIP_CHECK(hipMemMap(reinterpret_cast<void*>(uiptr), size_mem, 0, handle[idx], 0))
+    HIP_CHECK(hipMemRelease(handle[idx]))
   }
   hipMemAccessDesc accessDesc = {};
   accessDesc.location.type = hipMemLocationTypeDevice;
   accessDesc.location.id = device;
   accessDesc.flags = hipMemAccessFlagsProtReadWrite;
   // Make the address accessible to GPU 0
-  HIP_CHECK(hipMemSetAccess(ptrA, (numOfBuffers * size_mem), &accessDesc, 1));
+  HIP_CHECK(hipMemSetAccess(ptrA, (numOfBuffers * size_mem), &accessDesc, 1))
   std::vector<int> A_h(numOfBuffers * size_mem), B_h(numOfBuffers * size_mem),
       C_h(numOfBuffers * size_mem);
   // Fill Data
@@ -364,15 +364,15 @@ HIP_TEST_CASE(Unit_hipMemCreate_MapNonContiguousChunks) {
                      dim3(THREADS_PER_BLOCK), 0, 0, reinterpret_cast<int*>(ptrA));
   HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA),
                          numOfBuffers * buffer_size));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   // Validate Results
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
   for (int idx = 0; idx < numOfBuffers; idx++) {
     unsigned long long uiptr = reinterpret_cast<unsigned long long>(ptrA);
     uiptr = uiptr + idx * size_mem;
-    HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(uiptr), size_mem));
+    HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(uiptr), size_mem))
   }
-  HIP_CHECK(hipMemAddressFree(ptrA, (numOfBuffers * size_mem)));
+  HIP_CHECK(hipMemAddressFree(ptrA, (numOfBuffers * size_mem)))
   CTX_DESTROY();
 }
 
@@ -396,7 +396,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_ChkWithMemset) {
   CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
 
@@ -418,27 +418,27 @@ HIP_TEST_CASE(Unit_hipMemCreate_ChkWithMemset) {
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   hipMemGenericAllocationHandle_t handle;
   // Allocate physical memory
-  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
-  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   // Set access
   hipMemAccessDesc accessDesc = {};
   accessDesc.location.type = hipMemLocationTypeDevice;
   accessDesc.location.id = device;
   accessDesc.flags = hipMemAccessFlagsProtReadWrite;
   // Make the address accessible to GPU 0
-  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
+  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1))
   std::vector<int> A_h(N);
-  HIP_CHECK(hipMemset(ptrA, init_val, buffer_size));
-  HIP_CHECK(hipMemcpyDtoH(A_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
+  HIP_CHECK(hipMemset(ptrA, init_val, buffer_size))
+  HIP_CHECK(hipMemcpyDtoH(A_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size))
   for (int idx = 0; idx < N; idx++) {
     REQUIRE(A_h[idx] == init_val);
   }
-  HIP_CHECK(hipMemUnmap(ptrA, size_mem));
-  HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
-  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemUnmap(ptrA, size_mem))
+  HIP_CHECK(hipMemAddressFree(ptrA, size_mem))
+  HIP_CHECK(hipMemRelease(handle))
   CTX_DESTROY();
 }
 
@@ -457,7 +457,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_Negative) {
   int deviceId = 0;
   hipDevice_t device;
   CTX_CREATE();
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
   checkVMMSupported(device);
   hipMemGenericAllocationHandle_t handle;
   hipMemAllocationProp prop = {};
@@ -498,7 +498,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_Negative) {
 
   SECTION("pass location id as > highest device number") {
     int numDevices = 0;
-    HIP_CHECK(hipGetDeviceCount(&numDevices));
+    HIP_CHECK(hipGetDeviceCount(&numDevices))
     prop.location.id = numDevices;  // set to non existing device
     REQUIRE(hipMemCreate(&handle, granularity, &prop, 0) == hipErrorInvalidDevice);
   }
@@ -513,7 +513,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_Capture) {
   size_t allocation_granularity = 0;
   constexpr int kDeviceId = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  HIP_CHECK(hipDeviceGet(&device, kDeviceId))
 
   hipMemAllocationProp allocation_prop{};
   allocation_prop.type = hipMemAllocationTypePinned;
@@ -524,15 +524,15 @@ HIP_TEST_CASE(Unit_hipMemCreate_Capture) {
                                            hipMemAllocationGranularityMinimum));
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemCreate(&allocation_handle, allocation_granularity, &allocation_prop, 0));
+  HIP_CHECK(hipMemCreate(&allocation_handle, allocation_granularity, &allocation_prop, 0))
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipMemRelease(allocation_handle));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipMemRelease(allocation_handle))
   CTX_DESTROY();
 }
 

@@ -135,29 +135,29 @@ static void test_group_partition(unsigned int tileSz) {
     int* dResult = NULL;
     int* hResult = NULL;
 
-    HIPCHECK(hipHostMalloc(&hResult, numTiles  * sizeof(int), hipHostMallocDefault));
+    HIPCHECK(hipHostMalloc(&hResult, numTiles  * sizeof(int), hipHostMallocDefault))
     memset(hResult, 0, numTiles * sizeof(int));
 
-    HIPCHECK(hipMalloc(&dResult, numTiles * sizeof(int)));
+    HIPCHECK(hipMalloc(&dResult, numTiles * sizeof(int)))
 
 
     // Launch Kernel
     hipLaunchKernelGGL(kernel_cg_group_partition_shfl_down, blockSize, threadsPerBlock,
                        threadsPerBlock * sizeof(int), 0, dResult, tileSz, i);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
     err = hipDeviceSynchronize();
     if (err != hipSuccess) {
       fprintf(stderr, "Failed to launch kernel (error code %s)!\n", hipGetErrorString(err));
     }
 
 
-    HIPCHECK(hipMemcpy(hResult, dResult, sizeof(int) * numTiles, hipMemcpyDeviceToHost));
+    HIPCHECK(hipMemcpy(hResult, dResult, sizeof(int) * numTiles, hipMemcpyDeviceToHost))
 
     verifyResults(hResult, expectedSum, numTiles);
 
     // Free all allocated memory on host and device
-    HIPCHECK(hipFree(dResult));
-    HIPCHECK(hipHostFree(hResult));
+    HIPCHECK(hipFree(dResult))
+    HIPCHECK(hipHostFree(hResult))
     delete[] expectedResult;
 
     printf("\n...PASSED.\n\n");
@@ -185,7 +185,7 @@ static void test_shfl_down() {
 
     int arrSize = blockSize * threadsPerBlock * sizeof(int);
 
-    HIPCHECK(hipHostMalloc(&hPtr, arrSize));
+    HIPCHECK(hipHostMalloc(&hPtr, arrSize))
     // Fill up the array
     for (int i = 0; i < WAVE_SIZE; i++) {
       hPtr[i] = rand() % 1000;
@@ -197,15 +197,15 @@ static void test_shfl_down() {
     }
     // printf("Array passed to GPU for computation\n");
     // printResultsCoalescedGroupsShflDown(hPtr, WAVE_SIZE);
-    HIPCHECK(hipMalloc(&dPtr, group_size_in_bytes));
-    HIPCHECK(hipMalloc(&dResults, group_size_in_bytes));
+    HIPCHECK(hipMalloc(&dPtr, group_size_in_bytes))
+    HIPCHECK(hipMalloc(&dResults, group_size_in_bytes))
 
-    HIPCHECK(hipMemcpy(dPtr, hPtr, group_size_in_bytes, hipMemcpyHostToDevice));
+    HIPCHECK(hipMemcpy(dPtr, hPtr, group_size_in_bytes, hipMemcpyHostToDevice))
     // Launch Kernel
     hipLaunchKernelGGL(kernel_shfl_down, blockSize, threadsPerBlock, threadsPerBlock * sizeof(int),
                        0, dPtr, dResults, lane_delta, i);
-    HIP_CHECK(hipGetLastError());
-    HIPCHECK(hipMemcpy(hPtr, dResults, group_size_in_bytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGetLastError())
+    HIPCHECK(hipMemcpy(hPtr, dResults, group_size_in_bytes, hipMemcpyDeviceToHost))
     err = hipDeviceSynchronize();
     if (err != hipSuccess) {
       fprintf(stderr, "Failed to launch kernel (error code %s)!\n", hipGetErrorString(err));
@@ -218,9 +218,9 @@ static void test_shfl_down() {
     compareResultsCoalescedGroupsShflDown(hPtr, cpuResultsArr, group_size_in_bytes);
     std::cout << "Results verified!\n";
 
-    HIPCHECK(hipHostFree(hPtr));
-    HIPCHECK(hipFree(dPtr));
-    HIPCHECK(hipFree(dResults));
+    HIPCHECK(hipHostFree(hPtr))
+    HIPCHECK(hipFree(dPtr))
+    HIPCHECK(hipFree(dResults))
     free(cpuResultsArr);
   }
 }

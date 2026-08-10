@@ -35,7 +35,7 @@ HIP_TEST_CASE(Unit_hipArrayGetInfo_Positive_Basic) {
   hipExtent extent;
   unsigned int flags = 1;
 
-  HIP_CHECK(hipArrayGetInfo(&desc, &extent, &flags, array.ptr()));
+  HIP_CHECK(hipArrayGetInfo(&desc, &extent, &flags, array.ptr()))
 
   REQUIRE(extent.width == 1024);
   REQUIRE(extent.height == 4);
@@ -75,7 +75,7 @@ HIP_TEST_CASE(Unit_hipArrayGetInfo_Negative_Parameters) {
   }
 
   SECTION("array is freed") {
-    HIP_CHECK(hipFreeArray(array.ptr()));
+    HIP_CHECK(hipFreeArray(array.ptr()))
     HIP_CHECK_ERROR(hipArrayGetInfo(&desc, &extent, &flags, array.ptr()), hipErrorInvalidHandle);
   }
 }

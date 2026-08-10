@@ -132,18 +132,18 @@ __global__ void __half2Test(bool* result, __half2 a) {
 
 HIP_TEST_CASE(Unit_hipTestNativeHalf) {
   bool* result{nullptr};
-  HIP_CHECK(hipHostMalloc(&result, 1));
+  HIP_CHECK(hipHostMalloc(&result, 1))
   SECTION("Half Test") {
     result[0] = true;
     hipLaunchKernelGGL(__halfTest, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, result, __half{1});
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(result[0] == true);
   }
   SECTION("Half2 Test") {
     result[0] = true;
     hipLaunchKernelGGL(__half2Test, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, result, __half2{1, 1});
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(result[0] == true);
   }
-  HIP_CHECK(hipHostFree(result));
+  HIP_CHECK(hipHostFree(result))
 }

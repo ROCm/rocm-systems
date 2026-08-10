@@ -48,8 +48,8 @@ static void runTest(const int width, const float offsetX = 0) {
   memset(&resDesc, 0, sizeof(resDesc));
 
   if (resType == hipResourceTypeArray) {
-    HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width));
-    HIP_CHECK(hipMemcpy2DToArray(hipArray, 0, 0, hData, size, size, 1, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width))
+    HIP_CHECK(hipMemcpy2DToArray(hipArray, 0, 0, hData, size, size, 1, hipMemcpyHostToDevice))
     resDesc.resType = hipResourceTypeArray;  // Will call tex1D in kernel
     resDesc.res.array.array = hipArray;
   } else if (resType == hipResourceTypeLinear) {
@@ -58,8 +58,8 @@ static void runTest(const int width, const float offsetX = 0) {
       free(hData);
       FAIL("One or more unexpected parameters for hipResourceTypeLinear");
     }
-    HIP_CHECK(hipMalloc((void**)&hipBuff, size));
-    HIP_CHECK(hipMemcpy(hipBuff, hData, size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc((void**)&hipBuff, size))
+    HIP_CHECK(hipMemcpy(hipBuff, hData, size, hipMemcpyHostToDevice))
     resDesc.resType = hipResourceTypeLinear;  // Will call tex1Dfetch in kernel
     resDesc.res.linear.devPtr = hipBuff;
     resDesc.res.linear.sizeInBytes = size;
@@ -83,15 +83,15 @@ static void runTest(const int width, const float offsetX = 0) {
 #if HT_AMD
   if (ret == hipErrorInvalidValue && resType == hipResourceTypeLinear) {
     free(hData);
-    HIP_CHECK(hipFree(hipBuff));
+    HIP_CHECK(hipFree(hipBuff))
     HIP_SKIP_TEST("sRGB is not supported for hipResourceTypeLinear on AMD devices.");
   }
 #endif
-  HIP_CHECK(ret);
+  HIP_CHECK(ret)
 
   float4* dData = nullptr;
   size = width * sizeof(float4);
-  HIP_CHECK(hipMalloc((void**)&dData, size));
+  HIP_CHECK(hipMalloc((void**)&dData, size))
 
   dim3 dimBlock(16, 1, 1);
   dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, 1, 1);
@@ -99,14 +99,14 @@ static void runTest(const int width, const float offsetX = 0) {
   if (resType == hipResourceTypeArray) {
     hipLaunchKernelGGL(tex1DRGBAKernel<normalizedCoords>, dimGrid, dimBlock, 0, 0, dData,
                        textureObject, width, offsetX);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
   } else {
     hipLaunchKernelGGL(tex1DRGBAKernelFetch, dimGrid, dimBlock, 0, 0, dData, textureObject,
                        offsetX);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   size = width * sizeof(float4);
   float4* hInputData = (float4*)malloc(size);   // CPU expected values
   float4* hOutputData = (float4*)malloc(size);  // GPU output values
@@ -120,7 +120,7 @@ static void runTest(const int width, const float offsetX = 0) {
     hInputData[j].w = hData[j].w / uCharMax;
   }
 
-  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost))
 
   bool result = true;
 
@@ -147,8 +147,8 @@ static void runTest(const int width, const float offsetX = 0) {
   }
 
 line1:
-  HIP_CHECK(hipDestroyTextureObject(textureObject));
-  HIP_CHECK(hipFree(dData));
+  HIP_CHECK(hipDestroyTextureObject(textureObject))
+  HIP_CHECK(hipFree(dData))
   if (hipArray) HIP_CHECK(hipFreeArray(hipArray));
   if (hipBuff) HIP_CHECK(hipFree(hipBuff));
   free(hData);

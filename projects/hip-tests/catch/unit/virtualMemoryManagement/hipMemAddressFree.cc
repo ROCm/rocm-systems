@@ -35,7 +35,7 @@ HIP_TEST_CASE(Unit_hipMemAddressFree_negative) {
   int deviceId = 0;
   hipDevice_t device;
   CTX_CREATE();
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
@@ -47,7 +47,7 @@ HIP_TEST_CASE(Unit_hipMemAddressFree_negative) {
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   // Allocate virtual address range
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
 
   SECTION("nullptr to devptr") {
     REQUIRE(hipMemAddressFree(nullptr, size_mem) == hipErrorInvalidValue);
@@ -55,7 +55,7 @@ HIP_TEST_CASE(Unit_hipMemAddressFree_negative) {
 
   SECTION("pass zero to size") { REQUIRE(hipMemAddressFree(ptrA, 0) == hipErrorInvalidValue); }
 
-  HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  HIP_CHECK(hipMemAddressFree(ptrA, size_mem))
   CTX_DESTROY();
 }
 
@@ -65,7 +65,7 @@ HIP_TEST_CASE(Unit_hipMemAddressFree_Capture) {
   size_t buffer_size = DATA_SIZE * sizeof(int);
   int device_id = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, device_id));
+  HIP_CHECK(hipDeviceGet(&device, device_id))
   checkVMMSupported(device);
 
   hipMemAllocationProp alloc_prop{};
@@ -80,17 +80,17 @@ HIP_TEST_CASE(Unit_hipMemAddressFree_Capture) {
   size_t reserved_size = ((granularity + buffer_size - 1) / granularity) * granularity;
 
   void* reserved_ptr = nullptr;
-  HIP_CHECK(hipMemAddressReserve(&reserved_ptr, reserved_size, 0, nullptr, 0));
+  HIP_CHECK(hipMemAddressReserve(&reserved_ptr, reserved_size, 0, nullptr, 0))
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemAddressFree(reserved_ptr, reserved_size));
+  HIP_CHECK(hipMemAddressFree(reserved_ptr, reserved_size))
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
   CTX_DESTROY();
 }
 

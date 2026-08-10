@@ -48,55 +48,55 @@ HIP_TEST_CASE(Unit_hipEventCoalescing_CrossStreamWait) {
   float *A_h, *B_h, *C_h, *D_h;
   float *A_d, *B_d, *C_d, *D_d;
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N);
-  HIP_CHECK(hipMalloc(&D_d, Nbytes));
+  HIP_CHECK(hipMalloc(&D_d, Nbytes))
   D_h = reinterpret_cast<float*>(malloc(Nbytes));
 
   REQUIRE(D_h != nullptr);
 
   hipStream_t stream1, stream2;
   hipEvent_t event;
-  HIP_CHECK(hipStreamCreate(&stream1));
-  HIP_CHECK(hipStreamCreate(&stream2));
-  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
+  HIP_CHECK(hipStreamCreate(&stream1))
+  HIP_CHECK(hipStreamCreate(&stream2))
+  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming))
 
-  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
 
   for (int iter = 0; iter < kNumIterations; iter++) {
     // Reset destination on stream1 to known garbage so stale reads would be visible
-    HIP_CHECK(hipMemsetAsync(C_d, 0xFF, Nbytes, stream1));
+    HIP_CHECK(hipMemsetAsync(C_d, 0xFF, Nbytes, stream1))
 
     // Producer: stream1 computes C_d = A_d + B_d
     HipTest::launchKernel<float>(HipTest::vectorADD<float>, kBlocks, kThreadsPerBlock, 0, stream1,
                                  static_cast<const float*>(A_d),
                                  static_cast<const float*>(B_d),
                                  C_d, N);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
 
     // Record event multiple times on stream1 (should coalesce — but the barrier
     // must survive coalescing so stream2's wait sees stream1's kernel completion)
-    HIP_CHECK(hipEventRecord(event, stream1));
+    HIP_CHECK(hipEventRecord(event, stream1))
     HIP_CHECK(hipEventRecord(event, stream1));  // Should coalesce
     HIP_CHECK(hipEventRecord(event, stream1));  // Should coalesce
 
     // Consumer: stream2 waits on event, then reads C_d and writes D_d = C_d + B_d
-    HIP_CHECK(hipStreamWaitEvent(stream2, event, 0));
+    HIP_CHECK(hipStreamWaitEvent(stream2, event, 0))
     HipTest::launchKernel<float>(HipTest::vectorADDReverse<float>, kBlocks, kThreadsPerBlock, 0,
                                  stream2, static_cast<const float*>(C_d),
                                  static_cast<const float*>(B_d), D_d, N);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
 
-    HIP_CHECK(hipStreamSynchronize(stream2));
+    HIP_CHECK(hipStreamSynchronize(stream2))
 
     // D_d should equal (A_d + B_d) + B_d
-    HIP_CHECK(hipMemcpy(D_h, D_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(D_h, D_d, Nbytes, hipMemcpyDeviceToHost))
     HipTest::checkVectors<float>(A_h, B_h, D_h, N, [](float a, float b) { return (a + b) + b; });
   }
 
-  HIP_CHECK(hipEventDestroy(event));
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
-  HIP_CHECK(hipFree(D_d));
+  HIP_CHECK(hipEventDestroy(event))
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipStreamDestroy(stream2))
+  HIP_CHECK(hipFree(D_d))
   free(D_h);
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
@@ -128,11 +128,11 @@ HIP_TEST_CASE(Unit_hipEventCoalescing_AsyncOpsBreakCoalescing) {
 
   hipStream_t stream;
   hipEvent_t event;
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming))
 
   int* d_buf;
-  HIP_CHECK(hipMalloc(&d_buf, Nbytes));
+  HIP_CHECK(hipMalloc(&d_buf, Nbytes))
   std::vector<int> h_buf(N);
 
   SECTION("Memcpy breaks coalescing") {
@@ -142,21 +142,21 @@ HIP_TEST_CASE(Unit_hipEventCoalescing_AsyncOpsBreakCoalescing) {
       std::fill(h_buf.begin(), h_buf.end(), sentinel);
 
       // First record - submits barrier
-      HIP_CHECK(hipEventRecord(event, stream));
+      HIP_CHECK(hipEventRecord(event, stream))
 
       // Async memcpy - must break coalescing
-      HIP_CHECK(hipMemcpyAsync(d_buf, h_buf.data(), Nbytes, hipMemcpyHostToDevice, stream));
+      HIP_CHECK(hipMemcpyAsync(d_buf, h_buf.data(), Nbytes, hipMemcpyHostToDevice, stream))
 
       // Second record - must submit new barrier (NOT coalesce) so sync waits for memcpy
-      HIP_CHECK(hipEventRecord(event, stream));
+      HIP_CHECK(hipEventRecord(event, stream))
 
       // Sync event - if coalescing wrongly skipped the second barrier, the memcpy
       // might not have completed when we read back
-      HIP_CHECK(hipEventSynchronize(event));
+      HIP_CHECK(hipEventSynchronize(event))
 
       // Read back without further sync — relies on event sync covering the memcpy
       std::vector<int> h_verify(N, 0);
-      HIP_CHECK(hipMemcpy(h_verify.data(), d_buf, Nbytes, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(h_verify.data(), d_buf, Nbytes, hipMemcpyDeviceToHost))
       for (size_t i = 0; i < N; i++) {
         REQUIRE(h_verify[i] == sentinel);
       }
@@ -168,27 +168,27 @@ HIP_TEST_CASE(Unit_hipEventCoalescing_AsyncOpsBreakCoalescing) {
       const unsigned char pattern = static_cast<unsigned char>(0x40 + iter);
       const int expected = (pattern << 24) | (pattern << 16) | (pattern << 8) | pattern;
 
-      HIP_CHECK(hipEventRecord(event, stream));
+      HIP_CHECK(hipEventRecord(event, stream))
 
       // Async memset - must break coalescing
-      HIP_CHECK(hipMemsetAsync(d_buf, pattern, Nbytes, stream));
+      HIP_CHECK(hipMemsetAsync(d_buf, pattern, Nbytes, stream))
 
       // Second record - must submit new barrier
-      HIP_CHECK(hipEventRecord(event, stream));
+      HIP_CHECK(hipEventRecord(event, stream))
 
-      HIP_CHECK(hipEventSynchronize(event));
+      HIP_CHECK(hipEventSynchronize(event))
 
       std::vector<int> h_verify(N, 0);
-      HIP_CHECK(hipMemcpy(h_verify.data(), d_buf, Nbytes, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(h_verify.data(), d_buf, Nbytes, hipMemcpyDeviceToHost))
       for (size_t i = 0; i < N; i++) {
         REQUIRE(h_verify[i] == expected);
       }
     }
   }
 
-  HIP_CHECK(hipFree(d_buf));
-  HIP_CHECK(hipEventDestroy(event));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(d_buf))
+  HIP_CHECK(hipEventDestroy(event))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -224,17 +224,17 @@ HIP_TEST_CASE(Unit_hipEventCoalescing_InterleavedEvents) {
   float *A_h, *B_h, *C_h;
   float *A_d, *B_d, *C_d, *D_d;
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N);
-  HIP_CHECK(hipMalloc(&D_d, Nbytes));
+  HIP_CHECK(hipMalloc(&D_d, Nbytes))
 
   hipStream_t stream1, stream2;
   hipEvent_t event1, event2;
-  HIP_CHECK(hipStreamCreate(&stream1));
-  HIP_CHECK(hipStreamCreate(&stream2));
-  HIP_CHECK(hipEventCreateWithFlags(&event1, hipEventDisableTiming));
-  HIP_CHECK(hipEventCreateWithFlags(&event2, hipEventDisableTiming));
+  HIP_CHECK(hipStreamCreate(&stream1))
+  HIP_CHECK(hipStreamCreate(&stream2))
+  HIP_CHECK(hipEventCreateWithFlags(&event1, hipEventDisableTiming))
+  HIP_CHECK(hipEventCreateWithFlags(&event2, hipEventDisableTiming))
 
-  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
 
   for (int iter = 0; iter < kNumIterations; iter++) {
     // kernel_A: C_d = A_d + B_d
@@ -242,7 +242,7 @@ HIP_TEST_CASE(Unit_hipEventCoalescing_InterleavedEvents) {
                                  static_cast<const float*>(A_d),
                                  static_cast<const float*>(B_d),
                                  C_d, N);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
 
     // Interleaved records - none should coalesce because event identity changes
     HIP_CHECK(hipEventRecord(event1, stream1));  // barrier(event1)
@@ -254,32 +254,32 @@ HIP_TEST_CASE(Unit_hipEventCoalescing_InterleavedEvents) {
                                  static_cast<const float*>(A_d),
                                  static_cast<const float*>(B_d),
                                  D_d, N);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
 
     HIP_CHECK(hipEventRecord(event2, stream1));  // different event — NOT coalesce
 
     // event2 captures point AFTER kernel_B. If stream2 waits on event2 and reads D_d,
     // it should see kernel_B's output. If event2 wrongly coalesced with event1,
     // stream2 would not wait long enough.
-    HIP_CHECK(hipStreamWaitEvent(stream2, event2, 0));
+    HIP_CHECK(hipStreamWaitEvent(stream2, event2, 0))
 
     // Validate kernel_B's output is readable after waiting on event2
     std::vector<float> D_h(N);
-    HIP_CHECK(hipMemcpyAsync(D_h.data(), D_d, Nbytes, hipMemcpyDeviceToHost, stream2));
-    HIP_CHECK(hipStreamSynchronize(stream2));
+    HIP_CHECK(hipMemcpyAsync(D_h.data(), D_d, Nbytes, hipMemcpyDeviceToHost, stream2))
+    HIP_CHECK(hipStreamSynchronize(stream2))
     HipTest::checkVectorSUB(A_h, B_h, D_h.data(), N);
 
     // Validate kernel_A's output via event1 wait on a fresh stream wait
-    HIP_CHECK(hipEventSynchronize(event1));
-    HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipEventSynchronize(event1))
+    HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
     HipTest::checkVectorADD(A_h, B_h, C_h, N);
   }
 
-  HIP_CHECK(hipEventDestroy(event1));
-  HIP_CHECK(hipEventDestroy(event2));
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
-  HIP_CHECK(hipFree(D_d));
+  HIP_CHECK(hipEventDestroy(event1))
+  HIP_CHECK(hipEventDestroy(event2))
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipStreamDestroy(stream2))
+  HIP_CHECK(hipFree(D_d))
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 
@@ -312,22 +312,22 @@ HIP_TEST_CASE(Unit_hipEventCoalescing_EventQuery) {
 
   hipStream_t stream;
   hipEvent_t event;
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming))
 
   int *A_d, *C_d;
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipMalloc(&C_d, Nbytes));
-  HIP_CHECK(hipMemset(A_d, 0, Nbytes));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipMalloc(&C_d, Nbytes))
+  HIP_CHECK(hipMemset(A_d, 0, Nbytes))
 
   for (int iter = 0; iter < kNumIterations; iter++) {
     // Launch slow kernel
     HipTest::launchKernel<int>(HipTest::addCount<int>, kBlocks, kThreadsPerBlock, 0, stream,
                                static_cast<const int*>(A_d), C_d, N, kSlowCount);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
 
     // Record event multiple times - later records should coalesce
-    HIP_CHECK(hipEventRecord(event, stream));
+    HIP_CHECK(hipEventRecord(event, stream))
     HIP_CHECK(hipEventRecord(event, stream));  // Should coalesce
     HIP_CHECK(hipEventRecord(event, stream));  // Should coalesce
 
@@ -337,14 +337,14 @@ HIP_TEST_CASE(Unit_hipEventCoalescing_EventQuery) {
     REQUIRE((query_status == hipErrorNotReady || query_status == hipSuccess));
 
     // After full sync, query must report success
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipEventQuery(event));
+    HIP_CHECK(hipStreamSynchronize(stream))
+    HIP_CHECK(hipEventQuery(event))
   }
 
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(C_d));
-  HIP_CHECK(hipEventDestroy(event));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(C_d))
+  HIP_CHECK(hipEventDestroy(event))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**

@@ -68,9 +68,9 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Negative) {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphNode_t memcpyNode;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipCtxCreate(&context, 0, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipCtxCreate(&context, 0, 0))
 
   HIP_MEMCPY3D myparams{};
   memset(&myparams, 0x0, sizeof(HIP_MEMCPY3D));
@@ -252,11 +252,11 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Negative) {
     ret = hipDrvGraphAddMemcpyNode(&memcpyNode, graph, nullptr,
                                    0, &myparams, context);
     REQUIRE(hipErrorInvalidValue == ret);
-    HIP_CHECK(hipFreeArray(devArray1));
-    HIP_CHECK(hipFreeArray(devArray2));
+    HIP_CHECK(hipFreeArray(devArray1))
+    HIP_CHECK(hipFreeArray(devArray2))
   }
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 }
 
 /*
@@ -265,7 +265,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Negative) {
  * Validate the output.
  */
 static void hipDrvGraphAddMemcpyNode_test(int deviceid = 0) {
-  HIP_CHECK(hipSetDevice(deviceid));
+  HIP_CHECK(hipSetDevice(deviceid))
 
   constexpr size_t size = 1024;
   size_t numW = size * sizeof(int);
@@ -281,9 +281,9 @@ static void hipDrvGraphAddMemcpyNode_test(int deviceid = 0) {
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyH2H;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipCtxCreate(&context, 0, deviceid));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipCtxCreate(&context, 0, deviceid))
 
   HIP_MEMCPY3D myparams{};
   memset(&myparams, 0x0, sizeof(HIP_MEMCPY3D));
@@ -308,13 +308,13 @@ static void hipDrvGraphAddMemcpyNode_test(int deviceid = 0) {
   HIP_CHECK(hipDrvGraphAddMemcpyNode(&memcpyH2H, graph, nullptr,
                                      0, &myparams, context));
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
   // Validation
   REQUIRE(memcmp(A_h.data(), B_h.data(), numW) == 0);
 }
@@ -359,7 +359,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_MulitDevice) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices > 1) {
     for (int device=0; device < numDevices; device++) {
       hipDrvGraphAddMemcpyNode_test(device);
@@ -389,11 +389,11 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Positive_Basic) {
   using namespace std::placeholders;
 
   constexpr bool async = false;
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
   hipDevice_t device;
   hipCtx_t context;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  HIP_CHECK(hipCtxCreate(&context, 0, device));
+  HIP_CHECK(hipDeviceGet(&device, 0))
+  HIP_CHECK(hipCtxCreate(&context, 0, device))
 
   SECTION("Device to host") {
     Memcpy3DDeviceToHostShell<async>(
@@ -421,8 +421,8 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Positive_Basic) {
     }
   }
 
-  HIP_CHECK(hipCtxPopCurrent(&context));
-  HIP_CHECK(hipCtxDestroy(context));
+  HIP_CHECK(hipCtxPopCurrent(&context))
+  HIP_CHECK(hipCtxDestroy(context))
 }
 
 HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Positive_Array) {
@@ -431,11 +431,11 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Positive_Array) {
   using namespace std::placeholders;
 
   constexpr bool async = false;
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
   hipDevice_t device;
   hipCtx_t context;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  HIP_CHECK(hipCtxCreate(&context, 0, device));
+  HIP_CHECK(hipDeviceGet(&device, 0))
+  HIP_CHECK(hipCtxCreate(&context, 0, device))
 
   SECTION("Array from/to Host") {
     DrvMemcpy3DArrayHostShell<async>(
@@ -446,8 +446,8 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Positive_Array) {
         std::bind(DrvMemcpy3DGraphWrapper<>, _1, _2, _3, _4, _5, _6, context, _7));
   }
 
-  HIP_CHECK(hipCtxPopCurrent(&context));
-  HIP_CHECK(hipCtxDestroy(context));
+  HIP_CHECK(hipCtxPopCurrent(&context))
+  HIP_CHECK(hipCtxDestroy(context))
 }
 #endif  // if 0
 
@@ -483,11 +483,11 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Positive_Array) {
 HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Negative_Parameters) {
   using namespace std::placeholders;
 
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
   hipDevice_t device;
   hipCtx_t context;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  HIP_CHECK(hipCtxCreate(&context, 0, device));
+  HIP_CHECK(hipDeviceGet(&device, 0))
+  HIP_CHECK(hipCtxCreate(&context, 0, device))
 
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};
 
@@ -495,7 +495,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Negative_Parameters) {
                                     hipPos src_pos, hipExtent extent, hipMemcpyKind kind,
                                     hipCtx_t context) {
     hipGraph_t graph = nullptr;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
     hipGraphNode_t node = nullptr;
 
     auto params = GetDrvMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent, kind);
@@ -536,7 +536,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Negative_Parameters) {
 
     SECTION("dstPitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       hipPitchedPtr invalid_ptr = dst_ptr;
       invalid_ptr.pitch = attr;
       auto params = GetDrvMemcpy3DParms(invalid_ptr, dst_pos, src_ptr, src_pos, extent, kind);
@@ -546,7 +546,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Negative_Parameters) {
 
     SECTION("srcPitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       hipPitchedPtr invalid_ptr = src_ptr;
       invalid_ptr.pitch = attr;
       auto params = GetDrvMemcpy3DParms(dst_ptr, dst_pos, invalid_ptr, src_pos, extent, kind);
@@ -602,7 +602,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Negative_Parameters) {
                       hipErrorInvalidValue);
     }
 
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphDestroy(graph))
   };
 
   SECTION("Host to Device") {
@@ -645,8 +645,8 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Negative_Parameters) {
                   make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice, context);
   }
 
-  HIP_CHECK(hipCtxPopCurrent(&context));
-  HIP_CHECK(hipCtxDestroy(context));
+  HIP_CHECK(hipCtxPopCurrent(&context))
+  HIP_CHECK(hipCtxDestroy(context))
 }
 
 /**

@@ -76,27 +76,27 @@ void hipPerfMemcpy::TestResult(unsigned int numTests,
 bool hipPerfMemcpy::run_h2d(unsigned int numTests) {
   int *A, *Ad;
   A = new int[totalSizes_[numTests]];
-  HIP_CHECK(hipHostRegister(A, totalSizes_[numTests], hipHostRegisterDefault));
+  HIP_CHECK(hipHostRegister(A, totalSizes_[numTests], hipHostRegisterDefault))
   setHostBuffer(A, 1, totalSizes_[numTests]);
-  HIP_CHECK(hipMalloc(&Ad, totalSizes_[numTests]));
+  HIP_CHECK(hipMalloc(&Ad, totalSizes_[numTests]))
 
   // measure performance based on host time
   auto all_start = std::chrono::steady_clock::now();
 
   for (int j = 0; j < NUM_ITER; j++) {
-    HIP_CHECK(hipMemcpyAsync(Ad, A, totalSizes_[numTests], hipMemcpyHostToDevice, nullptr));
+    HIP_CHECK(hipMemcpyAsync(Ad, A, totalSizes_[numTests], hipMemcpyHostToDevice, nullptr))
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   auto all_end = std::chrono::steady_clock::now();
   std::chrono::duration<double, std::micro> diff = all_end - all_start;
 
   TestResult(numTests, diff, hipMemcpyHostToDevice);
 
-  HIP_CHECK(hipHostUnregister(A));
+  HIP_CHECK(hipHostUnregister(A))
   delete[] A;
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Ad))
 
   return true;
 }
@@ -104,63 +104,63 @@ bool hipPerfMemcpy::run_h2d(unsigned int numTests) {
 bool hipPerfMemcpy::run_d2h(unsigned int numTests) {
   int *A, *Ad;
   A = new int[totalSizes_[numTests]];
-  HIP_CHECK(hipHostRegister(A, totalSizes_[numTests], hipHostRegisterDefault));
-  HIP_CHECK(hipMalloc(&Ad, totalSizes_[numTests]));
-  HIP_CHECK(hipMemset(Ad, 0x1, totalSizes_[numTests]));
+  HIP_CHECK(hipHostRegister(A, totalSizes_[numTests], hipHostRegisterDefault))
+  HIP_CHECK(hipMalloc(&Ad, totalSizes_[numTests]))
+  HIP_CHECK(hipMemset(Ad, 0x1, totalSizes_[numTests]))
 
   // measure performance based on host time
   auto all_start = std::chrono::steady_clock::now();
 
   for (int j = 0; j < NUM_ITER; j++) {
-    HIP_CHECK(hipMemcpyAsync(A, Ad, totalSizes_[numTests], hipMemcpyDeviceToHost, nullptr));
+    HIP_CHECK(hipMemcpyAsync(A, Ad, totalSizes_[numTests], hipMemcpyDeviceToHost, nullptr))
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   auto all_end = std::chrono::steady_clock::now();
   std::chrono::duration<double, std::micro> diff = all_end - all_start;
 
   TestResult(numTests, diff, hipMemcpyDeviceToHost);
 
-  HIP_CHECK(hipHostUnregister(A));
+  HIP_CHECK(hipHostUnregister(A))
   delete[] A;
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Ad))
 
   return true;
 }
 
 bool hipPerfMemcpy::run_d2d(unsigned int numTests) {
   int *Ad1, *Ad2;
-  HIP_CHECK(hipMalloc(&Ad1, totalSizes_[numTests]));
-  HIP_CHECK(hipMalloc(&Ad2, totalSizes_[numTests]));
-  HIP_CHECK(hipMemset(Ad2, 0x1, totalSizes_[numTests]));
+  HIP_CHECK(hipMalloc(&Ad1, totalSizes_[numTests]))
+  HIP_CHECK(hipMalloc(&Ad2, totalSizes_[numTests]))
+  HIP_CHECK(hipMemset(Ad2, 0x1, totalSizes_[numTests]))
 
 
   // measure performance based on host time
   auto all_start = std::chrono::steady_clock::now();
 
   for (int j = 0; j < NUM_ITER; j++) {
-    HIP_CHECK(hipMemcpyAsync(Ad1, Ad2, totalSizes_[numTests], hipMemcpyDeviceToDevice, nullptr));
+    HIP_CHECK(hipMemcpyAsync(Ad1, Ad2, totalSizes_[numTests], hipMemcpyDeviceToDevice, nullptr))
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   auto all_end = std::chrono::steady_clock::now();
   std::chrono::duration<double, std::micro> diff = all_end - all_start;
 
   TestResult(numTests, diff, hipMemcpyDeviceToDevice);
 
-  HIP_CHECK(hipFree(Ad1));
-  HIP_CHECK(hipFree(Ad2));
+  HIP_CHECK(hipFree(Ad1))
+  HIP_CHECK(hipFree(Ad2))
 
   return true;
 }
 
 bool hipPerfMemcpy::run_d2d_nocu(unsigned int numTests) {
   int *Ad1, *Ad2;
-  HIP_CHECK(hipMalloc(&Ad1, totalSizes_[numTests]));
-  HIP_CHECK(hipMalloc(&Ad2, totalSizes_[numTests]));
-  HIP_CHECK(hipMemset(Ad2, 0x1, totalSizes_[numTests]));
+  HIP_CHECK(hipMalloc(&Ad1, totalSizes_[numTests]))
+  HIP_CHECK(hipMalloc(&Ad2, totalSizes_[numTests]))
+  HIP_CHECK(hipMemset(Ad2, 0x1, totalSizes_[numTests]))
 
   // measure performance based on host time
   auto all_start = std::chrono::steady_clock::now();
@@ -170,15 +170,15 @@ bool hipPerfMemcpy::run_d2d_nocu(unsigned int numTests) {
         hipMemcpyAsync(Ad1, Ad2, totalSizes_[numTests], hipMemcpyDeviceToDeviceNoCU, nullptr));
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   auto all_end = std::chrono::steady_clock::now();
   std::chrono::duration<double, std::micro> diff = all_end - all_start;
 
   TestResult(numTests, diff, hipMemcpyDeviceToDeviceNoCU);
 
-  HIP_CHECK(hipFree(Ad1));
-  HIP_CHECK(hipFree(Ad2));
+  HIP_CHECK(hipFree(Ad1))
+  HIP_CHECK(hipFree(Ad2))
 
   return true;
 }
@@ -197,15 +197,15 @@ bool hipPerfMemcpy::run_d2d_nocu(unsigned int numTests) {
 
 HIP_TEST_CASE(Performance_hipPerfMemcpy_test) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   if (numDevices <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   } else {
     int deviceId = 0;
-    HIP_CHECK(hipSetDevice(deviceId));
+    HIP_CHECK(hipSetDevice(deviceId))
     hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+    HIP_CHECK(hipGetDeviceProperties(&props, deviceId))
 
     CONSOLE_PRINT("info: running on bus 0x%x %s with %d CUs and device id: %d\n", props.pciBusID,
                   props.name, props.multiProcessorCount, deviceId);

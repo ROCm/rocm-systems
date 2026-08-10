@@ -34,12 +34,12 @@
  */
 HIP_TEST_CASE(Unit_hipModuleLoad_MultProcess_MultGPU) {
   int deviceCount{0};
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   REQUIRE(deviceCount != 0);
   // Spawn 1 Process for each device
   for (int deviceNo = 0; deviceNo < deviceCount; deviceNo++) {
     // set the device id for the current process
-    HIP_CHECK(hipSetDevice(deviceNo));
+    HIP_CHECK(hipSetDevice(deviceNo))
     hip::SpawnProc proc("testhipModuleLoadUnloadFunc_exe", true);
     REQUIRE(proc.run("1") == true);
     REQUIRE(proc.run("2") == true);

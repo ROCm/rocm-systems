@@ -16,7 +16,7 @@ bool QueryTextureWidthOrSkip(size_t* max_width, const hipChannelFormatDesc* desc
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 }  // namespace
@@ -26,7 +26,7 @@ HIP_TEST_CASE(Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_Re
   CHECK_IMAGE_SUPPORT;
 
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   size_t max_width = 0;
   const auto desc = hipCreateChannelDesc<float>();
@@ -42,7 +42,7 @@ HIP_TEST_CASE(Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_Re
   CHECK_IMAGE_SUPPORT;
 
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   size_t max_width = 0;
   const auto desc = hipCreateChannelDesc<uint8_t>();
@@ -58,7 +58,7 @@ HIP_TEST_CASE(Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_Nu
   CHECK_IMAGE_SUPPORT;
 
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   const auto desc = hipCreateChannelDesc<float>();
   REQUIRE(hipDeviceGetTexture1DLinearMaxWidth(nullptr, &desc, device) != hipSuccess);
@@ -69,7 +69,7 @@ HIP_TEST_CASE(Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_Nu
   CHECK_IMAGE_SUPPORT;
 
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   size_t max_width = 0;
   REQUIRE(hipDeviceGetTexture1DLinearMaxWidth(&max_width, nullptr, device) != hipSuccess);
@@ -80,7 +80,7 @@ HIP_TEST_CASE(Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_Ze
   CHECK_IMAGE_SUPPORT;
 
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   size_t max_width = 0;
   hipChannelFormatDesc desc{};
@@ -92,7 +92,7 @@ HIP_TEST_CASE(Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_In
   CHECK_IMAGE_SUPPORT;
 
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
 
   size_t max_width = 0;
   const auto desc = hipCreateChannelDesc<float>();

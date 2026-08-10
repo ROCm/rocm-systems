@@ -139,10 +139,10 @@ HIP_TEST_CASE(Unit_Device___float2half_rd_SmallVals_Sanity_Positive) {
 
 
   for (int i = 0; i < 11; ++i) {
-    HIP_CHECK(hipMemcpy(input_dev.ptr(), input + i, sizeof(float), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(input_dev.ptr(), input + i, sizeof(float), hipMemcpyHostToDevice))
 
     __float2half_rd_kernel<<<1, 1>>>(out.ptr(), 1, input_dev.ptr());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(out.ptr()[0] == reference[i]);
   }
 }
@@ -171,10 +171,10 @@ HIP_TEST_CASE(Unit_Device___float2half_ru_SmallVals_Sanity_Positive) {
 
 
   for (int i = 0; i < 11; ++i) {
-    HIP_CHECK(hipMemcpy(input_dev.ptr(), input + i, sizeof(float), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(input_dev.ptr(), input + i, sizeof(float), hipMemcpyHostToDevice))
 
     __float2half_ru_kernel<<<1, 1>>>(out.ptr(), 1, input_dev.ptr());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(out.ptr()[0] == reference[i]);
   }
 }
@@ -201,10 +201,10 @@ HIP_TEST_CASE(Unit_Device___float2half_rz_SmallVals_Sanity_Positive) {
 
 
   for (int i = 0; i < 11; ++i) {
-    HIP_CHECK(hipMemcpy(input_dev.ptr(), input + i, sizeof(float), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(input_dev.ptr(), input + i, sizeof(float), hipMemcpyHostToDevice))
 
     __float2half_rz_kernel<<<1, 1>>>(out.ptr(), 1, input_dev.ptr());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(out.ptr()[0] == reference[i]);
   }
 }

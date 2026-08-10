@@ -22,9 +22,9 @@ static void runTest(hipTextureAddressMode addressMode, hipTextureFilterMode filt
   hipCtx_t HipContext;
   hipDevice_t HipDevice;
   int deviceID = 0;
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipDeviceGet(&HipDevice, deviceID));
-  HIP_CHECK(hipCtxCreate(&HipContext, 0, HipDevice));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipDeviceGet(&HipDevice, deviceID))
+  HIP_CHECK(hipCtxCreate(&HipContext, 0, HipDevice))
 
   // Allocating the required buffer on gpu device
   float *texBuf, *texBufOut;
@@ -35,10 +35,10 @@ static void runTest(hipTextureAddressMode addressMode, hipTextureFilterMode filt
     output[i] = 0.0;
   }
 
-  HIP_CHECK(hipMalloc(&texBuf, N * sizeof(float)));
-  HIP_CHECK(hipMalloc(&texBufOut, N * sizeof(float)));
-  HIP_CHECK(hipMemcpy(texBuf, val, N * sizeof(float), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemset(texBufOut, 0, N * sizeof(float)));
+  HIP_CHECK(hipMalloc(&texBuf, N * sizeof(float)))
+  HIP_CHECK(hipMalloc(&texBufOut, N * sizeof(float)))
+  HIP_CHECK(hipMemcpy(texBuf, val, N * sizeof(float), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemset(texBufOut, 0, N * sizeof(float)))
   hipResourceDesc resDescLinear;
 
   memset(&resDescLinear, 0, sizeof(resDescLinear));
@@ -57,16 +57,16 @@ static void runTest(hipTextureAddressMode addressMode, hipTextureFilterMode filt
 
   // Creating texture object
   hipTextureObject_t texObj = 0;
-  HIP_CHECK(hipCreateTextureObject(&texObj, &resDescLinear, &texDesc, NULL));
+  HIP_CHECK(hipCreateTextureObject(&texObj, &resDescLinear, &texDesc, NULL))
 
   dim3 dimBlock(1, 1, 1);
   dim3 dimGrid(N, 1, 1);
 
   hipLaunchKernelGGL(tex1dKernel, dim3(dimGrid), dim3(dimBlock), 0, 0, texBufOut, texObj);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipMemcpy(output, texBufOut, N * sizeof(float), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(output, texBufOut, N * sizeof(float), hipMemcpyDeviceToHost))
 
   for (int i = 0; i < (N - offset); i++) {
     if (output[i] != val[i + offset]) {
@@ -83,10 +83,10 @@ static void runTest(hipTextureAddressMode addressMode, hipTextureFilterMode filt
     }
   }
 
-  HIP_CHECK(hipDestroyTextureObject(texObj));
-  HIP_CHECK(hipFree(texBuf));
-  HIP_CHECK(hipFree(texBufOut));
-  HIP_CHECK(hipCtxDestroy(HipContext));
+  HIP_CHECK(hipDestroyTextureObject(texObj))
+  HIP_CHECK(hipFree(texBuf))
+  HIP_CHECK(hipFree(texBufOut))
+  HIP_CHECK(hipCtxDestroy(HipContext))
 }
 
 

@@ -97,8 +97,8 @@ template <typename T> void Memcpy3D<T>::AllocateMemory() {
  * DeAllocates the Memory of device and host variables
  */
 template <typename T> void Memcpy3D<T>::DeAllocateMemory() {
-  HIP_CHECK(hipFreeArray(arr));
-  HIP_CHECK(hipFreeArray(arr1));
+  HIP_CHECK(hipFreeArray(arr))
+  HIP_CHECK(hipFreeArray(arr1))
   free(hData);
 }
 
@@ -117,13 +117,13 @@ template <typename T> void Memcpy3D<T>::DeAllocateMemory() {
  * Validating the result by comparing "hData" and "hOutputData" variables
  */
 template <typename T> void Memcpy3D<T>::D2H_H2D_DeviceMem_OnDiffDevice() {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   int peerAccess = 0;
-  HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 1, 0));
+  HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 1, 0))
   if (peerAccess) {
     AllocateMemory();
     // Memory is allocated on device 0 and Memcpy3DAsync triggered from device 1
-    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipSetDevice(1))
 
     // H2D Scenario
     memset(&myparms, 0x0, sizeof(hipMemcpy3DParms));
@@ -136,7 +136,7 @@ template <typename T> void Memcpy3D<T>::D2H_H2D_DeviceMem_OnDiffDevice() {
     myparms.kind = hipMemcpyHostToDevice;
 #endif
     REQUIRE(hipMemcpy3D(&myparms) == hipSuccess);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     // Device to host
     memset(&myparms, 0x0, sizeof(hipMemcpy3DParms));
@@ -151,7 +151,7 @@ template <typename T> void Memcpy3D<T>::D2H_H2D_DeviceMem_OnDiffDevice() {
     myparms.kind = hipMemcpyDeviceToHost;
 #endif
     REQUIRE(hipMemcpy3D(&myparms) == hipSuccess);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     // Validating the result
     HipTest::checkArray(hData, hOutputData, width, height, depth);
@@ -177,9 +177,9 @@ template <typename T> void Memcpy3D<T>::D2H_H2D_DeviceMem_OnDiffDevice() {
  * Validating the result by comparing "hData" and "hOutputData" variables
  */
 template <typename T> void Memcpy3D<T>::D2D_DeviceMem_OnDiffDevice() {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   int peerAccess = 0;
-  HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
+  HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1))
   if (peerAccess) {
     AllocateMemory();
     memset(&myparms, 0x0, sizeof(hipMemcpy3DParms));
@@ -200,7 +200,7 @@ template <typename T> void Memcpy3D<T>::D2D_DeviceMem_OnDiffDevice() {
                                hipArrayDefault));
 
     // Allocating Mem on GPU device 0 and trigger hipMemcpy3D from GPU 1
-    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipSetDevice(1))
 
     // D2D Scenario
     memset(&myparms, 0x0, sizeof(hipMemcpy3DParms));
@@ -213,7 +213,7 @@ template <typename T> void Memcpy3D<T>::D2D_DeviceMem_OnDiffDevice() {
     myparms.kind = hipMemcpyDeviceToDevice;
 #endif
     REQUIRE(hipMemcpy3D(&myparms) == hipSuccess);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     // For validating the D2D copy copying it again to hOutputData and
     // verifying it with iniital data hData
@@ -231,7 +231,7 @@ template <typename T> void Memcpy3D<T>::D2D_DeviceMem_OnDiffDevice() {
     myparms.kind = hipMemcpyDeviceToHost;
 #endif
     REQUIRE(hipMemcpy3D(&myparms) == hipSuccess);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     HipTest::checkArray(hData, hOutputData, width, height, depth);
 
     // DeAllocating Memory
@@ -245,7 +245,7 @@ template <typename T> void Memcpy3D<T>::D2D_DeviceMem_OnDiffDevice() {
  * This API verifies all the negative scenarios of hipMemcpy3D API
  */
 template <typename T> void Memcpy3D<T>::NegativeTests() {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   AllocateMemory();
 
   // Initialization of data
@@ -388,7 +388,7 @@ template <typename T> void Memcpy3D<T>::NegativeTests() {
     // Passing src array size greater than destination array size
     hipArray_t arr2;
     hipChannelFormatDesc channelDesc1 = hipCreateChannelDesc(sizeof(T) * 8, 0, 0, 0, formatKind);
-    HIP_CHECK(hipMalloc3DArray(&arr2, &channelDesc1, make_hipExtent(3, 3, 3), hipArrayDefault));
+    HIP_CHECK(hipMalloc3DArray(&arr2, &channelDesc1, make_hipExtent(3, 3, 3), hipArrayDefault))
     myparms.srcArray = arr;
     myparms.dstArray = arr2;
 #ifdef __HIP_PLATFORM_NVIDIA__
@@ -407,7 +407,7 @@ template <typename T> void Memcpy3D<T>::NegativeTests() {
  * This API verifies the Extent validation Scenarios
  */
 template <typename T> void Memcpy3D<T>::Extent_Validation() {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   AllocateMemory();
   memset(&myparms, 0x0, sizeof(hipMemcpy3DParms));
   myparms.srcPos = make_hipPos(0, 0, 0);
@@ -452,7 +452,7 @@ template <typename T> void Memcpy3D<T>::Extent_Validation() {
  */
 
 template <typename T> void Memcpy3D<T>::simple_Memcpy3D() {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   AllocateMemory();
 
   // Host to Device
@@ -517,7 +517,7 @@ template <typename T> void Memcpy3D<T>::simple_Memcpy3D() {
 HIP_TEST_CASE(Unit_hipMemcpy3D_multiDevice_Negative) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices > 1) {
     Memcpy3D<int> memcpy3d(width, height, depth, hipChannelFormatKindSigned);
     memcpy3d.NegativeTests();

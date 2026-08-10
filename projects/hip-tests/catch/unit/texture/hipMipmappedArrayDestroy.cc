@@ -47,9 +47,9 @@ HIP_TEST_CASE(Unit_hipMipmappedArrayDestroy_Negative_Parameters) {
 
     unsigned int levels = 1 + std::log2(desc.Depth);
 
-    HIP_CHECK(hipMipmappedArrayCreate(&array, &desc, levels));
+    HIP_CHECK(hipMipmappedArrayCreate(&array, &desc, levels))
 
-    HIP_CHECK(hipMipmappedArrayDestroy(array));
+    HIP_CHECK(hipMipmappedArrayDestroy(array))
     HIP_CHECK_ERROR(hipMipmappedArrayDestroy(array), hipErrorContextIsDestroyed);
   }
 }
