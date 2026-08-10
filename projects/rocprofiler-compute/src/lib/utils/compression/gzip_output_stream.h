@@ -32,8 +32,9 @@ public:
     bool is_open() const;
 
 private:
-    gzFile_s* m_file   = nullptr;
-    bool      m_failed = false;
+    std::string m_path;
+    gzFile_s*   m_file   = nullptr;
+    bool        m_failed = false;
 };
 
 }  // namespace rocprofiler_compute_tool::compression

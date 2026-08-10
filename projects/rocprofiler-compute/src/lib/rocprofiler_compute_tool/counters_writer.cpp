@@ -4,9 +4,11 @@
 
 #include "compression/gzip_output_stream.h"
 
+#include <filesystem>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <system_error>
 
 namespace rocprofiler_compute_tool
 {
@@ -57,9 +59,10 @@ void CsvCountersWriter::write_counters(tool_data_t* tool_data)
                                            [&stream](std::string_view text)
                                            { return stream.write(text); });
 
-    // close() emits the gzip trailer; failure there corrupts the file.
     if (!stream.close() || !wrote)
     {
+        std::error_code ec;
+        std::filesystem::remove(tool_data->output_filename, ec);
         std::cerr << "Failed to write output file: " << tool_data->output_filename << std::endl;
         return;
     }

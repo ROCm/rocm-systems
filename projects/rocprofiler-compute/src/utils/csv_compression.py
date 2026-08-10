@@ -3,6 +3,8 @@
 
 """CSV compression boundary for profile and analyze."""
 
+from __future__ import annotations
+
 import gzip
 import zlib
 from pathlib import Path
@@ -13,8 +15,7 @@ GZIP_SUFFIX = ".gz"
 # Level 1 for write-once counter CSVs; matches kCompressionLevel in C++.
 GZIP_LEVEL = 1
 
-# Shared by analyze readers for truncated or corrupt gzip artifacts.
-CORRUPT_CSV_ERRORS = (OSError, EOFError, zlib.error)
+CORRUPT_CSV_ERRORS = (gzip.BadGzipFile, EOFError, zlib.error)
 
 _GZIP_MAGIC = b"\x1f\x8b"
 
@@ -38,7 +39,7 @@ def is_compressed(path: PathLike) -> bool:
 
 def open_csv_read(path: PathLike) -> IO[str]:
     """Open a CSV for reading, compressed or not."""
-    if str(path).endswith(GZIP_SUFFIX):
+    if is_compressed(path):
         return gzip.open(path, "rt", newline="", encoding="utf-8")
     return open(path, newline="", encoding="utf-8")
 

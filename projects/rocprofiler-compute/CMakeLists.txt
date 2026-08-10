@@ -1393,8 +1393,8 @@ set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 
 # Dependencies
 set(PACKAGE_REQUIRES "rocprofiler" CACHE STRING "Package dependencies")
-set(CPACK_RPM_PACKAGE_REQUIRES ${PACKAGE_REQUIRES})
-set(CPACK_DEBIAN_PACKAGE_DEPENDS ${PACKAGE_REQUIRES})
+set(CPACK_RPM_PACKAGE_REQUIRES "${PACKAGE_REQUIRES}, zlib")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "${PACKAGE_REQUIRES}, zlib1g")
 
 # Handle the project rebranding from omniperf to rocprofiler-compute
 set(OMNIPERF_PACKAGE_NAME "omniperf")

@@ -5,6 +5,7 @@
 #include <zlib.h>
 
 #include <algorithm>
+#include <iostream>
 #include <limits>
 #include <string>
 
@@ -17,25 +18,26 @@ constexpr std::size_t kMaxChunk = std::numeric_limits<int>::max();
 }  // namespace
 
 GzipFileOutputStream::GzipFileOutputStream(const std::string& path, int level)
+    : m_path{path}
 {
-    const auto mode = "wb" + std::to_string(level);
+    const auto mode = "wb" + std::to_string(std::clamp(level, 0, 9));
     m_file          = gzopen(path.c_str(), mode.c_str());
     m_failed        = m_file == nullptr;
 }
 
 GzipFileOutputStream::~GzipFileOutputStream()
 {
-    close();
+    if (m_file && !close())
+        std::cerr << "Failed to close gzip stream: " << m_path << std::endl;
 }
 
 bool GzipFileOutputStream::write(std::string_view data)
 {
     if (m_failed || !m_file)
     {
-        m_failed = true;  // write after close must leave ok() false
+        m_failed = true;
         return false;
     }
-    // gzwrite returns 0 for empty input, same as on error.
     if (data.empty())
         return true;
 
@@ -59,7 +61,6 @@ bool GzipFileOutputStream::close()
 {
     if (m_file)
     {
-        // gzclose emits the trailer; failure here corrupts the file.
         if (gzclose(m_file) != Z_OK)
             m_failed = true;
         m_file = nullptr;

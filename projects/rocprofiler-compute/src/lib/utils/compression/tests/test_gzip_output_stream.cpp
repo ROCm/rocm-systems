@@ -102,6 +102,20 @@ TEST_F(TestGzipOutputStream, ManyWrites_RoundTripAsOneStream)
     EXPECT_EQ(gunzip(raw_bytes()), expected);
 }
 
+TEST_F(TestGzipOutputStream, OutOfRangeLevel_StillCompresses)
+{
+    const std::string data(64 * 1024, 'x');
+    {
+        GzipFileOutputStream stream(m_path.string(), 10);
+        ASSERT_TRUE(stream.write(data));
+        ASSERT_TRUE(stream.close());
+    }
+
+    const auto compressed = raw_bytes();
+    EXPECT_EQ(gunzip(compressed), data);
+    EXPECT_LT(compressed.size(), data.size());
+}
+
 TEST_F(TestGzipOutputStream, IncompressibleDataLargerThanTheInternalBuffer_RoundTrips)
 {
     // Incompressible input forces deflate to spill its output buffer repeatedly.

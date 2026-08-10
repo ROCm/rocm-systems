@@ -44,11 +44,8 @@ def test_concat_result_csvs_concatenates_rocpd_results(tmp_path, monkeypatch) ->
     assert sorted(merged["Counter_Value"].tolist()) == [10, 20, 30]
 
 
-def test_concat_result_csvs_skips_empty_and_errors_when_all_empty(
-    tmp_path, monkeypatch
-) -> None:
-    """Empty results files are skipped; all-empty workload errors out."""
-    mocks = common.patch_console(monkeypatch, MODULE, "debug", "warning")
+def test_concat_result_csvs_errors_when_all_empty(tmp_path, monkeypatch) -> None:
+    common.patch_console(monkeypatch, MODULE, "debug", "warning")
     (tmp_path / "results_pmc_perf_0.csv").write_text("")
     (tmp_path / "results_pmc_perf_1.csv").write_text("")
 
@@ -59,12 +56,24 @@ def test_concat_result_csvs_skips_empty_and_errors_when_all_empty(
         )
 
     assert not (tmp_path / "pmc_perf.csv").exists()
-    skipped = [
-        call.args[0]
-        for call in mocks["warning"].call_args_list
-        if "Skipping empty" in str(call.args[0])
-    ]
-    assert len(skipped) == 2
+
+
+def test_concat_result_csvs_errors_on_zero_byte_compressed_pass(
+    tmp_path, monkeypatch
+) -> None:
+    common.patch_console(monkeypatch, MODULE, "debug", "warning")
+    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
+    with gzip.open(tmp_path / "results_pmc_perf_0.csv.gz", "wt") as f:
+        f.write(header + "0,kernel_a,SQ_WAVES,10\n")
+    (tmp_path / "results_pmc_perf_1.csv.gz").write_bytes(b"")
+
+    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
+    with pytest.raises(SystemExit):
+        inst.concat_result_csvs(
+            find_csvs(tmp_path, "results_*.csv"), tmp_path / "pmc_perf.csv"
+        )
+
+    assert not (tmp_path / "pmc_perf.csv").exists()
 
 
 def test_concat_result_csvs_reads_compressed_results(tmp_path, monkeypatch) -> None:

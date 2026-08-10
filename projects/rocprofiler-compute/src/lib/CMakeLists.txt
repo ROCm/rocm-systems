@@ -25,8 +25,7 @@ find_package(rocprofiler-sdk REQUIRED CONFIG)
 find_package(amd_comgr REQUIRED CONFIG)
 
 # pkg-config zlib: find_package(ZLIB) can pick up ROCm headers without libz.
-# libz.so.1 is already loaded via libdw; this adds a build dep only.
-pkg_check_modules(zlib REQUIRED IMPORTED_TARGET zlib)
+pkg_check_modules(zlib REQUIRED IMPORTED_TARGET zlib>=1.2.7)
 if(NOT TARGET ZLIB::ZLIB)
     add_library(ZLIB::ZLIB ALIAS PkgConfig::zlib)
 endif()
