@@ -185,10 +185,10 @@ serialize_gpu_metrics(const gpu_metrics_t&              metrics,
     serialize_uint8(result, xgmi_write_count);
 
     // Serialize per-XCP sizes
-    for(std::uint8_t const size : vcn_xcp_sizes)
+    for(const std::uint8_t size : vcn_xcp_sizes)
         serialize_uint8(result, size);
 
-    for(std::uint8_t const size : jpeg_xcp_sizes)
+    for(const std::uint8_t size : jpeg_xcp_sizes)
         serialize_uint8(result, size);
 
     // Serialize the flattened data
@@ -259,7 +259,7 @@ deserialize_gpu_metrics(const std::vector<std::uint8_t>& serialized_data,
         {
             // Per-XCP: split flat data according to XCP sizes into vcn_busy
             size_t flat_offset = 0;
-            for(std::uint8_t const xcp_size : vcn_xcp_sizes)
+            for(const std::uint8_t xcp_size : vcn_xcp_sizes)
             {
                 const std::vector<std::uint16_t> xcp_data(flat_data.begin() + flat_offset,
                                                           flat_data.begin() +
@@ -282,7 +282,7 @@ deserialize_gpu_metrics(const std::vector<std::uint8_t>& serialized_data,
         {
             // Per-XCP: split flat data according to XCP sizes into jpeg_busy
             size_t flat_offset = 0;
-            for(std::uint8_t const xcp_size : jpeg_xcp_sizes)
+            for(const std::uint8_t xcp_size : jpeg_xcp_sizes)
             {
                 const std::vector<std::uint16_t> xcp_data(flat_data.begin() + flat_offset,
                                                           flat_data.begin() +

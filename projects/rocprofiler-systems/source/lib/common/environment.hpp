@@ -539,7 +539,7 @@ discover_torch_libpath(const std::string& python_binary)
     const auto is_safe_executable_path = [](const std::string& path) {
         // Allow only a conservative set of characters in the executable path to
         // avoid injection when used in a shell command.
-        for(unsigned char const c : path)
+        for(const unsigned char c : path)
         {
             if(std::isalnum(c) != 0) continue;
             switch(c)

@@ -578,7 +578,7 @@ module_function::is_routine_constrained() const
     static const strset_t whole = []() {
         auto _v   = get_whole_function_names();
         auto _ret = _v;
-        for(std::string const _ext : { "64", "_l", "_r" })
+        for(const std::string _ext : { "64", "_l", "_r" })
             for(const auto& itr : _v)
                 _ret.emplace(itr + _ext);
         return _ret;

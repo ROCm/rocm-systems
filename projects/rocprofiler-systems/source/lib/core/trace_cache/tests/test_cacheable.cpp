@@ -49,21 +49,21 @@ TEST_F(cacheable_test, store_value_double)
 
 TEST_F(cacheable_test, store_value_unsigned_long)
 {
-    unsigned long const value = 123456789UL;
+    const unsigned long value = 123456789UL;
     rocprofsys::trace_cache::utility::store_value(value, buffer.data(), position);
 
     EXPECT_EQ(position, sizeof(unsigned long));
-    unsigned long const stored_value = *reinterpret_cast<unsigned long*>(buffer.data());
+    const unsigned long stored_value = *reinterpret_cast<unsigned long*>(buffer.data());
     EXPECT_EQ(stored_value, 123456789UL);
 }
 
 TEST_F(cacheable_test, store_value_unsigned_char)
 {
-    unsigned char const value = 255;
+    const unsigned char value = 255;
     rocprofsys::trace_cache::utility::store_value(value, buffer.data(), position);
 
     EXPECT_EQ(position, sizeof(unsigned char));
-    unsigned char const stored_value = *reinterpret_cast<unsigned char*>(buffer.data());
+    const unsigned char stored_value = *reinterpret_cast<unsigned char*>(buffer.data());
     EXPECT_EQ(stored_value, 255);
 }
 
@@ -180,7 +180,7 @@ TEST_F(cacheable_test, parse_value_double)
 
 TEST_F(cacheable_test, parse_value_unsigned_long)
 {
-    unsigned long const original_value = 0xDEADBEEF;
+    const unsigned long original_value = 0xDEADBEEF;
     rocprofsys::trace_cache::utility::store_value(original_value, buffer.data(),
                                                   position);
 
@@ -538,7 +538,7 @@ TEST_F(cacheable_test, parse_multiple_values)
     const int           int_val    = 42;
     const double        double_val = 3.14;
     auto                str_val    = "multi"sv;
-    unsigned char const uchar_val  = 128;
+    const unsigned char uchar_val  = 128;
 
     rocprofsys::trace_cache::utility::store_value(int_val, buffer.data(), position);
     rocprofsys::trace_cache::utility::store_value(double_val, buffer.data(), position);

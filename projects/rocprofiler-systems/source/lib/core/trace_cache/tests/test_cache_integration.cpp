@@ -612,7 +612,7 @@ TEST_F(trace_cache_module_integration_test, concurrent_write_read_validation)
     }
 
     int total_written = 0;
-    for(int const counter : thread_counters)
+    for(const int counter : thread_counters)
     {
         EXPECT_EQ(counter, samples_per_thread);
         total_written += counter;

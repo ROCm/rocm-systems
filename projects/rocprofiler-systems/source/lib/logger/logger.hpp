@@ -39,7 +39,7 @@ to_lower(std::string_view s)
 {
     std::string result;
     result.reserve(s.size());
-    for(char const c : s)
+    for(const char c : s)
     {
         result += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
