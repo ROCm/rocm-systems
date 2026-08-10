@@ -122,6 +122,20 @@ fi
 
 # --- Assert the debug markers ----------------------------------------------
 fail=0
+
+# Scenarios whose inferior faults on purpose (SIGILL, SIGSEGV) are not held to
+# `exit 0` the way the clean scenarios above are -- rocgdb's batch status for a
+# run that ends on a fatal GPU signal is not something this harness pins down.
+# What must never pass silently is the run being cut short: `timeout` kills with
+# 124, and a signalled child reports 128+signo. Either means the expected output
+# markers below were matched against a truncated log.
+check_not_killed() { # <status> <scenario description>
+  if [[ $1 -eq 124 || $1 -ge 128 ]]; then
+    echo "FAIL: $2 rocgdb run was killed (status $1)" >&2
+    fail=1
+  fi
+}
+
 check() { # <regex> <description>
   if grep -qaE "$1" <<<"$out"; then
     echo "  ok: $2"
@@ -269,6 +283,7 @@ timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -
     -ex 'info registers pc' \
     "$app" </dev/null >"$outfile4" 2>&1
 status4=$?
+check_not_killed "$status4" "illegal-instruction"
 out4="$(cat "$outfile4")"
 echo "--------------------------------------------------------------------"
 echo "$out4"
@@ -304,6 +319,8 @@ if hipcc --offload-arch="$arch" -g -O0 -o "$badapp" "$here/bad_access.hip" 2>"$w
       -ex 'run' \
       -ex 'continue' \
       "$badapp" </dev/null >"$outfile5" 2>&1
+  status5=$?
+  check_not_killed "$status5" "memory-violation"
   out5="$(cat "$outfile5")"
   echo "--------------------------------------------------------------------"
   echo "$out5"
@@ -345,6 +362,8 @@ timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -
     -ex 'info args' \
     -ex 'continue' \
     "$app" </dev/null >"$outfile6" 2>&1
+status6=$?
+check_not_killed "$status6" "private/scratch-read"
 out6="$(cat "$outfile6")"
 echo "--------------------------------------------------------------------"
 echo "$out6"
