@@ -325,7 +325,7 @@ class TestPlotMemChartGfx9:
             pytest.param(
                 "VGPR",
                 7201,
-                "RVGPRseq:  7201",
+                "VGPRs:  7201",
                 11,
                 slice(58, 78),
                 id="vgpr-allocation",

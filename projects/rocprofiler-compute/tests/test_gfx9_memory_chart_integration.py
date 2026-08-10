@@ -5,6 +5,7 @@
 
 import functools
 from pathlib import Path
+from typing import Optional
 
 import common
 import pytest
@@ -52,7 +53,7 @@ def expected_missing_metric_keys(architecture: str) -> frozenset[str]:
     return GFX9_ALWAYS_MISSING_METRIC_KEYS
 
 
-def normalized_panel_metrics(architecture: str) -> dict[str, int | None]:
+def normalized_panel_metrics(architecture: str) -> dict[str, Optional[int]]:
     panel_metric_keys = panel_yaml_metric_keys(architecture)
     return {
         metric_name: value if metric_name in panel_metric_keys else None
