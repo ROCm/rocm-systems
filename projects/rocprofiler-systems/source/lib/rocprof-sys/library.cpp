@@ -423,7 +423,7 @@ invoke_external_resume_callbacks()
 extern "C" void
 rocprofsys_external_register_pause_callbacks(void (*pause_fn)(), void (*resume_fn)())
 {
-    const ::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+    const std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
 
     if(pause_fn)
     {
