@@ -18,7 +18,6 @@ namespace rdna4 {
 class Vopd : public IsaInstruction<Isa> {
 public:
   explicit Vopd(const MachineInst *inst);
-  static bool is_vopd(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
 
 private:

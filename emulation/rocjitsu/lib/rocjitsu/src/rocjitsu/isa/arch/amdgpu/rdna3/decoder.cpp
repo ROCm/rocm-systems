@@ -14,8 +14,6 @@ namespace rocjitsu {
 namespace rdna3 {
 
 std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {
-  if (Vopd::is_vopd(opcode))
-    return std::make_unique<Vopd>(opcode);
   Sop1MachineInst op = std::bit_cast<decltype(op)>(*opcode);
   return primary_decode_table[op.encoding](opcode);
 }
@@ -23,6 +21,10 @@ std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {
 std::unique_ptr<Instruction> Decoder::decodeInvalid(const MachineInst *opcode) {
   throw util::InvalidInst(std::format("{:X}", *opcode));
   return nullptr;
+}
+
+std::unique_ptr<Instruction> Decoder::decodeVopd(const MachineInst *opcode) {
+  return std::make_unique<Vopd>(opcode);
 }
 
 std::unique_ptr<Instruction> Decoder::decodeVCndmaskB32Vop2(const MachineInst *opcode) {
@@ -5974,14 +5976,14 @@ const std::array<Decoder::DecodeFunc, 512> Decoder::primary_decode_table = {
     &Decoder::decodeInvalid,
     &Decoder::decodeInvalid,
     &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
+    &Decoder::decodeVopd,
+    &Decoder::decodeVopd,
+    &Decoder::decodeVopd,
+    &Decoder::decodeVopd,
+    &Decoder::decodeVopd,
+    &Decoder::decodeVopd,
+    &Decoder::decodeVopd,
+    &Decoder::decodeVopd,
     &Decoder::subDecodeVop3p,
     &Decoder::subDecodeVop3p,
     &Decoder::subDecodeVinterp,
