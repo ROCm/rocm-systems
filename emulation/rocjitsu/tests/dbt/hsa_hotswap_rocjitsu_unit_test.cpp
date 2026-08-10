@@ -7,6 +7,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "support/gfx1250_test_code_object.h"
 
@@ -569,10 +570,9 @@ TEST_F(HsaHotswapHookTest, TranslationFailureDoesNotLoadOrRetain) {
 TEST_F(HsaHotswapHookTest, RendersTranslatorDiagnosticsAndDumpsFailedSource) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   constexpr auto conversion =
-      rocjitsu::gfx1250::build_vop3(rocjitsu::gfx1250::kVCvtPkFp8F32Vop3,
-                                    {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2});
+      rocjitsu::gfx1250::build_sop1(rocjitsu::gfx1250::kSBarrierSignalIsfirstSop1, {.ssrc0 = 195});
   constexpr uint32_t kEndpgm = 0xBFB00000u;
-  const std::array<uint32_t, 3> text = {conversion[0], conversion[1], kEndpgm};
+  const std::array<uint32_t, 2> text = {conversion[0], kEndpgm};
   const auto source = rocjitsu::test_support::make_gfx1250_code_object(text);
   hsa_code_object_reader_t reader{};
   ASSERT_EQ(
@@ -591,11 +591,14 @@ TEST_F(HsaHotswapHookTest, RendersTranslatorDiagnosticsAndDumpsFailedSource) {
   EXPECT_EQ(g_load_agent_calls, 0);
   EXPECT_NE(log_text.find("[hsa-hotswap-rj] error: translation diagnostic "), std::string::npos)
       << log_text;
-  EXPECT_NE(log_text.find(" severity=error kind=translator-expand-missing "), std::string::npos)
+  EXPECT_NE(log_text.find(" severity=error kind=translator-expand-failed "), std::string::npos)
       << log_text;
-  EXPECT_NE(log_text.find(" guest_offset=.text+0x0 mnemonic=v_cvt_pk_fp8_f32 "), std::string::npos)
+  EXPECT_NE(log_text.find(" guest_offset=.text+0x0 mnemonic=s_barrier_signal_isfirst "),
+            std::string::npos)
       << log_text;
-  EXPECT_NE(log_text.find(" required=Add a semantic expansion rule for this mnemonic."),
+  EXPECT_NE(log_text.find(" message="), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find(" required=Use a different barrier id, or signal it without the first-"
+                          "signal form."),
             std::string::npos)
       << log_text;
   expect_failure_dump(log_text, source);
@@ -613,6 +616,21 @@ TEST_F(HsaHotswapHookTest, DiagnosticPrefixMatchesWarningSeverity) {
   EXPECT_NE(log_text.find(" severity=warning kind=translator-data-only "), std::string::npos)
       << log_text;
   EXPECT_EQ(log_text.find("[hsa-hotswap-rj] error:"), std::string::npos) << log_text;
+}
+
+TEST_F(HsaHotswapHookTest, RendersRequiredWorkDiagnostic) {
+  const rj_gfx1250_b0_to_a0_diagnostic_t diagnostic{
+      "error", "translator-expand-missing", 1, 8, "v_test", "required step", 1,
+  };
+  testing::internal::CaptureStderr();
+  rj_test_log_translation_diagnostic(0x1234, &diagnostic);
+  const std::string log_text = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log_text.find(" severity=error kind=translator-expand-missing "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" guest_offset=.text+0x8 mnemonic=v_test "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" required=required step"), std::string::npos) << log_text;
+  EXPECT_EQ(log_text.find(" message="), std::string::npos) << log_text;
 }
 
 // The translated backing storage retained for an A0 load must SURVIVE OnUnload()

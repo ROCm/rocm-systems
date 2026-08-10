@@ -2,9 +2,9 @@
 
 ## Overview
 
-The Dynamic Binary Instrumentation (DBI) system patches AMDGPU HSA code objects in-place, before they are loaded into device memory, to inject code at chosen anchor instructions. Patched code objects can be loaded by either the simulated KMD (`SimulatedDriver`) or — eventually — by real ROCR via the HSA tools layer (`HSA_TOOLS_LIB=librocjitsu_hooks.so`). DBI itself is target-agnostic at the layer boundary; per-ISA differences are confined to the instruction builder and decoder.
+The Dynamic Binary Instrumentation (DBI) system patches AMDGPU HSA code objects in-place, before they are loaded into device memory, to inject code at chosen anchor instructions. Patched code objects can be loaded by either the simulated KMD (`SimulatedDriver`) or — eventually — by real ROCR via the HSA tools layer (`HSA_TOOLS_LIB=librocjitsu_hooks.so`). DBI itself is target-agnostic at the layer boundary; most per-ISA differences are confined to the instruction/spill builders and decoder, but a few arch predicates (`max_scratch_offset_bytes`, `descriptor_vgpr_granularity_for_wavefront`, `arch_has_accvgpr`, `arch_has_unified_vgpr_allocation`) live in the orchestrator.
 
-This document describes the DBI subsystem as currently implemented. Two end-to-end trampoline shapes are in tree: the original *inline-nop* trampoline, and a *probe call* that invokes a copied no-op probe body (`rj_nop_probe`) via `s_swappc_b64` before the relocated original. Multiple instrumentation points per code object are supported. Still future work: per-site failure tolerance, predicate-based anchor selection, EXEC-policy management, `AfterInst` / `BlockEntry` / `BlockExit` kinds, layout/negotiation between the builder and the orchestrator, register **spilling** (non-empty spill sets currently fail closed), and **automatic SGPR-count growth** so the probe's link pair is always granted (see [Probe-call register requirement](#instrumentation-flow-probe-call)).
+This document describes the DBI subsystem as currently implemented. Two end-to-end trampoline shapes are in tree: the original *inline-nop* trampoline, and a *probe call* that invokes a copied no-op probe body (`rj_nop_probe`) via `s_swappc_b64` before the relocated original. Multiple instrumentation points per code object are supported. **Register spilling is implemented**: registers that are both live at the anchor and clobbered by instrumentation are saved to a reserved per-lane scratch "DBI spill zone" before the probe call and restored after — VGPRs directly, SGPRs through a bridge VGPR (`v_writelane`/`v_readlane`), and AccVGPRs directly via the CDNA scratch `acc` bit. EXEC/VCC/M0 that a probe clobbers are preserved in dead SGPRs, and EXEC is forced to `-1` (full mask) around the spill store/load so all lanes round-trip. End-to-end scope is **CDNA3, CDNA4, and RDNA4** (sim-validated); RDNA2/3/3.5 and CDNA1/2 are deferred. Still future work: per-site failure tolerance, predicate-based anchor selection, `AfterInst` / `BlockEntry` / `BlockExit` kinds, layout/negotiation between the builder and the orchestrator, **automatic SGPR-count growth** so the probe's link pair is always granted (see [Probe-call register requirement](#instrumentation-flow-probe-call)), enabling scratch from zero, HWREG (MODE) preservation, and precise EXEC/VCC/M0 liveness (their clobbers are detected but their liveness is not tracked, so preservation is conservative — see [Register Liveness](#register-liveness-analysis-shared-with-dbt)).
 
 ---
 
@@ -76,11 +76,12 @@ InstrumentedCodeObject      -- patched ELF + diagnostics
 - `BeforeInst` kind only (other kinds are fatal).
 - `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
 - `filter_flags` and `force_full_exec` are still reserved milestone guardrails — non-default values are fatal until each gains a real consumer.
-- Probe calls require the probe's link pair (`s[30:31]` for `rj_nop_probe`) and any chosen scratch to be within the kernel's SGPR allocation, and an empty spill set. Non-empty spill sets fail closed; auto-growing the SGPR count is not yet implemented (see [Probe-call register requirement](#instrumentation-flow-probe-call)).
+- Probe calls require the probe's link pair (`s[30:31]` for `rj_nop_probe`) and any chosen scratch/special-state temps to be within the kernel's SGPR allocation (bounded by `kernel_sgpr_count`); auto-growing the SGPR count is not yet implemented (see [Probe-call register requirement](#instrumentation-flow-probe-call)).
+- Register spilling is enabled for `spill_set = live_at_anchor ∩ (probe_clobbers ∪ builder_clobbers)`. The orchestrator scans the kernel descriptor (`scan_kernel_descriptors`), builds one `SpillManager` from its `private_segment_fixed_size`, splits the spill set by class, and calls `plan_vgpr_spills` / `plan_sgpr_spills` / `plan_acc_spills`. Spilling is gated per-arch by `max_scratch_offset_bytes()` (returns 0 ⇒ arch has no scratch emitter ⇒ unsupported) and by those fail-closed helpers; there is no `SpillPolicy` enum. A kernel with zero scratch, more than one kernel, an over-offset-cap slot, a probe that clobbers FLAT_SCRATCH, or (for SGPR spills) no dead bridge VGPR within the kernel's VGPR allocation fails closed.
 
 ### Key design constraint
 
-The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPatcher do not. Milestone-scoped restrictions live at the orchestrator boundary: reserved-field rejections in `validate_anchor()`, the `validate_inline_nop_plan()` shape check on the inline-nop path, the spill-policy gate on the probe-call path, and the multi-text rejection at the top of `patch()`. The builder accepts any well-formed plan and the patcher accepts any well-formed mutation request.
+The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPatcher do not. Milestone-scoped restrictions live at the orchestrator boundary: reserved-field rejections in `validate_anchor()`, the `validate_inline_nop_plan()` shape check on the inline-nop path, the arch/scratch spill gating on the probe-call path (`max_scratch_offset_bytes` + the fail-closed `plan_*_spills` helpers, plus the single-kernel and nonzero-scratch checks), and the multi-text rejection at the top of `patch()`. The builder accepts any well-formed plan and the patcher accepts any well-formed mutation request.
 
 ---
 
@@ -88,7 +89,20 @@ The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPat
 
 **Files:** `code/patch/trampoline_builder.h`, `code/patch/trampoline_builder.cpp`
 
-Generic byte emitter. Takes a `TrampolinePlan` and returns `TrampolineBytes{patched_anchor_bytes, trampoline_words}`. Knows nothing about `InstrumentationPoint`s or milestones. It emits two body shapes: the inline-nop body, and the probe-call envelope (SCC save, `s_getpc_b64` + 64-bit add chain to materialize the copied probe body's address, `s_swappc_b64` to it, SCC restore) wrapped around the relocated original. `plan_probe_call()` selects the link/target SGPR pairs and SCC temp and reports `builder_clobbers`; `emit_probe_call()` lowers the chosen plan to bytes.
+Generic byte emitter. Takes a `TrampolinePlan` and returns `TrampolineBytes{patched_anchor_bytes, trampoline_words}`. Knows nothing about `InstrumentationPoint`s or milestones. It emits two body shapes: the inline-nop body, and the probe-call envelope wrapped around the relocated original. `plan_probe_call()` selects the link/target SGPR pairs, the SCC temp, and any special-state (EXEC/VCC/M0) and SGPR-bridge temps, and reports `builder_clobbers`; `emit_probe_call()` lowers the chosen plan to bytes.
+
+The probe-call envelope, in emit order, is: an in-flight-load drain; the special-state saves (`s_mov` EXEC/VCC into dead SGPR pairs, M0 into a dead SGPR) and SCC save; the **spill prologue** (see below); the `s_getpc_b64` + 64-bit add chain that materializes the copied probe body's address; `s_swappc_b64` to it; then after the call a `build_wait_all_loads_complete()` drain (so the probe's own in-flight loads finish before the restores and host resume), the SCC restore, the **spill epilogue**, and the special-state restores, before the relocated original.
+
+### Spill bracket
+
+`build_spill_bracket()` produces the prologue (saves) and epilogue (restores) that wrap the call:
+- **VGPRs** — a direct `build_scratch_store_dword` in the prologue, `build_scratch_load_dword` in the epilogue.
+- **AccVGPRs** — the same builders with `acc=true` (CDNA scratch `acc` bit), addressing the accumulator file directly; no bridge. CDNA-only.
+- **SGPRs** — bridged through one VGPR (`plan.spill_bridge_vgpr`): `v_writelane` then a scratch store in the prologue; a scratch load, load-wait, then `v_readlane` in the epilogue. The single bridge is reused, so each SGPR restore is its own load/wait/readlane.
+- **Waits/drains** — `build_wait_stores_complete` drains the stores before the call (a WAR guard on the source registers, and on RDNA4 orders each store ahead of its reload, since RDNA4 tracks stores on STORECNT which `s_wait_loadcnt` misses); `build_wait_loads_complete` guards the reloads. The in-flight-load drains that bracket the whole envelope are emitted by `emit_probe_call` (so they also cover no-spill sites), not by the bracket.
+- **EXEC full-mask** — when the site spills, `emit_probe_call` forces `EXEC = -1` around the spill store and load so lanes inactive at the anchor still round-trip, restoring the anchor mask before the `s_swappc` (so the probe runs under the real mask) and re-widening before the reloads.
+
+Per-arch specifics (scratch encodings, waitcnt split) live in `code/builders/spill_builders.h`; the bracket logic itself is arch-generic.
 
 ### What it handles
 
@@ -143,7 +157,7 @@ Defense-in-depth check that the orchestrator-produced `TrampolinePlan` matches t
 | `InstrumentationPoint` | request | `anchor_offset`, `kind`, `probe_obj`, `probe_symbol`, reserved fields |
 | `ResolvedInstrumentationSite` | post-validation | `anchor_offset`, `original_size`, `original_bytes`, `mnemonic`, `kind`, `probe_index` (set for probe calls) |
 | `ProbeCallable` | probe registry | resolved probe `symbol`, `arch`, calling convention, `body_words`, `output_text_offset` |
-| `TrampolinePlan` | builder input | `arch`, `anchor_offset`, `original_size`, `original_words`, `trampoline_offset`, `return_target`, `before_items`, `after_items`, `emit_original`; probe-call: `is_probe_call`, `probe_target_offset`, `link_pair_base`, `target_pair_base`, `scc_temp`, `preserve_scc`, `before_word_count`, `builder_clobbers` |
+| `TrampolinePlan` | builder input | `arch`, `anchor_offset`, `original_size`, `original_words`, `trampoline_offset`, `return_target`, `before_items`, `after_items`, `emit_original`, `kernel_sgpr_count`; probe-call: `is_probe_call`, `probe_target_offset`, `link_pair_base`, `target_pair_base`, `scc_temp`, `preserve_scc`, `preserve_exec`, `preserve_vcc`, `preserve_m0`, `special_state_saves`, `vgpr_spills`, `sgpr_spills`, `acc_spills`, `spill_bridge_vgpr`, `before_word_count`, `builder_clobbers` |
 | `TrampolineBytes` | builder output | `patched_anchor_bytes`, `trampoline_words` |
 | `InstrumentationPatch` | per-site summary (test/debug) | `anchor_offset`, `original_size`, `trampoline_offset`, `return_target`, `original_bytes`, `patched_anchor_bytes`; probe-call: `is_probe_call`, `probe_symbol`, `probe_target_offset`, `link_pair_base`, `target_pair_base` |
 | `InstrumentedCodeObject` | `patch()` output | `elf_bytes`, `errors`, `warnings` |
@@ -157,11 +171,24 @@ The intermediate site/plan types are expected to thicken as the framework grows 
 
 ### Code Object Patcher (`code/patch/code_object_patcher.h`) [shared with DBT]
 
-Owns ELF-level mutations. The DBI orchestrator reads the original payload via `text_bytes()`, assembles the new `.text` locally (each anchor spliced in place, then every trampoline appended after the original bytes with `append_words()`), and applies it with a single `replace_text()` before `emit()` returns the patched ELF buffer. The patcher accepts any well-formed mutation request; layout decisions stay in the orchestrator. Trampolines live inside `.text` as a local code cave (the same layout DBT uses) rather than a separate section, so cave offsets are plain `.text`-relative bytes in `[text_size, text_size + cave_bytes)`.
+Owns ELF-level mutations. The DBI orchestrator reads the original payload via `text_bytes()`, assembles the new `.text` locally (each anchor spliced in place, then every trampoline appended after the original bytes with `append_words()`), and applies it with a single `replace_text()` before `emit()` returns the patched ELF buffer. When a site spills, the orchestrator also calls `set_private_segment_fixed_size(descriptor_file_offset, SpillManager::total_private_bytes())` to grow the kernel's scratch reservation to cover the DBI spill zone before `replace_text`. The patcher accepts any well-formed mutation request; layout decisions stay in the orchestrator. Trampolines live inside `.text` as a local code cave (the same layout DBT uses) rather than a separate section, so cave offsets are plain `.text`-relative bytes in `[text_size, text_size + cave_bytes)`.
 
-### Instruction Builder (`code/patch/instruction_builder.h`) [shared with DBT]
+### Instruction Builder (`code/builders/instruction_builder.h`) [shared with DBT]
 
-ISA-parameterized helpers for encoding common instructions (`s_branch`, `s_nop`, etc.) and the SOPP branch math (`compute_sopp_branch_simm16`). Used by both the trampoline builder and the DBT code-cave path. SOPP format is identical across AMDGPU generations but opcodes differ; always go through these helpers, never hardcode opcodes.
+ISA-parameterized helpers for encoding common instructions (`s_branch`, `s_nop`, `s_mov_b32`/`s_mov_b64`, `s_cselect_b32`, `s_getpc_b64`, `s_swappc_b64`, etc.) and the SOPP branch math (`compute_sopp_branch_simm16`). Used by both the trampoline builder and the DBT code-cave path. SOPP format is identical across AMDGPU generations but opcodes differ; always go through these helpers, never hardcode opcodes. (Moved from `code/patch/` to `code/builders/` alongside `spill_builders.h`.)
+
+### Spill Builders (`code/builders/spill_builders.h`) [DBI-only]
+
+Multi-word, generation-specific encoders for the spill bracket, split out from the scalar helpers because their prefixes/opcodes move by ISA and they return variable-length word lists. Not shared with DBT (which emits scratch through its own target-specific path):
+- `build_scratch_store_dword` / `build_scratch_load_dword` — per-lane scratch store/load. CDNA3/CDNA4 use the gfx9 FLAT `seg=SCRATCH` encoding (2 words, 13-bit signed offset, `lds`=0); RDNA4 uses the dedicated VSCRATCH encoding (3 words, 24-bit offset, `sve`=0). Both take an `acc` flag that, on CDNA, sets the FLAT `acc` bit to address the AccVGPR file directly (RDNA throws — no acc file).
+- `build_v_writelane_b32` / `build_v_readlane_b32` — the SGPR↔VGPR lane bridge (VOP3; CDNA prefix `0x34`, RDNA `0x35`).
+- `build_wait_loads_complete` / `build_wait_stores_complete` — the async-access fences. CDNA uses a unified `s_waitcnt`; RDNA4 splits into `s_wait_loadcnt` (loads on LOADCNT) and `s_wait_storecnt` (stores on STORECNT). `build_wait_all_loads_complete` is the boundary drain used by `emit_probe_call`.
+
+An unmodeled arch throws `UnimplementedInst`. The hard arch gates on spilling are these five builders, `max_scratch_offset_bytes`, and — in the orchestrator — `arch_has_accvgpr` (AccVGPR spills require an AGPR file) and `arch_has_unified_vgpr_allocation` (which selects the descriptor's ACCUM_OFFSET split used to size the AccVGPR window).
+
+### Kernel Descriptor Scan (`code/kernel_descriptor_scan.h`) [shared with DBT]
+
+Enumerates a code object's kernel descriptors and derives per-kernel allocation facts. `scan_kernel_descriptors(image, text_offset, text_size)` returns each kernel's descriptor file offset, entry, and `private_segment_fixed_size`, with overflow-safe extent checks and a descriptor-bounded-by-owning-section guard (rejects malformed ELFs). `kernel_wavefront_size` and `descriptor_vgpr_granularity_for_wavefront` decode the wave-size-dependent VGPR encoding granule (shared with DBT so the two cannot diverge); the orchestrator multiplies `(GRANULATED_WORKITEM_VGPR_COUNT + 1)` by that granule to get the kernel's VGPR count. The orchestrator currently rejects anything but a single kernel.
 
 ### Register Liveness Analysis [shared with DBT]
 
@@ -176,15 +203,19 @@ Ordinary SGPRs, VGPRs, and AccVGPRs via `RegisterSet`. `InstDefUse` records expl
 
 #### What it does NOT track
 
-- EXEC, VCC, SCC, M0, FLAT_SCRATCH, TTMP — special architectural state. The `RegClass` enum names these for future use, but they are not in the dataflow set.
+- EXEC, VCC, SCC, M0, FLAT_SCRATCH, TTMP — special architectural state. The `RegClass` enum names these, but they are not in the backward-liveness dataflow set (`RegisterSet` is SGPR/VGPR/AccVGPR only). See the special-state note below for how they are still preserved.
 - Cross-kernel CFG. Edges that leave the kernel scope are silently dropped.
 - Memory dependencies. Liveness is purely register-based.
+
+#### Special state (EXEC / VCC / M0)
+
+EXEC, VCC, and M0 *writes* are surfaced by the decoder as special-state operands (e.g. `v_cmp` → VCC, `v_cmpx` → EXEC), so a probe's `ProbeClobberSummary.touches_{exec,vcc,m0}` are set and drive preservation. They are **not** part of the backward-liveness `RegisterSet` dataflow, so preservation is *save-when-clobbered*, not save-when-live. Because implicit-def detection is not proven comprehensive (a truly operand-less implicit def could be missed), EXEC and VCC are preserved **unconditionally** as a safety net; M0 is preserved only when a write is detected. This is why the trampoline can reserve EXEC/VCC/M0 temps even though liveness never reports them.
 
 ### SpillManager
 
 **Files:** `code/patch/spill_manager.h`, `code/patch/spill_manager.cpp`
 
-Per-kernel scratch-layout planner for DBI spill/fill slots. Probe-call trampolines will use it to reserve byte offsets within per-lane scratch where saved SGPRs / VGPRs / AccVGPRs go before a probe runs and from which they are restored after. Not consumed by the inline-nop pipeline.
+Per-kernel scratch-layout planner for DBI spill/fill slots. Probe-call trampolines use it to reserve byte offsets within per-lane scratch where saved SGPRs / VGPRs / AccVGPRs go before a probe runs and from which they are restored after; the orchestrator writes the bumped `total_private_bytes()` back into the descriptor (see [Code Object Patcher](#code-object-patcher-codepatchcode_object_patcherh-shared-with-dbt)). Not consumed by the inline-nop pipeline. Slots are laid out above the kernel's existing scratch via the shared `PrivateSegmentCursor` (an aligned, overflow-safe byte-range allocator, defined inline in `spill_manager.h`), so DBI slots can start above DBT's high-water mark when both passes run.
 
 #### Responsibilities
 
@@ -196,8 +227,7 @@ Per-kernel scratch-layout planner for DBI spill/fill slots. Probe-call trampolin
 #### What it is not
 
 - Not a memory allocator. SpillManager only computes layout.
-- Not the code generator. SpillManager hands out offsets; emitting the actual `scratch_store` / `scratch_load` (or equivalents) will be the trampoline builder's job.
-- Not an MFMA-clobber tracker. AccVGPR clobbering by long-latency MFMA is deferred.
+- Not the code generator. SpillManager hands out offsets; emitting the actual `scratch_store` / `scratch_load` (or the writelane/readlane bridge and `acc`-bit variants) is the trampoline builder's job (see [Spill Builders](#spill-builders-codebuildersspill_buildersh-dbi-only)).
 
 #### Public API
 
@@ -274,29 +304,46 @@ The trampoline envelope wraps the relocated original:
     s_waitcnt ...
     s_setpc_b64 s[30:31]    <-- returns through the link pair
   [trampoline]              @ trampoline_offset:
-    s_cselect_b32 <scc_temp>, 1, 0     <-- SCC save (preserve_scc)
+    <in-flight-load drain>              <-- s_wait_loadcnt / s_waitcnt; also emitted on no-spill sites
+    s_mov_b64    <exec_temp>, exec      <-- EXEC save (preserve_exec, or any spilling site)
+    s_mov_b64    <vcc_temp>,  vcc       <-- VCC save  (preserve_vcc)
+    s_mov_b32    <m0_temp>,   m0        <-- M0 save   (preserve_m0)
+    s_mov_b64    exec, -1               <-- widen to full mask for the stores (spilling site)
+    [spill prologue]                    <-- VGPR/acc direct stores; SGPR writelane + store; store wait
+    s_mov_b64    exec, <exec_temp>      <-- restore anchor mask so the probe runs masked (spilling site)
+    s_cselect_b32 <scc_temp>, 1, 0      <-- SCC save (preserve_scc)
     s_getpc_b64  s[target_pair]
     s_add_u32    s[target_lo], s[target_lo], (probe_target - pc)@lo
     s_addc_u32   s[target_hi], s[target_hi], (probe_target - pc)@hi
     s_swappc_b64 s[30:31], s[target_pair]   <-- call: PC=body, return->s[30:31]
+    <in-flight-load drain>              <-- guards restores/host against the probe's own loads
     s_cmp_lg_u32 <scc_temp>, 0          <-- SCC restore
+    s_mov_b64    exec, -1               <-- re-widen to full mask for the loads (spilling site)
+    [spill epilogue]                    <-- VGPR/acc direct loads; SGPR load + wait + readlane; load wait
+    s_mov_b64    exec, <exec_temp>      <-- EXEC restore
+    s_mov_b64    vcc,  <vcc_temp>       <-- VCC restore
+    s_mov_b32    m0,   <m0_temp>        <-- M0 restore
     <relocated original word(s)>
     s_branch <return>                   <-- back to anchor_offset + original_size
 ```
 
-The `s_getpc_b64` + 64-bit add chain is `.text`-relative, so the materialized target is load-base-independent; the `±simm16` branch range only constrains the forward/return `s_branch`es, not the call.
+Lines above are conditional: the EXEC/VCC/M0 saves and restores appear only when that register is preserved (EXEC also rides in whenever the site spills); the four `exec, -1` / `exec, <exec_temp>` toggles appear only on a spilling site; the `[spill prologue]` / `[spill epilogue]` are empty when `spill_set` is empty (leaving the plain SCC-bracketed call). See [TrampolineBuilder → Spill bracket](#spill-bracket) for the bracket contents. The `s_getpc_b64` + 64-bit add chain is `.text`-relative, so the materialized target is load-base-independent; the `±simm16` branch range only constrains the forward/return `s_branch`es, not the call.
 
 ### Register requirement
 
 The probe's calling convention fixes the **link pair** at `s[30:31]` (`AmdGpuFuncNoArgsReturnS30S31`): `s_swappc_b64` writes the return address there and the body's `s_setpc_b64 s[30:31]` reads it back. The planner additionally picks a dead, even-aligned **target pair** (holds the materialized address) and a dead **SCC temp** from the anchor's liveness. All of these must be *granted by the kernel's SGPR allocation*.
 
-The instrumentor does **not yet grow the kernel's SGPR count**, so the kernel must already allocate through `s31`. Until auto-growth lands, the hardware smoke test instruments a register-padded fixture kernel (`vector_add_probe.hip`, `.sgpr_count` ≥ 32). Resource policy also fails closed when the link pair is live at the anchor, when no dead target pair is available, or when the spill set is non-empty (`instrument_clobbers ∩ live_at_anchor`; spilling is deferred).
+The planner also reserves, from the same dead-SGPR pool bounded by `plan.kernel_sgpr_count`, a temp per preserved special register (an even pair for EXEC/VCC, a single for M0) and — for SGPR spills — a bridge VGPR from the kernel's ordinary-VGPR range (`min(kernel_vgpr_count, accum_base)`, so it can never alias an AccVGPR). EXEC is reserved whenever the site spills, not just when the probe clobbers it, because the store/load run under a forced full mask.
+
+The instrumentor does **not yet grow the kernel's SGPR count**, so the kernel must already allocate through `s31` (and through any special-state/bridge temps). Until auto-growth lands, the hardware smoke test instruments a register-padded fixture kernel (`vector_add_probe.hip`, `.sgpr_count` ≥ 32). Resource policy fails closed when the link pair is live at the anchor, when no dead target pair or required temp is available within the kernel's allocation, when the probe clobbers FLAT_SCRATCH (the spill store/load depend on it), when the kernel has zero scratch or is one of several kernels, when a spill offset exceeds the arch's scratch-offset field, (for SGPR spills) when no dead bridge VGPR exists in the ordinary-VGPR range, or (for AccVGPR spills) when the target has no AccVGPR file (`arch_has_accvgpr` is false) or an AccVGPR index falls outside the descriptor-derived accumulator window (`kernel_vgpr_count − accum_base`). The spill set itself is `instrument_clobbers ∩ live_at_anchor` and is spilled, not rejected.
 
 ---
 
 ## Testing
 
-- **Unit (`tests/patch/instrumentor_test.cpp`):** Validator coverage (each rejection path on synthetic anchors, including the bounds-overflow regression for `is_relocatable_anchor`), inline-nop plan guardrail, `make_trampoline_plan`, end-to-end `patch()` on a synthetic ELF (expected anchor splice + trampoline layout + reparse), a decoded round-trip of every word in the emitted trampoline, the probe-call path (probe body copied once and the trampoline call targets it), and the spill formula + no-spill policy.
+- **Unit (`tests/patch/instrumentor_test.cpp`):** Validator coverage (each rejection path on synthetic anchors, including the bounds-overflow regression for `is_relocatable_anchor`), inline-nop plan guardrail, `make_trampoline_plan`, end-to-end `patch()` on a synthetic ELF (expected anchor splice + trampoline layout + reparse), a decoded round-trip of every word in the emitted trampoline, the probe-call path (probe body copied once and the trampoline call targets it), the spill formula, per-class spill planning (`plan_vgpr/sgpr/acc_spills` — ascending slots, class/arch/offset-cap rejections, the kernel-VGPR-count bridge bound), the drain ordering (`expect_drain_before_store` / `expect_drain_after_return`), EXEC/VCC/M0 preservation (incl. unconditional EXEC/VCC), and the fail-closed cases (FLAT_SCRATCH clobber, zero-scratch, SGPR temp past the kernel allocation).
+- **Spill sim e2e (`tests/dbi/dbi_spill_sim_test.cpp`):** Runs the full `s_swappc` envelope + spill bracket through `DbiSim` and reads back registers after execution, each with a negative control that nops the restore. Fixtures cover VGPR, SGPR (VGPR-bridged), two-SGPR, reused-spilled-bridge, AccVGPR (CDNA), combined VGPR+SGPR+ACC, EXEC preserve (wave32 partial mask), full-mask EXEC-widen spill, and probe-runs-under-anchor-mask — parameterized across **CDNA3, CDNA4, and RDNA4** (AGPR is CDNA-only).
+- **Unit (`tests/code/kernel_descriptor_scan_test.cpp`):** Single-kernel scan, and the malformed-ELF rejections (unterminated `.kd` name, section-header-table / symtab-range overflow, descriptor crossing its owning section).
 - **Unit (`tests/patch/trampoline_builder_test.cpp`):** Builder byte-layout contract, branch math, arch-honoring opcode selection, INT16 limit boundary cases.
 - **Unit (`tests/patch/instruction_builder_test.cpp`):** `compute_sopp_branch_simm16` boundary / alignment / overflow / negative-unaligned-delta.
 - **Unit (`tests/patch/probe_symbol_test.cpp`, `probe_callable_test.cpp`, `probe_clobber_test.cpp`):** Probe symbol resolution (missing / duplicate / undefined / non-executable / zero-size rejection), `ProbeCallable` construction, and the `rj_nop_probe` clobber summary (empty ordinary clobbers, no special state).
