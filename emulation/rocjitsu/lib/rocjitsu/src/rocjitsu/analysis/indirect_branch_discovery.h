@@ -51,6 +51,11 @@ struct IndirectCallFixup {
   /// be replaced with a direct transfer window — an unconstrained path would be
   /// redirected to a concrete target it never dynamically reaches.
   bool source_incomplete = false;
+  /// @brief True when the recovery range contains an `s_wait_xcnt` the replacement
+  /// must reproduce. The canonical builder overwrites the whole range and writes
+  /// the same SGPR pair the drain was ordering, so dropping the wait would let the
+  /// pair be rewritten while an operation still has the old value in flight.
+  bool source_requires_xcnt_drain = false;
   uint16_t source_return_sreg = 0;           ///< Low SGPR receiving the return PC for calls.
   uint64_t target_getpc_offset = 0;          ///< Relocated offset of the s_getpc_b64 producer.
   uint64_t target_recovery_begin_offset = 0; ///< Relocated first byte of replaceable builder code.
@@ -92,6 +97,14 @@ struct PcAddressBuilder {
   /// erase an intervening instruction. A non-contiguous producer cannot back a
   /// whole-scope relocation invariant even though its final value is known.
   bool contiguous = true;
+  /// @brief True when two observations of this producer disagreed on its value.
+  ///
+  /// Distinct from a cleared @ref resolved, which also covers a producer this
+  /// pass simply never followed to a setpc. A poisoned producer is one no single
+  /// delta rewrite can satisfy, so a caller reasoning about whether every code
+  /// address is relocated must fail closed on it rather than defer to another
+  /// analysis that happened to track the same getpc.
+  bool poisoned = false;
 
   friend bool operator==(const PcAddressBuilder &, const PcAddressBuilder &) = default;
 };
@@ -127,6 +140,15 @@ struct PcAddressBuilder {
 ///        section actually contains a recoverable indirect consumer, because a
 ///        section with no dynamic transfer has no stale-PC branch hazard to
 ///        prove anything about.
+/// @brief Whether an AMDGPU physical VGPR is callee-saved by the ABI.
+///
+/// @details A callee-saved VGPR keeps its value across a call, so a value stashed
+/// there is still the caller's after the callee returns. @p phys_vgpr is the
+/// resolved physical index; gfx1250 VGPR_MSB banking can push it past 255, and the
+/// ABI table only covers v0-v255, so a banked register above that range is not
+/// proven callee-saved and reports false.
+[[nodiscard]] bool is_callee_saved_vgpr(uint16_t phys_vgpr);
+
 /// @returns Recovered indirect branch/call metadata.
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,

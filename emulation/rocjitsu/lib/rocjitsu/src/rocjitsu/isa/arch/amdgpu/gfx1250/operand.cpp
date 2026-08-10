@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include <format>
 #include <optional>
 #include <stdexcept>
@@ -87,10 +88,41 @@ Operand::Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, 
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
 
+Operand Operand::make_literal32(int size_bits, uint32_t literal_value, Literal32Widening widening) {
+  Operand operand(size_bits, OperandType::OPR_SIMM32, static_cast<int>(literal_value));
+  operand.literal32_widening_ = widening;
+  return operand;
+}
+
+uint64_t Operand::widened_literal32_value() const {
+  uint32_t literal_value = static_cast<uint32_t>(encoding_value_);
+  switch (*literal32_widening_) {
+  case Literal32Widening::ZeroExtend:
+    return literal_value;
+  case Literal32Widening::SignExtend:
+    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(literal_value)));
+  case Literal32Widening::Replicate32:
+    return (static_cast<uint64_t>(literal_value) << 32) | literal_value;
+  case Literal32Widening::F64HighBits:
+    return static_cast<uint64_t>(literal_value) << 32;
+  }
+  return literal_value;
+}
+
 std::optional<uint64_t> Operand::literal64_value() const {
   if (!has_literal64_)
     return std::nullopt;
   return literal64_value_;
+}
+
+std::optional<uint64_t> Operand::const_value() const {
+  if (has_literal64_)
+    return literal64_value_;
+  if (is_immediate_type(opr_type_))
+    return static_cast<uint64_t>(static_cast<uint32_t>(encoding_value_));
+  if (to_register_ref())
+    return std::nullopt;
+  return amdgpu::resolve_src_scalar_statically(encoding_value_);
 }
 
 std::string Operand::name() const {
@@ -874,6 +906,8 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
     break;
   }
   case OperandType::OPR_EXEC: {
+    if (encoding_value_ == OpSelExec::OPR_EXEC_EXEC)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
     break;
   }
   case OperandType::OPR_GPUMEM: {
@@ -888,9 +922,17 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     break;
   }
   case OperandType::OPR_SDST_EXEC: {
+    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     break;
   }
   case OperandType::OPR_SDST_M0: {
@@ -928,6 +970,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     if (encoding_value_ >= OpSelSrc::OPR_SRC_VGPR_MIN &&
         encoding_value_ <= OpSelSrc::OPR_SRC_VGPR_MAX)
       return RegisterRef{RegClass::VGPR,
@@ -942,6 +988,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSrcNoinline::OPR_SRC_NOINLINE_SGPR_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     if (encoding_value_ >= OpSelSrcNoinline::OPR_SRC_NOINLINE_VGPR_MIN &&
         encoding_value_ <= OpSelSrcNoinline::OPR_SRC_NOINLINE_VGPR_MAX)
       return RegisterRef{
@@ -957,6 +1007,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSrcSimple::OPR_SRC_SIMPLE_SGPR_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     if (encoding_value_ >= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN &&
         encoding_value_ <= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MAX)
       return RegisterRef{
@@ -1005,6 +1059,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     break;
   }
   case OperandType::OPR_SSRC_BARRIER_ID: {

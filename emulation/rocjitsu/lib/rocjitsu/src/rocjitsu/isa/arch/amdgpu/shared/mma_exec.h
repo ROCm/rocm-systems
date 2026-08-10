@@ -75,7 +75,11 @@ struct PackedOutputLoc {
 /// AccVGPR bank (acc_cd=1, gfx942 separate bank model).
 /// Encoding 0-255 = v[0-255] or acc[0-255] depending on acc_cd.
 /// Encoding 512-767 = acc[0-255] via OpSel (always AccVGPR bank).
+/// Encoding 768-1023 = acc[0-255] on CDNA1, which types MFMA/accvgpr destinations
+/// as OPR_ACCVGPR (OPR_ACCVGPR_ACC_MIN = 768) rather than the 512-based range.
 inline uint32_t dst_base(uint32_t vb, int ev, uint32_t acc_cd = 1) {
+  if (ev >= 768)
+    return vb + ACC_VGPR_OFFSET + static_cast<uint32_t>(ev - 768);
   if (ev >= 512)
     return vb + ACC_VGPR_OFFSET + static_cast<uint32_t>(ev - 512);
   if (acc_cd)
@@ -2515,17 +2519,32 @@ void exec_swmmac_packed16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t
   }
 }
 
+/// @brief Round a WMMA f32 accumulator to f16 under MODE.FP16_OVFL.
+///
+/// @details MI400 Shader Programming 4.6.12 gives WMMA and SWMMAC results of 16
+/// bits or fewer +/-MAX instead of +/-infinity when the mode bit is set, and the
+/// MODE table records that WMMA saturates INF on this generation while every
+/// other opcode preserves it. Ordinary conversions therefore keep using
+/// util::f32_to_f16_mode, which clamps finite overflow only. Architectures whose
+/// WMMA has no FP16_OVFL support pass false and keep the plain rounding.
+inline uint16_t wmma_round_f16(float val, bool fp16_ovfl) {
+  if (fp16_ovfl && std::isinf(val))
+    return std::signbit(val) ? uint16_t{0xFBFF} : uint16_t{0x7BFF};
+  return util::f32_to_f16_mode(val, fp16_ovfl);
+}
+
 template <typename ExtractA, typename ExtractB>
 void exec_wmma_f16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
                    uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
-                   uint32_t const_acc = ACC_FROM_VGPR, uint32_t wave_size = WMMA_WAVE32) {
+                   uint32_t const_acc = ACC_FROM_VGPR, uint32_t wave_size = WMMA_WAVE32,
+                   bool fp16_ovfl = false) {
   exec_wmma_packed16(
       cu, M, N, K, in_bits, dst, s0, s1, s2, ea, eb,
       [](auto &cu, uint32_t reg, uint32_t lane, uint32_t sub) {
         uint32_t raw = RegisterAccess(cu).read_vgpr(reg, lane);
         return util::f16_to_f32(static_cast<uint16_t>((raw >> (sub * 16)) & 0xFFFF));
       },
-      [](float val) { return util::f32_to_f16(val); }, const_acc, wave_size);
+      [fp16_ovfl](float val) { return wmma_round_f16(val, fp16_ovfl); }, const_acc, wave_size);
 }
 
 /// Fast path for the f16-output WMMA shapes (v_wmma_f16_*_f16). Like the f32-out
@@ -2761,13 +2780,13 @@ void exec_wmma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint3
 /// force-scalar.
 template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8, bool FNUZ = false>
 void exec_wmma_f16_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                           uint32_t const_acc = ACC_FROM_VGPR) {
+                           uint32_t const_acc = ACC_FROM_VGPR, bool fp16_ovfl = false) {
   constexpr uint32_t in_bits = 8;
   static_assert(N % 16 == 0, "specialized f8 WMMA assumes N is a multiple of the zmm width");
   constexpr auto ea = f8_extract_fn<A_FP8, FNUZ>();
   constexpr auto eb = f8_extract_fn<B_FP8, FNUZ>();
   auto fallback = [&]() {
-    exec_wmma_f16(cu, M, N, K, in_bits, dst, s0, s1, s2, ea, eb, const_acc);
+    exec_wmma_f16(cu, M, N, K, in_bits, dst, s0, s1, s2, ea, eb, const_acc, WMMA_WAVE32, fp16_ovfl);
   };
   if constexpr (!util::has_stdx_simd) {
     fallback();
@@ -2835,7 +2854,7 @@ void exec_wmma_f16_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
         auto out = wmma_output_loc_16(M, N, row, col);
         uint32_t idx = out.reg * WMMA_WAVE32 + out.lane;
         uint32_t shift = out.sub_element * 16;
-        uint16_t v = util::f32_to_f16(C_buf[row * N + col]);
+        uint16_t v = wmma_round_f16(C_buf[row * N + col], fp16_ovfl);
         words[idx] = (words[idx] & ~(0xFFFFu << shift)) | (static_cast<uint32_t>(v) << shift);
         masks[idx] |= 1u << out.sub_element;
       }
