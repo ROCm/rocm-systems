@@ -174,6 +174,20 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSubmitBadArgument)
     ASSERT_EQ(result, HIPFILE_INVALID_VALUE);
 }
 
+TEST_F(HipFileUnit, TestHipFileBatchIOSubmitBatchFull)
+{
+    hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
+    hipFileIOParams_t                          io_param = makeBatchParam();
+    std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
+
+    EXPECT_CALL(mock_state, getBatchContext(b_handle)).WillOnce(Return(mock_b_context));
+    expectBatchLookup(io_param);
+    EXPECT_CALL(*mock_b_context, submitOperations(_)).WillOnce(Throw(BatchFull()));
+
+    auto result = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
+    ASSERT_EQ(result, HipFileOpError(hipFileBatchFull));
+}
+
 TEST_F(HipFileUnit, TestHipFileBatchIOSubmitInvalidOperation)
 {
     hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);

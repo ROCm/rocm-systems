@@ -32,6 +32,12 @@ struct InvalidBatchHandle : public std::invalid_argument {
     }
 };
 
+struct BatchFull : public std::invalid_argument {
+    BatchFull() : std::invalid_argument{"Not enough room in batch"}
+    {
+    }
+};
+
 struct InvalidStateTransition : public std::logic_error {
     InvalidStateTransition(const char *from, const char *to);
 };

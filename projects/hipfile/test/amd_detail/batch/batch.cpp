@@ -345,7 +345,7 @@ TEST_F(HipFileBatchContext, SubmitOverCapacity)
         ops.push_back(makeOperation());
     }
 
-    ASSERT_THROW(_context->submitOperations(std::move(ops)), std::invalid_argument);
+    ASSERT_THROW(_context->submitOperations(std::move(ops)), BatchFull);
 }
 
 TEST_F(HipFileBatchContext, SubmitOverCapacityOverMultipleSubmissions)
@@ -354,7 +354,7 @@ TEST_F(HipFileBatchContext, SubmitOverCapacityOverMultipleSubmissions)
         _context->submitOperations(BatchOperations{makeOperation()});
     }
 
-    ASSERT_THROW(_context->submitOperations(BatchOperations{makeOperation()}), std::invalid_argument);
+    ASSERT_THROW(_context->submitOperations(BatchOperations{makeOperation()}), BatchFull);
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON
