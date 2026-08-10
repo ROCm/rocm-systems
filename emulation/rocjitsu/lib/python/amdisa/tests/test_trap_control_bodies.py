@@ -1,0 +1,73 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+"""The trap-handler control ops derive as `true_nop` and get real bodies.
+
+The MR ISA carries no pseudocode for S_RFE / S_SENDMSG / S_SENDMSGHALT, so
+they derive as `true_nop`. They are not nops: the configured GPU trap handler
+returns through S_RFE and reports through S_SENDMSG, and leaving these empty
+disables ROCgdb's whole stop/resume path. The bodies therefore live in the
+generator, and these tests pin the parts of them that a regeneration has
+previously been able to silently drop.
+"""
+
+from types import SimpleNamespace
+
+from amdisa.codegen import CodeGenerator
+
+
+def _body(name: str) -> str:
+    """Emitted execute() body for a trap-control op, straight from the generator."""
+    generator = CodeGenerator.__new__(CodeGenerator)
+    sem = SimpleNamespace(
+        name=name,
+        semantic_class='true_nop',
+        operation=None,
+        data_type=None,
+        sets_scc=None,
+        branch_condition=None,
+    )
+    return CodeGenerator._trap_control_body(generator, sem)
+
+
+class TestSRfeBody:
+    def test_restores_the_saved_pc(self):
+        body = _body('S_RFE_B64')
+        assert 'read_scalar64(inst.ssrc0)' in body
+        assert 'kPcAddressMask' in body
+
+    def test_restores_the_interrupted_exec(self):
+        """Regression: a handler that returns without stopping the wave used to
+        leave its own EXEC mask installed, silently un-diverging a branch for
+        the rest of the kernel. gdb.rocm/lane-info.exp catches it, as does
+        WaveDebugTest.TrapHandlerRestoresInterruptedExecWhenReturningWithoutStopping.
+        This block once existed only in the checked-in generated header, so the
+        next regeneration would have removed it."""
+        body = _body('S_RFE_B64')
+        assert 'wf.set_exec(wf.trap_saved_exec());' in body
+        assert 'if (wf.in_trap_handler())' in body
+        # The restore has to happen while the flag still says we are in the
+        # handler, so it must precede the clear.
+        assert body.index('wf.set_exec(wf.trap_saved_exec());') < body.index(
+            'wf.set_in_trap_handler(false);'
+        )
+
+    def test_honours_status_halt_on_the_way_out(self):
+        body = _body('S_RFE_B64')
+        assert 'kStatusHalt' in body
+        assert 'wf.set_debug_halted(true);' in body
+
+
+class TestSendmsgBody:
+    def test_reports_msg_interrupt_from_inside_the_handler(self):
+        body = _body('S_SENDMSG')
+        assert 'wf.set_trap_interrupt_sent(true);' in body
+        assert 'wf.cu().handle_sendmsg(wf, message);' in body
+
+    def test_sendmsghalt_halts_the_wave(self):
+        body = _body('S_SENDMSGHALT')
+        assert 'wf.set_debug_halted(true);' in body
+
+    def test_plain_sendmsg_does_not_halt(self):
+        body = _body('S_SENDMSG')
+        assert 'set_debug_halted' not in body

@@ -3725,6 +3725,65 @@ class CodeGenerator:
             enabled=enabled,
         )
 
+    _TRAP_RETURN_NAMES = ('S_RFE', 'S_RFE_B64')
+    _TRAP_SENDMSG_NAMES = ('S_SENDMSG', 'S_SENDMSGHALT')
+
+    def _trap_control_body(self, sem: InstructionSemantics) -> str | None:
+        """execute() body for a trap-handler control op, or None if not one.
+
+        The MR ISA carries no pseudocode for these, so they derive as
+        `true_nop`. They are not nops: the configured GPU trap handler returns
+        through S_RFE and reports through S_SENDMSG, and leaving them empty
+        silently disables ROCgdb's whole stop/resume path (see
+        docs/rocgdb-debugging.md). The bodies belong here rather than in a
+        hand-edit of the generated header, which a regeneration would drop.
+        """
+        if sem.name in self._TRAP_RETURN_NAMES:
+            # Return from exception: restore the PC the trap handler saved in
+            # ssrc0. The 48-bit mask drops the status bits the hardware packs
+            # into the high half, and the instruction size is subtracted
+            # because the interpreter advances the PC after execute() returns.
+            return (
+                '  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0);\n'
+                '  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;\n'
+                '  wf.pc = (saved_pc & kPcAddressMask) - inst.size();\n'
+                '\n'
+                '  // Returning from the handler puts the interrupted EXEC back. The handler runs\n'
+                '  // under its own mask -- it parks a doorbell id in EXEC_LO on the way to\n'
+                '  // MSG_INTERRUPT -- and restoring that is part of returning, not part of\n'
+                '  // stopping for a debugger: a handler that returns without stopping the wave\n'
+                '  // used to leave its mask installed, so the application ran on with every lane\n'
+                '  // active. That silently un-diverges a branch (gdb.rocm/lane-info.exp sees\n'
+                '  // lanes that converged out of a branch reported active again) and is\n'
+                '  // permanent, because nothing later puts the application\'s mask back.\n'
+                '  if (wf.in_trap_handler())\n'
+                '    wf.set_exec(wf.trap_saved_exec());\n'
+                '  wf.set_in_trap_handler(false);\n'
+                '\n'
+                '  // The handler sets STATUS.HALT when it wants the wave to stay\n'
+                '  // stopped for the debugger; honour that on the way out.\n'
+                '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
+                '  if ((wf.status_raw() & kStatusHalt) != 0) {\n'
+                '    wf.set_debug_single_step(false);\n'
+                '    wf.set_debug_halted(true);\n'
+                '  }'
+            )
+
+        if sem.name in self._TRAP_SENDMSG_NAMES:
+            # MSG_INTERRUPT (id 1) from inside the trap handler is how the wave
+            # tells KFD it has stopped; the CU turns it into a debug event.
+            body = (
+                '  const uint32_t message = static_cast<uint32_t>(inst.simm16.encoding_value_);\n'
+                '  if (wf.in_trap_handler() && (message & 0xFu) == 1u)\n'
+                '    wf.set_trap_interrupt_sent(true);\n'
+                '  wf.cu().handle_sendmsg(wf, message);'
+            )
+            if sem.name == 'S_SENDMSGHALT':
+                body += '\n  wf.set_debug_halted(true);'
+            return body
+
+        return None
+
     def _gen_execute_body(
         self, inst: Instruction, sem: InstructionSemantics, enc_name: str = ''
     ) -> str:
@@ -4058,44 +4117,10 @@ class CodeGenerator:
         if cls == 'true_nop' and sem.name in ('S_SLEEP', 'S_SLEEP_VAR'):
             return '  wf.cu().request_functional_yield();'
 
-        # The MR ISA carries no pseudocode for the trap-handler control ops, so
-        # they derive as true_nop. They are not nops: the configured GPU trap
-        # handler returns through S_RFE and reports through S_SENDMSG, and
-        # leaving these empty silently disables ROCgdb's whole stop/resume path
-        # (see docs/rocgdb-debugging.md). Emit real bodies here, alongside
-        # S_SLEEP above, rather than hand-editing the generated header.
-        if cls == 'true_nop' and sem.name in ('S_RFE', 'S_RFE_B64'):
-            # Return from exception: restore the PC the trap handler saved in
-            # ssrc0. The 48-bit mask drops the status bits the hardware packs
-            # into the high half, and the instruction size is subtracted
-            # because the interpreter advances the PC after execute() returns.
-            return (
-                '  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0);\n'
-                '  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;\n'
-                '  wf.pc = (saved_pc & kPcAddressMask) - inst.size();\n'
-                '  wf.set_in_trap_handler(false);\n'
-                '\n'
-                '  // The handler sets STATUS.HALT when it wants the wave to stay\n'
-                '  // stopped for the debugger; honour that on the way out.\n'
-                '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
-                '  if ((wf.status_raw() & kStatusHalt) != 0) {\n'
-                '    wf.set_debug_single_step(false);\n'
-                '    wf.set_debug_halted(true);\n'
-                '  }'
-            )
-
-        if cls == 'true_nop' and sem.name in ('S_SENDMSG', 'S_SENDMSGHALT'):
-            # MSG_INTERRUPT (id 1) from inside the trap handler is how the wave
-            # tells KFD it has stopped; the CU turns it into a debug event.
-            body = (
-                '  const uint32_t message = static_cast<uint32_t>(inst.simm16.encoding_value_);\n'
-                '  if (wf.in_trap_handler() && (message & 0xFu) == 1u)\n'
-                '    wf.set_trap_interrupt_sent(true);\n'
-                '  wf.cu().handle_sendmsg(wf, message);'
-            )
-            if sem.name == 'S_SENDMSGHALT':
-                body += '\n  wf.set_debug_halted(true);'
-            return body
+        if cls == 'true_nop':
+            trap_body = self._trap_control_body(sem)
+            if trap_body is not None:
+                return trap_body
 
         if cls == 'true_nop':
             return '  (void)wf;'
