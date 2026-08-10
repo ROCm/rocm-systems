@@ -1,7 +1,7 @@
 {
   "system_configurations": {
     "name": "RCCL Host Tests",
-    "description": "CPU-only host-path tests that need no GPU and no RCCL build. Currently the device-kernel leak guards (pytest): run src/device/generate.py (rocSHMEM OFF/ON) and src/device/symmetric/generate.py and assert the generated kernel set (grand total, per-collective counts, per-dimension value-sets) against committed baselines. Intended to also host other host-only tests over time. build_configuration.requires_build = false: these suites exercise only the generators/host code (never librccl), so the runner skips both the RCCL build and the librccl.so environment check."
+    "description": "CPU-only host-path tests; no GPU or RCCL build required (requires_build=false)."
   },
   "paths": {
     "workdir": "${WORKDIR:-$PWD}",
