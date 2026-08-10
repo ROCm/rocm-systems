@@ -393,6 +393,11 @@ class Runtime {
                                      hsa_signal_value_t value, hsa_amd_signal_handler handler,
                                      void* arg);
 
+  /// @brief Asks the asynchronous event monitor to rescan its signals.
+  /// Uses the monitor's own wake signal, which nothing else waits on, so the
+  /// request cannot be consumed by another thread.
+  void WakeAsyncSignalMonitor();
+
   hsa_status_t InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
                           hsa_interop_map_flag_t flags, size_t size_hint, size_t* size, void** ptr,
                           size_t* metadata_size, const void** metadata);
