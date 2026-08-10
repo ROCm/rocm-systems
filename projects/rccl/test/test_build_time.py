@@ -52,11 +52,9 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
-from typing import TextIO
 
 HERE: str = os.path.dirname(os.path.abspath(__file__))
 RCCL_ROOT: str = os.path.dirname(HERE)
-TOOLCHAIN: str = os.path.join(RCCL_ROOT, "toolchain-linux.cmake")
 CMAKELISTS: str = os.path.join(RCCL_ROOT, "CMakeLists.txt")
 
 DEFAULT_THRESHOLD_SEC: int = 300
@@ -238,7 +236,6 @@ def build_target(
     ]
 
     env = build_env()
-    log: TextIO
     with open(log_path, "w") as log:
         def run(cmd: list[str]) -> tuple[float, int]:
             log.write("\n$ " + " ".join(cmd) + "\n")
@@ -260,10 +257,18 @@ def fmt(seconds: float) -> str:
     return "%d:%05.2f" % (int(seconds // 60), seconds % 60)
 
 
-def git(*args: str) -> str:
-    """Run git in the RCCL source tree and return stripped stdout."""
-    return subprocess.run(["git", "-C", RCCL_ROOT, *args],
-                          capture_output=True, text=True, check=True).stdout.strip()
+def rccl_dir_within(worktree: str) -> str:
+    """Locate the RCCL project inside a checkout of the enclosing repository.
+
+    RCCL lives at projects/rccl in the rocm-systems monorepo, so a worktree
+    root is not itself a configurable source directory. Resolves to the
+    worktree root when RCCL is checked out standalone.
+    """
+    top, err = git_err("rev-parse", "--show-toplevel")
+    if err or not top:
+        raise RuntimeError("cannot locate git toplevel: %s" % (err or "unknown error"))
+    rel = os.path.relpath(RCCL_ROOT, top)
+    return os.path.normpath(os.path.join(worktree, rel))
 
 
 def git_err(*args: str) -> tuple[str | None, str | None]:
@@ -294,22 +299,11 @@ def resolve_base_sha(explicit_rev: str | None) -> tuple[str | None, str, str | N
     upstream = os.environ.get("RCCL_BUILD_TIME_UPSTREAM", "origin/develop")
     ensure_upstream_fetched(upstream)
     merge_base, err = git_err("merge-base", upstream, "HEAD")
-    if err:
-        return None, upstream, "cannot resolve merge-base with %s: %s" % (upstream, err)
+    if err or not merge_base:
+        return None, upstream, "cannot resolve merge-base with %s: %s" % (upstream, err or "unknown error")
     sha, err = git_err("rev-parse", merge_base)
     label = "%s (merge-base with %s)" % (merge_base[:10], upstream)
     return sha, label, err
-
-
-def rccl_dir_within(worktree: str) -> str:
-    """Locate the RCCL project inside a checkout of the enclosing repository.
-
-    RCCL lives at projects/rccl in the rocm-systems monorepo, so a worktree
-    root is not itself a configurable source directory. Resolves to the
-    worktree root when RCCL is checked out standalone.
-    """
-    rel = os.path.relpath(RCCL_ROOT, git("rev-parse", "--show-toplevel"))
-    return os.path.normpath(os.path.join(worktree, rel))
 
 
 @dataclass
