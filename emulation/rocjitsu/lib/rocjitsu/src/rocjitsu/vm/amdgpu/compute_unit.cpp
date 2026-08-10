@@ -399,9 +399,18 @@ void ComputeUnitCore::update_wf_states() {
 void ComputeUnitCore::issue_instruction(Wavefront *active) {
   uint32_t vmid = active->process_id();
 
+  // Deliberately not gated on debug_active_, unlike the data-side probe below.
+  // An unfetchable PC reads back as zeros, and zeros decode to a valid
+  // instruction, so an undebugged wave that branches into unmapped memory would
+  // otherwise execute zeros forever. Stopping it matters more than the one
+  // extra page-table lookup, which is a fraction of the per-issue decode cost.
   if (vmid != 0 && !memory_->is_fetchable(active->pc, vmid)) {
     if (memory_violation_handler_ && memory_violation_handler_(*active, active->pc, false))
       return;
+    // Wavefront::halt() is silent, so say why this wave stopped. Without this
+    // the wave simply disappears from the run with nothing in the log.
+    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(UnfetchablePc) pc=0x",
+                     std::hex, active->pc, std::dec, " vmid=", vmid);
     active->halt();
     return;
   }
