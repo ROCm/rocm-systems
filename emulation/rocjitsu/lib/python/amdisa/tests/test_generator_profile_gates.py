@@ -1042,15 +1042,10 @@ def test_gfx1250_wmma_f32_passes_c_modifier_to_accumulator_helper():
 def test_gfx1250_wmma_f16_f8_passes_fp16_overflow_mode(
     k: int, input_type: str, a_fp8: str, b_fp8: str
 ) -> None:
-    inst = Instruction(
-        f'V_WMMA_F16_16X16X{k}_{input_type}', 'ENC_VOP3P', 0, []
-    )
+    inst = Instruction(f'V_WMMA_F16_16X16X{k}_{input_type}', 'ENC_VOP3P', 0, [])
     body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'gfx1250')
 
-    assert (
-        f'amdgpu::exec_wmma_f16_f8_spec<16, 16, {k}, {a_fp8}, {b_fp8}>('
-        in body
-    )
+    assert f'amdgpu::exec_wmma_f16_f8_spec<16, 16, {k}, {a_fp8}, {b_fp8}>(' in body
     assert 'const_acc, wf.fp16_ovfl());' in body
 
 
