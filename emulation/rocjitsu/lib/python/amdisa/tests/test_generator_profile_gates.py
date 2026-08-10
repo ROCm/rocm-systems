@@ -1926,6 +1926,85 @@ def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
     ) < ceil_body.index('read_vop3_true16_src(src0, wf, lane, opsel, 0)')
 
 
+def test_rdna4_64bit_literal_widening_is_format_specific(tmp_path):
+    args = SimpleNamespace(
+        multi=[f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}'],
+        gen_isas=True,
+        gen_dbt=False,
+        isa_output=str(tmp_path),
+        dbt_output=None,
+    )
+
+    _run_multi(args)
+
+    vop3 = (tmp_path / 'rdna4' / 'vop3.cpp').read_text()
+    signed_ctor = _generated_constructor_body(vop3, 'VCmpLtI64Vop3')
+    unsigned_ctor = _generated_constructor_body(vop3, 'VCmpLtU64Vop3')
+    operand_cpp = (tmp_path / 'rdna4' / 'operand.cpp').read_text()
+
+    assert 'Operand::make_literal32' in signed_ctor
+    assert 'Operand::Literal32Widening::SignExtend' in signed_ctor
+    assert 'static_cast<uint32_t>' in signed_ctor
+    assert 'Operand::Literal32Widening::ZeroExtend' in unsigned_ctor
+    assert 'if (literal32_widening_)' in operand_cpp
+    assert 'return widened_literal32_value();' in operand_cpp
+    assert 'case Literal32Widening::Replicate32:' in operand_cpp
+    assert 'if (has_literal64_)' in operand_cpp
+    assert 'return literal64_value_;' in operand_cpp
+    assert 'uint64_t signed_literal32_value_' not in operand_cpp
+    assert 'static_cast<uint32_t>(encoding_value_)' in operand_cpp
+    assert (
+        'std::format("0x{:x}", static_cast<uint32_t>(encoding_value_))' in operand_cpp
+    )
+
+
+def test_generated_literal32_widening_shapes_cover_gfx1250_and_cdna_vopc(
+    gfx1250_generated_root: Path,
+    tmp_path: Path,
+):
+    args = SimpleNamespace(
+        multi=[f'cdna4:{_mrisa_dir() / "amdgpu_isa_cdna4.xml"}'],
+        gen_isas=True,
+        gen_dbt=False,
+        isa_output=str(tmp_path),
+        dbt_output=None,
+    )
+    _run_multi(args)
+
+    gfx_operand_exec = (gfx1250_generated_root / 'operand_exec.cpp').read_text()
+    gfx_vop3_alu = (gfx1250_generated_root / 'vop3_alu.cpp').read_text()
+    gfx_vop3_data = (gfx1250_generated_root / 'vop3_data.cpp').read_text()
+    gfx_vop3_ternary = (gfx1250_generated_root / 'vop3_ternary.cpp').read_text()
+    gfx_vop3p = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+    cdna_vopc = (tmp_path / 'cdna4' / 'vopc.cpp').read_text()
+
+    assert gfx_operand_exec.count('if (literal32_widening_)') == 2
+    assert gfx_operand_exec.count('return widened_literal32_value();') == 2
+
+    mixed_ctor = _generated_constructor_body(gfx_vop3_ternary, 'VMadNcI64I32Vop3')
+    assert mixed_ctor.count('Operand::make_literal32') == 1
+    assert 'src2 = Operand::make_literal32' in mixed_ctor
+    assert 'Operand::Literal32Widening::SignExtend' in mixed_ctor
+
+    packed_ctor = _generated_constructor_body(gfx_vop3p, 'VPkAddF32Vop3p')
+    assert packed_ctor.count('Operand::make_literal32') == 2
+    assert 'Operand::Literal32Widening::Replicate32' in packed_ctor
+
+    cdna_vopc_ctor = _generated_constructor_body(cdna_vopc, 'VCmpLtI64Vopc')
+    assert 'src0 = Operand::make_literal32' in cdna_vopc_ctor
+    assert 'Operand::Literal32Widening::SignExtend' in cdna_vopc_ctor
+
+    effective_32bit_ctors = (
+        _generated_constructor_body(gfx_vop3_data, 'VCndmaskB32Vop3'),
+        _generated_constructor_body(gfx_vop3_data, 'VCndmaskB16Vop3'),
+        _generated_constructor_body(gfx_vop3_alu, 'VAddCoCiU32Vop3SdstEnc'),
+        _generated_constructor_body(gfx_vop3_alu, 'VSubCoCiU32Vop3SdstEnc'),
+        _generated_constructor_body(gfx_vop3_alu, 'VSubrevCoCiU32Vop3SdstEnc'),
+    )
+    for constructor in effective_32bit_ctors:
+        assert re.search(r'src2\s*=\s*Operand::make_literal32\(\s*32\s*,', constructor)
+
+
 def test_generated_rdna4_local_vop3_pack_paths_use_selected_halves(
     rdna4_generated_root: Path,
 ):
@@ -2234,6 +2313,54 @@ def test_rdna4_generated_vop3_dpp_availability_is_instruction_specific(
         'throw util::InvalidInst("V_PK_ADD_F16 does not support DPP", "");'
         in unsupported_vop3p
     )
+
+
+def test_gfx1250_packed_f32_execute_uses_local_simd_probe(
+    gfx1250_generated_root: Path,
+):
+    source = (gfx1250_generated_root / 'vop3p_exec.cpp').read_text()
+    assert 'literal64_value' not in source
+    add_body = _generated_method_body(source, 'VPkAddF32Vop3p', 'VPkMulBf16Vop3p')
+    mul_body = _generated_method_body(source, 'VPkMulF32Vop3p', 'VPkAddF32Vop3p')
+    fma_body = _generated_method_body(source, 'VPkFmaF32Vop3p', 'VFmaMixF32Vop3p')
+
+    for body in (add_body, mul_body):
+        assert 'ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_F32_SELECTORS' in body
+        assert 'inst_.opsel, inst_.opsel_hi' in body
+        assert body.index('ROCJITSU_TRY_SIMD') < body.index('for (uint32_t lane')
+        assert 'amdgpu::execute_v_pk_' not in body
+
+    assert 'ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32_SELECTORS' in fma_body
+    assert 'inst_.opsel, inst_.opsel_hi, inst_.pad_14' in fma_body
+    assert fma_body.index('ROCJITSU_TRY_SIMD') < fma_body.index('for (uint32_t lane')
+
+
+def test_gfx1250_vop3p_rejects_unencoded_literal64_selectors(
+    gfx1250_generated_root: Path,
+):
+    encodings = (gfx1250_generated_root / 'encodings.cpp').read_text()
+    vop3p = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+    ctor_start = encodings.index('Vop3p::Vop3p(')
+    ctor_end = encodings.index('void Vop3p::implicit_uses', ctor_start)
+    vop3p_ctor = encodings[ctor_start:ctor_end]
+
+    assert 'num_encoded_sources > 0 && inst_.src0 == 254' in vop3p_ctor
+    assert 'num_encoded_sources > 1 && inst_.src1 == 254' in vop3p_ctor
+    assert 'num_encoded_sources > 2 && inst_.src2 == 254' in vop3p_ctor
+    assert (
+        'throw util::InvalidInst("Vop3p does not support Literal64", "")' in vop3p_ctor
+    )
+
+    for class_name in ('VPkAddF32Vop3p', 'VPkMulF32Vop3p', 'VPkFmaF32Vop3p'):
+        body = _generated_constructor_body(vop3p, class_name)
+        assert 'OperandType::OPR_SIMM64' not in body
+        assert 'literal_word + 1' not in body
+
+    for class_name in ('VPkAddF32Vop3p', 'VPkMulF32Vop3p'):
+        body = _generated_constructor_body(vop3p, class_name)
+        assert re.search(r'selected_exec_fn\(\d+\), 2\)', body)
+    fma_body = _generated_constructor_body(vop3p, 'VPkFmaF32Vop3p')
+    assert re.search(r'selected_exec_fn\(\d+\)\)', fma_body)
 
 
 def test_generated_vop_execution_has_no_instruction_storage_bypass(
@@ -2868,10 +2995,13 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert '(word0_ >> 24) == 0xCF' in cpp
     assert '[[maybe_unused]] bool vopd3' not in cpp
     assert 'vopd3 ? OperandType::OPR_SRC_SIMPLE : OperandType::OPR_SRC' in cpp
-    assert 'bool literal_uses_f64_high_bits' in cpp
-    assert '(static_cast<uint64_t>(literal) << 32), true' in cpp
-    assert 'is_float64_op(opx_), literal_, srcx0' in cpp
-    assert 'is_float64_op(opy_), literal_, srcy0' in cpp
+    assert 'literal_uses_f64_high_bits' not in cpp
+    assert 'Operand::make_literal32(literal,' not in cpp
+    assert 'Operand::Literal32Widening::F64HighBits' not in cpp
+    assert 'make_src0(x_bits, true, false, 0, srcx0)' in cpp
+    assert 'make_src0(y_bits, true, false, 0, srcy0)' in cpp
+    assert 'make_src0(x_bits, false, has_literal_, literal_, srcx0)' in cpp
+    assert 'make_src0(y_bits, false, has_literal_, literal_, srcy0)' in cpp
     assert 'case 3:\n              case 7:' not in cpp
     assert 'if (lhs == 0.0f || rhs == 0.0f)' in exec_cpp
     src_neg_start = exec_cpp.index('bool Vopd::uses_src_neg_modifier')
@@ -2927,10 +3057,10 @@ def test_rdna4_vopd_template_uses_available_src_operand_type(tmp_path):
     assert 'return Operand(bits, OperandType::OPR_SRC, encoded);' in cpp
     assert '(word0_ >> 24) == 0xCF' not in cpp
     assert 'Format::Vopd3' not in cpp
-    assert 'literal_uses_f64_high_bits' in cpp
+    assert 'literal_uses_f64_high_bits' not in cpp
     assert 'is_float64_op' not in cpp
-    assert 'false, literal_, srcx0' in cpp
-    assert 'false, literal_, srcy0' in cpp
+    assert 'make_src0(x_bits, false, has_literal_, literal_, srcx0)' in cpp
+    assert 'make_src0(y_bits, false, has_literal_, literal_, srcy0)' in cpp
     assert 'kVopdAddF64' not in cpp
     assert 'execute_slot64' not in cpp
     assert 'constexpr uint16_t kVopdDot2AccF32F16 = 12;' in cpp

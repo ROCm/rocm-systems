@@ -17,6 +17,7 @@ namespace rdna4 {
 
 class Operand : public AmdgpuIsaOperand<Isa> {
 public:
+  enum class Literal32Widening { ZeroExtend, SignExtend, Replicate32, F64HighBits };
   Operand(int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source = false,
           bool packed_16bit_dst = false);
   Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,
@@ -24,6 +25,7 @@ public:
   Operand(int size_bits, OperandType opr_type, int encoding_value, uint16_t literal16_display_value,
           bool has_literal16_display);
   Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);
+  static Operand make_literal32(int size_bits, uint32_t literal_value, Literal32Widening widening);
   std::string name() const override;
   std::optional<uint64_t> literal64_value() const override;
   std::optional<uint64_t> const_value() const override;
@@ -43,12 +45,12 @@ private:
   void write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const override;
   uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;
   void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;
-
-private:
+  uint64_t widened_literal32_value() const;
   uint16_t literal16_display_value_ = 0;
   bool has_literal16_display_ = false;
   uint64_t literal64_value_ = 0;
   bool has_literal64_ = false;
+  std::optional<Literal32Widening> literal32_widening_;
   bool packed_16bit_source_ = false;
   bool packed_16bit_dst_ = false;
 };
