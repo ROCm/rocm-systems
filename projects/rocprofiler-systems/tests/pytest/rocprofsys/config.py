@@ -12,7 +12,7 @@ from typing import Optional
 import re
 
 from .cache import persistent_cache, persistent_cached_property, resolve_username
-from .capabilities import SystemCapabilities, find_roctx_site_packages
+from .capabilities import SystemCapabilities
 
 
 @dataclass
@@ -125,8 +125,11 @@ class RocprofsysConfig:
                     found_paths.append(candidate)
         return found_paths
 
-    def get_library_path(self) -> str:
+    def get_library_path(self, python_version: Optional[str] = None) -> str:
         """Get LD_LIBRARY_PATH including rocprofiler-systems libraries.
+
+        Args:
+            python_version: Interpreter the run targets, when it targets one.
 
         Returns:
             LD_LIBRARY_PATH string with rocprofiler-systems libraries
@@ -147,6 +150,14 @@ class RocprofsysConfig:
         for llvm_path in self.llvm_lib_paths:
             paths.append(str(llvm_path))
 
+        # The python base environment puts ROCm's roctx bindings on PYTHONPATH;
+        # on some builds their compiled extension resolves libpython through the
+        # loader search path, so the interpreter's own lib dir has to be here.
+        if python_version and self.capabilities.roctx_site_packages(python_version):
+            python_lib_dir = self.capabilities.python_lib_dir(python_version)
+            if python_lib_dir:
+                paths.append(str(python_lib_dir))
+
         return ":".join(paths)
 
     def get_preload_path(self) -> Optional[str]:
@@ -164,13 +175,6 @@ class RocprofsysConfig:
             return None
         existing = os.environ.get("LD_PRELOAD", "")
         return f"{asan_library}:{existing}" if existing else asan_library
-
-    def get_roctx_site_packages(self, python_version: str) -> Optional[Path]:
-        """Get the ROCm-provided roctx site-packages directory for a Python version.
-
-        See :func:`rocprofsys.capabilities.find_roctx_site_packages`.
-        """
-        return find_roctx_site_packages(self.rocm_path, python_version)
 
     def get_target_executable(self, name: str) -> Path:
         """Get path to a test target executable.

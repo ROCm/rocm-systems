@@ -21,7 +21,6 @@ from pathlib import Path
 import shutil
 import subprocess
 from typing import Optional
-from .capabilities import roctx_runtime_env_updates
 from .config import RocprofsysConfig
 from .environment import TestEnvironment, TestEnvKind
 
@@ -182,6 +181,7 @@ class BaseRunner(ABC):
         num_procs: int = 0,
         working_directory: Optional[Path] = None,
         no_base_env: bool = False,
+        python_version: Optional[str] = None,
     ):
         self.config = config
         self.target = target
@@ -199,14 +199,15 @@ class BaseRunner(ABC):
             ) from exc
         self.num_procs = num_procs
         self.working_directory = working_directory or config.rocprofsys_build_dir
+        self.python_version = python_version
         self.environment = TestEnvironment()
         self.environment.set_base_environment(
-            config, TestEnvKind.NONE if no_base_env else test_type
+            config, TestEnvKind.NONE if no_base_env else test_type, python_version
         )
         # LD_LIBRARY_PATH default on the test layer; the test's own env (applied
         # next) may override it (e.g. Julia adds extra lib dirs).
         self.environment.set_test_environment(
-            {"LD_LIBRARY_PATH": config.get_library_path()}
+            {"LD_LIBRARY_PATH": config.get_library_path(python_version)}
         )
         # LD_PRELOAD default (sanitizer builds prepend the asan runtime).
         preload = config.get_preload_path()
@@ -703,40 +704,18 @@ class PythonRunner(BaseRunner):
         standalone: bool = False,
         **kwargs,
     ):
-        super().__init__(config, TestEnvKind.PYTHON, target, output_dir, **kwargs)
+        super().__init__(
+            config,
+            TestEnvKind.PYTHON,
+            target,
+            output_dir,
+            python_version=python_version,
+            **kwargs,
+        )
 
-        self.python_version = python_version
         self.annotated = annotated
         self.standalone = standalone
         self.profile_args = profile_args or []
-
-        # ROCm's roctx Python bindings are installed in a version-specific
-        # directory outside rocprofsys's own (ABI-agnostic) site-packages, so
-        # they must be appended to PYTHONPATH for the interpreter under test.
-        # The compiled libpyroctx.<abi>.so extension also links directly
-        # against libpython<version>.so (no rpath), so LD_LIBRARY_PATH must
-        # include the interpreter's own lib directory too, or the import
-        # fails even though every file is present on disk.
-        if self.python_version:
-            roctx_site_packages = config.get_roctx_site_packages(self.python_version)
-            if roctx_site_packages:
-                try:
-                    python_executable = config.capabilities.get_python_executable(
-                        self.python_version
-                    )
-                except FileNotFoundError:
-                    python_executable = None
-                env_updates = roctx_runtime_env_updates(
-                    roctx_site_packages,
-                    python_executable,
-                    pythonpath_base=self.environment.base.get("PYTHONPATH", ""),
-                    ld_library_path_base=self.environment.test.get("LD_LIBRARY_PATH", ""),
-                )
-                self.environment.set_test_environment(env_updates)
-                # BaseRunner.__init__ already cached self.env from the
-                # environment as it stood before this update; refresh it or
-                # the added entries would never reach the subprocess.
-                self.env = self.environment.get_merged_environment(config)
 
     def build_command(self) -> list[str]:
         python_executable = self.config.capabilities.get_python_executable(
