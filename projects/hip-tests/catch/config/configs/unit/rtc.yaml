@@ -74,6 +74,11 @@ rtc:
     # AIRUNTIME-2410
     disabled: [asan]
     tags: [compile]
+  Unit_Rtc_Global_Memory_Access:
+    <<: *level_2
+    # AIRUNTIME-2410
+    disabled: [asan]
+    tags: [compile]
   Unit_Rtc_Reduce_Simple:
     <<: *level_2
     # AIRUNTIME-2410

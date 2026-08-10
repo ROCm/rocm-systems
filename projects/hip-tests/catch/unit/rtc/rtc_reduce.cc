@@ -278,3 +278,77 @@ HIP_TEMPLATE_TEST_CASE(Unit_Rtc_Reduce_Simple, float, __half) {
   }
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 }
+
+TEST_CASE(Unit_Rtc_Global_Memory_Access)
+{
+  unsigned int wavefrontSize = getWarpSize();
+  size_t logSize;
+  std::string scalarName, intrinsicName, kernelStr;
+  const char* loweredName;
+  hiprtcProgram prog;
+  hipFunction_t kernel;
+  hipModule_t module;
+  hiprtcResult compileResult;
+  int numIncrements = 10;
+  LinearAllocGuard<int> d_numIncrements(LinearAllocs::hipMalloc, sizeof(int));
+  LinearAllocGuard<float> d_output(LinearAllocs::hipMalloc, wavefrontSize * sizeof(float));
+  LinearAllocGuard<float> output(LinearAllocs::malloc, wavefrontSize * sizeof(float));
+  size_t codeSize;
+  std::vector<char> code;
+  dim3 grdDim{1u};
+  dim3 blkDim{wavefrontSize};
+  std::vector<const void*> args = {d_output.ptr(), d_numIncrements.ptr()};
+  std::size_t sizeBytes = args.size() * sizeof(void*);
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, args.data(), HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                    &sizeBytes, HIP_LAUNCH_PARAM_END};
+  const char* options[] = { "-O2" };
+  std::string expression = "mykernel<float>";
+
+  kernelStr = R"(
+     template <class T>
+     __global__ void mykernel(T* output, int* numIncrements)
+     {
+       int tid = threadIdx.x;
+       int laneId = tid % warpSize;
+
+       for (int i = 0; i < *numIncrements; i++) {
+         output[laneId]++;
+       }
+     }
+   )";
+
+  HIP_CHECK(hipMemcpy(d_numIncrements.ptr(), &numIncrements, sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemset(d_output.ptr(), 0, d_output.size_bytes()));
+  HIPRTC_CHECK(
+      hiprtcCreateProgram(&prog, kernelStr.c_str(), "mykernel.hip", 0, nullptr, nullptr));
+  HIPRTC_CHECK(hiprtcAddNameExpression(prog, expression.c_str()));
+  compileResult = hiprtcResult{hiprtcCompileProgram(prog, NELEMS(options), options)};
+  HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
+
+  if (compileResult != HIPRTC_SUCCESS || logSize > 0) {
+    std::string log(logSize, '\0');
+
+    HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
+    std::cerr << "Runtime compilation failed or contained warnings for operator: " << scalarName
+              << " associated reduce function: " << intrinsicName << "\n";
+    std::cerr << log << '\n';
+    REQUIRE(false);
+  }
+
+  HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
+  printf("Code size: %zu\n", codeSize);
+  code.resize(codeSize);
+  HIPRTC_CHECK(hiprtcGetCode(prog, code.data()));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  HIPRTC_CHECK(hiprtcGetLoweredName(prog, expression.c_str(), &loweredName));
+  HIP_CHECK(hipModuleGetFunction(&kernel, module, loweredName));
+  HIP_CHECK(hipModuleLaunchKernel(kernel, grdDim.x, grdDim.y, grdDim.z, blkDim.x, blkDim.y,
+                                  blkDim.z, 0, 0, nullptr, config));
+  HIP_CHECK(hipModuleUnload(module));
+  HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
+  HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost));
+
+  for (int i = 0; i < wavefrontSize; i++) {
+    REQUIRE(output.ptr()[i] == numIncrements);
+  }
+}
