@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
@@ -1560,13 +1561,16 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
   // and depending on the binary size, that might be costly.
   auto [binary, binSize] = clBinary()->data();
   if (binSize < sizeof(amd::Elf64_Ehdr)) {
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Invalid size to validate \n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+            "The elf size is way too small to validate: %d \n", binSize);
     return false;
   }
 
-  // So we do the validation by explicitly getting the ELF headers
-  const amd::Elf64_Ehdr* ehdr = reinterpret_cast<const amd::Elf64_Ehdr*>(binary);
-  uint16_t type = ehdr->e_type;
+  // So we do the validation by explicitly getting the ELF header. Copy it into an
+  // aligned local, since the binary buffer has no alignment guarantee.
+  amd::Elf64_Ehdr ehdr;
+  std::memcpy(&ehdr, binary, sizeof(ehdr));
+  uint16_t type = ehdr.e_type;
 
   switch (type) {
     case ET_NONE: {
@@ -1582,7 +1586,7 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
       break;
     }
     case ET_DYN: {
-      if (ehdr->e_machine == EM_AMDGPU) {
+      if (ehdr.e_machine == EM_AMDGPU) {
         setType(TYPE_EXECUTABLE);
       } else {
         setType(TYPE_LIBRARY);
