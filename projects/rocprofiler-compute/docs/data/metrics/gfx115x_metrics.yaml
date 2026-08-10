@@ -57,28 +57,16 @@ System Speed-of-Light:
     rst: Bandwidth of instruction cache requests to the GL1 cache. High values may indicate instruction cache pressure from large kernels or frequent instruction cache misses.
     unit: Bytes/s
 Memory chart - Instruction Cache:
-  ICache Utilization:
-    rst: Percentage of shader busy cycles spent actively servicing instruction fetch requests. High utilization indicates the instruction cache is keeping pace with shader execution. Low utilization may indicate instruction cache misses causing stalls, or idle shaders.
-    unit: Percent
   ICache Hit Rate:
     rst: Percentage of instruction cache accesses that are serviced from cache without fetching from the GL1 cache. High hit rates indicate good instruction locality. Low hit rates may indicate large kernels exceeding instruction cache capacity or divergent branches.
-    unit: Percent
-  ICache Miss Rate:
-    rst: Percentage of instruction cache accesses that miss and require fetching from the GL1 cache. High miss rates increase instruction fetch latency and may cause shader stalls. Consider reducing kernel code size or improving branch coherence.
     unit: Percent
   ICache Requests:
     rst: 'Count of instruction-cache (SQC ICache) requests issued, per normalization unit. Formula: SQC_ICACHE_REQ_sum / $denom'
     unit: Requests per Normalization Unit
-  ICache Request Stall Rate:
-    rst: 'Percent of shader busy cycles where the instruction cache input interface was stalled (valid without ready). Formula: 100 * SQC_ICACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum.'
-    unit: Percent
   ICache-GL1 Read Bandwidth:
     rst: Bytes per second of read traffic from the instruction path toward GL1 (texture-cache path instruction requests), using 128 B per SQC_TC_INST_REQ event.
     unit: Bytes/s
 Memory chart - Scalar Data Cache:
-  DCache Utilization:
-    rst: Percentage of shader busy cycles spent actively servicing scalar data cache requests. The scalar data cache holds uniform data accessed by scalar instructions. High utilization indicates active use of scalar memory operations.
-    unit: Percent
   DCache Hit Rate:
     rst: Percentage of scalar data cache accesses that hit in cache. High hit rates indicate efficient reuse of constant and uniform data. Low hit rates may indicate excessive unique constant data or poor temporal locality.
     unit: Percent
@@ -86,22 +74,13 @@ Memory chart - TCP Cache:
   GL0 Cache Hit Rate (TCP Cache):
     rst: Percentage of GL0 vector cache (TCP Cache) requests serviced from cache. TCP Cache is the first-level cache for vector memory operations. Higher hit rates reduce traffic to the GL1 cache and lower memory access latency for vector operations.
     unit: Percent
-  TCP Total Requests:
-    rst: Total TCP (vector L0) requests per normalization unit (reads, writes and related traffic aggregated in TCP_REQ_sum).
-    unit: Requests per Normalization Unit
   TCP Read Requests:
     rst: TCP read requests per normalization unit (TCP_REQ_READ_sum).
     unit: Requests per Normalization Unit
   TCP Write Requests:
     rst: TCP write requests per normalization unit (TCP_REQ_WRITE_sum).
     unit: Requests per Normalization Unit
-  TCP Miss Requests:
-    rst: TCP requests that missed in the L0 vector cache and required a fill from GL1C (TCP_REQ_MISS_sum / $denom).
-    unit: Requests per Normalization Unit
 Memory chart - LDS (Local Data Share):
-  LDS Atomic Instructions:
-    rst: Number of atomic operations executed on Local Data Share memory. Atomic operations provide thread-safe read-modify-write operations but may serialize if multiple work-items access the same address.
-    unit: Instructions per Normalization Unit
   LDS Utilization:
     rst: Percentage of shader busy cycles during which LDS was servicing indexed accesses.
     unit: Percent
@@ -111,15 +90,6 @@ Memory chart - LDS (Local Data Share):
   LDS Estimated Bandwidth:
     rst: Estimated achieved bandwidth for Local Data Share operations. This reflects the effective throughput after accounting for bank conflicts. RDNA 3.5 provides 32 LDS banks per compute unit for high-bandwidth shared memory access.
     unit: Bytes/s
-  LDS Instructions:
-    rst: Total LDS (Local Data Share) instructions executed per normalization unit (SQ_INSTS_LDS_sum).
-    unit: Instructions per Normalization Unit
-  LDS Instruction Cycles:
-    rst: Cycles spent executing LDS instructions per normalization unit (SQ_INST_CYCLES_LDS_sum).
-    unit: Cycles per Normalization Unit
-  LDS Wait Cycles:
-    rst: Cycles waves spent waiting on LDS (wait-state attribution), per normalization unit (SQ_WAIT_INST_LDS_sum).
-    unit: Cycles per Normalization Unit
 Memory chart - GL1 Cache:
   GL1 Cache Utilization:
     rst: Percentage of cycles the GL1 cache is actively processing requests. GL1 cache is shared across multiple workgroup processors within a shader engine. High utilization indicates active memory traffic through the GL1 cache.
@@ -645,12 +615,6 @@ L2-Fabric interface metrics:
     rst: Percentage of GPU active time the Texture Addresser was busy processing memory address calculations. High TA busy indicates active texture or buffer memory operations. This reflects the address generation workload for memory requests.
     unit: Percent
 Memory chart - TCP-GL1 Interface:
-  TCP-GL1 Read Requests:
-    rst: Read requests from TCP to GL1C (miss/refill path), per normalization unit.
-    unit: Requests per Normalization Unit
-  TCP-GL1 Write Requests:
-    rst: Write-related requests from TCP toward GL1C, per normalization unit.
-    unit: Requests per Normalization Unit
   TCP-GL1 Read Bandwidth:
     rst: Bytes per second for TCP→GL1 read traffic (64 B per TCP_GL1_REQ_READ event).
     unit: Bytes/s
@@ -658,24 +622,12 @@ Memory chart - TCP-GL1 Interface:
     rst: Bytes per second for TCP→GL1 write traffic (64 B per TCP_GL1_REQ_WRITE event).
     unit: Bytes/s
 Memory chart - GL1-GL2 Interface:
-  GL1-GL2 Read Requests:
-    rst: Read requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_READ_sum).
-    unit: Requests per Normalization Unit
-  GL1-GL2 Write Requests:
-    rst: Write requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_WRITE_sum).
-    unit: Requests per Normalization Unit
   GL1-GL2 Read Bandwidth:
     rst: Bytes per second on the GL1C→GL2C read interface (32/64/128 B request bins).
     unit: Bytes/s
   GL1-GL2 Write Bandwidth:
     rst: Bytes per second on the GL1C→GL2C write interface (32/64 B request bins).
     unit: Bytes/s
-  GL1-GL2 Read Latency:
-    rst: Average cycles from GL1C read request to response (GL1C_GL2_REQ_READ_LATENCY_sum / GL1C_GL2_REQ_READ_sum) when the denominator is non-zero.
-    unit: Cycles
-  GL1-GL2 Write Latency:
-    rst: Average cycles from GL1C write request to completion (GL1C_GL2_REQ_WRITE_LATENCY_sum / GL1C_GL2_REQ_WRITE_sum) when the denominator is non-zero.
-    unit: Cycles
 Wavefront Launch Stats:
   Grid Size:
     rst: Number of work-items in the dispatch grid for the kernel (Grid_Size), averaged/min/maxed across samples. Defines total parallel work launched.

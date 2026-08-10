@@ -51,71 +51,41 @@ from utils.utils_analysis import format_bw_human_readable
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     # Table 301: Instruction Cache
     ("ICache Requests", 450),
-    ("ICache Utilization", 45.2),
     ("ICache Hit Rate", 98.5),
-    ("ICache Miss Rate", 1.5),
-    ("ICache Request Stall Rate", 2.1),
     ("ICache-GL1 Read Bandwidth", 57.6e9),
     # Table 302: Scalar Data Cache
     ("DCache Requests", 225),
-    ("DCache Utilization", 38.7),
     ("DCache Hit Rate", 95.3),
-    ("DCache Request Stall Rate", 1.8),
     ("DCache-GL1 Read Bandwidth", 28.8e9),
     # Table 303: TCP Cache (GL0 Vector Cache)
-    ("TCP Total Requests", 1_250_000),
     ("TCP Read Requests", 875_000),
     ("TCP Write Requests", 375_000),
-    ("TCP Miss Requests", 150_000),
     ("GL0 Cache Hit Rate (TCP Cache)", 88.0),
     ("GL0 Cache BW (TCP Cache)", 80e9),
     # Table 304: LDS
-    ("LDS Instructions", 125_000),
     ("LDS Utilization", 62.0),
-    ("LDS Atomic Instructions", 10_000),
-    ("LDS Instruction Cycles", 250_000),
-    ("LDS Wait Cycles", 12_500),
     ("LDS Bank Conflict Rate", 4.0),
     ("LDS Estimated Bandwidth", 256e9),
     # Table 305: TCP-GL1 Interface
-    ("TCP-GL1 Read Requests", 150_000),
-    ("TCP-GL1 Write Requests", 50_000),
     ("TCP-GL1 Read Bandwidth", 96e9),
     ("TCP-GL1 Write Bandwidth", 32e9),
     # Table 306: GL1 Cache (L1)
     ("GL1 Cache Utilization", 65.2),
-    ("GL1 Cache Total Requests", 200_000),
-    ("GL1 Cache Read Requests", 150_000),
-    ("GL1 Cache Write Requests", 50_000),
-    ("GL1 Cache Miss Requests", 30_000),
     ("GL1 Cache Hit Rate", 85.0),
-    ("GL1 Cache Starve Rate", 5.2),
     ("GL1 Cache Stall GL2 Backpressure", 8.5),
     # Table 307: GL1-GL2 Interface
-    ("GL1-GL2 Read Requests", 30_000),
-    ("GL1-GL2 Write Requests", 10_000),
     ("GL1-GL2 Read Bandwidth", 48e9),
     ("GL1-GL2 Write Bandwidth", 16e9),
-    ("GL1-GL2 Read Latency", 85.2),
-    ("GL1-GL2 Write Latency", 62.4),
     # Table 308: GL2 Cache (L2)
     ("GL2 Cache Utilization", 74.2),
-    ("GL2 Cache Total Requests", 40_000),
-    ("GL2 Cache Read Requests", 30_000),
-    ("GL2 Cache Write Requests", 10_000),
-    ("GL2 Cache Atomic Requests", 1_000),
     ("GL2 Cache Hit Rate", 82.5),
     ("GL2 Cache Read BW", 64e9),
     ("GL2 Cache Write BW", 24e9),
     # Table 309: Graphics Core Efficiency Arbiter (GCEA) to System Memory
     ("SARB Utilization", 52.3),
     ("SARB Stall Rate", 12.4),
-    ("DRAM Read Requests", 25_000),
-    ("DRAM Write Requests", 8_000),
     ("DRAM Read Bandwidth", 100e9),
     ("DRAM Write Bandwidth", 60e9),
-    ("Read Returns", 25_000),
-    ("Write Returns", 8_000),
 )
 
 MEM_CHART_PANEL_METRIC_KEYS: tuple[str, ...] = tuple(
