@@ -7,11 +7,14 @@
  ************************************************************************/
 
 #include "rccl_ptr.h"
+// UserRegMode is accepted only to match the Primitives primary template (which
+// carries it for LL128, see primitives.h/prims_ll128.h). The LL protocol path is
+// unchanged from the baseline and ignores it.
 template <typename T, typename RedOp, typename Fan, int Direct, int P2p, bool isNetOffload, int Metadata, int Pipeline,
-          int useAcc>
-class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc>
+          int useAcc, int UserRegMode>
+class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>
   : public PrimitivesWithoutDirect<
-      Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc>> {
+      Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>> {
   // In the case of Fan::MaxRecv == 0, we need to force MaxRecv to 1 for this to compile
   // This is because of a recv buffer which is allocated to MaxRecv length in send-only cases.
   static constexpr int MaxRecv = Fan::MaxRecv > 1 ? Fan::MaxRecv : 1;
@@ -71,7 +74,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
   inline __device__ void barrier() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     if (nthreads != WARP_SIZE)
-#if defined(__gfx942__) || (defined(__gfx950__) && defined(HIP_HOST_UNCACHED_MEMORY))
+#if defined(__gfx942__) || (defined(__gfx950__) && defined(HIP_HOST_UNCACHED_MEMORY)) || defined(__gfx1250__)
       barrier_generic(__threadfence_block(), nthreads, barrier_next, barriers);
 #else
       barrier_generic(__threadfence(), nthreads, barrier_next, barriers);

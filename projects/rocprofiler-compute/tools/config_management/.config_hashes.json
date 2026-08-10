@@ -17,6 +17,29 @@
         "1700_graphics_register_bus_manager.yaml": "5e61a4f7c346f2d4373b4f8ff995501c"
       }
     },
+    "gfx1250": {
+      "files": {
+        "0000_top_stats.yaml": "389a0a8101238b6dda7f4f4ae5a3c718",
+        "0100_system_info.yaml": "b5823ba6b80439996727e3e8982a2ff6",
+        "0200_system_speed_of_light.yaml": "18f841ff3cd2a36987bdbb8a2e8766c1",
+        "0300_memory_chart.yaml": "a87a7149747459300f24da5f6ba798c1",
+        "0400_roofline.yaml": "2a839ae6e84a846345027ec9758efd11",
+        "0500_command_processor_cpc.yaml": "393bf6bc23b574912e4df7dc4b74d3c4",
+        "0600_workgroup_manager_spi.yaml": "0bc73c166cf74ee86a5b5a5997a80562",
+        "0700_workgroup_processor_wgp.yaml": "3b381f97aa02b9d61eb92fddc5d80512",
+        "0800_gl0_texture_addresser_txa.yaml": "a500a73ac6834fe7f8935e1bb5880548",
+        "0900_gl0_cache_and_lds.yaml": "780b63beb42ecc7f3c78cbdab377770c",
+        "1000_gl0_texture_data_txd.yaml": "f20343c12ddfde652c9e9b1259624961",
+        "1100_gl1_cache.yaml": "5328b776681a685b2b6dc47058abaef1",
+        "1200_graphics_level_arbiter_glarb.yaml": "0c2d19a9bd097ad64444ba808de3815b",
+        "1300_gl2_cache.yaml": "823b326f98c5ee67832f54854800e0b2",
+        "1400_efficiency_arbiter_ea.yaml": "c2a106c58f1ed46fe7638ee52ab2a919",
+        "1500_central_hub_ch.yaml": "5e9755e44897eb3d4d5c4051bcff3f34",
+        "1600_translation_cache_l1_utcl1.yaml": "bc80e9c94abc6f3d6612cd06ffad901d",
+        "1700_graphics_register_bus_manager_grbm.yaml": "b20f6321c9ea095fcbc7256fa8f34e7e",
+        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
+      }
+    },
     "gfx908": {
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",

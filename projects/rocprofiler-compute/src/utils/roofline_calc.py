@@ -123,6 +123,18 @@ SUPPORTED_DATATYPES: dict[str, dict[str, OpsSupport]] = {
         "I32": OpsSupport.VALU,
         "I64": OpsSupport.VALU,
     },  # Unsupported: F4, F6, F8
+    "gfx1250": {
+        "FP4": OpsSupport.MATRIX,
+        "FP6": OpsSupport.MATRIX,
+        "FP8": OpsSupport.MATRIX,
+        "FP16": OpsSupport.VALU | OpsSupport.MATRIX,
+        "BF16": OpsSupport.MATRIX,
+        "FP32": OpsSupport.VALU | OpsSupport.MATRIX,
+        "FP64": OpsSupport.VALU,
+        "I8": OpsSupport.VALU | OpsSupport.MATRIX,
+        "I32": OpsSupport.VALU,
+        "I64": OpsSupport.VALU,
+    },
 }
 
 
