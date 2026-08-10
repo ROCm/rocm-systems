@@ -26,15 +26,6 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/test_generate_device_table.py"
   )
 
-  # CPU-only generator unit test: guards src/device/ce_reduce/generate.py's
-  # per-instantiation TU splitting (ce_reduce_impl.h.in / ce_reduce_launcher.cpp.in
-  # template expansion). Needs no GPU and no built library.
-  add_test(
-    NAME rccl-generate-ce-reduce
-    COMMAND "${Python3_EXECUTABLE}"
-            "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
-  )
-
   if (ENABLE_CODE_COVERAGE)
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
@@ -242,8 +233,8 @@ if(BUILD_TESTS)
   # Create rccl-UnitTests binary
   add_executable(rccl-UnitTests ${TEST_SOURCE_FILES})
 
-  # AICOMRCCL-1534 / net-plugin assignment tests: net_reload_plugin.cpp is compiled into
-  # rccl-UnitTests and loaded in-process via NCCL_NET_PLUGIN=STATIC_PLUGIN (dlopen(NULL)).
+  # AICOMRCCL-1534: net_reload_plugin.cpp is compiled into rccl-UnitTests and loaded
+  # in-process via NCCL_NET_PLUGIN=STATIC_PLUGIN (dlopen(NULL)), so no external .so.
   # Scope its headers to the file so the generic example headers don't shadow others.
   set_source_files_properties(plugin/net_reload_plugin.cpp PROPERTIES
     INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/net/example/nccl)
@@ -251,7 +242,7 @@ if(BUILD_TESTS)
   # dlsym(dlopen(NULL), ...) only finds symbols present in the dynamic symbol table;
   # export just the one plugin symbol (narrow, unlike a broad -rdynamic).
   target_link_options(rccl-UnitTests PRIVATE
-    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12")
+    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v10")
 
   # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
   # (inline, static, constexpr, template functions) and can run in both Release and Debug.
@@ -268,6 +259,10 @@ if(BUILD_TESTS)
       DdaCollCommonTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
+      device/TestTDM.cpp
+      device/TestTdmCopy.cpp
+      device/TestAsyncCopy.cpp
+      device/TestLdsTransfer.cpp
       device/GinDeviceTests.cpp
       device/GinAnvilIpcDevice_test.cpp
       DeviceApiTests.cpp
@@ -298,6 +293,26 @@ if(BUILD_TESTS)
       ${PROJECT_BINARY_DIR}/hipify/src/include
       ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
     )
+
+    # device/TestTdmCopy.cpp exercises tdm/tdmCopy.h, which detects TDM toolchain
+    # support via __has_include(<hip/amd_detail/amd_gfx1250_TDM.h>). Some ROCm SDKs
+    # do not ship that descriptor header, in which case every tdm:: entry point
+    # would compile to a deleted stub and the tests could not link. The repo
+    # vendors an equivalent descriptor at src/device/tdm/tdm.h, so when the SDK is
+    # missing the header we stage a copy at its canonical include path and add
+    # that directory to the fixtures include search path only.
+    find_path(RCCL_GFX1250_TDM_HEADER
+      NAMES hip/amd_detail/amd_gfx1250_TDM.h
+      PATHS ${RCCL_COMMON_INCLUDE_DIRS} "${ROCM_PATH}/include")
+    if(NOT RCCL_GFX1250_TDM_HEADER)
+      set(_rccl_tdm_fallback_dir "${PROJECT_BINARY_DIR}/tdm_fallback")
+      configure_file(
+        "${PROJECT_SOURCE_DIR}/src/device/tdm/tdm.h"
+        "${_rccl_tdm_fallback_dir}/hip/amd_detail/amd_gfx1250_TDM.h"
+        COPYONLY)
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE "${_rccl_tdm_fallback_dir}")
+      message(STATUS "rccl-UnitTestsFixtures: SDK lacks amd_gfx1250_TDM.h; using vendored fallback from src/device/tdm/tdm.h")
+    endif()
 
   if(ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM_GIN)

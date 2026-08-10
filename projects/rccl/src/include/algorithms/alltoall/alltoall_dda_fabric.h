@@ -16,6 +16,7 @@
 #pragma once
 
 #include "algorithms/CollCommon.h"
+#include "algorithms/CollCommonTdm.h"
 #include "fabric_gpu_barrier.h"
 
 namespace meta::comms {
@@ -59,6 +60,32 @@ __launch_bounds__(512)
   }
 
   // barrier to ensure remote ranks won't free their buffers until I'm done
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+}
+
+// Tensor-data-mover variant: same phases and barrier placement as the kernel
+// above, with the staging copy and the peer exchange driven by TDM.
+template <typename T, int NRANKS_CT>
+__launch_bounds__(kTdmThreadsPerBlock) __global__
+  void ddaAllToAllFabricTdm(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
+                            const T* __restrict__ sendbuff, int selfRank, int nRanks, FabricGpuBarrier barrier) {
+  __shared__ __align__(kTdmRowBytes) uint8_t lds[kTdmLdsBytes];
+  const TdmWarpTile tile = tdmWarpTile();
+  uint8_t* window0 = tdmWindow(lds, 0);
+  uint8_t* window1 = tdmWindow(lds, 1);
+
+  uint8_t* const* peers = reinterpret_cast<uint8_t* const*>(ipcbuffs);
+  const int nRanksEff = (NRANKS_CT > 0) ? NRANKS_CT : nRanks;
+  const size_t perRankBytes = count * sizeof(T);
+
+  tdmCopyRange(reinterpret_cast<const uint8_t*>(sendbuff), peers[selfRank], perRankBytes * nRanksEff, window0, window1,
+               tile);
+
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+
+  tdmAllToAll<NRANKS_CT>(peers, reinterpret_cast<uint8_t*>(recvbuff), selfRank, nRanks, perRankBytes, window0, window1,
+                         tile);
+
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
 }
 

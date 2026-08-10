@@ -41,7 +41,12 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
 
   // Use the block cap chosen at init (barrier flag buffer is sized for it).
   const int nBlocksMax = comm->ddaFabricMaxBlocks;
-  auto gridBlock = meta::comms::getGridAndBlockDims(count, sizeof(T), nBlocksMax);
+  const bool useTdm = comm->ddaUseTdm;
+  // Both sizings depend only on the element count, so every rank in the clique
+  // agrees on the grid -- FabricGpuBarrier pairs ranks by blockIdx and would
+  // hang if they did not.
+  auto gridBlock = useTdm ? meta::comms::getTdmGridAndBlockDims(count * sizeof(T), nBlocksMax) :
+                            meta::comms::getGridAndBlockDims(count, sizeof(T), nBlocksMax);
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 
@@ -51,25 +56,43 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  INFO(NCCL_COLL, "DDA fabric AllToAll: launching kernel: nRanks=%d count=%zu grid=%u block=%u%s", nRanks, count,
-       grid.x, block.x, (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
+  INFO(NCCL_COLL, "DDA fabric AllToAll: launching %s kernel: nRanks=%d count=%zu grid=%u block=%u%s",
+       useTdm ? "TDM" : "vector", nRanks, count, grid.x, block.x,
+       (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
   // Note: the copy of sendbuff into this rank's scratch buffer is performed
-  // inside the kernel (copyFromSrcToDest) rather than via a host-side
-  // hipMemcpyAsync, which is expensive to launch on ROCm.
-  switch (nRanks) {
-  case 4:
-    meta::comms::ddaAllToAllFabric<T, 4><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
-    break;
-  case 8:
-    meta::comms::ddaAllToAllFabric<T, 8><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
-    break;
-  default:
-    meta::comms::ddaAllToAllFabric<T, 0><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
-    break;
+  // inside the kernel rather than via a host-side hipMemcpyAsync, which is
+  // expensive to launch on ROCm.
+  if (useTdm) {
+    switch (nRanks) {
+    case 4:
+      meta::comms::ddaAllToAllFabricTdm<T, 4><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+      break;
+    case 8:
+      meta::comms::ddaAllToAllFabricTdm<T, 8><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+      break;
+    default:
+      meta::comms::ddaAllToAllFabricTdm<T, 0><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+      break;
+    }
+  } else {
+    switch (nRanks) {
+    case 4:
+      meta::comms::ddaAllToAllFabric<T, 4><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+      break;
+    case 8:
+      meta::comms::ddaAllToAllFabric<T, 8><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+      break;
+    default:
+      meta::comms::ddaAllToAllFabric<T, 0><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+      break;
+    }
   }
 
   CUDACHECK(cudaGetLastError());

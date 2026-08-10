@@ -84,6 +84,11 @@ set(SRC_FILES
   device/onerank.cu
   device/network/unpack/unpack_defs.h
   device/network/unpack/unpack.h
+  device/tdm/tdm.h
+  device/tdm/cachePolicy.h
+  device/tdm/syncPolicy.h
+  device/tdm/asyncCopy.h
+  device/tdm/tdmCopy.h
   device/symmetric/all_gather.cuh
   device/symmetric/all_gather_gin.cuh
   device/symmetric/all_reduce.cuh
@@ -115,6 +120,8 @@ set(SRC_FILES
   include/mem_manager.h
   include/allocator.h
   include/algorithms/CollCommon.h
+  include/algorithms/CollCommonTdm.h
+  include/algorithms/ReduceCopyTdm.h
   include/algorithms/CollCommon_ll128.h
   include/algorithms/all_reduce/all_reduce_dda.h
   include/algorithms/all_reduce/all_reduce_dda_ll.h
@@ -660,7 +667,6 @@ endif()
 
 set(GEN_DIR "${HIPIFY_DIR}/gensrc")
 set(GEN_SYM_DIR "${GEN_DIR}/symmetric")
-set(GEN_CE_REDUCE_DIR "${GEN_DIR}/ce_reduce")
 
 if(ONLY_FUNCS)
   message(WARNING "Using ONLY_FUNCS = ${ONLY_FUNCS}. Not meant for release builds.")
@@ -690,20 +696,6 @@ if (GENERATE_SYM_KERNELS)
     message(SEND_ERROR "Error: ${gen_sym_py_error}")
     message(FATAL_ERROR "${RCCL_SOURCE_DIR}/src/device/symmetric/generate.py failed")
   endif()
-endif()
-
-# Execute the python script to generate one TU per CE-reduce kernel
-# instantiation (see src/device/ce_reduce/generate.py for why this is split
-# out instead of living in a single ce_reduce.cc).
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/ce_reduce/generate.py ${GEN_CE_REDUCE_DIR}
-    WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
-    RESULT_VARIABLE gen_ce_reduce_py_result
-    ERROR_VARIABLE gen_ce_reduce_py_error
-)
-if (gen_ce_reduce_py_result)
-  message(SEND_ERROR "Error: ${gen_ce_reduce_py_error}")
-  message(FATAL_ERROR "${RCCL_SOURCE_DIR}/src/device/ce_reduce/generate.py failed")
 endif()
 
 # Find the generated files in the output directory
@@ -749,12 +741,16 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric_ll128\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll128\\.cu\\.cpp$")
-  # ce_reduce.cc is now pure host code (a dispatcher calling into the
-  # per-instantiation launchers generated under gensrc/ce_reduce/, which are
-  # excluded above by the "gensrc/.*\\.cpp$" filter and compiled separately
-  # by cmake/DeviceLinker.cmake). It stays in the main target and is
-  # compiled --offload-host-only like ce_coll.cc.
-  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_all_reduce_fabric_ll.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_all_gather_fabric_ll.cu.cpp, dda_alltoall_fabric.cu.cpp)")
+  # ce_reduce.cc contains the CE AllReduce __global__ kernel and its launcher;
+  # it is compiled with full HIP by the device linker step (ce_reduce.o) so the
+  # fat binary is properly embedded. ce_coll.cc (no __global__ call sites)
+  # stays in the main target and is compiled --offload-host-only as usual.
+  # When ENABLE_CE_REDUCE_KERNEL is OFF there is no device linker step for it, so
+  # it stays in the main target and compiles to just the host-side stub launcher.
+  if(ENABLE_CE_REDUCE_KERNEL)
+    list(FILTER HIP_SOURCES EXCLUDE REGEX "device/ce_reduce\\.cc$")
+  endif()
+  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, device/ce_reduce.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_all_reduce_fabric_ll.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_all_gather_fabric_ll.cu.cpp, dda_alltoall_fabric.cu.cpp)")
 endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
@@ -806,6 +802,29 @@ if(DEMANGLE_DIR)
 endif()
 if(ROCTX_ENABLE)
   target_include_directories(rccl PRIVATE ${ROCTRACER_INCLUDE_DIR})
+endif()
+
+# The DDA Simple fabric kernels use the tensor data mover via tdm/tdmCopy.h,
+# which detects toolchain support with
+# __has_include(<hip/amd_detail/amd_gfx1250_TDM.h>). Some ROCm SDKs do not ship
+# that descriptor header; without it TDM_SUPPORTED is 0 and the TDM kernels
+# silently compile down to their vector fallback. The repo vendors an equivalent
+# descriptor at src/device/tdm/tdm.h, so stage a copy at the canonical include
+# path when the SDK lacks one. This must run before DeviceLinker.cmake is
+# included below, since rccl_device_defs snapshots this target's include
+# directories and the dda_*_fabric.cu kernels are built by the device linker.
+# test/CMakeLists.txt does the same for the unit-test fixtures.
+find_path(RCCL_GFX1250_TDM_HEADER
+  NAMES hip/amd_detail/amd_gfx1250_TDM.h
+  PATHS ${HIP_INCLUDE_DIRS} "${ROCM_PATH}/include")
+if(NOT RCCL_GFX1250_TDM_HEADER)
+  set(_rccl_tdm_fallback_dir "${PROJECT_BINARY_DIR}/tdm_fallback")
+  configure_file(
+    "${PROJECT_SOURCE_DIR}/src/device/tdm/tdm.h"
+    "${_rccl_tdm_fallback_dir}/hip/amd_detail/amd_gfx1250_TDM.h"
+    COPYONLY)
+  target_include_directories(rccl PRIVATE "${_rccl_tdm_fallback_dir}")
+  message(STATUS "rccl: SDK lacks amd_gfx1250_TDM.h; using vendored fallback from src/device/tdm/tdm.h")
 endif()
 
 ## Set RCCL compile definitions
@@ -959,6 +978,10 @@ endif()
 if(CE_ENABLED)
   target_compile_definitions(rccl PRIVATE CE_BATCH_ASYNC_SUPPORTED)
   message(STATUS "CE_BATCH_ASYNC_SUPPORTED compile definition enabled")
+endif()
+if(NOT ENABLE_CE_REDUCE_KERNEL)
+  target_compile_definitions(rccl PRIVATE RCCL_DISABLE_CE_REDUCE_KERNEL)
+  message(STATUS "ENABLE_CE_REDUCE_KERNEL=OFF: CE AllReduce local-reduction kernel replaced by a failing stub")
 endif()
 if(CUMEM_DMABUF_EXPORT_ENABLED)
   target_compile_definitions(rccl PRIVATE RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)

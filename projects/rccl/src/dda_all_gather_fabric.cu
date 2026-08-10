@@ -41,7 +41,12 @@ static ncclResult_t ncclAllGatherDdaFabricTyped(const void* sendbuff, void* recv
 
   // Use the block cap chosen at init (barrier flag buffer is sized for it).
   const int nBlocksMax = comm->ddaFabricMaxBlocks;
-  auto gridBlock = meta::comms::getGridAndBlockDims(sendcount, sizeof(T), nBlocksMax);
+  const bool useTdm = comm->ddaUseTdm;
+  // Both sizings depend only on the element count, so every rank in the clique
+  // agrees on the grid -- FabricGpuBarrier pairs ranks by blockIdx and would
+  // hang if they did not.
+  auto gridBlock = useTdm ? meta::comms::getTdmGridAndBlockDims(sendcount * sizeof(T), nBlocksMax) :
+                            meta::comms::getGridAndBlockDims(sendcount, sizeof(T), nBlocksMax);
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 
@@ -51,28 +56,49 @@ static ncclResult_t ncclAllGatherDdaFabricTyped(const void* sendbuff, void* recv
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  INFO(NCCL_COLL, "DDA fabric AllGather: launching kernel: nRanks=%d sendcount=%zu grid=%u block=%u%s", nRanks,
-       sendcount, grid.x, block.x, (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
+  INFO(NCCL_COLL, "DDA fabric AllGather: launching %s kernel: nRanks=%d sendcount=%zu grid=%u block=%u%s",
+       useTdm ? "TDM" : "vector", nRanks, sendcount, grid.x, block.x,
+       (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
   // Specialize the kernel for common clique sizes (compile-time NRANKS -> the
-  // unrolled CollCommon allGather), and fall back to the runtime kernel
-  // (NRANKS_CT == 0) for any other size.
-  switch (nRanks) {
-  case 4:
-    meta::comms::ddaAllGatherFabric<T, 4><<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), sendcount,
-                                                                      static_cast<const T*>(sendbuff), comm->rank,
-                                                                      nRanks, barrierHost);
-    break;
-  case 8:
-    meta::comms::ddaAllGatherFabric<T, 8><<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), sendcount,
-                                                                      static_cast<const T*>(sendbuff), comm->rank,
-                                                                      nRanks, barrierHost);
-    break;
-  default:
-    meta::comms::ddaAllGatherFabric<T, 0><<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), sendcount,
-                                                                      static_cast<const T*>(sendbuff), comm->rank,
-                                                                      nRanks, barrierHost);
-    break;
+  // unrolled allGather), and fall back to the runtime kernel (NRANKS_CT == 0)
+  // for any other size.
+  if (useTdm) {
+    switch (nRanks) {
+    case 4:
+      meta::comms::ddaAllGatherFabricTdm<T, 4><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), sendcount, static_cast<const T*>(sendbuff), comm->rank, nRanks,
+        barrierHost);
+      break;
+    case 8:
+      meta::comms::ddaAllGatherFabricTdm<T, 8><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), sendcount, static_cast<const T*>(sendbuff), comm->rank, nRanks,
+        barrierHost);
+      break;
+    default:
+      meta::comms::ddaAllGatherFabricTdm<T, 0><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), sendcount, static_cast<const T*>(sendbuff), comm->rank, nRanks,
+        barrierHost);
+      break;
+    }
+  } else {
+    switch (nRanks) {
+    case 4:
+      meta::comms::ddaAllGatherFabric<T, 4><<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff),
+                                                                        sendcount, static_cast<const T*>(sendbuff),
+                                                                        comm->rank, nRanks, barrierHost);
+      break;
+    case 8:
+      meta::comms::ddaAllGatherFabric<T, 8><<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff),
+                                                                        sendcount, static_cast<const T*>(sendbuff),
+                                                                        comm->rank, nRanks, barrierHost);
+      break;
+    default:
+      meta::comms::ddaAllGatherFabric<T, 0><<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff),
+                                                                        sendcount, static_cast<const T*>(sendbuff),
+                                                                        comm->rank, nRanks, barrierHost);
+      break;
+    }
   }
 
   CUDACHECK(cudaGetLastError());

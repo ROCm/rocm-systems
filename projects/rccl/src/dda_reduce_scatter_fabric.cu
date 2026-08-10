@@ -41,9 +41,13 @@ static ncclResult_t ncclReduceScatterDdaFabricTyped(const void* sendbuff, void* 
 
   // Use the block cap chosen at init (barrier flag buffer is sized for it).
   const int nBlocksMax = comm->ddaFabricMaxBlocks;
+  const bool useTdm = comm->ddaUseTdm;
   // For reduce-scatter we use recvcount for grid calculation since each rank
-  // processes its own shard.
-  auto gridBlock = meta::comms::getGridAndBlockDims(recvcount, sizeof(T), nBlocksMax);
+  // processes its own shard. Both sizings depend only on the count, so every
+  // rank in the clique agrees on the grid -- FabricGpuBarrier pairs ranks by
+  // blockIdx and would hang if they did not.
+  auto gridBlock = useTdm ? meta::comms::getTdmGridAndBlockDims(recvcount * sizeof(T), nBlocksMax) :
+                            meta::comms::getGridAndBlockDims(recvcount, sizeof(T), nBlocksMax);
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 
@@ -55,25 +59,46 @@ static ncclResult_t ncclReduceScatterDdaFabricTyped(const void* sendbuff, void* 
 
   CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
 
-  INFO(NCCL_COLL, "DDA fabric ReduceScatter: launching kernel: nRanks=%d recvcount=%zu grid=%u block=%u%s", nRanks,
-       recvcount, grid.x, block.x, (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
+  INFO(NCCL_COLL, "DDA fabric ReduceScatter: launching %s kernel: nRanks=%d recvcount=%zu grid=%u block=%u%s",
+       useTdm ? "TDM" : "vector", nRanks, recvcount, grid.x, block.x,
+       (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
-  switch (nRanks) {
-  case 4:
-    meta::comms::ddaReduceScatterFabric<T, 4, false>
-      <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
-                                   comm->rank, nRanks, barrierHost, nullptr);
-    break;
-  case 8:
-    meta::comms::ddaReduceScatterFabric<T, 8, false>
-      <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
-                                   comm->rank, nRanks, barrierHost, nullptr);
-    break;
-  default:
-    meta::comms::ddaReduceScatterFabric<T, 0, false>
-      <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
-                                   comm->rank, nRanks, barrierHost, nullptr);
-    break;
+  if (useTdm) {
+    switch (nRanks) {
+    case 4:
+      meta::comms::ddaReduceScatterFabricTdm<T, 4, false>
+        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
+                                     comm->rank, nRanks, barrierHost, nullptr);
+      break;
+    case 8:
+      meta::comms::ddaReduceScatterFabricTdm<T, 8, false>
+        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
+                                     comm->rank, nRanks, barrierHost, nullptr);
+      break;
+    default:
+      meta::comms::ddaReduceScatterFabricTdm<T, 0, false>
+        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
+                                     comm->rank, nRanks, barrierHost, nullptr);
+      break;
+    }
+  } else {
+    switch (nRanks) {
+    case 4:
+      meta::comms::ddaReduceScatterFabric<T, 4, false>
+        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
+                                     comm->rank, nRanks, barrierHost, nullptr);
+      break;
+    case 8:
+      meta::comms::ddaReduceScatterFabric<T, 8, false>
+        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
+                                     comm->rank, nRanks, barrierHost, nullptr);
+      break;
+    default:
+      meta::comms::ddaReduceScatterFabric<T, 0, false>
+        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
+                                     comm->rank, nRanks, barrierHost, nullptr);
+      break;
+    }
   }
 
   CUDACHECK(cudaGetLastError());

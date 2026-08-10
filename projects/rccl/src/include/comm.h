@@ -638,6 +638,10 @@ struct ncclComm {
   nccl_dda_detail::DdaIpcBarrierState* ddaIpcBarrierState; /* IPC path only */
   nccl_dda_detail::DdaFabricBarrierState* ddaFabricBarrierState; /* fabric path only */
   int ddaFabricMaxBlocks;
+  // Whether the Simple-protocol fabric kernels drive their bulk movement with
+  // the tensor data mover. Resolved once at init (arch support + RCCL_DDA_TDM)
+  // because the check queries device properties.
+  bool ddaUseTdm;
   // True when ddaScratch is VMM (cuMem) backed (fabric path); selects the
   // matching deallocator at teardown.
   bool ddaScratchIsVmm;
@@ -677,6 +681,7 @@ struct ncclComm {
   int nNodes;
   int rcclUseOneSlice; // RCCL: true if this comm is using one slice per primitive
   int cheapPostSendFenceOff; // RCCL: true if cheap post-send fence is disabled
+  int ll128AlwaysShmem; // RCCL: true to always stage LL128 local buffer traffic through shared memory
   int localRank;
   int localRanks;
   int maxLocalRanks;

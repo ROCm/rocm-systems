@@ -89,6 +89,7 @@ option(DUMP_ASM                                "Disassemble and dump"           
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
+option(ENABLE_CE_REDUCE_KERNEL                 "Build the CE AllReduce local-reduction kernel" ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
 option(DISABLE_KERNARG_PRELOAD                 "Disable amdgpu-kernarg-preload-count compile/link flag" OFF)
 option(BUILD_NCCL4PY                           "Build the nccl4py Python bindings wheel"       OFF)
@@ -112,6 +113,8 @@ option(ENABLE_ROCSHMEM                         "Link librocshmem.a into librccl.
 option(ENABLE_ROCSHMEM_GIN                     "Compile GIN rocshmem plugins; symbols resolved at runtime by the executable" OFF)
 option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device unit tests with ENABLE_ROCSHMEM on test targets only (no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
+# gfx1250 only: reserve 256 KiB LDS in SIMPLE kernels for reduceCopy TDM staging.
+option(RCCL_REDUCECOPY_TDM_LDS                 "Reserve 256KiB LDS for SIMPLE reduceCopy TDM on gfx1250" ON)
 
 # Default GPU architectures to build
 #==================================================================================================

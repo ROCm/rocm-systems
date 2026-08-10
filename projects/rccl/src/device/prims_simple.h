@@ -8,6 +8,7 @@
 
 #include "rccl_metadata.h"
 #include "network/unpack/unpack.h"
+#include "algorithms/ReduceCopyTdm.h"
 #include <cassert>
 
 enum primsMode {
@@ -278,16 +279,32 @@ class Primitives<T, RedOp, Fan, Direct,
             && MultimemSrcs == 0 && MultimemDsts == 0 && !Src) {
           // We can only have one direct receive. Since srcs[0] == dstPtr+offset, skip one copy
           if (Send && Dst && ncclShmem.groups[group].srcs[0] != ncclShmem.groups[group].dsts[1]) {
-            reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, 1, 1, 0, 1, MaxSend, /*PreOpSrcs*/ 0>(
-              tid, nworkers, /*redArg*/ 0, /*postOp*/ false, 1, ncclShmem.groups[group].srcs, fan.nsend(),
-              ncclShmem.groups[group].dsts + 1, workSize);
+            if (workSize > 0) {
+              if (fan.nsend() == 1) {
+                rccl::reduceCopyDispatchOrTdm<Unroll, useAcc && Dst, RedOp, T, 0, 1, 1, 0, 1, MaxSend,
+                                              /*PreOpSrcs=*/0>(
+                  tid, nworkers, /*redArg*/ 0, /*postOp*/ false, 1, ncclShmem.groups[group].srcs, 1,
+                  ncclShmem.groups[group].dsts + 1, workSize);
+              } else {
+                reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, 1, 1, 0, 1, MaxSend, /*PreOpSrcs*/ 0>(
+                  tid, nworkers, /*redArg*/ 0, /*postOp*/ false, 1, ncclShmem.groups[group].srcs, fan.nsend(),
+                  ncclShmem.groups[group].dsts + 1, workSize);
+              }
+            }
           }
         } else if (DirectSend && !DirectRecv && SrcBuf != Input && ncclShmem.groups[group].dsts[Dst] == nullptr) {
           // For broadcast in CollNet to do empty send
-
-          reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs*/ 0>(
-            tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, Recv, ncclShmem.groups[group].srcs, Dst,
-            ncclShmem.groups[group].dsts, workSize);
+          if (workSize > 0) {
+            if constexpr (Recv == 1 && Dst == 1) {
+              rccl::reduceCopyDispatchOrTdm<Unroll, useAcc && Dst, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/0>(
+                tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, 1, ncclShmem.groups[group].srcs, 1,
+                ncclShmem.groups[group].dsts, workSize);
+            } else {
+              reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs*/ 0>(
+                tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, Recv, ncclShmem.groups[group].srcs, Dst,
+                ncclShmem.groups[group].dsts, workSize);
+            }
+          }
 
         } else if (ncclShmem.groups[group].srcs[0] && ncclShmem.groups[group].dsts[0]) {
           constexpr int PreOpSrcs = SrcBuf != Input                               ? 0 :
@@ -295,15 +312,38 @@ class Primitives<T, RedOp, Fan, Direct,
                                                                                     1;
           if (Send && Dst && ncclShmem.groups[group].dsts[1] == nullptr) {
             // this case should only be directCopySend() with registered buffers and send to net peer
-            reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, Recv + Src, Recv * MaxRecv + Src, 0, 1, 1, PreOpSrcs,
-                       Pipeline>(tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, Recv * fan.nrecv() + Src,
-                                 ncclShmem.groups[group].srcs, 1, ncclShmem.groups[group].dsts, workSize);
-          } else {
-            reduceCopy<Unroll, useAcc && Dst, RedOp, T, MultimemSrcs, Recv + Src, Recv * MaxRecv + Src, MultimemDsts,
-                       Send + Dst, Send * MaxSend + Dst, PreOpSrcs, Pipeline>(
-              tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, Recv * fan.nrecv() + Src,
-              ncclShmem.groups[group].srcs, Send * fan.nsend() + Dst, ncclShmem.groups[group].dsts, workSize,
-              ncclShmem.groups[group].acc);
+            if (workSize > 0) {
+              const int nSrcsRt = Recv * fan.nrecv() + Src;
+              if constexpr (PreOpSrcs == 0) {
+                rccl::reduceCopyDispatchOrTdm<Unroll, useAcc && Dst, RedOp, T, 0, Recv + Src, Recv * MaxRecv + Src, 0,
+                                              1, 1, PreOpSrcs, Pipeline>(
+                  tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, nSrcsRt, ncclShmem.groups[group].srcs, 1,
+                  ncclShmem.groups[group].dsts, workSize);
+              } else {
+                reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, Recv + Src, Recv * MaxRecv + Src, 0, 1, 1, PreOpSrcs,
+                           Pipeline>(tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, nSrcsRt,
+                                     ncclShmem.groups[group].srcs, 1, ncclShmem.groups[group].dsts, workSize);
+              }
+            }
+          } else if (workSize > 0) {
+            const int nSrcsRt = Recv * fan.nrecv() + Src;
+            const int nDstsRt = Send * fan.nsend() + Dst;
+            // IPC-registered P2P: user/direct buffers, not conn FIFO staging.
+            const bool p2pDirectMem =
+              P2p && Direct && directBuff != nullptr &&
+              ((Send && (flags & DirectWrite)) || (Recv && (flags & DirectRead)));
+            if (nSrcsRt == 1 && nDstsRt == 1 && !postOp && !(useAcc && Dst)) {
+              rccl::reduceCopyDispatchOrTdm<Unroll, useAcc && Dst, RedOp, T, MultimemSrcs, Recv + Src,
+                                            Recv * MaxRecv + Src, MultimemDsts, Send + Dst, Send * MaxSend + Dst,
+                                            PreOpSrcs, Pipeline>(
+                tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, nSrcsRt, ncclShmem.groups[group].srcs,
+                nDstsRt, ncclShmem.groups[group].dsts, workSize, ncclShmem.groups[group].acc, p2pDirectMem);
+            } else {
+              reduceCopy<Unroll, useAcc && Dst, RedOp, T, MultimemSrcs, Recv + Src, Recv * MaxRecv + Src,
+                         MultimemDsts, Send + Dst, Send * MaxSend + Dst, PreOpSrcs, Pipeline>(
+                tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, nSrcsRt, ncclShmem.groups[group].srcs,
+                nDstsRt, ncclShmem.groups[group].dsts, workSize, ncclShmem.groups[group].acc);
+            }
           }
 
         } else {
@@ -463,20 +503,36 @@ private:
     for (int slice = 0; slice < SlicePerChunk; ++slice) {
       ssize_t realSize = max(0, min(dataSize, peerElem - offset));
       bool fenceNeeded = false;
-      if (tid < nworkers) {
-        if (Send) {
-          // Scatter pre-scales data of input buffer only in non-Direct case
-          constexpr int PreOpSrcs = DirectSend ? 0 : 1;
-          if (tid == 0) ncclShmem.groups[group].srcs[0] = (T*)ncclShmem.groups[group].userInput + inpIx + offset;
+      if (Send) {
+        // Scatter pre-scales data of input buffer only in non-Direct case
+        constexpr int PreOpSrcs = DirectSend ? 0 : 1;
+        if (tid == 0) ncclShmem.groups[group].srcs[0] = (T*)ncclShmem.groups[group].userInput + inpIx + offset;
+        if (tid < nworkers) {
           // realSize is not accurate here; but intra-node does not rely on sizes FIFO
           waitPeer<0, DirectSend, 0, 1, 1, 0>(0, inpIx, offset, realSize);
           subBarrier();
+        }
+        if constexpr (PreOpSrcs == 0) {
+          if (nworkers == blockDim.x) barrier();
 #pragma unroll 1
-          // Loop over peers
           for (int j = 0; j < fan.nsend(); j++) {
             int i = (j + shift) % fan.nsend();
             ssize_t pOffset = i * peerOffset;
-            // Skip the data I am responsible of reducing myself
+            if (skip >= 0 && i >= skip) pOffset += peerOffset;
+            void* src0 = (T*)ncclShmem.groups[group].srcs[0] + pOffset;
+            void* dstPtr = ncclShmem.groups[group].dsts[i];
+            ssize_t realPeerSize = min(realSize, totalElem - pOffset);
+            if (realPeerSize > 0 && dstPtr != nullptr) {
+              rccl::reduceCopyOrTdm<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/0>(
+                tid, nworkers, ncclShmem.groups[group].redOpArgs, false, 1, src0, dstPtr, realPeerSize);
+              if (tid < nworkers) fenceNeeded = true;
+            }
+          }
+        } else if (tid < nworkers) {
+#pragma unroll 1
+          for (int j = 0; j < fan.nsend(); j++) {
+            int i = (j + shift) % fan.nsend();
+            ssize_t pOffset = i * peerOffset;
             if (skip >= 0 && i >= skip) pOffset += peerOffset;
             void* src0 = (T*)ncclShmem.groups[group].srcs[0] + pOffset;
             ssize_t realPeerSize = min(realSize, totalElem - pOffset);
@@ -484,29 +540,32 @@ private:
               reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 1, PreOpSrcs>(
                 tid, nworkers, ncclShmem.groups[group].redOpArgs, false, 1, &src0, 1, ncclShmem.groups[group].dsts + i,
                 realPeerSize);
-              // Mark for threadfence at the end
-              fenceNeeded |= true;
+              fenceNeeded = true;
             }
           }
-        } else if (Recv) {
-          if (tid == 0) ncclShmem.groups[group].dsts[0] = (T*)ncclShmem.groups[group].userOutput + outIx + offset;
-          ssize_t pOffset = index * peerOffset;
-          if (skip >= 0 && index >= skip) pOffset += peerOffset;
+        }
+      } else if (Recv) {
+        if (tid == 0) ncclShmem.groups[group].dsts[0] = (T*)ncclShmem.groups[group].userOutput + outIx + offset;
+        ssize_t pOffset = index * peerOffset;
+        if (skip >= 0 && index >= skip) pOffset += peerOffset;
+        if (tid < nworkers) {
           // Adjust remote index with peer offset in case we are directly pulling from peer's output buffer
           waitPeer<DirectRecv, 0, 1, 0, 0, 1>(outIx + pOffset, outIx + pOffset, offset, realSize);
           subBarrier();
+        }
+        if (nworkers == blockDim.x) barrier();
 #pragma unroll 1
-          for (int j = 0; j < fan.nrecv(); j++) {
-            int i = (j + shift) % fan.nrecv();
-            pOffset = i * peerOffset;
-            if (skip >= 0 && i >= skip) pOffset += peerOffset;
-            void* dst0 = (T*)ncclShmem.groups[group].dsts[0] + pOffset;
-            ssize_t realPeerSize = min(realSize, totalElem - pOffset);
-            if (DirectRecv && ncclShmem.groups[group].srcs[i] == dst0) realPeerSize = 0;
-            if (realPeerSize > 0)
-              reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/0>(
-                tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, 1, ncclShmem.groups[group].srcs + i, 1, &dst0,
-                realPeerSize);
+        for (int j = 0; j < fan.nrecv(); j++) {
+          int i = (j + shift) % fan.nrecv();
+          pOffset = i * peerOffset;
+          if (skip >= 0 && i >= skip) pOffset += peerOffset;
+          void* dst0 = (T*)ncclShmem.groups[group].dsts[0] + pOffset;
+          ssize_t realPeerSize = min(realSize, totalElem - pOffset);
+          if (DirectRecv && ncclShmem.groups[group].srcs[i] == dst0) realPeerSize = 0;
+          if (realPeerSize > 0) {
+            void* srcPtr = ncclShmem.groups[group].srcs[i];
+            rccl::reduceCopyOrTdm<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/0>(
+              tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, 1, srcPtr, dst0, realPeerSize);
           }
         }
       }
