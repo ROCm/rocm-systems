@@ -1029,6 +1029,35 @@ def test_gfx1250_wmma_f32_passes_c_modifier_to_accumulator_helper():
     assert 'amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi)' in body
 
 
+@pytest.mark.parametrize('k', [64, 128])
+@pytest.mark.parametrize(
+    ('input_type', 'a_fp8', 'b_fp8'),
+    [
+        ('FP8_FP8', 'true', 'true'),
+        ('FP8_BF8', 'true', 'false'),
+        ('BF8_FP8', 'false', 'true'),
+        ('BF8_BF8', 'false', 'false'),
+    ],
+)
+def test_gfx1250_wmma_f16_f8_passes_fp16_overflow_mode(
+    k: int, input_type: str, a_fp8: str, b_fp8: str
+) -> None:
+    inst = Instruction(f'V_WMMA_F16_16X16X{k}_{input_type}', 'ENC_VOP3P', 0, [])
+    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'gfx1250')
+
+    assert f'amdgpu::exec_wmma_f16_f8_spec<16, 16, {k}, {a_fp8}, {b_fp8}>(' in body
+    assert 'const_acc, wf.fp16_ovfl());' in body
+
+
+def test_gfx1250_wmma_f16_overflow_mode_is_scoped_to_f8_helper() -> None:
+    inst = Instruction('V_WMMA_F16_16X16X32_F16', 'ENC_VOP3P', 0, [])
+    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'gfx1250')
+
+    assert 'amdgpu::exec_wmma_f16_spec<16, 16, 32>(' in body
+    assert 's2, const_acc);' in body
+    assert 'wf.fp16_ovfl()' not in body
+
+
 def test_rdna_wmma_uses_arch_specific_wave32_operand_layout():
     operands = [
         Operand('vdst', 256, 'OPR_VGPR', False, True, False, False, 0),
