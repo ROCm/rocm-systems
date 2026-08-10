@@ -238,9 +238,11 @@ correlation_id_finalize()
         {
             if(itr && itr->get_ref_count() > 0)
             {
-                // Deliberately leaked by the signal-less loss policy: its kernel may
-                // still be running, so force-retiring it here would release state the
-                // GPU can still reach.
+                // "Leaked" = a signal-less dispatch whose firmware completion record was
+                // lost (ring overrun, slot quarantine, or teardown), so no record is
+                // emitted and the id is intentionally not retired here: its kernel may
+                // still be running, and force-retiring would release state the GPU can
+                // still reach.
                 if(kfd::signal_less_id_is_leaked(itr->internal)) continue;
 
                 ++ndangling;
