@@ -622,26 +622,30 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   const bool trap_return =
       mnemonic == "s_rfe_b64" || mnemonic == "s_rfe_i64" || mnemonic == "s_rfe";
 
-  // Report a faulting access here, between the PC advance and the pipeline
-  // decision. Both orderings matter. The report has to come after the advance
-  // so a wave serialized by the handler resumes past the access rather than
-  // re-executing it; the pipeline decision has to come after the report so that
-  // discarding the access is conditional on the debugger actually claiming the
+  // A faulting access is discarded only if the debugger actually claims the
   // fault. debug_active_ is CU-wide, so the probe also fires for waves of a
-  // process nobody is debugging -- on_wave_memory_violation() declines those,
-  // and dropping the instruction anyway silently lost a store, or left a load's
+  // process nobody is debugging; on_wave_memory_violation() declines those, and
+  // dropping the instruction anyway silently lost a store, or left a load's
   // destination registers stale, in an undebugged process.
+  //
+  // The report has to be made against the resume PC -- a wave the handler
+  // serializes must come back past the access, not re-execute it -- so the PC
+  // is advanced for the duration of the report and put back if the fault goes
+  // unclaimed. Everything downstream then sees exactly the ordering it saw
+  // before: the instruction is routed at the issue PC and the PC advances
+  // afterwards.
   const uint64_t issue_pc = active->pc;
-  active->pc += inst_size;
-
   bool fault_claimed = false;
   if (debug_memory_fault && !active->debug_halted()) {
+    active->pc += inst_size;
     for (uint64_t addr : dbg_addrs) {
       if (access_faults(addr) && memory_violation_handler_(*active, addr, dbg_is_write)) {
         fault_claimed = true;
         break;
       }
     }
+    if (!fault_claimed)
+      active->pc = issue_pc;
   }
 
   if (fault_claimed) {
@@ -651,11 +655,13 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   if (inst->is_memory_op()) {
     if (inst->data() && inst->data()->tag() == GLOBAL_MEM) {
       auto *d = inst->data_as<VectorMemState>();
-      d->issue_pc = issue_pc;
+      d->issue_pc = active->pc;
     }
     route_memory_inst(inst, *active);
   } else
     delete inst;
+
+  active->pc += inst_size;
 
   // Deliver on the causes this instruction raised, not on TRAPSTS changing.
   // TRAPSTS.EXCP is sticky and nothing in the model clears it between
