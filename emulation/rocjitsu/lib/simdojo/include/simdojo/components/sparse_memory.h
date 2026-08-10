@@ -188,10 +188,12 @@ public:
   }
 
   /// @brief Return whether the page containing @p addr has sparse backing.
+  /// @details Pages are keyed by their aligned byte address, the same key
+  /// get_page_locked() and read_sparse_chunk() use -- not by page number.
   bool has_page(uint64_t addr) const {
     const auto &stripe = page_stripes_[stripe_index(addr)];
     std::shared_lock<std::shared_mutex> lock(stripe.mutex);
-    return stripe.pages.contains(addr >> PAGE_SHIFT);
+    return stripe.pages.contains(addr & ~PAGE_MASK);
   }
 
 private:
