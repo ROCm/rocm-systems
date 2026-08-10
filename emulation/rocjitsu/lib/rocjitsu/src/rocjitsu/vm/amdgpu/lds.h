@@ -14,11 +14,12 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-/// @brief Per-Compute Unit Local Data Share (LDS) memory.
+/// @brief Local Data Share (LDS) memory backing for a dispatch placement.
 ///
-/// @details LDS is a fast on-chip SRAM shared by all wavefronts within a single CU.
-/// Size is configurable per CU. Addresses are byte-granularity, local to the CU
-/// (not globally visible).
+/// @details CU-mode workgroups use the backing owned by one ComputeUnitCore.
+/// RDNA WGP-mode workgroups use a backing owned by the sibling-CU pair. The
+/// latter has the combined capacity of both physical CUs. Addresses are
+/// byte-granularity and local to the selected placement (not globally visible).
 class Lds : public simdojo::MemoryInterface {
 public:
   /// @brief Construct LDS with the given size in kilobytes.

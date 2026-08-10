@@ -345,7 +345,11 @@ in the ROCm AMDGPU kernel driver. AMD SMI passes the raw `uint64_t` value throug
 
 - **For violation fields (`metric --violation`) returning N/A:** The violation API is only supported on MI3x+ (MI300X and newer). On older ASICs (Navi/MI1x/MI2x), use `amd-smi metric --power` and check `THROTTLE_STATUS` instead.
 - **For `THROTTLE_STATUS` in `metric --power` showing N/A:** This field is available on Navi/MI1x/MI2x (gpu_metrics v1.3) but not on MI3x+. On MI3x+, use `amd-smi metric --violation` or `amd-smi monitor --violation` instead.
-- Check your ASIC generation with {c:func}`amdsmi_get_gpu_asic_info` or `amd-smi static --asic`
+- **For gpu_metrics-sourced fields (violations, `SOCKET_POWER`, engine usage, etc.) returning N/A:** `gpu_metrics` is a versioned structure supplied by the amdgpu driver, and AMD SMI needs explicit support for each version's layout. When the driver is newer than your AMD SMI (or ROCm) release, it can report a `gpu_metrics` version AMD SMI doesn't recognize yet, so these fields read N/A. Upgrade AMD SMI or ROCm to a release paired with your driver's `gpu_metrics` version to resolve this. (ROCm 7.13 added support for the dynamic `gpu_metrics` layout introduced in v1.9, which handles current and future versions, so releases from 7.13 onward are no longer affected by this mismatch.)
+- Check your ASIC generation with {c:func}`amdsmi_get_gpu_asic_info` or
+  `amd-smi static --asic`
+
+See {ref}`About N/A values <cli-output-na>` for more information.
 
 ## Further reading
 

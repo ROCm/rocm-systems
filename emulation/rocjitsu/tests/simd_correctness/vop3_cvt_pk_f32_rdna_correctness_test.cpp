@@ -16,13 +16,10 @@
 ///   v_cvt_pk_u16_f32: lane = (uint16_t)clamp(f, 0, 65535)
 /// with src0 -> low half, src1 -> high half of the dst.
 ///
-/// This file also pins the deliberate codegen QUIRK in the *normalized* packs:
-/// RDNA spells them v_cvt_pk_norm_{i16,u16}_f32 (underscore), and the underscore
-/// i16 form is generated with the UNSIGNED u16 lambda — clamp(f * 65535, 0,
-/// 65535) — despite "i16" in its name (see simd_codegen.py "QUIRK"). The
-/// no-underscore signed spelling (v_cvt_pknorm_i16_f32) is CDNA-only and not
-/// decodable here. The norm cases below lock the underscore form to u16 so a
-/// future "the name says i16" change is caught on both the scalar and SIMD path.
+/// This file also pins the normalized packed signed i16 behavior:
+/// v_cvt_pk_norm_i16_f32 scales by 32767, clamps to [-32768, 32767], truncates,
+/// and packs the signed 16-bit results. The no-underscore signed spelling
+/// (v_cvt_pknorm_i16_f32) is CDNA-only and not decodable here.
 ///
 /// Each case is executed twice in the same process (force-scalar and force-SIMD
 /// gate) and BOTH runs are asserted equal to an independent golden reference, so
@@ -64,9 +61,7 @@ constexpr uint32_t DST_SENTINEL = 0xCDCDCDCDu;
 // RDNA3 VOP3 opcodes (from rdna3/test_encodings.h: 0xD7060000 / 0xD7070000).
 constexpr uint32_t kOpCvtPkI16F32 = 774;
 constexpr uint32_t kOpCvtPkU16F32 = 775;
-// Normalized i16 pack (rdna3/test_encodings.h: 0xD7210000). Note the underscore
-// spelling — RDNA exposes v_cvt_pk_norm_i16_f32, which despite its name is
-// generated with the u16-normalized lambda (the QUIRK we pin below).
+// Normalized i16 pack (rdna3/test_encodings.h: 0xD7210000).
 constexpr uint32_t kOpCvtPkNormI16F32 = 801; // 0xD7210000 >> 16 & 0x3FF
 
 // RDNA3 VOP3 (encoding[31:26]=0x35). word0 = vdst[7:0] | op[25:16] | enc[31:26];
@@ -112,34 +107,20 @@ uint32_t golden(bool is_u16, float f0, float f1) {
   return (static_cast<uint32_t>(hi) << 16) | static_cast<uint32_t>(lo);
 }
 
-// --- Normalized pack-convert (the underscore-spelling u16 quirk) ------------
+// --- Normalized pack-convert ------------------------------------------------
 // Both arch-generated lambdas scale by K, clamp, map NaN->0, then truncate
-// toward zero (mirrors execute_shared.h / util::cvt_pknorm_*_f32_simd). The
-// QUIRK: v_cvt_pk_norm_i16_f32 (underscore) uses the UNSIGNED form below.
-uint16_t cvt_norm_u16(float f) {
-  if (std::isnan(f))
-    return 0;
-  return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));
-}
-// What a (wrong) signed-i16 reading would produce — used only to show the two
-// spellings diverge, never as the expected result for the underscore form.
-uint16_t cvt_norm_i16_wrong(float f) {
+// toward zero (mirrors execute_shared.h / util::cvt_pknorm_*_f32_simd).
+uint16_t cvt_norm_i16(float f) {
   if (std::isnan(f))
     return 0;
   return static_cast<uint16_t>(static_cast<int16_t>(std::clamp(f * 32767.0f, -32768.0f, 32767.0f)));
 }
-uint32_t golden_norm_u16(float f0, float f1) {
-  return (static_cast<uint32_t>(cvt_norm_u16(f1)) << 16) | static_cast<uint32_t>(cvt_norm_u16(f0));
-}
-// The value the underscore form must NOT produce (signed-i16 reading).
-uint32_t golden_norm_i16_wrong(float f0, float f1) {
-  return (static_cast<uint32_t>(cvt_norm_i16_wrong(f1)) << 16) |
-         static_cast<uint32_t>(cvt_norm_i16_wrong(f0));
+uint32_t golden_norm_i16(float f0, float f1) {
+  return (static_cast<uint32_t>(cvt_norm_i16(f1)) << 16) | static_cast<uint32_t>(cvt_norm_i16(f0));
 }
 
 // Normalized-domain inputs: in-range, fractional/truncation, the i16/u16
-// divergence points (±1.0), out-of-range (clamped), negatives (-> 0 under u16),
-// and NaN (-> 0).
+// divergence points (±1.0), out-of-range (clamped), and NaN (-> 0).
 const std::array<float, 8> kNormInputs = {{
     0.0f,
     1.0f,
@@ -290,7 +271,7 @@ TEST(Vop3CvtPkF32RdnaCorrectness, BugMarker_40000) {
   }
 }
 
-// Drives v_cvt_pk_norm_i16_f32 in both gate modes against the UNSIGNED golden.
+// Drives v_cvt_pk_norm_i16_f32 in both gate modes against the signed golden.
 // Seeds the norm input set directly (Fixture::seed feeds the non-norm kInputs).
 void check_cvt_pk_norm_i16(uint64_t exec) {
   ForceScalarGuard gate_guard;
@@ -330,31 +311,29 @@ void check_cvt_pk_norm_i16(uint64_t exec) {
       EXPECT_EQ(simd_out[lane], DST_SENTINEL) << name << ": clobbered inactive lane " << lane;
       continue;
     }
-    const uint32_t want = golden_norm_u16(norm_f0_for(lane), norm_f1_for(lane));
+    const uint32_t want = golden_norm_i16(norm_f0_for(lane), norm_f1_for(lane));
     EXPECT_EQ(scalar_out[lane], want) << name << " (scalar) lane " << lane;
     EXPECT_EQ(simd_out[lane], want) << name << " (simd) lane " << lane;
   }
 }
 
-TEST(Vop3CvtPkF32RdnaCorrectness, NormI16_UsesUnsignedU16_FullExec) {
+TEST(Vop3CvtPkF32RdnaCorrectness, NormI16_UsesSignedI16_FullExec) {
   check_cvt_pk_norm_i16(/*exec=*/0xFFFFFFFFULL);
 }
-TEST(Vop3CvtPkF32RdnaCorrectness, NormI16_UsesUnsignedU16_PartialExec) {
+TEST(Vop3CvtPkF32RdnaCorrectness, NormI16_UsesSignedI16_PartialExec) {
   check_cvt_pk_norm_i16(/*exec=*/0xA5A58001ULL);
 }
 
-// Pin the quirk at the values where signed-i16 and unsigned-u16 normalization
-// diverge: +1.0 -> 0xFFFF under u16 (vs 0x7FFF under i16); -1.0 -> 0x0000 under
-// u16 (vs 0x8001 under i16). The underscore spelling MUST produce the u16
-// result. If someone "corrects" the codegen to signed i16, these flip and fail.
-TEST(Vop3CvtPkF32RdnaCorrectness, NormI16_QuirkMarker) {
+// Pin the values where signed-i16 and unsigned-u16 normalization diverge:
+// +1.0 -> 0x7FFF under signed i16, -1.0 -> 0x8001.
+TEST(Vop3CvtPkF32RdnaCorrectness, NormI16_SignedMarker) {
   ForceScalarGuard gate_guard;
   for (bool force_scalar : {true, false}) {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
     ASSERT_NE(fx.cu, nullptr);
     uint32_t vb = fx.wf->vgpr_alloc().base;
-    // lane 0: (+1.0, +1.0) -> both halves 0xFFFF; lane 1: (-1.0, -1.0) -> 0.
+    // lane 0: (+1.0, +1.0) -> both halves 0x7FFF; lane 1: (-1.0, -1.0) -> 0x8001.
     fx.cu->write_vgpr(vb + 0, 0, std::bit_cast<uint32_t>(1.0f));
     fx.cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(1.0f));
     fx.cu->write_vgpr(vb + 0, 1, std::bit_cast<uint32_t>(-1.0f));
@@ -372,16 +351,10 @@ TEST(Vop3CvtPkF32RdnaCorrectness, NormI16_QuirkMarker) {
     const uint32_t lane1 = fx.cu->read_vgpr(vb + kDstVgpr, 1);
     delete inst;
 
-    EXPECT_EQ(lane0, 0xFFFFFFFFu)
-        << "force_scalar=" << force_scalar
-        << ": v_cvt_pk_norm_i16_f32 must use UNSIGNED u16 (+1.0 -> 0xFFFF, not 0x7FFF)";
-    EXPECT_EQ(lane1, 0x00000000u) << "force_scalar=" << force_scalar
-                                  << ": negatives clamp to 0 under u16 normalization";
-    // Sanity: the signed-i16 reading we are guarding against differs at both lanes.
-    EXPECT_NE(lane0, golden_norm_i16_wrong(1.0f, 1.0f))
-        << "i16 reading leaked into the underscore spelling";
-    EXPECT_NE(lane1, golden_norm_i16_wrong(-1.0f, -1.0f))
-        << "i16 reading leaked into the underscore spelling";
+    EXPECT_EQ(lane0, 0x7FFF7FFFu) << "force_scalar=" << force_scalar
+                                  << ": +1.0 must normalize to signed i16 max";
+    EXPECT_EQ(lane1, 0x80018001u) << "force_scalar=" << force_scalar
+                                  << ": -1.0 must normalize to signed -32767";
   }
 }
 

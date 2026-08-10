@@ -593,6 +593,11 @@ set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
 set(CL_FILE_LIST "${KERNELS_DIR}/cu_mask_kernels.cl")
 build_sample_for_devices("cu_mask")
 
+# Trap Handler Test Kernels
+set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
+set(CL_FILE_LIST "${KERNELS_DIR}/trap_handler_test_kernels.cl")
+build_sample_for_devices("trap_handler_test")
+
 # Configure RPATH settings before creating executable target
 set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
 set(CMAKE_SKIP_BUILD_RPATH FALSE)
@@ -786,6 +791,7 @@ set(HOTSWAP_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/hotswap")
 # runpaths only let the hotswap tests exercise ROCR's lazy dlopen path locally.
 set(HOTSWAP_BUILD_RPATH "")
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(HOTSWAP_COMGR_WITHOUT_OPTIONS "")
   set(HOTSWAP_SYMBOL_TOOL "${CMAKE_NM}")
   if(NOT HOTSWAP_SYMBOL_TOOL)
     find_program(HOTSWAP_SYMBOL_TOOL NAMES llvm-nm nm HINTS ${LLVM_TOOLS_BINARY_DIR})
@@ -802,15 +808,25 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             OUTPUT_VARIABLE _comgr_symbols
             ERROR_QUIET)
           if(_comgr_symbol_result EQUAL 0 AND
-             _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite")
+             _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite_with_options")
             list(APPEND HOTSWAP_BUILD_RPATH "${_prefix}/${_libdir}")
             break()
+          elseif(_comgr_symbol_result EQUAL 0 AND
+                 _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite")
+            list(APPEND HOTSWAP_COMGR_WITHOUT_OPTIONS "${_comgr_library}")
           endif()
         endif()
       endforeach()
     endforeach()
   endforeach()
   list(REMOVE_DUPLICATES HOTSWAP_BUILD_RPATH)
+  list(REMOVE_DUPLICATES HOTSWAP_COMGR_WITHOUT_OPTIONS)
+  if(NOT HOTSWAP_BUILD_RPATH AND HOTSWAP_COMGR_WITHOUT_OPTIONS)
+    message(WARNING
+      "Found COMGR without amd_comgr_hotswap_rewrite_with_options: "
+      "${HOTSWAP_COMGR_WITHOUT_OPTIONS}. hotswap_rewrite requires a "
+      "ROCm/llvm-project#3008-capable COMGR for local test RPATH setup.")
+  endif()
 endif()
 
 set(HOTSWAP_GFX1250_ASM "${HOTSWAP_TEST_ROOT}/fixtures/gfx1250_min.s")
@@ -881,6 +897,22 @@ set_tests_properties(hotswap_rewrite PROPERTIES
   LABELS "quick;standard;pr;pre-commit;hotswap"
   TIMEOUT 120)
 
+# GPU-free InterceptQueue retry/overflow slot-accounting logic unit tests. These exercise
+# the pure header logic in hsa-runtime's core/inc/intercept_queue_logic.h + GoogleTest, so
+# they need no GPU or hsa-runtime library. ${GOOGLE_TEST_FRWK_NAME} (google-test-frwk64) is a
+# single static lib that compiles src/gtest_main.cpp (see rocrtst/gtest/CMakeLists.txt).
+set(INTERCEPT_QUEUE_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/intercept_queue")
+add_executable(intercept_queue_logic_test
+  ${INTERCEPT_QUEUE_TEST_ROOT}/intercept_queue_logic_test.cc)
+target_include_directories(intercept_queue_logic_test PRIVATE
+  ${HSA_RUNTIME_ROOT}
+  ${ROCRTST_ROOT}/gtest/include)
+target_link_libraries(intercept_queue_logic_test ${GOOGLE_TEST_FRWK_NAME} pthread)
+add_test(NAME intercept_queue_logic_test COMMAND intercept_queue_logic_test)
+set_tests_properties(intercept_queue_logic_test PROPERTIES
+  LABELS "quick;standard;pr;pre-commit"
+  TIMEOUT 60)
+
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
 
@@ -900,7 +932,7 @@ install(TARGETS ${ROCRTST}
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin)
 
-install(TARGETS hotswap_gfx_query hotswap_rewrite
+install(TARGETS hotswap_gfx_query hotswap_rewrite intercept_queue_logic_test
         RUNTIME DESTINATION bin)
 
 # Install platform configuration file
@@ -957,6 +989,8 @@ if(EXISTS "${TEST_CATEGORIES_CMAKE}" AND EXISTS "${TEST_CATEGORIES_YAML}")
         "set_tests_properties(hotswap_gfx_query PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 60)\n\n"
         "add_test(hotswap_rewrite \"../hotswap_rewrite\")\n"
         "set_tests_properties(hotswap_rewrite PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 120)\n\n"
+        "add_test(intercept_queue_logic_test \"../intercept_queue_logic_test\")\n"
+        "set_tests_properties(intercept_queue_logic_test PROPERTIES LABELS \"quick;standard;pr;pre-commit\" TIMEOUT 60)\n\n"
     )
 
     install(

@@ -29,9 +29,6 @@ namespace rocprofiler
 namespace rocattach
 {
 bool
-find_library(void*& addr, int inpid, const std::string& library);
-
-bool
 find_symbol(int target_pid, void*& addr, const std::string& library, const std::string& symbol);
 
 }  // namespace rocattach

@@ -29,7 +29,7 @@ namespace rocjitsu {
 /// @brief KFD event subsystem state.
 ///
 /// @details Owns all event-related state for the simulated driver: the event
-/// table, event page, and synchronization primitives. The SimulatedDriver
+/// table, event page, and synchronization primitives. The SimulatedKfd
 /// delegates event ioctls to this class and accesses the event page and memfd
 /// for mmap/munmap operations.
 class EventState {
@@ -73,6 +73,12 @@ public:
   /// @brief Adopt a pre-allocated event page from the FMM allocator (dGPU path).
   /// @details Idempotent, subsequent calls after the first are no-ops.
   void adopt_page(void *ptr, size_t size);
+
+  /// @brief If @p ptr is the adopted event page, clear page/page_size and return true.
+  /// @details Clears the fields under mutex_ so the CP interrupt thread (which
+  /// reads page/page_size under the same lock in signal_interrupt) can never race
+  /// a concurrent munmap tearing the mapping down.
+  [[nodiscard]] bool release_page(void *ptr);
 
   /// @brief Signal event(s) from the CP's interrupt callback.
   /// @details When event_id is non-zero, signals that specific event. When

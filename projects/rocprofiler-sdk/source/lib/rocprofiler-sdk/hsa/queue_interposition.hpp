@@ -37,6 +37,10 @@
 
 namespace rocprofiler
 {
+namespace context
+{
+struct context;
+}
 namespace hsa
 {
 namespace queue_interposition
@@ -219,6 +223,12 @@ destroy_queue_state(const hsa_queue_t* queue);
  */
 bool
 supports_queue_interposition();
+
+void
+notify_queue_interposition_consumer_context_started(const context::context* ctx);
+
+void
+notify_queue_interposition_consumer_context_stopped(const context::context* ctx);
 
 /**
  * @brief Install interposition wrappers into the HSA core API table

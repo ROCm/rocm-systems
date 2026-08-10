@@ -59,14 +59,13 @@ target_link_libraries(
     PUBLIC $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-build-flags>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-threading>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-memcheck>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-sanitizer>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-cxx-filesystem>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-abseil>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-fmt>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-yaml-cpp>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dl>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-ptl>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-atomic>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-hsakmt-nolink>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-elfio>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dw>)

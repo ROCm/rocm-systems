@@ -25,104 +25,85 @@
 #ifndef LIBRARY_SRC_MEMORY_DEFAULT_ALLOCATOR_HPP_
 #define LIBRARY_SRC_MEMORY_DEFAULT_ALLOCATOR_HPP_
 
+#include <algorithm>
+#include <string>
+
 #include <hip/hip_runtime_api.h>
 
 #include "envvar.hpp"
 #include "log.hpp"
 #include "hip_allocator.hpp"
 
-#if ((defined(USE_HEAP_DEVICE_COARSEGRAIN) ? 1 : 0) + \
-      (defined(USE_HEAP_DEVICE_FINEGRAIN) ? 1 : 0) + \
-      (defined(USE_HEAP_DEVICE_UNCACHED) ? 1 : 0) + \
-      (defined(USE_HEAP_DEVICE_VMM_POSIX) ? 1 : 0) + \
-      (defined(USE_HEAP_DEVICE_VMM_FABRIC) ? 1 : 0)) > 1
- #error "Multiple USE_HEAP_DEVICE_* allocator options enabled; exactly one allocator type must be selected"
- #endif
-
-// the using statements remain in the code until we commit
-// the change to make the default allocator a runtime decision.
-#if defined USE_HEAP_DEVICE_COARSEGRAIN
-using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorCoarsegrained;
-#endif
-#if defined USE_HEAP_DEVICE_FINEGRAIN
-using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorFinegrained;
-#endif
-
-#if defined USE_HEAP_DEVICE_UNCACHED
-#if defined HAVE_DEVICE_MALLOC_UNCACHED
-using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorUncached;
-#else
-#error "USE_HEAP_DEVICE_UNCACHED unsupported in this HIP version"
-#endif
-#endif
-
-#if defined USE_HEAP_DEVICE_VMM_POSIX
-#if HIP_VERSION >= 70000000
-using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorVMMPosixFd;
-#else
-#error "USE_HEAP_DEVICE_VMM_POSIX requires ROCm 7.0 or newer (HIP_VERSION >= 70000000)"
-#endif
-#endif
-
-#if defined USE_HEAP_DEVICE_VMM_FABRIC
-#if HIP_VERSION >= 70000000
-using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorVMMFabric;
-#else
-// Precise ROCm version required for Fabric allocator to be adjusted
-#error "USE_HEAP_DEVICE_VMM_FABRIC requires ROCm 7.0 or newer (HIP_VERSION >= 70000000)"
-#endif
-#endif
-
 namespace rocshmem {
   extern HIPAllocator *default_allocator_;
 
   static void set_default_allocator()
   {
-    int hip_dev_id{};
-    hipError_t err = hipGetDevice(&hip_dev_id);
-    if (err != hipSuccess) {
-      LOG_ERROR_ABORT("Could not get current device. Aborting");
-    }
+    std::string requested = envvar::heap_allocator_type.get_value();
+    // Normalise to lower-case for case-insensitive matching.
+    std::transform(requested.begin(), requested.end(), requested.begin(), ::tolower);
 
-    char arch_name[256];
-    hipDeviceProp_t prop;
-    err = hipGetDeviceProperties(&prop, hip_dev_id);
-    if (err != hipSuccess) {
-      LOG_ERROR_ABORT("Could not get device properties. Aborting");
-    }
-    std::snprintf(arch_name, sizeof(arch_name), "%s",prop.gcnArchName);
+    // Resolve the effective allocator type.
+    // Priority: envvar > default (finegrained).
+    enum class AllocChoice { finegrained, coarsegrained, uncached, vmm_posix, vmm_fabric };
+    AllocChoice choice;
 
-#if defined USE_HEAP_DEVICE_COARSEGRAIN
-    default_allocator_ = new HIPAllocatorCoarsegrained();
-#endif
-#if defined USE_HEAP_DEVICE_FINEGRAIN
-    default_allocator_ = new HIPAllocatorFinegrained();
-#endif
-#if defined USE_HEAP_DEVICE_UNCACHED
-#if defined HAVE_DEVICE_MALLOC_UNCACHED
-    // Temporary hack that will be fixed when we add the ability
-    // to use an environment variable to set the Heap Allocatory Type.
-    // With that commit we will introduce also a generic 'default'
-    // setting that can be adjusted for different architectures.
-    // This is to avoid failures with rocSHMEM on gfx1201 if using
-    // Uncached allocator with ROCm 7.2.0
-    if (strncmp(arch_name, "gfx1201", strlen("gfx1201")) == 0) {
-      default_allocator_ = new HIPAllocatorFinegrained();
+    if (requested.empty()) {
+      choice = AllocChoice::finegrained;
+    } else if (requested == "finegrained") {
+      choice = AllocChoice::finegrained;
+    } else if (requested == "coarsegrained") {
+      choice = AllocChoice::coarsegrained;
+    } else if (requested == "uncached") {
+      choice = AllocChoice::uncached;
+    } else if (requested == "vmm_posix") {
+      choice = AllocChoice::vmm_posix;
+    } else if (requested == "vmm_fabric") {
+      choice = AllocChoice::vmm_fabric;
     } else {
-      default_allocator_ = new HIPAllocatorUncached();
+      LOG_ERROR_ABORT("Unknown ROCSHMEM_HEAP_ALLOCATOR_TYPE value: '%s'. "
+                      "Accepted values: uncached, finegrained, coarsegrained, vmm_posix, vmm_fabric.",
+                      requested.c_str());
+      return;
     }
+
+    // Fall back to finegrained if uncached is not available in this build.
+    if (choice == AllocChoice::uncached) {
+#if !defined HAVE_DEVICE_MALLOC_UNCACHED
+      LOG_WARN("ROCSHMEM_HEAP_ALLOCATOR_TYPE=uncached is not supported in this build "
+               "(requires ROCm 6.0+). Falling back to finegrained.");
+      choice = AllocChoice::finegrained;
 #endif
+    }
+
+    switch (choice) {
+      case AllocChoice::finegrained:
+        default_allocator_ = new HIPAllocatorFinegrained();
+        break;
+      case AllocChoice::coarsegrained:
+        default_allocator_ = new HIPAllocatorCoarsegrained();
+        break;
+      case AllocChoice::uncached:
+#if defined HAVE_DEVICE_MALLOC_UNCACHED
+        default_allocator_ = new HIPAllocatorUncached();
 #endif
-#if defined USE_HEAP_DEVICE_VMM_POSIX
-#if HIP_VERSION >= 70000000
-    default_allocator_ = new HIPAllocatorVMMPosixFd();
+        break;
+      case AllocChoice::vmm_posix:
+#if HIP_VERSION >= 70200000
+        default_allocator_ = new HIPAllocatorVMMPosixFd();
+#else
+        LOG_ERROR_ABORT("ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix requires ROCm 7.2 or newer.");
 #endif
+        break;
+      case AllocChoice::vmm_fabric:
+#if defined HAVE_AMDSMI_GPU_FABRIC_INFO
+        default_allocator_ = new HIPAllocatorVMMFabric();
+#else
+        LOG_ERROR_ABORT("ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_fabric requires ROCm 7.14+ "
+                        "with AMD SMI fabric handle support.");
 #endif
-#if defined USE_HEAP_DEVICE_VMM_FABRIC
-#if HIP_VERSION >= 70000000
-    default_allocator_ = new HIPAllocatorVMMFabric();
-#endif
-#endif
+        break;
+    }
   }
 
   [[maybe_unused]] static HIPAllocator* get_default_allocator()

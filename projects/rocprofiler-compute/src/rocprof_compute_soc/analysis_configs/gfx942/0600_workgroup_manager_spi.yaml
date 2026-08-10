@@ -14,31 +14,29 @@ Panel Config:
         unit: Unit
       metric:
         Accelerator Utilization:
-          avg: SUM(100 * $GRBM_GUI_ACTIVE_PER_XCD) / SUM($GRBM_COUNT_PER_XCD)
-          min: MIN(100 * $GRBM_GUI_ACTIVE_PER_XCD / $GRBM_COUNT_PER_XCD)
-          max: MAX(100 * $GRBM_GUI_ACTIVE_PER_XCD / $GRBM_COUNT_PER_XCD)
+          avg: 100 * SUM($GRBM_GUI_ACTIVE_PER_XCD) / SUM($GRBM_COUNT_PER_XCD)
+          min: 100 * MIN($GRBM_GUI_ACTIVE_PER_XCD / $GRBM_COUNT_PER_XCD)
+          max: 100 * MAX($GRBM_GUI_ACTIVE_PER_XCD / $GRBM_COUNT_PER_XCD)
           unit: Percent
         Scheduler-Pipe Utilization:
-          avg: SUM(100 * SPI_CSN_BUSY) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu)
-          min: MIN(100 * SPI_CSN_BUSY / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu
-            * $se_per_gpu))
-          max: MAX(100 * SPI_CSN_BUSY / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu
-            * $se_per_gpu))
+          avg: 100 * SUM(SPI_CSN_BUSY) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu)
+          min: 100 * MIN(SPI_CSN_BUSY / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+          max: 100 * MAX(SPI_CSN_BUSY / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
           unit: Percent
         Workgroup Manager Utilization:
-          avg: SUM(100 * $GRBM_SPI_BUSY_PER_XCD) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
-          min: MIN(100 * $GRBM_SPI_BUSY_PER_XCD / $GRBM_GUI_ACTIVE_PER_XCD)
-          max: MAX(100 * $GRBM_SPI_BUSY_PER_XCD / $GRBM_GUI_ACTIVE_PER_XCD)
+          avg: 100 * SUM($GRBM_SPI_BUSY_PER_XCD) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          min: 100 * MIN($GRBM_SPI_BUSY_PER_XCD / $GRBM_GUI_ACTIVE_PER_XCD)
+          max: 100 * MAX($GRBM_SPI_BUSY_PER_XCD / $GRBM_GUI_ACTIVE_PER_XCD)
           unit: Percent
         Shader Engine Utilization:
-          avg: SUM(100 * SQ_BUSY_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu)
-          min: MIN(100 * SQ_BUSY_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu))
-          max: MAX(100 * SQ_BUSY_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu))
+          avg: 100 * SUM(SQ_BUSY_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu)
+          min: 100 * MIN(SQ_BUSY_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu))
+          max: 100 * MAX(SQ_BUSY_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu))
           unit: Percent
         SIMD Utilization:
-          avg: SUM(100 * SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
-          max: MAX(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          avg: 100 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX(SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         Dispatched Workgroups:
           avg: AVG(SPI_CSN_NUM_THREADGROUPS)
@@ -51,14 +49,14 @@ Panel Config:
           max: MAX(SPI_CSN_WAVE)
           unit: Wavefronts
         VGPR Writes:
-          avg: SUM(4 * SPI_VWC_CSC_WR) / SUM(SPI_CSN_WAVE)
-          min: MIN(4 * SPI_VWC_CSC_WR / SPI_CSN_WAVE)
-          max: MAX(4 * SPI_VWC_CSC_WR / SPI_CSN_WAVE)
+          avg: 4 * SUM(SPI_VWC_CSC_WR) / SUM(SPI_CSN_WAVE)
+          min: 4 * MIN(SPI_VWC_CSC_WR / SPI_CSN_WAVE)
+          max: 4 * MAX(SPI_VWC_CSC_WR / SPI_CSN_WAVE)
           unit: Cycles/wave
         SGPR Writes:
-          avg: SUM(1 * SPI_SWC_CSC_WR) / SUM(SPI_CSN_WAVE)
-          min: MIN(1 * SPI_SWC_CSC_WR / SPI_CSN_WAVE)
-          max: MAX(1 * SPI_SWC_CSC_WR / SPI_CSN_WAVE)
+          avg: SUM(SPI_SWC_CSC_WR) / SUM(SPI_CSN_WAVE)
+          min: MIN(SPI_SWC_CSC_WR / SPI_CSN_WAVE)
+          max: MAX(SPI_SWC_CSC_WR / SPI_CSN_WAVE)
           unit: Cycles/wave
   - metric_table:
       id: 602
@@ -71,59 +69,59 @@ Panel Config:
         unit: Unit
       metric:
         Not-scheduled Rate (Workgroup Manager):
-          avg: SUM(100 * SPI_RA_REQ_NO_ALLOC_CSN) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
-          min: MIN(100 * SPI_RA_REQ_NO_ALLOC_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
-          max: MAX(100 * SPI_RA_REQ_NO_ALLOC_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
+          avg: 100 * SUM(SPI_RA_REQ_NO_ALLOC_CSN) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
+          min: 100 * MIN(SPI_RA_REQ_NO_ALLOC_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
+          max: 100 * MAX(SPI_RA_REQ_NO_ALLOC_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
           unit: Percent
         Not-scheduled Rate (Scheduler-Pipe):
-          avg: SUM(100 * SPI_RA_REQ_NO_ALLOC) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
-          min: MIN(100 * SPI_RA_REQ_NO_ALLOC / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
-          max: MAX(100 * SPI_RA_REQ_NO_ALLOC / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
+          avg: 100 * SUM(SPI_RA_REQ_NO_ALLOC) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
+          min: 100 * MIN(SPI_RA_REQ_NO_ALLOC / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
+          max: 100 * MAX(SPI_RA_REQ_NO_ALLOC / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
           unit: Percent
         Scheduler-Pipe Stall Rate:
-          avg: SUM(100 * SPI_RA_RES_STALL_CSN) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
-          min: MIN(100 * SPI_RA_RES_STALL_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
-          max: MAX(100 * SPI_RA_RES_STALL_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
+          avg: 100 * SUM(SPI_RA_RES_STALL_CSN) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
+          min: 100 * MIN(SPI_RA_RES_STALL_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
+          max: 100 * MAX(SPI_RA_RES_STALL_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
           unit: Percent
         Scratch Stall Rate:
-          avg: SUM(100 * SPI_RA_TMP_STALL_CSN) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
-          min: MIN(100 * SPI_RA_TMP_STALL_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
-          max: MAX(100 * SPI_RA_TMP_STALL_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
+          avg: 100 * SUM(SPI_RA_TMP_STALL_CSN) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
+          min: 100 * MIN(SPI_RA_TMP_STALL_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
+          max: 100 * MAX(SPI_RA_TMP_STALL_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
           unit: Percent
         Insufficient SIMD Waveslots:
-          avg: SUM(100 * SPI_RA_WAVE_SIMD_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN(100 * SPI_RA_WAVE_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
-          max: MAX(100 * SPI_RA_WAVE_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          avg: 100 * SUM(SPI_RA_WAVE_SIMD_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(SPI_RA_WAVE_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX(SPI_RA_WAVE_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         Insufficient SIMD VGPRs:
-          avg: SUM(100 * SPI_RA_VGPR_SIMD_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN(100 * SPI_RA_VGPR_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
-          max: MAX(100 * SPI_RA_VGPR_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          avg: 100 * SUM(SPI_RA_VGPR_SIMD_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(SPI_RA_VGPR_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX(SPI_RA_VGPR_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         Insufficient SIMD SGPRs:
-          avg: SUM(100 * SPI_RA_SGPR_SIMD_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN(100 * SPI_RA_SGPR_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
-          max: MAX(100 * SPI_RA_SGPR_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          avg: 100 * SUM(SPI_RA_SGPR_SIMD_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(SPI_RA_SGPR_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX(SPI_RA_SGPR_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         Insufficient CU LDS:
-          avg: SUM(400 * SPI_RA_LDS_CU_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN(400 * SPI_RA_LDS_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
-          max: MAX(400 * SPI_RA_LDS_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          avg: 400 * SUM(SPI_RA_LDS_CU_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 400 * MIN(SPI_RA_LDS_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 400 * MAX(SPI_RA_LDS_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         Insufficient CU Barriers:
-          avg: SUM(400 * SPI_RA_BAR_CU_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN(400 * SPI_RA_BAR_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
-          max: MAX(400 * SPI_RA_BAR_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          avg: 400 * SUM(SPI_RA_BAR_CU_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 400 * MIN(SPI_RA_BAR_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 400 * MAX(SPI_RA_BAR_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         Reached CU Workgroup Limit:
-          avg: SUM(400 * SPI_RA_TGLIM_CU_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN(400 * SPI_RA_TGLIM_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
-          max: MAX(400 * SPI_RA_TGLIM_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          avg: 400 * SUM(SPI_RA_TGLIM_CU_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 400 * MIN(SPI_RA_TGLIM_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 400 * MAX(SPI_RA_TGLIM_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         Reached CU Wavefront Limit:
-          avg: SUM(400 * SPI_RA_WVLIM_STALL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN(400 * SPI_RA_WVLIM_STALL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
-          max: MAX(400 * SPI_RA_WVLIM_STALL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          avg: 400 * SUM(SPI_RA_WVLIM_STALL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 400 * MIN(SPI_RA_WVLIM_STALL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 400 * MAX(SPI_RA_WVLIM_STALL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
   metrics_description:
     Accelerator Utilization: The percent of cycles in the kernel where the accelerator

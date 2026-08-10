@@ -279,10 +279,11 @@ public:
      * @brief Initializes the decoder with the specified device, GCN architecture, and device ID.
      * @param device_name The name of the device.
      * @param device_id The ID of the device.
-     * @param gpu_uuid The UUID of the GPU.
+     * @param gpu_uuid The GPU UUID (fallback match).
+     * @param gpu_pci_bdf The GPU PCI BDF (primary match).
      * @return The status of the initialization.
      */
-    RocJpegStatus InitializeDecoder(std::string device_name, int device_id, std::string& gpu_uuid);
+    RocJpegStatus InitializeDecoder(const std::string& device_name, int device_id, const std::string& gpu_uuid, const std::string& gpu_pci_bdf);
 
     /**
      * @brief Submits a JPEG stream for decoding.
@@ -371,6 +372,10 @@ private:
      * partitions based on the unique identifiers of GPUs.
      */
     std::unordered_map<std::string, ComputePartition> gpu_uuids_to_compute_partition_map_;
+
+    // GPU PCI BDF -> render node index / compute partition (primary match key).
+    std::unordered_map<std::string, int> gpu_pci_bdf_to_render_nodes_map_;
+    std::unordered_map<std::string, ComputePartition> gpu_pci_bdf_to_compute_partition_map_;
     /**
      * @brief Initializes the VAAPI with the specified DRM node.
      * @param drm_node The DRM node to use for VAAPI initialization.
@@ -418,9 +423,15 @@ private:
                                     ComputePartition current_compute_partitions,
                                     int &offset);
     /**
-     * @brief Retrieves GPU UUIDs and maps them to render node IDs.
+     * @brief Retrieves GPU UUIDs and PCI bus IDs and maps them to render node IDs and compute partitions.
     */
     void GetGpuUuids();
+
+    // Returns the lowercased PCI BDF (function suffix stripped) for a render node, or "" if not a PCI device.
+    std::string GetRenderNodeBusId(const std::string& render_node_name);
+
+    // Returns the lowest-numbered /dev/dri/renderD* node, or "" if none.
+    std::string GetFirstAvailableDrmNode();
 
     /**
      * @brief Retrieves the number of JPEG cores available.

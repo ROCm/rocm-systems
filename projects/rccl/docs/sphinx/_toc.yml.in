@@ -20,6 +20,8 @@ subtrees:
     title: Using the RCCL Tuner plugin
   - file: how-to/using-nccl
     title: Using the NCCL Net plugin
+  - file: how-to/fault-tolerance
+    title: Fault tolerance in RCCL
   - file: how-to/troubleshooting-rccl
     title: Troubleshoot RCCL
   - file: how-to/rccl-usage-tips

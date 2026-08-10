@@ -20,11 +20,14 @@ ImageMsaaLoadVsample::ImageMsaaLoadVsample(const MachineInst *inst)
     : Vsample("image_msaa_load", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageMsaaLoadVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  num_src_ = 1;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  num_src_ = 2;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageMsaaLoadVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -36,13 +39,16 @@ ImageSampleVsample::ImageSampleVsample(const MachineInst *inst)
     : Vsample("image_sample", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -53,13 +59,16 @@ ImageSampleDVsample::ImageSampleDVsample(const MachineInst *inst)
     : Vsample("image_sample_d", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(288, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleDVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -70,13 +79,16 @@ ImageSampleLVsample::ImageSampleLVsample(const MachineInst *inst)
     : Vsample("image_sample_l", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleLVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleLVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -87,13 +99,16 @@ ImageSampleBVsample::ImageSampleBVsample(const MachineInst *inst)
     : Vsample("image_sample_b", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleBVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleBVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -104,13 +119,16 @@ ImageSampleLzVsample::ImageSampleLzVsample(const MachineInst *inst)
     : Vsample("image_sample_lz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleLzVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleLzVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -121,13 +139,16 @@ ImageSampleCVsample::ImageSampleCVsample(const MachineInst *inst)
     : Vsample("image_sample_c", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -138,13 +159,16 @@ ImageSampleCDVsample::ImageSampleCDVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(320, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCDVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -155,13 +179,16 @@ ImageSampleCLVsample::ImageSampleCLVsample(const MachineInst *inst)
     : Vsample("image_sample_c_l", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCLVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCLVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -172,13 +199,16 @@ ImageSampleCBVsample::ImageSampleCBVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCBVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCBVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -189,13 +219,16 @@ ImageSampleCLzVsample::ImageSampleCLzVsample(const MachineInst *inst)
     : Vsample("image_sample_c_lz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCLzVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCLzVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -206,13 +239,16 @@ ImageSampleOVsample::ImageSampleOVsample(const MachineInst *inst)
     : Vsample("image_sample_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -223,13 +259,16 @@ ImageSampleDOVsample::ImageSampleDOVsample(const MachineInst *inst)
     : Vsample("image_sample_d_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(320, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleDOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -240,13 +279,16 @@ ImageSampleLOVsample::ImageSampleLOVsample(const MachineInst *inst)
     : Vsample("image_sample_l_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleLOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleLOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -257,13 +299,16 @@ ImageSampleBOVsample::ImageSampleBOVsample(const MachineInst *inst)
     : Vsample("image_sample_b_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleBOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleBOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -274,13 +319,16 @@ ImageSampleLzOVsample::ImageSampleLzOVsample(const MachineInst *inst)
     : Vsample("image_sample_lz_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleLzOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleLzOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -291,13 +339,16 @@ ImageSampleCOVsample::ImageSampleCOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -308,13 +359,16 @@ ImageSampleCDOVsample::ImageSampleCDOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCDOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -325,13 +379,16 @@ ImageSampleCLOVsample::ImageSampleCLOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_l_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCLOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCLOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -342,13 +399,16 @@ ImageSampleCBOVsample::ImageSampleCBOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCBOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCBOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -359,13 +419,16 @@ ImageSampleCLzOVsample::ImageSampleCLzOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCLzOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCLzOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -376,13 +439,16 @@ ImageGather4Vsample::ImageGather4Vsample(const MachineInst *inst)
     : Vsample("image_gather4", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4Vsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -393,13 +459,16 @@ ImageGather4LVsample::ImageGather4LVsample(const MachineInst *inst)
     : Vsample("image_gather4_l", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4LVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4LVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -410,13 +479,16 @@ ImageGather4BVsample::ImageGather4BVsample(const MachineInst *inst)
     : Vsample("image_gather4_b", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4BVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4BVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -427,13 +499,16 @@ ImageGather4LzVsample::ImageGather4LzVsample(const MachineInst *inst)
     : Vsample("image_gather4_lz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4LzVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4LzVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -444,13 +519,16 @@ ImageGather4CVsample::ImageGather4CVsample(const MachineInst *inst)
     : Vsample("image_gather4_c", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4CVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4CVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -461,13 +539,16 @@ ImageGather4CLzVsample::ImageGather4CLzVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_lz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4CLzVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4CLzVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -478,13 +559,16 @@ ImageGather4OVsample::ImageGather4OVsample(const MachineInst *inst)
     : Vsample("image_gather4_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4OVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4OVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -495,13 +579,16 @@ ImageGather4LzOVsample::ImageGather4LzOVsample(const MachineInst *inst)
     : Vsample("image_gather4_lz_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4LzOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4LzOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -512,13 +599,16 @@ ImageGather4CLzOVsample::ImageGather4CLzOVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4CLzOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4CLzOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -529,13 +619,16 @@ ImageGetLodVsample::ImageGetLodVsample(const MachineInst *inst)
     : Vsample("image_get_lod", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGetLodVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGetLodVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -546,13 +639,16 @@ ImageSampleDG16Vsample::ImageSampleDG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(224, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleDG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -563,13 +659,16 @@ ImageSampleCDG16Vsample::ImageSampleCDG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(256, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCDG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -580,13 +679,16 @@ ImageSampleDOG16Vsample::ImageSampleDOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDOG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(256, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleDOG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -597,13 +699,16 @@ ImageSampleCDOG16Vsample::ImageSampleCDOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDOG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(288, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCDOG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -614,13 +719,16 @@ ImageSampleClVsample::ImageSampleClVsample(const MachineInst *inst)
     : Vsample("image_sample_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleClVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -631,13 +739,16 @@ ImageSampleDClVsample::ImageSampleDClVsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(320, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleDClVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -648,13 +759,16 @@ ImageSampleBClVsample::ImageSampleBClVsample(const MachineInst *inst)
     : Vsample("image_sample_b_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleBClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleBClVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -665,13 +779,16 @@ ImageSampleCClVsample::ImageSampleCClVsample(const MachineInst *inst)
     : Vsample("image_sample_c_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCClVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -682,13 +799,16 @@ ImageSampleCDClVsample::ImageSampleCDClVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCDClVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -699,13 +819,16 @@ ImageSampleCBClVsample::ImageSampleCBClVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCBClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCBClVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -716,13 +839,16 @@ ImageSampleClOVsample::ImageSampleClOVsample(const MachineInst *inst)
     : Vsample("image_sample_cl_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleClOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleClOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -733,13 +859,16 @@ ImageSampleDClOVsample::ImageSampleDClOVsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDClOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleDClOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -750,13 +879,16 @@ ImageSampleBClOVsample::ImageSampleBClOVsample(const MachineInst *inst)
     : Vsample("image_sample_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleBClOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleBClOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -767,13 +899,16 @@ ImageSampleCClOVsample::ImageSampleCClOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_cl_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCClOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCClOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -784,13 +919,16 @@ ImageSampleCDClOVsample::ImageSampleCDClOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDClOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(384, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCDClOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -801,13 +939,16 @@ ImageSampleCBClOVsample::ImageSampleCBClOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCBClOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(224, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCBClOVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -818,13 +959,16 @@ ImageSampleCDClG16Vsample::ImageSampleCDClG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDClG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(288, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCDClG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -835,13 +979,16 @@ ImageSampleDClOG16Vsample::ImageSampleDClOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDClOG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(288, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleDClOG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -852,13 +999,16 @@ ImageSampleCDClOG16Vsample::ImageSampleCDClOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDClOG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(320, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleCDClOG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -869,13 +1019,16 @@ ImageSampleDClG16Vsample::ImageSampleDClG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDClG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(256, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageSampleDClG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -886,13 +1039,16 @@ ImageGather4ClVsample::ImageGather4ClVsample(const MachineInst *inst)
     : Vsample("image_gather4_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4ClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4ClVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -903,13 +1059,16 @@ ImageGather4BClVsample::ImageGather4BClVsample(const MachineInst *inst)
     : Vsample("image_gather4_b_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4BClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4BClVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -920,13 +1079,16 @@ ImageGather4CClVsample::ImageGather4CClVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4CClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4CClVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -937,13 +1099,16 @@ ImageGather4CLVsample::ImageGather4CLVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_l", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4CLVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4CLVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -954,13 +1119,16 @@ ImageGather4CBVsample::ImageGather4CBVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_b", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4CBVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4CBVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -971,13 +1139,16 @@ ImageGather4CBClVsample::ImageGather4CBClVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4CBClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4CBClVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -988,13 +1159,16 @@ ImageGather4hVsample::ImageGather4hVsample(const MachineInst *inst)
     : Vsample("image_gather4h", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4hVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
+  vaddr.apply_fieldless_caps(false, false, false);
 }
 
 void ImageGather4hVsample::execute_impl(amdgpu::Wavefront &wf) {

@@ -693,8 +693,11 @@ static hipError_t playback_hipDrvGraphAddMemcpyNode(PlaybackContext& ctx, const 
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvGraphAddMemcpyNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipDrvGraphAddMemcpyNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -756,11 +759,7 @@ static hipError_t playback_hipEventElapsedTime(PlaybackContext& ctx, const uint8
   return _r;
 }
 
-static hipError_t playback_hipEventQuery(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipEventQuery*>(payload);
-  hipError_t _r = (hipError_t)hipEventQuery((hipEvent_t)ctx.translate_event(a->event));
-  return _r;
-}
+extern hipError_t playback_hipEventQuery(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipEventRecord(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipEventRecord*>(payload);
@@ -803,16 +802,7 @@ static hipError_t playback_hipExtLaunchMultiKernelMultiDevice(PlaybackContext& c
   return _r;
 }
 
-static hipError_t playback_hipExtMallocWithFlags(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipExtMallocWithFlags — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipExtMallocWithFlags(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipExtStreamCreateWithCUMask(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
@@ -1092,8 +1082,11 @@ static hipError_t playback_hipGraphAddChildGraphNode(PlaybackContext& ctx, const
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddChildGraphNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddChildGraphNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1103,8 +1096,11 @@ static hipError_t playback_hipGraphAddDependencies(PlaybackContext& ctx, const u
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddDependencies — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddDependencies: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1114,8 +1110,11 @@ static hipError_t playback_hipGraphAddEmptyNode(PlaybackContext& ctx, const uint
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddEmptyNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddEmptyNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1125,8 +1124,11 @@ static hipError_t playback_hipGraphAddEventRecordNode(PlaybackContext& ctx, cons
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddEventRecordNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddEventRecordNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1136,8 +1138,11 @@ static hipError_t playback_hipGraphAddEventWaitNode(PlaybackContext& ctx, const 
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddEventWaitNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddEventWaitNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1147,8 +1152,11 @@ static hipError_t playback_hipGraphAddHostNode(PlaybackContext& ctx, const uint8
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddHostNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddHostNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1158,8 +1166,11 @@ static hipError_t playback_hipGraphAddKernelNode(PlaybackContext& ctx, const uin
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddKernelNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddKernelNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1169,8 +1180,11 @@ static hipError_t playback_hipGraphAddMemAllocNode(PlaybackContext& ctx, const u
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddMemAllocNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddMemAllocNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1180,8 +1194,11 @@ static hipError_t playback_hipGraphAddMemFreeNode(PlaybackContext& ctx, const ui
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddMemFreeNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddMemFreeNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1191,8 +1208,11 @@ static hipError_t playback_hipGraphAddMemcpyNode(PlaybackContext& ctx, const uin
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddMemcpyNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddMemcpyNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1202,8 +1222,11 @@ static hipError_t playback_hipGraphAddMemcpyNode1D(PlaybackContext& ctx, const u
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddMemcpyNode1D — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddMemcpyNode1D: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1213,8 +1236,11 @@ static hipError_t playback_hipGraphAddMemcpyNodeFromSymbol(PlaybackContext& ctx,
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddMemcpyNodeFromSymbol — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddMemcpyNodeFromSymbol: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1224,8 +1250,11 @@ static hipError_t playback_hipGraphAddMemcpyNodeToSymbol(PlaybackContext& ctx, c
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddMemcpyNodeToSymbol — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddMemcpyNodeToSymbol: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1235,8 +1264,11 @@ static hipError_t playback_hipGraphAddMemsetNode(PlaybackContext& ctx, const uin
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddMemsetNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddMemsetNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1257,8 +1289,11 @@ static hipError_t playback_hipGraphClone(PlaybackContext& ctx, const uint8_t* pa
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphClone — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphClone: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1268,8 +1303,11 @@ static hipError_t playback_hipGraphCreate(PlaybackContext& ctx, const uint8_t* p
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphCreate — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphCreate: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -1525,15 +1563,7 @@ static hipError_t playback_hipGraphHostNodeSetParams(PlaybackContext& ctx, const
 
 extern hipError_t playback_hipGraphInstantiate(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipGraphInstantiateWithFlags(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphInstantiateWithFlags*>(payload);
-  hipGraphExec_t _out_pGraphExec = nullptr;
-  hipError_t _r = (hipError_t)hipGraphInstantiateWithFlags(&_out_pGraphExec, (hipGraph_t)ctx.translate_graph(a->graph), (unsigned long long)a->flags);
-  if (_r == hipSuccess) {
-    ctx.record_graph_exec(a->pGraphExec, _out_pGraphExec);
-  }
-  return _r;
-}
+extern hipError_t playback_hipGraphInstantiateWithFlags(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipGraphKernelNodeCopyAttributes(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
@@ -1888,7 +1918,7 @@ static hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pa
   void* _out_ptr = nullptr;
   hipError_t _r = (hipError_t)hipHostMalloc((void**)&_out_ptr, (size_t)a->size, (unsigned int)a->flags);
   if (_r == hipSuccess) {
-    ctx.record_alloc(a->ptr, _out_ptr, static_cast<size_t>(a->size));
+    ctx.record_alloc(a->ptr, _out_ptr, static_cast<size_t>(a->size), AllocKind::HostMalloc);
   }
   return _r;
 }
@@ -2072,7 +2102,7 @@ static hipError_t playback_hipMallocPitch(PlaybackContext& ctx, const uint8_t* p
   size_t _out_pitch{};
   hipError_t _r = (hipError_t)hipMallocPitch((void**)&_out_ptr, &_out_pitch, (size_t)a->width, (size_t)a->height);
   if (_r == hipSuccess) {
-    ctx.record_alloc(a->ptr, _out_ptr, static_cast<size_t>(a->width));
+    ctx.record_alloc(a->ptr, _out_ptr, static_cast<size_t>(a->width), AllocKind::Device);
   }
   return _r;
 }
@@ -2383,17 +2413,9 @@ extern hipError_t playback_hipMemUnmap(PlaybackContext& ctx, const uint8_t* payl
 
 extern hipError_t playback_hipMemcpy(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipMemcpy2D(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemcpy2D*>(payload);
-  hipError_t _r = (hipError_t)hipMemcpy2D(ctx.translate_ptr(a->dst), (size_t)a->dpitch, ctx.translate_ptr(a->src), (size_t)a->spitch, (size_t)a->width, (size_t)a->height, (hipMemcpyKind)a->kind);
-  return _r;
-}
+extern hipError_t playback_hipMemcpy2D(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipMemcpy2DAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemcpy2DAsync*>(payload);
-  hipError_t _r = (hipError_t)hipMemcpy2DAsync(ctx.translate_ptr(a->dst), (size_t)a->dpitch, ctx.translate_ptr(a->src), (size_t)a->spitch, (size_t)a->width, (size_t)a->height, (hipMemcpyKind)a->kind, (hipStream_t)ctx.translate_stream(a->stream));
-  return _r;
-}
+extern hipError_t playback_hipMemcpy2DAsync(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemcpy2DFromArray(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
@@ -3092,11 +3114,7 @@ static hipError_t playback_hipStreamIsCapturing(PlaybackContext& ctx, const uint
   return _r;
 }
 
-static hipError_t playback_hipStreamQuery(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamQuery*>(payload);
-  hipError_t _r = (hipError_t)hipStreamQuery((hipStream_t)ctx.translate_stream(a->stream));
-  return _r;
-}
+extern hipError_t playback_hipStreamQuery(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipStreamSynchronize(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipStreamSynchronize*>(payload);
@@ -3392,9 +3410,10 @@ static hipError_t playback_hipTexRefSetMipmappedArray(PlaybackContext& ctx, cons
 }
 
 static hipError_t playback_hipThreadExchangeStreamCaptureMode(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx;
   const auto* a = reinterpret_cast<const hrr_args_hipThreadExchangeStreamCaptureMode*>(payload);
-  hipStreamCaptureMode _out_mode{};
-  hipError_t _r = (hipError_t)hipThreadExchangeStreamCaptureMode(&_out_mode);
+  hipStreamCaptureMode mode = static_cast<hipStreamCaptureMode>(a->mode);
+  hipError_t _r = (hipError_t)hipThreadExchangeStreamCaptureMode(&mode);
   return _r;
 }
 
@@ -3656,11 +3675,7 @@ static hipError_t playback_hipMemcpy2DToArrayAsync_spt(PlaybackContext& ctx, con
   return hipSuccess;
 }
 
-static hipError_t playback_hipStreamQuery_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamQuery_spt*>(payload);
-  hipError_t _r = (hipError_t)hipStreamQuery_spt((hipStream_t)ctx.translate_stream(a->stream));
-  return _r;
-}
+extern hipError_t playback_hipStreamQuery_spt(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipStreamSynchronize_spt(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipStreamSynchronize_spt*>(payload);
@@ -3809,8 +3824,11 @@ static hipError_t playback_hipDrvGraphAddMemsetNode(PlaybackContext& ctx, const 
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvGraphAddMemsetNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipDrvGraphAddMemsetNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -3820,8 +3838,11 @@ static hipError_t playback_hipGraphAddExternalSemaphoresWaitNode(PlaybackContext
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddExternalSemaphoresWaitNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddExternalSemaphoresWaitNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -3831,8 +3852,11 @@ static hipError_t playback_hipGraphAddExternalSemaphoresSignalNode(PlaybackConte
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddExternalSemaphoresSignalNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddExternalSemaphoresSignalNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -3880,8 +3904,11 @@ static hipError_t playback_hipGraphAddNode(PlaybackContext& ctx, const uint8_t* 
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -3891,8 +3918,11 @@ static hipError_t playback_hipGraphInstantiateWithParams(PlaybackContext& ctx, c
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphInstantiateWithParams — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphInstantiateWithParams: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -3955,8 +3985,11 @@ static hipError_t playback_hipDrvGraphAddMemFreeNode(PlaybackContext& ctx, const
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvGraphAddMemFreeNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipDrvGraphAddMemFreeNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -4149,8 +4182,11 @@ static hipError_t playback_hipGraphAddBatchMemOpNode(PlaybackContext& ctx, const
   static bool warned = false;
   if (!warned) {
     warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphAddBatchMemOpNode — "
-            "this API is not replayed; results may differ from capture.\n");
+    fprintf(stderr, "[HRR] hipGraphAddBatchMemOpNode: explicit (node-API) graph "
+            "construction is NOT supported by HRR replay. Only "
+            "stream-capture graphs (hipStreamBeginCapture/EndCapture) "
+            "are replayable; instantiating a node-API-built graph will "
+            "fail loudly. This call is skipped.\n");
   }
   return hipSuccess;
 }
@@ -4905,11 +4941,11 @@ const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {
     static_cast<uint32_t>(sizeof(hrr_args_hipIpcOpenMemHandle)),  // [216] HRR_API_HIPIPCOPENMEMHANDLE
     static_cast<uint32_t>(sizeof(hrr_args_hipKernelNameRef)),  // [217] HRR_API_HIPKERNELNAMEREF
     static_cast<uint32_t>(sizeof(hrr_args_hipKernelNameRefByPtr)),  // [218] HRR_API_HIPKERNELNAMEREFBYPTR
-    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchByPtr)),  // [219] HRR_API_HIPLAUNCHBYPTR
+    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [219] variable-length kernel launch
     static_cast<uint32_t>(sizeof(hrr_args_hipLaunchCooperativeKernel)),  // [220] HRR_API_HIPLAUNCHCOOPERATIVEKERNEL
     static_cast<uint32_t>(sizeof(hrr_args_hipLaunchCooperativeKernelMultiDevice)),  // [221] HRR_API_HIPLAUNCHCOOPERATIVEKERNELMULTIDEVICE
     static_cast<uint32_t>(sizeof(hrr_args_hipLaunchHostFunc)),  // [222] HRR_API_HIPLAUNCHHOSTFUNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchKernel)),  // [223] HRR_API_HIPLAUNCHKERNEL
+    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [223] variable-length kernel launch
     static_cast<uint32_t>(sizeof(hrr_args_hipMalloc)),  // [224] HRR_API_HIPMALLOC
     static_cast<uint32_t>(sizeof(hrr_args_hipMalloc3D)),  // [225] HRR_API_HIPMALLOC3D
     static_cast<uint32_t>(sizeof(hrr_args_hipMalloc3DArray)),  // [226] HRR_API_HIPMALLOC3DARRAY
@@ -5011,7 +5047,7 @@ const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {
     static_cast<uint32_t>(sizeof(hrr_args_hipModuleGetTexRef)),  // [322] HRR_API_HIPMODULEGETTEXREF
     static_cast<uint32_t>(sizeof(hrr_args_hipModuleLaunchCooperativeKernel)),  // [323] HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL
     static_cast<uint32_t>(sizeof(hrr_args_hipModuleLaunchCooperativeKernelMultiDevice)),  // [324] HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNELMULTIDEVICE
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleLaunchKernel)),  // [325] HRR_API_HIPMODULELAUNCHKERNEL
+    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [325] variable-length kernel launch
     static_cast<uint32_t>(sizeof(hrr_args_hipModuleLoad)),  // [326] HRR_API_HIPMODULELOAD
     static_cast<uint32_t>(sizeof(hrr_args_hipModuleLoadData)),  // [327] HRR_API_HIPMODULELOADDATA
     static_cast<uint32_t>(sizeof(hrr_args_hipModuleLoadDataEx)),  // [328] HRR_API_HIPMODULELOADDATAEX
@@ -5139,7 +5175,7 @@ const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {
     static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetCaptureInfo_v2_spt)),  // [450] HRR_API_HIPSTREAMGETCAPTUREINFO_V2_SPT
     static_cast<uint32_t>(sizeof(hrr_args_hipLaunchHostFunc_spt)),  // [451] HRR_API_HIPLAUNCHHOSTFUNC_SPT
     static_cast<uint32_t>(sizeof(hrr_args_hipCreateChannelDesc)),  // [452] HRR_API_HIPCREATECHANNELDESC
-    static_cast<uint32_t>(sizeof(hrr_args_hipExtModuleLaunchKernel)),  // [453] HRR_API_HIPEXTMODULELAUNCHKERNEL
+    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [453] variable-length kernel launch
     static_cast<uint32_t>(sizeof(hrr_args_hipHccModuleLaunchKernel)),  // [454] HRR_API_HIPHCCMODULELAUNCHKERNEL
     static_cast<uint32_t>(sizeof(hrr_args_hipGetStreamDeviceId)),  // [455] HRR_API_HIPGETSTREAMDEVICEID
     static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphAddMemsetNode)),  // [456] HRR_API_HIPDRVGRAPHADDMEMSETNODE

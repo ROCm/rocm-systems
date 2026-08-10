@@ -65,7 +65,7 @@ shift
 
 # Common environment for both modes.
 ENV_ARGS=(
-    -e "LD_PRELOAD=${INSTALL_DIR}/lib/librocjitsu_kmd.so"
+    -e "LD_PRELOAD=${INSTALL_DIR}/lib/librocjitsu.so"
     -e "RJ_CONFIG=${INSTALL_DIR}/share/rocjitsu/configs/gfx950_cdna4_kmd.json"
     -e "HSA_ENABLE_SDMA=1"
     -e "ROCPROFILER_REGISTER_ENABLED=0"
@@ -78,10 +78,10 @@ if [[ "${RJ_INSTALLED:-0}" != "1" ]]; then
     BUILD_DIR="${RJ_BUILD_DIR:-${PROJECT_DIR}/build}"
     CONFIG="${RJ_CONFIG:-${PROJECT_DIR}/configs/gfx950_cdna4_kmd.json}"
     SCHEMA="${PROJECT_DIR}/schemas/simulation_config.fbs"
-    LIB_PATH="${BUILD_DIR}/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so"
+    LIB_PATH="${BUILD_DIR}/librocjitsu.so"
 
     if [[ ! -f "$LIB_PATH" ]]; then
-        echo "Error: librocjitsu_kmd.so not found at $LIB_PATH" >&2
+        echo "Error: librocjitsu.so not found at $LIB_PATH" >&2
         echo "Build first (cd build && ninja) or set RJ_BUILD_DIR." >&2
         exit 1
     fi
@@ -91,7 +91,7 @@ if [[ "${RJ_INSTALLED:-0}" != "1" ]]; then
     fi
 
     VOLUME_ARGS=(
-        -v "${LIB_PATH}:${INSTALL_DIR}/lib/librocjitsu_kmd.so:ro"
+        -v "${LIB_PATH}:${INSTALL_DIR}/lib/librocjitsu.so:ro"
         -v "${CONFIG}:${INSTALL_DIR}/share/rocjitsu/configs/gfx950_cdna4_kmd.json:ro"
         -v "${SCHEMA}:${INSTALL_DIR}/share/rocjitsu/schemas/simulation_config.fbs:ro"
     )

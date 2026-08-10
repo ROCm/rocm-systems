@@ -98,6 +98,7 @@ class BufferLoadD16FormatXMubuf : public Mubuf {
 public:
   BufferLoadD16FormatXMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -118,6 +119,7 @@ class BufferLoadD16FormatXyzMubuf : public Mubuf {
 public:
   BufferLoadD16FormatXyzMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -318,6 +320,7 @@ class BufferLoadD16U8Mubuf : public Mubuf {
 public:
   BufferLoadD16U8Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -328,6 +331,7 @@ class BufferLoadD16I8Mubuf : public Mubuf {
 public:
   BufferLoadD16I8Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -338,6 +342,7 @@ class BufferLoadD16B16Mubuf : public Mubuf {
 public:
   BufferLoadD16B16Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -348,6 +353,7 @@ class BufferLoadD16HiU8Mubuf : public Mubuf {
 public:
   BufferLoadD16HiU8Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -358,6 +364,7 @@ class BufferLoadD16HiI8Mubuf : public Mubuf {
 public:
   BufferLoadD16HiI8Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -368,6 +375,7 @@ class BufferLoadD16HiB16Mubuf : public Mubuf {
 public:
   BufferLoadD16HiB16Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -398,6 +406,7 @@ class BufferLoadD16HiFormatXMubuf : public Mubuf {
 public:
   BufferLoadD16HiFormatXMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -441,6 +450,7 @@ public:
   BufferAtomicCmpswapB32Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
@@ -581,6 +591,7 @@ public:
   BufferAtomicCmpswapB64Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
@@ -701,6 +712,7 @@ public:
   BufferAtomicCmpswapF32Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;

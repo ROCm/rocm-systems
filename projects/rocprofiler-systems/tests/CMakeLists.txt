@@ -25,7 +25,6 @@ set(ROCPROFSYS_PYTHON_VALIDATION_FILES
 )
 
 set(ROCPROFSYS_TEST_SCRIPTS
-    ${CMAKE_CURRENT_LIST_DIR}/run-rocprof-sys-pid.sh
     ${CMAKE_CURRENT_LIST_DIR}/get_default_nic.sh
     ${CMAKE_CURRENT_LIST_DIR}/generate_papi_nic_events.sh
     ${CMAKE_CURRENT_LIST_DIR}/run_rocprofiler_systems.py

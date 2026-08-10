@@ -28,7 +28,6 @@ Profiling with ROCm Compute Profiler provides the following benefits:
   the output format of raw performance counter data produced by the underlying
   :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` backend. Supported output formats are
   ``csv`` and ``rocpd``. The default output format is ``rocpd``.
-
 * :ref:`Filtering <filtering>`: Apply runtime filters to speed up the profiling
   process.
 
@@ -264,6 +263,25 @@ The output directory can be parameterized with the following keywords:
 
 If MPI rank is detected and the output directory does not include ``%rank%``,
 ROCm Compute Profiler appends ``/<rank>`` to avoid collisions across ranks.
+
+Each profiling run should use a fresh output directory. A workload directory
+holds the output of exactly one run, so profiling into a non-empty directory
+fails with an error rather than silently mixing runs. To re-profile in place,
+add ``--overwrite``, which clears the directory first:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name vcopy --overwrite -- ./vcopy -n 1048576 -b 256
+
+.. warning::
+
+   ``--overwrite`` deletes the target directory's existing contents. Nothing is
+   removed without it.
+
+.. note::
+
+   Automated runs should never reuse a workload directory: profile into a fresh
+   directory each time, or pass ``--overwrite``.
 
 Examples:
 
@@ -728,6 +746,13 @@ that contains both ``roofline.csv`` and application performance counters
 (see :doc:`../analyze/mode`). Visualization options (``--sort``, ``--mem-level``,
 ``--roofline-data-type``) are available in analyze mode.
 
+.. note::
+   Matrix multiplication benchmarking and counter collection will vary depending on which architecture is profiled:
+   * gfx9 (CDNA1/2/3/4) supports Matrix Fused MultiplyAdd (MFMA).
+   * gfx10+ (RDNA3+) supports Wave Matrix Multiply Accumulate (WMMA).
+
+   Additionally, the cache levels that are benchmarked are dependent on the memory hierarchy levels of the architecture. See the :ref:`CDNA Performance Model <cdna-performance-model>` or :ref:`RDNA Performance Model <rdna-performance-model>` pages to view more information about the hardware blocks and cache levels supported in each architecture.
+
 Roofline options (profile)
 --------------------------
 
@@ -827,31 +852,34 @@ To target a specific GPU device, use ``--device``:
 
    $ rocprof-compute profile --name my_bench --bench-only --device 2
 
-To regenerate benchmark data in an existing profiled workload directory, use
-``--output-directory`` to point at the workload path directly:
+To regenerate benchmark data in an existing workload directory, point
+``--output-directory`` at the workload path. This replaces the existing
+``roofline.csv``, so it requires ``--overwrite``. Unlike a full profile,
+``--bench-only`` replaces only ``roofline.csv`` and leaves the rest of the
+workload (counter data, traces) untouched:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --bench-only --output-directory workloads/vcopy/MI300X_A1
+   $ rocprof-compute profile --bench-only --overwrite --output-directory workloads/vcopy/MI300X_A1
 
 .. note::
 
    ``--bench-only`` writes ``roofline.csv`` only; rendering a roofline
    chart additionally requires application performance counters from a
    ``--roof-only`` (or regular profile) run. The intended workflow is to
-   profile first, then re-run ``--bench-only`` against that workload
+   profile first, then re-run ``--bench-only --overwrite`` against that workload
    later to refresh stale peak values before analyzing:
 
    .. code-block:: shell-session
 
       $ rocprof-compute profile --name vcopy --roof-only -- ./vcopy
-      $ rocprof-compute profile --bench-only --output-directory workloads/vcopy/MI300X_A1
+      $ rocprof-compute profile --bench-only --overwrite --output-directory workloads/vcopy/MI300X_A1
       $ rocprof-compute analyze --path workloads/vcopy/MI300X_A1
 
 .. _torch-operator-mapping:
 
-Torch operator mapping
-========================
+Torch trace
+===========
 
 ROCm Compute Profiler offers Torch operator mapping functionality to analyze the performance metrics at the PyTorch operator level. This feature maps the performance counters to specific PyTorch operators, enabling detailed performance analysis of
 the PyTorch workloads at the operator granularity.
@@ -892,7 +920,7 @@ option when profiling a PyTorch workload:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute --experimental profile --name mnist_torch --torch-trace -- python train.py
+   $ rocprof-compute profile --experimental --torch-trace --name mnist_torch -- python train.py
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -916,19 +944,36 @@ option when profiling a PyTorch workload:
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
 
+Reducing instrumentation overhead
+---------------------------------
+
+By default, ``--torch-trace`` also wraps the device- and layout-related
+``torch.Tensor`` methods ``to``, ``cpu``, ``cuda``, and ``contiguous``, which
+attribute tensor movement and layout changes to the originating PyTorch call
+site. These methods are called frequently, so wrapping them adds overhead and
+increases the trace size.
+
+Set the ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` environment variable to
+``0`` (or ``false``, ``no``, ``off``) in the workload environment to disable
+these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
+
+.. code-block:: shell-session
+
+   $ ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0 rocprof-compute profile --experimental --torch-trace --name mnist_torch -- python train.py
+
 Output
 ------
 
 When Torch operator mapping is enabled, profiling writes additional CSV files in
 the workload directory: **marker_api_trace** and **counter_collection** files with
-the ``torch_trace`` prefix. These correlate PyTorch operators
+the ``ml_api_trace`` prefix. These correlate PyTorch operators
 with GPU kernels and performance counters. When you run analyze (e.g. with
 ``--list-torch-operators`` or ``--torch-operator``), a consolidated CSV is written
-to ``torch_trace/consolidated.csv``; the source marker and counter files are
+to ``ml_api_trace/consolidated.csv``; the source marker and counter files are
 **retained** in the workload directory and are not deleted.
 
-``torch_trace/`` directory
-The ``torch_trace/`` directory contains ``consolidated.csv`` with all
+``ml_api_trace/`` directory
+The ``ml_api_trace/`` directory contains ``consolidated.csv`` with all
 operator/kernel data. The columns include:
 
    * ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
@@ -941,7 +986,7 @@ The consolidated CSV is generated automatically on the first analysis run that
 requires it (``--list-torch-operators`` or ``--torch-operator``) and is reused on
 subsequent runs.
 
-Sample rows from ``torch_trace/consolidated.csv`` (from profiling an mnist model).
+Sample rows from ``ml_api_trace/consolidated.csv`` (from profiling an mnist model).
 
 .. list-table::
    :header-rows: 1
@@ -997,12 +1042,14 @@ The ``pmc_perf.csv`` file contains the standard performance counter data (same a
 * Correlating operator-level timing with kernel-level hardware metrics
 * Tracing the execution flow from high-level PyTorch API to low-level GPU kernels
 
+.. _torch-trace-limitations:
+
 Limitations
 -----------
 
 The Torch trace feature currently has the following limitations:
 
-* Torch trace is experimental. Use ``rocprof-compute --experimental profile ... --torch-trace`` and ``rocprof-compute --experimental analyze ...`` with ``--list-torch-operators`` or ``--torch-operator`` as needed.
+* Torch trace is experimental. Use ``rocprof-compute profile ... --experimental --torch-trace`` and ``rocprof-compute analyze ... --experimental`` with ``--list-torch-operators`` or ``--torch-operator`` as needed.
 
 * The ``--torch-trace`` option requires the application to be a Python command or Python script.
 
@@ -1028,7 +1075,7 @@ operator occurs in your PyTorch application:
    nn.Module.MyModel.forward/nn.Module.Linear.forward
    torch.nn.functional.relu
 
-The ``Operator_Name`` column in ``torch_trace/consolidated.csv`` contains
+The ``Operator_Name`` column in ``ml_api_trace/consolidated.csv`` contains
 the full operator hierarchy.
 
 This hierarchical information enables:
@@ -1067,13 +1114,84 @@ Torch operator mapping can be combined with other profiling options. Use
 .. code-block:: shell-session
 
    # Combine with block filtering for targeted counter collection
-   $ rocprof-compute --experimental profile --name mnist --torch-trace -b 11 12 -- python train.py
+   $ rocprof-compute profile -b 11 12 --experimental --torch-trace --name mnist -- python train.py
 
    # Combine with iteration multiplexing
-   $ rocprof-compute --experimental profile --name mnist --torch-trace --iteration-multiplexing kernel -- python train.py
+   $ rocprof-compute profile --experimental --torch-trace --name mnist --iteration-multiplexing kernel -- python train.py
 
    # Combine with kernel filtering (filters by GPU kernel name)
-   $ rocprof-compute --experimental profile --name mnist --torch-trace -k elementwise -- python train.py
+   $ rocprof-compute profile --experimental --torch-trace --name mnist -k elementwise -- python train.py
+
+.. _triton-trace:
+
+Triton trace
+============
+
+In addition to PyTorch, ROCm Compute Profiler can map performance counters to
+Triton kernels (including Triton kernels launched by ``torch.compile`` /
+Inductor). This is enabled with the ``--triton-trace`` option and shares the
+same ``ml_api_trace`` output, ``Backend`` attribution, and analysis flow as Torch
+trace.
+
+.. warning::
+
+   Triton trace is currently an experimental feature. You must pass
+   ``--experimental`` to both **profile** and **analyze** commands when using the
+   Triton trace related options (``--triton-trace`` for profile;
+   ``--list-triton-operators`` and ``--triton-operator`` for analyze).
+
+Requirements
+------------
+
+Triton trace has the same requirements and limitations as Torch trace (see
+:ref:`torch-trace-limitations`), with a valid Triton installation required in
+place of PyTorch.
+
+Usage
+-----
+
+To enable Triton kernel mapping, use ``--experimental`` with the
+``--triton-trace`` option:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --experimental --triton-trace --name triton_gemm -- python gemm.py
+
+``--triton-trace`` can be combined with ``--torch-trace`` to instrument both
+frameworks in a single run:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --experimental --torch-trace --triton-trace --name compiled_model -- python train.py
+
+Each captured marker records its originating framework in the ``Backend`` column
+of ``ml_api_trace/consolidated.csv``, so each framework can be analyzed
+independently. To enable all supported backends at once, use
+:ref:`--ml-api-trace <ml-api-trace>`.
+
+To analyze the captured Triton kernels, use the ``--list-triton-operators`` and
+``--triton-operator`` options in analyze mode (see :doc:`../analyze/cli`).
+
+.. _ml-api-trace:
+
+ML API trace
+============
+
+``--ml-api-trace`` enables marker tracing for all supported ML framework backends in a
+single option.
+
+.. warning::
+
+   ML API trace is currently an experimental feature. You must pass
+   ``--experimental`` when using it.
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --experimental --ml-api-trace --name model -- python train.py
+
+The output is identical to enabling each framework's trace flag individually.
+Captured kernels are attributed in the ``Backend`` column and analyzed with the
+corresponding per-framework operator options (see :doc:`../analyze/cli`).
 
 .. _iteration-multiplexing:
 

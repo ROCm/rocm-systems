@@ -137,9 +137,9 @@ rocprofsys_set_env(const char* env_name, const char* env_val)
 }
 
 extern "C" void
-rocprofsys_set_mpi(bool use, bool attached)
+rocprofsys_set_mpi(bool use)
 {
-    rocprofsys_set_mpi_hidden(use, attached);
+    rocprofsys_set_mpi_hidden(use);
 }
 
 extern "C" void

@@ -4,7 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  */
- 
+
 #pragma once
 
 #include <chrono>
@@ -58,7 +58,10 @@ enum class ProxyCounterTypes {
   UNINITIALIZED = 100
 };
 
-enum class ProxyOpType { SEND, RECV };
+enum class ProxyOpType {
+  SEND,
+  RECV
+};
 // ProxyTraceRecordKey and ProxyTraceExtraInfo is used to pass arguments to
 // proxy thread (see ncclProxyOp and ncclProxySubArgs in proxy.h)
 struct ProxyTraceRecordKey {
@@ -68,8 +71,7 @@ struct ProxyTraceRecordKey {
                          // collective/p2p (identified as commHash:opCount),
                          // assigned when creating ProxyTraceOp entry
   inline std::string str() const {
-    return "<" + std::to_string(commHash) + ":" + std::to_string(opCount) +
-           ":" + std::to_string(proxyOpId) + ">";
+    return "<" + std::to_string(commHash) + ":" + std::to_string(opCount) + ":" + std::to_string(proxyOpId) + ">";
   }
 };
 
@@ -80,8 +82,7 @@ struct ProxyTraceExtraInfo {
   uint32_t totalBytes{0};
   uint32_t chunkSize{0};
   inline std::string str() const {
-    return fmt::format("[fu,pr,pa,tb,ck]:{},{},{},{},{}", funcIdx, protocol,
-                       pattern, totalBytes, chunkSize);
+    return fmt::format("[fu,pr,pa,tb,ck]:{},{},{},{},{}", funcIdx, protocol, pattern, totalBytes, chunkSize);
   }
 };
 
@@ -95,17 +96,17 @@ struct ProxyTraceOp {
   int32_t myRank{-1};
   int32_t peerRank{-1};
   std::unordered_map<ProxyCounterTypes, int64_t> counters{
-      {ProxyCounterTypes::POSTED, 0},
-      {ProxyCounterTypes::KERNEL_COPY_READY, 0},
-      {ProxyCounterTypes::RTR_RECV, 0},
-      {ProxyCounterTypes::RTS_SEND, 0},
-      {ProxyCounterTypes::RECEIVED, 0},
-      {ProxyCounterTypes::TRANSMITTED, 0},
-      {ProxyCounterTypes::FLUSHED, 0},
-      {ProxyCounterTypes::DONE, 0},
-      {ProxyCounterTypes::RECV_TAIL, 0},
-      {ProxyCounterTypes::TAIL_OR_HEAD, 0},
-      {ProxyCounterTypes::FIFO_SZ_OR_HEAD_CACHE, -1},
+    {ProxyCounterTypes::POSTED, 0},
+    {ProxyCounterTypes::KERNEL_COPY_READY, 0},
+    {ProxyCounterTypes::RTR_RECV, 0},
+    {ProxyCounterTypes::RTS_SEND, 0},
+    {ProxyCounterTypes::RECEIVED, 0},
+    {ProxyCounterTypes::TRANSMITTED, 0},
+    {ProxyCounterTypes::FLUSHED, 0},
+    {ProxyCounterTypes::DONE, 0},
+    {ProxyCounterTypes::RECV_TAIL, 0},
+    {ProxyCounterTypes::TAIL_OR_HEAD, 0},
+    {ProxyCounterTypes::FIFO_SZ_OR_HEAD_CACHE, -1},
   };
   ProxyCounterTypes lastUpdatingCounter{ProxyCounterTypes::UNINITIALIZED};
   ProxyOpType opType{ProxyOpType::SEND};
@@ -113,54 +114,41 @@ struct ProxyTraceOp {
   std::chrono::time_point<std::chrono::high_resolution_clock> startTs{};
   std::chrono::time_point<std::chrono::high_resolution_clock> lastUpdateTs{};
   std::unordered_map<ProxyCounterTypes, std::chrono::time_point<std::chrono::high_resolution_clock>> timestamps{
-      {ProxyCounterTypes::POSTED, {}},
-      {ProxyCounterTypes::KERNEL_COPY_READY, {}},
+    {ProxyCounterTypes::POSTED, {}},
+    {ProxyCounterTypes::KERNEL_COPY_READY, {}},
   };
   void computeStatus();
   // str the entry to a string
   std::string str();
 };
 
-using ProxyActiveOpMap = std::unordered_map<
-    uint64_t /* commHash*/,
-    std::unordered_map<int64_t /* opCount*/,
+using ProxyActiveOpMap =
+  std::unordered_map<uint64_t /* commHash*/, std::unordered_map<int64_t /* opCount*/,
                        /* proxyOpId : op */
-                       std::unordered_map<int64_t, ProxyTraceOp>>>;
+                                                                std::unordered_map<int64_t, ProxyTraceOp>>>;
 
 using ProxyActiveOpIdTracker =
-    std::unordered_map<uint64_t /* commHash*/,
-                       std::unordered_map<int64_t /* opCount*/, int64_t>>;
+  std::unordered_map<uint64_t /* commHash*/, std::unordered_map<int64_t /* opCount*/, int64_t>>;
 
 class ProxyTrace {
- public:
-  ProxyTrace(int32_t rank) : myRank(rank) {}; 
-  
+public:
+  ProxyTrace(int32_t rank) : myRank(rank) {};
+
   ProxyTrace() = delete;
-  ProxyTrace(const ProxyTrace &) = delete;
-  ProxyTrace &operator=(const ProxyTrace &) = delete;
+  ProxyTrace(const ProxyTrace&) = delete;
+  ProxyTrace& operator=(const ProxyTrace&) = delete;
 
   //
   // Public APIs called by the proxy thread and ncclCommDump().
   // All these APIs lock the same shared mutex before executing.
   //
 
-  void updateProxyOpCounter(
-      const ProxyTraceRecordKey& traceKey,
-      ProxyCounterTypes counter,
-      int64_t val);
+  void updateProxyOpCounter(const ProxyTraceRecordKey& traceKey, ProxyCounterTypes counter, int64_t val);
 
-  void setProxyOpTimestamp(
-      const ProxyTraceRecordKey& traceKey,
-      ProxyCounterTypes counter);
+  void setProxyOpTimestamp(const ProxyTraceRecordKey& traceKey, ProxyCounterTypes counter);
 
-  void addNewProxyOp(
-      ProxyTraceRecordKey& key,
-      const ProxyTraceExtraInfo& extraInfo,
-      ProxyOpType opType,
-      int channelId,
-      int nSteps,
-      uint32_t nbytes,
-      int peerRank);
+  void addNewProxyOp(ProxyTraceRecordKey& key, const ProxyTraceExtraInfo& extraInfo, ProxyOpType opType, int channelId,
+                     int nSteps, uint32_t nbytes, int peerRank);
 
   // Dump all trace for a given communicator
   std::string dump(uint64_t commHash);
@@ -171,26 +159,23 @@ class ProxyTrace {
   //
   // Getters called by public APIs as well as unit tests.
   // These are not thread-safe unless called by the public APIs above.
-  // 
+  //
 
-  ProxyTraceOp *getProxyTraceOpPtr(const ProxyTraceRecordKey &traceKey);
+  ProxyTraceOp* getProxyTraceOpPtr(const ProxyTraceRecordKey& traceKey);
   float getMapSizeMB() const;
 
 private:
-  void checkOpCompleted(const ProxyTraceRecordKey &key);
+  void checkOpCompleted(const ProxyTraceRecordKey& key);
 
-  void addNewProxyTraceOpImpl(const ProxyTraceRecordKey &key,
-                              const ProxyTraceExtraInfo &extraInfo,
-                              ProxyOpType opType, int channelId, int nSteps,
-                              uint32_t nbytes, int peerRank);
+  void addNewProxyTraceOpImpl(const ProxyTraceRecordKey& key, const ProxyTraceExtraInfo& extraInfo, ProxyOpType opType,
+                              int channelId, int nSteps, uint32_t nbytes, int peerRank);
 
   // Get a unique proxyOpId for a given commHash:opCount
   // If the opCount is not found, create a new entry for it and return 0
   int64_t getOrCreateProxyOpId(uint64_t commHash, uint64_t opCount);
 
   // check if an active send/recv operation exists for a given commHash:opCount
-  bool checkActiveOpExist(uint64_t commHash, uint64_t opCount,
-                          uint32_t proxyOpId) const;
+  bool checkActiveOpExist(uint64_t commHash, uint64_t opCount, uint32_t proxyOpId) const;
 
   mutable std::mutex mutex_;
   int myRank{-1};

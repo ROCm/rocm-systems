@@ -98,7 +98,7 @@ Expected: FAIL — symbol not defined.
 
 ```bash
 git add include/amd_smi/amdsmi.h src/amd_smi/amd_smi.cc tests/amd_smi_test/test_file.cc
-git commit -s -m "[AMD-SMI] Add amdsmi_get_gpu_new_feature"
+git commit -s -m "feat(amdsmi): add amdsmi_get_gpu_new_feature"
 ```
 ````
 

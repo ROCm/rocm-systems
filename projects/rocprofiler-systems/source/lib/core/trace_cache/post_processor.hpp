@@ -4,12 +4,20 @@
 #pragma once
 
 #include "core/output_file_registry.hpp"
+#include "core/perfetto/fwd.hpp"
 #include "core/progress/tracker.hpp"
 #include "core/trace_cache/data_types.hpp"
 
+#include <functional>
 #include <memory>
+#include <optional>
 #include <sys/types.h>
 #include <vector>
+
+namespace rocprofsys
+{
+class track_registry;
+}  // namespace rocprofsys
 
 namespace rocprofsys::trace_cache
 {
@@ -23,6 +31,16 @@ public:
     post_processor& operator=(const post_processor&) = delete;
     post_processor(post_processor&&)                 = delete;
     post_processor& operator=(post_processor&&)      = delete;
+
+    // Wire the cached-mode perfetto engine + its track_registry into the
+    // per-pid perfetto_processor_t instances built by process(). Both
+    // pointers must outlive every per-pid processing run; cache_manager
+    // owns them for the lifetime of post_process_bulk. Calling with
+    // nullptrs (the default) restores the pre-engine wiring — useful
+    // when perfetto is disabled and the build of perfetto_processor_t
+    // is suppressed anyway.
+    void set_cached_perfetto_context(core::cached_perfetto_engine& engine,
+                                     rocprofsys::track_registry&   tracks) noexcept;
 
     void process(const std::vector<std::shared_ptr<data::processor_config_t>>& configs,
                  const data::enabled_formats_t&                                formats);
@@ -39,8 +57,10 @@ private:
         const std::vector<std::shared_ptr<data::processor_config_t>>& configs,
         const data::enabled_formats_t&                                formats);
 
-    progress::tracker&    m_tracker;
-    output_file_registry& m_registry;
+    progress::tracker&                                                  m_tracker;
+    output_file_registry&                                               m_registry;
+    std::optional<std::reference_wrapper<core::cached_perfetto_engine>> m_engine{};
+    std::optional<std::reference_wrapper<rocprofsys::track_registry>>   m_tracks{};
 };
 
 }  // namespace rocprofsys::trace_cache

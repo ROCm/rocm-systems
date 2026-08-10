@@ -160,13 +160,13 @@ git branch -D backup/BRANCH_NAME   # only after Step 6 passes
 ## Commit Message Format
 
 **REQUIRED SUB-SKILL:** Use the `amdsmi-commit-and-pr-conventions` skill for the commit
-title and body format — it is the single source of truth for the `[AMD-SMI]`
-tag, the bulleted body, the no-ticket-in-body rule, and brevity caps. Apply it
-to every commit you create here.
+title and body format — it is the single source of truth for the
+Conventional Commits `type(amdsmi):` title, the bulleted body, the
+no-ticket-in-body rule, and brevity caps. Apply it to every commit you create here.
 
 Quick reminder while restaging (see the skill for the full convention):
 
-- Subject: `[AMD-SMI] imperative summary`, ≤72 chars, no trailing period
+- Subject: `type(amdsmi): imperative summary`, ≤72 chars, no trailing period
 - Body: blank line, verb-first bullets, no `ROCM-NNNNN` refs in the body
 - `Signed-off-by` required; preserve original authors and `Co-authored-by:`
 

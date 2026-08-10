@@ -20,6 +20,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SCmpLgI32Sopc : public Sopc {
@@ -28,6 +29,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SCmpGtI32Sopc : public Sopc {
@@ -36,6 +38,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SCmpGeI32Sopc : public Sopc {
@@ -44,6 +47,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SCmpLtI32Sopc : public Sopc {
@@ -52,6 +56,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SCmpLeI32Sopc : public Sopc {
@@ -60,6 +65,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SCmpEqU32Sopc : public Sopc {
@@ -68,6 +74,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SCmpLgU32Sopc : public Sopc {
@@ -76,6 +83,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SCmpGtU32Sopc : public Sopc {
@@ -84,6 +92,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SCmpGeU32Sopc : public Sopc {
@@ -92,6 +101,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SCmpLtU32Sopc : public Sopc {
@@ -100,6 +110,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SCmpLeU32Sopc : public Sopc {
@@ -108,6 +119,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SBitcmp0B32Sopc : public Sopc {
@@ -116,6 +128,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SBitcmp1B32Sopc : public Sopc {
@@ -124,6 +137,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SBitcmp0B64Sopc : public Sopc {
@@ -132,6 +146,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SBitcmp1B64Sopc : public Sopc {
@@ -140,6 +155,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SCmpEqU64Sopc : public Sopc {
@@ -148,6 +164,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 class SCmpLgU64Sopc : public Sopc {
@@ -156,6 +173,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
+  Operand scc;
 };
 
 } // namespace rdna2
