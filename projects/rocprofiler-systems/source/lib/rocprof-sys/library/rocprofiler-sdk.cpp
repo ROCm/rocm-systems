@@ -5,6 +5,7 @@
 #include "api.hpp"
 #include "binary/analysis.hpp"
 #include "common/env_vars.hpp"
+#include "common/static_object.hpp"
 #include "common/synchronized.hpp"
 #include "core/common.hpp"
 #include "core/common_types.hpp"
@@ -197,8 +198,11 @@ struct rocprofsys_ompt_cb_storage_t
 
     static rocprofsys_ompt_cb_storage_t& instance()
     {
-        static rocprofsys_ompt_cb_storage_t* _instance =
-            new rocprofsys_ompt_cb_storage_t{};
+        // Must outlive both finalization and static destruction: release() is invoked
+        // from thread-local destructors, which can run after either has completed
+        static auto*& _instance =
+            common::static_object<rocprofsys_ompt_cb_storage_t>::construct(
+                common::do_not_destroy{});
         return *_instance;
     }
 

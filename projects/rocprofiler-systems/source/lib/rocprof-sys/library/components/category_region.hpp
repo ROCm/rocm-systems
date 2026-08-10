@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/defines.h"
+#include "common/static_object.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
@@ -150,8 +151,8 @@ template <typename Policy = real_region_policy>
 struct category_region
 {
     // Global directory of every thread's category_region instance, so finalization can
-    // drain threads other than the caller. Leaked so the thread-local handles that
-    // deregister at process exit can never touch a freed registry
+    // drain threads other than the caller. Never destroyed so the thread-local handles
+    // that deregister at process exit can never touch a freed registry
     struct registry_t
     {
         std::vector<category_region*> instances = {};
@@ -159,7 +160,11 @@ struct category_region
 
         static registry_t& instance()
         {
-            static registry_t* _instance = new registry_t{};
+            // registry_t is used as the context type so that every translation unit
+            // including this header shares a single registry
+            static auto*& _instance =
+                common::static_object<registry_t, registry_t>::construct(
+                    common::do_not_destroy{});
             return *_instance;
         }
     };
