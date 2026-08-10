@@ -168,8 +168,11 @@ class SymmetricGeneratorKernelCountTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # generate.py is co-located with this test; its absence is a real error,
-        # not a reason to skip (a skipped ctest reports PASS and hides breakage).
-        assert os.path.exists(GENERATE_PY), "generate.py not found next to test: %s" % GENERATE_PY
+        # not a reason to skip (a skipped run reports PASS and hides breakage).
+        # Use an explicit raise, not assert: assert is stripped under `python -O`,
+        # which would let the check silently pass.
+        if not os.path.exists(GENERATE_PY):
+            raise FileNotFoundError("generate.py not found next to test: %s" % GENERATE_PY)
         cls._dir = tempfile.mkdtemp(prefix="rccl_symkcount_")
         # Register cleanup right after mkdtemp so a failure in _generate() still
         # removes the temp dir (tearDownClass is skipped when setUpClass raises).
