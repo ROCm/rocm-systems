@@ -15,9 +15,6 @@
 
 #include <cstdint>
 
-// Forward-declare libvfio-user types.
-typedef struct vfu_ctx vfu_ctx_t;
-
 namespace rocjitsu::vfu {
 
 /// @brief BAR0 VRAM aperture.
@@ -35,9 +32,8 @@ public:
   Bar0Vram(const Bar0Vram &) = delete;
   Bar0Vram &operator=(const Bar0Vram &) = delete;
 
-  /// @brief Register this BAR with the libvfio-user context.
-  /// @returns 0 on success, -1 on failure.
-  int setup(vfu_ctx_t *ctx);
+  /// @brief Returns true if the VRAM memfd was initialized successfully.
+  bool valid() const { return memfd_.valid(); }
 
   /// @brief The backing memfd file descriptor.
   int fd() const { return memfd_.fd(); }

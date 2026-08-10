@@ -88,8 +88,24 @@ int VfuServer::init() {
   // 3. Construct BAR handlers.
   // -----------------------------------------------------------------------
   bar0_ = std::make_unique<Bar0Vram>(opts_.vram_bar_size);
-  if (bar0_->setup(ctx_) != 0)
+  if (!bar0_->valid()) {
+    std::fprintf(stderr, "[vfu] BAR0 VRAM memfd initialization failed\n");
     return -1;
+  }
+
+  // BAR0/1: 64-bit prefetchable VRAM aperture, fully mmap-able (no callback).
+  iovec bar0_mmap{.iov_base = nullptr, .iov_len = bar0_->size()};
+  if (vfu_setup_region(ctx_,
+                       VFU_PCI_DEV_BAR0_REGION_IDX,
+                       bar0_->size(),
+                       nullptr,
+                       VFU_REGION_FLAG_RW | VFU_REGION_FLAG_MEM |
+                         VFU_REGION_FLAG_64_BITS | VFU_REGION_FLAG_PREFETCH,
+                       &bar0_mmap, 1,
+                       bar0_->fd(), 0) != 0) {
+    std::perror("vfu_setup_region BAR0");
+    return -1;
+  }
 
   bar2_ = std::make_unique<Bar2Doorbell>(
       BarSizes::kBar2Doorbell,

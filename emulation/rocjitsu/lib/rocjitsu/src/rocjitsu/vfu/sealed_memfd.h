@@ -13,6 +13,7 @@
 
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
