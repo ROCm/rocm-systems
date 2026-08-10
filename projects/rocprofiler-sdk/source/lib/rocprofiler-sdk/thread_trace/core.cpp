@@ -485,7 +485,7 @@ DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t& aql,
 std::unordered_set<rocprofiler_agent_id_t>
 DispatchThreadTracer::configured_agents() const
 {
-    auto result = std::unordered_set<rocprofiler_agent_id_t>{};
+    auto                                result = std::unordered_set<rocprofiler_agent_id_t>{};
     std::shared_lock<std::shared_mutex> lk(agents_map_mut);
     for(const auto& [agent_id, _] : params)
         result.insert(agent_id);
@@ -502,8 +502,8 @@ DispatchThreadTracer::collects_on(rocprofiler_agent_id_t agent_id) const
 bool
 DispatchThreadTracer::intersects(const DispatchThreadTracer& rhs) const
 {
-    std::shared_lock<std::shared_mutex>       lk(agents_map_mut);
-    std::shared_lock<std::shared_mutex>       lk_rhs(rhs.agents_map_mut);
+    std::shared_lock<std::shared_mutex> lk(agents_map_mut);
+    std::shared_lock<std::shared_mutex> lk_rhs(rhs.agents_map_mut);
     for(const auto& [agent_id, _] : params)
     {
         if(rhs.params.count(agent_id) > 0) return true;
