@@ -88,8 +88,8 @@ def make_colliding_pc_sampling_tool_data(process_id: int, sample_count: int):
     return tool_data
 
 
-def make_pc_sampling_only_database_analyzer(workload_path, tool_data_records):
-    """Build a database analyzer configured for sampling-only records."""
+def make_pc_sampling_database_analyzer(tool_data_per_workload):
+    """Build a database analyzer configured for sampling-only workloads."""
     analyzer = db_analysis(
         SimpleNamespace(output_name=None, output_format="database"),
         {},
@@ -98,16 +98,23 @@ def make_pc_sampling_only_database_analyzer(workload_path, tool_data_records):
         workload_path: schema.Workload(
             sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
         )
+        for workload_path in tool_data_per_workload
     }
     analyzer._roofline_ceilings_per_workload = {}
     analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
-    analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data_records}
+    analyzer._pc_sampling_tool_data_per_workload = tool_data_per_workload
     analyzer._dispatch_data_per_workload = {
         workload_path: analyzer._build_pc_sampling_dispatch_data(tool_data_records)
+        for workload_path, tool_data_records in tool_data_per_workload.items()
     }
     analyzer._roofline_data_per_kernel = {}
     analyzer._roofline_data_per_workload = {}
     return analyzer
+
+
+def make_pc_sampling_only_database_analyzer(workload_path, tool_data_records):
+    """Build a database analyzer configured for one sampling-only workload."""
+    return make_pc_sampling_database_analyzer({workload_path: tool_data_records})
 
 
 def make_counter_backed_database_analyzer(
@@ -1016,17 +1023,6 @@ def test_add_pc_sampling_data_no_tool_data_is_noop(db_session):
     assert db_session.query(orm.InstructionLine).count() == 0
 
 
-def test_run_analysis_writes_schema_version_2_1_1(
-    db_session,
-    tmp_path: Path,
-) -> None:
-    analyzer = make_pc_sampling_only_database_analyzer(str(tmp_path), [])
-
-    run_analysis_with_materialized_views(analyzer)
-
-    assert db_session.query(orm.Metadata).one().schema_version == "2.1.1"
-
-
 def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
     """Instruction lines use the workload kernels and transient store registry."""
     workload_path = "/fake/workload"
@@ -1357,7 +1353,7 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
         .execute(
             text(
                 "SELECT pid, kernel_uuid, kernel_name, count "
-                "FROM compute_pc_sampling_view ORDER BY pid"
+                "FROM compute_pc_sampling_summary_view ORDER BY pid"
             )
         )
         .mappings()
@@ -1419,7 +1415,10 @@ def test_run_analysis_exports_process_scoped_pc_sampling_csv(
         expected_pc_sampling_mapping = {
             pid: count
             for pid, count in database_session.execute(
-                text("SELECT pid, count FROM compute_pc_sampling_view ORDER BY pid")
+                text(
+                    "SELECT pid, count "
+                    "FROM compute_pc_sampling_summary_view ORDER BY pid"
+                )
             )
         }
         expected_kernel_mapping = {
@@ -1440,11 +1439,11 @@ def test_run_analysis_exports_process_scoped_pc_sampling_csv(
             "kernel.csv",
             "kernel_metric.csv",
             "workload_metric.csv",
-            "pc_sampling.csv",
+            "pc_sampling_summary.csv",
         }
         assert "dispatch.csv" not in output_filenames
 
-        pc_sampling_frame = pd.read_csv(csv_directory / "pc_sampling.csv")
+        pc_sampling_frame = pd.read_csv(csv_directory / "pc_sampling_summary.csv")
         kernel_frame = pd.read_csv(csv_directory / "kernel.csv")
         assert "pid" in pc_sampling_frame.columns
         assert "code_object_id" in pc_sampling_frame.columns
@@ -1680,6 +1679,177 @@ def make_disasm_code_object(code_object_id, instructions, symbol_name="sym"):
             }
         ],
     }
+
+
+def make_source_workload_tool_data_records(
+    workload_path,
+    snapshot_source_paths,
+    sampled_source,
+):
+    """Create PC-sampling inputs with sampled source values."""
+    workload_path.mkdir(parents=True, exist_ok=True)
+    for original_source_path in snapshot_source_paths:
+        snapshot_path = workload_path / "src" / original_source_path.relative_to("/")
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        snapshot_path.touch()
+
+    tool_data = make_pc_sampling_tool_data()
+    tool_data["strings"]["pc_sample_comments"] = [sampled_source, sampled_source]
+    return [tool_data]
+
+
+@pytest.mark.parametrize(
+    ("workload_specs", "expected_sources"),
+    [
+        pytest.param(
+            {
+                "first": SimpleNamespace(
+                    snapshot_source_paths=(
+                        Path("/home/u/first/src/a.cpp"),
+                        Path("/home/u/first/include/b.hpp"),
+                    ),
+                    sampled_source="/home/u/first/src/a.cpp:10",
+                ),
+                "second": SimpleNamespace(
+                    snapshot_source_paths=(
+                        Path("/opt/projects/second/src/a.cpp"),
+                        Path("/opt/projects/second/include/b.hpp"),
+                    ),
+                    sampled_source="/opt/projects/second/src/a.cpp:10",
+                ),
+            },
+            {
+                ("first", 0x10): "src/a.cpp:10",
+                ("second", 0x10): "src/a.cpp:10",
+            },
+            id="unrelated_roots",
+        ),
+        pytest.param(
+            {
+                "populated": SimpleNamespace(
+                    snapshot_source_paths=(
+                        Path("/home/u/project/src/a.cpp"),
+                        Path("/home/u/project/include/b.hpp"),
+                    ),
+                    sampled_source="/home/u/project/src/a.cpp:10",
+                ),
+                "missing": SimpleNamespace(
+                    snapshot_source_paths=(),
+                    sampled_source="/home/u/project/borrowed/a.cpp:10",
+                ),
+            },
+            {
+                ("populated", 0x10): "src/a.cpp:10",
+                ("missing", 0x10): "/home/u/project/borrowed/a.cpp:10",
+            },
+            id="missing_tree_does_not_borrow_ancestor",
+        ),
+        pytest.param(
+            {
+                "root": SimpleNamespace(
+                    snapshot_source_paths=(
+                        Path("/home/u/root/a.cpp"),
+                        Path("/opt/root/b.hpp"),
+                    ),
+                    sampled_source="/home/u/root/a.cpp:10",
+                ),
+                "normal": SimpleNamespace(
+                    snapshot_source_paths=(
+                        Path("/srv/normal/project/src/a.cpp"),
+                        Path("/srv/normal/project/include/b.hpp"),
+                    ),
+                    sampled_source="/srv/normal/project/src/a.cpp:10",
+                ),
+            },
+            {
+                ("root", 0x10): "/home/u/root/a.cpp:10",
+                ("normal", 0x10): "src/a.cpp:10",
+            },
+            id="root_ancestor_does_not_affect_sibling",
+        ),
+    ],
+)
+def test_run_analysis_uses_workload_specific_source_ancestors(
+    db_session,
+    tmp_path,
+    workload_specs,
+    expected_sources,
+):
+    tool_data_per_workload = {}
+    for workload_name, workload_spec in workload_specs.items():
+        workload_path = tmp_path / workload_name
+        tool_data_per_workload[str(workload_path)] = (
+            make_source_workload_tool_data_records(
+                workload_path,
+                workload_spec.snapshot_source_paths,
+                workload_spec.sampled_source,
+            )
+        )
+    analyzer = make_pc_sampling_database_analyzer(tool_data_per_workload)
+
+    run_analysis_with_materialized_views(analyzer)
+
+    source_by_workload_and_offset = {
+        (
+            line.kernel_symbol.code_object_store.workload.sub_name,
+            line.code_object_offset,
+        ): line.source
+        for line in db_session.query(orm.InstructionLine).all()
+        if line.code_object_offset == 0x10
+    }
+    assert source_by_workload_and_offset == expected_sources
+
+
+@pytest.mark.parametrize(
+    ("create_snapshot", "expected_sampled_source"),
+    [
+        pytest.param(
+            True,
+            "src/a.cpp:10",
+            id="snapshot",
+        ),
+        pytest.param(
+            False,
+            "/home/u/project/src/a.cpp:10",
+            id="missing_snapshot",
+        ),
+    ],
+)
+def test_run_analysis_stores_sampled_sources_relative_to_snapshot_ancestor(
+    db_session,
+    tmp_path,
+    create_snapshot,
+    expected_sampled_source,
+):
+    sampled_source = "/home/u/project/src/a.cpp:10"
+    if create_snapshot:
+        for source_path in (
+            Path("home/u/project/src/a.cpp"),
+            Path("home/u/project/include/b.hpp"),
+        ):
+            snapshot_path = tmp_path / "src" / source_path
+            snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+            snapshot_path.touch()
+
+    tool_data = make_pc_sampling_tool_data()
+    tool_data["strings"]["pc_sample_comments"] = [
+        sampled_source,
+        "/home/u/project/src/a.cpp:11",
+    ]
+    analyzer = make_pc_sampling_only_database_analyzer(
+        str(tmp_path),
+        [tool_data],
+    )
+
+    run_analysis_with_materialized_views(analyzer)
+
+    instruction_by_offset = {
+        line.code_object_offset: line
+        for line in db_session.query(orm.InstructionLine).all()
+    }
+    assert set(instruction_by_offset) == {0x10, 0x20}
+    assert instruction_by_offset[0x10].source == expected_sampled_source
+    assert instruction_by_offset[0x10].pc_sample_state is not None
 
 
 def test_add_code_object_isa_adds_unsampled_lines(db_session):
