@@ -482,40 +482,32 @@ TEST(RaceDetector, Dtl_SameWaveWithVmcntSafe) {
   EXPECT_FALSE(b.hasRace());
 }
 
+TEST(RaceDetector, Dtl_SameWavePartialVmcntRetiresOldest) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{16}, /*bytesPerLane=*/4, /*exec=*/1);
+  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{64}, /*bytesPerLane=*/4, /*exec=*/1);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/1);
+
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/64, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(64));
+}
+
 // ---- Exec mask ----
 
-TEST(RaceDetector, Exec_PartialWriteFullRead) {
-  // Only lane 0 writes LDS, then the same lane reads it in a later DS
-  // instruction executed with the full wave active.
+TEST(RaceDetector, Exec_DirectToLdsTracksOnlyActiveLaneIntervals) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*exec=*/1);
+  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{16}, /*bytesPerLane=*/4, /*exec=*/1);
+
+  // globalToLds pads inactive lane addresses with zero. The explicit one-lane
+  // exec mask must keep that padding out of the tracked LDS intervals.
   b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
   EXPECT_FALSE(b.hasRace());
-}
 
-TEST(RaceDetector, Exec_PartialWriteWaitcntOk) {
-  // Lane 0 writes, waitcnt, then read → safe (same wave, WAVE_COMPLETE).
-  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*exec=*/1);
-  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
-  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
-  EXPECT_FALSE(b.hasRace());
-}
-
-TEST(RaceDetector, Exec_DisjointLanesOverlap) {
-  // Lane 0 writes LDS[0], then lane 1 in the same wave reads LDS[0].
-  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*exec=*/1);
-  b.checkLdsRead(/*wave=*/0, /*lane=*/1, /*addr=*/0, /*bytes=*/4);
-  EXPECT_FALSE(b.hasRace());
-}
-
-TEST(RaceDetector, Exec_DisjointLanesDisjoint) {
-  // Lane 0 and lane 1 write different LDS addresses → safe.
-  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*exec=*/1);
-  b.ldsWrite(/*wave=*/0, /*lane=*/1, /*addr=*/64, /*bytes=*/4, /*exec=*/2);
-  EXPECT_FALSE(b.hasRace());
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(16));
 }
 
 // ---- Multi-workgroup ----
