@@ -263,13 +263,17 @@ endif()
 if(HIP_PLATFORM STREQUAL "amd")
   if(WIN32)
     set(win_disable_warnings ${win_disable_warnings} -Wno-ignored-attributes -Wno-microsoft-cast -Wno-unknown-argument)
+    # to bypass unsafe printf warning in HIP_CHECK macro
+    set(win_disable_warnings ${win_disable_warnings} -Wno-unsafe-buffer-usage-in-libc-call)
+    # C++98 compat flags prohibits using nullptr
+    set(win_disable_warnings ${win_disable_warnings} -Wno-c++98-compat -Wno-c++98-compat-pedantic)
     # Windows for some reason does not honor the `CMAKE_CXX_STANDARD` we set initially in the file
     # Which results in errors about missing headers etc
     set(win_cxx_standard -std=c++17)
   endif()
   add_compile_options(${HIP_PATH_OPT} ${win_cxx_standard} -x hip -Wall -Wextra -Wvla -Wno-deprecated ${win_disable_warnings})
   if(HIP_TESTS_ENABLE_WERROR)
-      add_compile_options(-Werror -Wno-c++98-compat -Wno-c++98-compat-pedantic)
+      add_compile_options(-Werror)
   endif()
 endif()
 
