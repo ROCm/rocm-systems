@@ -19,5 +19,3 @@ matrix-nightly:
 matrix-ci:
   # MI355
   - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950' }
-  # Strix Halo
-  - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151' }
