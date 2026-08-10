@@ -40,11 +40,22 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   modes on partition-capable accelerators, noting that analysis derives logical
   XCD, L2 channel, and HBM channel counts from them.
 
+* Added the `LDS Utilization` metric to the gfx115x Memory Chart.
+
 ### Changed
 
 * Renamed the PC sampling analysis output: `pc_sampling.csv` is now `pc_sampling_summary.csv`, and the `compute_pc_sampling_view` view is now `compute_pc_sampling_summary_view`.
 
 * ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) are no longer allowed with PC-sampling-only profiling; the run now fails with an error telling the user to drop the ML API tracing flag or add a counter block, since without counters there is nothing to correlate the markers against.
+
+* gfx115x Memory Chart edges now report traffic measured at the interface they represent.
+  * Removed the LDS instruction and cycle counts between the Kernel and LDS blocks. Instruction counts remain in the Workgroup Processor panel as `Instructions - LDS`.
+  * The GL2 to GCEA edge now reports `GL2-Fabric Read BW` and `GL2-Fabric Write BW`, replacing `GL2 Cache Read BW` and `GL2 Cache Write BW`, which measure GL1-to-GL2 traffic and remain available in the L2 Cache panel.
+
+* gfx115x Memory Chart naming and labels are now consistent with the metrics behind them.
+  * Renamed `Dcache Requests`, `Dcache Hit Rate`, and `Dcache-GL1 Read Bandwidth` to `DCache ...`.
+  * The SQC block reports `ICache Hit Rate` and `DCache Hit Rate`, and the GCEA block reports `SARB Util` and `SARB Stall`.
+  * The GL0 and SQC hit rates are drawn with a bar.
 
 ### Removed
 
@@ -52,6 +63,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Removed the `--join-type` profile mode option, which only affected the CSV output format.
 
 * Removed analyze support for workloads produced by the CSV profile backend. Such workloads are now rejected with an error telling you to re-profile with a current release.
+
+* Removed 30 metrics from the gfx115x Memory Chart panel that the chart does not render. They are also no longer reported by `--view table`. `DRAM Read Requests`, `DRAM Write Requests`, `Read Returns`, and `Write Returns` remain available in the Graphics Core Efficiency Arbiter panel.
 
 ### Optimized
 
@@ -62,6 +75,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 * Corrected the VGPR allocation label from `RVGPRseq` to `VGPRs` in gfx9 memory charts
+
+* Fixed the gfx115x Memory Chart confusing measured zeros with missing data. LDS bandwidth, LDS bank conflict rate, and GL0 bandwidth are now shown when the counter reads zero, and DRAM bandwidth reports `Total: N/A` instead of `Total: 0.0 B/s` when the counters are absent.
+
+* Fixed `GL2-Fabric Write BW` understating write bandwidth on gfx115x in the System Speed-of-Light and Memory Chart panels.
 
 ### Upcoming changes
 

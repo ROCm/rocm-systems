@@ -188,7 +188,7 @@ def _stack_metrics(*lines: str) -> str:
 def _fmt_edge(
     label: str,
     value: Any,  # noqa: ANN401
-    width: int = 7,
+    width: int = 11,
 ) -> str:
     """Format one kernel-edge row: ``Label  : value``."""
     label_str = f"{label:<{width}}"
@@ -340,9 +340,9 @@ def _build_kernel_and_l0(
         "",
         "",
         "",
-        f"[{c_rd}]{_fmt_edge('ICache', m['icache_req'])}[/{c_rd}]",
+        f"[{c_rd}]{_fmt_edge('ICache Read', m['icache_req'])}[/{c_rd}]",
         f"[{c_rd}]{ka_l}[/{c_rd}]",
-        f"[{c_rd}]{_fmt_edge('DCache', m['dcache_req'])}[/{c_rd}]",
+        f"[{c_rd}]{_fmt_edge('DCache Read', m['dcache_req'])}[/{c_rd}]",
         f"[{c_rd}]{ka_l}[/{c_rd}]",
         "",
         "",
@@ -649,7 +649,7 @@ def create_mem_chart_diagram(
         "right": "-" * std_arrow_len + ">",
     }
 
-    kernel_edge_width = 16
+    kernel_edge_width = 20
     kernel_arrows = {
         "left": "<" + "-" * (kernel_edge_width - 1),
         "right": "-" * (kernel_edge_width - 1) + ">",
