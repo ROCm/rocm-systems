@@ -204,19 +204,21 @@ def _fmt_edge(
 # ---------------------------------------------------------------------------
 
 
-def _print_mem_chart_scope_bar(console: Console) -> None:
-    """Horizontal rule: GPU span vs System Memory (above the diagram body)."""
-    console.print(
-        "|"
-        + "-" * 62
-        + " [dim]GPU[/dim] "
-        + "-" * 62
-        + "|"
-        + "-" * 4
-        + " [dim]System Memory[/dim] "
-        + "-" * 4
-        + "|"
-    )
+def _scope_bar(gpu_span: int, sysmem_span: int) -> str:
+    """Horizontal rule marking the GPU span vs System Memory.
+
+    Spans are measured from the assembled layout so the rule always lines up
+    with the diagram, whatever the panel and edge-column widths happen to be.
+    """
+
+    def section(label: str, span: int) -> str:
+        inner = max(len(label) + 2, span - 1)
+        pad = inner - len(label) - 2
+        left = pad // 2
+        return "|" + "-" * left + f" [dim]{label}[/dim] " + "-" * (pad - left)
+
+    # The closing "|" sits on the diagram's last column, so it is part of the span.
+    return section("GPU", gpu_span) + section("System Memory", sysmem_span - 1) + "|"
 
 
 def normalize_mem_chart_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
@@ -639,8 +641,6 @@ def create_mem_chart_diagram(
     console.print()
     if chart_title:
         console.print(f"[bold]{chart_title}[/bold]")
-    _print_mem_chart_scope_bar(console)
-    console.print()
 
     # Arrow constants
     std_arrow_len = 8
@@ -682,6 +682,15 @@ def create_mem_chart_diagram(
         dram_edges,
         dram_panel,
     )
+
+    # Scope rule, sized from the assembled layout: everything left of the DRAM
+    # edge column is on-GPU, the DRAM edge and panel are System Memory.
+    total = console.measure(main_layout).maximum
+    sysmem_span = (
+        console.measure(dram_edges).maximum + console.measure(dram_panel).maximum
+    )
+    console.print(_scope_bar(total - sysmem_span, sysmem_span))
+    console.print()
 
     console.print(main_layout)
     console.print()
