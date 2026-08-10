@@ -778,8 +778,11 @@ bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) 
 
   // WarpSpeed is not supported currently for the following cases:
   // 1. if any work batch in the plan contains P2P work
-  // 2. or any collective task is not using RING algorithm
+  // 2. if the plan contains AllGatherV-fused work; that kernel
+  //    does not implement WarpSpeed's warp-level channel distribution
+  // 3. or any collective task is not using RING algorithm
   bool hasP2p = !ncclIntruQueueEmpty(&plan->p2pTaskQueue);
+  bool hasBcast = !ncclIntruQueueEmpty(&plan->bcastTaskQueue);
   bool hasNonRing = false;
   struct ncclTaskColl* task = ncclIntruQueueHead(&plan->collTaskQueue);
   while (task != nullptr) {
@@ -789,7 +792,7 @@ bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) 
     }
     task = task->next;
   }
-  return (!hasP2p && !hasNonRing);
+  return (!hasP2p && !hasBcast && !hasNonRing);
 }
 
 bool rcclIsAboveWarpSpeedThreshold(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {

@@ -75,6 +75,12 @@ in the following table.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
 
+    * - | ``NCCL_ALLGATHERV_ENABLE``
+        | Fuses grouped multi-root ``ncclBroadcast`` calls into a single AllGatherV
+          ring kernel when two or more distinct roots appear in a group.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
 Logging and debugging
 =====================
 
