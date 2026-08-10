@@ -545,7 +545,6 @@ static ncclResult_t IbCastResiliencyProbePost(struct ncclIbResiliencySend* sendR
 
 static ncclResult_t IbCastResiliencyProbeHandleCompletionEvent(struct ncclIbResiliencySend* sendResCtx,
                                                                struct ibv_wc* probeWc, int devIndex) {
-
   INFO(NCCL_NET,
        "NET/IB: %s: Got probing completion (devIndex=%d, wc->status=%d, wc->opcode=%d, wc->wr_id=0x%lx, wc->qp_num=%u)",
        __func__, devIndex, probeWc->status, probeWc->opcode, probeWc->wr_id, probeWc->qp_num);

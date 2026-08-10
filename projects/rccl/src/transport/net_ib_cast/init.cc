@@ -551,10 +551,10 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
 
       // CTS offload and QP sharing are mutually exclusive. disable CTS offload when QP sharing is enabled
       if (IbCastOffloadEnabled && (rcclParamIbCastCommNGroups() > 0)) {
-        INFO(NCCL_INIT|NCCL_NET, "NET/IB : QP sharing enabled - disabling CTS Offload (not yet supported with QP sharing)");
+        INFO(NCCL_INIT | NCCL_NET, "NET/IB : QP sharing enabled - disabling CTS Offload (not yet supported with QP sharing)");
         IbCastOffloadEnabled = false;
       }
-  
+
       INFO(NCCL_INIT | NCCL_NET,
            "NET/IB : AINIC RoCEv2 optimizations enabled: CTS Inline Data: %s; CTS Offload: %s; "
            "IB Use Inline: enabled; GDR Flush: disabled",

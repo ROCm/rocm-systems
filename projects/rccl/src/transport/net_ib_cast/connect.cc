@@ -490,8 +490,8 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs) {
   if (createQpAttrs->oooRq) {
-     NCCLCHECK(ncclIbCreateQpMlx5(createQpAttrs, qp));
-     return ncclSuccess;
+    NCCLCHECK(ncclIbCreateQpMlx5(createQpAttrs, qp));
+    return ncclSuccess;
   }
   if (createQpAttrs->useIonic && createQpAttrs->type != IBV_QPT_UD) {
     NCCLCHECK(ncclIbCreateQpIonic(createQpAttrs, qp));
