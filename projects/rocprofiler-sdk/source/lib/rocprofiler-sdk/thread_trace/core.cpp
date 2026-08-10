@@ -518,8 +518,8 @@ DispatchThreadTracer::start_context()
     // HSA write interceptor now calls thread_trace::write_hook / signal_completion_hook
     // directly (see hsa/queue.cpp). Scope serialization to the agents configured on this
     // context. An empty set still means every agent.
-    const auto agents = configured_agents();
-    CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization(agents);
+    const auto serialization_agents = configured_agents();
+    CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization(serialization_agents);
 }
 
 void
@@ -528,8 +528,8 @@ DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-funct
     auto* controller = hsa::get_queue_controller();
     if(!controller) return;
 
-    const auto agents = configured_agents();
-    controller->disable_serialization(agents);
+    const auto serialization_agents = configured_agents();
+    controller->disable_serialization(serialization_agents);
 }
 
 DeviceThreadTracer::DeviceThreadTracer()

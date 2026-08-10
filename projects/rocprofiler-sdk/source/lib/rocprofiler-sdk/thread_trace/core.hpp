@@ -43,9 +43,9 @@
 #include <mutex>
 #include <shared_mutex>
 #include <string>
-#include <unordered_set>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -184,8 +184,8 @@ private:
     std::unordered_map<hsa_agent_t, std::unique_ptr<ThreadTracerAgent>>     agents{};
     std::unordered_map<rocprofiler_agent_id_t, thread_trace_parameter_pack> params{};
 
-    std::shared_mutex agents_map_mut{};
-    std::atomic<int>  post_move_data{0};
+    mutable std::shared_mutex agents_map_mut{};
+    std::atomic<int>          post_move_data{0};
 };
 
 class DeviceThreadTracer
