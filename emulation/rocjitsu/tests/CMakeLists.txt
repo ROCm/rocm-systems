@@ -2620,17 +2620,41 @@ find_program(
         "${CMAKE_SOURCE_DIR}/../mirage/target/debug"
     PATH_SUFFIXES bin
 )
-if(ROCGDB_EXECUTABLE AND HIPCC_EXECUTABLE)
-    set(_rocgdb_demo_env "")
-    if(MIRAGE_EXECUTABLE)
-        list(APPEND _rocgdb_demo_env "MIRAGE_BIN=${MIRAGE_EXECUTABLE}")
-    endif()
+# Mirage is as much a prerequisite as rocgdb and hipcc: without it the harness
+# has nothing to run the debuggee under. Registering the test anyway produced a
+# test that could only skip, or -- worse -- one that ran a Mirage which then
+# loaded whatever librocjitsu.so it happened to find, or none at all and exited
+# 127 long before reaching ROCgdb.
+if(ROCGDB_EXECUTABLE AND HIPCC_EXECUTABLE AND MIRAGE_EXECUTABLE)
+    # Stage the librocjitsu.so this build just produced into a stub ROCm root
+    # and point Mirage at it. $ROCM_HOME/lib is one of Mirage's documented
+    # search locations (emulation/mirage/rocjitsu/src/lib.rs kmd_search_dirs),
+    # and the search is additive, so a stub root cannot shadow anything else.
+    set(_rocgdb_rocm_home ${CMAKE_CURRENT_BINARY_DIR}/rocgdb_rocm_home)
+    add_custom_command(
+        OUTPUT ${_rocgdb_rocm_home}/lib/librocjitsu.so
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${_rocgdb_rocm_home}/lib
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:rocjitsu_shared>
+            ${_rocgdb_rocm_home}/lib/librocjitsu.so
+        DEPENDS rocjitsu_shared
+        COMMENT "Staging librocjitsu.so for the rocgdb debug smoke test"
+        VERBATIM
+    )
+    add_custom_target(
+        rocgdb_demo_rocm_home
+        ALL
+        DEPENDS ${_rocgdb_rocm_home}/lib/librocjitsu.so
+    )
+
     rj_add_test(
         NAME "RocgdbDebug.KernelBreakpoint"
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/rocgdb/debug_kernel.sh"
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         TIMEOUT 300
-        ENVIRONMENT ${_rocgdb_demo_env}
+        ENVIRONMENT
+            "MIRAGE_BIN=${MIRAGE_EXECUTABLE}"
+            "ROCM_HOME=${_rocgdb_rocm_home}"
         SKIP_REGULAR_EXPRESSION "SKIP:"
     )
     message(
@@ -2640,6 +2664,6 @@ if(ROCGDB_EXECUTABLE AND HIPCC_EXECUTABLE)
 else()
     message(
         STATUS
-        "rocgdb debug smoke test disabled (rocgdb or hipcc not found)"
+        "rocgdb debug smoke test disabled (need rocgdb, hipcc and mirage)"
     )
 endif()
