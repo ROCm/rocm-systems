@@ -21,6 +21,8 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
+
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
@@ -4298,6 +4300,30 @@ TEST(RdnaVectorLaneReadTest, ReadlaneFamilyUsesDecodedSourceVgprPerWave) {
     SCOPED_TRACE("rdna4");
     expect_vector_lane_reads_use_own_wave_vgprs(ROCJITSU_CODE_ARCH_RDNA4);
   }
+}
+
+// A VOP3 output modifier scales the result. INEXACT must be derived from the
+// scaled exact value, not by comparing the scaled result against the unscaled
+// product -- that comparison is unequal for every nonzero product as soon as
+// any modifier is present, and a spurious INEXACT with MODE.excp_en set stops
+// the wave for the debugger on arithmetic that was exact.
+TEST(AluExceptionTest, OutputModifierDoesNotFabricateInexact) {
+  constexpr uint32_t kInexact = 1u << 5;
+
+  // 2.0 * 3.0 == 6.0 exactly, and stays exact under every OMOD scale.
+  EXPECT_EQ(amdgpu::classify_mul_f32(2.0f, 3.0f) & kInexact, 0u);
+  for (float scale : {2.0f, 4.0f, 0.5f})
+    EXPECT_EQ(amdgpu::classify_mul_f32(2.0f, 3.0f, scale) & kInexact, 0u) << "omod scale " << scale;
+
+  // A genuinely inexact product stays reported, with and without a modifier.
+  EXPECT_EQ(amdgpu::classify_mul_f32(1.1f, 1.1f) & kInexact, kInexact);
+  EXPECT_EQ(amdgpu::classify_mul_f32(1.1f, 1.1f, 2.0f) & kInexact, kInexact);
+
+  // NaN compares unequal to itself, so an exactness test that does not exclude
+  // non-finite values reports INEXACT for it even with no modifier at all.
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  EXPECT_EQ(amdgpu::classify_mul_f32(nan, 3.0f) & kInexact, 0u);
+  EXPECT_EQ(amdgpu::classify_mul_f32(nan, 3.0f, 2.0f) & kInexact, 0u);
 }
 
 } // namespace

@@ -15,12 +15,20 @@ namespace rocjitsu::amdgpu {
 inline constexpr uint32_t kAluExceptionModeMask = 0x7fu << 12;
 inline constexpr uint32_t kAluExceptionTrapstsMask = 0x7fu;
 
-inline uint32_t classify_mul_f32(float lhs, float rhs) {
+/// @brief EXCP causes raised by `lhs * rhs`, optionally scaled by an output
+/// modifier.
+/// @details @p omod_scale must be applied to the exact and the rounded value
+/// alike. Deriving INEXACT by comparing the scaled result against the unscaled
+/// product instead reports every nonzero product as inexact the moment an
+/// output modifier is present, because scaling by 2 changes the value it is
+/// being compared against.
+inline uint32_t classify_mul_f32(float lhs, float rhs, float omod_scale = 1.0f) {
   uint32_t causes = 0;
   if (std::fpclassify(lhs) == FP_SUBNORMAL || std::fpclassify(rhs) == FP_SUBNORMAL)
     causes |= 1u << 1;
-  const long double exact = static_cast<long double>(lhs) * static_cast<long double>(rhs);
-  const float result = lhs * rhs;
+  const long double exact =
+      static_cast<long double>(lhs) * static_cast<long double>(rhs) * omod_scale;
+  const float result = (lhs * rhs) * omod_scale;
   if (std::isfinite(lhs) && std::isfinite(rhs) && std::isinf(result))
     causes |= 1u << 3;
   if (exact != 0.0L && (result == 0.0f || std::fpclassify(result) == FP_SUBNORMAL))
@@ -59,16 +67,16 @@ template <typename Inst> uint32_t classify_mul_f32_vop3(const Inst &inst, Wavefr
       rhs = std::fabs(rhs);
     if (inst.inst_.neg & 2u)
       rhs = -rhs;
-    float result = lhs * rhs;
+    // OMOD scales the result, so it has to take part in deriving the causes
+    // rather than being compared against the unscaled product afterwards.
+    float omod_scale = 1.0f;
     if (inst.inst_.omod == 1)
-      result *= 2.0f;
+      omod_scale = 2.0f;
     else if (inst.inst_.omod == 2)
-      result *= 4.0f;
+      omod_scale = 4.0f;
     else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    causes |= classify_mul_f32(lhs, rhs);
-    if (result != lhs * rhs)
-      causes |= 1u << 5;
+      omod_scale = 0.5f;
+    causes |= classify_mul_f32(lhs, rhs, omod_scale);
   }
   return causes;
 }
