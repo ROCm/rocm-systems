@@ -174,7 +174,7 @@ build_environment_buffer()
             // only take envvars starting with ROCP
             continue;
         }
-        constexpr char register_library_env[] = "ROCPROFILER_REGISTER_LIBRARY=";
+        constexpr auto register_library_env = "ROCPROFILER_REGISTER_LIBRARY=";
         if(strncmp(register_library_env, var, sizeof(register_library_env) - 1) == 0)
         {
             // ROCPROFILER_REGISTER_LIBRARY is set by the attaching process's SDK and may
