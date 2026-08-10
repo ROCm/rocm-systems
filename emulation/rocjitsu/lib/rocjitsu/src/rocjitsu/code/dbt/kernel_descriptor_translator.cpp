@@ -560,17 +560,16 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
       descriptor_vgpr_granularity_for_wavefront(guest_arch, result.guest_wavefront_size);
   const auto host_vgpr_granularity =
       descriptor_vgpr_granularity_for_wavefront(host_arch, result.host_wavefront_size);
-  if (!guest_vgpr_granularity || !host_vgpr_granularity)
+  if (!guest_vgpr_granularity || !host_vgpr_granularity) {
     append_descriptor_error(
         result, "guest or host architecture does not support the selected wavefront size");
+    return result;
+  }
 
   const uint32_t guest_vgpr_granulated =
       AMDHSA_BITS_GET(src.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
-  // Keep best-effort descriptor diagnostics deterministic after recording the
-  // unsupported pair above. A one-register granule preserves the encoded lower
-  // bound without pretending that the pair has a valid AMDGPU ABI granularity.
   result.guest_vgpr_allocation_count =
-      granulated_count_to_registers(guest_vgpr_granulated, guest_vgpr_granularity.value_or(1));
+      granulated_count_to_registers(guest_vgpr_granulated, *guest_vgpr_granularity);
   result.guest_vgpr_count = result.guest_vgpr_allocation_count;
   if (arch_has_accvgpr(guest_arch) && result.accvgpr_base != 0 &&
       result.guest_vgpr_allocation_count > result.accvgpr_base) {
@@ -686,7 +685,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   }
 
   result.target_vgpr_granulated = clamp_granulated(
-      register_count_to_granulated(required_vgpr_allocation, host_vgpr_granularity.value_or(1)),
+      register_count_to_granulated(required_vgpr_allocation, *host_vgpr_granularity),
       kMaxVgprGranulatedField, result, "GRANULATED_WORKITEM_VGPR_COUNT");
 
   // SGPR counts are also stored as a granulated value, but the descriptor
