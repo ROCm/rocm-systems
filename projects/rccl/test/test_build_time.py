@@ -52,6 +52,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
+from typing import Any, IO
 
 HERE: str = os.path.dirname(os.path.abspath(__file__))
 RCCL_ROOT: str = os.path.dirname(HERE)
@@ -60,6 +61,43 @@ CMAKELISTS: str = os.path.join(RCCL_ROOT, "CMakeLists.txt")
 DEFAULT_THRESHOLD_SEC: int = 300
 
 PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
+
+
+class CommandError(RuntimeError):
+    """A subprocess exited non-zero."""
+
+    def __init__(self, cmd: list[str], returncode: int, output: str = "") -> None:
+        self.cmd = cmd
+        self.returncode = returncode
+        self.output = output
+        msg = "%s failed (rc=%d)" % (" ".join(cmd), returncode)
+        if output:
+            msg += ": %s" % output
+        super().__init__(msg)
+
+
+def run_checked(
+    cmd: list[str],
+    *,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+    capture_output: bool = True,
+    stdout: int | IO[Any] | None = None,
+    stderr: int | IO[Any] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess and raise CommandError if it exits non-zero."""
+    if stdout is not None or stderr is not None:
+        capture_output = False
+    proc = subprocess.run(
+        cmd, cwd=cwd, env=env, capture_output=capture_output,
+        text=True, stdout=stdout, stderr=stderr, check=False,
+    )
+    if proc.returncode != 0:
+        detail = ""
+        if capture_output:
+            detail = (proc.stderr or proc.stdout or "").strip()
+        raise CommandError(cmd, proc.returncode, detail)
+    return proc
 
 # Ordered most- to least-specific; plain CI is last so it only acts as a
 # fallback for runners that set nothing else.
@@ -142,11 +180,11 @@ def local_gpu_targets() -> list[str]:
     if not enumerator:
         raise RuntimeError("rocm_agent_enumerator not found; pass --targets explicitly")
 
-    proc = subprocess.run([enumerator], capture_output=True, text=True)
-    if proc.returncode != 0:
-        msg = (proc.stderr or proc.stdout).strip()
+    try:
+        proc = run_checked([enumerator], capture_output=True)
+    except CommandError as exc:
         raise RuntimeError("rocm_agent_enumerator failed (rc=%d): %s"
-                           % (proc.returncode, msg))
+                           % (exc.returncode, exc.output)) from exc
     out = proc.stdout
     # Deduplicate but keep discovery order; gfx000 is the CPU agent.
     targets: list[str] = []
@@ -171,11 +209,16 @@ def _hipcc_accepts(hipcc: str, extra_args: list[str]) -> bool:
     with tempfile.TemporaryDirectory() as tmp:
         empty = os.path.join(tmp, "empty.hip")
         open(empty, "w").close()
-        return subprocess.run(
-            [hipcc, "-x", "hip"] + extra_args + ["-fsyntax-only", empty],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        ).returncode == 0
+        try:
+            run_checked(
+                [hipcc, "-x", "hip"] + extra_args + ["-fsyntax-only", empty],
+                capture_output=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except CommandError:
+            return False
 
 
 def compiler_works(hipcc: str) -> bool:
@@ -241,9 +284,12 @@ def build_target(
             log.write("\n$ " + " ".join(cmd) + "\n")
             log.flush()
             start = time.monotonic()
-            rc = subprocess.call(cmd, cwd=build_dir, stdout=log, stderr=subprocess.STDOUT,
-                                 env=env)
-            return time.monotonic() - start, rc
+            try:
+                run_checked(cmd, cwd=build_dir, env=env, capture_output=False,
+                            stdout=log, stderr=subprocess.STDOUT)
+                return time.monotonic() - start, 0
+            except CommandError:
+                return time.monotonic() - start, 1
 
         configure_s, rc = run(configure)
         if rc != 0:
@@ -264,21 +310,23 @@ def rccl_dir_within(worktree: str) -> str:
     root is not itself a configurable source directory. Resolves to the
     worktree root when RCCL is checked out standalone.
     """
-    top, err = git_err("rev-parse", "--show-toplevel")
-    if err or not top:
-        raise RuntimeError("cannot locate git toplevel: %s" % (err or "unknown error"))
+    top = git_run("rev-parse", "--show-toplevel")
     rel = os.path.relpath(RCCL_ROOT, top)
     return os.path.normpath(os.path.join(worktree, rel))
 
 
+def git_run(*args: str) -> str:
+    """Run git in the RCCL source tree; raise CommandError on failure."""
+    proc = run_checked(["git", "-C", RCCL_ROOT, *args], capture_output=True)
+    return proc.stdout.strip()
+
+
 def git_err(*args: str) -> tuple[str | None, str | None]:
     """Run git; return (stdout, None) on success or (None, error) on failure."""
-    proc = subprocess.run(["git", "-C", RCCL_ROOT, *args],
-                          capture_output=True, text=True, check=False)
-    if proc.returncode == 0:
-        return proc.stdout.strip(), None
-    msg = (proc.stderr or proc.stdout or "").strip()
-    return None, msg or ("git %s exited %d" % (" ".join(args), proc.returncode))
+    try:
+        return git_run(*args), None
+    except CommandError as exc:
+        return None, exc.output or str(exc)
 
 
 def ensure_upstream_fetched(upstream: str) -> None:
@@ -286,8 +334,11 @@ def ensure_upstream_fetched(upstream: str) -> None:
     if "/" not in upstream:
         return
     remote, ref = upstream.split("/", 1)
-    subprocess.run(["git", "-C", RCCL_ROOT, "fetch", "--depth=1", remote, ref],
-                   capture_output=True, text=True, check=False)
+    try:
+        run_checked(["git", "-C", RCCL_ROOT, "fetch", "--depth=1", remote, ref],
+                    capture_output=True)
+    except CommandError:
+        pass
 
 
 def resolve_base_sha(explicit_rev: str | None) -> tuple[str | None, str, str | None]:
@@ -326,21 +377,28 @@ class Comparison:
 def time_best_of(
     target: str, source_dir: str, build_root: str, tag: str, jobs: int,
     round_index: int, keep: bool,
-) -> tuple[float, bool]:
-    """Build one revision once and return (total_s, ok) for this round."""
+) -> tuple[float, bool, str]:
+    """Build one revision once and return (total_s, ok, log_path) for this round."""
     build_dir = os.path.join(build_root, "%s-%s-%d" % (target, tag, round_index))
     log_path = os.path.join(build_root, "%s-%s-%d.log" % (target, tag, round_index))
-    configure_s, build_s, ok = build_target(target, build_dir, jobs, log_path, source_dir)
+    for attempt in range(2):
+        configure_s, build_s, ok = build_target(target, build_dir, jobs, log_path, source_dir)
+        if ok:
+            if not keep:
+                shutil.rmtree(build_dir, ignore_errors=True)
+            return configure_s + build_s, True, log_path
+        if attempt == 0:
+            print("    build failed (attempt 1/2), retrying ... see %s" % log_path, flush=True)
     if not keep:
         shutil.rmtree(build_dir, ignore_errors=True)
-    return configure_s + build_s, ok
+    return 0.0, False, log_path
 
 
 def compare_target(
     target: str, head_dir: str, base_dir: str, build_root: str, jobs: int, repeat: int,
     keep: bool,
-) -> tuple[float, float, bool]:
-    """Time base and head alternately; return (base_best, head_best, ok).
+) -> tuple[float, float, bool, str | None]:
+    """Time base and head alternately; return (base_best, head_best, ok, fail_log).
 
     Alternating rather than running all of one revision then the other keeps
     slow drift (thermal, noisy neighbours) from landing on just one side. The
@@ -350,20 +408,20 @@ def compare_target(
     base_times: list[float] = []
     head_times: list[float] = []
     for i in range(repeat):
-        base_s, ok = time_best_of(target, base_dir, build_root, "base", jobs, i, keep)
+        base_s, ok, log_path = time_best_of(target, base_dir, build_root, "base", jobs, i, keep)
         if not ok:
-            return 0.0, 0.0, False
+            return 0.0, 0.0, False, log_path
         base_times.append(base_s)
 
-        head_s, ok = time_best_of(target, head_dir, build_root, "head", jobs, i, keep)
+        head_s, ok, log_path = time_best_of(target, head_dir, build_root, "head", jobs, i, keep)
         if not ok:
-            return 0.0, 0.0, False
+            return 0.0, 0.0, False, log_path
         head_times.append(head_s)
 
         print("    round %d/%d: base %s  head %s" %
               (i + 1, repeat, fmt(base_s), fmt(head_s)), flush=True)
 
-    return min(base_times), min(head_times), True
+    return min(base_times), min(head_times), True, None
 
 
 def resolve_targets(args: argparse.Namespace) -> tuple[list[str], str]:
@@ -372,8 +430,8 @@ def resolve_targets(args: argparse.Namespace) -> tuple[list[str], str]:
         return args.targets, "--targets"
     if args.local_gpu:
         return local_gpu_targets(), "local GPUs (rocm_agent_enumerator)"
-    if os.environ.get("RCCL_BUILD_TIME_TARGETS", "").split():
-        return os.environ["RCCL_BUILD_TIME_TARGETS"].split(), "RCCL_BUILD_TIME_TARGETS"
+    if (env_targets := os.environ.get("RCCL_BUILD_TIME_TARGETS", "").split()):
+        return env_targets, "RCCL_BUILD_TIME_TARGETS"
     return targets_from_cmake(), "DEFAULT_GPUS in CMakeLists.txt"
 
 
@@ -444,8 +502,8 @@ def run_comparison(
     if err:
         print("SKIP: cannot check out base commit %s (%s)" % (base_sha[:10], err))
         return 0
-    base_dir = rccl_dir_within(worktree)
     try:
+        base_dir = rccl_dir_within(worktree)
         results: list[Comparison] = []
         for target in targets:
             if not compiler_supports(target, hipcc):
@@ -456,11 +514,11 @@ def run_comparison(
                 continue
 
             print("[%s] timing base and head ..." % target, flush=True)
-            base_s, head_s, ok = compare_target(
+            base_s, head_s, ok, fail_log = compare_target(
                 target, RCCL_ROOT, base_dir, build_root, args.jobs, args.repeat, args.keep)
             if not ok:
-                print("[%s] FAIL - build failed, see %s" % (target, build_root))
-                results.append(Comparison(target, FAIL, "build failed"))
+                print("[%s] FAIL - build failed, see %s" % (target, fail_log))
+                results.append(Comparison(target, FAIL, "build failed, see %s" % fail_log))
                 continue
 
             result = Comparison(target, PASS, "", base_s, head_s)
