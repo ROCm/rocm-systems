@@ -106,6 +106,7 @@ class BufferLoadD16FormatXVbuffer : public Vbuffer {
 public:
   BufferLoadD16FormatXVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -128,6 +129,7 @@ class BufferLoadD16FormatXyzVbuffer : public Vbuffer {
 public:
   BufferLoadD16FormatXyzVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -348,6 +350,7 @@ class BufferLoadD16U8Vbuffer : public Vbuffer {
 public:
   BufferLoadD16U8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -359,6 +362,7 @@ class BufferLoadD16I8Vbuffer : public Vbuffer {
 public:
   BufferLoadD16I8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -370,6 +374,7 @@ class BufferLoadD16B16Vbuffer : public Vbuffer {
 public:
   BufferLoadD16B16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -381,6 +386,7 @@ class BufferLoadD16HiU8Vbuffer : public Vbuffer {
 public:
   BufferLoadD16HiU8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -392,6 +398,7 @@ class BufferLoadD16HiI8Vbuffer : public Vbuffer {
 public:
   BufferLoadD16HiI8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -403,6 +410,7 @@ class BufferLoadD16HiB16Vbuffer : public Vbuffer {
 public:
   BufferLoadD16HiB16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -436,6 +444,7 @@ class BufferLoadD16HiFormatXVbuffer : public Vbuffer {
 public:
   BufferLoadD16HiFormatXVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -944,6 +953,7 @@ class TbufferLoadD16FormatXVbuffer : public Vbuffer {
 public:
   TbufferLoadD16FormatXVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -966,6 +976,7 @@ class TbufferLoadD16FormatXyzVbuffer : public Vbuffer {
 public:
   TbufferLoadD16FormatXyzVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;

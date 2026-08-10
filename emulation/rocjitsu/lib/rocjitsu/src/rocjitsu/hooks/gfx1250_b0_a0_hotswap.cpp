@@ -7,7 +7,19 @@
 /// @section env Environment controls
 ///
 /// - `HSA_HOTSWAP_VERBOSE` -- debug logging to stderr. Changes what is reported,
-///   never what is done.
+///   never what is done. Errors are always reported, independently of this flag.
+/// - `HSA_HOTSWAP_DUMP_SOURCE` -- when set to anything but `0`, a translation
+///   that fails writes the source code object it refused to disk. Off by
+///   default: these objects reach 212 MiB, and a failure the memo declines to
+///   remember recurs on every load of the same bytes.
+/// - `HSA_HOTSWAP_DUMP_DIR` -- where those artifacts go, falling back to
+///   `TMPDIR` and then `/tmp`. Naming a destination does not enable capture;
+///   `HSA_HOTSWAP_DUMP_SOURCE` does that.
+///
+/// Capture writes at most one artifact per source identity and covers at most 32
+/// distinct sources per process. An out-of-resources failure is never captured:
+/// copying a large input adds pressure to a system that just ran out, and the
+/// bytes are not what failed.
 ///
 /// `HSA_HOTSWAP_DISABLE` belongs to CLR rather than this hook: it stops CLR
 /// forwarding anything here at all.
@@ -20,6 +32,7 @@
 #include <atomic>
 #include <cerrno>
 #include <cinttypes>
+#include <climits>
 #include <condition_variable>
 #include <cstdarg>
 #include <cstdio>
@@ -36,6 +49,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -62,35 +76,340 @@ bool verbose_logging() {
   return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
 }
 
-void log(const char *format, ...) {
-  if (!verbose_logging())
+void log(const char *format, ...) noexcept;
+void log_error(const char *format, ...) noexcept;
+
+#if defined(RJ_HOTSWAP_TEST_HOOKS)
+// The state and its lock live in ordinary functions, not in the template below:
+// a function-local static inside a template belongs to one instantiation, so a
+// second call site with a different callable type would get its own copy.
+std::mutex &test_dump_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+std::vector<std::string> &test_dump_paths() {
+  static std::vector<std::string> paths;
+  return paths;
+}
+
+/// @brief Run @p fn against the recorded capture paths under their own lock.
+template <typename Fn> decltype(auto) with_test_dump_paths(Fn &&fn) {
+  std::lock_guard lock(test_dump_mutex());
+  return fn(test_dump_paths());
+}
+
+void remember_test_dump(const char *path) noexcept {
+  try {
+    with_test_dump_paths([&](std::vector<std::string> &paths) { paths.emplace_back(path); });
+  } catch (...) {
+  }
+}
+#else
+void remember_test_dump(const char *) noexcept {}
+#endif
+
+/// @brief Whether the operator asked for failing inputs to be written to disk.
+///
+/// @details Capture is opt-in because the objects are large -- RCCL's gfx1250
+/// device image is 212 MiB -- and an environmental failure is deliberately not
+/// memoized, so it repeats on every load of the same bytes.
+bool source_capture_enabled() {
+  const char *value = std::getenv("HSA_HOTSWAP_DUMP_SOURCE");
+  return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+}
+
+/// @brief Directory that receives captured sources, most specific setting first.
+const char *source_capture_directory() {
+  for (const char *name : {"HSA_HOTSWAP_DUMP_DIR", "TMPDIR"}) {
+    const char *value = std::getenv(name);
+    if (value != nullptr && value[0] != '\0')
+      return value;
+  }
+  return "/tmp";
+}
+
+// A distinct failing object is rare, but nothing about a process guarantees it:
+// cap what the registries below can grow to, and stop capturing once a run has
+// produced enough material to diagnose whatever is wrong.
+constexpr size_t kMaxCapturedSources = 32;
+
+/// @brief Everything the capture policy remembers for the life of the process.
+struct SourceCaptureState {
+  /// Source identity -> whether its artifact was completely written. An entry
+  /// present but false is a capture in flight on another thread.
+  std::unordered_map<uint64_t, bool> captures;
+  /// Sources the disabled-capture hint has already named. Kept apart from
+  /// @ref captures so the hint does not consume the artifact's one slot: an
+  /// operator who reads it, exports the variable and retries must get the file.
+  std::unordered_set<uint64_t> hinted;
+  /// Sources whose write failure has been reported. A failed write is retried,
+  /// so without this a permanently unwritable destination would report itself on
+  /// every load of the same bytes.
+  std::unordered_set<uint64_t> reported_write_failures;
+  /// Whether the registry has already explained that it is full.
+  bool reported_capacity = false;
+};
+
+// Held in ordinary functions for the reason given above test_dump_mutex().
+std::mutex &capture_state_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+SourceCaptureState &capture_state() {
+  static SourceCaptureState state;
+  return state;
+}
+
+/// @brief Run @p fn against the capture state under its own lock.
+template <typename Fn> decltype(auto) with_capture_state(Fn &&fn) {
+  std::lock_guard lock(capture_state_mutex());
+  return fn(capture_state());
+}
+
+/// @returns True the first time @p source_id is offered, up to the registry cap.
+bool claim_once(std::unordered_set<uint64_t> SourceCaptureState::*member,
+                uint64_t source_id) noexcept {
+  try {
+    return with_capture_state([&](SourceCaptureState &state) {
+      auto &seen = state.*member;
+      if (seen.size() >= kMaxCapturedSources)
+        return false;
+      return seen.insert(source_id).second;
+    });
+  } catch (...) {
+    return false;
+  }
+}
+
+/// @brief What became of an attempt to claim the capture slot for one source.
+enum class CaptureClaim : uint8_t {
+  Granted,        ///< This call owns the write and must settle it.
+  AlreadyHandled, ///< Captured already, or being written by another thread.
+  RegistryFull,   ///< The per-process source cap is reached.
+};
+
+/// @brief Begin the one capture allowed for @p source_id.
+///
+/// @details A granted claim is settled by finish_source_capture(), so a capture
+/// that could not be written -- an unwritable directory, a full filesystem --
+/// can be retried once the operator fixes it rather than being refused for the
+/// life of the process.
+CaptureClaim begin_source_capture(uint64_t source_id) noexcept {
+  try {
+    return with_capture_state([&](SourceCaptureState &state) {
+      if (state.captures.contains(source_id))
+        return CaptureClaim::AlreadyHandled;
+      if (state.captures.size() >= kMaxCapturedSources)
+        return CaptureClaim::RegistryFull;
+      state.captures.emplace(source_id, false);
+      return CaptureClaim::Granted;
+    });
+  } catch (...) {
+    return CaptureClaim::AlreadyHandled;
+  }
+}
+
+/// @brief Settle a claim taken by begin_source_capture().
+void finish_source_capture(uint64_t source_id, bool written) noexcept {
+  with_capture_state([&](SourceCaptureState &state) {
+    if (written)
+      state.captures[source_id] = true;
+    else
+      state.captures.erase(source_id);
+  });
+}
+
+/// @returns True the one time the full registry should explain itself.
+bool claim_capacity_report() noexcept {
+  return with_capture_state(
+      [](SourceCaptureState &state) { return !std::exchange(state.reported_capacity, true); });
+}
+
+/// @brief Write @p bytes to a fresh file in the configured directory.
+///
+/// @returns True only once the artifact is completely written and closed.
+bool write_captured_source(uint64_t source_id, std::span<const uint8_t> bytes) noexcept {
+  // The write is retried until it succeeds, so its failure is reported once per
+  // source: a destination that stays unwritable would otherwise repeat itself on
+  // every load of the same bytes.
+  const auto report_failure = [source_id] {
+    return claim_once(&SourceCaptureState::reported_write_failures, source_id);
+  };
+  char path[PATH_MAX];
+  const int length =
+      std::snprintf(path, sizeof(path), "%s/rocjitsu-gfx1250-b0-to-a0-%016" PRIx64 "-XXXXXX.elf",
+                    source_capture_directory(), source_id);
+  if (length < 0 || static_cast<size_t>(length) >= sizeof(path)) {
+    if (report_failure()) {
+      log_error(
+          "translation failed and its source code object could not be saved: path is too long "
+          "source_id=fnv1a64:%016" PRIx64 "; please file a bug report",
+          source_id);
+    }
+    return false;
+  }
+
+  const int descriptor = mkstemps(path, 4);
+  if (descriptor < 0) {
+    if (report_failure()) {
+      log_error("translation failed and its source code object could not be saved "
+                "source_id=fnv1a64:%016" PRIx64 " errno=%d; please file a bug report",
+                source_id, errno);
+    }
+    return false;
+  }
+  FILE *output = fdopen(descriptor, "wb");
+  if (output == nullptr) {
+    const int saved_errno = errno;
+    close(descriptor);
+    unlink(path);
+    if (report_failure()) {
+      log_error("translation failed and its source code object could not be saved "
+                "source_id=fnv1a64:%016" PRIx64 " path=%s errno=%d; please file a bug report",
+                source_id, path, saved_errno);
+    }
+    return false;
+  }
+  const size_t written = std::fwrite(bytes.data(), 1, bytes.size(), output);
+  const int close_status = std::fclose(output);
+  if (written != bytes.size() || close_status != 0) {
+    const int saved_errno = errno;
+    unlink(path);
+    if (report_failure()) {
+      log_error("translation failed and its source code object could not be saved "
+                "source_id=fnv1a64:%016" PRIx64
+                " path=%s written=%zu expected=%zu errno=%d; please file a bug report",
+                source_id, path, written, bytes.size(), saved_errno);
+    }
+    return false;
+  }
+  log_error("translation failed; source code object saved source_id=fnv1a64:%016" PRIx64
+            " input_bytes=%zu path=%s; please file a bug report and attach this code object",
+            source_id, bytes.size(), path);
+  remember_test_dump(path);
+  return true;
+}
+
+void dump_failed_source(uint64_t source_id, std::span<const uint8_t> bytes) noexcept {
+  if (!source_capture_enabled()) {
+    if (claim_once(&SourceCaptureState::hinted, source_id)) {
+      log_error("translation failed; set HSA_HOTSWAP_DUMP_SOURCE=1 to save the source code object "
+                "source_id=fnv1a64:%016" PRIx64 " input_bytes=%zu; please file a bug report",
+                source_id, bytes.size());
+    }
+    return;
+  }
+  switch (begin_source_capture(source_id)) {
+  case CaptureClaim::Granted:
+    finish_source_capture(source_id, write_captured_source(source_id, bytes));
+    return;
+  case CaptureClaim::AlreadyHandled:
+    return;
+  case CaptureClaim::RegistryFull:
+    // Silence here would look identical to a successful capture the operator
+    // then cannot find.
+    if (claim_capacity_report()) {
+      log_error("translation failed; no source code object was saved because %zu distinct sources "
+                "have already been captured source_id=fnv1a64:%016" PRIx64
+                "; please file a bug report",
+                kMaxCapturedSources, source_id);
+    }
+    return;
+  }
+}
+
+void write_log(bool enabled, const char *level, const char *format, va_list args) noexcept {
+  if (!enabled)
     return;
   flockfile(stderr);
   std::fputs("[hsa-hotswap-rj] ", stderr);
-  va_list args;
-  va_start(args, format);
+  if (level != nullptr)
+    std::fprintf(stderr, "%s: ", level);
   std::vfprintf(stderr, format, args);
-  va_end(args);
   std::fputc('\n', stderr);
   funlockfile(stderr);
 }
 
-void log_translation(uint64_t source_id, const char *outcome, size_t changed, size_t input_bytes,
-                     size_t output_bytes, rj_status_t translation_status,
-                     hsa_status_t load_status) {
-  log("eager translation source_id=fnv1a64:%016" PRIx64
-      " input_revision=b0 output_revision=a0 outcome=%s changed=%zu"
-      " input_bytes=%zu output_bytes=%zu translation_status=%d status=%d",
-      source_id, outcome, changed, input_bytes, output_bytes, static_cast<int>(translation_status),
-      static_cast<int>(load_status));
+void log(const char *format, ...) noexcept {
+  va_list args;
+  va_start(args, format);
+  write_log(verbose_logging(), nullptr, format, args);
+  va_end(args);
 }
 
-template <typename Fn> hsa_status_t hsa_boundary(Fn &&fn) noexcept {
+void log_error(const char *format, ...) noexcept {
+  va_list args;
+  va_start(args, format);
+  write_log(true, "error", format, args);
+  va_end(args);
+}
+
+/// @brief Report one load attempt.
+///
+/// @param replay True when the outcome is a remembered verdict rather than a
+///        fresh one. A refusal is reported unconditionally the one time it is
+///        reached, but the reuses that follow are not new failures: a device
+///        library registered once per kernel and per device replays the same
+///        verdict hundreds of times, and reporting each one buries the original.
+void log_translation(uint64_t source_id, const char *outcome, size_t changed, size_t input_bytes,
+                     size_t output_bytes, rj_status_t translation_status, hsa_status_t load_status,
+                     bool replay = false) noexcept {
+  const bool failed =
+      translation_status != ROCJITSU_STATUS_SUCCESS || load_status != HSA_STATUS_SUCCESS;
+  if ((!failed || replay) && !verbose_logging())
+    return;
+  flockfile(stderr);
+  std::fputs("[hsa-hotswap-rj] ", stderr);
+  if (failed)
+    std::fputs("error: ", stderr);
+  std::fprintf(stderr,
+               "eager translation source_id=fnv1a64:%016" PRIx64
+               " input_revision=b0 output_revision=a0 outcome=%s changed=%zu"
+               " input_bytes=%zu output_bytes=%zu translation_status=%d status=%d\n",
+               source_id, outcome, changed, input_bytes, output_bytes,
+               static_cast<int>(translation_status), static_cast<int>(load_status));
+  funlockfile(stderr);
+}
+
+void log_translation_diagnostic(uint64_t source_id,
+                                const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic) noexcept {
+  if (diagnostic == nullptr)
+    return;
+  const char *severity = diagnostic->severity != nullptr ? diagnostic->severity : "unknown";
+  const char *kind = diagnostic->kind != nullptr ? diagnostic->kind : "unknown";
+  const char *mnemonic = diagnostic->mnemonic != nullptr ? diagnostic->mnemonic : "";
+  const char *message = diagnostic->message != nullptr ? diagnostic->message : "";
+
+  flockfile(stderr);
+  std::fprintf(stderr,
+               "[hsa-hotswap-rj] %s: translation diagnostic "
+               "source_id=fnv1a64:%016" PRIx64 " severity=%s kind=%s",
+               severity, source_id, severity, kind);
+  if (diagnostic->has_guest_offset)
+    std::fprintf(stderr, " guest_offset=.text+0x%" PRIx64, diagnostic->guest_offset);
+  if (mnemonic[0] != '\0')
+    std::fprintf(stderr, " mnemonic=%s", mnemonic);
+  if (diagnostic->required_work)
+    std::fprintf(stderr, " required=%s\n", message);
+  else
+    std::fprintf(stderr, " message=%s\n", message);
+  funlockfile(stderr);
+}
+
+template <typename Fn> hsa_status_t hsa_boundary(const char *operation, Fn &&fn) noexcept {
   try {
     return fn();
   } catch (const std::bad_alloc &) {
+    log_error("operation=%s exception=std::bad_alloc status=%d", operation,
+              static_cast<int>(HSA_STATUS_ERROR_OUT_OF_RESOURCES));
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  } catch (const std::exception &error) {
+    log_error("operation=%s exception=std::exception what=%s status=%d", operation, error.what(),
+              static_cast<int>(HSA_STATUS_ERROR));
+    return HSA_STATUS_ERROR;
   } catch (...) {
+    log_error("operation=%s exception=unknown status=%d", operation,
+              static_cast<int>(HSA_STATUS_ERROR));
     return HSA_STATUS_ERROR;
   }
 }
@@ -714,15 +1033,24 @@ void override_translation_status_for_test(rj_status_t &, uint8_t *&, size_t &) {
 
 bool install(HsaApiTable *table) {
   std::lock_guard lock(g_state.lifecycle_mutex);
-  if (g_state.core != nullptr || table == nullptr || table->core_ == nullptr)
+  if (g_state.core != nullptr) {
+    log_error("OnLoad refused: hook is already installed");
     return false;
+  }
+  if (table == nullptr || table->core_ == nullptr) {
+    log_error("OnLoad refused: missing HSA API table");
+    return false;
+  }
 
   CoreApiTable *core = table->core_;
   constexpr size_t required_size =
       offsetof(CoreApiTable, hsa_executable_load_agent_code_object_fn) +
       sizeof(CoreApiTable::hsa_executable_load_agent_code_object_fn);
-  if (core->version.minor_id < required_size)
+  if (core->version.minor_id < required_size) {
+    log_error("OnLoad refused: HSA core API table is too small size=%u required=%zu",
+              core->version.minor_id, required_size);
     return false;
+  }
 
   OriginalApi original{
       core->hsa_code_object_reader_create_from_file_fn,
@@ -743,8 +1071,10 @@ bool install(HsaApiTable *table) {
       original.load_agent == nullptr || original.load_program == nullptr ||
       original.load_deprecated == nullptr || original.get_extension_table == nullptr ||
       original.iterate_agents == nullptr || original.agent_get_info == nullptr ||
-      original.agent_iterate_isas == nullptr || original.isa_get_info == nullptr)
+      original.agent_iterate_isas == nullptr || original.isa_get_info == nullptr) {
+    log_error("OnLoad refused: HSA core API table has a missing required entry");
     return false;
+  }
 
   // Do NOT free the previous generation's translated backing storage here. Those
   // buffers can still be referenced by consumers whose lifetime is NOT bounded by
@@ -1012,7 +1342,7 @@ hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, co
 
 hsa_status_t HSA_API reader_create_from_memory(const void *code_object, size_t size,
                                                hsa_code_object_reader_t *reader) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_code_object_reader_create_from_memory", [&] {
     // Reject a null output pointer before forwarding: the lower/vendor API may write
     // through it without checking, so fail fast the way ROCr's own layer does.
     if (reader == nullptr)
@@ -1031,7 +1361,7 @@ hsa_status_t HSA_API reader_create_from_memory(const void *code_object, size_t s
 }
 
 hsa_status_t HSA_API reader_create_from_file(hsa_file_t file, hsa_code_object_reader_t *reader) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_code_object_reader_create_from_file", [&] {
     if (reader == nullptr)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     const std::shared_ptr<const OriginalApi> api =
@@ -1048,7 +1378,7 @@ hsa_status_t HSA_API reader_create_from_file(hsa_file_t file, hsa_code_object_re
 
 hsa_status_t vendor_reader_create(hsa_file_t file, size_t offset, size_t size,
                                   hsa_code_object_reader_t *reader) {
-  return hsa_boundary([&] {
+  return hsa_boundary("amd_loader_code_object_reader_create_from_file", [&] {
     if (reader == nullptr)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     const std::shared_ptr<const OriginalApi> api =
@@ -1067,7 +1397,7 @@ hsa_status_t vendor_reader_create(hsa_file_t file, size_t offset, size_t size,
 
 hsa_status_t HSA_API system_get_major_extension_table(uint16_t extension, uint16_t version_major,
                                                       size_t table_length, void *table) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_system_get_major_extension_table", [&] {
     const std::shared_ptr<const OriginalApi> api =
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
@@ -1092,7 +1422,7 @@ hsa_status_t HSA_API system_get_major_extension_table(uint16_t extension, uint16
 }
 
 hsa_status_t HSA_API reader_destroy(hsa_code_object_reader_t reader) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_code_object_reader_destroy", [&] {
     const std::shared_ptr<const OriginalApi> api =
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
@@ -1106,7 +1436,7 @@ hsa_status_t HSA_API reader_destroy(hsa_code_object_reader_t reader) {
 }
 
 hsa_status_t HSA_API executable_destroy(hsa_executable_t executable) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_executable_destroy", [&] {
     const std::shared_ptr<const OriginalApi> api =
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
@@ -1122,7 +1452,7 @@ hsa_status_t HSA_API executable_destroy(hsa_executable_t executable) {
 hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_agent_t agent,
                                             hsa_code_object_reader_t reader, const char *options,
                                             hsa_loaded_code_object_t *loaded) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_executable_load_agent_code_object", [&] {
     const std::shared_ptr<const OriginalApi> api =
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
@@ -1172,15 +1502,16 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
       memo_publish(claim, fingerprint, source, outcome);
     };
 
-    // Serve a remembered outcome, whichever way it went. Reporting it through the
-    // same record as a fresh translation keeps every load attributable to its
-    // source object; a reuse that logged less would blind that linkage precisely
-    // when almost every load is a reuse.
+    // Serve a remembered outcome, whichever way it went. Both reuses carry the
+    // same record as a fresh translation so every load stays attributable to its
+    // source object, but only the verbose channel sees them: the reuse itself is
+    // not news, and almost every load is a reuse.
     if (lookup == MemoLookup::kHit) {
       if (translation.output == nullptr) {
         log_translation(translation.info.source_code_object_id, "reused_failure",
                         translation.info.changed_instruction_count, source->size(), 0,
-                        translation.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+                        translation.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
+                        /*replay=*/true);
         return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
       }
       const hsa_status_t reused_status = load_owned_bytes(executable, agent, translation.output,
@@ -1195,12 +1526,21 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
     size_t translated_size = 0;
     g_state.translations.fetch_add(1, std::memory_order_relaxed);
     hold_claimed_translation_for_test();
-    translation.status = rj_gfx1250_b0_to_a0_translate_with_info(
-        source->data(), source->size(), &translated_data, &translated_size, &translation.info);
+    translation.status = rj_gfx1250_b0_to_a0_translate(
+        source->data(), source->size(), &translated_data, &translated_size, &translation.info,
+        [](const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic, void *user_data) noexcept {
+          const auto *info = static_cast<const rj_gfx1250_b0_to_a0_translation_info_t *>(user_data);
+          log_translation_diagnostic(info->source_code_object_id, diagnostic);
+        },
+        &translation.info);
     override_translation_status_for_test(translation.status, translated_data, translated_size);
     if (translation.status != ROCJITSU_STATUS_SUCCESS || translated_data == nullptr ||
         translated_size == 0) {
       rj_gfx1250_b0_to_a0_free(translated_data);
+      // Copying a large input to disk after an allocation failure adds pressure
+      // to a system that just ran out, and the bytes are not what failed.
+      if (translation.status != ROCJITSU_STATUS_OUT_OF_RESOURCES)
+        dump_failed_source(translation.info.source_code_object_id, *source);
       // Remember a refusal only when it is a verdict on the bytes. The translator
       // reports an environmental failure -- an allocation it could not make, an
       // exception it could not attribute -- with a status that promises nothing
@@ -1239,7 +1579,7 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
 hsa_status_t HSA_API load_program_code_object(hsa_executable_t executable,
                                               hsa_code_object_reader_t reader, const char *options,
                                               hsa_loaded_code_object_t *loaded) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_executable_load_program_code_object", [&] {
     const std::shared_ptr<const OriginalApi> api =
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
@@ -1261,7 +1601,7 @@ hsa_status_t HSA_API load_program_code_object(hsa_executable_t executable,
 
 hsa_status_t HSA_API load_code_object(hsa_executable_t executable, hsa_agent_t agent,
                                       hsa_code_object_t code_object, const char *options) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_executable_load_code_object", [&] {
     const std::shared_ptr<const OriginalApi> api =
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
@@ -1290,7 +1630,14 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
   (void)failed_tool_names;
   try {
     return install(table);
+  } catch (const std::bad_alloc &) {
+    log_error("OnLoad failed: exception=std::bad_alloc");
+    return false;
+  } catch (const std::exception &error) {
+    log_error("OnLoad failed: exception=std::exception what=%s", error.what());
+    return false;
   } catch (...) {
+    log_error("OnLoad failed: exception=unknown");
     return false;
   }
 }
@@ -1298,7 +1645,10 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
 extern "C" RJ_HOOK_EXPORT void OnUnload() {
   try {
     uninstall();
+  } catch (const std::exception &error) {
+    log_error("OnUnload failed: exception=std::exception what=%s", error.what());
   } catch (...) {
+    log_error("OnUnload failed: exception=unknown");
   }
 }
 
@@ -1327,6 +1677,13 @@ extern "C" RJ_HOOK_EXPORT size_t rj_test_retained_executable_buffer_count() {
 // expects to observe a translation cannot do so once an earlier case has already
 // paid for the same bytes.
 extern "C" RJ_HOOK_EXPORT void rj_test_clear_retained_storage() {
+  std::vector<std::string> dump_paths;
+  with_test_dump_paths([&](std::vector<std::string> &paths) { dump_paths.swap(paths); });
+  for (const std::string &path : dump_paths)
+    (void)unlink(path.c_str());
+  // The capture state is process-wide, so a case that leaves its source claimed
+  // or its capacity message spent would silently change what a later one sees.
+  with_capture_state([](SourceCaptureState &state) { state = {}; });
   {
     std::lock_guard lock(g_state.storage_mutex);
     g_state.readers.clear();
@@ -1427,6 +1784,12 @@ extern "C" RJ_HOOK_EXPORT void rj_test_force_next_translation_status(int status)
   g_forced_status = static_cast<rj_status_t>(status);
 }
 
+// Test-only: how many source captures this process has written.
+extern "C" RJ_HOOK_EXPORT uint64_t rj_test_dump_path_count() {
+  return with_test_dump_paths(
+      [](const std::vector<std::string> &paths) { return static_cast<uint64_t>(paths.size()); });
+}
+
 // Test-only: bytes the memo is currently holding, sources and outputs together.
 extern "C" RJ_HOOK_EXPORT uint64_t rj_test_translation_memo_bytes() {
   std::lock_guard lock(g_state.memo_mutex);
@@ -1438,5 +1801,13 @@ extern "C" RJ_HOOK_EXPORT uint64_t rj_test_translation_memo_bytes() {
 extern "C" RJ_HOOK_EXPORT void rj_test_log_translation(uint64_t source_id, size_t changed) {
   log_translation(source_id, "translated", changed, 64, 96, ROCJITSU_STATUS_SUCCESS,
                   HSA_STATUS_SUCCESS);
+}
+
+// Test-only: render one diagnostic without arranging a translator result solely
+// to select its severity.
+extern "C" RJ_HOOK_EXPORT void
+rj_test_log_translation_diagnostic(uint64_t source_id,
+                                   const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic) {
+  log_translation_diagnostic(source_id, diagnostic);
 }
 #endif // RJ_HOTSWAP_TEST_HOOKS

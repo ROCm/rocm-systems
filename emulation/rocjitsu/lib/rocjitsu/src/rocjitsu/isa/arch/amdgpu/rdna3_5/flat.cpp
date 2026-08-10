@@ -664,6 +664,12 @@ FlatLoadD16U8Flat::FlatLoadD16U8Flat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void FlatLoadD16U8Flat::implicit_uses(RegisterSet &uses) const {
+  Flat::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void FlatLoadD16U8Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
@@ -702,6 +708,12 @@ FlatLoadD16I8Flat::FlatLoadD16I8Flat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void FlatLoadD16I8Flat::implicit_uses(RegisterSet &uses) const {
+  Flat::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void FlatLoadD16I8Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -745,6 +757,12 @@ FlatLoadD16B16Flat::FlatLoadD16B16Flat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void FlatLoadD16B16Flat::implicit_uses(RegisterSet &uses) const {
+  Flat::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void FlatLoadD16B16Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
@@ -783,6 +801,12 @@ FlatLoadD16HiU8Flat::FlatLoadD16HiU8Flat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void FlatLoadD16HiU8Flat::implicit_uses(RegisterSet &uses) const {
+  Flat::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void FlatLoadD16HiU8Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -825,6 +849,12 @@ FlatLoadD16HiI8Flat::FlatLoadD16HiI8Flat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void FlatLoadD16HiI8Flat::implicit_uses(RegisterSet &uses) const {
+  Flat::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void FlatLoadD16HiI8Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
@@ -864,6 +894,12 @@ FlatLoadD16HiB16Flat::FlatLoadD16HiB16Flat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void FlatLoadD16HiB16Flat::implicit_uses(RegisterSet &uses) const {
+  Flat::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void FlatLoadD16HiB16Flat::execute_impl(amdgpu::Wavefront &wf) {

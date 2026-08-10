@@ -435,6 +435,13 @@ def _extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
 
         if result["memory_partition"] == "N/A" or not result["memory_partition"]:
             console_warning("Cannot detect memory partition from amd-smi.")
+            if (
+                gpu_arch
+                and MIGPUSpecs.get_gpu_series(gpu_arch.lower().strip()).lower()
+                == "gfx1250_series"
+            ):
+                console_warning("Applying default memory partition: NPS1")
+                result["memory_partition"] = "NPS1"
 
     console_debug(
         f"vbios is {result['vbios']}, compute partition is "
@@ -1007,16 +1014,19 @@ class MachineSpecsCDNA(MachineSpecs):
     )
 
     def _get_hbm_channels(self) -> Optional[str]:
-        """HBM channel count, adjusted for the MI300 NPS memory partition."""
-        partition = self.memory_partition or ""
-        if partition.lower().startswith("nps"):
-            channels = 128
-            if partition.lower() == "nps4":
-                channels //= 4
-            elif partition.lower() == "nps8":
-                channels //= 8
-            return str(channels)
-        return self.total_l2_chan
+        """HBM channel count, adjusted for the MI300 NPS memory partition.
+
+        Uses the whole-chip (SPX) XCD count rather than ``total_l2_chan``: HBM
+        stays interleaved across XCDs, so it does not follow compute partitions.
+        """
+        partition = (self.memory_partition or "").lower()
+        if not partition.startswith("nps"):
+            return self.total_l2_chan
+        whole_chip_xcds = mi_gpu_specs.get_num_xcds(
+            self.gpu_arch, self.gpu_model or None, "SPX"
+        )
+        divisor = {"nps4": 4, "nps8": 8}.get(partition, 1)
+        return str(int(self.l2_banks) * whole_chip_xcds // divisor)
 
     def finalize_soc_fields(self, gpu_info: dict[str, Any]) -> None:
         self.compute_partition = gpu_info["compute_partition"]

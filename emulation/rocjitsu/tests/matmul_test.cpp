@@ -5,8 +5,8 @@
 #include "test_paths.h"
 
 #include "embedded_schema.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/executable.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"

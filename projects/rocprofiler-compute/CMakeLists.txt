@@ -333,19 +333,43 @@ add_test(
 )
 
 add_test(
-    NAME test_profile_roofline_1
+    NAME test_profile_roofline_dir
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m roofline_1
-        --junitxml=tests/test_profile_roofline_1.xml ${COV_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m roofline_dir
+        --junitxml=tests/test_profile_roofline_dir.xml ${COV_OPTION}
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
-    NAME test_profile_roofline_2
+    NAME test_profile_roofline_extra_options
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m roofline_2
-        --junitxml=tests/test_profile_roofline_2.xml ${COV_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m
+        roofline_extra_options --junitxml=tests/test_profile_roofline_extra_options.xml
+        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profile_roofline_bench
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m roofline_bench
+        --junitxml=tests/test_profile_roofline_bench.xml ${COV_OPTION}
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profile_roofline_plot
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m roofline_plot
+        --junitxml=tests/test_profile_roofline_plot.xml ${COV_OPTION}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profile_roofline_validation
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m
+        roofline_validation --junitxml=tests/test_profile_roofline_validation.xml
+        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -456,8 +480,11 @@ set_tests_properties(
     test_profile_sort
     test_profile_misc
     test_profile_path
-    test_profile_roofline_1
-    test_profile_roofline_2
+    test_profile_roofline_dir
+    test_profile_roofline_extra_options
+    test_profile_roofline_bench
+    test_profile_roofline_plot
+    test_profile_roofline_validation
     test_profile_section
     test_profile_sets_func
     test_profile_iteration_multiplexing_1
@@ -844,8 +871,11 @@ if(${ENABLE_COVERAGE})
         test_profile_sort
         test_profile_misc
         test_profile_path
-        test_profile_roofline_1
-        test_profile_roofline_2
+        test_profile_roofline_dir
+        test_profile_roofline_extra_options
+        test_profile_roofline_bench
+        test_profile_roofline_plot
+        test_profile_roofline_validation
         test_profile_section
         test_profile_sets_func
         test_pc_sampling
@@ -1065,8 +1095,10 @@ install(
     FILES_MATCHING
     PATTERN "*.hip"
     PATTERN "*.h"
+    PATTERN "*.hpp"
     PATTERN "*.cpp"
     PATTERN "*.py"
+    PATTERN "Makefile"
     PATTERN "workloads" EXCLUDE
 )
 # modulefile
