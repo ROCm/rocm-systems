@@ -78,7 +78,7 @@ struct production_pmc_registrar
 
         auto register_rccl_info = [&](const char* direction_label,
                                       const char* description) {
-            std::string label =
+            const std::string label =
                 fmt::format("{} GPU {}", direction_label, rccl_device_idx);
             trace_cache::get_metadata_registry().add_pmc_info(
                 { agent_type::GPU, rccl_device_idx, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
@@ -194,7 +194,7 @@ write_perfetto_counter_track(std::uint64_t _val, std::uint64_t _begin_ts,
 
         if(!counter_track::exists(_idx))
         {
-            std::string _label =
+            const std::string _label =
                 (_idx > 0) ? fmt::format("{} [{}]", Tp::label, _idx) : Tp::label;
             counter_track::emplace(_idx, _label, "bytes");
         }
@@ -213,7 +213,7 @@ cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes,
     size_t transfer_bytes = bytes;
 
     tracking_state.register_gpu(rccl_device_idx);
-    std::uint64_t cumulative = tracking_state.add_bytes(rccl_device_idx, bytes);
+    const std::uint64_t cumulative = tracking_state.add_bytes(rccl_device_idx, bytes);
 
     const auto event_metadata = fmt::format(R"({{"transfer_bytes":{}}})", transfer_bytes);
 
@@ -324,11 +324,11 @@ tool_tracing_callback_rccl(std::uint32_t                                 operati
                            rocprofiler_callback_tracing_rccl_api_data_t* payload,
                            std::uint64_t begin_ts, std::uint64_t end_ts)
 {
-    rccl_event_info info = rccl_get_event_info_impl(operation, *payload);
+    const rccl_event_info info = rccl_get_event_info_impl(operation, *payload);
 
     if(info.size > 0 && info.comm != nullptr)
     {
-        std::uint32_t device_id = rccl_get_device_id(info.comm);
+        const std::uint32_t device_id = rccl_get_device_id(info.comm);
 
         if(info.is_send)
         {

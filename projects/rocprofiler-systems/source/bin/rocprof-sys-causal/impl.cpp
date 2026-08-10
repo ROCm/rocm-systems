@@ -779,7 +779,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
                         << itr.second << "\n";
             };
 
-        int nwidth = (std::log10(_causal_envs_tmp.size()) + 1);
+        const int nwidth = (std::log10(_causal_envs_tmp.size()) + 1);
         for(size_t i = 0; i < _causal_envs_tmp.size(); ++i)
         {
             std::stringstream fname{};

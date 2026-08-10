@@ -204,7 +204,6 @@ inline const rocprofsys_agent_t*
 client_data::get_agent(rocprofiler_agent_id_t _id) const
 {
     const auto& agent = get_agent_manager_instance().get_agent_by_handle(_id.handle);
-
     return &agent;
 }
 

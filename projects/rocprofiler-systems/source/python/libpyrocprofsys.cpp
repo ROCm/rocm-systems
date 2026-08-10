@@ -312,7 +312,7 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     if(_disable) return;
 
     _disable = true;
-    tim::scope::destructor _dtor{ []() { _disable = false; } };
+    const tim::scope::destructor _dtor{ []() { _disable = false; } };
     (void) _dtor;
 
     if(pframe.is_none() || pframe.ptr() == nullptr) return;
@@ -321,11 +321,11 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
 
     auto* frame = reinterpret_cast<PyFrameObject*>(pframe.ptr());
 
-    int what = (strcmp(swhat, "call") == 0)       ? PyTrace_CALL
-               : (strcmp(swhat, "c_call") == 0)   ? PyTrace_C_CALL
-               : (strcmp(swhat, "return") == 0)   ? PyTrace_RETURN
-               : (strcmp(swhat, "c_return") == 0) ? PyTrace_C_RETURN
-                                                  : -1;
+    const int what = (strcmp(swhat, "call") == 0)       ? PyTrace_CALL
+                     : (strcmp(swhat, "c_call") == 0)   ? PyTrace_C_CALL
+                     : (strcmp(swhat, "return") == 0)   ? PyTrace_RETURN
+                     : (strcmp(swhat, "c_return") == 0) ? PyTrace_C_RETURN
+                                                        : -1;
     // only support PyTrace_{CALL,C_CALL,RETURN,C_RETURN}
     if(what < 0)
     {
@@ -417,11 +417,11 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         return false;
     };
 
-    bool  _force      = false;
-    auto& _only_funcs = _config.restrict_functions;
-    auto& _incl_funcs = _config.include_functions;
-    auto& _skip_funcs = _config.exclude_functions;
-    auto  _func       = py::cast<std::string>(get_frame_code(frame)->co_name);
+    const bool _force      = false;
+    auto&      _only_funcs = _config.restrict_functions;
+    auto&      _incl_funcs = _config.include_functions;
+    auto&      _skip_funcs = _config.exclude_functions;
+    auto       _func       = py::cast<std::string>(get_frame_code(frame)->co_name);
 
     if(!_only_funcs.empty())
     {
@@ -497,14 +497,14 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     auto _label = _get_label(_func, _file, _full);
     if(_label.empty()) return;
 
-    static thread_local strset_t _labels{};
-    const auto&                  _label_ref = *_labels.emplace(_label).first;
-    auto                         _annotate  = _config.annotate_trace;
+    static thread_local strset_t const _labels{};
+    const auto&                        _label_ref = *_labels.emplace(_label).first;
+    auto                               _annotate  = _config.annotate_trace;
 
     // start function
     auto _profiler_call = [&]() {
-        int _lineno = 0;
-        int _lasti  = 0;
+        const int _lineno = 0;
+        const int _lasti  = 0;
         if(_annotate)
         {
             _lineno                         = get_frame_lineno(frame);

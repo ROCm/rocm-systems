@@ -485,19 +485,20 @@ module_function::is_module_constrained() const
         // return _report("Skipping", "default module", 2);
         return false;
 
-    static std::regex ext_regex{ "\\.(s|S)$", regex_opts };
-    static std::regex sys_regex{ "^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$", regex_opts };
-    static std::regex sys_build_regex{ "^(\\.\\./sysdeps/|/build/)", regex_opts };
-    static std::regex dyninst_regex{ "(dyninst|DYNINST|(^|/)RT[[:graph:]]+\\.c$)",
-                                     regex_opts };
-    static std::regex dependlib_regex{ "^(lib|)(rocprof-sys|rocprofsys|"
-                                       "pthread|caliper|gotcha|papi|"
-                                       "cupti|TAU|likwid|pfm|nvperf|unwind)",
+    static std::regex const ext_regex{ "\\.(s|S)$", regex_opts };
+    static std::regex const sys_regex{ "^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$",
                                        regex_opts };
-    static std::regex core_cmod_regex{
+    static std::regex const sys_build_regex{ "^(\\.\\./sysdeps/|/build/)", regex_opts };
+    static std::regex const dyninst_regex{ "(dyninst|DYNINST|(^|/)RT[[:graph:]]+\\.c$)",
+                                           regex_opts };
+    static std::regex const dependlib_regex{ "^(lib|)(rocprof-sys|rocprofsys|"
+                                             "pthread|caliper|gotcha|papi|"
+                                             "cupti|TAU|likwid|pfm|nvperf|unwind)",
+                                             regex_opts };
+    static std::regex const core_cmod_regex{
         "^(malloc|(f|)lock|sig|sem)[a-z_]+(|64|_r|_l)\\.c$"
     };
-    static std::regex core_lib_regex{ "lib(elf)(-|\\.)", regex_opts };
+    static std::regex const core_lib_regex{ "lib(elf)(-|\\.)", regex_opts };
     // static std::regex prefix_regex{ "^(_|\\.[a-zA-Z0-9])", regex_opts };
 
     // file extensions that should not be instrumented
@@ -551,33 +552,33 @@ module_function::is_routine_constrained() const
         return _report("Skipping", "function-constraint", 2);
     }
 
-    static std::regex exclude("(rocprofsys|rocprof-sys|tim::|MPI_Init|MPI_"
-                              "Finalize|dyninst|DYNINST|tm_clones)",
-                              regex_opts);
+    static std::regex const exclude("(rocprofsys|rocprof-sys|tim::|MPI_Init|MPI_"
+                                    "Finalize|dyninst|DYNINST|tm_clones)",
+                                    regex_opts);
     // static std::regex exclude_printf("(|v|f)printf$", regex_opts);
-    static std::regex exclude_cxx(
+    static std::regex const exclude_cxx(
         "(std::_Sp_counted_base|std::(use|has)_facet|std::locale|::sentry|^std::_|::_(M|"
         "S)_|::basic_string[a-zA-Z,<>: ]+::_M_create|::__|::_(Alloc|State)|"
         "std::(basic_|)(ifstream|ios|istream|ostream|stream))",
         regex_opts);
 
-    static std::regex exclude_fortran(
+    static std::regex const exclude_fortran(
         "(log2visit|Log2VisitHelper)",  // From LLVM's libFortranRuntime.a library
         regex_opts);
 
-    static std::regex leading(
+    static std::regex const leading(
         "^(\\.|frame_dummy|transaction clone|virtual thunk|non-virtual thunk|"
         "\\(|targ|kmp_threadprivate_|Kokkos::Profiling::|_IO_|___|"
         "__(GI|cxa|libc|IO|rpc|run|call|pthread|dl|nl|nss|new|old|internal|argp|malloc|"
         "libio|printf)_)",
         regex_opts);
-    static std::regex trailing("(_internal)$", regex_opts);
+    static std::regex const trailing("(_internal)$", regex_opts);
     // static std::regex trailing(
     //    "(_|\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$", regex_opts);
-    static strset_t whole = []() {
+    static strset_t const whole = []() {
         auto _v   = get_whole_function_names();
         auto _ret = _v;
-        for(std::string _ext : { "64", "_l", "_r" })
+        for(std::string const _ext : { "64", "_l", "_r" })
             for(const auto& itr : _v)
                 _ret.emplace(itr + _ext);
         return _ret;
@@ -864,8 +865,8 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
     rocprofsys::function_args_t _args{};
     if(!_source_obj_name.empty())
         _args.push_back({ 0U, "string", "source_object", _source_obj_name });
-    auto _serialized_args = rocprofsys::get_args_string(_args);
-    bool use_args_entr    = (!_serialized_args.empty() && _entr_trace_args);
+    auto       _serialized_args = rocprofsys::get_args_string(_args);
+    const bool use_args_entr    = (!_serialized_args.empty() && _entr_trace_args);
 
     auto _trace_entr = (use_args_entr)
                            ? rocprofsys_call_expr(_name.c_str(), _serialized_args)
