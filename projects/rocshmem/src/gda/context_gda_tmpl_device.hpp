@@ -35,7 +35,7 @@
 #include "queue_pair.hpp"
 #include "rocshmem_calc.hpp"
 #include "backend_gda.hpp"
-#include "sqtt_trace.hpp"
+#include "backend_type.hpp"
 
 #include <hip/hip_runtime.h>
 

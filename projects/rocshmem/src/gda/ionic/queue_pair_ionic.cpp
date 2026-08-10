@@ -27,7 +27,7 @@
 #include "util.hpp"
 #include "log.hpp"
 #include "containers/free_list_impl.hpp"
-#include "sqtt_trace.hpp"
+#include "backend_type.hpp"
 
 namespace rocshmem {
 

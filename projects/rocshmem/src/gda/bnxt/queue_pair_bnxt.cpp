@@ -24,7 +24,7 @@
 
 #include "gda/queue_pair.hpp"
 #include "log.hpp"
-#include "sqtt_trace.hpp"
+#include "backend_type.hpp"
 
 namespace rocshmem {
 
@@ -305,11 +305,13 @@ __device__ void QueuePair::bnxt_post_wqe_rma(int32_t length,
 
   for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
     if (i == wf_info.pe_group_logical_lane_id) {
-      bnxt_write_rma_wqe(raddr, laddr, length, opcode);
+      bnxt_write_rma_wqe(length, raddr, rkey, laddr, lkey, opcode);
 
-      sqtt_marker_enter("doorbell");
-      bnxt_ring_doorbell(bnxt_sq.tail);
-      sqtt_marker_exit("doorbell");
+      if (ring_db) {
+        sqtt_marker_enter("doorbell");
+        bnxt_ring_doorbell(bnxt_sq.tail);
+        sqtt_marker_exit("doorbell");
+      }
     }
   }
 

@@ -28,7 +28,7 @@
 
 #include "gda/endian.hpp"
 #include "gda/queue_pair.hpp"
-#include "sqtt_trace.hpp"
+#include "backend_type.hpp"
 
 namespace rocshmem {
 
