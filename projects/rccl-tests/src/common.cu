@@ -1319,6 +1319,10 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
           const char* algoName = NULL;
           const char* protoName = NULL;
           bool haveInfo = false;
+          // Keep using getSymkInfo (preferred) until every symmetric-capable
+          // collective is migrated onto rcclSelectXxx/getCollImplInfo. Notably
+          // ReduceScatter is not yet wired into getCollImplInfo, so getSymkInfo
+          // remains the only symk reporter for it.
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
           if (test_ncclVersion >= NCCL_VERSION(2,28,0) && local_register == SYMMETRIC_REGISTER && ctaPolicy != NCCL_CTA_POLICY_ZERO && rcclTestsGetSymkInfo) {
             if (args->collTest->getSymkInfo) {

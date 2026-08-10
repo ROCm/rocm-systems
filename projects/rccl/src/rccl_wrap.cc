@@ -490,26 +490,35 @@ static int symkHostRedOpToDev(ncclRedOp_t op) {
   }
 }
 
-ncclResult_t rcclSymKGetInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
-                             ncclRedOp_t op, int* algo, int* protocol, int* maxChannels) {
-  RCCL_STATIC_EXPOSE_CHECK();
-  if (algo == nullptr || protocol == nullptr || maxChannels == nullptr) return ncclInvalidArgument;
-  if (coll != ncclFuncAllReduce && coll != ncclFuncAllGather && coll != ncclFuncReduceScatter)
-    return ncclInvalidArgument;
+// Fills (algo, protocol, maxChannels) for the symmetric kernel that would run
+// for these operands; returns false if symk is unavailable or no kernel is
+// picked. Single source shared by rcclSymKGetInfo and the query-mode symmetric
+// reporting in rcclSelectAllReduce/rcclSelectAllGather.
+static bool rcclSymkQuery(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
+                          ncclRedOp_t op, int* algo, int* protocol, int* maxChannels) {
+  if (coll != ncclFuncAllReduce && coll != ncclFuncAllGather && coll != ncclFuncReduceScatter) return false;
   int devOp = (coll == ncclFuncAllGather) ? (int)ncclDevSum : symkHostRedOpToDev(op);
-  if (devOp < 0) return ncclInvalidArgument;
-  NCCLCHECK(ncclSymkInitOnce(comm));
-  if (!ncclSymkAvailable(comm, coll, devOp, dataType, (size_t)count)) return ncclInvalidArgument;
+  if (devOp < 0) return false;
+  if (ncclSymkInitOnce(comm) != ncclSuccess) return false;
+  if (!ncclSymkAvailable(comm, coll, devOp, dataType, (size_t)count)) return false;
   float estTimeUs;
   ncclSymkKernelId kernelId;
   int nWarps;
   bool forced = false;
-  NCCLCHECK(ncclSymkPickKernel(comm, coll, devOp, dataType, (size_t)count, (size_t)count, 1, ncclSymSendRegRecvReg,
-                               &estTimeUs, &kernelId, maxChannels, &nWarps, &forced));
-  if (kernelId == ncclSymkKernelId_Count) return ncclInvalidArgument;
+  if (ncclSymkPickKernel(comm, coll, devOp, dataType, (size_t)count, (size_t)count, 1, ncclSymSendRegRecvReg,
+                         &estTimeUs, &kernelId, maxChannels, &nWarps, &forced) != ncclSuccess)
+    return false;
+  if (kernelId == ncclSymkKernelId_Count) return false;
   *algo = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC;
   *protocol = rcclSymkKernelIdIsLL((int)kernelId) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
+  return true;
+}
 
+ncclResult_t rcclSymKGetInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
+                             ncclRedOp_t op, int* algo, int* protocol, int* maxChannels) {
+  RCCL_STATIC_EXPOSE_CHECK();
+  if (algo == nullptr || protocol == nullptr || maxChannels == nullptr) return ncclInvalidArgument;
+  if (!rcclSymkQuery(comm, coll, count, dataType, op, algo, protocol, maxChannels)) return ncclInvalidArgument;
   return ncclSuccess;
 }
 
@@ -838,6 +847,15 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 
   if (symEligible) {
     decision->algo = RCCL_SYMMETRIC;
+    // Reporting only: fill the symk protocol/channels that will actually run.
+    // Skipped on the live path (taskAppend recomputes and dispatches symk).
+    if (query) {
+      int a, p, ch;
+      if (rcclSymkQuery(comm, ncclFuncAllReduce, count, datatype, op, &a, &p, &ch)) {
+        decision->protocol = p;
+        decision->nMaxChannels = ch;
+      }
+    }
     return ncclSuccess;
   }
 
@@ -885,6 +903,18 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // kernel (extracted downstream), so DDA is gated on !symEligible, as before.
   const bool symEligible =
     isSymmetricKernelRequested(comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount, sendbuff, recvbuff);
+  // Reporting only: symk wins when eligible (extracted downstream on the live
+  // path, which falls through to enqueue exactly as before). If the kernel pick
+  // fails, fall through and report the next backend.
+  if (query && symEligible) {
+    int a, p, ch;
+    if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch)) {
+      decision->algo = a;
+      decision->protocol = p;
+      decision->nMaxChannels = ch;
+      return ncclSuccess;
+    }
+  }
   if (!symEligible && rcclDdaEnabled(comm, totalBytes, 8388608)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       if (rcclParamDdaLL() && msgSize <= (size_t)rcclParamDdaLLThreshold() &&
