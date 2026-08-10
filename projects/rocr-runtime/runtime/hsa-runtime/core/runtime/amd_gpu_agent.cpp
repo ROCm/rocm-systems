@@ -1056,20 +1056,6 @@ void GpuAgent::ReleaseResources() {
       }
     }
 
-    if (ape1_base_ != 0) {
-      _aligned_free(reinterpret_cast<void*>(ape1_base_));
-    }
-
-    scratch_cache_.trim(true);
-    scratch_cache_.free_reserve();
-
-    if (scratch_pool_.base() != NULL) {
-      core::DriverMemoryHandle scratch_handle{};
-      scratch_handle.handle = reinterpret_cast<uint64_t>(scratch_pool_.base());
-      scratch_handle.size = scratch_pool_.size();
-      driver().FreeMemory(scratch_handle);
-    }
-
     for (int i = 0; i < QueueCount; i++)
       queues_[i].reset();
     // Destroy the GWS-access queue here. It is a GpuAgent member that would
@@ -1083,6 +1069,26 @@ void GpuAgent::ReleaseResources() {
       std::lock_guard<std::mutex> gws_lock(gws_queue_.lock_);
       gws_queue_.queue_.reset();
       gws_queue_.ref_ct_ = 0;
+    }
+
+    // hsa_shut_down invalidates application-owned queues. Destroy any queues
+    // still registered after the runtime-owned queue pools have been cleaned.
+    for (auto* queue : GetAqlQueues()) {
+      queue->Destroy();
+    }
+
+    if (ape1_base_ != 0) {
+      _aligned_free(reinterpret_cast<void*>(ape1_base_));
+    }
+
+    scratch_cache_.trim(true);
+    scratch_cache_.free_reserve();
+
+    if (scratch_pool_.base() != NULL) {
+      core::DriverMemoryHandle scratch_handle{};
+      scratch_handle.handle = reinterpret_cast<uint64_t>(scratch_pool_.base());
+      scratch_handle.size = scratch_pool_.size();
+      driver().FreeMemory(scratch_handle);
     }
 
     system_deallocator()(doorbell_queue_map_);
