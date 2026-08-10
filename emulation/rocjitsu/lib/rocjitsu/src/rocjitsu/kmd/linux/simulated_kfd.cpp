@@ -2455,9 +2455,16 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
   state.sgprs.resize(state.num_sgprs);
   for (uint32_t s = 0; s < state.num_sgprs; ++s)
     state.sgprs[s] = wf.debug_read_sgpr(s);
+  // The CWSR record's VGPR stride is wave64-shaped (cwsr.cpp kVgprLaneBytes)
+  // whatever the wave size is, but the physical register only has wf_size()
+  // lanes -- a wave32 VectorReg<32> is exactly 32 wide, so reading lanes 32-63
+  // runs off it into the neighbouring register. Read the live lanes and leave
+  // the rest of the wave64-shaped slot at the zero resize() already wrote; the
+  // restore path is bounded by wf_size() too and never looks at them.
   state.vgprs.resize(static_cast<size_t>(state.num_vgprs) * 64);
+  const uint32_t live_lanes = wf.wf_size();
   for (uint32_t r = 0; r < state.num_vgprs; ++r)
-    for (uint32_t lane = 0; lane < 64; ++lane)
+    for (uint32_t lane = 0; lane < live_lanes; ++lane)
       state.vgprs[static_cast<size_t>(r) * 64 + lane] = wf.debug_read_vgpr(r, lane);
   state.lds.resize(wf.lds_size());
   if (!state.lds.empty())
