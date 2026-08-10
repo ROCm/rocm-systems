@@ -77,19 +77,19 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
-        Dcache Requests:
+        DCache Requests:
           value: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
           unit: (Requests + $normUnit)
-        Dcache Utilization:
+        DCache Utilization:
           value: 100 * SUM(SQC_DCACHE_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
           unit: Percent
-        Dcache Hit Rate:
+        DCache Hit Rate:
           value: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
           unit: Percent
-        Dcache Request Stall Rate:
+        DCache Request Stall Rate:
           value: 100 * SUM(SQC_DCACHE_INPUT_VALID_READYB_sum) / SUM(SQ_BUSY_CYCLES_sum)
           unit: Percent
-        Dcache-GL1 Read Bandwidth:
+        DCache-GL1 Read Bandwidth:
           value: 128 * SUM(SQC_TC_DATA_READ_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
 
@@ -353,11 +353,11 @@ Panel Config:
       Percentage of instruction cache accesses that miss and require fetching from the GL1
       cache. High miss rates increase instruction fetch latency and may cause shader stalls.
       Consider reducing kernel code size or improving branch coherence.
-    Dcache Utilization: >-
+    DCache Utilization: >-
       Percentage of shader busy cycles spent actively servicing scalar data cache requests.
       The scalar data cache holds uniform data accessed by scalar instructions. High
       utilization indicates active use of scalar memory operations.
-    Dcache Hit Rate: >-
+    DCache Hit Rate: >-
       Percentage of scalar data cache accesses that hit in cache. High hit rates indicate
       efficient reuse of constant and uniform data. Low hit rates may indicate excessive
       unique constant data or poor temporal locality.

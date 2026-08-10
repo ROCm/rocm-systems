@@ -57,11 +57,11 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("ICache Request Stall Rate", 2.1),
     ("ICache-GL1 Read Bandwidth", 57.6e9),
     # Table 302: Scalar Data Cache
-    ("Dcache Requests", 225),
-    ("Dcache Utilization", 38.7),
-    ("Dcache Hit Rate", 95.3),
-    ("Dcache Request Stall Rate", 1.8),
-    ("Dcache-GL1 Read Bandwidth", 28.8e9),
+    ("DCache Requests", 225),
+    ("DCache Utilization", 38.7),
+    ("DCache Hit Rate", 95.3),
+    ("DCache Request Stall Rate", 1.8),
+    ("DCache-GL1 Read Bandwidth", 28.8e9),
     # Table 303: TCP Cache (GL0 Vector Cache)
     ("TCP Total Requests", 1_250_000),
     ("TCP Read Requests", 875_000),
@@ -271,9 +271,9 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     m["icache_hit"] = metric_dict.get("ICache Hit Rate")
     m["icache_gl1_bw"] = metric_dict.get("ICache-GL1 Read Bandwidth")
 
-    m["dcache_req"] = metric_dict.get("Dcache Requests")
-    m["dcache_hit"] = metric_dict.get("Dcache Hit Rate")
-    m["dcache_gl1_bw"] = metric_dict.get("Dcache-GL1 Read Bandwidth")
+    m["dcache_req"] = metric_dict.get("DCache Requests")
+    m["dcache_hit"] = metric_dict.get("DCache Hit Rate")
+    m["dcache_gl1_bw"] = metric_dict.get("DCache-GL1 Read Bandwidth")
 
     m["tcp_read_req"] = metric_dict.get("TCP Read Requests")
     m["tcp_write_req"] = metric_dict.get("TCP Write Requests")

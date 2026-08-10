@@ -101,26 +101,14 @@ Memory chart - Instruction Cache:
     rst: Bytes per second of read traffic from the instruction path toward GL1 (texture-cache path instruction requests), using 128 B per SQC_TC_INST_REQ event.
     unit: Bytes/s
 Memory chart - Scalar Data Cache:
-  Dcache Utilization:
+  DCache Utilization:
     plain: Percentage of shader busy cycles spent actively servicing scalar data cache requests. The scalar data cache holds uniform data accessed by scalar instructions. High utilization indicates active use of scalar memory operations.
     rst: Percentage of shader busy cycles spent actively servicing scalar data cache requests. The scalar data cache holds uniform data accessed by scalar instructions. High utilization indicates active use of scalar memory operations.
     unit: Percent
-  Dcache Hit Rate:
+  DCache Hit Rate:
     plain: Percentage of scalar data cache accesses that hit in cache. High hit rates indicate efficient reuse of constant and uniform data. Low hit rates may indicate excessive unique constant data or poor temporal locality.
     rst: Percentage of scalar data cache accesses that hit in cache. High hit rates indicate efficient reuse of constant and uniform data. Low hit rates may indicate excessive unique constant data or poor temporal locality.
     unit: Percent
-  Dcache Requests:
-    plain: 'Count of scalar data-cache (SQC DCache) requests, per normalization unit. Formula: SQC_DCACHE_REQ_sum / $denom'
-    rst: 'Count of scalar data-cache (SQC DCache) requests, per normalization unit. Formula: SQC_DCACHE_REQ_sum / $denom'
-    unit: Requests per Normalization Unit
-  Dcache Request Stall Rate:
-    plain: 'Percent of shader busy cycles where the scalar data cache input interface was stalled. Formula: 100 * SQC_DCACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum.'
-    rst: 'Percent of shader busy cycles where the scalar data cache input interface was stalled. Formula: 100 * SQC_DCACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum.'
-    unit: Percent
-  Dcache-GL1 Read Bandwidth:
-    plain: Bytes per second of scalar read traffic from SQC toward GL1 (SQC_TC_DATA_READ_REQ at 128 B per request).
-    rst: Bytes per second of scalar read traffic from SQC toward GL1 (SQC_TC_DATA_READ_REQ at 128 B per request).
-    unit: Bytes/s
 Memory chart - TCP Cache (GL0 Vector Cache):
   GL0 Cache Hit Rate (TCP Cache):
     plain: Percentage of GL0 vector cache (TCP Cache) requests serviced from cache. TCP Cache is the first-level cache for vector memory operations. Higher hit rates reduce traffic to the GL1 cache and lower memory access latency for vector operations.
@@ -430,7 +418,7 @@ WGP Instruction Cache:
     rst: Percentage of instruction cache accesses that hit. High hit rates are essential for sustained instruction throughput. Low rates may indicate large kernels or divergent branches causing instruction cache thrashing.
     unit: Percent
 WGP Scalar Data Cache:
-  Dcache Hit Rate:
+  DCache Hit Rate:
     plain: Percentage of scalar data cache accesses that hit. High hit rates indicate efficient reuse of constant and uniform data. Low rates may suggest excessive unique constant data or poor temporal locality.
     rst: Percentage of scalar data cache accesses that hit. High hit rates indicate efficient reuse of constant and uniform data. Low rates may suggest excessive unique constant data or poor temporal locality.
     unit: Percent
