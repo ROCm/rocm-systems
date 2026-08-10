@@ -28,6 +28,16 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 profile="${MIRAGE_PROFILE:-mi350x}"
 arch="${OFFLOAD_ARCH:-gfx950}"
 
+# CTest matches the whole output against SKIP_REGULAR_EXPRESSION "SKIP:" (see
+# the RocgdbDebug.KernelBreakpoint registration in tests/CMakeLists.txt), and a
+# match reports the entire seven-scenario run skipped regardless of the exit
+# status. So the literal string "SKIP:" must be emitted only from here, where it
+# always means a test-wide prerequisite is missing and the run stops
+# immediately. A mid-run scenario that cannot proceed sets fail=1 instead --
+# printing the token from there would hide every result the run had already
+# produced. Anchoring the CMake regex is not an alternative: cmsys anchors to
+# the start of the whole output blob, not per line, which would break this
+# function instead.
 skip() {
   echo "SKIP: $1"
   [[ -n "${ROCGDB_DEMO_REQUIRE:-}" ]] && exit 1
@@ -337,7 +347,9 @@ if hipcc --offload-arch="$arch" -g -O0 -o "$badapp" "$here/bad_access.hip" 2>"$w
     'the wild store raised a memory violation'
   check5 'bad_access .*at .*:[0-9]+' 'stopped in the faulting kernel'
 else
-  echo "  SKIP: could not build bad_access.hip for $arch"
+  cat "$workdir/badbuild.log" >&2
+  echo "FAIL: could not build bad_access.hip for $arch" >&2
+  fail=1
 fi
 
 # --- Sixth scenario: private/scratch variable reads ---------------------------
@@ -442,7 +454,9 @@ if hipcc --offload-arch="$arch" -g -O0 -o "$mwapp" "$here/multi_wave.hip" 2>"$wo
     fail=1
   fi
 else
-  echo "  SKIP: could not build multi_wave.hip for $arch"
+  cat "$workdir/mwbuild.log" >&2
+  echo "FAIL: could not build multi_wave.hip for $arch" >&2
+  fail=1
 fi
 
 if [[ $fail -ne 0 ]]; then
