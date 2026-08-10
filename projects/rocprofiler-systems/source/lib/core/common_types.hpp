@@ -51,7 +51,7 @@ append_escaped_field(std::string& out, std::string_view field)
         return;
     }
 
-    for(char const ch : field)
+    for(const char ch : field)
     {
         switch(ch)
         {

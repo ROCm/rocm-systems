@@ -687,7 +687,7 @@ TEST(perfetto_engine_cached, concurrent_collect_packet_bytes_no_loss_or_bleed)
     std::atomic<bool>        go{ false };
     std::vector<std::thread> threads;
     threads.reserve(pid_count);
-    for(int const pid : pids)
+    for(const int pid : pids)
     {
         threads.emplace_back([&, pid]() {
             ++ready;

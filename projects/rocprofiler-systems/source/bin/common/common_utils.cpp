@@ -471,7 +471,7 @@ strip_ansi(const std::string& text)
     std::string result;
     result.reserve(text.size());
     bool in_escape = false;
-    for(char const ch : text)
+    for(const char ch : text)
     {
         if(in_escape)
         {

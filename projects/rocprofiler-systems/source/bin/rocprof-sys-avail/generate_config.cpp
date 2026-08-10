@@ -208,7 +208,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
 
     auto        _fmts    = std::set<std::string>{};
     std::string _txt_ext = ".cfg";
-    for(std::string const itr : { ".cfg", ".txt", ".json", ".xml" })
+    for(const std::string itr : { ".cfg", ".txt", ".json", ".xml" })
     {
         if(_config_file.length() <= itr.length()) continue;
         auto _pos = _config_file.rfind(itr);

@@ -331,7 +331,7 @@ TEST_F(UnifiedMemoryProcessorTest,
 
     bool saw_gpu1 = false;
     bool saw_gpu2 = false;
-    for(auto const& dev : j["devices"])
+    for(const auto& dev : j["devices"])
     {
         auto        device_id = dev["device_id"].get<std::uint32_t>();
         const auto& h2d       = dev["migrations"]["host_to_device"];
@@ -374,7 +374,7 @@ TEST_F(UnifiedMemoryProcessorTest, ExtractGpuNameResolvesOrFallsBack)
 
     bool saw_resolved = false;
     bool saw_fallback = false;
-    for(auto const& dev : j["devices"])
+    for(const auto& dev : j["devices"])
     {
         const std::string name = dev["device_name"];
         if(dev["device_id"] == kGpu1)
@@ -615,7 +615,7 @@ TEST_F(UnifiedMemoryProcessorTest, FloatSanitizationProducesZeroSize)
             std::numeric_limits<std::uint64_t>::max()),  // = 2^64 (UB if cast)
     };
 
-    for(double const v : rejected_values)
+    for(const double v : rejected_values)
         feed_h2d_migrate_with_value(v);
 
     processor->finalize_processing();
