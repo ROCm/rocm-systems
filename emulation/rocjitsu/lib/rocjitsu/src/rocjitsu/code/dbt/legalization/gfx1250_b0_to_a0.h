@@ -8,6 +8,7 @@
 #define ROCJITSU_CODE_DBT_LEGALIZATION_GFX1250_B0_TO_A0_H_
 
 #include <cstdint>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -31,6 +32,26 @@ struct InstructionLegalization;
 /// corresponding semantic rule inspects the precise operand predicate before
 /// changing code.
 [[nodiscard]] const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &inst);
+
+/// @brief True for instruction families whose A0 handling is deferred pending
+/// confirmation of the exact translated set.
+///
+/// @details The barrier-state query and s_monitor_sleep may need
+/// target-specific translation that is not yet implemented -- the latter
+/// because of DEGFXMI400-12268, where s_monitor_sleep('forever') with MWAIT=0
+/// can hang the wave. Rather than fail closed, they are passed through
+/// unchanged and the caller reports the omission so it is visible rather than
+/// silent. Revisit once the precise set is confirmed; if translation is
+/// required, move the relevant members into the fail-closed classification.
+///
+/// Plain s_sleep and s_sleep_var are NOT members: they behave identically on A0
+/// and B0, so copying them through is the correct translation rather than a
+/// missing one.
+///
+/// The classification is a pure query. Reporting belongs to the translation
+/// loop, which owns both the diagnostic list and the per-translation record of
+/// what it has already reported.
+[[nodiscard]] bool gfx1250_b0_to_a0_is_deferred_family(std::string_view mnemonic);
 
 /// @brief True when a low-precision B0 WMMA needs an A0 completion wait.
 ///

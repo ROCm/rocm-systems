@@ -15,6 +15,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <iomanip>
+#include <sstream>
+#include <string>
 #include <mutex>
 #include <cstdlib>
 #include <thread>
@@ -144,6 +146,32 @@ inline bool isQuickLevel() {
 // Do not call before all threads have joined
 #define HIP_CHECK_THREAD_FINALIZE()                                                                \
   { TestContext::get().finalizeResults(); }
+
+// Per-thread buffer used by INFO_THREAD
+inline std::string& threadInfoMessageBuffer() {
+  static thread_local std::string buffer;
+  return buffer;
+}
+
+// Thread-safe counterpart of INFO: stashes a diagnostic message that the next
+// CHECK_THREAD attaches to its recorded result.
+#define INFO_THREAD(message)                                                                       \
+  {                                                                                                \
+    std::stringstream threadInfoStream;                                                            \
+    threadInfoStream << message;                                                                   \
+    threadInfoMessageBuffer() = threadInfoStream.str();                                            \
+  }
+
+// Thread-safe counterpart of CHECK
+#define CHECK_THREAD(condition)                                                                    \
+  {                                                                                                \
+    auto localResult = (condition);                                                                \
+    std::string threadCall =                                                                       \
+        threadInfoMessageBuffer().empty() ? std::string(#condition) : threadInfoMessageBuffer();   \
+    HCResult result(__LINE__, __FILE__, hipSuccess, threadCall, localResult);                      \
+    TestContext::get().addResults(result);                                                         \
+    threadInfoMessageBuffer().clear();                                                             \
+  }
 
 // Selects between the thread-safe and the regular check based on a runtime flag.
 #define HIP_CHECK_OPT_THREAD(threadSafe, error)                                                    \
