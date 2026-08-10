@@ -110,8 +110,11 @@ public:
     template <typename T, typename std::enable_if<sizeof(T) % sizeof(uint32_t) == 0, int>::type = 0>
     void Append(T&& packet)
     {
-        size_t   pos        = data_.size();
-        uint32_t num_dwords = sizeof(packet) / sizeof(uint32_t);
+        static_assert(std::is_trivially_copyable_v<std::remove_reference_t<T>>,
+                      "Append serialises the packet with memcpy");
+
+        size_t         pos        = data_.size();
+        constexpr auto num_dwords = uint32_t{sizeof(T) / sizeof(uint32_t)};
         CheckPredExec(pos, num_dwords);
         data_.resize(pos + num_dwords);
         memcpy(&data_[pos], &packet, sizeof(T));
@@ -131,7 +134,7 @@ public:
         size_t pos = data_.size();
         CheckPredExec(pos, num_dwords);
         data_.resize(pos + num_dwords);
-        memcpy(&data_[pos], data_pointer, num_dwords);
+        memcpy(&data_[pos], data_pointer, num_dwords * sizeof(uint32_t));
     }
 
     /// @brief Return size of Gpu commands in bytes in the underlying buffer

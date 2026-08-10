@@ -123,7 +123,9 @@ private:
     uint32_t   target_xcc_{0};
     int        pos_{0};
     int        initial_buff_size_{0};
-    const int  pred_exec_max_size{0x3FFF};
+
+    // PACKET3_PRED_EXEC__EXEC_COUNT is 14 bits, so a region may not exceed this
+    static constexpr int pred_exec_max_size{0x3FFF};
 };
 
 // PMC PM4 commands builder virtual interface
