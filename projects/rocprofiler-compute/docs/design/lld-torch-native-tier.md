@@ -150,59 +150,19 @@ flowchart TD
 
 ### Flow across files
 
-The same op flow mapped onto the source files and their functions.
-
-**Entry points** — Python calls land in the module file, which forwards to the
-bridge, the user-scope helpers, and the capture/stats state.
-
-```mermaid
-flowchart LR
-    py[Python] --> mod[roctx_recordfn_module.cpp]
-    mod --> brg[record_function_bridge.h<br/>install / uninstall]
-    mod --> us[user_scope.h<br/>push / pop_user_scope]
-    mod --> cap[capture_control.h<br/>start / stop_capture]
-    mod --> stt[dump_stats<br/>reads g_stats]
-```
-
-**Operator entry** — `start_cb` restores context, pushes the leaf, then emits.
-
-```mermaid
-flowchart TD
-    op[ATen op] --> sc[record_function_bridge.h<br/>start_cb]
-    sc --> ov[user_scope.h<br/>apply_userscope_overlay]
-    sc --> cn[snapshot_store.h<br/>consume]
-    ov --> dd[marker_stack.h<br/>push_with_prefix_dedup]
-    cn --> dd
-    sc --> lf[leaf_context.h<br/>default_leaf_context]
-    lf --> pf[marker_stack.h<br/>stack push]
-    sc --> sv[snapshot_store.h<br/>save]
-    sc --> wf[wire_format.h<br/>build_marker_string]
-    wf --> em[roctx.h<br/>roctxRangePushA]
-```
-
-`start_cb` wraps the above in a `scope_guard.h` guard so any failure unwinds the
-partial push; success stores what was pushed in the observer context.
-
-**Operator exit** — `end_cb` unwinds exactly what `start_cb` recorded.
+Where the source lives. Operators arrive through the callback and user scopes
+through the pybind entry points, but both end up pushing frames onto the same
+stack and emitting through the same encoder.
 
 ```mermaid
 flowchart LR
-    op[op exits] --> ec[record_function_bridge.h<br/>end_cb]
-    ec --> uw[record_function_bridge.h<br/>unwind_observer_context]
-    uw --> rp[roctx.h<br/>roctxRangePop]
-    uw --> pop[marker_stack.h<br/>stack pop]
-```
-
-**User scope** — structural markers from Python take a parallel path that also
-publishes the chain for autograd workers.
-
-```mermaid
-flowchart TD
-    push[user_scope.h<br/>push_user_scope] --> pf[marker_stack.h<br/>stack push]
-    push --> mg[user_scope.h<br/>make_userscope_guard]
-    mg --> tls[(c10 TLS DebugInfo)]
-    push --> wf[wire_format.h<br/>build_marker_string]
-    wf --> em[roctx.h<br/>roctxRangePushA]
+    op[ATen op] --> brg[record_function_bridge.h<br/>operator callback]
+    py[Python] --> mod[roctx_recordfn_module.cpp<br/>pybind entry points]
+    mod --> brg
+    mod --> us[user_scope.h<br/>user scopes, TLS chain]
+    brg --> st[marker_stack.h<br/>snapshot_store.h<br/>frames, fwd-to-bwd lookup]
+    us --> st
+    st --> wf[wire_format.h<br/>encode] --> rx[ROCTX range]
 ```
 
 ### Operator capture
@@ -223,8 +183,26 @@ sequenceDiagram
     End->>End: unwind observer context
 ```
 
+The leaf frame's context is one of four fixed tags, chosen from the op's scope
+and what is already on the stack. Downstream parsers match these tokens
+literally, so the mapping is part of the contract:
+
+| Scope | Condition | Leaf context |
+| --- | --- | --- |
+| forward | stack is empty | `#1@aten:0` |
+| forward | stack is not empty | `#1@aten.nested:0` |
+| backward | has a sequence number | `#1@autograd.bwd:0` |
+| backward | no sequence number (engine-internal) | `#1@autograd.engine:0` |
+
+Emptiness is judged after the overlay, so an op running inside a user scope, or
+on a worker that inherited a chain, is nested; `#1@aten:0` means no enclosing
+frame at all. The tags imitate the `#<n>@<location>` shape of a user-scope
+context so every frame parses the same way downstream.
+
 `install()` is idempotent and guarded by a mutex; `uninstall()` removes the
-callback. Both track a single handle.
+callback. Both track a single handle. `uninstall()` also clears the snapshot
+store: with no callback left to consume them, snapshots from a forward whose
+backward never ran would be held for the life of the process.
 
 ## Forward-to-backward correlation
 
