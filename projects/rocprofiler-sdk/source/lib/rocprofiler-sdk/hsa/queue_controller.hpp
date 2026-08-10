@@ -146,7 +146,7 @@ private:
     // that do not exist yet.
     struct serialization_refcount
     {
-        int64_t all = 0;
+        int64_t                                             all       = 0;
         std::unordered_map<rocprofiler_agent_id_t, int64_t> per_agent = {};
 
         int64_t count(rocprofiler_agent_id_t agent_id) const

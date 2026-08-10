@@ -402,7 +402,7 @@ TEST(counters_per_agent, scoped_and_unscoped_serialization_compose)
     controller->serializer(&queue_a);
     controller->serializer(&queue_b);
 
-    controller->enable_serialization({agent_b.handle});
+    controller->enable_serialization({agent_b});
     EXPECT_FALSE(controller->is_serialization_enabled(agent_a));
     EXPECT_TRUE(controller->is_serialization_enabled(agent_b));
 
@@ -415,7 +415,7 @@ TEST(counters_per_agent, scoped_and_unscoped_serialization_compose)
     EXPECT_TRUE(controller->is_serialization_enabled(agent_b))
         << "the scoped request still holds agent B";
 
-    controller->disable_serialization({agent_b.handle});
+    controller->disable_serialization({agent_b});
     EXPECT_FALSE(controller->is_serialization_enabled(agent_b));
 }
 
