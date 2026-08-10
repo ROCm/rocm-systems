@@ -430,8 +430,6 @@ DispatchThreadTracer::resource_deinit()
     agents.clear();
 }
 
-namespace
-{
 // Report each context's complete per-agent requirements before resource_init builds
 // anything. Caller holds the tracer's params lock.
 template <typename ParamsMap>
@@ -446,7 +444,6 @@ register_shared_sizes_locked(const ParamsMap& params)
             agent_id, *hsa_agent, pack.buffer_size, pack.num_buffers);
     }
 }
-}  // namespace
 
 void
 DispatchThreadTracer::register_shared_sizes()

@@ -157,22 +157,21 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
 
     if(!pool.allocate_fn || !pool.free_fn || !pool.allow_access_fn) return HSA_STATUS_ERROR;
 
+    hsa_status_t status = HSA_STATUS_ERROR;
     if(flags.host_access)
     {
-        auto status =
-            pool.allocate_fn(pool.cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
+        status = pool.allocate_fn(pool.cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
 
         if(status == HSA_STATUS_SUCCESS)
             status = pool.allow_access_fn(1, &pool.gpu_agent, nullptr, *ptr);
-        return status;
     }
-
-    // Device (SQTT output) buffer: borrowed from the per-agent resource handle.
-    void* shared = pool.allocate_output(size);
-    if(shared == nullptr) return HSA_STATUS_ERROR;
-
-    *ptr = shared;
-    return HSA_STATUS_SUCCESS;
+    else
+    {
+        // Device (SQTT output) buffer: borrowed from the per-agent resource handle.
+        *ptr   = pool.allocate_output(size);
+        status = (*ptr != nullptr) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+    }
+    return status;
 }
 
 void
