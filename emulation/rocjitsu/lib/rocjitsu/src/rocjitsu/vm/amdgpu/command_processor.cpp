@@ -667,7 +667,12 @@ void CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint
         q.ring_size = ring_size;
         changed = q.runtime_suspended != suspended;
         q.runtime_suspended = suspended;
-        if (changed && !suspended)
+        // Only consume the deferral once *no* reason still gates the queue.
+        // debug_work_deferred is shared by both suspend reasons, so clearing it
+        // here while the debugger still holds the gate would leave the later
+        // debugger resume with nothing to release, and the already-fetched
+        // packets would sit until an unrelated doorbell arrived.
+        if (changed && !suspended && !q.debug_suspended)
           wake_command_processor = std::exchange(q.debug_work_deferred, false);
         break;
       }
@@ -711,16 +716,18 @@ void CommandProcessor::set_queue_debug_suspended(uint32_t queue_id, uint32_t pro
           // than an earlier incomplete dispatch, is what prevents it from
           // running. Resident waves are reactivated directly by KFD resume.
           auto &state = new_queue_states_[index];
+          // Accumulate: the flag is shared with the runtime's suspend reason,
+          // and fetch_from_queue() may already have recorded a deferral for a
+          // queue the runtime had gated. Assigning would discard it, leaving
+          // neither resume path with anything to release.
           if (state.next_dispatch_idx < state.entries.size()) {
             const auto &entry = state.entries[state.next_dispatch_idx];
             const bool barrier_ready =
                 !entry.barrier_bit || barrier_satisfied(state, state.next_dispatch_idx);
-            q.debug_work_deferred =
+            q.debug_work_deferred |=
                 barrier_ready && (entry.is_non_kernel() || !entry.fully_dispatched());
-          } else {
-            q.debug_work_deferred = false;
           }
-        } else {
+        } else if (!q.runtime_suspended) {
           wake_command_processor |= std::exchange(q.debug_work_deferred, false);
         }
       }

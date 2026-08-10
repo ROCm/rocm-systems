@@ -567,8 +567,18 @@ public:
   bool runtime_suspended() const { return runtime_suspended_; }
   void set_runtime_suspended(bool v) { runtime_suspended_ = v; }
 
+  /// @brief Whether a *debugger* currently holds this wave stopped.
+  /// @details Deliberately excludes runtime_suspended_: KFD uses this to decide
+  /// which waves it may serialize into a CWSR record, count in the SUSPEND /
+  /// RESUME_QUEUES stopped set, and refuse to checkpoint. A queue the runtime
+  /// throttled to queue_percentage 0 is none of those things, and folding it in
+  /// makes RESUME_QUEUES fail its stopped-vs-restored count and publishes waves
+  /// to rocm-dbgapi that no debugger ever stopped. Ask debug_paused() instead
+  /// when the question is "may the scheduler issue this wave".
+  bool debug_stopped() const { return debug_halted_ || debug_suspended_; }
+
   /// @brief Whether any reason currently keeps this wave from being issued.
-  bool debug_paused() const { return debug_halted_ || debug_suspended_ || runtime_suspended_; }
+  bool debug_paused() const { return debug_stopped() || runtime_suspended_; }
   bool fatal_exception_pending() const { return fatal_exception_pending_; }
   void set_fatal_exception_pending(bool pending) { fatal_exception_pending_ = pending; }
 

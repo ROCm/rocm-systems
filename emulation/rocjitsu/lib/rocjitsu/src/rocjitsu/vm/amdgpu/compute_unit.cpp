@@ -546,6 +546,10 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     }
   }
 
+  // Sampled before execute so the trap-return test below can be a state
+  // transition rather than a per-ISA mnemonic list. See its use.
+  const bool was_in_trap_handler = active->in_trap_handler();
+
   execute_instruction(inst, *active);
 
   // A terminating instruction (s_endpgm with no pending waits) halts the wave
@@ -604,7 +608,11 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
       auto &d = *inst->data_as<VectorMemState>();
       dbg_is_atomic = (d.atomic_op != AtomicOp::NONE);
       dbg_is_write = !d.is_load || dbg_is_atomic;
-      dbg_bytes = dbg_is_atomic ? d.elem_size : std::max(1u, d.num_elems * d.elem_size);
+      // std::max on both arms: VectorMemState::elem_size defaults to 0 and the
+      // range check below reports a zero-sized range as *unmapped*, so an
+      // atomic whose decoder left elem_size unset would fault on every lane of
+      // a perfectly mapped buffer.
+      dbg_bytes = std::max(1u, dbg_is_atomic ? d.elem_size : d.num_elems * d.elem_size);
       dbg_addrs.reserve(d.wf_size);
       for (uint32_t lane = 0; lane < d.wf_size; ++lane)
         if (d.lane_mask & (1ULL << lane))
@@ -625,16 +633,21 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
                                 addr <= active->shared_aperture_limit();
     return !shared_address && !memory_->is_range_mapped(addr, dbg_bytes, dbg_vmid);
   };
-  bool debug_memory_fault = false;
+  // Locate the faulting address once. The report loop below resumes from this
+  // iterator rather than rescanning: each access_faults() call is a page-table
+  // walk per touched page, and dbg_addrs holds one entry per active lane.
+  auto first_fault = dbg_addrs.end();
   if (debug_probe && memory_violation_handler_)
-    debug_memory_fault = std::ranges::any_of(dbg_addrs, access_faults);
+    first_fault = std::ranges::find_if(dbg_addrs, access_faults);
+  const bool debug_memory_fault = first_fault != dbg_addrs.end();
 
-  // Every ISA's spelling of the trap return has to be recognised here, or that
-  // ISA's handler completes without KFD ever being told. GFX1250 spells it
-  // s_rfe_i64.
-  const std::string_view mnemonic(inst->mnemonic());
-  const bool trap_return =
-      mnemonic == "s_rfe_b64" || mnemonic == "s_rfe_i64" || mnemonic == "s_rfe";
+  // The trap return is whatever instruction just left the handler. Asking the
+  // wave rather than matching mnemonics keeps this ISA-agnostic: the spelling
+  // differs per ISA (gfx1250 uses s_rfe_i64), and a hard-coded list silently
+  // stops calling notify_trap_complete() for any spelling it misses -- KFD is
+  // never told the handler returned and the debugger hangs. Only the generated
+  // s_rfe body clears the flag.
+  const bool trap_return = was_in_trap_handler && !active->in_trap_handler();
 
   // A faulting access is discarded only if the debugger actually claims the
   // fault. debug_active_ is CU-wide, so the probe also fires for waves of a
@@ -652,13 +665,16 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   bool fault_claimed = false;
   if (debug_memory_fault && !active->debug_halted()) {
     active->pc += inst_size;
-    for (uint64_t addr : dbg_addrs) {
-      if (access_faults(addr) && memory_violation_handler_(*active, addr, dbg_is_write)) {
+    for (auto it = first_fault; it != dbg_addrs.end(); ++it) {
+      if (access_faults(*it) && memory_violation_handler_(*active, *it, dbg_is_write)) {
         fault_claimed = true;
         break;
       }
     }
-    if (!fault_claimed)
+    // Only undo our own advance. A declining handler is still free to have
+    // moved the wave (entering a trap handler, for instance); clobbering that
+    // would resume the application with the handler's state half-installed.
+    if (!fault_claimed && active->pc == issue_pc + inst_size)
       active->pc = issue_pc;
   }
 

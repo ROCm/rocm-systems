@@ -367,13 +367,16 @@ void SimulatedKfd::reap_exited_debug_sessions(std::stop_token stop) {
     }
     if (stop.stop_requested())
       break;
-    std::vector<pid_t> released;
+    std::vector<std::pair<pid_t, std::shared_ptr<KfdProcess>>> released;
     for (auto it = debug_sessions_.begin(); it != debug_sessions_.end();) {
       if (pidfd_is_exited(it->second.debugger_pidfd.get()) == 1) {
         // The debugger is gone and will never ack; release any inferior
         // blocked in the RUNTIME_ENABLE handshake for it.
         cancel_runtime_handshake(it->first);
-        released.push_back(it->first);
+        // Resolve the debuggee now, while the session's pinned identity still
+        // vouches for the pid. After the erase the number alone could name a
+        // process that merely reused it.
+        released.emplace_back(it->first, find_process_by_client_pid(it->first));
         it = debug_sessions_.erase(it);
       } else if (pidfd_is_exited(it->second.target_pidfd.get()) == 1) {
         if (!it->second.target_exited) {
@@ -401,8 +404,8 @@ void SimulatedKfd::reap_exited_debug_sessions(std::stop_token stop) {
     // thread.
     if (!released.empty()) {
       lock.unlock();
-      for (pid_t pid : released)
-        release_debuggee_state(pid);
+      for (auto &[pid, proc] : released)
+        release_debuggee_state(pid, proc);
       lock.lock();
     }
   }
@@ -2521,7 +2524,7 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
       cu->with_wave_state_locked([&] {
         for (uint32_t i = 0; i < cu->num_wf_slots(); ++i) {
           auto *wave = cu->wf(i);
-          if (wave->debug_paused() && wave->process_id() == process_id &&
+          if (wave->debug_stopped() && wave->process_id() == process_id &&
               wave->queue_id() == queue_id)
             waves.push_back(build_cwsr_wave_state(*wave));
         }
@@ -2897,7 +2900,8 @@ bool SimulatedKfd::on_wave_alu_exception(amdgpu::Wavefront &wave) {
   return true;
 }
 
-void SimulatedKfd::release_debuggee_state(pid_t target_pid) {
+void SimulatedKfd::release_debuggee_state(pid_t target_pid,
+                                          const std::shared_ptr<KfdProcess> &target_proc) {
   // Everything a session imposed on its inferior, undone in one place so that
   // explicit detach and debugger death cannot drift apart. Callers have already
   // erased the session and must not hold debug_sessions_mutex_ here: this takes
@@ -2909,7 +2913,6 @@ void SimulatedKfd::release_debuggee_state(pid_t target_pid) {
     debug_events_.erase(target_pid);
   }
 
-  auto target_proc = find_process_by_client_pid(target_pid);
   std::vector<std::pair<uint32_t, uint32_t>> queues;
   if (target_proc != nullptr) {
     std::lock_guard<std::mutex> alloc_lock(target_proc->alloc_mutex_);
@@ -2951,12 +2954,17 @@ void SimulatedKfd::release_debuggee_state(pid_t target_pid) {
         mem->set_process_mem_fd(target_proc->process_id(), -1);
   }
 
-  // Debug checks stay on only while some session still wants them.
+  // Debug checks stay on only while some session still wants them. Read the
+  // answer under the lock, then reach into the CUs after releasing it -- the
+  // whole point of this function running unlocked is that debug_sessions_mutex_
+  // is never held while touching a CU.
+  bool no_sessions_left = false;
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
-    if (debug_sessions_.empty())
-      set_debug_active_on_all_cus(false);
+    no_sessions_left = debug_sessions_.empty();
   }
+  if (no_sessions_left)
+    set_debug_active_on_all_cus(false);
 }
 
 void SimulatedKfd::set_debug_active_on_all_cus(bool active) {
@@ -3081,7 +3089,7 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
         cu->with_wave_state_locked([&] {
           for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
             auto *wave = cu->wf(slot);
-            if (wave->debug_paused() && wave->process_id() == proc->process_id() &&
+            if (wave->debug_stopped() && wave->process_id() == proc->process_id() &&
                 wave->queue_id() == context.queue_id) {
               stopped.push_back(wave);
               states.push_back(build_cwsr_wave_state(*wave));
@@ -3309,7 +3317,7 @@ void SimulatedKfd::clear_completed_debug_queues(KfdProcess *proc, const uint32_t
         cu->with_wave_state_locked([&] {
           for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
             const auto *wave = cu->wf(slot);
-            if (wave->debug_paused() && wave->process_id() == process_id &&
+            if (wave->debug_stopped() && wave->process_id() == process_id &&
                 wave->queue_id() == queue_id)
               has_stopped_wave = true;
           }
@@ -3887,11 +3895,13 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
     // on its way out. This is the same invariant SUSPEND_QUEUES observes.
     debug_sessions_.erase(target_pid);
     lk.unlock();
-    release_debuggee_state(target_pid);
+    release_debuggee_state(target_pid, find_process_by_client_pid(target_pid));
     // An explicit detach also has to release a waiter, or the inferior pays the
     // full liveness deadline for a debugger that is deliberately going away.
     cancel_runtime_handshake(target_pid);
-    lk.lock();
+    // Deliberately left unlocked: nothing below touches debug_sessions_, and
+    // release_debuggee_state() already re-took and released the mutex for the
+    // one guarded question it has to ask.
     return 0;
   }
   case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:

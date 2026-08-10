@@ -104,6 +104,7 @@ struct CwsrGeometry {
   uint32_t vgpr_count = 0;
   uint32_t sgpr_count = 112;
   uint32_t vcc_lo_slot = 0;
+  uint32_t flat_scratch_lo_slot = 0;
   uint32_t hwreg_bytes = 0;
   uint32_t sgpr_bytes = 0;
   uint32_t vgpr_bytes = 0;
@@ -133,7 +134,12 @@ CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveStat
     return geometry;
 
   geometry.vgpr_count = std::max<uint32_t>(round_up(max_vgprs, 8), 8);
-  geometry.vcc_lo_slot = std::min(kArchScalars, geometry.sgpr_count) - 2;
+  // Alias slots, computed once so serialize and deserialize cannot disagree
+  // about where they are. FLAT_SCRATCH being written but read back from a
+  // separately open-coded offset is exactly how it came to be dropped.
+  const uint32_t alias_end = std::min(kArchScalars, geometry.sgpr_count);
+  geometry.vcc_lo_slot = alias_end - 2;
+  geometry.flat_scratch_lo_slot = alias_end - 6;
   geometry.hwreg_bytes = kHwregCount * sizeof(uint32_t);
   geometry.sgpr_bytes = geometry.sgpr_count * sizeof(uint32_t);
   geometry.vgpr_bytes = geometry.vgpr_count * kVgprLaneBytes;
@@ -289,7 +295,7 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
     // aliased_sgpr_end - 6/-5; rocdbgapi architecture.cpp register_address).
     // rocm-dbgapi checks its computed per-wave scratch base against this
     // register, so it must hold the wave's scratch base.
-    const uint32_t flat_scratch_lo_slot = std::min(kArchScalars, sgpr_count) - 6;
+    const uint32_t flat_scratch_lo_slot = geometry.flat_scratch_lo_slot;
     write32(sgprs_addr + flat_scratch_lo_slot * 4,
             static_cast<uint32_t>(w.flat_scratch & 0xFFFFFFFF));
     write32(sgprs_addr + (flat_scratch_lo_slot + 1) * 4,
@@ -423,7 +429,7 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
     w.vcc = static_cast<uint64_t>(vcc_lo) | (static_cast<uint64_t>(vcc_hi) << 32);
     // FLAT_SCRATCH is serialized into its alias slots but was never read back,
     // so a serialize/deserialize round trip silently dropped it.
-    const uint32_t flat_scratch_lo_slot = std::min(kArchScalars, geometry.sgpr_count) - 6;
+    const uint32_t flat_scratch_lo_slot = geometry.flat_scratch_lo_slot;
     const uint32_t fs_lo = read32(sgprs_addr + flat_scratch_lo_slot * 4);
     const uint32_t fs_hi = read32(sgprs_addr + (flat_scratch_lo_slot + 1) * 4);
     w.flat_scratch = static_cast<uint64_t>(fs_lo) | (static_cast<uint64_t>(fs_hi) << 32);

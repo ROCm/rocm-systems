@@ -138,7 +138,13 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           // handler's state installed -- silently wrong, and hard to trace
           // back here. Refuse instead of writing a checkpoint that cannot be
           // restored faithfully.
-          if (w->in_trap_handler() || w->debug_paused())
+          //
+          // debug_stopped(), not debug_paused(): a wave whose only pause reason
+          // is the runtime's (queue_percentage 0) carries no trap or debugger
+          // state, and the CP re-derives queue suspension on restore. Refusing
+          // it would make an ordinary throttled queue unable to checkpoint, and
+          // blame a debugger that is not attached.
+          if (w->in_trap_handler() || w->debug_stopped())
             throw std::runtime_error(
                 "Cannot checkpoint " + cu->name() + " wf" + std::to_string(w->wf_id()) +
                 ": the wave is in a trap handler or stopped for a debugger, and that state "

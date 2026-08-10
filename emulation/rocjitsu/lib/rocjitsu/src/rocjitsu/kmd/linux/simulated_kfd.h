@@ -342,7 +342,12 @@ private:
   /// @note Must be called with debug_sessions_mutex_ *unlocked*: it takes CU
   /// wave-state locks, and the engine thread takes those before
   /// debug_sessions_mutex_.
-  void release_debuggee_state(pid_t target_pid);
+  /// @param target_proc The debuggee, resolved while the session still pinned
+  /// its identity. Re-resolving by pid inside the release would race pid reuse:
+  /// the reaper runs after the inferior may already have exited, and clearing
+  /// exception status, queue gates, wave stop bits and memory routing on an
+  /// innocent process that inherited the number is worse than leaking them.
+  void release_debuggee_state(pid_t target_pid, const std::shared_ptr<KfdProcess> &target_proc);
 
   /// @brief Duplicate the authorized target-memory fd for lock-free I/O.
   util::UniqueHandle duplicate_debug_target_mem(pid_t target_pid) const;

@@ -164,14 +164,8 @@ public:
   /// callers can retry a not-yet-installed range while still allowing a mapped
   /// page's deliberately clipped extent to produce bounded partial accesses.
   bool has_range_mapping(uint64_t addr, size_t size, uint32_t vmid = 0) const {
-    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - addr)
-      return false;
-    bool mapped = true;
-    for_each_page_chunk(addr, size, [&](uint64_t ea, size_t, size_t) {
-      if (mapped && !has_page_mapping(ea, vmid))
-        mapped = false;
-    });
-    return mapped;
+    return every_page(addr, size,
+                      [&](uint64_t page_addr) { return has_page_mapping(page_addr, vmid); });
   }
 
   /// @brief Resolve a GPU VA range to its first borrowed host byte.
@@ -217,14 +211,7 @@ public:
   /// access starting near the end of a mapped page can still run off it.
   /// A zero size, or a range that wraps the address space, is not mapped.
   bool is_range_mapped(uint64_t addr, size_t size, uint32_t vmid = 0) const {
-    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - addr)
-      return false;
-    bool mapped = true;
-    for_each_page_chunk(addr, size, [&](uint64_t ea, size_t, size_t) {
-      if (mapped && !is_mapped(ea, vmid))
-        mapped = false;
-    });
-    return mapped;
+    return every_page(addr, size, [&](uint64_t page_addr) { return is_mapped(page_addr, vmid); });
   }
 
   /// @brief Look up PTE MTYPE for a GPU VA in the given VMID's page table.
@@ -680,6 +667,25 @@ private:
       fn(ea, offset, chunk);
       offset += chunk;
     }
+  }
+
+  /// @brief Whether @p pred holds for every page touched by [addr, addr+size).
+  /// @details Shared spine of has_range_mapping() and is_range_mapped(), which
+  /// differ only in their per-page predicate. Unlike for_each_page_chunk() this
+  /// stops at the first page that fails, so a large unmapped range costs one
+  /// page-table walk rather than one per 4 KiB. A zero size, or a range that
+  /// wraps the address space, satisfies nothing.
+  template <typename Pred> static bool every_page(uint64_t addr, size_t size, Pred &&pred) {
+    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - addr)
+      return false;
+    size_t offset = 0;
+    while (offset < size) {
+      const uint64_t ea = addr + offset;
+      if (!pred(ea))
+        return false;
+      offset += std::min(size - offset, PAGE_SIZE - (ea & PAGE_MASK));
+    }
+    return true;
   }
 
   static constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
