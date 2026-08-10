@@ -88,17 +88,10 @@ do_host_tests() {
     --gtest_color=no "$@" 2>&1 | "${stamp[@]}" | tee "$LOG_FILE"
 }
 
-# Kernel-count leak guards: the pytest suite in test/kernel-count runs the
-# device-kernel generators (src/device/generate.py, rocSHMEM OFF/ON, and
-# src/device/symmetric/generate.py) and asserts the generated kernel set still
-# matches the committed baselines -- grand total, per-collective counts, and
-# per-dimension value-sets. CPU-only: needs only python3 + pytest (no rccl build,
-# no hipify, no GPU). A kernel-count change fails here with an actionable diff
-# telling the author to update the baselines and justify the growth. This is the
-# same suite CI's test_runner drives via configs/host_tests.json; here we run it
-# in a self-provisioned venv so the lean host-test image needs no system pytest.
+# Run the kernel-count guard pytest suite (test/kernel-count) in a local venv so
+# the lean host-test image needs no system pytest. See that dir's README.
 do_guards() {
-  echo "==> Kernel-count guards (generate.py leak check, pytest)"
+  echo "==> Kernel-count guards (pytest: test/kernel-count)"
   local gd="$RCCL_ROOT/test/kernel-count"
   local venv="$gd/venv"
   if [ ! -x "$venv/bin/pytest" ]; then
