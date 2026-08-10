@@ -311,8 +311,7 @@ void SSwapPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 void SRfeI64Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SAddPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  int64_t offset = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
-  wf.pc = static_cast<uint64_t>(static_cast<int64_t>(wf.pc) + offset);
+  wf.pc += amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
 }
 
 void SSendmsgRtnB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
