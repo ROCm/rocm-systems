@@ -30,6 +30,7 @@ from utils.metrics.evaluation_pipeline import (
 )
 from utils.metrics.expression import (
     CodeTransformer,
+    InvalidExpressionError,
     build_eval_string,
     gen_counter_list,
     update_denominator_string,
@@ -189,15 +190,11 @@ class TestExpression:
         assert update_denominator_string("", "per_wave") == ""
 
     def test_visit_call_raises_for_unknown_function(self):
-        """CodeTransformer.visit_Call raises for unknown function names."""
+        """CodeTransformer rejects unsupported function calls."""
+        tree = ast.parse("UNKNOWN_FUNC(5)")
         transformer = CodeTransformer()
-        unknown_call = ast.Call(
-            func=ast.Name(id="ammolite__UNKNOWN", ctx=ast.Load()),
-            args=[ast.Constant(value=5)],
-            keywords=[],
-        )
-        with pytest.raises(Exception, match="Unknown call"):
-            transformer.visit_Call(unknown_call)
+        with pytest.raises(InvalidExpressionError, match="Unsupported call"):
+            transformer.visit(tree)
 
     def test_visit_call_translates_supported_function_to_helper_name(self):
         """CodeTransformer.visit_Call rewrites MIN to the to_min helper name."""
@@ -325,13 +322,15 @@ class TestExpression:
         """CodeTransformer.generic_visit raises for disallowed AST node types."""
         tree = ast.parse(formula)
         transformer = CodeTransformer()
-        with pytest.raises(ValueError, match=blocked_node):
+        with pytest.raises(InvalidExpressionError, match=blocked_node):
             transformer.visit(tree)
 
-    def test_build_eval_string_exits_on_unsafe_formula(self) -> None:
-        """build_eval_string exits via console_error for unsafe formulas."""
-        with pytest.raises(SystemExit):
-            build_eval_string('"".__class__')
+    def test_build_eval_string_warns_on_unsafe_formula(self) -> None:
+        """build_eval_string warns and returns empty for unsafe formulas."""
+        with patch("utils.metrics.expression.console_warning") as mock_warning:
+            result = build_eval_string('"".__class__')
+        assert result == ""
+        assert mock_warning.called
 
 
 # =============================================================================
@@ -793,6 +792,14 @@ class TestEvaluationPipeline:
 
 class TestMetricEvaluator:
     """Tests for utils.metrics.metric_evaluator."""
+
+    def test_eval_expression_cannot_reach_builtins(self):
+        """Builtins are suppressed at the eval site."""
+        evaluator = MetricEvaluator(pd.DataFrame(), {}, {})
+        with patch("utils.metrics.metric_evaluator.console_warning") as mock_warning:
+            result = evaluator.eval_expression("__import__('os')")
+        assert result == "N/A"
+        assert mock_warning.called
 
     def test_eval_expression_returns_na_when_eval_returns_none(self):
         """eval_expression returns 'N/A' when the evaluated expression yields None."""

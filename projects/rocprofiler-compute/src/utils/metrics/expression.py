@@ -10,10 +10,16 @@ import re
 
 import astunparse
 
-from utils.logger import console_error
+from utils.logger import console_warning
 from utils.utils_common import SUPPORTED_FIELD
 from utils.utils_counter_defs import SUPPORTED_DENOM
 
+
+class InvalidExpressionError(ValueError):
+    """Raised when a metric formula contains disallowed AST constructs."""
+
+
+# ast.Attribute is deliberately omitted — it enables dunder-chain escapes.
 ALLOWED_AST_NODES: frozenset[type] = frozenset({
     ast.Module,
     ast.Expr,
@@ -28,9 +34,9 @@ ALLOWED_AST_NODES: frozenset[type] = frozenset({
     ast.BoolOp,
     ast.IfExp,
     ast.Call,
+    ast.keyword,
     ast.Subscript,
     ast.Slice,
-    ast.Index,
     ast.Load,
     ast.Add,
     ast.Sub,
@@ -39,6 +45,12 @@ ALLOWED_AST_NODES: frozenset[type] = frozenset({
     ast.FloorDiv,
     ast.Mod,
     ast.Pow,
+    ast.BitOr,
+    ast.BitAnd,
+    ast.BitXor,
+    ast.LShift,
+    ast.RShift,
+    ast.Invert,
     ast.USub,
     ast.UAdd,
     ast.Not,
@@ -48,6 +60,10 @@ ALLOWED_AST_NODES: frozenset[type] = frozenset({
     ast.Gt,
     ast.LtE,
     ast.GtE,
+    ast.In,
+    ast.NotIn,
+    ast.Is,
+    ast.IsNot,
     ast.And,
     ast.Or,
 })
@@ -81,25 +97,27 @@ class CodeTransformer(ast.NodeTransformer):
 
     def generic_visit(self, node: ast.AST) -> ast.AST:
         if type(node) not in ALLOWED_AST_NODES:
-            raise ValueError(f"Disallowed expression element: {type(node).__name__}")
+            raise InvalidExpressionError(
+                f"Disallowed expression element: {type(node).__name__}"
+            )
         return super().generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> ast.Call:
-        self.generic_visit(node)
         if isinstance(node.func, ast.Name):
-            if node.func.id in SUPPORTED_CALL:
-                node.func.id = SUPPORTED_CALL[node.func.id]
-            else:
-                raise Exception("Unknown call:", node.func.id)
+            if node.func.id not in SUPPORTED_CALL:
+                raise InvalidExpressionError(f"Unsupported call: {node.func.id}")
+            self.generic_visit(node)
+            node.func.id = SUPPORTED_CALL[node.func.id]
+        else:
+            self.generic_visit(node)
         return node
 
     def visit_IfExp(self, node: ast.IfExp) -> ast.Expr:
         self.generic_visit(node)
 
         if isinstance(node.body, ast.Constant):
-            raise Exception(
-                "Don't support body of IF with number only! Has to be expr with "
-                "df['column']."
+            raise InvalidExpressionError(
+                "IF body must contain a df['column'] expression, not a literal"
             )
 
         new_node = ast.Expr(
@@ -130,6 +148,23 @@ class CodeTransformer(ast.NodeTransformer):
                 ctx=ast.Load(),
             )
         return node
+
+
+def transform_expression(
+    ast_node: ast.AST,
+    source: str,
+) -> bool:
+    """Run CodeTransformer on *ast_node*, warning on invalid formulas.
+
+    Returns True on success, False when the expression was rejected.
+    """
+    transformer = CodeTransformer()
+    try:
+        transformer.visit(ast_node)
+    except InvalidExpressionError as exc:
+        console_warning(f"Invalid metric expression '{source}': {exc}")
+        return False
+    return True
 
 
 def build_eval_string(equation: str) -> str:
@@ -186,11 +221,8 @@ def build_eval_string(equation: str) -> str:
 
     # convert equation string to intermediate expression in df array format
     ast_node = ast.parse(equation_string)
-    try:
-        transformer = CodeTransformer()
-        transformer.visit(ast_node)
-    except ValueError as exc:
-        console_error(f"Invalid metric expression '{equation}': {exc}")
+    if not transform_expression(ast_node, equation):
+        return ""
 
     equation_string = astunparse.unparse(ast_node)
 

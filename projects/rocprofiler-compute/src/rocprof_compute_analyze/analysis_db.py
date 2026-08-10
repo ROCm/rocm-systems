@@ -30,7 +30,6 @@ from utils.file_io import (
 )
 from utils.logger import (
     console_debug,
-    console_error,
     console_warning,
     demarcate,
 )
@@ -49,7 +48,7 @@ from utils.metrics.aggregation import (
     to_sum,
 )
 from utils.metrics.common import ValuDualIssueDetector
-from utils.metrics.expression import CodeTransformer
+from utils.metrics.expression import transform_expression
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -582,17 +581,15 @@ class db_analysis(OmniAnalyze_Base):
         emit_variance_warnings: bool = False,
     ) -> Any:  # noqa ANN401
         if parse:
+            original_value = value
             value = re.sub(
                 r"\$([0-9A-Za-z_]+)",
                 lambda m: f'sys_info["{m.group(1)}"]',
                 value,
             )
             ast_node = ast.parse(value)
-            try:
-                transformer = CodeTransformer()
-                transformer.visit(ast_node)
-            except ValueError as exc:
-                console_error(f"Invalid metric expression '{value}': {exc}")
+            if not transform_expression(ast_node, original_value):
+                return None
             value = astunparse.unparse(ast_node)
             value = value.replace("raw_pmc_df", "pmc_df")
             value = value.replace("pmc_df['sys_info']", "sys_info")
