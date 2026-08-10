@@ -1789,6 +1789,12 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   }
 #endif
   INFO(NCCL_INIT, "Cheap post-send fence is %s", comm->cheapPostSendFenceOff ? "OFF" : "ON");
+#if defined(RCCL_REDUCECOPY_TDM_LDS_BUILD)
+  INFO(NCCL_INIT,
+       "SIMPLE reduceCopy TDM LDS staging enabled (gfx1250 device kernels reserve 256 KiB block LDS when bulk-eligible)");
+#else
+  INFO(NCCL_INIT, "SIMPLE reduceCopy TDM LDS staging disabled at build time (RCCL_REDUCECOPY_TDM_LDS=OFF)");
+#endif
   comm->ll128AlwaysShmem = rcclParamLl128AlwaysShmem() ? 1 : 0;
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||

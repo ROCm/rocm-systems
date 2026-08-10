@@ -38,6 +38,7 @@ use_ninja=false
 force_reduce_pipeline=false
 generate_sym_kernels=true
 ce_reduce_kernel=true
+tdm_based_copy=true
 device_linker=true
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 kernarg_preload=true
@@ -61,6 +62,7 @@ function display_help()
     echo "    -d|--dependencies          Install RCCL dependencies"
     echo "       --device-linker         Build with assembly-extract device linker (default)"
     echo "       --disable-ce-reduce-kernel  Disable the CE AllReduce local-reduction kernel (large instantiation matrix; speeds up device builds that do not exercise CE AllReduce)"
+    echo "       --disable-tdm-based-copy  Disable TDM-based SIMPLE copy on gfx1250 (default: enabled)"
     echo "       --disable-roctx         Build without ROCTX logging"
     echo "       --disable-sym-kernels   Disable symmetric memory kernels"
     echo "       --disable-warp-speed    Disable WARP_SPEED kernel optimizations"
@@ -99,6 +101,7 @@ function display_help()
     echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"
     echo "    -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)"
     echo "    -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)"
+    echo "    -DRCCL_REDUCECOPY_TDM_LDS=OFF         Disable TDM-based SIMPLE copy on gfx1250 (default: ON)"
     echo "    -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)"
     echo ""
     echo "  Environment variables:"
@@ -120,7 +123,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-ce-reduce-kernel,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-ce-reduce-kernel,disable-colltrace,disable-kernarg-preload,disable-tdm-based-copy,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -143,6 +146,7 @@ while true; do
     -d | --dependencies)             install_dependencies=true;                                                                        shift ;;
          --device-linker)            device_linker=true;                                                                               shift ;;
          --disable-ce-reduce-kernel) ce_reduce_kernel=false;                                                                           shift ;;
+         --disable-tdm-based-copy) tdm_based_copy=false;                                                                               shift ;;
          --disable-roctx)            roctx_enabled=false;                                                                              shift ;;
          --disable-sym-kernels)      generate_sym_kernels=false;                                                                       shift ;;
          --disable-warp-speed)       warp_speed_enabled=false;                                                                         shift ;;
@@ -405,6 +409,11 @@ fi
 # Enabled by default; disabling replaces it with a stub that fails CE AllReduce.
 if [[ "${ce_reduce_kernel}" == false ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_CE_REDUCE_KERNEL=OFF"
+fi
+
+# TDM-based SIMPLE copy (gfx1250 device kernels)
+if [[ "${tdm_based_copy}" == false ]]; then
+    cmake_common_options="${cmake_common_options} -DRCCL_REDUCECOPY_TDM_LDS=OFF"
 fi
 
 # Device linker (assembly-extract pipeline, no -fgpu-rdc)

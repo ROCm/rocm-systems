@@ -1014,6 +1014,13 @@ else()
   target_compile_options(rccl PRIVATE -fgpu-rdc)
 endif()
 
+if(RCCL_REDUCECOPY_TDM_LDS)
+  target_compile_definitions(rccl PRIVATE RCCL_REDUCECOPY_TDM_LDS_BUILD)
+  message(STATUS "RCCL_REDUCECOPY_TDM_LDS=ON: gfx1250 SIMPLE reduceCopy kernels reserve 256KiB LDS for TDM staging")
+else()
+  message(STATUS "RCCL_REDUCECOPY_TDM_LDS=OFF: SIMPLE reduceCopy TDM LDS staging disabled")
+endif()
+
 if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-invalid-offsetof)
   target_compile_options(rccl PRIVATE -Wno-unused-result)
