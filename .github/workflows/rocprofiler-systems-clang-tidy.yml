@@ -46,6 +46,11 @@ jobs:
           echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
+      - name: Install clang-tidy
+        run: |
+          apt-get update
+          apt-get install -y clang-tidy-18
+
       - name: CMake configure
         working-directory: projects/rocprofiler-systems
         run: |
@@ -58,4 +63,5 @@ jobs:
         run: |
           python3 scripts/clang-tidy-check.py \
             --base "origin/${{ github.base_ref }}" \
-            --build-path build/debug
+            --build-path build/debug \
+            --clang-tidy-binary clang-tidy-18
