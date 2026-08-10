@@ -9,12 +9,35 @@ Covers:
 """
 
 import re
+from pathlib import Path
 
 import common
+import pytest
+import yaml
 
 from utils import mem_chart_gfx11
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
+
+MEM_CHART_PANEL_YAML = (
+    Path(common.ROOT)
+    / "src"
+    / "rocprof_compute_soc"
+    / "analysis_configs"
+    / "gfx115x"
+    / "0300_memory_chart.yaml"
+)
+
+
+def mem_chart_yaml_metric_names() -> list[str]:
+    """Return gfx115x Memory Chart metric names from disk, in panel order."""
+    panel = yaml.safe_load(MEM_CHART_PANEL_YAML.read_text(encoding="utf-8"))
+    return [
+        name
+        for entry in panel["Panel Config"]["data source"]
+        for name in entry["metric_table"]["metric"]
+    ]
+
 
 # =============================================================================
 # Tests for format_bw_human_readable function (gfx11)
@@ -432,15 +455,82 @@ class TestPlotMemChartGfx11:
 
         assert "TB/s" in result
 
-    def test_zero_bandwidth_values(self):
-        """Test with zero bandwidth values."""
-        zero_metrics = {
-            "DRAM Read Bandwidth": 0,
-            "DRAM Write Bandwidth": 0,
-        }
-        result = mem_chart_gfx11.plot_mem_chart(zero_metrics, chart_title=DEFAULT_TITLE)
 
-        assert "B/s" in result  # Zero formats as "0.0 B/s"
+# =============================================================================
+# Tests for zero vs missing metric display (gfx11)
+# =============================================================================
+
+
+class TestZeroVersusMissingMetrics:
+    """A measured 0 must render; an absent counter must never read as 0."""
+
+    # Panel lines that vanish when their metric is absent, so a falsy check would
+    # also hide a measured 0. Each case sets one metric only, so the expected text
+    # can come from no other panel.
+    GUARDED_LINES = [
+        ("LDS Utilization", "Util 0.0%"),
+        ("LDS Estimated Bandwidth", "BW 0.0 B/s"),
+        ("LDS Bank Conflict Rate", "Bank Conflict"),
+        ("GL0 Cache BW (TCP Cache)", "BW 0.0 B/s"),
+    ]
+
+    @pytest.mark.parametrize(("metric", "expected"), GUARDED_LINES)
+    def test_zero_valued_metric_is_displayed(self, metric, expected):
+        """Zero is falsy, so guarded lines must test `is not None` to show it."""
+        output = common.strip_ansi(
+            mem_chart_gfx11.plot_mem_chart({metric: 0}, chart_title=DEFAULT_TITLE)
+        )
+
+        assert expected in output
+
+    def test_all_zero_metrics_render_no_placeholders(self):
+        """Nothing reads as unavailable when every counter measured 0."""
+        metrics = dict.fromkeys(mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS, 0)
+        output = common.strip_ansi(
+            mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
+        )
+
+        assert "Total: 0.0" in output  # DRAM total sums two real zeros
+        assert "N/A" not in output
+
+    def test_missing_counters_are_not_reported_as_zero(self):
+        """Absent metrics stay None, so no counter is fabricated as 0."""
+        output = common.strip_ansi(
+            mem_chart_gfx11.plot_mem_chart({}, chart_title=DEFAULT_TITLE)
+        )
+
+        assert "Total: N/A" in output
+        assert "0.0" not in output
+
+
+# =============================================================================
+# Tests for panel YAML sync (gfx11)
+# =============================================================================
+
+
+class TestMemChartPanelYamlSync:
+    """gfx115x chart names must track 0300_memory_chart.yaml on disk."""
+
+    def test_panel_metric_keys_match_yaml_in_order(self):
+        """Keys mirror the YAML in panel order, as the module docstring claims."""
+        assert (
+            list(mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS)
+            == mem_chart_yaml_metric_names()
+        )
+
+    def test_every_chart_lookup_resolves_against_yaml(self):
+        """Every metric the chart reads is still spelled that way in the YAML.
+
+        Drift is invisible on screen: edge rows render blank and guarded panel
+        lines disappear, rather than showing "N/A".
+        """
+        metrics = dict.fromkeys(mem_chart_yaml_metric_names(), 1.0)
+        extracted = mem_chart_gfx11._extract_metrics(
+            mem_chart_gfx11.normalize_mem_chart_metrics(metrics)
+        )
+
+        unresolved = sorted(key for key, value in extracted.items() if value is None)
+        assert not unresolved, f"metric names drifted from the YAML: {unresolved}"
 
 
 # =============================================================================
@@ -450,15 +540,6 @@ class TestPlotMemChartGfx11:
 
 class TestDefaultSampleMetrics:
     """Tests for DEFAULT_SAMPLE_METRICS constant."""
-
-    def test_keys_match_mem_chart_panel_yaml(self):
-        """Keys match gfx1151 Memory Chart YAML (MEM_CHART_PANEL_METRIC_KEYS)."""
-        assert set(mem_chart_gfx11.DEFAULT_SAMPLE_METRICS) == set(
-            mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS
-        )
-        assert len(mem_chart_gfx11.DEFAULT_SAMPLE_METRICS) == len(
-            mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS
-        )
 
     def test_all_bandwidth_values_positive(self):
         """Test that all bandwidth values are positive."""
