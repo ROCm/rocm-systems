@@ -1148,11 +1148,10 @@ TEST(Gfx1250SimulationTest, IbSts2ClusterFieldsAreZeroForOrdinaryDispatch) {
   queue.dispatch(kernel_object, /*grid_size_x=*/32, /*workgroup_size_x=*/32);
   step_until_halted(*sim.engine, *sim.cu());
 
-  auto *wf = sim.cu()->wf(0);
-  ASSERT_NE(wf, nullptr);
-  const uint32_t sbase = wf->sgpr_alloc().base;
-  EXPECT_EQ(sim.cu()->read_sgpr(sbase + 2), 0u);
-  EXPECT_EQ(sim.cu()->read_sgpr(sbase + 3), 0u);
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
+  const auto &wf = sim.snapshot->snapshots().front();
+  EXPECT_EQ(wf.sgpr(2), 0u);
+  EXPECT_EQ(wf.sgpr(3), 0u);
 }
 
 TEST(Gfx1250SimulationTest, DynamicClusterLaunchStateMatchesCompilerAbiWithAlignedOffset) {
