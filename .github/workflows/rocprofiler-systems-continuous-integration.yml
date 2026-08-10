@@ -206,6 +206,7 @@ jobs:
           TARBALL_ROCM_VERSION=$(basename "${tarball}" | sed -E 's/^rocm-([0-9]+\.[0-9]+\.[0-9]+)-multiarch\.tar\.gz$/\1/')
           mkdir -p "${ROCM_PATH}"
           tar -xf "${tarball}" -C "${ROCM_PATH}"
+          rm "${tarball}"
           echo "ROCM_VERSION=${TARBALL_ROCM_VERSION}" >> "${GITHUB_ENV}"
           echo "${ROCM_PATH}/bin" >> "${GITHUB_PATH}"
           echo "${ROCM_PATH}/llvm/bin" >> "${GITHUB_PATH}"
