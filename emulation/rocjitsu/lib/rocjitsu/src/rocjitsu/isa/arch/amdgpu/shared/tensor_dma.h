@@ -14,6 +14,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 
 namespace rocjitsu {
@@ -184,6 +185,35 @@ inline TensorDmaDescriptor parse_descriptor(std::array<uint32_t, 4> d0, std::arr
   return desc;
 }
 
+inline bool has_empty_active_extent(const TensorDmaDescriptor &desc, uint32_t rank) {
+  return std::any_of(desc.tensor_dims.begin(), desc.tensor_dims.begin() + rank,
+                     [](uint32_t extent) { return extent == 0; });
+}
+
+inline uint64_t saturating_add(uint64_t lhs, uint64_t rhs) {
+  return rhs > std::numeric_limits<uint64_t>::max() - lhs ? std::numeric_limits<uint64_t>::max()
+                                                          : lhs + rhs;
+}
+
+inline uint64_t saturating_multiply(uint64_t lhs, uint64_t rhs) {
+  return lhs != 0 && rhs > std::numeric_limits<uint64_t>::max() / lhs
+             ? std::numeric_limits<uint64_t>::max()
+             : lhs * rhs;
+}
+
+inline void validate_dense_iteration_layout(const TensorDmaDescriptor &desc, uint32_t rank) {
+  uint64_t occupied_span = desc.tensor_dims[0];
+  for (uint32_t dim = 1; dim < rank; ++dim) {
+    const uint64_t stride = desc.global_strides[dim - 1];
+    if (stride < occupied_span)
+      throw util::UnimplementedInst("tensor DMA iterate overlapping strides");
+
+    const uint64_t additional_span =
+        saturating_multiply(stride, static_cast<uint64_t>(desc.tensor_dims[dim] - 1));
+    occupied_span = saturating_add(occupied_span, additional_span);
+  }
+}
+
 inline void validate_supported_descriptor(const TensorDmaDescriptor &desc, bool store_from_lds) {
   // The in-tree HIP descriptor API and LLVM lowering only produce the boolean
   // count encodings 0 (disabled) and 1 (active).
@@ -213,10 +243,30 @@ inline void validate_supported_descriptor(const TensorDmaDescriptor &desc, bool 
   }
   if (desc.iterate && (rank < 2 || rank > 3))
     throw util::UnimplementedInst("tensor DMA iterate rank");
+  if (desc.iterate && desc.iteration_count > 1 && desc.global_increment != 0 &&
+      !has_empty_active_extent(desc, rank))
+    validate_dense_iteration_layout(desc, rank);
   for (uint32_t dim = 0; dim < rank; ++dim) {
     if (desc.tile_dims[dim] == 0)
       throw util::UnimplementedInst("tensor DMA sparse tile dimensions");
   }
+}
+
+inline std::array<uint64_t, 5> dense_iteration_origin(const TensorDmaDescriptor &desc,
+                                                      uint32_t rank, uint32_t iteration) {
+  std::array<uint64_t, 5> origin{};
+  if (iteration == 0 || desc.global_increment == 0)
+    return origin;
+
+  uint64_t remaining = static_cast<uint64_t>(iteration) * desc.global_increment;
+  for (uint32_t dim = rank; dim > 1; --dim) {
+    const uint32_t coordinate = dim - 1;
+    const uint64_t stride = desc.global_strides[coordinate - 1];
+    origin[coordinate] = remaining / stride;
+    remaining %= stride;
+  }
+  origin[0] = remaining;
+  return origin;
 }
 
 inline void copy_bytes(const TensorDmaDescriptor &desc, Wavefront &wf, uint64_t global_element,
@@ -255,21 +305,22 @@ inline void copy_gather_tensor(const TensorDmaDescriptor &desc, Wavefront &wf,
   const uint32_t rank = desc.rank();
   if (rank == 0)
     return;
+  const bool fully_masked = has_empty_active_extent(desc, rank);
 
   for (uint32_t idx = 0; idx < desc.valid_indices; ++idx) {
     const uint32_t gather_index = desc.gather_indices[idx];
     for (uint32_t coord0 = 0; coord0 < desc.tile_dims[0]; ++coord0) {
-      bool in_bounds = true;
+      bool in_bounds = !fully_masked;
       uint64_t global_element = coord0;
       if (rank == 1) {
         global_element += gather_index;
-        if (desc.tensor_dims[0] != 0 && global_element >= desc.tensor_dims[0])
+        if (global_element >= desc.tensor_dims[0])
           in_bounds = false;
       } else {
         global_element += static_cast<uint64_t>(gather_index) * desc.global_strides[0];
-        if (desc.tensor_dims[0] != 0 && coord0 >= desc.tensor_dims[0])
+        if (coord0 >= desc.tensor_dims[0])
           in_bounds = false;
-        if (desc.tensor_dims[1] != 0 && gather_index >= desc.tensor_dims[1])
+        if (gather_index >= desc.tensor_dims[1])
           in_bounds = false;
       }
 
@@ -284,6 +335,7 @@ inline void copy_dense_tensor(const TensorDmaDescriptor &desc, Wavefront &wf, bo
   const uint32_t rank = desc.rank();
   if (rank == 0)
     return;
+  const bool fully_masked = has_empty_active_extent(desc, rank);
 
   uint64_t element_count = 1;
   for (uint32_t dim = 0; dim < rank; ++dim)
@@ -291,18 +343,21 @@ inline void copy_dense_tensor(const TensorDmaDescriptor &desc, Wavefront &wf, bo
 
   const uint32_t iteration_count = desc.iterate ? desc.iteration_count : 1;
   for (uint32_t iter = 0; iter < iteration_count; ++iter) {
+    const auto iteration_origin =
+        desc.iterate ? dense_iteration_origin(desc, rank, iter) : std::array<uint64_t, 5>{};
     for (uint64_t linear = 0; linear < element_count; ++linear) {
       uint64_t remaining = linear;
       uint64_t global_element = static_cast<uint64_t>(iter) * desc.global_increment;
       uint64_t lds_element = static_cast<uint64_t>(iter) * desc.lds_increment;
       uint64_t lds_stride = 1;
-      bool in_bounds = true;
+      bool in_bounds = !fully_masked;
 
       for (uint32_t dim = 0; dim < rank; ++dim) {
         const uint32_t tile_dim = desc.tile_dims[dim];
         const uint32_t coord = static_cast<uint32_t>(remaining % tile_dim);
         remaining /= tile_dim;
-        if (desc.tensor_dims[dim] != 0 && coord >= desc.tensor_dims[dim])
+        const uint64_t tensor_coord = iteration_origin[dim] + coord;
+        if (tensor_coord >= desc.tensor_dims[dim])
           in_bounds = false;
         global_element += coord * (dim == 0 ? 1 : desc.global_strides[dim - 1]);
         lds_element += coord * lds_stride;
