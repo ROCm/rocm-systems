@@ -34,16 +34,16 @@ METHOD = "host_trap"
 
 
 def test_validate_pc_sampling_selected_regions_csv(pc_csv):
-    # CSV schema, sample volume, and per-row values
+    # Validate the common CSV schema, volume, and sample fields.
     pcs_csv.validate_columns(pc_csv, METHOD)
     pcs_csv.validate_sample_volume(pc_csv)
     pcs_csv.validate_values(pc_csv)
 
 
 def test_validate_pc_sampling_selected_regions_json(pc_csv, json_data, request):
-    pcs_json.validate_csv_json_parity(pc_csv, json_data, METHOD)
+    pcs_json.validate_csv_json_parity_num_samples(pc_csv, json_data, METHOD)
     pcs_json.validate_data_integrity(json_data, METHOD)
-    # collection restricted to the resume regions
+    # Validate gating according to the selected-region mode.
     if request.config.getoption("--ref-count"):
         pcs_json.validate_selected_regions_ref_count_gating(json_data, METHOD)
     else:
