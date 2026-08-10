@@ -128,7 +128,7 @@ defaultGrid(size_t n)
 inline hoff_t
 fileSize(int fd)
 {
-    struct stat st {};
+    struct stat st{};
     EXPECT_EQ(0, fstat(fd, &st));
     return static_cast<hoff_t>(st.st_size);
 }
@@ -158,21 +158,38 @@ struct BadIdxFlag {
 
     BadIdxFlag()
     {
-        EXPECT_EQ(hipSuccess, hipMalloc(&dev, sizeof(int32_t)));
+        if (hipMalloc(&dev, sizeof(int32_t)) != hipSuccess) {
+            dev = nullptr;
+            ADD_FAILURE() << "hipMalloc for the kernel bad-index flag failed";
+            return;
+        }
         reset();
     }
     ~BadIdxFlag()
     {
-        (void)hipFree(dev);
+        if (dev != nullptr) {
+            (void)hipFree(dev);
+        }
+    }
+    // Callers must check this before launching a kernel that dereferences dev.
+    bool allocated() const
+    {
+        return dev != nullptr;
     }
     void reset()
     {
+        if (dev == nullptr) {
+            return;
+        }
         int32_t init = -1;
         EXPECT_EQ(hipSuccess, hipMemcpy(dev, &init, sizeof(int32_t), hipMemcpyHostToDevice));
     }
     int32_t value() const
     {
         int32_t v = -2;
+        if (dev == nullptr) {
+            return v;
+        }
         EXPECT_EQ(hipSuccess, hipMemcpy(&v, dev, sizeof(int32_t), hipMemcpyDeviceToHost));
         return v;
     }
@@ -245,6 +262,7 @@ launchAndVerify(int32_t *start, size_t alloc_n, int32_t *arr, size_t n, dim3 gri
     assert(modify_stride != 0 && "modify_stride must be >= 1");
     BadIdxFlag bad;
     BadIdxFlag bad_slack;
+    ASSERT_TRUE(bad.allocated() && bad_slack.allocated()) << "kernel bad-index flag allocation failed";
     ASSERT_EQ(hipSuccess, launchVerifyAndModify(start, alloc_n, arr, n, kPatternBase, bad.dev, kSentinel,
                                                 bad_slack.dev, grid, workgroup, modify_stride));
     ASSERT_EQ(-1, bad.value()) << "payload pattern corrupted";
@@ -280,6 +298,7 @@ launchAndVerifyBytes(unsigned char *start, size_t alloc_bytes, unsigned char *ar
     assert(modify_stride != 0 && "modify_stride must be >= 1");
     BadIdxFlag bad;
     BadIdxFlag bad_slack;
+    ASSERT_TRUE(bad.allocated() && bad_slack.allocated()) << "kernel bad-index flag allocation failed";
     ASSERT_EQ(hipSuccess,
               launchVerifyAndModifyBytes(start, alloc_bytes, arr, n, kByteEntry, kByteModified, bad.dev,
                                          kByteDevSlack, bad_slack.dev, grid, workgroup, modify_stride));
