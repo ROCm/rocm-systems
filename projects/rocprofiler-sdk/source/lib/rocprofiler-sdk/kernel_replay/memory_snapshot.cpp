@@ -28,9 +28,12 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 
+#include <fmt/format.h>
 #include <hsa/hsa.h>
 
 #include <cstdint>
+#include <new>
+#include <string_view>
 #include <vector>
 
 namespace rocprofiler
@@ -119,21 +122,49 @@ snap(hsa_agent_t agent)
     device_snapshot_t out{};
     out.blocks.reserve(inventory.size());
 
-    for(const auto& [ptr, size] : inventory)
-    {
-        if(size == 0) continue;
+    // Capture one region (device->host) into the snapshot. Returns false on any failure: a host
+    // allocation failure under memory pressure (resize throws bad_alloc) or a failed DMA copy.
+    // Either leaves the snapshot incomplete, so the caller must decline replay rather than restore
+    // partial state.
+    auto capture = [&](void* gpu_addr, size_t size, std::string_view what) -> bool {
+        if(size == 0) return true;
 
         mem_block_t blk;
-        blk.gpu_addr = ptr;
-        blk.host_copy.resize(size);
-
-        if(dma_copy(blk.host_copy.data(), ptr, size) != HSA_STATUS_SUCCESS)
+        blk.gpu_addr = gpu_addr;
+        try
         {
-            ROCP_WARNING << "replay snapshot: device->host copy failed for region " << ptr;
-            continue;
+            blk.host_copy.resize(size);
+        } catch(const std::bad_alloc&)
+        {
+            ROCP_WARNING << fmt::format("kernel-replay snapshot: host allocation of {} bytes "
+                                        "failed for {} {} (memory pressure)",
+                                        size,
+                                        what,
+                                        gpu_addr);
+            return false;
+        }
+
+        if(dma_copy(blk.host_copy.data(), gpu_addr, size) != HSA_STATUS_SUCCESS)
+        {
+            ROCP_WARNING << fmt::format(
+                "kernel-replay snapshot: device->host copy failed for {} {} ({}B)",
+                what,
+                gpu_addr,
+                size);
+            return false;
         }
 
         out.blocks.push_back(std::move(blk));
+        return true;
+    };
+
+    for(const auto& [ptr, size] : inventory)
+    {
+        if(!capture(ptr, size, "region"))
+        {
+            out.ok = false;
+            return out;
+        }
     }
 
     // Module-scope variables (__device__ / __constant__ globals) live in the loaded executable's
@@ -141,22 +172,17 @@ snap(hsa_agent_t agent)
     // per-block host->device copy as tracked allocations (see restore()).
     for(const auto& var : discover_module_variables(agent))
     {
-        mem_block_t blk;
-        blk.gpu_addr = var.gpu_addr;
-        blk.host_copy.resize(var.size);
-
-        if(dma_copy(blk.host_copy.data(), var.gpu_addr, var.size) != HSA_STATUS_SUCCESS)
+        if(!capture(var.gpu_addr, var.size, "module variable"))
         {
-            ROCP_WARNING << "replay snapshot: device->host copy failed for module variable "
-                         << var.gpu_addr;
-            continue;
+            out.ok = false;
+            return out;
         }
-
-        out.blocks.push_back(std::move(blk));
     }
 
-    ROCP_INFO << "replay snapshot: captured " << out.blocks.size()
-              << " regions (tracked allocations + module variables) for agent " << agent.handle;
+    ROCP_INFO << fmt::format("kernel-replay snapshot: captured {} regions (tracked allocations + "
+                             "module variables) for agent {}",
+                             out.blocks.size(),
+                             agent.handle);
     return out;
 }
 
@@ -168,13 +194,17 @@ restore(const device_snapshot_t& snapshot)
     {
         if(dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size()) != HSA_STATUS_SUCCESS)
         {
-            ROCP_WARNING << "replay restore: host->device copy failed for region " << blk.gpu_addr;
+            ROCP_WARNING << fmt::format(
+                "kernel-replay restore: host->device copy failed for region {} ({}B)",
+                blk.gpu_addr,
+                blk.host_copy.size());
             continue;
         }
         ++ok;
     }
 
-    ROCP_INFO << "replay restore: restored " << ok << "/" << snapshot.blocks.size() << " regions";
+    ROCP_INFO << fmt::format(
+        "kernel-replay restore: restored {}/{} regions", ok, snapshot.blocks.size());
     return ok;
 }
 }  // namespace memory_snapshot
