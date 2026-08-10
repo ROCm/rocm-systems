@@ -25,6 +25,10 @@ THE SOFTWARE.
 #include <hip/hip_cooperative_groups.h>
 #include <hip/cooperative_groups/memcpy_async.h>
 
+#include <algorithm>
+#include <utility>
+#include <vector>
+
 // trivial vector add using shared memory
 // a[i] * x + b[i]
 __global__ void vector_add_mem(float* out, float* a, float* b, float x, size_t size) {
@@ -166,6 +170,270 @@ TEST_CASE("Unit_device_memcpy_async") {
           REQUIRE(cpu_out[i] == gpu_out[i]);
         }
       }
+    }
+  }
+}
+
+// Exercise the cooperative_groups::memcpy_async() API surface: supported
+// group types, edge cases, and the layout overload.
+
+namespace {
+
+template <unsigned int TileSize>
+__global__ void tile_memcpy_async_kernel(float* out, const float* in,
+                                         size_t per_tile_bytes) {
+  namespace cg = cooperative_groups;
+  extern __shared__ float smem[];
+  auto block = cg::this_thread_block();
+  auto tile = cg::tiled_partition<TileSize>(block);
+
+  const unsigned int tiles_per_block = blockDim.x / TileSize;
+  const unsigned int tile_id = threadIdx.x / TileSize;
+  const size_t per_tile_elems = per_tile_bytes / sizeof(float);
+
+  float* smem_chunk = smem + tile_id * per_tile_elems;
+  const float* in_chunk = in + (blockIdx.x * tiles_per_block + tile_id) * per_tile_elems;
+  float* out_chunk = out + (blockIdx.x * tiles_per_block + tile_id) * per_tile_elems;
+
+  cg::memcpy_async(tile, smem_chunk, in_chunk, per_tile_bytes);
+  tile.sync();
+
+  // Touch + double the data to prove it actually arrived.
+  for (unsigned int i = tile.thread_rank(); i < per_tile_elems; i += TileSize) {
+    smem_chunk[i] = smem_chunk[i] * 2.0f;
+  }
+  tile.sync();
+
+  cg::memcpy_async(tile, out_chunk, smem_chunk, per_tile_bytes);
+  tile.sync();
+}
+
+__global__ void coalesced_memcpy_async_kernel(float* out, const float* in,
+                                              size_t total_bytes) {
+  namespace cg = cooperative_groups;
+  extern __shared__ float smem[];
+  auto active = cg::coalesced_threads();
+  // All lanes are active here, so coalesced_group covers the whole warp/block
+  // tile that entered the kernel; the API still has to accept this group type.
+  cg::memcpy_async(active, smem, in, total_bytes);
+  active.sync();
+
+  const size_t total_elems = total_bytes / sizeof(float);
+  for (size_t i = active.thread_rank(); i < total_elems; i += active.size()) {
+    smem[i] += 1.0f;
+  }
+  active.sync();
+
+  cg::memcpy_async(active, out, smem, total_bytes);
+  active.sync();
+}
+
+__global__ void layout_min_kernel(float* out, const float* in,
+                                  size_t dst_count, size_t src_count) {
+  namespace cg = cooperative_groups;
+  extern __shared__ float smem[];
+  auto tb = cg::this_thread_block();
+  // Layout-overload: copies min(dst_count, src_count) elements.
+  cg::memcpy_async(tb, smem, dst_count, in, src_count);
+  tb.sync();
+
+  const size_t copied = dst_count < src_count ? dst_count : src_count;
+  for (size_t i = threadIdx.x; i < copied; i += blockDim.x) {
+    out[i] = smem[i];
+  }
+}
+
+__global__ void zero_count_kernel(float* out, const float* in, size_t size) {
+  namespace cg = cooperative_groups;
+  extern __shared__ float smem[];
+  auto tb = cg::this_thread_block();
+
+  // Pre-fill shared with a sentinel; a zero-byte memcpy_async must not touch
+  // it, otherwise the sentinel would survive into out[].
+  size_t i = threadIdx.x;
+  smem[i] = -42.0f;
+  tb.sync();
+
+  cg::memcpy_async(tb, smem, in, /*count=*/static_cast<size_t>(0));
+  tb.sync();
+
+  out[i] = smem[i];
+  // Independently, do a real copy of `size` floats to confirm later calls
+  // still work after a zero-count call.
+  cg::memcpy_async(tb, smem, in, size * sizeof(float));
+  tb.sync();
+  out[size + i] = smem[i];
+}
+
+__global__ void unaligned_size_kernel(float* out, const float* in,
+                                      size_t bytes) {
+  namespace cg = cooperative_groups;
+  extern __shared__ unsigned char smem_b[];
+  auto tb = cg::this_thread_block();
+  cg::memcpy_async(tb, smem_b, reinterpret_cast<const unsigned char*>(in),
+                   bytes);
+  tb.sync();
+  // Single-thread copy-out so we don't depend on element alignment of `out`.
+  if (threadIdx.x == 0) {
+    auto* dst = reinterpret_cast<unsigned char*>(out);
+    for (size_t i = 0; i < bytes; i++) dst[i] = smem_b[i];
+  }
+}
+
+}  // namespace
+
+HIP_TEST_CASE(Unit_coop_memcpy_async_thread_block_tile_Basic) {
+  constexpr unsigned int kTile = 32;
+  for (const unsigned int block_threads : {32u, 64u, 128u, 256u}) {
+    if (block_threads % kTile != 0) continue;
+    const unsigned int tiles_per_block = block_threads / kTile;
+    const size_t per_tile_elems = 64;
+    const size_t per_tile_bytes = per_tile_elems * sizeof(float);
+    const size_t total_elems = tiles_per_block * per_tile_elems;
+    const size_t total_bytes = total_elems * sizeof(float);
+
+    float *d_in, *d_out;
+    HIP_CHECK(hipMalloc(&d_in, total_bytes));
+    HIP_CHECK(hipMalloc(&d_out, total_bytes));
+
+    std::vector<float> in(total_elems), out(total_elems, 0.0f);
+    for (size_t i = 0; i < total_elems; i++) in[i] = static_cast<float>(i + 1);
+    HIP_CHECK(hipMemcpy(d_in, in.data(), total_bytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemset(d_out, 0, total_bytes));
+
+    INFO("block_threads " << block_threads);
+    tile_memcpy_async_kernel<kTile><<<1, block_threads, total_bytes>>>(
+        d_out, d_in, per_tile_bytes);
+    HIP_CHECK(hipMemcpy(out.data(), d_out, total_bytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_in));
+    HIP_CHECK(hipFree(d_out));
+
+    for (size_t i = 0; i < total_elems; i++) {
+      INFO("idx " << i);
+      REQUIRE(out[i] == Catch::Approx(in[i] * 2.0f));
+    }
+  }
+}
+
+HIP_TEST_CASE(Unit_coop_memcpy_async_coalesced_group_Basic) {
+  for (const size_t size : {32u, 64u, 128u}) {
+    const size_t bytes = size * sizeof(float);
+    float *d_in, *d_out;
+    HIP_CHECK(hipMalloc(&d_in, bytes));
+    HIP_CHECK(hipMalloc(&d_out, bytes));
+
+    std::vector<float> in(size), out(size, 0.0f);
+    for (size_t i = 0; i < size; i++) in[i] = static_cast<float>(i * 2 + 1);
+    HIP_CHECK(hipMemcpy(d_in, in.data(), bytes, hipMemcpyHostToDevice));
+
+    INFO("size " << size);
+    coalesced_memcpy_async_kernel<<<1, size, bytes>>>(d_out, d_in, bytes);
+    HIP_CHECK(hipMemcpy(out.data(), d_out, bytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_in));
+    HIP_CHECK(hipFree(d_out));
+
+    for (size_t i = 0; i < size; i++) {
+      INFO("idx " << i);
+      REQUIRE(out[i] == Catch::Approx(in[i] + 1.0f));
+    }
+  }
+}
+
+HIP_TEST_CASE(Unit_coop_memcpy_async_LayoutMin) {
+  // Try all three orderings: dst<src, dst==src, dst>src.
+  for (const auto& [dst_count, src_count] :
+       std::vector<std::pair<size_t, size_t>>{{32, 64}, {64, 64}, {128, 64}}) {
+    const size_t copied = dst_count < src_count ? dst_count : src_count;
+    const size_t alloc_elems = std::max(dst_count, src_count);
+    const size_t smem_bytes = alloc_elems * sizeof(float);
+
+    float *d_in, *d_out;
+    HIP_CHECK(hipMalloc(&d_in, alloc_elems * sizeof(float)));
+    HIP_CHECK(hipMalloc(&d_out, alloc_elems * sizeof(float)));
+
+    std::vector<float> in(alloc_elems), out(alloc_elems, -1.0f);
+    for (size_t i = 0; i < alloc_elems; i++) in[i] = static_cast<float>(i + 1);
+    HIP_CHECK(hipMemcpy(d_in, in.data(), alloc_elems * sizeof(float),
+                        hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_out, out.data(), alloc_elems * sizeof(float),
+                        hipMemcpyHostToDevice));
+
+    const unsigned int threads = 64;
+    INFO("dst_count " << dst_count << " src_count " << src_count
+                      << " expected_copied " << copied);
+    layout_min_kernel<<<1, threads, smem_bytes>>>(d_out, d_in, dst_count,
+                                                  src_count);
+    HIP_CHECK(hipMemcpy(out.data(), d_out, alloc_elems * sizeof(float),
+                        hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_in));
+    HIP_CHECK(hipFree(d_out));
+
+    for (size_t i = 0; i < copied; i++) {
+      INFO("copied region idx " << i);
+      REQUIRE(out[i] == Catch::Approx(in[i]));
+    }
+    // Beyond the copied region, the tail of `out` was not overwritten by the
+    // kernel — it should still hold the sentinel from the initial host copy.
+    for (size_t i = copied; i < alloc_elems; i++) {
+      INFO("untouched tail idx " << i);
+      REQUIRE(out[i] == Catch::Approx(-1.0f));
+    }
+  }
+}
+
+HIP_TEST_CASE(Unit_coop_memcpy_async_ZeroCount) {
+  constexpr size_t size = 32;
+  const size_t smem_bytes = size * sizeof(float);
+
+  float *d_in, *d_out;
+  HIP_CHECK(hipMalloc(&d_in, smem_bytes));
+  HIP_CHECK(hipMalloc(&d_out, 2 * smem_bytes));
+
+  std::vector<float> in(size), out(2 * size, 0.0f);
+  for (size_t i = 0; i < size; i++) in[i] = static_cast<float>(i + 100);
+  HIP_CHECK(hipMemcpy(d_in, in.data(), smem_bytes, hipMemcpyHostToDevice));
+
+  zero_count_kernel<<<1, size, smem_bytes>>>(d_out, d_in, size);
+  HIP_CHECK(hipMemcpy(out.data(), d_out, 2 * smem_bytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipFree(d_in));
+  HIP_CHECK(hipFree(d_out));
+
+  for (size_t i = 0; i < size; i++) {
+    INFO("zero-count idx " << i);
+    // The zero-byte memcpy_async must not have touched smem, so the
+    // pre-filled sentinel survives.
+    REQUIRE(out[i] == Catch::Approx(-42.0f));
+  }
+  for (size_t i = 0; i < size; i++) {
+    INFO("post-zero real-copy idx " << i);
+    REQUIRE(out[size + i] == Catch::Approx(in[i]));
+  }
+}
+
+HIP_TEST_CASE(Unit_coop_memcpy_async_Unaligned) {
+  // Byte-granularity sizes including non-multiples of 16/8/4 and sizes
+  // smaller than the group, plus a size with a tail beyond the per-thread
+  // share.
+  for (const size_t bytes : {1u, 3u, 7u, 15u, 31u, 33u, 65u, 129u}) {
+    unsigned char *d_in, *d_out;
+    HIP_CHECK(hipMalloc(&d_in, bytes));
+    HIP_CHECK(hipMalloc(&d_out, bytes));
+
+    std::vector<unsigned char> in(bytes), out(bytes, 0);
+    for (size_t i = 0; i < bytes; i++) in[i] = static_cast<unsigned char>(i + 1);
+    HIP_CHECK(hipMemcpy(d_in, in.data(), bytes, hipMemcpyHostToDevice));
+
+    INFO("bytes " << bytes);
+    const unsigned int threads = 32;
+    unaligned_size_kernel<<<1, threads, bytes + 16>>>(
+        reinterpret_cast<float*>(d_out), reinterpret_cast<float*>(d_in), bytes);
+    HIP_CHECK(hipMemcpy(out.data(), d_out, bytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_in));
+    HIP_CHECK(hipFree(d_out));
+
+    for (size_t i = 0; i < bytes; i++) {
+      INFO("byte idx " << i);
+      REQUIRE(static_cast<int>(out[i]) == static_cast<int>(in[i]));
     }
   }
 }
