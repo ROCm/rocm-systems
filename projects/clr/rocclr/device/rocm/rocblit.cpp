@@ -3004,6 +3004,10 @@ bool KernelBlitManager::WriteBufferBatch(
       gpu().command()->ReleasePinnedMemory();
       return false;
     }
+    // Release pinned memory after fallback shader copy completes
+    for (const auto& op : pinned_copy_ops) {
+      gpu().addPinnedMem(op.srcMemory);
+    }
   }
 
   return true;
@@ -3124,6 +3128,10 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
       for (const StagingReadBack& read_back : staging_read_backs) {
         memcpy(read_back.dst, read_back.staging, read_back.size);
       }
+    }
+    // Release pinned memory after fallback shader copy completes
+    for (const auto& op : pinned_copy_ops) {
+      gpu().addPinnedMem(op.dstMemory);
     }
   }
 
