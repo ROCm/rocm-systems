@@ -233,7 +233,7 @@ ensure_finalization(bool _static_init = false)
     if(_static_init)
     {
         auto _verbose =
-            get_verbose_env() + ((get_debug_env() || get_debug_init()) ? 15 : 0);
+            get_verbose_env() + ((get_debug_env() || get_debug_init()) ? 16 : 0);
         auto _search_paths = fmt::format(
             "{}:{}:{}:{}:{}", rocprofsys::get_env<std::string>(env_vars::PATH, ""),
             rocprofsys::get_env<std::string>("PWD"), ".",
