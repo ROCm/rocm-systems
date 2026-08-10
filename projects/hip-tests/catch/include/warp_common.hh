@@ -756,6 +756,7 @@ void runTestReduce(int iteration, Reduce reduce)
           // for integral types or min/max the result should match exactly
           if constexpr (std::is_same<T, __half>::value) {
             REQUIRE(__half2float(result) == __half2float(expected));
+            INFO("numReduce: " << numReduce);
           } else {
             if (result != expected) {
               printMismatch(result, expected, waveInput, mask, lane);
