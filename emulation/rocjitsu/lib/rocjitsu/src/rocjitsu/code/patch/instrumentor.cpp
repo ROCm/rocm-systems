@@ -7,11 +7,11 @@
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
-#include "rocjitsu/code/dbt/scoped_cfg_edges.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/error_report.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
@@ -19,12 +19,12 @@
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "util/except.h"
 
 #include <algorithm>
 #include <array>
 #include <cstring>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -110,35 +110,81 @@ std::string reg_name(RegisterRef ref) {
   return std::string(prefix) + std::to_string(ref.index);
 }
 
-// Special machine state has no save/restore path across a probe call yet.
-// Only SCC (via the trampoline envelope) and ordinary GPRs (via the spill
-// policy) are handled today. Until each special register gains a real consumer,
-// fail closed on any probe whose body touches them rather than letting it
-// silently corrupt the host kernel's state.
-bool check_probe_special_state(const ProbeClobberSummary &summary, std::string *error_out) {
-  std::vector<const char *> touched;
-  if (summary.touches_exec)
-    touched.push_back("EXEC");
-  if (summary.touches_vcc)
-    touched.push_back("VCC");
-  if (summary.touches_m0)
-    touched.push_back("M0");
-  if (summary.touches_flat_scratch)
-    touched.push_back("FLAT_SCRATCH");
-  if (touched.empty())
-    return true;
-  if (error_out != nullptr) {
-    std::string msg = "probe body writes special machine state not yet preserved across a "
-                      "probe call:";
-    bool first = true;
-    for (const char *name : touched) {
-      msg += first ? " " : ", ";
-      msg += name;
-      first = false;
-    }
-    *error_out = std::move(msg);
+// Largest positive byte offset encodable in the scratch store/load offset field,
+// per arch. 0 means the arch has no scratch spill emitter (spilling unsupported).
+// The fields are signed, so the cap is the positive half: the CDNA FLAT path
+// writes the 12-bit offset (pad_12 left 0), RDNA4 has a signed 24-bit VSCRATCH
+// ioffset.
+uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return 0xFFF; // 12-bit, pad_12 = 0
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return 0x7FFFFF; // positive half of signed 24-bit
+  default:
+    return 0;
   }
-  return false;
+}
+
+// TODO: these two arch predicates duplicate logic that also lives in DBT
+// (kernel_descriptor_translator.cpp's arch_has_accvgpr / uses_gfx90a_accum_offset)
+// and code_object_patcher.cpp (target_uses_gfx90a_accum_offset). They should be
+// consolidated into isa/isa_traits.h alongside arch_is_cdna/arch_is_rdna, but the
+// arch_has_accvgpr copies disagree on CDNA1 (this one follows the physical AGPR file;
+// DBT's follows the HasAccVgpr trait, which models CDNA1 as zero), so unifying needs a
+// deliberate CDNA1-semantics decision. Kept DBI-local until then.
+
+// All CDNA generations (gfx908/gfx90a/gfx942/gfx950) have an AccVGPR file.
+// RDNA/gfx1250 have none.
+bool arch_has_accvgpr(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// CDNA2-4 (gfx90a/gfx942/gfx950) carve the AccVGPR file out of a single unified VGPR
+// allocation, split at the descriptor's ACCUM_OFFSET field. CDNA1/gfx908 allocates
+// AGPRs separately and has no such field; RDNA and gfx1250 have no AccVGPR file at
+// all.
+bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return true;
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return false;
+  default:
+    throw util::UnimplementedInst("unified VGPR allocation for target architecture");
+  }
+}
+
+// Special machine state preserved across a probe call: SCC (via the trampoline
+// envelope), EXEC/VCC/M0 (saved to a dead SGPR temp; the orchestrator sets the
+// plan.preserve_* flags below), and ordinary GPRs (via the spill policy).
+// FLAT_SCRATCH stays rejected: the spill store/load depend on it, so a probe
+// that clobbers it entangles with the spill mechanism. Fail closed there rather
+// than let it silently corrupt the host kernel's state.
+bool check_probe_special_state(const ProbeClobberSummary &summary, std::string *error_out) {
+  if (summary.touches_flat_scratch) {
+    report(error_out, "probe body writes FLAT_SCRATCH, which the spill store/load depend on; "
+                      "not preservable across a probe call");
+    return false;
+  }
+  return true;
 }
 
 // Check that the probe does not clobber the link pair.
@@ -283,16 +329,197 @@ RegisterSet compute_spill_set(const RegisterSet &live_at_anchor,
   return live_at_anchor & instrumentation_clobbers;
 }
 
-bool check_spill_policy(const RegisterSet &spill_set, SpillPolicy policy, std::string *error_out) {
-  if (policy == SpillPolicy::NoSpillsSupported && !spill_set.none()) {
-    std::string msg = "probe-call requires spilling live registers, not yet supported:";
-    bool first = true;
-    spill_set.for_each([&](RegisterRef ref) {
-      msg += first ? " " : ", ";
-      msg += reg_name(ref);
-      first = false;
-    });
-    report(error_out, msg.c_str());
+bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rj_code_arch_t arch,
+                      std::vector<SpillSlot> &out, std::string *error_out) {
+  out.clear();
+
+  // Plans VGPR spills only; the orchestrator routes SGPRs to plan_sgpr_spills.
+  // Reject any non-VGPR here defensively before reserving anything.
+  std::string non_vgpr;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (ref.cls != RegClass::VGPR) {
+      non_vgpr += non_vgpr.empty() ? " " : ", ";
+      non_vgpr += reg_name(ref);
+    }
+  });
+  if (!non_vgpr.empty()) {
+    report(error_out,
+           ("probe-call spill of non-VGPR registers not yet supported:" + non_vgpr).c_str());
+    return false;
+  }
+
+  const uint32_t max_offset = max_scratch_offset_bytes(arch);
+  if (max_offset == 0) {
+    report(error_out, "probe-call spilling not supported for target architecture");
+    return false;
+  }
+
+  bool ok = true;
+  std::string fail;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (!ok)
+      return;
+    const std::optional<uint32_t> off = spills.allocate_slot(ref);
+    if (!off) {
+      fail = "probe-call spill of " + reg_name(ref) + " exceeds the per-lane scratch limit";
+      ok = false;
+    } else if (*off > max_offset) {
+      fail = "probe-call spill offset for " + reg_name(ref) +
+             " exceeds the scratch instruction offset field";
+      ok = false;
+    } else {
+      out.push_back(SpillSlot{RegClass::VGPR, ref.index, *off});
+    }
+  });
+  if (!ok) {
+    out.clear();
+    report(error_out, fail.c_str());
+    return false;
+  }
+  return true;
+}
+
+bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_anchor,
+                      const std::vector<SpillSlot> &vgpr_spills, uint32_t kernel_vgpr_count,
+                      SpillManager &spills, rj_code_arch_t arch, std::vector<SpillSlot> &out,
+                      uint16_t &out_bridge, std::string *error_out) {
+  out.clear();
+
+  // Only SGPRs bridge through a VGPR here; other classes (AccVGPR) are unhandled.
+  std::string non_sgpr;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (ref.cls != RegClass::SGPR) {
+      non_sgpr += non_sgpr.empty() ? " " : ", ";
+      non_sgpr += reg_name(ref);
+    }
+  });
+  if (!non_sgpr.empty()) {
+    report(error_out,
+           ("probe-call spill of non-SGPR registers not yet supported:" + non_sgpr).c_str());
+    return false;
+  }
+  if (spill_set.none())
+    return true;
+
+  const uint32_t max_offset = max_scratch_offset_bytes(arch);
+  if (max_offset == 0) {
+    report(error_out, "probe-call spilling not supported for target architecture");
+    return false;
+  }
+
+  // Bridge, within the kernel's allocated VGPR count (never an unallocated index).
+  // Prefer a dead VGPR; else reuse a spilled VGPR, whose value is already on scratch
+  // (build_spill_bracket orders its store/reload around the bridge use). A spilled
+  // VGPR is live at the anchor, so the dead scan never returns one.
+  const uint16_t vgpr_bound =
+      static_cast<uint16_t>(std::min<uint32_t>(kernel_vgpr_count, REGISTER_SET_MAX_VGPRS));
+  std::optional<uint16_t> bridge;
+  for (uint16_t v = 0; v < vgpr_bound; ++v) {
+    if (!live_at_anchor.contains(RegisterRef{RegClass::VGPR, v, 1})) {
+      bridge = v;
+      break;
+    }
+  }
+  if (!bridge && !vgpr_spills.empty())
+    bridge = vgpr_spills.front().reg; // allocated by construction, so in bounds
+  if (!bridge) {
+    report(error_out, "probe-call SGPR spill needs a bridge VGPR, but none is dead or already "
+                      "spilled within the kernel's allocated VGPRs");
+    return false;
+  }
+
+  bool ok = true;
+  std::string fail;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (!ok)
+      return;
+    const std::optional<uint32_t> off = spills.allocate_slot(ref);
+    if (!off) {
+      fail = "probe-call spill of " + reg_name(ref) + " exceeds the per-lane scratch limit";
+      ok = false;
+    } else if (*off > max_offset) {
+      fail = "probe-call spill offset for " + reg_name(ref) +
+             " exceeds the scratch instruction offset field";
+      ok = false;
+    } else {
+      out.push_back(SpillSlot{RegClass::SGPR, ref.index, *off});
+    }
+  });
+  if (!ok) {
+    out.clear();
+    report(error_out, fail.c_str());
+    return false;
+  }
+  out_bridge = *bridge;
+  return true;
+}
+
+bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count, SpillManager &spills,
+                     rj_code_arch_t arch, std::vector<SpillSlot> &out, std::string *error_out) {
+  out.clear();
+
+  // Plans AccVGPR spills only; the orchestrator routes VGPRs/SGPRs elsewhere.
+  std::string non_acc;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (ref.cls != RegClass::ACC_VGPR) {
+      non_acc += non_acc.empty() ? " " : ", ";
+      non_acc += reg_name(ref);
+    }
+  });
+  if (!non_acc.empty()) {
+    report(error_out, ("AccVGPR spill planning received non-AccVGPR registers:" + non_acc).c_str());
+    return false;
+  }
+  if (spill_set.none())
+    return true;
+
+  if (!arch_has_accvgpr(arch)) {
+    report(error_out, "AccVGPR spilling is only supported on CDNA1-4 targets");
+    return false;
+  }
+
+  const uint32_t max_offset = max_scratch_offset_bytes(arch);
+  if (max_offset == 0) {
+    report(error_out, "probe-call spilling not supported for target architecture");
+    return false;
+  }
+
+  // Never spill an AccVGPR the kernel did not allocate: acc_count is the AGPR
+  // window size (unified VGPR budget minus the ACCUM_OFFSET base). Reject out of
+  // band before reserving anything.
+  std::string oob;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (ref.index >= acc_count) {
+      oob += oob.empty() ? " " : ", ";
+      oob += reg_name(ref);
+    }
+  });
+  if (!oob.empty()) {
+    report(error_out,
+           ("probe-call spill of AccVGPR past the kernel's allocated count:" + oob).c_str());
+    return false;
+  }
+
+  bool ok = true;
+  std::string fail;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (!ok)
+      return;
+    const std::optional<uint32_t> off = spills.allocate_slot(ref);
+    if (!off) {
+      fail = "probe-call spill of " + reg_name(ref) + " exceeds the per-lane scratch limit";
+      ok = false;
+    } else if (*off > max_offset) {
+      fail = "probe-call spill offset for " + reg_name(ref) +
+             " exceeds the scratch instruction offset field";
+      ok = false;
+    } else {
+      out.push_back(SpillSlot{RegClass::ACC_VGPR, ref.index, *off});
+    }
+  });
+  if (!ok) {
+    out.clear();
+    report(error_out, fail.c_str());
     return false;
   }
   return true;
@@ -357,21 +584,12 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
     return false;
   }
   decoder_ = std::move(decoder);
-  // Force every kernel entry to begin a block. BasicBlock::build only leads at
-  // natural boundaries, so a descriptor entry inside a fallthrough block would
-  // not start a block and would be silently dropped by the entry match below;
-  // a preceding `s_mov exec, -1` could then make it look Full even though
-  // hardware may enter with unknown EXEC, licensing unsound VGPR kills.
-  const std::vector<uint64_t> entry_offsets = obj_.kernel_entry_text_offsets(arch_);
-  blocks_ = BasicBlock::build(obj_, *decoder_, arch_, entry_offsets);
+  blocks_ = BasicBlock::build(obj_, *decoder_, arch_);
   // BasicBlock::build returns blocks in .text order. Keep clause state across
   // block boundaries because a branch target may split the linear instruction
   // stream in the middle of a clause.
   uint32_t clause_remaining = 0;
-  std::unordered_set<uint64_t> block_starts;
-  block_starts.reserve(blocks_.size());
   for (const auto &block : blocks_) {
-    block_starts.insert(block->start_offset());
     uint64_t cur = block->start_offset();
     for (const Instruction &inst : block->instructions()) {
       if (clause_remaining > 0) {
@@ -382,16 +600,6 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
       if (is_s_clause(inst))
         clause_remaining = std::max(clause_remaining, s_clause_following_instruction_count(inst));
       cur += static_cast<uint64_t>(inst.size());
-    }
-  }
-  // Fail closed if a readable entry still has no exact block (e.g. it points
-  // into undecodable bytes).
-  for (const uint64_t entry : entry_offsets) {
-    if (!block_starts.contains(entry)) {
-      report(error_out, ("kernel entry offset " + std::to_string(entry) +
-                         " has no basic block after construction")
-                            .c_str());
-      return false;
     }
   }
   blocks_built_ = true;
@@ -551,21 +759,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   liveness_scope.reserve(blocks_.size());
   for (const auto &block : blocks_)
     liveness_scope.push_back(block.get());
-  const std::span<const uint8_t> original_text = patcher.text_bytes();
-  const auto liveness_edges =
-      scoped_call_liveness_edges(KernelBlockScope(liveness_scope), original_text);
-  const auto entry_offsets = obj_.kernel_entry_text_offsets(arch_);
-  const std::unordered_set<uint64_t> entry_offset_set(entry_offsets.begin(), entry_offsets.end());
-  std::vector<const BasicBlock *> entry_blocks;
-  for (BasicBlock *block : liveness_scope) {
-    if (block != nullptr && entry_offset_set.contains(block->start_offset()))
-      entry_blocks.push_back(block);
-  }
-  auto exec = std::make_unique<ExecMaskAnalysis>(KernelBlockScope(liveness_scope),
-                                                 obj_.kernel_wavefront_size(arch_), liveness_edges,
-                                                 entry_blocks);
-  const LivenessAnalysis liveness{
-      KernelBlockScope(liveness_scope), std::move(exec), {}, liveness_edges};
+  const LivenessAnalysis liveness{KernelBlockScope(liveness_scope)};
 
   // Lay out the appended region as [probe bodies][trampolines]. Each distinct
   // probe body is copied once, ahead of the trampolines that call into it, so a
@@ -581,9 +775,20 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     cave_cursor += probe.body_words.size() * sizeof(uint32_t);
   }
 
+  // Register spilling targets a single-kernel code object for now: any site that
+  // must spill grows that one kernel's per-lane scratch. The SpillManager is
+  // created lazily on the first spilling site and shared by the rest; its final
+  // size is written back to the descriptor after all sites succeed.
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(patcher.image_bytes(), patcher.text_offset(), patcher.text_size());
+
   // Temporary SGPR-allocation bound. The probe-call return-link pair is fixed
-  // by the calling convention, so the kernel must allocate up to it.
-  const std::optional<uint32_t> kernel_sgpr_count = obj_.min_kernel_sgpr_count(arch_);
+  // by the calling convention, so the kernel must allocate up to it. Derived from
+  // the descriptors already scanned above.
+  const std::optional<uint32_t> kernel_sgpr_count =
+      AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels);
+  std::optional<SpillManager> spills;
+  uint64_t spill_descriptor_file_offset = 0;
 
   std::vector<AppliedSite> applied;
   applied.reserve(sites.size());
@@ -601,10 +806,22 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     if (site.is_probe_call()) {
       const ProbeCallable &probe = resolved.probes[*site.probe_index];
 
+      // A probe call selects temp SGPRs (link/target/SCC/special-state) bounded by
+      // the kernel's own allocation. Without a discovered descriptor that bound is
+      // unknown, so a temp could land past the kernel's .sgpr_count; fail closed
+      // rather than fall back to the device-wide default (growing the allocation is
+      // deferred).
+      if (!kernel_sgpr_count) {
+        result.errors.push_back("probe call at anchor_offset " +
+                                std::to_string(site.anchor_offset) +
+                                " requires a discovered kernel descriptor to bound SGPR "
+                                "selection, but none was found");
+        continue;
+      }
+
       // The kernel must own the fixed return-link pair.
       if (const std::optional<uint16_t> link_base = link_pair_for(probe.cc);
-          link_base && kernel_sgpr_count &&
-          !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, *link_base)) {
+          link_base && !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, *link_base)) {
         result.errors.push_back(
             "probe call needs the return-link pair s[" + std::to_string(*link_base) + ":" +
             std::to_string(*link_base + 1) + "] but the kernel allocates only " +
@@ -644,6 +861,17 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // Set the probe's offset
       TrampolinePlan plan = make_base_plan(site, arch_, trampoline_offset);
       plan.probe_target_offset = probe.output_text_offset;
+      // Preserve special state the probe clobbers by saving it to a dead SGPR
+      // around the call. EXEC/VCC are saved unconditionally as a conservative
+      // policy: the summary detects the special-state writes the decoder exposes as
+      // operands, but always saving keeps correctness independent of per-opcode
+      // implicit-def coverage. M0 stays clobber-gated.
+      plan.preserve_exec = true;
+      plan.preserve_vcc = true;
+      plan.preserve_m0 = summary->touches_m0;
+      // Cap envelope/temp SGPR selection at the kernel's own allocation so a temp
+      // never lands past its .sgpr_count
+      plan.kernel_sgpr_count = *kernel_sgpr_count;
       // Given liveness, clobbers, and calling convention, select registers
       // for trampoline and determine how big the trampoline will be
       if (!TrampolineBuilder::plan_probe_call(plan, probe.cc, live, summary->ordinary_clobbers,
@@ -652,14 +880,87 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         continue;
       }
 
-      // Check that we do not need to spill registers since that is not
-      // implemented yet.
+      // Spill any register that is both live at the anchor and clobbered by the
+      // instrumentation envelope/probe. VGPRs spill to the kernel's per-lane
+      // scratch; SGPRs bridge through a dead VGPR; AccVGPRs and over-cap sites
+      // fail closed inside the planners.
       const RegisterSet clobbers =
           compute_instrumentation_clobbers(*summary, plan.builder_clobbers);
       const RegisterSet spill = compute_spill_set(live, clobbers);
-      if (!check_spill_policy(spill, SpillPolicy::NoSpillsSupported, &err)) {
-        result.errors.push_back(std::move(err));
-        continue;
+      if (!spill.none()) {
+        // Single-kernel assumption: spilling needs exactly one kernel descriptor
+        // with non-zero fixed scratch to grow.
+        if (kernels.size() != 1 || kernels.front().descriptor.private_segment_fixed_size == 0) {
+          result.errors.push_back(
+              "probe call at anchor_offset " + std::to_string(site.anchor_offset) +
+              " must spill live registers, but the code object does not have a single kernel with "
+              "fixed scratch to spill into");
+          continue;
+        }
+        const KernelDescriptorInfo &kernel = kernels.front();
+        if (!spills) {
+          // Cap total per-lane scratch at the widest slot the scratch offset field
+          // can encode, so the SpillManager limit and the per-instruction offset
+          // guards in the planners agree.
+          const uint32_t scratch_limit = max_scratch_offset_bytes(arch_) + SpillManager::kSlotBytes;
+          spills.emplace(kernel.descriptor.private_segment_fixed_size, scratch_limit);
+          spill_descriptor_file_offset = kernel.descriptor_file_offset;
+        }
+        // Split by class: VGPRs go straight to scratch; SGPRs bridge through a dead
+        // VGPR; AccVGPRs go straight to scratch via the CDNA `acc` bit (no bridge).
+        RegisterSet vgpr_spill = spill;
+        vgpr_spill.clear_class(RegClass::SGPR);
+        vgpr_spill.clear_class(RegClass::ACC_VGPR);
+        RegisterSet sgpr_spill = spill;
+        sgpr_spill.clear_class(RegClass::VGPR);
+        sgpr_spill.clear_class(RegClass::ACC_VGPR);
+        RegisterSet acc_spill = spill;
+        acc_spill.clear_class(RegClass::VGPR);
+        acc_spill.clear_class(RegClass::SGPR);
+        if (!plan_vgpr_spills(vgpr_spill, *spills, arch_, plan.vgpr_spills, &err)) {
+          result.errors.push_back(std::move(err));
+          continue;
+        }
+        const uint32_t granulated_vgpr_count =
+            AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc1,
+                            rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+        // The descriptor encoding granule is wave-size dependent on RDNA (8 for
+        // Wave32, 4 for Wave64); using the Wave32 granule for a Wave64 kernel would
+        // overcount the allocation and let the SGPR bridge scan pick an unallocated
+        // VGPR. Share the wave-aware decoder with DBT so the two cannot diverge.
+        const uint32_t kernel_vgpr_count =
+            (granulated_vgpr_count + 1) *
+            descriptor_vgpr_granularity_for_wavefront(
+                arch_, kernel_wavefront_size(arch_, kernel.descriptor));
+        // On a unified-allocation arch the VGPR allocation splits at the ACCUM_OFFSET
+        // base ((encoded+1)*4) into an ordinary-VGPR prefix and the AccVGPR window.
+        // Arches without that split (non-CDNA, and CDNA1/gfx908 whose AGPRs allocate
+        // separately) have no ACCUM_OFFSET field, so the whole allocation is ordinary.
+        const uint32_t accum_base =
+            arch_has_unified_vgpr_allocation(arch_)
+                ? (AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc3,
+                                   rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+                   1) *
+                      4
+                : kernel_vgpr_count;
+        // The SGPR bridge must be an ordinary VGPR: an index in the accumulator
+        // window would alias an AGPR that is not part of acc_spills.
+        const uint32_t ordinary_vgpr_bound = std::min(kernel_vgpr_count, accum_base);
+        if (!sgpr_spill.none() &&
+            !plan_sgpr_spills(sgpr_spill, live, plan.vgpr_spills, ordinary_vgpr_bound, *spills,
+                              arch_, plan.sgpr_spills, plan.spill_bridge_vgpr, &err)) {
+          result.errors.push_back(std::move(err));
+          continue;
+        }
+        // AccVGPRs (CDNA only): reject an index past the allocated AGPR window.
+        if (!acc_spill.none()) {
+          const uint32_t acc_count =
+              kernel_vgpr_count > accum_base ? kernel_vgpr_count - accum_base : 0;
+          if (!plan_acc_spills(acc_spill, acc_count, *spills, arch_, plan.acc_spills, &err)) {
+            result.errors.push_back(std::move(err));
+            continue;
+          }
+        }
       }
 
       // Get trampoline from TrampolineBuilder
@@ -695,6 +996,18 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // All-or-nothing: bail before mutating the patcher if any site failed.
   if (!result.errors.empty())
     return result;
+
+  // Grow the spilled kernel's per-lane scratch to cover its DBI spill zone. Done
+  // before replace_text so the edit lands at the descriptor's original file offset;
+  // replace_text then relocates the descriptor with the rest of the ELF.
+  if (spills) {
+    if (!patcher.set_private_segment_fixed_size(spill_descriptor_file_offset,
+                                                spills->total_private_bytes())) {
+      result.errors.emplace_back(
+          "failed to grow private_segment_fixed_size for the spilled kernel descriptor");
+      return result;
+    }
+  }
 
   // Every per-site validation, branch-range check, and trampoline-byte
   // construction has succeeded up to this point. Assemble the new .text in one

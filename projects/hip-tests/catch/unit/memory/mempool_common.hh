@@ -309,7 +309,10 @@ class streamMemAllocTest {
   explicit streamMemAllocTest(int N, bool threadSafe = false)
       : size(N), threadSafe(threadSafe) {
     byte_size = N*sizeof(int);
+    A_h = B_h = C_h = nullptr;
+    A_d = B_d = C_d = nullptr;
   }
+  void setThreadSafe(bool ts) { threadSafe = ts; }
   // Create host buffers and initialize them with input data
   void createHostBufferWithData() {
     A_h = reinterpret_cast<int*>(malloc(byte_size));
@@ -318,6 +321,11 @@ class streamMemAllocTest {
     REQUIRE_OPT_THREAD(threadSafe, B_h != nullptr);
     C_h = reinterpret_cast<int*>(malloc(byte_size));
     REQUIRE_OPT_THREAD(threadSafe, C_h != nullptr);
+    // In threadSafe mode REQUIRE_THREAD records the failure but does not abort
+    // execution, so guard against dereferencing a failed allocation below.
+    if ((A_h == nullptr) || (B_h == nullptr) || (C_h == nullptr)) {
+      return;
+    }
     // set data to host
     for (int i = 0; i < size; i++) {
       A_h[i] = 2*i + 1;  // Odd
