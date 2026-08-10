@@ -17,6 +17,7 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/dbt/encoding_translator.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_cdna3.h"
@@ -57,7 +58,6 @@
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/dbt/waitcnt_translator.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
@@ -10459,9 +10459,8 @@ TEST(BinaryTranslatorE2E, Gfx1250EmulatesCvtF32Fp8E5m3ForA0) {
   // Assert the value-defining literal constants of the emitted sequence, not just
   // mnemonic counts: an off-by-one in the NaN threshold, exponent clamp, or the
   // F16/F32 reconstruction constants would otherwise pass. These constants are
-  // distinctive, so scan the raw translated text words for each. (Reading them from
-  // the raw text is robust; a decoded VOP3's raw_encoding() only spans its 2-dword
-  // base and does not expose the trailing literal.)
+  // distinctive, so scan the raw translated text words for each. This checks the
+  // emitted bytes directly without coupling the test to decoded instruction objects.
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
@@ -16207,6 +16206,234 @@ TEST(BinaryTranslatorE2E, Gfx1250LeavesCompactVgprMatchingSelectorNumberUnchange
     const auto out = translate_gfx1250_b0_to_a0_words({source_word});
     ASSERT_GE(out.size(), 2u);
     EXPECT_EQ(out[0], source_word) << "an ordinary VGPR must be copied verbatim";
+  }
+}
+
+// A literal source reports the literal's own value as its encoding value, so
+// the constants 230 and 231 collide numerically with the two selectors. Reading
+// the operand instead of the encoding field mistakes such a constant for the
+// base, and rewriting the field then erases the marker that says a literal
+// follows -- stranding its dword as a standalone illegal instruction.
+//
+// The first VOP2 case is the RCCL all_reduce_perf kernel that first exposed
+// this: `v_mul_u64_e32 v[10:11], 0xe7, v[0:1]`, words 0x541400ff 0x000000e7.
+TEST(BinaryTranslatorE2E, Gfx1250LeavesLiteralMatchingSelectorNumberUnchangedForA0) {
+  struct LiteralCase {
+    const char *name;
+    std::vector<uint32_t> words;
+  };
+  constexpr uint32_t kLiteralSelector = 255;
+  constexpr uint32_t kLiteral64Selector = 254;
+  const std::vector<LiteralCase> cases = {
+      // The reported reproducer, and its twin on the other colliding constant.
+      {"vop2 literal 0xe7",
+       {gfx1250::build_vop2(gfx1250::kVMulU64Vop2,
+                            {.src0 = kLiteralSelector, .vsrc1 = 0, .vdst = 10})[0],
+        kFlatScratchBaseHiSelector}},
+      {"vop2 literal 0xe6",
+       {gfx1250::build_vop2(gfx1250::kVMulU64Vop2,
+                            {.src0 = kLiteralSelector, .vsrc1 = 0, .vdst = 10})[0],
+        kFlatScratchBaseLoSelector}},
+      // The scalar path rewrites the selector in place, so a stale literal there
+      // keeps the instruction's size and changes only what it reads: a silent
+      // wrong answer alongside the orphaned dword.
+      {"sop1 literal 0xe7",
+       {gfx1250::build_sop1(gfx1250::kSMovB64Sop1,
+                            {.ssrc0 = static_cast<uint8_t>(kLiteralSelector), .sdst = 0})[0],
+        kFlatScratchBaseHiSelector}},
+      // A 64-bit literal reports only its low dword as the encoding value, so it
+      // collides the same way while stranding two dwords rather than one.
+      {"vop2 literal64 low dword 0xe7",
+       {gfx1250::build_vop2(gfx1250::kVMulU64Vop2,
+                            {.src0 = kLiteral64Selector, .vsrc1 = 0, .vdst = 10})[0],
+        kFlatScratchBaseHiSelector, 1u}},
+  };
+  for (const LiteralCase &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const auto out = translate_gfx1250_b0_to_a0_words(test_case.words);
+    ASSERT_GE(out.size(), test_case.words.size() + 1u);
+
+    for (size_t i = 0; i < test_case.words.size(); ++i) {
+      EXPECT_EQ(out[i], test_case.words[i])
+          << "word " << i << " of a literal-source instruction must be copied verbatim";
+    }
+    EXPECT_EQ(out.size(), test_case.words.size() + 1u)
+        << "no prologue may be prepended for a literal that is not the selector";
+  }
+}
+
+// The cases above all put their source fields in word 0. VOP3 puts them in word
+// 1 and its literal in word 2, so it is the only layout where the field being
+// rewritten and the literal that must survive live in different words.
+//
+// Both sources here read 231: src0 genuinely names the selector, while src1 is
+// an ordinary literal that merely collides with its number. The two must be
+// treated differently in a single instruction -- src0 repointed at the borrowed
+// pair, src1 and its trailing dword untouched.
+TEST(BinaryTranslatorE2E, Gfx1250RewritesVop3SelectorButKeepsCollidingLiteralForA0) {
+  constexpr uint32_t kLiteralSelector = 255;
+  const auto source = gfx1250::build_vop3(
+      gfx1250::kVMulU64Vop3,
+      {.vdst = 10, .src0 = kFlatScratchBaseHiSelector, .src1 = kLiteralSelector});
+  const auto out =
+      translate_gfx1250_b0_to_a0_words({source[0], source[1], kFlatScratchBaseHiSelector});
+  ASSERT_GE(out.size(), 5u) << "the rewrite prepends one scalar move and keeps four words";
+
+  ASSERT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
+  const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+  EXPECT_EQ(pair_base % 2u, 0u) << "a 64-bit scalar operand must be even-aligned";
+
+  EXPECT_EQ(out[1], source[0]) << "vdst, opcode, and modifiers are unchanged";
+  EXPECT_EQ(out[2] & 0x1ffu, pair_base) << "the real selector must name the borrowed pair";
+  EXPECT_EQ((out[2] >> 9) & 0x1ffu, kLiteralSelector)
+      << "the literal marker must survive, or its dword becomes an instruction";
+  EXPECT_EQ(out[3], kFlatScratchBaseHiSelector) << "the literal dword itself is unchanged";
+  EXPECT_EQ(out.size(), 5u) << "only the prologue is added";
+}
+
+namespace {
+
+/// @brief Mnemonics reported once per translation for a deferred family, in the
+/// order the translation reported them.
+///
+/// The report is an ordinary translation diagnostic, so it reaches the library
+/// callback and the hotswap renderer alongside every other one. Reading it back
+/// off the result needs no stream redirection.
+[[nodiscard]] std::vector<std::string>
+deferred_family_reports(const rocjitsu::TranslatedCodeObject &result) {
+  std::vector<std::string> reported;
+  for (const auto &diagnostic : result.diagnostics) {
+    if (diagnostic.severity == rocjitsu::DiagnosticSeverity::Warning &&
+        diagnostic.kind == rocjitsu::DiagnosticKind::Legalization &&
+        diagnostic.message.find("target-specific handling is not yet implemented") !=
+            std::string::npos) {
+      reported.push_back(diagnostic.mnemonic);
+    }
+  }
+  return reported;
+}
+
+/// @brief Translate a single-kernel gfx1250 object with the B0-to-A0 profile.
+[[nodiscard]] rocjitsu::TranslatedCodeObject
+translate_gfx1250_b0_to_a0_result(rocjitsu::BinaryTranslator &translator,
+                                  std::vector<uint32_t> words) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  words.push_back(kGfx1250SEndpgm);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  auto result = translator.translate(source);
+  EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  return result;
+}
+
+[[nodiscard]] rocjitsu::BinaryTranslator make_gfx1250_b0_to_a0_translator() {
+  return rocjitsu::BinaryTranslator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+}
+
+/// @brief An s_monitor_sleep, whose A0 handling is deferred (DEGFXMI400-12268).
+[[nodiscard]] uint32_t gfx1250_deferred_word() {
+  return gfx1250::build_sopp(gfx1250::kSMonitorSleepSopp, {.simm16 = 1})[0];
+}
+
+} // namespace
+
+// A deferred family passes through unchanged and is reported so the gap stays
+// visible. The report describes the mnemonic, not the site, so repeating it per
+// instruction adds nothing: one RCCL all_reduce run emitted 104,831 copies.
+TEST(BinaryTranslatorE2E, Gfx1250ReportsOncePerDeferredMnemonicWithinOneTranslation) {
+  const uint32_t deferred = gfx1250_deferred_word();
+  auto translator = make_gfx1250_b0_to_a0_translator();
+  const auto result = translate_gfx1250_b0_to_a0_result(
+      translator, {deferred, deferred, deferred, deferred, deferred});
+
+  EXPECT_EQ(deferred_family_reports(result), (std::vector<std::string>{"s_monitor_sleep"}))
+      << "five deferred instructions must produce one diagnostic, not five";
+}
+
+// Distinct deferred mnemonics are distinct gaps, so suppressing one must not
+// suppress another.
+TEST(BinaryTranslatorE2E, Gfx1250ReportsSeparatelyForEachDeferredMnemonic) {
+  const uint32_t deferred = gfx1250_deferred_word();
+  const uint32_t barrier_state =
+      gfx1250::build_sop1(gfx1250::kSGetBarrierStateSop1, {.ssrc0 = 0, .sdst = 0})[0];
+  auto translator = make_gfx1250_b0_to_a0_translator();
+  const auto result = translate_gfx1250_b0_to_a0_result(
+      translator, {deferred, barrier_state, deferred, barrier_state});
+
+  auto reported = deferred_family_reports(result);
+  std::ranges::sort(reported);
+  EXPECT_EQ(reported, (std::vector<std::string>{"s_get_barrier_state", "s_monitor_sleep"}));
+}
+
+// The suppression is scoped to one translation. Process-wide state would let
+// the first code object that uses a deferred mnemonic hide the same gap in
+// every object loaded afterwards, which is exactly how HotSwap runs: many code
+// objects translated in one process.
+TEST(BinaryTranslatorE2E, Gfx1250ReportsAgainForEachSeparateTranslation) {
+  const uint32_t deferred = gfx1250_deferred_word();
+  auto first_translator = make_gfx1250_b0_to_a0_translator();
+  auto second_translator = make_gfx1250_b0_to_a0_translator();
+  const auto first = translate_gfx1250_b0_to_a0_result(first_translator, {deferred, deferred});
+  const auto second = translate_gfx1250_b0_to_a0_result(second_translator, {deferred, deferred});
+
+  EXPECT_EQ(deferred_family_reports(first), (std::vector<std::string>{"s_monitor_sleep"}));
+  EXPECT_EQ(deferred_family_reports(second), (std::vector<std::string>{"s_monitor_sleep"}))
+      << "a second code object must report the gap independently";
+}
+
+// A translator instance reused across code objects must behave the same way,
+// since the state lives on the translator rather than in a local.
+TEST(BinaryTranslatorE2E, Gfx1250ReportsAgainWhenOneTranslatorIsReused) {
+  const uint32_t deferred = gfx1250_deferred_word();
+  auto translator = make_gfx1250_b0_to_a0_translator();
+  const auto first = translate_gfx1250_b0_to_a0_result(translator, {deferred, deferred});
+  const auto second = translate_gfx1250_b0_to_a0_result(translator, {deferred, deferred});
+
+  EXPECT_EQ(deferred_family_reports(first), (std::vector<std::string>{"s_monitor_sleep"}));
+  EXPECT_EQ(deferred_family_reports(second), (std::vector<std::string>{"s_monitor_sleep"}))
+      << "translate() must reset the per-translation suppression state";
+}
+
+// The report points at the first instruction of the family so a reader can find
+// one, and carries the mnemonic so callback consumers can group by gap.
+TEST(BinaryTranslatorE2E, Gfx1250DeferredFamilyReportCarriesOffsetAndMnemonic) {
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  const uint32_t deferred = gfx1250_deferred_word();
+  auto translator = make_gfx1250_b0_to_a0_translator();
+  const auto result =
+      translate_gfx1250_b0_to_a0_result(translator, {kGfx1250SNop, deferred, deferred});
+
+  const auto reported = std::ranges::find_if(result.diagnostics, [](const auto &diagnostic) {
+    return diagnostic.mnemonic == "s_monitor_sleep";
+  });
+  ASSERT_NE(reported, result.diagnostics.end());
+  EXPECT_EQ(reported->severity, rocjitsu::DiagnosticSeverity::Warning);
+  EXPECT_EQ(reported->guest_offset, std::optional<uint64_t>(sizeof(uint32_t)))
+      << "the offset must name the first deferred instruction, not the s_nop before it";
+}
+
+// s_sleep and s_sleep_var behave identically on A0 and B0. The only sleep-family
+// A0 erratum, DEGFXMI400-12268, is specific to s_monitor_sleep('forever') with
+// MWAIT=0. Copying a plain sleep through is therefore the correct translation,
+// not an unimplemented one, and reporting it drowned the reports that do name a
+// real gap: one RCCL all_reduce run emitted 104,831 of them.
+TEST(BinaryTranslatorE2E, Gfx1250CopiesPlainSleepWithoutReportingAGap) {
+  const std::vector<uint32_t> sleeps = {
+      gfx1250::build_sopp(gfx1250::kSSleepSopp, {.simm16 = 1})[0],
+      gfx1250::build_sop1(gfx1250::kSSleepVarSop1, {.ssrc0 = 0})[0],
+  };
+  auto translator = make_gfx1250_b0_to_a0_translator();
+  const auto result = translate_gfx1250_b0_to_a0_result(translator, sleeps);
+
+  EXPECT_TRUE(deferred_family_reports(result).empty())
+      << "a plain sleep translates correctly and must not be reported as a gap";
+  for (const auto &diagnostic : result.diagnostics) {
+    EXPECT_EQ(diagnostic.severity, rocjitsu::DiagnosticSeverity::Warning) << diagnostic.message;
   }
 }
 

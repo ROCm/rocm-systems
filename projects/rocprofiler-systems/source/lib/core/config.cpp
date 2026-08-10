@@ -843,7 +843,9 @@ configure_settings(bool _init)
         std::string, env_vars::SAMPLING_GPUS,
         "Devices to query when ROCPROFSYS_USE_AMD_SMI=ON. Values should be separated by "
         "commas and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies "
-        "'all' and 'none' suppresses all GPU sampling",
+        "'all' and 'none' suppresses all GPU sampling. The "
+        "selection is further restricted to GPUs visible to the ROCm runtime "
+        "(ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES)",
         std::string{ "all" }, "amd_smi", "rocm", "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(
