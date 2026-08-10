@@ -328,6 +328,7 @@ if(BUILD_TESTS)
       device/TestAsyncCopy.cpp
       device/TestLdsTransfer.cpp
       device/GinDeviceTests.cpp
+      device/SymmetricAccumTypeTests.cpp
       device/GinAnvilIpcDevice_test.cpp
       device/HierarchicalShuffleTests.cpp
       DeviceApiTests.cpp
