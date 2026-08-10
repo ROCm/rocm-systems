@@ -382,7 +382,8 @@ def _build_kernel_and_l0(
     )
     tcp_panel = Panel(
         _stack_metrics(
-            metric_line("Hit Rate", m["tcp_hit"], "%", COLORS["hit"]),
+            f"{metric_line('Hit Rate', m['tcp_hit'], '%', COLORS['hit'])}\n"
+            f"[dim]{bar(m['tcp_hit'])}[/dim]",
             tcp_bw_line,
         ),
         title=f"[bold {c_bl}]GL0 (TCP Cache)[/bold {c_bl}]",
@@ -394,8 +395,10 @@ def _build_kernel_and_l0(
     # SQC panel
     sqc_panel = Panel(
         _stack_metrics(
-            metric_line("ICache Hit", m["icache_hit"], "%", COLORS["hit"]),
-            metric_line("DCache Hit", m["dcache_hit"], "%", COLORS["hit"]),
+            f"{metric_line('ICache Hit Rate', m['icache_hit'], '%', COLORS['hit'])}\n"
+            f"[dim]{bar(m['icache_hit'])}[/dim]",
+            f"{metric_line('DCache Hit Rate', m['dcache_hit'], '%', COLORS['hit'])}\n"
+            f"[dim]{bar(m['dcache_hit'])}[/dim]",
         ),
         title=f"[bold {c_bl}]SQC[/bold {c_bl}]",
         border_style=c_bl,
