@@ -46,7 +46,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from typing import Dict, Optional, Set
+from typing import Dict, List, Optional, Set
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERATE_PY = os.path.join(HERE, "generate.py")
@@ -180,8 +180,10 @@ def _generate(tmpdir: str, rocshmem: str) -> None:
 
     argv layout matches src/CMakeLists.txt:
       gensrc, IFC, <unused>, local_gpu_only, rocshmem, ONLY_FUNCS
-    local_gpu_only=OFF keeps the count deterministic and GPU-free (no rocminfo);
-    an empty ONLY_FUNCS makes the generator use its real default shipping set.
+    local_gpu_only=OFF keeps the count deterministic and GPU-free (no rocminfo)
+    and yields the full MULTI-ARCH superset of kernels (arch-guarded variants
+    included); a BUILD_LOCAL_GPU_TARGET_ONLY=ON build legitimately emits fewer.
+    An empty ONLY_FUNCS makes the generator use its real default shipping set.
     """
     subprocess.run(
         [sys.executable, GENERATE_PY, tmpdir, "OFF", "OFF", "OFF", rocshmem, ""],
@@ -191,66 +193,82 @@ def _generate(tmpdir: str, rocshmem: str) -> None:
     )
 
 
-def _parse_config(test, tmpdir):
+def _parse_config(testcase, tmpdir):
     """Parse specialized/*.cpp; enforce exactly one DEFINE per file.
 
-    Returns (records, num_files). The per-file check keeps PARSER breakage (regex
-    no longer matches the emitted format) distinct from a legitimate baseline
-    move: a file with zero matches fails here with a "format changed" message
-    rather than silently lowering the count.
+    Returns (records, num_files, manifest_count). The per-file check keeps PARSER
+    breakage (regex no longer matches the emitted format) distinct from a
+    legitimate baseline move: a file with zero matches fails here with a "format
+    changed" message rather than silently lowering the count. manifest_count is an
+    INDEPENDENT tally from specialized_files.txt (generate.py's device-linker
+    contract, built from a different code path than the .cpp files) for cross-check.
     """
     spec_dir = os.path.join(tmpdir, "specialized")
-    test.assertTrue(os.path.isdir(spec_dir), "generator produced no specialized/ dir")
+    testcase.assertTrue(os.path.isdir(spec_dir), "generator produced no specialized/ dir")
     files = sorted(glob.glob(os.path.join(spec_dir, "*.cpp")))
-    test.assertTrue(files, "generator produced no specialized kernel files")
+    testcase.assertTrue(files, "generator produced no specialized kernel files")
 
     records = []
     for fp in files:
         with open(fp) as f:
             text = f.read()
         matches = list(_DEFINE_RE.finditer(text))
-        test.assertEqual(
+        testcase.assertEqual(
             len(matches), 1,
             "parser integrity: expected exactly one DEFINE_ncclDevFunc in %s, found "
             "%d -- generate.py output format likely changed; update _DEFINE_RE "
             "(this is NOT a kernel-count change)" % (os.path.basename(fp), len(matches)),
         )
         records.append(matches[0].groupdict())
-    return records, len(files)
+
+    manifest = os.path.join(tmpdir, "specialized_files.txt")
+    testcase.assertTrue(
+        os.path.isfile(manifest),
+        "generator did not write specialized_files.txt (device-linker contract)",
+    )
+    with open(manifest) as f:
+        manifest_count = sum(1 for line in f if line.strip())
+
+    return records, len(files), manifest_count
 
 
-def _per_coll(records):
-    counts = {}
+def _per_coll(records: List[Dict[str, str]]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
     for r in records:
         counts[r["coll"]] = counts.get(r["coll"], 0) + 1
     return counts
 
 
-def _dims(records):
+def _dims(records: List[Dict[str, str]]) -> Dict[str, Set[str]]:
     return {dim: {r[dim] for r in records} for dim in _DIMENSIONS}
 
 
 class MainGeneratorKernelCountTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not os.path.exists(GENERATE_PY):
-            raise unittest.SkipTest("generate.py not found next to test")
+        # generate.py is co-located with this test; its absence is a real error,
+        # not a reason to skip (a skipped ctest reports PASS and hides breakage).
+        assert os.path.exists(GENERATE_PY), "generate.py not found next to test: %s" % GENERATE_PY
+        # Register cleanup right after each mkdtemp so a failure in the subsequent
+        # _generate() still removes the temp dir (tearDownClass is skipped when
+        # setUpClass raises).
         cls._dir_off = tempfile.mkdtemp(prefix="rccl_kcount_off_")
+        cls.addClassCleanup(shutil.rmtree, cls._dir_off, ignore_errors=True)
         cls._dir_on = tempfile.mkdtemp(prefix="rccl_kcount_on_")
+        cls.addClassCleanup(shutil.rmtree, cls._dir_on, ignore_errors=True)
         _generate(cls._dir_off, "OFF")
         _generate(cls._dir_on, "ON")
 
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls._dir_off, ignore_errors=True)
-        shutil.rmtree(cls._dir_on, ignore_errors=True)
-
     def _check(self, tmpdir, label, exp_total, exp_per_coll, exp_dims):
-        records, num_files = _parse_config(self, tmpdir)
-        # Parser integrity: one DEFINE per file => records track files exactly.
+        records, num_files, manifest_count = _parse_config(self, tmpdir)
+        # Independent cross-check: the .cpp-parsed record count must agree with
+        # specialized_files.txt (a separate generator code path). This is the
+        # genuine integrity check -- unlike files-vs-records, which is invariant
+        # given the one-DEFINE-per-file assertion above.
         self.assertEqual(
-            num_files, len(records),
-            "parser integrity: %d specialized files but %d parsed kernels" % (num_files, len(records)),
+            manifest_count, len(records),
+            "generator contract: specialized_files.txt lists %d kernels but %d were "
+            "parsed from specialized/*.cpp" % (manifest_count, len(records)),
         )
         report = diff_report(
             label,
@@ -268,13 +286,19 @@ class MainGeneratorKernelCountTest(unittest.TestCase):
         self._check(self._dir_on, "rocshmem=ON", EXPECTED_TOTAL_ON,
                     EXPECTED_PER_COLL_ON, EXPECTED_DIMS_ON)
 
-    def test_rocshmem_on_adds_only_gda_collectives(self):
-        # Sanity: ON is a strict superset of OFF, differing solely by the two GDA
-        # collectives. Guards against ON accidentally perturbing other kernels.
-        self.assertEqual(EXPECTED_TOTAL_ON - EXPECTED_TOTAL_OFF,
-                         EXPECTED_PER_COLL_ON["AlltoAllGda"] + EXPECTED_PER_COLL_ON["AlltoAllvGda"])
-        self.assertEqual(set(EXPECTED_PER_COLL_ON) - set(EXPECTED_PER_COLL_OFF),
-                         {"AlltoAllGda", "AlltoAllvGda"})
+    def test_rocshmem_on_is_off_plus_gda(self):
+        # Generator-backed (not just constant self-consistency): ON must equal OFF
+        # plus exactly the two GDA collectives, with every shared collective's
+        # count unchanged. Catches ON accidentally perturbing non-GDA kernels.
+        off = _per_coll(_parse_config(self, self._dir_off)[0])
+        on = _per_coll(_parse_config(self, self._dir_on)[0])
+        self.assertEqual(set(on) - set(off), {"AlltoAllGda", "AlltoAllvGda"})
+        self.assertEqual(set(off) - set(on), set())
+        for coll, n in off.items():
+            self.assertEqual(on.get(coll), n,
+                             "collective %s changed between rocSHMEM OFF and ON" % coll)
+        self.assertEqual(sum(on.values()) - sum(off.values()),
+                         on["AlltoAllGda"] + on["AlltoAllvGda"])
 
 
 class DiffReportHelperTest(unittest.TestCase):

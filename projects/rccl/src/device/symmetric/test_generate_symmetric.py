@@ -23,7 +23,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from typing import Dict, Optional, Set
+from typing import Dict, List, Optional, Set
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERATE_PY = os.path.join(HERE, "generate.py")
@@ -152,14 +152,14 @@ def _generate(tmpdir: str) -> None:
     )
 
 
-def _per_coll(records):
-    counts = {}
+def _per_coll(records: List[Dict[str, Optional[str]]]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
     for r in records:
         counts[r["coll"]] = counts.get(r["coll"], 0) + 1
     return counts
 
 
-def _dims(records):
+def _dims(records: List[Dict[str, Optional[str]]]) -> Dict[str, Set[str]]:
     # red/ty are None for non-reduction kernels; exclude those from the value-set.
     return {dim: {r[dim] for r in records if r[dim] is not None} for dim in _DIMENSIONS}
 
@@ -167,16 +167,16 @@ def _dims(records):
 class SymmetricGeneratorKernelCountTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not os.path.exists(GENERATE_PY):
-            raise unittest.SkipTest("generate.py not found next to test")
+        # generate.py is co-located with this test; its absence is a real error,
+        # not a reason to skip (a skipped ctest reports PASS and hides breakage).
+        assert os.path.exists(GENERATE_PY), "generate.py not found next to test: %s" % GENERATE_PY
         cls._dir = tempfile.mkdtemp(prefix="rccl_symkcount_")
+        # Register cleanup right after mkdtemp so a failure in _generate() still
+        # removes the temp dir (tearDownClass is skipped when setUpClass raises).
+        cls.addClassCleanup(shutil.rmtree, cls._dir, ignore_errors=True)
         _generate(cls._dir)
         with open(os.path.join(cls._dir, "sym_kernels_host.cc")) as f:
             cls.host = f.read()
-
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls._dir, ignore_errors=True)
 
     def _kernel_count_literal(self):
         m = _COUNT_RE.search(self.host)
@@ -258,6 +258,27 @@ class SymmetricNameParsingTest(unittest.TestCase):
         self.assertEqual(rec["coll"], "AllReduce")
         self.assertEqual(rec["algo"], "AGxLL_R")
 
+    # The parser-integrity guarantee ("raise, never silently mis-parse a renamed
+    # symbol") only holds if the ValueError branches actually fire. Exercise them.
+    def test_missing_prefix_raises(self):
+        self.assertRaises(ValueError, parse_kernel_name, "ncclFooBar_AllGather_ST")
+
+    def test_unknown_collective_raises(self):
+        self.assertRaises(ValueError, parse_kernel_name, "ncclSymkDevKernel_Scatter_ST")
+
+    def test_reduction_without_anchored_red_ty_raises(self):
+        # Known reduction coll but no trailing _<red>_<ty> to anchor on.
+        self.assertRaises(
+            ValueError, parse_kernel_name, "ncclSymkDevKernel_ReduceScatter_RSxLD_AGxST")
+
+    def test_reduction_with_unknown_type_raises(self):
+        self.assertRaises(
+            ValueError, parse_kernel_name, "ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f4")
+
+    def test_empty_algo_raises(self):
+        # Non-reduction collective with no algorithm token at all.
+        self.assertRaises(ValueError, parse_kernel_name, "ncclSymkDevKernel_AllGather")
+
 
 class SymmetricDiffReportHelperTest(unittest.TestCase):
     def test_none_when_identical(self):
@@ -274,6 +295,13 @@ class SymmetricDiffReportHelperTest(unittest.TestCase):
         self.assertIn("AllReduce 10 -> 15 (+5)", report)
         self.assertIn("gained ['f4']", report)
         self.assertIn("lost ['f32']", report)
+
+    def test_new_collective_shows_as_delta_from_zero(self):
+        report = diff_report(
+            42, 44, {"AllReduce": 42}, {"AllReduce": 42, "AllToAll": 2},
+            {"coll": {"AllReduce"}}, {"coll": {"AllReduce", "AllToAll"}})
+        self.assertIn("AllToAll 0 -> 2 (+2)", report)
+        self.assertIn("gained ['AllToAll']", report)
 
 
 if __name__ == "__main__":
