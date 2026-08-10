@@ -24,7 +24,7 @@ from utils.analysis_orm import (
     Workload,
 )
 
-PC_SAMPLING_VIEW_COLUMNS = [
+PC_SAMPLING_SUMMARY_VIEW_COLUMNS = [
     "workload_id",
     "pid",
     "code_object_id",
@@ -136,12 +136,12 @@ def add_pc_sampling_state(
     return sample_state
 
 
-def fetch_pc_sampling_rows(session: Session) -> list[dict[str, object]]:
-    """Fetch sampling view rows with decoded stall-reason JSON."""
-    selected_columns = ", ".join(PC_SAMPLING_VIEW_COLUMNS)
+def fetch_pc_sampling_summary_rows(session: Session) -> list[dict[str, object]]:
+    """Fetch sampling summary rows with decoded stall-reason JSON."""
+    selected_columns = ", ".join(PC_SAMPLING_SUMMARY_VIEW_COLUMNS)
     rows = session.execute(
         text(
-            f"SELECT {selected_columns} FROM compute_pc_sampling_view "
+            f"SELECT {selected_columns} FROM compute_pc_sampling_summary_view "
             "ORDER BY workload_id, pid, code_object_id, kernel_uuid, offset, "
             "instruction, source"
         )
@@ -442,12 +442,12 @@ def test_get_or_create_type_dedups(db_session):
 
 
 # =============================================================================
-# pc_sampling view
+# pc_sampling_summary view
 # =============================================================================
 
 
-def test_pc_sampling_view_flattens_normalized_tables(db_session):
-    """The pc_sampling view flattens the normalized tables and rebuilds
+def test_pc_sampling_summary_view_flattens_normalized_tables(db_session):
+    """The summary view flattens the normalized tables and rebuilds
     stall_reason as a JSON dict."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
@@ -461,7 +461,7 @@ def test_pc_sampling_view_flattens_normalized_tables(db_session):
     Database.create_views()
     db_session.commit()
 
-    assert fetch_pc_sampling_rows(db_session) == [
+    assert fetch_pc_sampling_summary_rows(db_session) == [
         {
             "workload_id": workload.workload_id,
             "pid": 42,
@@ -506,7 +506,7 @@ def test_instruction_line_static_type_defaults_to_none(db_session):
     assert sample_state.instruction_line.instruction_type_lookup is None
 
 
-def test_pc_sampling_view_separates_states_by_code_object(db_session):
+def test_pc_sampling_summary_view_separates_states_by_code_object(db_session):
     """States under one kernel stay separate per code object."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
@@ -534,7 +534,7 @@ def test_pc_sampling_view_separates_states_by_code_object(db_session):
     Database.create_views()
     db_session.commit()
 
-    rows = fetch_pc_sampling_rows(db_session)
+    rows = fetch_pc_sampling_summary_rows(db_session)
 
     # The same offset in two code objects can be different code, so the rows are
     # never summed together.
@@ -560,7 +560,7 @@ def test_pc_sampling_view_separates_states_by_code_object(db_session):
         ),
     ],
 )
-def test_pc_sampling_view_keeps_display_identity_fields_separate(
+def test_pc_sampling_summary_view_keeps_display_identity_fields_separate(
     db_session,
     identity_field: str,
     first_value: str,
@@ -593,7 +593,7 @@ def test_pc_sampling_view_keeps_display_identity_fields_separate(
     Database.create_views()
     db_session.commit()
 
-    rows = fetch_pc_sampling_rows(db_session)
+    rows = fetch_pc_sampling_summary_rows(db_session)
 
     assert {(row[identity_field], row["count"]) for row in rows} == {
         (first_value, 3),
@@ -601,7 +601,7 @@ def test_pc_sampling_view_keeps_display_identity_fields_separate(
     }
 
 
-def test_pc_sampling_view_keeps_processes_separate_under_one_kernel(db_session):
+def test_pc_sampling_summary_view_keeps_processes_separate_under_one_kernel(db_session):
     """Identical states in two processes remain separate view rows."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
@@ -626,14 +626,14 @@ def test_pc_sampling_view_keeps_processes_separate_under_one_kernel(db_session):
     Database.create_views()
     db_session.commit()
 
-    rows = fetch_pc_sampling_rows(db_session)
+    rows = fetch_pc_sampling_summary_rows(db_session)
 
     # One kernel row, one view row per process.
     assert {row["kernel_uuid"] for row in rows} == {kernel.kernel_uuid}
     assert {(row["pid"], row["count"]) for row in rows} == {(42, 3), (99, 5)}
 
 
-def test_pc_sampling_view_keeps_different_workloads_separate(db_session):
+def test_pc_sampling_summary_view_keeps_different_workloads_separate(db_session):
     """Matching states for different workloads remain separate view rows."""
     first_workload = Workload(name="first", sub_name="s")
     second_workload = Workload(name="second", sub_name="s")
@@ -660,7 +660,7 @@ def test_pc_sampling_view_keeps_different_workloads_separate(db_session):
     Database.create_views()
     db_session.commit()
 
-    rows = fetch_pc_sampling_rows(db_session)
+    rows = fetch_pc_sampling_summary_rows(db_session)
 
     assert {(row["workload_id"], row["count"]) for row in rows} == {
         (first_workload.workload_id, 3),
@@ -668,7 +668,7 @@ def test_pc_sampling_view_keeps_different_workloads_separate(db_session):
     }
 
 
-def test_pc_sampling_view_keeps_host_trap_states_with_null_counts(db_session):
+def test_pc_sampling_summary_view_keeps_host_trap_states_with_null_counts(db_session):
     """Host-trap rows stay per code object with null issue, stall, and reason."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
@@ -694,7 +694,7 @@ def test_pc_sampling_view_keeps_host_trap_states_with_null_counts(db_session):
     Database.create_views()
     db_session.commit()
 
-    rows = fetch_pc_sampling_rows(db_session)
+    rows = fetch_pc_sampling_summary_rows(db_session)
 
     assert [row["code_object_id"] for row in rows] == [5, 6]
     assert [row["count"] for row in rows] == [3, 5]
@@ -704,7 +704,7 @@ def test_pc_sampling_view_keeps_host_trap_states_with_null_counts(db_session):
 
 
 @pytest.mark.parametrize("nullable_field", ["offset", "instruction", "source"])
-def test_pc_sampling_view_attaches_reasons_with_nullable_identity(
+def test_pc_sampling_summary_view_attaches_reasons_with_nullable_identity(
     db_session, nullable_field
 ):
     """Null identity fields keep their rows and their own stall reasons."""
@@ -742,7 +742,7 @@ def test_pc_sampling_view_attaches_reasons_with_nullable_identity(
     Database.create_views()
     db_session.commit()
 
-    rows = fetch_pc_sampling_rows(db_session)
+    rows = fetch_pc_sampling_summary_rows(db_session)
 
     assert [row["code_object_id"] for row in rows] == [5, 6]
     assert all(row[nullable_field] is None for row in rows)

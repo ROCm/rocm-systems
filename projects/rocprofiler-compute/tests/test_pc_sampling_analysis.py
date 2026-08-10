@@ -2145,10 +2145,15 @@ def test_pc_sampling_analyze_database_output(
             db_pc_sampling = pd.read_sql_query(
                 "SELECT kernel_name, offset, instruction, source, count, "
                 "count_issue, count_stall, stall_reason "
-                "FROM compute_pc_sampling_view "
+                "FROM compute_pc_sampling_summary_view "
                 "ORDER BY kernel_name, offset",
                 conn,
             )
+            pc_sampling_views = conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'view' AND name LIKE 'compute_pc_sampling%' "
+                "ORDER BY name"
+            ).fetchall()
             db_dispatch_count = conn.execute(
                 "SELECT dispatch_count FROM compute_kernel_view"
             ).fetchone()[0]
@@ -2169,6 +2174,7 @@ def test_pc_sampling_analyze_database_output(
         assert inst_sample_total == state_total
         assert len(db_pc_sampling) == 14
         assert db_pc_sampling["count"].sum() == 390
+        assert pc_sampling_views == [("compute_pc_sampling_summary_view",)]
         assert db_dispatch_count == 3
         assert db_code_object_process_ids == [(1429079,)]
     finally:
@@ -2198,7 +2204,9 @@ def test_pc_sampling_analyze_csv_output(
         assert code == 0
 
         csv_dir = workload_dir / csv_name
-        csv_pc_sampling = pd.read_csv(csv_dir / "pc_sampling.csv")
+        summary_csv = csv_dir / "pc_sampling_summary.csv"
+        assert summary_csv.is_file()
+        csv_pc_sampling = pd.read_csv(summary_csv)
         csv_kernel = pd.read_csv(csv_dir / "kernel.csv")
         assert len(csv_pc_sampling) == 14
         assert csv_pc_sampling["count"].sum() == 390
