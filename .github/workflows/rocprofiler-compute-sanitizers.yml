@@ -52,9 +52,28 @@ env:
   ROCM_PATH: "/opt/rocm"
 
 jobs:
+  ci_config:
+    name: Load CI config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      gfx950_runner: ${{ steps.runner.outputs.gfx950_runner }}
+    steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+          set-safe-directory: true
+
+      - name: Resolve runner labels
+        id: runner
+        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
   sanitizer:
     name: ${{ matrix.sanitizer.name }}
-    runs-on: linux-gfx950-1gpu-ccs-ossci-rocm
+    needs: ci_config
+    runs-on: ${{ needs.ci_config.outputs.gfx950_runner }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -164,7 +183,7 @@ jobs:
           python3 ./tools/run-ci.py \
             --name "ROCm/rocprofiler-compute-${{ github.ref_name }}-ubuntu-24.04-${{ matrix.sanitizer.name }}" \
             --actor "${{ github.actor }}" \
-            --site linux-gfx950-1gpu-ccs-ossci-rocm \
+            --site ${{ needs.ci_config.outputs.gfx950_runner }} \
             --mode Continuous \
             --build-jobs 16 \
             --repeat-until-pass 1 \

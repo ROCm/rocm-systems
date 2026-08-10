@@ -24,6 +24,7 @@ public:
 private:
   using DecodeFunc = std::unique_ptr<Instruction> (*)(const MachineInst *);
   static std::unique_ptr<Instruction> decodeInvalid(const MachineInst *opcode);
+  static std::unique_ptr<Instruction> decodeVopd(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeVCndmaskB32Vop2(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeVAddF64Vop2(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeVAddF32Vop2(const MachineInst *opcode);

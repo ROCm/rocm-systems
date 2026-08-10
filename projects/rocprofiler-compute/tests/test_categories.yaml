@@ -63,8 +63,10 @@ test_categories:
       - test_profile_misc
       - test_profile_path
       - test_pc_sampling
-      - test_profile_roofline_1
-      - test_profile_roofline_2
+      - test_profile_roofline_dir
+      - test_profile_roofline_bench
+      - test_profile_roofline_plot
+      - test_profile_roofline_validation
       - test_profile_section
       - test_profile_sets_func
       - test_profile_sort
@@ -131,8 +133,11 @@ test_categories:
       - test_profile_misc
       - test_profile_path
       - test_pc_sampling
-      - test_profile_roofline_1
-      - test_profile_roofline_2
+      - test_profile_roofline_dir
+      - test_profile_roofline_extra_options
+      - test_profile_roofline_bench
+      - test_profile_roofline_plot
+      - test_profile_roofline_validation
       - test_profile_section
       - test_profile_sets_func
       - test_profile_sort
@@ -199,8 +204,11 @@ test_categories:
       - test_profile_misc
       - test_profile_path
       - test_pc_sampling
-      - test_profile_roofline_1
-      - test_profile_roofline_2
+      - test_profile_roofline_dir
+      - test_profile_roofline_extra_options
+      - test_profile_roofline_bench
+      - test_profile_roofline_plot
+      - test_profile_roofline_validation
       - test_profile_section
       - test_profile_sets_func
       - test_profile_sort

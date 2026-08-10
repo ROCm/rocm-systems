@@ -30,6 +30,9 @@ on:
       - '!projects/rocprofiler-compute/docs/**'
       - '!projects/rocprofiler-compute/docker/**'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -41,6 +44,9 @@ env:
 jobs:
   distbuild:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     container:
       image: ghcr.io/rocm/rocprofiler-ubuntu:24.04-compute-ci-base
     name: Create distribution tarball
@@ -113,6 +119,8 @@ jobs:
 
   disttest:
     runs-on: ubuntu-latest
+    permissions:
+      packages: read
     container:
       image: ghcr.io/rocm/rocprofiler-ubuntu:24.04-compute-ci-base
     needs: [distbuild]
