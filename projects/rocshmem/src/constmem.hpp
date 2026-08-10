@@ -26,6 +26,8 @@
 #define LIBRARY_SRC_CONSTMEM_HPP_
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 
 #include "gda/gda_enums.hpp"
 #include "rocshmem/rocshmem_common.hpp"
