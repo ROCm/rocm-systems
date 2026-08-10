@@ -755,7 +755,13 @@ template <simdojo::ExecMode Mode, GpuIsa Isa>
 class IsaExecComputeUnit : public ExecComputeUnit<Mode> {
 public:
   using Vgpr = simdojo::VectorReg<Isa::WF_SIZE, uint32_t>;
+#if defined(RJ_VGPR_STORAGE_BACKEND_EAGER)
+  using VgprFile = simdojo::RegisterFile<Vgpr, simdojo::RegisterFileStorage::EAGER>;
+#elif defined(RJ_VGPR_STORAGE_BACKEND_SOFTWARE_LAZY)
+  using VgprFile = simdojo::RegisterFile<Vgpr, simdojo::RegisterFileStorage::SOFTWARE_LAZY>;
+#else
   using VgprFile = simdojo::RegisterFile<Vgpr, simdojo::RegisterFileStorage::DEMAND_PAGED>;
+#endif
 
   /// @brief Construct an ISA-parameterized compute unit.
   /// @param name Human-readable name (e.g., "cu0").

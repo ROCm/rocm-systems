@@ -226,14 +226,19 @@ following dimensions:
 | Register width            | 64 lanes × 4 bytes                         |
 | Complete vector backing   | 1,280 MiB                                  |
 
-`RegisterFile` keeps this backing contiguous so instruction execution uses a
-stable direct-addressing path. On Linux, untouched portions do not consume
-resident memory. Storage becomes resident when a wave first accesses it and
-is zeroed when that wave retires. On Linux, wholly covered pages are also
-returned to the operating system when reclamation succeeds. The portable
-backend uses aligned, eagerly zeroed storage and retains it until the register
-file is destroyed. Both backends present the same zero-initialized,
-stable-address interface.
+On Linux, `RegisterFile` keeps this backing contiguous and uses anonymous
+demand paging, so untouched portions do not consume resident memory. Storage
+becomes resident when a wave first accesses it and is zeroed when that wave
+retires. Wholly covered pages are also returned to the operating system when
+reclamation succeeds.
+
+The portable backend divides the same physical-register index space into
+fixed-size chunks. An untouched chunk is represented by a null entry and reads
+as zero; its storage is allocated and zero-initialized on the first mutable
+access. Retiring a wave releases wholly covered chunks and clears any shared
+boundary chunk. Both backends preserve stable addresses for individual
+registers over an allocation's lifetime, but only the Linux backend exposes a
+single pointer spanning the complete file.
 
 This is a functional storage model, not a model of a physical register file.
 In particular, filling all 32 simulator slots with high-pressure waves can

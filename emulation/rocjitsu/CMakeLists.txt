@@ -105,6 +105,31 @@ option(
     OFF
 )
 option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
+set(RJ_VGPR_STORAGE_BACKEND
+    "AUTO"
+    CACHE STRING
+    "VGPR backing policy (AUTO, EAGER, or SOFTWARE_LAZY)"
+)
+set_property(
+    CACHE RJ_VGPR_STORAGE_BACKEND
+    PROPERTY STRINGS AUTO EAGER SOFTWARE_LAZY
+)
+string(TOUPPER "${RJ_VGPR_STORAGE_BACKEND}" RJ_VGPR_STORAGE_BACKEND)
+set(_rj_vgpr_storage_backends AUTO EAGER SOFTWARE_LAZY)
+if(NOT RJ_VGPR_STORAGE_BACKEND IN_LIST _rj_vgpr_storage_backends)
+    message(
+        FATAL_ERROR
+        "RJ_VGPR_STORAGE_BACKEND must be AUTO, EAGER, or SOFTWARE_LAZY; got "
+        "'${RJ_VGPR_STORAGE_BACKEND}'."
+    )
+endif()
+if(RJ_VGPR_STORAGE_BACKEND STREQUAL "EAGER")
+    add_compile_definitions(RJ_VGPR_STORAGE_BACKEND_EAGER=1)
+elseif(RJ_VGPR_STORAGE_BACKEND STREQUAL "SOFTWARE_LAZY")
+    add_compile_definitions(RJ_VGPR_STORAGE_BACKEND_SOFTWARE_LAZY=1)
+endif()
+message(STATUS "VGPR storage backend: ${RJ_VGPR_STORAGE_BACKEND}")
+unset(_rj_vgpr_storage_backends)
 option(
     LTO
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
