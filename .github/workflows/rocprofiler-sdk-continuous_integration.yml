@@ -89,6 +89,7 @@ env:
   ENABLE_HIPFILE_BUILD: "true"
 
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
+  SUBMODULE_CACHE_WARM_ONLY: "true"
 
 
 jobs:
@@ -187,6 +188,7 @@ jobs:
         run: git submodule update --init --recursive --jobs 4 -- ${SUBMODULE_PATHS}
 
       - name: Clone ROCDecode
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' }}
         uses: actions/checkout@v6
         with:
           repository: 'ROCm/rocDecode'
@@ -195,6 +197,7 @@ jobs:
           path: 'rocDecode'
 
       - name: Clone ROCJPEG
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' }}
         uses: actions/checkout@v6
         with:
           repository: 'ROCm/rocJPEG'
@@ -203,6 +206,7 @@ jobs:
           path: 'rocJPEG'
 
       - name: Install requirements
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' }}
         timeout-minutes: 10
         shell: bash
         working-directory: projects/rocprofiler-sdk
@@ -216,6 +220,7 @@ jobs:
           python3 -m pip install -U --user cmake==3.25.0
 
       - name: Build ROCProfiler SDK Dependencies
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' }}
         uses: ./.github/actions/rocprofiler-sdk-util
         with:
           rocm-path: ${{ env.ROCM_PATH }}
@@ -233,12 +238,13 @@ jobs:
           ccache-variant: ccache
 
       - name: Enable PC Sampling
-        if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' && (contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a')) }}
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
       - name: Configure, Build, and Test
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' }}
         timeout-minutes: 30
         shell: bash
         working-directory: projects/rocprofiler-sdk
@@ -269,7 +275,7 @@ jobs:
             -E  "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
       - name: Install
-        if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
         timeout-minutes: 10
         working-directory: projects/rocprofiler-sdk
         run: |
@@ -278,7 +284,7 @@ jobs:
           cmake --build build --target install --parallel 16
 
       - name: Build Packaging
-        if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
         timeout-minutes: 10
         working-directory: projects/rocprofiler-sdk
         run: |
@@ -287,7 +293,7 @@ jobs:
           cmake --build build --target package --parallel 16
 
       - name: Test Install Build
-        if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
         timeout-minutes: 20
         shell: bash
         working-directory: projects/rocprofiler-sdk
@@ -303,7 +309,7 @@ jobs:
           ctest --test-dir build-tests   -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
 
       - name: Install Packages
-        if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
         timeout-minutes: 5
         shell: bash
         working-directory: projects/rocprofiler-sdk
@@ -318,7 +324,7 @@ jobs:
           for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v 'roctx|rocpd'); do dpkg --force-all -i ${i}; done;
 
       - name: Test Installed Packages
-        if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
         timeout-minutes: 20
         shell: bash
         working-directory: projects/rocprofiler-sdk
@@ -333,7 +339,7 @@ jobs:
           ctest --test-dir build-tests-deb   -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
 
       - name: Archive production artifacts
-        if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' && github.event_name == 'workflow_dispatch' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
         uses: actions/upload-artifact@v7
         with:
           name: installers-deb
@@ -414,6 +420,7 @@ jobs:
         run: git submodule update --init --recursive --jobs 4 -- ${SUBMODULE_PATHS}
 
       - name: Install requirements (venv)
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' }}
         timeout-minutes: 10
         shell: bash
         working-directory: projects/rocprofiler-sdk
@@ -426,12 +433,13 @@ jobs:
           python3 -m pip install --upgrade -r requirements.txt
 
       - name: Install Curl for RHEL 8.8
-        if: ${{ matrix.system.os == 'rhel-8.8' }}
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' && matrix.system.os == 'rhel-8.8' }}
         run: |
           dnf install -y curl
           ln -s /usr/local/bin/curl /usr/bin/curl
 
       - name: Build ROCProfiler SDK Dependencies
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' }}
         uses: ./.github/actions/rocprofiler-sdk-util
         with:
           rocm-path: ${{ env.ROCM_PATH }}
@@ -447,13 +455,14 @@ jobs:
           ccache-variant: sccache
 
       - name: Enable PC Sampling
-        if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' && (contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a')) }}
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run:
             echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
       - name: Configure, Build, and Test
+        if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' }}
         timeout-minutes: 30
         shell: bash
         working-directory: projects/rocprofiler-sdk
@@ -558,6 +567,7 @@ jobs:
       run: git submodule update --init --recursive --jobs 4 -- ${SUBMODULE_PATHS}
 
     - name: Install requirements
+      if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' }}
       timeout-minutes: 10
       shell: bash
       working-directory: projects/rocprofiler-sdk
@@ -574,12 +584,13 @@ jobs:
         python3 -m pip install -U --user cmake==3.25.0
 
     - name: Enable PC Sampling
-      if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+      if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' && (contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a')) }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
     - name: Build ROCProfiler SDK Dependencies
+      if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' }}
       uses: ./.github/actions/rocprofiler-sdk-util
       with:
         rocm-path: ${{ env.ROCM_PATH }}
@@ -595,6 +606,7 @@ jobs:
         ccache-variant: ccache
 
     - name: Configure, Build, and Test
+      if: ${{ env.SUBMODULE_CACHE_WARM_ONLY != 'true' }}
       timeout-minutes: 30
       shell: bash
       working-directory: projects/rocprofiler-sdk
