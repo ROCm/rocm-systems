@@ -8,6 +8,7 @@
 #include "checkpoint_generated.h"
 #include "flatbuffers/flatbuffers.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <fstream>
@@ -18,6 +19,14 @@ namespace rocjitsu {
 namespace config {
 
 namespace {
+
+/// @brief First scalar selector that named a TTMP before TTMPs became their own
+/// register file.
+/// @details The decoder used to alias selectors 108..123 into the wavefront SGPR
+/// block on every architecture, so in a checkpoint written then those slots hold
+/// exactly the TTMP file. Selectors that high are unreachable as ordinary SGPR
+/// operands, so reading them back as TTMPs needs no per-architecture test.
+constexpr uint32_t kLegacyTtmpSgprBase = 108;
 
 /// @brief Serialize the SoC configuration into a FlatBuffer SimulationConfig.
 flatbuffers::Offset<fb::SimulationConfig>
@@ -261,18 +270,28 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           wf->set_mode_raw(wf_state->mode());
           wf->set_wave_sched_mode_raw(wf_state->wave_sched_mode());
 
-          if (auto *sgprs = wf_state->sgprs()) {
+          const auto *sgprs = wf_state->sgprs();
+          if (sgprs != nullptr) {
             for (size_t r = 0; r < sgprs->size() && r < wf->num_sgprs(); ++r) {
               cu->write_sgpr(wf->sgpr_alloc().base + static_cast<uint32_t>(r),
                              sgprs->Get(static_cast<unsigned>(r)));
             }
           }
 
-          // Absent on checkpoints written before TTMPs were split out of the
-          // SGPR file; those waves restore with TTMPs zeroed.
           if (auto *ttmps = wf_state->ttmps()) {
             for (uint32_t t = 0; t < ttmps->size() && t < 16; ++t)
               wf->set_ttmp(t, ttmps->Get(t));
+          } else if (sgprs != nullptr && sgprs->size() > kLegacyTtmpSgprBase) {
+            // Written before TTMPs were split out of the SGPR file. Back then
+            // the decoder aliased scalar selectors 108..123 into the SGPR block
+            // on every architecture, so those slots are exactly the TTMP file
+            // and the migration needs no per-arch test. Leaving them behind
+            // loses real launch state: RDNA4 and GFX1250 seed TTMP6/7/9 with
+            // workgroup ids at dispatch, and TTMP operands no longer read the
+            // SGPR slots the old checkpoint restores them into.
+            const uint32_t available = std::min<uint32_t>(16, sgprs->size() - kLegacyTtmpSgprBase);
+            for (uint32_t t = 0; t < available; ++t)
+              wf->set_ttmp(t, sgprs->Get(kLegacyTtmpSgprBase + t));
           }
 
           if (auto *vgprs = wf_state->vgprs()) {

@@ -24,9 +24,12 @@ table WavefrontState {
   wave_sched_mode: uint32; // WAVE_SCHED_MODE register.
   // Trap-temporary registers (TTMP0-15). These are a separate register file,
   // not the tail of `sgprs`: the ISA decoder routes scalar selectors 108..123
-  // here. Appended last so older checkpoints still load (the accessor returns
-  // null and the wave restores with TTMPs zeroed, which is what a wave that was
-  // never in a trap handler holds anyway).
+  // here. Appended last so older checkpoints still load: the accessor returns
+  // null, and restore then migrates the values out of `sgprs[108..123]`, which
+  // is where the same selectors were stored before the split. Zeroing them
+  // instead would not be safe -- RDNA4 and GFX1250 seed TTMP6/7/9 with
+  // workgroup ids at dispatch, so a wave that was never in a trap handler still
+  // holds meaningful TTMPs there.
   ttmps: [uint32];
 }
 
