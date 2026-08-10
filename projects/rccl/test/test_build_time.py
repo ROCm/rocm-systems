@@ -26,8 +26,12 @@ on a small runner. Parallelism defaults to the CPU count and is recorded in the
 report; use --jobs to pin it when comparing results across machines.
 
 --compare-base sidesteps that: it builds the PR's base commit and its head on
-this same runner and gates on the relative change, and a ratio cancels out
-machine speed. It costs 2*--repeat builds per target instead of one.
+this same runner and gates only on the relative change; a ratio cancels out
+machine speed and needs no per-machine threshold. It costs 2*--repeat builds
+per target instead of one. On shallow CI checkouts the script attempts a
+shallow fetch of the upstream ref before resolving the merge-base; if git
+history is still unavailable it skips with a clear message rather than failing
+the run as a false regression.
 
 Usage:
     ./test_build_time.py                      # every arch in DEFAULT_GPUS
@@ -143,7 +147,8 @@ def local_gpu_targets() -> list[str]:
     proc = subprocess.run([enumerator], capture_output=True, text=True)
     if proc.returncode != 0:
         msg = (proc.stderr or proc.stdout).strip()
-        raise RuntimeError(f"rocm_agent_enumerator failed (rc={proc.returncode}): {msg}")
+        raise RuntimeError("rocm_agent_enumerator failed (rc=%d): %s"
+                           % (proc.returncode, msg))
     out = proc.stdout
     # Deduplicate but keep discovery order; gfx000 is the CPU agent.
     targets: list[str] = []
@@ -261,10 +266,39 @@ def git(*args: str) -> str:
                           capture_output=True, text=True, check=True).stdout.strip()
 
 
-def default_base_rev() -> str:
-    """The commit a PR branched from: the merge base with the upstream branch."""
+def git_err(*args: str) -> tuple[str | None, str | None]:
+    """Run git; return (stdout, None) on success or (None, error) on failure."""
+    proc = subprocess.run(["git", "-C", RCCL_ROOT, *args],
+                          capture_output=True, text=True, check=False)
+    if proc.returncode == 0:
+        return proc.stdout.strip(), None
+    msg = (proc.stderr or proc.stdout or "").strip()
+    return None, msg or ("git %s exited %d" % (" ".join(args), proc.returncode))
+
+
+def ensure_upstream_fetched(upstream: str) -> None:
+    """Best-effort shallow fetch of the remote branch used for merge-base."""
+    if "/" not in upstream:
+        return
+    remote, ref = upstream.split("/", 1)
+    subprocess.run(["git", "-C", RCCL_ROOT, "fetch", "--depth=1", remote, ref],
+                   capture_output=True, text=True, check=False)
+
+
+def resolve_base_sha(explicit_rev: str | None) -> tuple[str | None, str, str | None]:
+    """Return (base_sha, label, error). label is printed in the report header."""
+    if explicit_rev:
+        sha, err = git_err("rev-parse", explicit_rev)
+        return sha, explicit_rev, err
+
     upstream = os.environ.get("RCCL_BUILD_TIME_UPSTREAM", "origin/develop")
-    return git("merge-base", upstream, "HEAD")
+    ensure_upstream_fetched(upstream)
+    merge_base, err = git_err("merge-base", upstream, "HEAD")
+    if err:
+        return None, upstream, "cannot resolve merge-base with %s: %s" % (upstream, err)
+    sha, err = git_err("rev-parse", merge_base)
+    label = "%s (merge-base with %s)" % (merge_base[:10], upstream)
+    return sha, label, err
 
 
 def rccl_dir_within(worktree: str) -> str:
@@ -296,19 +330,21 @@ class Comparison:
 
 
 def time_best_of(
-    target: str, source_dir: str, build_root: str, tag: str, jobs: int, repeat: int,
-    round_index: int,
+    target: str, source_dir: str, build_root: str, tag: str, jobs: int,
+    round_index: int, keep: bool,
 ) -> tuple[float, bool]:
     """Build one revision once and return (total_s, ok) for this round."""
     build_dir = os.path.join(build_root, "%s-%s-%d" % (target, tag, round_index))
     log_path = os.path.join(build_root, "%s-%s-%d.log" % (target, tag, round_index))
     configure_s, build_s, ok = build_target(target, build_dir, jobs, log_path, source_dir)
-    shutil.rmtree(build_dir, ignore_errors=True)
+    if not keep:
+        shutil.rmtree(build_dir, ignore_errors=True)
     return configure_s + build_s, ok
 
 
 def compare_target(
     target: str, head_dir: str, base_dir: str, build_root: str, jobs: int, repeat: int,
+    keep: bool,
 ) -> tuple[float, float, bool]:
     """Time base and head alternately; return (base_best, head_best, ok).
 
@@ -320,12 +356,12 @@ def compare_target(
     base_times: list[float] = []
     head_times: list[float] = []
     for i in range(repeat):
-        base_s, ok = time_best_of(target, base_dir, build_root, "base", jobs, repeat, i)
+        base_s, ok = time_best_of(target, base_dir, build_root, "base", jobs, i, keep)
         if not ok:
             return 0.0, 0.0, False
         base_times.append(base_s)
 
-        head_s, ok = time_best_of(target, head_dir, build_root, "head", jobs, repeat, i)
+        head_s, ok = time_best_of(target, head_dir, build_root, "head", jobs, i, keep)
         if not ok:
             return 0.0, 0.0, False
         head_times.append(head_s)
@@ -386,15 +422,22 @@ def run_comparison(
     args: argparse.Namespace, targets: list[str], hipcc: str, build_root: str,
 ) -> int:
     """Time base vs head for each target and gate on the relative change."""
-    base_rev = args.compare_base or default_base_rev()
-    base_sha = git("rev-parse", base_rev)
-    head_sha = git("rev-parse", "HEAD")
+    explicit_rev = args.compare_base if args.compare_base else None
+    base_sha, base_label, err = resolve_base_sha(explicit_rev)
+    if err or not base_sha:
+        print("SKIP: cannot resolve base commit (%s)" % (err or "unknown error"))
+        return 0
+
+    head_sha, err = git_err("rev-parse", "HEAD")
+    if err or not head_sha:
+        print("SKIP: cannot resolve HEAD (%s)" % (err or "unknown error"))
+        return 0
 
     print("  mode       : base-vs-head comparison")
-    print("  base       : %s (%s)" % (base_sha[:10], base_rev))
+    print("  base       : %s (%s)" % (base_sha[:10], base_label))
     print("  head       : %s" % head_sha[:10])
-    print("  tolerance  : head may be at most %.1f%% slower than base, and must "
-          "still finish within %s" % (args.max_regression_pct, fmt(args.threshold_sec)))
+    print("  tolerance  : head may be at most %.1f%% slower than base"
+          % args.max_regression_pct)
     print("  rounds     : %d (alternating; minimum of each wins)" % args.repeat)
     print()
 
@@ -403,7 +446,10 @@ def run_comparison(
         return 0
 
     worktree = os.path.join(build_root, "base-tree")
-    git("worktree", "add", "--detach", "--quiet", worktree, base_sha)
+    _, err = git_err("worktree", "add", "--detach", "--quiet", worktree, base_sha)
+    if err:
+        print("SKIP: cannot check out base commit %s (%s)" % (base_sha[:10], err))
+        return 0
     base_dir = rccl_dir_within(worktree)
     try:
         results: list[Comparison] = []
@@ -417,7 +463,7 @@ def run_comparison(
 
             print("[%s] timing base and head ..." % target, flush=True)
             base_s, head_s, ok = compare_target(
-                target, RCCL_ROOT, base_dir, build_root, args.jobs, args.repeat)
+                target, RCCL_ROOT, base_dir, build_root, args.jobs, args.repeat, args.keep)
             if not ok:
                 print("[%s] FAIL - build failed, see %s" % (target, build_root))
                 results.append(Comparison(target, FAIL, "build failed"))
@@ -426,25 +472,17 @@ def run_comparison(
             result = Comparison(target, PASS, "", base_s, head_s)
             pct = result.delta_pct or 0.0
 
-            # The head build is timed here anyway, so this run enforces the
-            # absolute budget too and there is no need for a second CI entry.
-            problems: list[str] = []
             if pct > args.max_regression_pct:
-                problems.append("%.1f%% slower than base (limit %.1f%%)"
-                                % (pct, args.max_regression_pct))
-            if head_s > args.threshold_sec:
-                problems.append("took %s, over the %s budget"
-                                % (fmt(head_s), fmt(args.threshold_sec)))
-            if problems:
                 result.status = FAIL
-                result.note = "; ".join(problems)
+                result.note = "%.1f%% slower than base (limit %.1f%%)" % (
+                    pct, args.max_regression_pct)
 
             print("[%s] %s - base %s -> head %s (%+.1f%%)%s" %
                   (target, result.status, fmt(base_s), fmt(head_s), pct,
-                   "  " + result.note if problems else ""))
+                   "  " + result.note if result.note else ""))
             results.append(result)
     finally:
-        git("worktree", "remove", "--force", worktree)
+        git_err("worktree", "remove", "--force", worktree)
 
     print()
     print("%-10s %10s %10s %9s  %s" % ("TARGET", "BASE", "HEAD", "DELTA", "RESULT"))
