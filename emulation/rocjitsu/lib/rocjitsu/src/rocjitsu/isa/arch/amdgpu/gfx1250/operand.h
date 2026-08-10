@@ -27,6 +27,7 @@ public:
   Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);
   std::string name() const override;
   std::optional<uint64_t> literal64_value() const override;
+  std::optional<uint64_t> const_value() const override;
   std::optional<RegisterRef> to_register_ref() const override;
   /// @brief Return the immutable full-simulator operand table.
   static const void *full_execution_backend();
@@ -61,6 +62,10 @@ private:
                                uint8_t byte_mask) const override;
   void simd_notify_read64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
                                    uint8_t byte_mask) const override;
+  void simd_notify_write_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                  uint8_t byte_mask) const override;
+  void simd_notify_write64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                    uint8_t byte_mask) const override;
   /// Same-image dispatch table populated by the execution TU before decode.
   /// This is not a registration ABI between independently loaded DSOs.
   struct ExecutionBackend {
@@ -90,6 +95,9 @@ private:
     void (Operand::*simd_notify_read64)(const amdgpu::Wavefront &, uint64_t,
                                         uint8_t) const = nullptr;
     void (Operand::*simd_notify_read64_mut)(amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;
+    void (Operand::*simd_notify_write_mut)(amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;
+    void (Operand::*simd_notify_write64_mut)(amdgpu::Wavefront &, uint64_t,
+                                             uint8_t) const = nullptr;
   };
   const ExecutionBackend *execution_backend_ = nullptr;
   bool simd_capable_exec() const;
@@ -113,6 +121,8 @@ private:
   void simd_notify_read_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;
   void simd_notify_read64_exec(const amdgpu::Wavefront &, uint64_t, uint8_t) const;
   void simd_notify_read64_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;
+  void simd_notify_write_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;
+  void simd_notify_write64_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;
 
 private:
   uint16_t literal16_display_value_ = 0;

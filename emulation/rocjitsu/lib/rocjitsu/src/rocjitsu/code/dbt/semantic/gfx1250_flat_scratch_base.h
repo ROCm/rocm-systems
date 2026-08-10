@@ -27,7 +27,10 @@ class LivenessAnalysis;
 /// for vector reads, so both cases need an operand rewrite.
 ///
 /// Detection is operand-driven rather than opcode-driven: any instruction with
-/// a 64-bit source position can name these selectors.
+/// a 64-bit source position can name these selectors. The selector is matched
+/// against the encoding field, not the decoded operand value: a literal source
+/// reports its own value there, so the constants 230 and 231 would otherwise be
+/// mistaken for the selectors they collide with.
 [[nodiscard]] bool gfx1250_reads_flat_scratch_base_64bit(const Instruction &inst);
 
 /// @brief Rewrite a 64-bit FLAT_SCRATCH_BASE source for the A0 profile.
