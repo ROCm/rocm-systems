@@ -600,11 +600,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         WARNINGS
     )
     rj_add_gtest_tests(gfx1250_b0_to_a0_library_test)
+    # Checked on the translator rather than the hook. The hook used to link the
+    # translator as a static archive and so carried the model code itself; now it
+    # loads a shared object, and the boundary this guards -- model in, execution
+    # out -- belongs to whichever artifact holds that code. Pointed at the hook it
+    # would now pass vacuously, which is the failure mode the required-symbol
+    # check at the end of the script exists to catch.
     add_test(
         NAME Gfx1250B0ToA0Library.SymbolBoundary
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-            -DMODEL_BINARY=$<TARGET_FILE:hsa_hotswap_rocjitsu> -P
+            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_gfx1250_b0_to_a0> -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
     )
 
