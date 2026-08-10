@@ -268,6 +268,51 @@ def test_duplicate_kernel_symbol_under_same_parents_rejected(db_session):
         db_session.commit()
 
 
+def test_duplicate_symbol_offset_in_one_code_object_rejected(db_session):
+    """Reject two kernels claiming one offset within a single code object."""
+    workload = Workload(name="w", sub_name="s")
+    code_object = CodeObjectStore(
+        code_object_id=5,
+        pid=42,
+        load_base=0x1000,
+        workload=workload,
+    )
+    for kernel_name in ("k1", "k2"):
+        db_session.add(
+            KernelSymbol(
+                code_object_store=code_object,
+                kernel=Kernel(kernel_name=kernel_name, workload=workload),
+                code_object_offset=0x100,
+            )
+        )
+
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+
+def test_offsetless_symbols_in_one_code_object_allowed(db_session):
+    """Symbols awaiting an ISA backfill do not collide on their null offset."""
+    workload = Workload(name="w", sub_name="s")
+    code_object = CodeObjectStore(
+        code_object_id=5,
+        pid=42,
+        load_base=0x1000,
+        workload=workload,
+    )
+    for kernel_name in ("k1", "k2"):
+        db_session.add(
+            KernelSymbol(
+                code_object_store=code_object,
+                kernel=Kernel(kernel_name=kernel_name, workload=workload),
+            )
+        )
+    db_session.commit()
+
+    symbols = db_session.query(KernelSymbol).all()
+    assert len(symbols) == 2
+    assert {symbol.code_object_offset for symbol in symbols} == {None}
+
+
 def test_two_kernels_in_one_code_object_get_separate_symbols(db_session):
     """One code object holding two kernels yields one symbol per kernel."""
     workload = Workload(name="w", sub_name="s")

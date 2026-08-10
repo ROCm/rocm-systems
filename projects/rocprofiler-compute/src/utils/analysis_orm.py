@@ -177,8 +177,12 @@ class CodeObjectStore(Base):
 
 class KernelSymbol(Base):
     __tablename__ = f"{PREFIX}kernel_symbol"
-    # One symbol per kernel per code object.
-    __table_args__ = (UniqueConstraint("code_object_uuid", "kernel_uuid"),)
+    # One symbol per kernel per code object, and one kernel per offset: an
+    # offset picks a single instruction, which lies in a single symbol.
+    __table_args__ = (
+        UniqueConstraint("code_object_uuid", "kernel_uuid"),
+        UniqueConstraint("code_object_uuid", "code_object_offset"),
+    )
 
     kernel_symbol_uuid = Column(Integer, primary_key=True)
     code_object_uuid = Column(
