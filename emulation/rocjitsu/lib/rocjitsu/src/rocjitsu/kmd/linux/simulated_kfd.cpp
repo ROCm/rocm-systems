@@ -3099,6 +3099,12 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
         }
       }
     }
+    // Accumulated inside the locked loop below rather than read afterwards.
+    // The loop clears debug_suspended, which makes these waves runnable, so
+    // from that point the engine thread can be writing debug_halted_ -- a plain
+    // bool -- concurrently. This value decides whether the queue gate reopens,
+    // so reading it unlocked would race the answer as well as the byte.
+    bool keep_dispatch_suspended = false;
     for (size_t index = 0; index < stopped.size(); ++index) {
       owners[index]->with_wave_state_locked([&] {
         const bool fatal_exception_pending = stopped[index]->fatal_exception_pending();
@@ -3106,13 +3112,13 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
         // suspended wave after the queue gate is released. Architecturally
         // halted waves remain halted until their CWSR record says otherwise.
         stopped[index]->set_debug_suspended(fatal_exception_pending);
-        if (!stopped[index]->debug_halted() && !stopped[index]->is_halted())
+        const bool halted = stopped[index]->debug_halted();
+        keep_dispatch_suspended |= halted;
+        if (!halted && !stopped[index]->is_halted())
           if (!fatal_exception_pending)
             wake.insert(owners[index]);
       });
     }
-    const bool keep_dispatch_suspended =
-        std::ranges::any_of(stopped, [](const auto *wave) { return wave->debug_halted(); });
     // Keep the queue-level launch gate closed until every resident wave has
     // consumed its CWSR state and become runnable. Reopen it before scheduling
     // those waves so CP completion processing cannot observe a queue as still
