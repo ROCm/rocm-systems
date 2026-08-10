@@ -76,9 +76,7 @@ uint32_t SQTTInstrumentPass::resolveMarkerString(CallInst* CI, uint8_t flags)
     if (inserted)
     {
         ++NextEventID;
-        Markers.push_back(
-            {id, isPoint ? MarkerKind::Point : MarkerKind::UserScope, Name, {}, 0, extraPayloadCount}
-        );
+        Markers.push_back({id, isPoint ? MarkerKind::Point : MarkerKind::UserScope, Name, {}, 0, extraPayloadCount});
     }
     bool enter = flags & MarkerEnter;
     return encodeMarker(id, enter, false); // enter or point

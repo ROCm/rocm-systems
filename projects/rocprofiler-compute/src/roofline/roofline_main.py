@@ -21,9 +21,8 @@ from utils.logger import (
 )
 from utils.roofline_calc import (
     CACHE_LEVELS,
-    MATRIX_DATATYPES,
-    PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
+    OpsSupport,
     construct_roof,
     sanitize_mem_level,
 )
@@ -41,6 +40,7 @@ ROOFLINE_SUPPORTED = [
     "gfx1150",
     "gfx1151",
     "gfx1152",
+    "gfx1250",
 ]
 
 SYMBOLS = [0, 1, 2, 3, 4, 5, 13, 17, 18, 20]
@@ -225,12 +225,13 @@ class Roofline:
             gpu_arch = getattr(self.__mspec, "gpu_arch", "unknown_arch")
             if (
                 "SUPPORTED_DATATYPES" not in globals()
-                or gpu_arch not in SUPPORTED_DATATYPES
-                or str(dt) not in SUPPORTED_DATATYPES[gpu_arch]
+                or gpu_arch not in SUPPORTED_DATATYPES.keys()
+                or str(dt) not in SUPPORTED_DATATYPES[gpu_arch].keys()
             ):
                 console_error(
                     f"{dt} is not a supported datatype for roofline profiling on "
-                    f"{getattr(self.__mspec, 'gpu_model', 'N/A')} (arch: {gpu_arch})",
+                    f"{getattr(self.__mspec, 'gpu_model', 'N/A')} (arch: {gpu_arch})- "
+                    f"cannot construct HTML plot",
                     exit=False,
                 )
                 continue
@@ -528,16 +529,30 @@ class Roofline:
                 ):
                     continue
 
+                x_raw = self.__ai_data[cache_level][0]
+                y_raw = self.__ai_data[cache_level][1]
+                valid = [
+                    (i, x, y)
+                    for i, (x, y) in enumerate(zip(x_raw, y_raw))
+                    if x > 0 and y > 0
+                ]
+                if not valid:
+                    continue
+
+                x_vals = [p[1] for p in valid]
+                y_vals = [p[2] for p in valid]
+                point_symbols = [symbols_list[p[0] % len(symbols_list)] for p in valid]
+
                 fig.add_trace(
                     go.Scatter(
-                        x=self.__ai_data[cache_level][0],
-                        y=self.__ai_data[cache_level][1],
+                        x=x_vals,
+                        y=y_vals,
                         name=name,
                         mode="markers",
                         marker=dict(
                             color=get_color(cache_level),
                             size=10,
-                            symbol=symbols_list[: len(self.__ai_data[cache_level][0])],
+                            symbol=point_symbols,
                         ),
                     ),
                     **subplot_kwargs,
@@ -626,10 +641,14 @@ class Roofline:
         # Peak Performance
         #######################
         valu_data = (
-            self.__ceiling_data.get("valu") if dtype in PEAK_OPS_DATATYPES else None
+            self.__ceiling_data.get("valu")
+            if OpsSupport.VALU in SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype]
+            else None
         )
         matrix_data = (
-            self.__ceiling_data.get("matrix_ops") if dtype in MATRIX_DATATYPES else None
+            self.__ceiling_data.get("matrix_ops")
+            if OpsSupport.MATRIX in SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype]
+            else None
         )
 
         if valu_data:
@@ -1050,11 +1069,11 @@ class Roofline:
         """
         console_debug("roofline", "Generating roofline plot for CLI")
 
-        if not (str(dtype) in SUPPORTED_DATATYPES[str(self.__mspec.gpu_arch)]):
+        if not (str(dtype) in SUPPORTED_DATATYPES[str(self.__mspec.gpu_arch)].keys()):
             console_error(
                 f"{dtype} is not a supported datatype for roofline profiling on "
                 f"{getattr(self.__mspec, 'gpu_model', 'N/A')} (arch: "
-                f"{self.__mspec.gpu_arch})",
+                f"{self.__mspec.gpu_arch})- cannot construct CLI plot",
                 exit=False,
             )
             return
@@ -1143,7 +1162,7 @@ class Roofline:
 
         # Plot VALU and Matrix Ops Peak
         if (
-            dtype in PEAK_OPS_DATATYPES
+            OpsSupport.VALU in SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype]
             and self.__ceiling_data["valu"]
             and self.__ceiling_data["valu"][0] is not None
         ):
@@ -1178,7 +1197,7 @@ class Roofline:
             console_warning(f"No PEAK measurement available for {dtype}")
 
         if (
-            dtype in MATRIX_DATATYPES
+            OpsSupport.MATRIX in SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype]
             and self.__ceiling_data["matrix_ops"]
             and self.__ceiling_data["matrix_ops"][0] is not None
         ):

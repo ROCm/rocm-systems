@@ -23,24 +23,21 @@
 #include <hip/hip_runtime.h>
 #include <atomic>
 #include <chrono>
-#include <thread>
 #include <iostream>
+#include <thread>
 
-#define HIP_CALL(call)                                                                             \
-    do                                                                                             \
-    {                                                                                              \
-        hipError_t err = call;                                                                     \
-        if(err != hipSuccess)                                                                      \
-        {                                                                                          \
-            fprintf(stderr, "%s\n", hipGetErrorString(err));                                       \
-            abort();                                                                               \
-        }                                                                                          \
-    } while(0)
+#define HIP_CALL(call)                                                                                                 \
+    do {                                                                                                               \
+        hipError_t err = call;                                                                                         \
+        if (err != hipSuccess)                                                                                         \
+        {                                                                                                              \
+            fprintf(stderr, "%s\n", hipGetErrorString(err));                                                           \
+            abort();                                                                                                   \
+        }                                                                                                              \
+    }                                                                                                                  \
+    while (0)
 
-__device__ void sync()
-{
-    __syncthreads();
-}
+__device__ void sync() { __syncthreads(); }
 
 // A small device function that should NOT be instrumented
 __device__ float add_one(float x)
@@ -56,24 +53,26 @@ __device__ float add_one(float x)
 __device__ float heavy_compute(int iters, float* out)
 {
     float result = out[threadIdx.x];
-    for (int i = 0; i < iters; i++) {
+    for (int i = 0; i < iters; i++)
+    {
         result = add_one(result);
         result = result / (result + 1.0f);
         result = add_one(result);
         result = result * 2.0f - 0.5f;
-        if (i%8 == 0)
+        if (i % 8 == 0)
         {
             sync();
-            out[(threadIdx.x+64)%256] += result;
+            out[(threadIdx.x + 64) % 256] += result;
             sync();
         }
         else
-            result += out[threadIdx.x]*0.01f;
+            result += out[threadIdx.x] * 0.01f;
     }
     return result;
 }
 
-__global__ void compute_kernel(float *out, const float *in, int size, int iters) {
+__global__ void compute_kernel(float* out, const float* in, int size, int iters)
+{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= size) return;
 
@@ -84,7 +83,8 @@ __global__ void compute_kernel(float *out, const float *in, int size, int iters)
     out[idx] = add_one(val);
 }
 
-int main() {
+int main()
+{
     const int N = 304 * 256;
     float *d_in, *d_out;
     hipMalloc(&d_in, N * sizeof(float));

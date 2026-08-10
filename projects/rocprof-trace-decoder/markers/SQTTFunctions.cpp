@@ -40,7 +40,7 @@ void SQTTInstrumentPass::insertFunctionMarkers(Function& F, uint32_t id, GfxGen 
     };
 
     Instruction* Entry = useBareTrace || !CurScopeCheck ? &*F.getEntryBlock().getFirstInsertionPt()
-                                                         : cast<Instruction>(CurScopeCheck)->getNextNode();
+                                                        : cast<Instruction>(CurScopeCheck)->getNextNode();
     emit(Entry, encodeMarker(id, /*enter=*/true, /*exit_prev=*/false));
 
     SmallVector<ReturnInst*, 4> Rets;
@@ -89,8 +89,14 @@ bool SQTTInstrumentPass::recoverEarlyMarkerMetadata(Module& M, bool& hasEarlyFun
             continue;
         hasEarlyFunctions |= markerKind == MarkerKind::Function;
         uint32_t id = static_cast<uint32_t>(IdC->getZExtValue());
-        Markers.push_back({id, markerKind, NameS->getString().str(), LocS->getString().str(),
-                           static_cast<uint32_t>(SizeC->getZExtValue()), static_cast<uint32_t>(PayloadC->getZExtValue())});
+        Markers.push_back(
+            {id,
+             markerKind,
+             NameS->getString().str(),
+             LocS->getString().str(),
+             static_cast<uint32_t>(SizeC->getZExtValue()),
+             static_cast<uint32_t>(PayloadC->getZExtValue())}
+        );
         MarkerRecord& entry = Markers.back();
         if (markerKind == MarkerKind::UserScope || markerKind == MarkerKind::Point)
         {
@@ -195,11 +201,15 @@ bool SQTTInstrumentPass::finalizeEarlyFunctionMarkers(Module& M)
     sorted.reserve(entries.size());
     for (auto& [id, entry] : entries)
         if (!entry.Disabled) sorted.push_back(&entry);
-    std::sort(sorted.begin(), sorted.end(), [](const Entry* a, const Entry* b)
-    {
-        if (a->Count != b->Count) return a->Count > b->Count;
-        return a->Record->ID < b->Record->ID;
-    });
+    std::sort(
+        sorted.begin(),
+        sorted.end(),
+        [](const Entry* a, const Entry* b)
+        {
+            if (a->Count != b->Count) return a->Count > b->Count;
+            return a->Record->ID < b->Record->ID;
+        }
+    );
     uint32_t nextID = 1;
     for (Entry* entry : sorted) entry->NewID = nextID++;
 
@@ -224,11 +234,15 @@ bool SQTTInstrumentPass::finalizeEarlyFunctionMarkers(Module& M)
     }
 
     Markers.erase(
-        std::remove_if(Markers.begin(), Markers.end(), [&](const MarkerRecord& record)
-        {
-            Entry* entry = find(record.ID);
-            return record.Kind == MarkerKind::Function && entry && entry->Disabled;
-        }),
+        std::remove_if(
+            Markers.begin(),
+            Markers.end(),
+            [&](const MarkerRecord& record)
+            {
+                Entry* entry = find(record.ID);
+                return record.Kind == MarkerKind::Function && entry && entry->Disabled;
+            }
+        ),
         Markers.end()
     );
     auto remap = [&](uint32_t& id)

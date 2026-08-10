@@ -41,6 +41,7 @@
 #include "lib/output/sql/common.hpp"
 #include "lib/output/sql/deferred_transaction.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
@@ -67,6 +68,7 @@
 #include <filesystem>
 #include <initializer_list>
 #include <limits>
+#include <map>
 #include <set>
 #include <type_traits>
 #include <unordered_map>
@@ -147,6 +149,7 @@ struct rocpd_db
     schema_map_t        schemas             = {};
     track_map_t         tracks              = {};
     size_t              event_id_counter    = 0;
+    size_t              sample_id_counter   = 0;
     statement_cache_t   statements          = {};
     pending_batch_map_t pending_batches     = {};
     fk_parent_map_t     fk_parent_tables    = {};
@@ -155,6 +158,7 @@ struct rocpd_db
     batch_stats_map_t   batch_stats         = {};
 
     size_t get_event_id() { return ++event_id_counter; }
+    size_t get_sample_id() { return ++sample_id_counter; }
 };
 
 void
@@ -257,7 +261,7 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options   = ROCPD_SQL_OPTIONS_NONE;
-    auto _version   = rocpd_version_triplet_t{3, 0, 2};  // default schema version
+    auto _version   = rocpd_version_triplet_t{3, 0, 3};  // default schema version
 
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
@@ -1034,9 +1038,11 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<tool_counter_record_t>&                                 counter_collection_gen,
-    const generator<tool_spm_counter_record_t>& /** spm_collection_gen*/,
-    const generator<rocprofiler_buffer_tracing_ompt_record_t>&      ompt_gen,
-    const generator<rocprofiler_buffer_tracing_hip_graph_record_t>& graph_launch_gen)
+    const generator<tool_spm_counter_record_t>&                             spm_collection_gen,
+    const generator<rocprofiler_buffer_tracing_ompt_record_t>&              ompt_gen,
+    const generator<rocprofiler_buffer_tracing_hip_graph_record_t>&         graph_launch_gen,
+    const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>&  rocshmem_api_gen,
+    const generator<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>&   hipfile_api_gen)
 {
     static auto get_simple_timer = [](std::string_view label) {
         return common::simple_timer{fmt::format("SQLite3 generation :: {:24}", label)};
@@ -1147,6 +1153,8 @@ write_rocpd(
 
     for(const auto& itr : tool_metadata.get_counter_dimension_info())
         add_string_entry(_metadata, itr.name);
+
+    add_string_entry(_metadata, "SPM");
 
     auto thread_ids = std::set<rocprofiler_thread_id_t>{};
     auto stream_set = std::unordered_set<rocprofiler_stream_id_t>{};
@@ -1438,6 +1446,7 @@ write_rocpd(
                         insert_value("expression", _expression, allow_empty_string{}),
                         insert_value("is_constant", aitr.is_constant),
                         insert_value("is_derived", aitr.is_derived),
+                        insert_value("spm_support", aitr.spm_support),
                         insert_value("extdata", json_data),
                     });
             }
@@ -1505,6 +1514,8 @@ write_rocpd(
 
             auto agent_node_id = tool_metadata.get_agent(info.agent_id)->node_id;
 
+            get_thread_id(thread_id);
+
             // Insert into kernel dispatch table
             get_insert_statement(
                 db,
@@ -1571,6 +1582,40 @@ write_rocpd(
                     );
                 }
             }
+
+            for(auto pctr : spm_collection_gen)
+            {
+                for(const auto& record : spm_collection_gen.get(pctr))
+                {
+                    const auto& dispatch_data = record.dispatch_data;
+                    const auto& info          = dispatch_data.dispatch_info;
+
+                    // Register thread ID
+                    get_thread_id(record.thread_id);
+
+                    // Use buffer category for kernel dispatches
+                    auto kind =
+                        tool_metadata.buffer_names.at(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
+
+                    // Process this dispatch (SPM dispatch timestamps are not available)
+                    process_dispatch(info.dispatch_id,              // dispatch_id
+                                     info.kernel_id,                // kernel_id
+                                     dispatch_data.correlation_id,  // corr_id
+                                     info,                          // info
+                                     kind,                          // kind
+                                     record.thread_id,              // thread_id
+                                     get_queue_id(info.queue_id),   // queue_id
+                                     get_stream_id(record.stream_id),
+                                     0,                    // start_timestamp
+                                     0,                    // end_timestamp
+                                     info.grid_size,       // grid
+                                     info.workgroup_size,  // workgroup
+                                     0,                    // graph_exec_id
+                                     0,                    // graph_node_id
+                                     false                 // enable_duplicate_check
+                    );
+                }
+            }
         }
         else
         {
@@ -1603,33 +1648,99 @@ write_rocpd(
         }
     };
 
-    auto insert_pmc_event_data =
-        [&db, &tool_metadata, &counter_collection_gen](auto& dispatch_evt_ids) {
-            auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_pmc_event");
-            auto   _deferred         = sql::deferred_transaction{db.conn};
-            size_t idx               = tool_metadata.pmc_event_offset;
-            for(auto ditr : counter_collection_gen)
+    auto insert_pmc_event_data = [&db,
+                                  &tool_metadata,
+                                  &counter_collection_gen,
+                                  &spm_collection_gen,
+                                  &string_entries,
+                                  node_id,
+                                  this_pid](auto& dispatch_evt_ids) {
+        auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_pmc_event");
+        auto   _deferred         = sql::deferred_transaction{db.conn};
+        size_t idx               = tool_metadata.pmc_event_offset;
+        for(auto ditr : counter_collection_gen)
+        {
+            for(const auto& record : counter_collection_gen.get(ditr))
             {
-                for(const auto& record : counter_collection_gen.get(ditr))
-                {
-                    const auto& info        = record.dispatch_data.dispatch_info;
-                    auto        dispatch_id = info.dispatch_id;
+                const auto& info        = record.dispatch_data.dispatch_info;
+                auto        dispatch_id = info.dispatch_id;
 
-                    auto evt_id = dispatch_evt_ids.at(dispatch_id);
-                    for(const auto& count : record.read())
+                auto evt_id = dispatch_evt_ids.at(dispatch_id);
+                for(const auto& count : record.read())
+                {
+                    get_insert_statement(db,
+                                         "rocpd_pmc_event{{uuid}}",
+                                         {
+                                             insert_value("id", idx++),
+                                             insert_value("event_id", evt_id),
+                                             insert_value("pmc_id", count.id.handle),
+                                             insert_value("value", count.value),
+                                         });
+                }
+            }
+        }
+
+        auto spm_name_id = string_entries.at("SPM");
+
+        for(auto ditr : spm_collection_gen)
+        {
+            for(const auto& record : spm_collection_gen.get(ditr))
+            {
+                const auto& info        = record.dispatch_data.dispatch_info;
+                auto        dispatch_id = info.dispatch_id;
+                auto        evt_id      = dispatch_evt_ids.at(dispatch_id);
+
+                auto track_id =
+                    get_track_id(db, node_id, this_pid, record.thread_id, spm_name_id, "{}");
+
+                auto counter_values = record.read();
+                auto values_by_timestamp =
+                    std::map<uint64_t, std::vector<const tool::tool_spm_counter_value_t*>>{};
+                for(const auto& count : counter_values)
+                    values_by_timestamp[count.timestamp].emplace_back(&count);
+
+                for(const auto& [timestamp, values] : values_by_timestamp)
+                {
+                    auto sample_id = db.get_sample_id();
+                    get_insert_statement(db,
+                                         "rocpd_sample{{uuid}}",
+                                         {
+                                             insert_value("id", sample_id),
+                                             insert_value("track_id", track_id),
+                                             insert_value("timestamp", timestamp),
+                                             insert_value("event_id", evt_id),
+                                         });
+
+                    for(const auto* count_ptr : values)
                     {
-                        get_insert_statement(db,
-                                             "rocpd_pmc_event{{uuid}}",
-                                             {
-                                                 insert_value("id", idx++),
-                                                 insert_value("event_id", evt_id),
-                                                 insert_value("pmc_id", count.id.handle),
-                                                 insert_value("value", count.value),
-                                             });
+                        const auto& count = *count_ptr;
+                        get_insert_statement(
+                            db,
+                            "rocpd_pmc_event{{uuid}}",
+                            {
+                                insert_value("id", idx++),
+                                insert_value("event_id", evt_id),
+                                insert_value("sample_id", sample_id),
+                                insert_value("pmc_id", count.id.handle),
+                                insert_value("value", count.value),
+                                insert_value(
+                                    "xcc",
+                                    counters::rec_to_dim_pos(count.instance_id,
+                                                             counters::ROCPROFILER_DIMENSION_XCC)),
+                                insert_value("shader_engine",
+                                             counters::rec_to_dim_pos(
+                                                 count.instance_id,
+                                                 counters::ROCPROFILER_DIMENSION_SHADER_ENGINE)),
+                                insert_value("instance",
+                                             counters::rec_to_dim_pos(
+                                                 count.instance_id,
+                                                 counters::ROCPROFILER_DIMENSION_INSTANCE)),
+                            });
                     }
                 }
             }
-        };
+        }
+    };
 
     auto insert_memory_copy_data =
         [&db, &tool_metadata, &string_entries, node_id, this_pid, &get_thread_id, &get_stream_id](
@@ -1956,7 +2067,7 @@ write_rocpd(
                     get_insert_statement(db,
                                          "rocpd_sample{{uuid}}",
                                          {
-                                             insert_value("id", itr.correlation_id.internal),
+                                             insert_value("id", db.get_sample_id()),
                                              insert_value("track_id", track_id),
                                              insert_value("timestamp", itr.start_timestamp),
                                              insert_value("event_id", evt_id),
@@ -2103,6 +2214,8 @@ write_rocpd(
         insert_api_data(rccl_api_gen);
         insert_api_data(ompt_gen);
         insert_api_data(rocdecode_api_gen);
+        insert_api_data(rocshmem_api_gen);
+        insert_api_data(hipfile_api_gen);
     }
 
     insert_kernel_dispatch_data(dispatch_to_evt_id);

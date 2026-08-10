@@ -645,9 +645,13 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd
   hip::MemcpyType type = ihipGetMemcpyType(srcMemory, dstMemory, kind);
   switch (type) {
     case hipCopyBufferP2P:
+      if (kind == hipMemcpyDeviceToDeviceNoCU) {
+        helper.copyMetadata().copyEnginePreference_ =
+            amd::CopyMetadata::CopyEnginePreference::SDMA;
+      }
       command = new amd::CopyMemoryP2PCommand(
           stream, CL_COMMAND_COPY_BUFFER, helper.waitList(), *srcMemory->asBuffer(),
-          *dstMemory->asBuffer(), srcOffset, dstOffset, sizeBytes);
+          *dstMemory->asBuffer(), srcOffset, dstOffset, sizeBytes, helper.copyMetadata());
       {
         hipError_t status = MemcpyCommandHelper::checkCommand(command);
         if (status != hipSuccess) {
@@ -3103,7 +3107,8 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
   // The ExtOp flags (hipMemcpyFlagExtOpSwap / hipMemcpyFlagExtOpIndirect*) are
   // only honored by the SDMA batch path (BatchCopyMemoryCommand ->
   // DmaBlitManager::hsaCopyBatch), which restricts them to transfers between
-  // device memory and pinned host memory. All other combinations are rejected up front.
+  // device memory and pinned host memory, plus peer device-to-device copies.
+  // All other combinations are rejected up front.
   const unsigned int kExtOpFlagMask =
       hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
   size_t attrIdx = 0;
@@ -3113,9 +3118,9 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     if (srcMemories[i] == nullptr && dstMemories[i] == nullptr) {
       type = hipHostToHost;
     } else if (srcMemories[i] == nullptr) {
-      type = hipWriteBuffer;
+      type = (getMemoryType(dstMemories[i]) == hipMemoryTypeHost) ? hipHostToHost : hipWriteBuffer;
     } else if (dstMemories[i] == nullptr) {
-      type = hipReadBuffer;
+      type = (getMemoryType(srcMemories[i]) == hipMemoryTypeHost) ? hipHostToHost : hipReadBuffer;
     } else {
       type = ihipGetMemcpyType(srcMemories[i], dstMemories[i], hipMemcpyDefault);
     }
@@ -3124,8 +3129,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     if (copyFlags & kExtOpFlagMask) {
       switch (type) {
         case hipCopyBuffer:
-        case hipCopyBufferSDMA:
-        case hipCopyBufferP2P: {
+        case hipCopyBufferSDMA: {
           // Narrow to H<->D for both swap and indirect.
           amd::Memory* sMem = srcMemories[i];
           amd::Memory* dMem = dstMemories[i];
@@ -3134,10 +3138,11 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
           }
           break;
         }
+        case hipCopyBufferP2P:
+          break;
         case hipHostToHost:
         case hipWriteBuffer:
         case hipReadBuffer:
-
           return hipErrorNotSupported;
       }
     }

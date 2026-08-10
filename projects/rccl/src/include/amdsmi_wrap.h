@@ -3,8 +3,12 @@
 #ifndef AMDSMI_WRAP_H_
 #define AMDSMI_WRAP_H_
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <ctime>
+#include <type_traits>
+#include <utility>
 
 #include "nccl.h"
 #include "device.h"
@@ -353,15 +357,16 @@ typedef struct {
 } amdsmi_fabric_telemetry_t;
 
 #define AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE 32
-#define AMDSMI_FABRIC_MAX_LOCAL_GPUS 8
+#define AMDSMI_FABRIC_MAX_LOCAL_GPUS 16
 
 /**
  * @brief Fabric type
  */
 typedef enum {
   AMDSMI_FABRIC_TYPE_UALOE,
-  AMDSMI_FABRIC_TYPE_UALLINK,
-  AMDSMI_FABRIC_TYPE_UNKNOWN
+  AMDSMI_FABRIC_TYPE_UALINK,
+  AMDSMI_FABRIC_TYPE_UNKNOWN,
+  AMDSMI_FABRIC_TYPE_UALLINK = AMDSMI_FABRIC_TYPE_UALINK //!< Deprecated, use AMDSMI_FABRIC_TYPE_UALINK instead
 } amdsmi_fabric_type_t;
 
 /**
@@ -403,19 +408,15 @@ typedef struct {
   amdsmi_fabric_accelerator_vpod_state_t accel_state; //!< Accelerator vPoD State
 } amdsmi_fabric_info_v1_t;
 
-typedef struct {
-  uint32_t version;
-  union fabric_info_ {
-    amdsmi_fabric_info_v1_t v1;
-  } fabric_version;
-} amdsmi_fabric_info_ver_t;
-
 /**
  * @brief Fabric device information structure
  */
 typedef struct {
   amdsmi_bdf_t bdf; //!< BDF of the Fabric device
-  amdsmi_fabric_info_ver_t fabric_info;
+  uint32_t fabric_version;
+  union fabric_info_ {
+    amdsmi_fabric_info_v1_t v1;
+  } fabric_info;
   uint32_t reserved[15];
 } amdsmi_fabric_info_t;
 
@@ -449,21 +450,52 @@ amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_han
  *
  *  @platform{gpu_bm_linux} @platform{host}
  *
- *  @details Given a telemetry item ID @p telem_id,
- *  this function returns a pointer to a string containing the human-readable name
- *  for the specified telemetry item. The returned string is statically allocated
- *  and should not be freed by the caller.
- *
+ *  @details Given a telemetry item ID @p telem_id, this function writes a pointer
+ *  to a human-readable name for the specified telemetry item through @p telem_name.
+ *  The returned string is statically allocated and should not be freed by the caller.
  *
  *  @param[in] telem_id The telemetry item ID for which the name is requested
  *
- *  @return const char* | Pointer to string containing the telemetry item name,
- *  or UNKNOWN if the category or telemetry ID is not recognized
+ *  @param[out] telem_name Receives a pointer to the telemetry item name string,
+ *  or "UNKNOWN" if the category or telemetry ID is not recognized
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id);
+amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char** telem_name);
 
 /** @} End rcclFabricCompat */
 #endif // !AMDSMI_FABRIC_DIRECT
+
+/*************************************************************************
+ * Fabric ABI guard
+ *
+ * amdsmi_get_gpu_fabric_info() is reached through dlopen, so it writes this
+ * struct using the shipped library's layout, not ours. If our declaration is
+ * smaller the library writes past the end of the caller's object, and any
+ * shift moves the fields we read. Neither shows up as a compiler diagnostic,
+ * so recognize the two shipped layouts here: a mismatch must be a deliberate
+ * update, not a silent memory bug. Some pre-release ROCm 7.14 snapshots used
+ * AMDSMI_FABRIC_MAX_LOCAL_GPUS=8, while final ROCm 7.14 and ROCm 7.15 use 16
+ * without changing the amd_smi major.
+ ************************************************************************/
+constexpr size_t kAmdSmiFabricInfo8GpuSize = 288;
+constexpr size_t kAmdSmiFabricInfo16GpuSize = 320;
+constexpr size_t kAmdSmiFabricState8GpuOffset = 208;
+constexpr size_t kAmdSmiFabricState16GpuOffset = 240;
+
+constexpr bool amdSmiFabricLayoutIs8Gpu =
+  sizeof(amdsmi_fabric_info_v1_t) == 212 && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo8GpuSize &&
+  offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState8GpuOffset - sizeof(uint32_t) &&
+  offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState8GpuOffset &&
+  offsetof(amdsmi_fabric_info_t, reserved) == 224;
+
+constexpr bool amdSmiFabricLayoutIs16Gpu =
+  sizeof(amdsmi_fabric_info_v1_t) == 244 && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo16GpuSize &&
+  offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState16GpuOffset - sizeof(uint32_t) &&
+  offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset &&
+  offsetof(amdsmi_fabric_info_t, reserved) == 256;
+
+static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu, "unsupported amdsmi fabric layout");
 
 /*************************************************************************
  * AMD SMI Fabric Info Cache
@@ -474,6 +506,120 @@ const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id);
 
 #define AMDSMI_FABRIC_INFO_VERSION_1 1
 #define AMDSMI_FABRIC_INFO_CURRENT_VERSION AMDSMI_FABRIC_INFO_VERSION_1
+
+// Sentinel amd_smi leaves in numeric fabric fields it could not source from sysfs
+constexpr uint32_t kAmdSmiFabricVersionUnreported = 0xFFFFFFFFu;
+
+// amd_smi never populates amdsmi_fabric_info_t's version field, so an unreported value
+// has to be read as v1 rather than as a reason to discard an otherwise valid payload.
+// A version the library does claim, but that we cannot interpret, is still refused.
+inline bool amdSmiFabricVersionUsable(uint32_t version) {
+  return version == kAmdSmiFabricVersionUnreported || version == AMDSMI_FABRIC_INFO_CURRENT_VERSION;
+}
+
+// Fabric is usable only over a link type we drive, and only once the accelerator has
+// reached a state where its vPoD can carry traffic.
+//
+// AMDSMI_FABRIC_TYPE_UALLINK is deprecated in favour of the correctly spelled
+// AMDSMI_FABRIC_TYPE_UALINK, but only the former exists in amd_smi before 27.0 and
+// the latter is an alias for it after, so the old name is the one that compiles
+// against every header we support.
+inline bool amdSmiFabricStateUsable(amdsmi_fabric_type_t type, amdsmi_fabric_accelerator_vpod_state_t state) {
+  return (type == AMDSMI_FABRIC_TYPE_UALOE || type == AMDSMI_FABRIC_TYPE_UALLINK) &&
+         (state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE || state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY);
+}
+
+/*************************************************************************
+ * amdsmi_fabric_info_t layout compatibility
+ *
+ * amd_smi 27.0 flattened this struct. The version moved from a nested
+ * fabric_info.version to a top-level fabric_version, and the payload from
+ * fabric_info.fabric_version.v1 to fabric_info.v1 -- note that fabric_version
+ * names different things either side of the change. The version and payload
+ * offsets did not move (bytes 8 and 12), so the shape change itself is only a
+ * source-level rename; the ABI guard above handles payload capacity separately.
+ *
+ * Detect the shape rather than test a version macro, so a header that carries
+ * the change under any version still resolves correctly. Only the flattened
+ * layout has a top-level integral fabric_version; in the nested layout that name
+ * exists solely inside fabric_info, as a union.
+ ************************************************************************/
+template <typename T, typename = void>
+struct amdSmiFabricInfoIsFlat : std::false_type {};
+
+template <typename T>
+struct amdSmiFabricInfoIsFlat<T, std::void_t<decltype(std::declval<const T&>().fabric_version)>>
+  : std::is_integral<std::decay_t<decltype(std::declval<const T&>().fabric_version)>> {};
+
+// Templates so that if constexpr discards the branch that does not compile against
+// the header in use; in a non-template function both branches are type-checked.
+template <typename FabricInfoT>
+inline uint32_t amdSmiFabricInfoVersion(const FabricInfoT& info) {
+  if constexpr (amdSmiFabricInfoIsFlat<FabricInfoT>::value) {
+    return info.fabric_version;
+  } else {
+    return info.fabric_info.version;
+  }
+}
+
+template <typename FabricInfoT>
+inline const amdsmi_fabric_info_v1_t* amdSmiFabricInfoV1(const FabricInfoT& info) {
+  if constexpr (amdSmiFabricInfoIsFlat<FabricInfoT>::value) {
+    return &info.fabric_info.v1;
+  } else {
+    return &info.fabric_info.fabric_version.v1;
+  }
+}
+
+// amd_smi 26.x used both supported payload sizes under the same SONAME. Use a
+// maximum-sized canary buffer so either runtime can write safely, then identify
+// how much it wrote. Both implementations value-initialize a local struct and
+// assign the complete object, making the final 32 bytes zero only for the
+// 16-GPU runtime.
+constexpr unsigned char kAmdSmiFabricBufferCanary = 0xA5;
+
+struct alignas(amdsmi_fabric_info_t) amdSmiFabricInfoBuffer {
+  unsigned char bytes[kAmdSmiFabricInfo16GpuSize];
+};
+
+enum class amdSmiFabricRuntimeLayout {
+  EightGpu,
+  SixteenGpu,
+  Unknown,
+};
+
+inline void amdSmiPrepareFabricInfoBuffer(amdSmiFabricInfoBuffer& buffer) {
+  memset(buffer.bytes, kAmdSmiFabricBufferCanary, sizeof(buffer.bytes));
+}
+
+inline amdsmi_fabric_info_t* amdSmiFabricInfoBufferAsInfo(amdSmiFabricInfoBuffer& buffer) {
+  return reinterpret_cast<amdsmi_fabric_info_t*>(buffer.bytes);
+}
+
+inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFabricInfoBuffer& buffer) {
+  bool tailIsCanary = true;
+  bool tailIsZero = true;
+  for (size_t i = kAmdSmiFabricInfo8GpuSize; i < kAmdSmiFabricInfo16GpuSize; ++i) {
+    tailIsCanary &= buffer.bytes[i] == kAmdSmiFabricBufferCanary;
+    tailIsZero &= buffer.bytes[i] == 0;
+  }
+  if (tailIsCanary) return amdSmiFabricRuntimeLayout::EightGpu;
+  if (tailIsZero) return amdSmiFabricRuntimeLayout::SixteenGpu;
+  return amdSmiFabricRuntimeLayout::Unknown;
+}
+
+// amd_smi 27.0 also changed amdsmi_fabric_telem_id_to_string from returning the name
+// to writing it through an out-parameter. The two are not call-compatible and we reach
+// it through dlopen, so the choice has to follow the version the loaded runtime
+// reports. An unknown version must assume the out-parameter form: calling a 27+
+// implementation the old way leaves it writing through an uninitialized pointer,
+// whereas calling an older one the new way merely leaves the name unwritten.
+constexpr uint32_t kAmdSmiLibVersionUnknown = 0;
+constexpr uint32_t kAmdSmiTelemOutParamMajor = 27;
+
+inline bool amdSmiTelemIdUsesOutParam(uint32_t libMajor) {
+  return libMajor == kAmdSmiLibVersionUnknown || libMajor >= kAmdSmiTelemOutParamMajor;
+}
 
 struct amdsmiFabricDeviceInfo {
   bool fabricSupported; //!< Whether UALoE fabric is available

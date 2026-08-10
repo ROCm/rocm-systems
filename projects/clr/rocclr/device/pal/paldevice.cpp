@@ -1582,8 +1582,22 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
         }
         remoteAlloc = true;
       }
+      // Multi-GPU fine-grain SVM (e.g. __managed__ / hipMallocManaged, which use
+      // CL_MEM_ALLOC_HOST_PTR | CL_MEM_SVM_FINE_GRAIN_BUFFER) must be addressable
+      // at the SAME canonical VA on every device. The pinned path maps the shared
+      // host pages at a device-local Default-range VA that differs from the owner's
+      // SVM VA, so a peer kernel using the canonical pointer faults or reads the
+      // wrong memory (observed as a dev1 GPU fault accessing a __managed__ var).
+      // For these, skip pinning on the peer and fall through to the reserved-VA SVM
+      // path so the peer reserves the canonical VA (same as a regular fine-grain
+      // hipHostAlloc peer). This also keeps the per-device suballocator free-lists
+      // symmetric, which is required for consistent intra-chunk offsets.
+      const bool mgpuFineGrainSvm =
+          (owner.getMemFlags() & CL_MEM_ALLOC_HOST_PTR) &&
+          (owner.getMemFlags() & CL_MEM_SVM_FINE_GRAIN_BUFFER) &&
+          (owner.getSvmPtr() != nullptr) && (owner.getContext().devices().size() > 1);
       // Make sure owner has a valid hostmem pointer and it's not COPY
-      if (!remoteAlloc && (owner.getHostMem() != nullptr)) {
+      if (!remoteAlloc && !mgpuFineGrainSvm && (owner.getHostMem() != nullptr)) {
         Resource::PinnedParams params;
         params.owner_ = &owner;
         params.gpu_ = reinterpret_cast<VirtualGPU*>(owner.getVirtualDevice());
@@ -1921,11 +1935,14 @@ bool Device::bindExternalDevice(uint flags, void* const pDevice[], void* pContex
 #endif  //_WIN32
 
   if (flags & amd::Context::Flags::GLDeviceKhr) {
-    // Attempt to associate PAL-OGL
-    if (!glAssociate(pContext, pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx])) {
-      if (!validateOnly) {
-        LogError("Failed glAssociate()");
+    void* glDevice = pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+    if (validateOnly) {
+      // Probe: check compatibility without starting a GL interop session.
+      if (!initGLInteropPrivateExt(pContext, glDevice) || !glCanInterop(pContext, glDevice)) {
+        return false;
       }
+    } else if (!glAssociate(pContext, glDevice)) {
+      LogError("Failed glAssociate()");
       return false;
     }
   }
@@ -1940,12 +1957,11 @@ bool Device::unbindExternalDevice(uint flags, void* const pDevice[], void* pCont
   }
 
   void* glDevice = pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
-  if (glDevice != nullptr) {
+  // validateOnly never started a session; nothing to dissociate.
+  if (glDevice != nullptr && !validateOnly) {
     // Dissociate PAL-OGL
     if (!glDissociate(pContext, glDevice)) {
-      if (validateOnly) {
-        LogWarning("Failed glDissociate()");
-      }
+      LogWarning("Failed glDissociate()");
       return false;
     }
   }

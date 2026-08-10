@@ -31,7 +31,8 @@
 #include <hip/hip_runtime.h>
 #include "markers.hpp"
 
-__global__ void test_kernel(float *out, const float *in, int n) {
+__global__ void test_kernel(float* out, const float* in, int n)
+{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n) return;
 
@@ -61,8 +62,9 @@ __global__ void test_kernel(float *out, const float *in, int n) {
     sqtt_marker_exit(10u);
 }
 
-int main() {
-    const int N = 304*256;
+int main()
+{
+    const int N = 304 * 256;
     float *d_in, *d_out;
     hipMalloc(&d_in, N * sizeof(float));
     hipMalloc(&d_out, N * sizeof(float));

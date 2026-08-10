@@ -12,6 +12,7 @@ set(UNIT_TEST_SOURCES
     symbol_seal_test.cpp
     writer_test.cpp
     reader_test.cpp
+    sqlite_backend_impl_test.cpp
 )
 
 add_executable(profiler-hub_unit_tests ${UNIT_TEST_SOURCES})

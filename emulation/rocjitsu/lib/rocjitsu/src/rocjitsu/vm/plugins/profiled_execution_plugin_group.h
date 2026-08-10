@@ -40,15 +40,17 @@ class ProfiledExecutionPluginGroup : public ExecutionPluginGroup {
   };
 
 public:
-  ProfiledExecutionPluginGroup() : start_time_(Clock::now()) {}
+  explicit ProfiledExecutionPluginGroup(PluginSinkConfig config)
+      : ExecutionPluginGroup(std::move(config)), start_time_(Clock::now()) {}
 
-  void onInit() {
-    if (auto *s = build_composite_sink("profile.log"))
+  void onInit() override {
+    profile_sink_ = build_sink_bundle("profile.log");
+    if (auto *s = profile_sink_.get())
       sink_ = s;
     ExecutionPluginGroup::onInit();
   }
 
-  void onShutdown() {
+  void onShutdown() override {
     if (prof_before_exec_.count > 0)
       print_profile_summary();
     ExecutionPluginGroup::onShutdown();
@@ -127,6 +129,14 @@ public:
     });
   }
 
+  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
+                              uint64_t lane_mask,
+                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override {
+    profiled_dispatch(prof_write_vgpr_, [&]() {
+      ExecutionPluginGroup::onAmdgpuWriteVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+    });
+  }
+
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) override {
     profiled_dispatch(prof_read_sgpr_,
                       [&]() { ExecutionPluginGroup::onAmdgpuReadSgpr(wf, physical_reg); });
@@ -157,6 +167,7 @@ private:
     prof_before_exec_ = {};
     prof_after_exec_ = {};
     prof_read_vgpr_ = {};
+    prof_write_vgpr_ = {};
     prof_read_sgpr_ = {};
     prof_route_mem_ = {};
     prof_barrier_ = {};
@@ -167,7 +178,8 @@ private:
   }
 
   void print_profile_summary() {
-    const char *kname = current_kernel_name_.empty() ? "?" : current_kernel_name_.c_str();
+    const char *kname =
+        current_kernel_name_.empty() ? kUnknownKernelIdentity : current_kernel_name_.c_str();
     sink().write(std::format("HOOK_PROFILE --- {} ---\n", kname));
     auto print_hook = [this](const char *name, const HookProfile &p) {
       if (p.count == 0)
@@ -178,6 +190,7 @@ private:
     print_hook("beforeExecuteInstruction", prof_before_exec_);
     print_hook("afterExecuteInstruction", prof_after_exec_);
     print_hook("readVgpr", prof_read_vgpr_);
+    print_hook("writeVgpr", prof_write_vgpr_);
     print_hook("readSgpr", prof_read_sgpr_);
     print_hook("routeMemoryInstruction", prof_route_mem_);
     print_hook("barrierResolved", prof_barrier_);
@@ -191,6 +204,7 @@ private:
   PluginSink &sink() { return *sink_; }
 
   Clock::time_point start_time_;
+  SinkBundle profile_sink_;
   PluginSink *sink_ = &StderrSink::instance();
   std::string current_kernel_name_;
   std::unordered_map<uint32_t, std::string> dispatch_kernel_names_;
@@ -198,6 +212,7 @@ private:
   HookProfile prof_before_exec_;
   HookProfile prof_after_exec_;
   HookProfile prof_read_vgpr_;
+  HookProfile prof_write_vgpr_;
   HookProfile prof_read_sgpr_;
   HookProfile prof_route_mem_;
   HookProfile prof_barrier_;

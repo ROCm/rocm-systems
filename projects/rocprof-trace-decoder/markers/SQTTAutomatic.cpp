@@ -45,9 +45,7 @@ bool SQTTInstrumentPass::instrumentBarriers(Function& F, GfxGen gen)
     // Snapshot all insertion points before changing the CFG.
     SmallVector<std::pair<Instruction*, uint32_t>, 8> insertions;
     auto markerID = [this](BarrierKind kind)
-    {
-        return kind == BarrierKind::None ? 0 : FirstBarrierID + static_cast<uint32_t>(kind);
-    };
+    { return kind == BarrierKind::None ? 0 : FirstBarrierID + static_cast<uint32_t>(kind); };
     for (auto& BB : F)
     {
         CallInst* signal = nullptr;
@@ -95,8 +93,8 @@ SQTTInstrumentPass::MemOpKind SQTTInstrumentPass::classifyMemOp(Instruction* I)
     if (!Callee) return MemOpKind::None;
     BufferOpKind kind = classifyBufferOp(Callee->getName());
     return kind == BufferOpKind::Load ? MemOpKind::Load
-           : kind == BufferOpKind::None ? MemOpKind::None
-                                        : MemOpKind::Store;
+         : kind == BufferOpKind::None ? MemOpKind::None
+                                      : MemOpKind::Store;
 }
 
 bool SQTTInstrumentPass::instrumentMemoryOps(Function& F, GfxGen gen)
@@ -104,9 +102,7 @@ bool SQTTInstrumentPass::instrumentMemoryOps(Function& F, GfxGen gen)
     // Snapshot first: inserting a trace changes the instruction stream being chunked.
     SmallVector<std::pair<Instruction*, uint32_t>, 16> insertions;
     auto markerID = [this](MemOpKind kind)
-    {
-        return kind == MemOpKind::None ? 0 : FirstVmemID + static_cast<uint32_t>(kind);
-    };
+    { return kind == MemOpKind::None ? 0 : FirstVmemID + static_cast<uint32_t>(kind); };
     for (auto& BB : F)
     {
         MemOpKind runKind = MemOpKind::None;
@@ -114,8 +110,7 @@ bool SQTTInstrumentPass::instrumentMemoryOps(Function& F, GfxGen gen)
         unsigned runSize = 0, gap = 0;
         auto flush = [&]
         {
-            if (runSize)
-                insertions.push_back({lastOp, markerID(runKind)});
+            if (runSize) insertions.push_back({lastOp, markerID(runKind)});
             runSize = 0;
         };
         for (auto& I : BB)

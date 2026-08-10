@@ -287,6 +287,7 @@ def test_canonical_config_arch_maps_gfx115_variants_to_shared_dir():
     assert canonical_config_arch("gfx1150") == "gfx115x"
     assert canonical_config_arch("gfx1151") == "gfx115x"
     assert canonical_config_arch("gfx1152") == "gfx115x"
+    assert canonical_config_arch("gfx1153") == "gfx115x"
     assert canonical_config_arch("gfx942") == "gfx942"
 
 
@@ -298,6 +299,7 @@ def test_is_single_panel_config_accepts_shared_gfx115x_dir(tmp_path):
         "gfx1150": "rdna35_point_1",
         "gfx1151": "rdna35_halo",
         "gfx1152": "rdna35_point_2",
+        "gfx1153": "rdna35_gorgon_point",
     }
 
     assert is_single_panel_config(str(tmp_path), supported_archs) is False
@@ -605,3 +607,25 @@ def test_reconstruct_specs_from_sysinfo_missing_version_raises():
     """A sysinfo dict without a version key aborts via console_error/KeyError."""
     with pytest.raises((KeyError, SystemExit)):
         generate_machine_specs(None, {"gpu_arch": "gfx1151"})
+
+
+@pytest.mark.misc
+def test_get_rocm_ver_env_override(monkeypatch, tmp_path):
+    """ROCM_VER overrides detection when no .info/ directory is present."""
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path))
+    monkeypatch.setenv("ROCM_VER", "6.9.9")
+    assert specs.get_rocm_ver() == "6.9.9"
+
+
+@pytest.mark.misc
+def test_get_rocm_ver_undetectable_errors(monkeypatch, tmp_path):
+    """Missing .info/ and unset ROCM_VER terminates via console_error."""
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path))
+    monkeypatch.delenv("ROCM_VER", raising=False)
+    with patch.object(specs, "console_error") as console_error_mock:
+        specs.get_rocm_ver()
+    console_error_mock.assert_called_once()
+    assert (
+        "Unable to detect a complete local ROCm installation"
+        in (console_error_mock.call_args.args[0])
+    )

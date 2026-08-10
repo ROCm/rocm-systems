@@ -441,10 +441,8 @@ static bool matchSubnet(struct ifaddrs local_if, union ncclSocketAddress* remote
     struct sockaddr_in* local_addr = (struct sockaddr_in*)(local_if.ifa_addr);
     struct sockaddr_in* mask = (struct sockaddr_in*)(local_if.ifa_netmask);
     struct sockaddr_in& remote_addr = remote->sin;
-    struct in_addr local_subnet, remote_subnet;
-    local_subnet.s_addr = local_addr->sin_addr.s_addr & mask->sin_addr.s_addr;
-    remote_subnet.s_addr = remote_addr.sin_addr.s_addr & mask->sin_addr.s_addr;
-    return (local_subnet.s_addr == remote_subnet.s_addr);
+    // Delegate the subnet-match boolean to a header helper for unit-testing (see socket.h).
+    return rcclMatchSubnetV4(local_addr->sin_addr, remote_addr.sin_addr, mask->sin_addr);
   } else if (family == AF_INET6) {
     struct sockaddr_in6* local_addr = (struct sockaddr_in6*)(local_if.ifa_addr);
     struct sockaddr_in6* mask = (struct sockaddr_in6*)(local_if.ifa_netmask);

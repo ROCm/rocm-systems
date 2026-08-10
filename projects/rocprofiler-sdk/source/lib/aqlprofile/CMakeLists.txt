@@ -28,7 +28,7 @@ target_link_libraries(
     PRIVATE $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>
             # $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-build-flags>
             $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-threading>
-            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-memcheck>
+            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-sanitizer>
             $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-cxx-filesystem>
             $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-abseil>
             $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-fmt>
@@ -39,3 +39,7 @@ set_target_properties(rocprofiler-sdk-aqlprofile PROPERTIES POSITION_INDEPENDENT
 add_subdirectory(core)
 add_subdirectory(util)
 add_subdirectory(pm4)
+
+if(ROCPROFILER_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()

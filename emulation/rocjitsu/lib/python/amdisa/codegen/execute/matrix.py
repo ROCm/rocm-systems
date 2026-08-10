@@ -134,6 +134,14 @@ def gen_mfma(
     input_type = m.group(5)  # F32, XF32, F16, BF16, I8, F64, etc.
     is_swmmac = name.startswith('V_SWMMAC_')
 
+    if inst.operands and inst.operands[0].fieldless:
+        raise ValueError(
+            f'{name}: fieldless operand at index 0 breaks the '
+            f'accumulator-is-operand[0] assumption in gen_mfma. A fieldless '
+            f'operand on a matrix instruction is unhandled. Decide how it '
+            f'should participate in the dst-width / operand mapping before '
+            f'regenerating.'
+        )
     dst_bits = inst.operands[0].size if inst.operands else 0
     dst_regs = max(1, dst_bits // 32)
 

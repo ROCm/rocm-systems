@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -45,14 +46,16 @@ TbufferLoadFormatXMtbuf::TbufferLoadFormatXMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -80,14 +83,16 @@ TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -115,14 +120,16 @@ TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -150,14 +157,16 @@ TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -185,14 +194,16 @@ TbufferStoreFormatXMtbuf::TbufferStoreFormatXMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -229,14 +240,16 @@ TbufferStoreFormatXyMtbuf::TbufferStoreFormatXyMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -275,14 +288,16 @@ TbufferStoreFormatXyzMtbuf::TbufferStoreFormatXyzMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -323,14 +338,16 @@ TbufferStoreFormatXyzwMtbuf::TbufferStoreFormatXyzwMtbuf(const MachineInst *inst
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -373,29 +390,28 @@ TbufferLoadFormatD16XMtbuf::TbufferLoadFormatD16XMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
+void TbufferLoadFormatD16XMtbuf::implicit_uses(RegisterSet &uses) const {
+  Mtbuf::implicit_uses(uses);
+  if (auto r = vdata.to_register_ref())
+    uses.expand(*r);
+}
+
 void TbufferLoadFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->d16_lo = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 TbufferLoadFormatD16XyMtbuf::TbufferLoadFormatD16XyMtbuf(const MachineInst *inst)
@@ -409,29 +425,22 @@ TbufferLoadFormatD16XyMtbuf::TbufferLoadFormatD16XyMtbuf(const MachineInst *inst
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 void TbufferLoadFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 2;
-  d->num_elems = 2;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->d16_lo = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 TbufferLoadFormatD16XyzMtbuf::TbufferLoadFormatD16XyzMtbuf(const MachineInst *inst)
@@ -445,29 +454,28 @@ TbufferLoadFormatD16XyzMtbuf::TbufferLoadFormatD16XyzMtbuf(const MachineInst *in
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
+void TbufferLoadFormatD16XyzMtbuf::implicit_uses(RegisterSet &uses) const {
+  Mtbuf::implicit_uses(uses);
+  if (auto r = vdata.to_register_ref())
+    uses.expand(RegisterRef{r->cls, static_cast<uint16_t>(r->index + 1), 1});
+}
+
 void TbufferLoadFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 2;
-  d->num_elems = 3;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->d16_lo = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 TbufferLoadFormatD16XyzwMtbuf::TbufferLoadFormatD16XyzwMtbuf(const MachineInst *inst)
@@ -481,29 +489,22 @@ TbufferLoadFormatD16XyzwMtbuf::TbufferLoadFormatD16XyzwMtbuf(const MachineInst *
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 void TbufferLoadFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 2;
-  d->num_elems = 4;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->d16_lo = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 TbufferStoreFormatD16XMtbuf::TbufferStoreFormatD16XMtbuf(const MachineInst *inst)
@@ -517,37 +518,22 @@ TbufferStoreFormatD16XMtbuf::TbufferStoreFormatD16XMtbuf(const MachineInst *inst
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 2);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
-  }
-  set_data(std::move(d));
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 TbufferStoreFormatD16XyMtbuf::TbufferStoreFormatD16XyMtbuf(const MachineInst *inst)
@@ -561,39 +547,22 @@ TbufferStoreFormatD16XyMtbuf::TbufferStoreFormatD16XyMtbuf(const MachineInst *in
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 2;
-  d->num_elems = 2;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 2);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    std::memcpy(&d->store_data[lane * 4 + 2], &val1, 2);
-  }
-  set_data(std::move(d));
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 TbufferStoreFormatD16XyzMtbuf::TbufferStoreFormatD16XyzMtbuf(const MachineInst *inst)
@@ -607,41 +576,22 @@ TbufferStoreFormatD16XyzMtbuf::TbufferStoreFormatD16XyzMtbuf(const MachineInst *
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 2;
-  d->num_elems = 3;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 6);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    std::memcpy(&d->store_data[lane * 6 + 0], &val0, 2);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    std::memcpy(&d->store_data[lane * 6 + 2], &val1, 2);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    std::memcpy(&d->store_data[lane * 6 + 4], &val2, 2);
-  }
-  set_data(std::move(d));
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 TbufferStoreFormatD16XyzwMtbuf::TbufferStoreFormatD16XyzwMtbuf(const MachineInst *inst)
@@ -655,43 +605,22 @@ TbufferStoreFormatD16XyzwMtbuf::TbufferStoreFormatD16XyzwMtbuf(const MachineInst
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 2;
-  d->num_elems = 4;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 2);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    std::memcpy(&d->store_data[lane * 8 + 2], &val1, 2);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val2, 2);
-    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    std::memcpy(&d->store_data[lane * 8 + 6], &val3, 2);
-  }
-  set_data(std::move(d));
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 } // namespace cdna4

@@ -122,13 +122,19 @@ bool glCanInterop(Device* device, void* GLplatformContext, void* GLdeviceContext
 }
 
 // ================================================================================================
-bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLdeviceContext) {
+bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLdeviceContext,
+                 bool validateOnly) {
   static_cast<void>(flags); // unused
 
   if (!initGLInteropPrivateExt(GLdeviceContext)) return false;
 
   if (!glCanInterop(device, GLplatformContext, GLdeviceContext)) {
     return false;
+  }
+
+  // validateOnly: compatibility confirmed, skip starting a real interop session.
+  if (validateOnly) {
+    return true;
   }
 
   return wglBeginCLInteropAMD(static_cast<HGLRC>(GLplatformContext), 0) != FALSE;

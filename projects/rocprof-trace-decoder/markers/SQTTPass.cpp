@@ -39,8 +39,7 @@ namespace
 {
 
 constexpr const char* MarkerSentinelNames[] = {
-    "__sqtt_named_marker_enter", "__sqtt_named_marker_exit", "__sqtt_named_marker_point", "__sqtt_named_marker_data"
-};
+    "__sqtt_named_marker_enter", "__sqtt_named_marker_exit", "__sqtt_named_marker_point", "__sqtt_named_marker_data"};
 
 void eraseUnusedMarkerSentinels(Module& M)
 {
@@ -81,8 +80,7 @@ bool inlineMarkerWrappers(Module& M)
     return changed;
 }
 
-template <typename Visit>
-bool visitTargetFunctions(Module& M, Visit&& visit)
+template <typename Visit> bool visitTargetFunctions(Module& M, Visit&& visit)
 {
     bool changed = false;
     for (Function& F : M)
@@ -111,26 +109,32 @@ PreservedAnalyses SQTTInstrumentPass::runEarly(Module& M)
     Changed |= inlineMarkerWrappers(M);
 
     // Now resolve sentinel calls that are directly visible.
-    Changed |= visitTargetFunctions(M, [&](Function& F, GfxGen gen)
-    {
-        return processMarkerCalls(F, gen, /*useBareTrace=*/true);
-    });
+    Changed |= visitTargetFunctions(
+        M, [&](Function& F, GfxGen gen) { return processMarkerCalls(F, gen, /*useBareTrace=*/true); }
+    );
 
     eraseUnusedMarkerSentinels(M);
 
-    Changed |= visitTargetFunctions(M, [&](Function& F, GfxGen gen)
-    {
-        if (F.getCallingConv() == CallingConv::AMDGPU_KERNEL || Config.FunctionThreshold == 0 ||
-            hasMustTailCall(F))
-            return false;
-        uint32_t id = NextEventID++;
-        Type* I32 = Type::getInt32Ty(Ctx);
-        F.setMetadata("sqtt.func.id", MDNode::get(Ctx, {ConstantAsMetadata::get(ConstantInt::get(I32, id))}));
-        Markers.push_back({id, MarkerKind::Function, F.getName().str(), getFunctionSourceLoc(F),
-                           computeFunctionSize(F, Config.Mode)});
-        insertFunctionMarkers(F, id, gen, /*useBareTrace=*/true);
-        return true;
-    });
+    Changed |= visitTargetFunctions(
+        M,
+        [&](Function& F, GfxGen gen)
+        {
+            if (F.getCallingConv() == CallingConv::AMDGPU_KERNEL || Config.FunctionThreshold == 0 || hasMustTailCall(F))
+                return false;
+            uint32_t id = NextEventID++;
+            Type* I32 = Type::getInt32Ty(Ctx);
+            F.setMetadata("sqtt.func.id", MDNode::get(Ctx, {ConstantAsMetadata::get(ConstantInt::get(I32, id))}));
+            Markers.push_back(
+                {id,
+                 MarkerKind::Function,
+                 F.getName().str(),
+                 getFunctionSourceLoc(F),
+                 computeFunctionSize(F, Config.Mode)}
+            );
+            insertFunctionMarkers(F, id, gen, /*useBareTrace=*/true);
+            return true;
+        }
+    );
 
     if (!Markers.empty()) storeEarlyMarkerMetadata(M, Ctx);
 
@@ -144,8 +148,7 @@ PreservedAnalyses SQTTInstrumentPass::runLate(Module& M)
     bool hadEarlyFuncInst = false;
     bool hadEarlyPass = recoverEarlyMarkerMetadata(M, hadEarlyFuncInst);
 
-    if (hadEarlyFuncInst)
-        Changed |= finalizeEarlyFunctionMarkers(M);
+    if (hadEarlyFuncInst) Changed |= finalizeEarlyFunctionMarkers(M);
 
     auto addSystemMarkers = [&](std::initializer_list<const char*> names)
     {
@@ -153,34 +156,36 @@ PreservedAnalyses SQTTInstrumentPass::runLate(Module& M)
         for (const char* name : names) Markers.push_back({NextEventID++, MarkerKind::SystemPoint, name});
         return firstID;
     };
-    if (Config.InstrumentBarriers)
-        FirstBarrierID = addSystemMarkers({"barrier_signal", "barrier_wait", "barrier"});
-    if (Config.MemoryChunkSize)
-        FirstVmemID = addSystemMarkers({"vmem_load", "vmem_store"});
+    if (Config.InstrumentBarriers) FirstBarrierID = addSystemMarkers({"barrier_signal", "barrier_wait", "barrier"});
+    if (Config.MemoryChunkSize) FirstVmemID = addSystemMarkers({"vmem_load", "vmem_store"});
 
     // A nonzero clock field must wait until every payload-producing protocol
     // has been discovered. The default no-clock path can lower each function
     // as soon as all of its markers have been inserted.
     const bool deferFullTraceFinalization = Config.ShaderClockBits != 0;
-    Changed |= visitTargetFunctions(M, [&](Function& F, GfxGen gen)
-    {
-        CurScopeCheck = nullptr; // reset per function
-        bool isKernel = F.getCallingConv() == CallingConv::AMDGPU_KERNEL;
-        if (isKernel) Markers.push_back({0, MarkerKind::Kernel, F.getName().str(), getFunctionSourceLoc(F)});
+    Changed |= visitTargetFunctions(
+        M,
+        [&](Function& F, GfxGen gen)
+        {
+            CurScopeCheck = nullptr; // reset per function
+            bool isKernel = F.getCallingConv() == CallingConv::AMDGPU_KERNEL;
+            if (isKernel) Markers.push_back({0, MarkerKind::Kernel, F.getName().str(), getFunctionSourceLoc(F)});
 
-        bool changed = finalizeExistingMarkers(F, gen);
-        changed |= processMarkerCalls(F, gen, /*useBareTrace=*/false);
-        if (Config.InstrumentBarriers) changed |= instrumentBarriers(F, gen);
-        if (Config.MemoryChunkSize) changed |= instrumentMemoryOps(F, gen);
-        if (Config.hasAddressTracing()) changed |= instrumentAddressTraces(F, gen);
-        if (!hadEarlyPass && Config.FunctionThreshold > 0 && !isKernel)
-            changed |= instrumentFunctionDirect(F, gen);
-        if (!deferFullTraceFinalization) changed |= finalizeFullTraces(F, gen);
-        return changed;
-    });
+            bool changed = finalizeExistingMarkers(F, gen);
+            changed |= processMarkerCalls(F, gen, /*useBareTrace=*/false);
+            if (Config.InstrumentBarriers) changed |= instrumentBarriers(F, gen);
+            if (Config.MemoryChunkSize) changed |= instrumentMemoryOps(F, gen);
+            if (Config.hasAddressTracing()) changed |= instrumentAddressTraces(F, gen);
+            if (!hadEarlyPass && Config.FunctionThreshold > 0 && !isKernel) changed |= instrumentFunctionDirect(F, gen);
+            if (!deferFullTraceFinalization) changed |= finalizeFullTraces(F, gen);
+            return changed;
+        }
+    );
 
-    if (Config.ShaderClockBits != 0 && std::any_of(Markers.begin(), Markers.end(), [](const MarkerRecord& entry)
-        { return entry.ExtraPayloadCount != 0; }))
+    if (Config.ShaderClockBits != 0 &&
+        std::any_of(
+            Markers.begin(), Markers.end(), [](const MarkerRecord& entry) { return entry.ExtraPayloadCount != 0; }
+        ))
         report_fatal_error("SQTT payload markers require SQTT_SHADER_CLOCK_BITS=0");
 
     if (deferFullTraceFinalization)
