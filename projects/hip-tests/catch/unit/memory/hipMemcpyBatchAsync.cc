@@ -121,15 +121,15 @@ void VerifyArrayFromBothEnds(const int* values, size_t copy_elements, int expect
     const size_t front_index = offset;
     const size_t back_index = copy_elements - 1 - offset;
 
-    INFO("Array failure at copy index " << copy_index << ", element " << front_index);
-    REQUIRE(values[front_index] == expected);
-
-    if (front_index == back_index) {
-      continue;
+    if (values[front_index] != expected) {
+      INFO("Array failure at copy index " << copy_index << ", element " << front_index);
+      REQUIRE(values[front_index] == expected);
     }
 
-    INFO("Array failure at copy index " << copy_index << ", element " << back_index);
-    REQUIRE(values[back_index] == expected);
+    if (front_index != back_index && values[back_index] != expected) {
+      INFO("Array failure at copy index " << copy_index << ", element " << back_index);
+      REQUIRE(values[back_index] == expected);
+    }
   }
 }
 
@@ -1053,6 +1053,51 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectDst) {
     HIP_CHECK(status);
     HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
     VerifyArrayFromBothEnds(dst.host_ptr(), copy_elements, kPatternValue, 0);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies a large D2D batch through the shader and SDMA copy paths.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_LargeBatch) {
+  constexpr size_t copy_count = 1024 * 32;
+  constexpr size_t copy_size = 64;
+  constexpr size_t total_size = copy_count * copy_size;
+  constexpr size_t copy_elements = copy_size / sizeof(int);
+  const hipMemcpyFlags flag = GENERATE(hipMemcpyFlagDefault, hipMemcpyFlagExtPreferCE);
+
+  StreamGuard stream_guard(Streams::created);
+  LinearAllocGuard<int> src(LinearAllocs::hipMalloc, total_size);
+  LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, total_size);
+  std::vector<void*> src_ptrs(copy_count);
+  std::vector<void*> dst_ptrs(copy_count);
+  std::vector<size_t> sizes(copy_count, copy_size);
+  std::vector<int> values(total_size / sizeof(int));
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderAny, {}, {}, static_cast<unsigned int>(flag)};
+  size_t attrs_idx = 0;
+
+  for (size_t i = 0; i < copy_count; ++i) {
+    src_ptrs[i] = reinterpret_cast<char*>(src.ptr()) + i * copy_size;
+    dst_ptrs[i] = reinterpret_cast<char*>(dst.ptr()) + i * copy_size;
+    std::fill_n(values.data() + i * copy_elements, copy_elements,
+                kPatternValue + static_cast<int>(i));
+  }
+  HIP_CHECK(hipMemcpy(src.ptr(), values.data(), total_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), copy_count, &attr,
+                                &attrs_idx, 1, nullptr, stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipMemcpy(values.data(), dst.ptr(), total_size, hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < copy_count; ++i) {
+    VerifyArrayFromBothEnds(values.data() + i * copy_elements, copy_elements,
+                            kPatternValue + static_cast<int>(i), i);
   }
 }
 #endif

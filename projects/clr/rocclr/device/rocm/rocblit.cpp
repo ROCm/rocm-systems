@@ -2831,69 +2831,77 @@ bool KernelBlitManager::ShaderCopyBufferBatchRaw(
 
   constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
   constexpr uint32_t kLocalWorkSize = 512;
-  const uint32_t max_workgroups_per_copy = std::max<uint32_t>(
-      dev().settings().limit_blit_wg_ / copy_operations.size(), 1);
-  const size_t descriptor_bytes =
-      copy_operations.size() * sizeof(CopyBufferBatchDescriptor);
-  void *descriptor_buffer = gpu().allocKernArg(descriptor_bytes, kCBAlignment);
-  CopyBufferBatchDescriptor *descriptors =
-      static_cast<CopyBufferBatchDescriptor *>(descriptor_buffer);
-  size_t descriptor_index = 0;
-  uint64_t max_aligned_element_count = 0;
-  bool needs_system_scope = false;
+  amd::Kernel* const kernel = kernels_[BlitCopyBufferBatch];
+  const Kernel& gpu_kernel = static_cast<const Kernel&>(*kernel->getDeviceKernel(dev()));
+  const size_t kernarg_reservation = (kCBAlignment - 1) +
+                                     (gpu_kernel.KernargSegmentAlignment() - 1) +
+                                     gpu_kernel.KernargSegmentByteSize();
+  const size_t max_operations_per_dispatch =
+      (gpu().KernArgPoolChunkSize() - kernarg_reservation) / sizeof(CopyBufferBatchDescriptor);
+  const size_t descriptor_buffer_bytes =
+      max_operations_per_dispatch * sizeof(CopyBufferBatchDescriptor);
   bool attach_signal = false;
 
-  for (const auto &copy_operation : copy_operations) {
-    const uint64_t source_address = reinterpret_cast<uint64_t>(copy_operation.src);
-    const uint64_t destination_address = reinterpret_cast<uint64_t>(copy_operation.dst);
-    needs_system_scope |= copy_operation.needs_system_scope || !copy_operation.metadata.isAsync_;
-    attach_signal |= copy_operation.attach_signal || !copy_operation.metadata.isAsync_;
-    const bool addresses_aligned = ((source_address % kMaxAlignment) == 0) &&
-                                   ((destination_address % kMaxAlignment) == 0);
-    const uint32_t aligned_element_size =
-        (addresses_aligned) ? kMaxAlignment : sizeof(uint32_t);
-    const uint64_t aligned_element_count =
-        copy_operation.size / aligned_element_size;
-    const uint32_t trailing_byte_count =
-        copy_operation.size % aligned_element_size;
-    max_aligned_element_count =
-        std::max(max_aligned_element_count, aligned_element_count);
+  for (size_t operation_offset = 0; operation_offset < copy_operations.size();
+       operation_offset += max_operations_per_dispatch) {
+    const size_t operation_count =
+        std::min(max_operations_per_dispatch, copy_operations.size() - operation_offset);
+    void* descriptor_buffer = gpu().allocKernArg(descriptor_buffer_bytes, kCBAlignment);
+    CopyBufferBatchDescriptor* descriptors =
+        static_cast<CopyBufferBatchDescriptor*>(descriptor_buffer);
+    uint64_t max_aligned_element_count = 0;
+    bool needs_system_scope = false;
 
-    descriptors[descriptor_index++] = {
-        source_address, destination_address, aligned_element_count,
-        aligned_element_size, trailing_byte_count};
+    for (size_t descriptor_index = 0; descriptor_index < operation_count; ++descriptor_index) {
+      const BatchRawCopyOp& copy_operation = copy_operations[operation_offset + descriptor_index];
+      const uint64_t source_address = reinterpret_cast<uint64_t>(copy_operation.src);
+      const uint64_t destination_address = reinterpret_cast<uint64_t>(copy_operation.dst);
+      needs_system_scope |= copy_operation.needs_system_scope || !copy_operation.metadata.isAsync_;
+      attach_signal |= copy_operation.attach_signal || !copy_operation.metadata.isAsync_;
+      const bool addresses_aligned =
+          ((source_address % kMaxAlignment) == 0) && ((destination_address % kMaxAlignment) == 0);
+      const uint32_t aligned_element_size = (addresses_aligned) ? kMaxAlignment : sizeof(uint32_t);
+      const uint64_t aligned_element_count = copy_operation.size / aligned_element_size;
+      const uint32_t trailing_byte_count = copy_operation.size % aligned_element_size;
+      max_aligned_element_count = std::max(max_aligned_element_count, aligned_element_count);
+
+      descriptors[descriptor_index] = {source_address, destination_address, aligned_element_count,
+                                       aligned_element_size, trailing_byte_count};
+    }
+
+    const uint32_t max_workgroups_per_copy = std::max<uint32_t>(
+        dev().settings().limit_blit_wg_ / static_cast<uint32_t>(operation_count), 1);
+    uint32_t workgroup_count = static_cast<uint32_t>(std::min<uint64_t>(
+        max_workgroups_per_copy,
+        amd::alignUp(max_aligned_element_count, static_cast<uint64_t>(kLocalWorkSize)) /
+            kLocalWorkSize));
+    workgroup_count = std::max<uint32_t>(workgroup_count, 1);
+    const uint32_t copy_stride = workgroup_count * kLocalWorkSize;
+
+    constexpr bool kDirectVa = true;
+    setArgument(kernel, 0, sizeof(cl_mem), descriptor_buffer, 0, nullptr, kDirectVa);
+    setArgument(kernel, 1, sizeof(kLocalWorkSize), &kLocalWorkSize);
+    setArgument(kernel, 2, sizeof(copy_stride), &copy_stride);
+
+    size_t global_work_size[2] = {copy_stride, operation_count};
+    size_t local_work_size[2] = {kLocalWorkSize, 1};
+    amd::NDRangeContainer nd_range(2, nullptr, global_work_size, local_work_size);
+
+    address parameters = captureArguments(kernel);
+    if (needs_system_scope) {
+      gpu().addSystemScope();
+    }
+    const bool is_last_dispatch = (operation_offset + operation_count) == copy_operations.size();
+    const bool submit_result =
+        gpu().submitKernelInternal(nd_range, *kernel, parameters, nullptr, 0, nullptr, nullptr,
+                                   is_last_dispatch && attach_signal);
+    releaseArguments(parameters);
+    if (!submit_result) {
+      return false;
+    }
   }
 
-  uint32_t workgroup_count = static_cast<uint32_t>(
-      std::min<uint64_t>(max_workgroups_per_copy,
-                         amd::alignUp(max_aligned_element_count,
-                                      static_cast<uint64_t>(kLocalWorkSize)) /
-                             kLocalWorkSize));
-  workgroup_count = std::max<uint32_t>(workgroup_count, 1);
-  const uint32_t copy_stride = workgroup_count * kLocalWorkSize;
-
-  amd::Kernel *const kernel = kernels_[BlitCopyBufferBatch];
-  constexpr bool kDirectVa = true;
-  setArgument(kernel, 0, sizeof(cl_mem), descriptor_buffer, 0, nullptr,
-              kDirectVa);
-
-  setArgument(kernel, 1, sizeof(kLocalWorkSize), &kLocalWorkSize);
-  setArgument(kernel, 2, sizeof(copy_stride), &copy_stride);
-
-  size_t global_work_size[2] = {copy_stride, copy_operations.size()};
-  size_t local_work_size[2] = {kLocalWorkSize, 1};
-  amd::NDRangeContainer nd_range(2, nullptr, global_work_size, local_work_size);
-
-  address parameters = captureArguments(kernel);
-  if (needs_system_scope) {
-    gpu().addSystemScope();
-  }
-  bool submit_result =
-      gpu().submitKernelInternal(nd_range, *kernel, parameters, nullptr, 0,
-                                 nullptr, nullptr, attach_signal);
-  releaseArguments(parameters);
-
-  return submit_result;
+  return true;
 }
 
 // ================================================================================================

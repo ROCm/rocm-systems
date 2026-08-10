@@ -2501,6 +2501,11 @@ void* VirtualGPU::allocKernArg(size_t size, size_t alignment) {
 }
 
 // ================================================================================================
+size_t VirtualGPU::KernArgPoolChunkSize() const {
+  return roc_device_.settings().kernargPoolSize_ / kKernArgPoolNumSignals;
+}
+
+// ================================================================================================
 address VirtualGPU::allocKernelArguments(size_t size, size_t alignment) {
   if (ROC_SKIP_KERNEL_ARG_COPY) {
     // Make sure VirtualGPU has an exclusive access to the resources
