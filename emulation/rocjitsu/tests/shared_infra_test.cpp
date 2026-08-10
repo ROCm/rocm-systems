@@ -65,6 +65,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
@@ -123,6 +124,15 @@ static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).uses_ttmp_workgroup_ids);
 static_assert(!isa_properties(ROCJITSU_CODE_ARCH_RDNA4).uses_cluster_ttmp_workgroup_ids);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).uses_ttmp_workgroup_ids);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).uses_cluster_ttmp_workgroup_ids);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA2).descriptor_vgpr_count_granule_wave32 == 0);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA2).descriptor_vgpr_count_granule_wave64 == 8);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA3).descriptor_vgpr_count_granule_wave32 == 0);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA3).descriptor_vgpr_count_granule_wave64 == 8);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).descriptor_vgpr_count_granule_wave32 == 8);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).descriptor_vgpr_count_granule_wave64 == 4);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).descriptor_vgpr_count_granule_wave32 ==
+              16);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).descriptor_vgpr_count_granule_wave64 == 0);
 
 // RDNA3/3.5 retain monolithic S_WAITCNT (GFX11 layout).
 static_assert(HasMonolithicWaitcnt<rdna3::Isa>);
@@ -138,6 +148,57 @@ static_assert(kCdnaAccVgprsPerWf == 256);
 static_assert(cdna3::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
 static_assert(cdna4::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
 static_assert(gfx1250::Isa::MAX_ACC_VGPRS_PER_WF == 0);
+
+TEST(IsaPropertiesTest, DescriptorVgprGranuleSupportsEveryAmdgpuWavefrontMode) {
+  struct ExpectedGranule {
+    rj_code_arch_t arch;
+    uint32_t wavefront_size;
+    uint32_t granule;
+  };
+  constexpr std::array cases = {
+      ExpectedGranule{ROCJITSU_CODE_ARCH_CDNA1, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_CDNA2, 64, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_CDNA3, 64, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_CDNA4, 64, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA1, 32, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA1, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA2, 32, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA2, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA3, 32, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA3, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA3_5, 32, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA3_5, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA4, 32, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA4, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_GFX1250, 32, 16},
+  };
+
+  for (const auto &[arch, wavefront_size, granule] : cases) {
+    const auto actual = descriptor_vgpr_count_granule_for_wavefront(arch, wavefront_size);
+    ASSERT_TRUE(actual.has_value());
+    EXPECT_EQ(*actual, granule);
+  }
+}
+
+TEST(IsaPropertiesTest, DescriptorVgprGranuleRejectsUnsupportedInputs) {
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_RV32I, 32).has_value());
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_RV64I, 64).has_value());
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_CDNA2, 32).has_value());
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_GFX1250, 64).has_value());
+}
+
+TEST(CommandProcessorTest, ConfigureForCdna2UsesEightVgprDescriptorGranule) {
+  amdgpu::CommandProcessor command_processor("cdna2_command_processor");
+  command_processor.set_vgpr_granularity(4);
+
+  command_processor.configure_for_arch(ROCJITSU_CODE_ARCH_CDNA2);
+
+  EXPECT_EQ(command_processor.vgpr_granularity(), 8u);
+}
 
 class Rdna3MemoryTestCu
     : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna3::Isa> {
