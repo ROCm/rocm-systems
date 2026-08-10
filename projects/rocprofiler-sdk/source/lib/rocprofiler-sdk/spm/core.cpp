@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/spm/core.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
@@ -32,6 +33,7 @@
 #include <atomic>
 #include <cstdint>
 #include <stdexcept>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -260,7 +262,9 @@ start_context(const context::context* ctx)
 
     auto* controller = hsa::get_queue_controller();
 
-    CHECK_NOTNULL(controller)->enable_serialization();
+    // Scope serialization to the agents this context collects on. An empty set still means
+    // every agent, so an unrestricted context serializes the whole machine as before.
+    CHECK_NOTNULL(controller)->enable_serialization(ctx->dispatch_spm->agents);
     ctx->dispatch_spm->enabled.wlock([&](auto& enabled) {
         if(enabled) return;
         enabled = true;
@@ -312,10 +316,42 @@ stop_context(const context::context* ctx)
         // whereas the drain bounds when completions arrive at all, which is what the rest of the
         // teardown depends on. Keeping it.
         hsa::queue_controller_sync();
-        controller->disable_serialization();
+        controller->disable_serialization(ctx->dispatch_spm->agents);
         // No per-queue callback to remove; spm::write_hook no-ops once dispatch_spm is
         // disabled above.
     }
+}
+
+rocprofiler_status_t
+set_dispatch_agents(rocprofiler_context_id_t      context_id,
+                    const rocprofiler_agent_id_t* agents,
+                    size_t                        num_agents)
+{
+    if(num_agents > 0 && agents == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    auto* ctx_p = context::get_mutable_registered_context(context_id);
+    if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
+    if(!ctx_p->dispatch_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+
+    for(const auto* itr : context::get_active_contexts())
+    {
+        if(itr && itr->context_idx == ctx_p->context_idx)
+            return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+    }
+
+    auto selected = std::unordered_set<rocprofiler_agent_id_t>{};
+    selected.reserve(num_agents);
+    for(size_t i = 0; i < num_agents; ++i)
+    {
+        const auto* agent = rocprofiler::agent::get_agent(agents[i]);
+        if(!agent || agent->type != ROCPROFILER_AGENT_TYPE_GPU)
+            return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+        selected.emplace(agents[i]);
+    }
+
+    ctx_p->dispatch_spm->agents = std::move(selected);
+
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 }  // namespace spm

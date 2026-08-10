@@ -121,5 +121,10 @@ start_context(const context::context*);
 void
 stop_context(const context::context*);
 
+rocprofiler_status_t
+set_dispatch_agents(rocprofiler_context_id_t      context_id,
+                    const rocprofiler_agent_id_t* agents,
+                    size_t                        num_agents);
+
 }  // namespace spm
 }  // namespace rocprofiler

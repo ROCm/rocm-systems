@@ -21,6 +21,8 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/spm/dispatch_handlers.hpp"
 
@@ -48,9 +50,13 @@ write_hook(const hsa::Queue&                                        queue,
            hsa::inst_pkt_t&                                         inst_pkt,
            bool&                                                    is_serialized)
 {
+    const auto agent_id = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
+
     auto active = context::get_active_contexts(spm_contexts_filter());
     for(const auto* ctx : active)
     {
+        if(!ctx->dispatch_spm->collects_on(agent_id)) continue;
+
         for(auto& cb : ctx->dispatch_spm->callbacks)
         {
             auto [packet, bSerial] = pre_kernel_call(ctx,
@@ -83,9 +89,7 @@ signal_completion_hook(const hsa::Queue& /*queue*/,
     //
     // Iterating registered contexts widens the candidate set, but routing stays per-origin because
     // each context's post_kernel_call only claims packets present in its own packet_return_map.
-    // That matters because there is no conflict guard rejecting a second concurrent dispatch_spm
-    // context, unlike dispatch_counter_collection, so more than one SPM context can be registered
-    // at once.
+    // Disjoint agent sets allow multiple concurrent SPM contexts when scoped via set_agents().
     auto contexts = context::get_registered_contexts(spm_contexts_filter());
     for(const auto* ctx : contexts)
     {
