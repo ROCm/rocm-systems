@@ -761,6 +761,7 @@ void runTestReduce(int iteration, Reduce reduce)
             if (result != expected) {
               printMismatch(result, expected, waveInput, mask, lane);
               INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
+              INFO("numReduce: " << numReduce);
               REQUIRE(result == expected);
             }
           }
