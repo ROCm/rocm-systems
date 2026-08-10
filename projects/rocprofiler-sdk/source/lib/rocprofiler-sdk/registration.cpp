@@ -1181,8 +1181,10 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
         auto status = rocprofiler::registration::late::invoke_register_propagation();
         if(status != ROCPROFILER_STATUS_SUCCESS)
         {
-            ROCP_CI_LOG(WARNING) << "Failed to invoke rocprofiler-register propagation during "
-                                    "anytime initialization.";
+            ROCP_CI_LOG(WARNING) << fmt::format("Failed to invoke rocprofiler-register propagation "
+                                                "during anytime initialization :: {} :: {}",
+                                                rocprofiler_get_status_name(status),
+                                                rocprofiler_get_status_string(status));
         }
 
         return status;
@@ -1208,10 +1210,12 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     auto status = rocprofiler::registration::late::invoke_register_propagation();
     if(status != ROCPROFILER_STATUS_SUCCESS)
     {
-        ROCP_CI_LOG(WARNING)
-            << "Failed to invoke rocprofiler-register propagation. This is normal if runtimes have "
-               "not initialized yet, or if rocprofiler-register is not loaded. Runtimes that "
-               "initialize after this call will be automatically profiled.";
+        ROCP_INFO << fmt::format(
+            "Failed to invoke rocprofiler-register propagation. This is normal if runtimes have "
+            "not initialized yet, or if rocprofiler-register is not loaded. Runtimes that "
+            "initialize after this call will be automatically profiled :: {} :: {}",
+            rocprofiler_get_status_name(status),
+            rocprofiler_get_status_string(status));
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
@@ -1221,7 +1225,7 @@ rocprofiler_status_t
 rocprofiler_iterate_runtime_registration_info(rocprofiler_runtime_registration_info_cb_t callback,
                                               void*                                      data)
 {
-    auto registrations = ::rocprofiler::registration::iterate::get_runtime_registrations();
+    auto registrations = ::rocprofiler::registration::iterate::get_runtime_registrations(nullptr);
 
     if(!registrations.has_value()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION;
 
