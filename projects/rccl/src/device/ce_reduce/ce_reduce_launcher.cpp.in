@@ -20,9 +20,7 @@ ncclResult_t ncclCeLocalReduceLaunch_${tag}_${redname}(const void* tmpBuf, void*
   using T = $ctype;
   constexpr int UnrollFactor = VecTrait<T>::GpuUnroll;
   const int threads = 256;
-  // Cap blocks for CE DMA headroom (mirrors NCCL_CE_VEC_BLOCKS from the original single-file version).
-  const int blocks = (int)std::min((size_t)46, (chunkElems / VecTrait<T>::W + (size_t)threads * UnrollFactor - 1) /
-                                                    ((size_t)threads * UnrollFactor));
+  const int blocks = ncclCeLocalReduceBlocksT<T>(chunkElems);
 
   (void)hipGetLastError();
   hipLaunchKernelGGL((ncclCeLocalReduceKernelVec<T, $redval, UnrollFactor>), dim3(blocks), dim3(threads), 0, stream,
@@ -34,3 +32,4 @@ ncclResult_t ncclCeLocalReduceLaunch_${tag}_${redname}(const void* tmpBuf, void*
   }
   return ncclSuccess;
 }
+$blocks_fn

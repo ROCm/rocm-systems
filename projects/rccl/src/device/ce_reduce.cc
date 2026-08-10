@@ -40,7 +40,8 @@ THE SOFTWARE.
   extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Sum(const void*, void*, int, size_t, hipStream_t);  \
   extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Prod(const void*, void*, int, size_t, hipStream_t); \
   extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Min(const void*, void*, int, size_t, hipStream_t);  \
-  extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Max(const void*, void*, int, size_t, hipStream_t)
+  extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Max(const void*, void*, int, size_t, hipStream_t);  \
+  extern int ncclCeLocalReduceBlocks_##Type(size_t)
 
 NCCL_CE_DECLARE_TYPE(f32);
 NCCL_CE_DECLARE_TYPE(f64);
@@ -89,4 +90,25 @@ ncclResult_t ncclCeLaunchLocalReduce(const void* tmpBuf, void* output, int nRank
   }
 
 #undef NCCL_CE_DISPATCH_REDOP
+}
+
+// *********************************************************************************
+// ncclCeLocalReduceBlocks -- reduce-kernel block count for host-side reporting
+// (redop-independent; mirrors the geometry the launcher above actually uses).
+// *********************************************************************************
+int ncclCeLocalReduceBlocks(ncclDataType_t datatype, size_t chunkElems) {
+  if (chunkElems == 0) return 0;
+  switch (datatype) {
+  case ncclFloat32:  return ncclCeLocalReduceBlocks_f32(chunkElems);
+  case ncclFloat64:  return ncclCeLocalReduceBlocks_f64(chunkElems);
+  case ncclFloat16:  return ncclCeLocalReduceBlocks_f16(chunkElems);
+  case ncclBfloat16: return ncclCeLocalReduceBlocks_bf16(chunkElems);
+  case ncclInt32:    return ncclCeLocalReduceBlocks_i32(chunkElems);
+  case ncclUint32:   return ncclCeLocalReduceBlocks_u32(chunkElems);
+  case ncclInt64:    return ncclCeLocalReduceBlocks_i64(chunkElems);
+  case ncclUint64:   return ncclCeLocalReduceBlocks_u64(chunkElems);
+  case ncclInt8:     return ncclCeLocalReduceBlocks_i8(chunkElems);
+  case ncclUint8:    return ncclCeLocalReduceBlocks_u8(chunkElems);
+  default:           return 0;
+  }
 }

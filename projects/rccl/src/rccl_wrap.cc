@@ -761,6 +761,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   if (!symEligible && ceArGraphAllowed && rcclUseCeAllReduce(comm, count, datatype, op) &&
       comm->ceColl.ceARTmpBuf != NULL) {
     decision->algo = RCCL_CE_2SHOT;
+    decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;
   }
 
@@ -824,12 +825,14 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 
   if (ceAllReduceFits && ceAvailable && !hasSysmemSegment) {
     decision->algo = RCCL_CE_REGISTERED;
+    decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;
   }
   // CTAPolicy ZERO (zero-compute-CTA offload) mirrors taskAppend; its guard is a
   // subset of the plain CE gate above, so it is subsumed today (no behavior change).
   if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAllReduceFits && ceAvailable && !hasSysmemSegment) {
     decision->algo = RCCL_CE_REGISTERED;
+    decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;
   }
 

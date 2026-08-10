@@ -126,4 +126,9 @@ ncclResult_t ncclCeAlltoAll(struct ncclComm* comm, struct ncclCeCollArgs* args, 
 ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                              struct ncclDevrWindow* recvWin = nullptr);
+
+// Reduce-kernel block count for a per-rank chunk of `chunkElems` elements
+// (chunkElems = count / nRanks). Mirrors the geometry ncclCeLaunchLocalReduce
+// launches; for host-side impl-selection reporting. Returns 0 if chunkElems==0.
+int ncclCeLocalReduceBlocks(ncclDataType_t datatype, size_t chunkElems);
 #endif /* NCCL_CE_COLL_H_ */
