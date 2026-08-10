@@ -3347,15 +3347,24 @@ void SimulatedKfd::runtime_debugger_handshake(pid_t target_pid, bool enabling) {
       return;
     self_debugged = session->second.debugger_pid == target_pid;
   }
-  // Drop any ack left over from an earlier transition for this pid before the
-  // event goes out. The disable direction reports without waiting, so nothing
-  // consumes the ack it draws; a later enable would otherwise find that stale
-  // entry already in runtime_acked_, satisfy its wait immediately, and let the
-  // inferior dispatch before the debugger has installed its breakpoints -- the
-  // exact failure the deadline below exists to prevent.
+  // Drop any ack or cancellation left over from an earlier transition for this
+  // pid before the event goes out. The disable direction reports without
+  // waiting, so nothing consumes the ack it draws; a later enable would
+  // otherwise find that stale entry already in runtime_acked_, satisfy its wait
+  // immediately, and let the inferior dispatch before the debugger has
+  // installed its breakpoints -- the exact failure the deadline below exists to
+  // prevent.
+  //
+  // A cancellation does the same thing and is easier to leave behind, because
+  // cancel_runtime_handshake() inserts unconditionally: a detach with no waiter
+  // parked -- which every explicit DBG_TRAP_DISABLE performs -- leaves an entry
+  // nobody consumes, and the wait predicate below accepts it just as readily as
+  // a real ack. Clearing both under the same lock a real cancel would take
+  // means a cancel racing this clear necessarily lands on the new wait.
   if (enabling) {
     std::lock_guard<std::mutex> lk(runtime_handshake_mutex_);
     runtime_acked_.erase(target_pid);
+    runtime_handshake_cancelled_.erase(target_pid);
   }
   raise_process_debug_event(target_pid, KFD_EC_MASK(EC_PROCESS_RUNTIME));
   // A process debugging itself cannot answer its own handshake: the ack would
