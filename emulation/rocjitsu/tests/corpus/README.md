@@ -75,8 +75,8 @@ suites. Only call durations are relevant because the job sets
 Record the source run, target, suite, and selector here for each temporary
 near-timeout skip.
 
-The following cases were identified in
-[`rocjitsu-test-corpus / test (release)`](https://github.com/ROCm/rocm-systems/actions/runs/31419310428/job/93555946906):
+The following cases were identified in CI test:
+`rocjitsu-test-corpus / test (release)`
 
 | Target | Suite | Test selector |
 | --- | --- | --- |
@@ -91,6 +91,7 @@ The following cases were identified in
 | gfx950 | llama | `llama.gfx950.backend_ops.MUL_MAT_ID.8e571d7d711d` |
 | gfx950 | llama | `llama.gfx950.backend_ops.FLASH_ATTN_EXT.b951a29db5dd` |
 | gfx950 | llama | `llama.gfx950.backend_ops.FLASH_ATTN_EXT.2dce6045f861` |
+| gfx1100 | llama | `llama.gfx1100.backend_ops.MUL_MAT_ID.bbb77a88fa25` |
 
 Remove a temporary entry after the test has sufficient headroom below the
 timeout or the timeout policy changes. Keep functional failures and permanent
