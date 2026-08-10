@@ -980,8 +980,26 @@ WriteInterceptor(const void* packets,
             }
 
             // Save this agent's tracked device allocations so every pass runs against identical
-            // inputs.
+            // inputs. snap() returns ok=false if it could not capture the complete set (host memory
+            // pressure or a failed copy)
             const auto snapshot = kernel_replay::memory_snapshot::snap(replay_agent);
+
+            // Snapshot incomplete (memory pressure or a failed capture copy): restoring a partial
+            // snapshot between passes would corrupt application data, so decline replay. Close the
+            // CONFIG sequence, free our drain signal, and run this dispatch once still under the
+            // writer lock with its original completion signal, then return.
+            if(!snapshot.ok)
+            {
+                ROCP_WARNING << "kernel replay: snapshot capture failed (memory pressure or copy "
+                                "error); running this dispatch once without replay";
+                kernel_replay::execute_config_phase_exit(
+                    replay_plan, thr_id, internal_corr_id, ancestor_corr_id);
+                if(drain_signal.handle != 0) get_core_table()->hsa_signal_destroy_fn(drain_signal);
+                process_packet_batch(packets_arr, 1, [&writer](packet_vector_t&& _packets) {
+                    writer(_packets.data(), _packets.size());
+                });
+                return;
+            }
 
             // Localized context control for this replay loop. This guard installs the thread-local
             // routing that connects the tool's PASS toggle callbacks (writers, via
@@ -1036,8 +1054,8 @@ WriteInterceptor(const void* packets,
             // Fire the app's original completion signal once, now that the final executed pass has
             // completed (we already drained the final pass's handler above). A trailing barrier
             // decrements it exactly as the single-pass path would, so the application unblocks and
-            // the next kernel on this GPU can dispatch. This is deferred out of the per-pass path
-            // so early-exit and indefinite loops signal on the actual last pass rather than at pass
+            // the next kernel on this GPU can dispatch. Deferred out of the per-pass path so
+            // early-exit and indefinite loops signal on the actual last pass rather than at pass
             // N-1.
             if(app_completion_signal.handle != 0)
             {
