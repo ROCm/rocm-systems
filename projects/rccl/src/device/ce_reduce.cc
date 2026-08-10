@@ -85,6 +85,7 @@ ncclResult_t ncclCeLaunchLocalReduce(const void* tmpBuf, void* output, int nRank
   case ncclUint64:   NCCL_CE_DISPATCH_REDOP(u64);
   case ncclInt8:     NCCL_CE_DISPATCH_REDOP(i8);
   case ncclUint8:    NCCL_CE_DISPATCH_REDOP(u8);
+  // fp8 (e4m3/e5m2) not currently supported for CE AR.
   default:
     return ncclInvalidArgument;
   }
@@ -109,6 +110,7 @@ int ncclCeLocalReduceBlocks(ncclDataType_t datatype, size_t chunkElems) {
   case ncclUint64:   return ncclCeLocalReduceBlocks_u64(chunkElems);
   case ncclInt8:     return ncclCeLocalReduceBlocks_i8(chunkElems);
   case ncclUint8:    return ncclCeLocalReduceBlocks_u8(chunkElems);
+  // fp8 (e4m3/e5m2) not currently supported for CE AR.
   default:           return 0;
   }
 }
