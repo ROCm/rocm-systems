@@ -874,6 +874,52 @@ TEST(WaveDebugTest, CwsrReservesDebuggerMemoryForDisplacedStepping) {
   EXPECT_GE(layout.debug_size / 32u, waves.size() + 2);
 }
 
+// FLAT_SCRATCH and VCC are written into aliased slots at the top of the saved
+// SGPR block. num_sgprs is accepted up to 106, so those slots overlap real
+// SGPR indices: serialization overwrote s102/s103 with FLAT_SCRATCH and
+// deserialization read the alias bytes back as if they were registers, while
+// flat_scratch itself was never restored at all. A round trip therefore
+// corrupted live register state and lost the scratch base.
+TEST(WaveDebugTest, CwsrRoundTripPreservesAliasedSgprsAndFlatScratch) {
+  constexpr uint64_t kCtxBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x40000;
+  constexpr uint32_t kMaxAcceptedSgprs = 106; // cwsr.cpp kMaxSgprs
+  constexpr uint64_t kFlatScratch = 0x0000DEAD0000BEEFULL;
+
+  std::map<uint64_t, uint32_t> mem;
+  auto write32 = [&](uint64_t va, uint32_t val) { mem[va] = val; };
+  auto read32 = [&](uint64_t va) -> uint32_t {
+    auto it = mem.find(va);
+    return it == mem.end() ? 0u : it->second;
+  };
+
+  std::vector<kmd::CwsrWaveState> in = {make_wave(0xCC01, 0x3000)};
+  in[0].num_sgprs = kMaxAcceptedSgprs;
+  in[0].sgprs.resize(kMaxAcceptedSgprs);
+  for (uint32_t s = 0; s < kMaxAcceptedSgprs; ++s)
+    in[0].sgprs[s] = 0xA5A50000u + s;
+  in[0].flat_scratch = kFlatScratch;
+  in[0].vcc = 0x0123456789ABCDEFULL;
+
+  ASSERT_TRUE(kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, in, write32).ok);
+
+  std::vector<kmd::CwsrWaveState> out(1);
+  out[0].num_sgprs = in[0].num_sgprs;
+  out[0].num_vgprs = in[0].num_vgprs;
+  ASSERT_TRUE(kmd::deserialize_queue_cwsr(kCtxBase, kAreaSize, out, read32));
+
+  EXPECT_EQ(out[0].flat_scratch, kFlatScratch) << "flat_scratch was not restored";
+  EXPECT_EQ(out[0].vcc, in[0].vcc);
+
+  // Slots below the aliases are real registers and must survive untouched.
+  for (uint32_t s = 0; s < 102; ++s)
+    EXPECT_EQ(out[0].sgprs[s], in[0].sgprs[s]) << "sgpr " << s;
+  // The aliased slots decode as the registers they alias, so they must not come
+  // back carrying FLAT_SCRATCH's bytes dressed up as SGPRs.
+  for (uint32_t s = 102; s < kMaxAcceptedSgprs; ++s)
+    EXPECT_EQ(out[0].sgprs[s], 0u) << "aliased slot " << s << " decoded as an SGPR";
+}
+
 TEST(WaveDebugTest, CwsrDeserializeRecoversSerializedWaveState) {
   // serialize_queue_cwsr followed by deserialize_queue_cwsr must round-trip the
   // register state the resume path reads back (the debugger writes its edits

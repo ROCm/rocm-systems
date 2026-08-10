@@ -21,9 +21,13 @@ constexpr uint32_t kTtmpCount = 16;  // ttmps saved at the top of the hwreg bloc
 constexpr uint32_t kVgprLaneBytes = 64 * sizeof(uint32_t); // one VGPR = 64 lanes * 4 bytes
 constexpr uint32_t kMaxSgprs = 106;
 constexpr uint32_t kMaxVgprs = 256;
-// gfx9.4: scalar_register_count() (102) + scalar_alias_count() (6). Determines
-// where VCC/FLAT_SCRATCH alias into the saved SGPR block.
-constexpr uint32_t kArchScalars = 108;
+// gfx9.4 scalar_register_count(): the architected scalars s0..s101. Selectors
+// at or above this alias VCC, FLAT_SCRATCH and XNACK_MASK rather than naming an
+// SGPR, so only the slots below it carry real register state.
+constexpr uint32_t kArchScalarRegisters = 102;
+// + scalar_alias_count() (6). Determines where VCC/FLAT_SCRATCH alias into the
+// saved SGPR block.
+constexpr uint32_t kArchScalars = kArchScalarRegisters + 6;
 constexpr uint32_t kCwsrHeaderBytes = 10 * sizeof(uint32_t);
 constexpr uint32_t kControlStackOffset = 0x100u;
 
@@ -270,8 +274,13 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
       write32(ttmps_addr + t * 4, ttmp[t]);
 
     // SGPR block. Fill meaningful scalars, then place VCC at its aliased slot.
+    // Only s0..s101 are real registers; the slots above are aliases written
+    // below. num_sgprs is allowed up to kMaxSgprs (106), so without this bound
+    // the aliases would be filled from sgprs[] first and then overwritten,
+    // and deserialize would read the alias bytes straight back as SGPRs.
+    const uint32_t real_sgprs = std::min(w.num_sgprs, kArchScalarRegisters);
     for (uint32_t s = 0; s < sgpr_count; ++s) {
-      uint32_t val = (s < w.num_sgprs && s < w.sgprs.size()) ? w.sgprs[s] : 0u;
+      uint32_t val = (s < real_sgprs && s < w.sgprs.size()) ? w.sgprs[s] : 0u;
       write32(sgprs_addr + s * 4, val);
     }
     write32(sgprs_addr + vcc_lo_slot * 4, static_cast<uint32_t>(w.vcc & 0xFFFFFFFF));
@@ -403,12 +412,21 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
     w.wave_in_group = ttmp11 & 0x3Fu;
     w.queue_packet_id = (ttmp11 >> 6) & 0x1FFFFFFu;
 
-    w.sgprs.resize(w.num_sgprs);
-    for (uint32_t s = 0; s < w.num_sgprs; ++s)
+    // Read back only the slots that hold real registers. The aliased ones are
+    // decoded as the registers they alias, below; treating them as SGPRs put
+    // FLAT_SCRATCH's bytes into s102/s103 on a round trip.
+    w.sgprs.assign(w.num_sgprs, 0u);
+    for (uint32_t s = 0; s < std::min(w.num_sgprs, kArchScalarRegisters); ++s)
       w.sgprs[s] = read32(sgprs_addr + s * 4);
     const uint32_t vcc_lo = read32(sgprs_addr + vcc_lo_slot * 4);
     const uint32_t vcc_hi = read32(sgprs_addr + (vcc_lo_slot + 1) * 4);
     w.vcc = static_cast<uint64_t>(vcc_lo) | (static_cast<uint64_t>(vcc_hi) << 32);
+    // FLAT_SCRATCH is serialized into its alias slots but was never read back,
+    // so a serialize/deserialize round trip silently dropped it.
+    const uint32_t flat_scratch_lo_slot = std::min(kArchScalars, geometry.sgpr_count) - 6;
+    const uint32_t fs_lo = read32(sgprs_addr + flat_scratch_lo_slot * 4);
+    const uint32_t fs_hi = read32(sgprs_addr + (flat_scratch_lo_slot + 1) * 4);
+    w.flat_scratch = static_cast<uint64_t>(fs_lo) | (static_cast<uint64_t>(fs_hi) << 32);
 
     w.vgprs.resize(static_cast<size_t>(w.num_vgprs) * 64);
     for (uint32_t r = 0; r < w.num_vgprs; ++r)
