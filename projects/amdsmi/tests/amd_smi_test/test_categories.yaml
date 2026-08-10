@@ -101,6 +101,7 @@ exclude_gpu:
       - "GpuFunctionalReadOnly.TestProcInfoRead"
       - "GpuFunctionalReadWrite.TestFrequenciesReadWrite"
     labels:
+      - "standard"
       - "comprehensive"
       - "full"
       - "ex_gpu_gfx908"

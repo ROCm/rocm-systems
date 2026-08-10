@@ -132,7 +132,7 @@ install(
 # Guarded on shared/ctest so standalone / sparse checkouts of amdsmi keep
 # building.
 # ---------------------------------------------------------------------------
-if(NOT ROCM_SYSTEMS_ROOT)
+if(NOT DEFINED ROCM_SYSTEMS_ROOT)
     get_filename_component(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../.." ABSOLUTE)
 endif()
 
