@@ -155,12 +155,7 @@ private:
       throw std::bad_alloc();
     allocation_bytes_ = required_bytes + page_padding;
 
-    int flags = MAP_PRIVATE | MAP_ANONYMOUS;
-#ifdef MAP_NORESERVE
-    // Sparse consumers can reserve many buffers. Avoid charging untouched
-    // virtual pages under strict overcommit policies.
-    flags |= MAP_NORESERVE;
-#endif
+    const int flags = MAP_PRIVATE | MAP_ANONYMOUS;
     void *mapping = mmap(nullptr, allocation_bytes_, PROT_READ | PROT_WRITE, flags, -1, 0);
     if (mapping == MAP_FAILED) {
       allocation_bytes_ = 0;
@@ -182,8 +177,8 @@ private:
     size_ = bytes;
 
 #ifdef MADV_NOHUGEPAGE
-    // Sparse access should not turn one touched base page into a huge-page
-    // commitment under transparent huge-page policies.
+    // Sparse access should not turn one touched base page into huge-page
+    // residency under transparent huge-page policies.
     (void)madvise(allocation_, allocation_bytes_, MADV_NOHUGEPAGE);
 #endif
   }

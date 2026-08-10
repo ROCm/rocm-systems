@@ -405,11 +405,7 @@ add_subdirectory(fuzz/decode)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(tools/rocjitsu)
 endif()
-# Tests and scaling tools.
 if(BUILD_TESTING)
-    # Register the opt-in benchmark build target and labelled resource-check
-    # CTest. Performance observations remain outside CTest.
-    add_subdirectory(benchmarks/vgpr_saturation)
     add_subdirectory(tests)
 endif()
 
