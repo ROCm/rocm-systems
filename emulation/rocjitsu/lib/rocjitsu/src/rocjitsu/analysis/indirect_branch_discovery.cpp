@@ -4,7 +4,7 @@
 #include "rocjitsu/analysis/indirect_branch_discovery.h"
 
 #include "rocjitsu/analysis/control_flow.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"

@@ -140,7 +140,7 @@
         {"name": "AllReduce.BiasFloat64_Min", "description": "AllReduce bias float64 min", "test_filter": "AllReduce.BiasFloat64_Min"},
         {"name": "AllReduce.BiasFloat64_Prod", "description": "AllReduce bias float64 prod", "test_filter": "AllReduce.BiasFloat64_Prod"},
         {"name": "AlltoAll.Channels", "description": "AlltoAll with channels", "test_filter": "AlltoAll.Channels", "timeout": 1000},
-        {"name": "Register.ProcessIsolatedRegisterTests", "description": "Process isolated buffer registration tests", "test_filter": "Register.ProcessIsolatedRegisterTests"},
+        {"name": "Register.ProcessIsolatedRegisterTests", "description": "Process isolated buffer registration tests", "test_filter": "Register.ProcessIsolatedRegisterTests", "timeout": 300},
         {"name": "Recorder.ParseBinary", "description": "Recorder parse binary tests", "test_filter": "Recorder.ParseBinary"},
         {"name": "Recorder.ParseJson", "description": "Recorder parse JSON tests", "test_filter": "Recorder.ParseJson"},
         {"name": "Recorder.VerifyMultithread", "description": "Recorder multithread verification tests", "test_filter": "Recorder.VerifyMultithread"},

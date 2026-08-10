@@ -1,0 +1,77 @@
+# =============================================================================
+# gfx1250 CPC (Command Processor - Compute) Metrics
+# =============================================================================
+#
+# CPC is the Command Processor for Compute workloads. It receives compute
+# dispatch commands and coordinates with SPI to launch workgroups.
+#
+# =============================================================================
+
+Panel Config:
+  id: 500
+  title: CPC (Command Processor - Compute)
+  description: |-
+    CPC (Command Processor - Compute) metrics for gfx1250. CPC handles compute
+    dispatch commands and coordinates workgroup launches with SPI.
+
+  data source:
+
+  - metric_table:
+      id: 501
+      title: "CPC Utilizations"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        CPC Utilization:
+          avg: AVG((100 * CPC_CPC_STAT_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          min: MIN((100 * CPC_CPC_STAT_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          max: MAX((100 * CPC_CPC_STAT_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          unit: Percent
+        CPC Micro-Engine Busy Dispatching Workgroups:
+          avg: AVG((100 * CPC_ME1_DC0_SPI_BUSY_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          min: MIN((100 * CPC_ME1_DC0_SPI_BUSY_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          max: MAX((100 * CPC_ME1_DC0_SPI_BUSY_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          unit: Percent
+        CPC ADC Pipe0 Busy Dispatching Workgroups:
+          avg: AVG((100 * CPC_DISPATCH_ACTIVE_EN0_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          min: MIN((100 * CPC_DISPATCH_ACTIVE_EN0_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          max: MAX((100 * CPC_DISPATCH_ACTIVE_EN0_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          unit: Percent
+        CPC ADC Pipe1 Busy Dispatching Workgroups:
+          avg: AVG((100 * CPC_DISPATCH_ACTIVE_EN1_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          min: MIN((100 * CPC_DISPATCH_ACTIVE_EN1_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          max: MAX((100 * CPC_DISPATCH_ACTIVE_EN1_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          unit: Percent
+        CPC ADC Pipe2 Busy Dispatching Workgroups:
+          avg: AVG((100 * CPC_DISPATCH_ACTIVE_EN2_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          min: MIN((100 * CPC_DISPATCH_ACTIVE_EN2_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          max: MAX((100 * CPC_DISPATCH_ACTIVE_EN2_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          unit: Percent
+        CPC ADC Pipe3 Busy Dispatching Workgroups:
+          avg: AVG((100 * CPC_DISPATCH_ACTIVE_EN3_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          min: MIN((100 * CPC_DISPATCH_ACTIVE_EN3_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          max: MAX((100 * CPC_DISPATCH_ACTIVE_EN3_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          unit: Percent
+
+  metrics_description:
+    CPC Utilization: >-
+      Percentage of GPU-active cycles the CPC is processing compute dispatch packets.
+
+    CPC Micro-Engine Busy Dispatching Workgroups: >-
+      Percent of CPC-busy cycles the micro-engine is sending dispatch commands to SPI.
+
+    CPC ADC Pipe0 Busy Dispatching Workgroups: >-
+      Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 0 is issuing workgroups to SPI.
+
+    CPC ADC Pipe1 Busy Dispatching Workgroups: >-
+      Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 1 is issuing workgroups to SPI.
+
+    CPC ADC Pipe2 Busy Dispatching Workgroups: >-
+      Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 2 is issuing workgroups to SPI.
+
+    CPC ADC Pipe3 Busy Dispatching Workgroups: >-
+      Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 3 is issuing workgroups to SPI.
