@@ -115,7 +115,7 @@ set(_torch_lib_search_dirs ${_torch_libs} ${_torch_wheel_lib_dir})
 list(REMOVE_DUPLICATES _torch_lib_search_dirs)
 
 set(_torch_resolved_libs "")
-foreach(_libname IN ITEMS torch torch_cpu torch_python c10)
+foreach(_libname IN ITEMS torch torch_cpu c10)
     set(_cachevar "_TORCH_RESOLVED_${_libname}_${_tag}")
     find_library(
         ${_cachevar}
@@ -132,6 +132,25 @@ foreach(_libname IN ITEMS torch torch_cpu torch_python c10)
     endif()
     list(APPEND _torch_resolved_libs ${${_cachevar}})
 endforeach()
+
+# torch_python is resolved separately and linked only into the pybind module.
+# It leaves Python symbols undefined and names no libpython of its own, so a
+# consumer that is not loaded by an interpreter cannot resolve them.
+set(_torch_python_cachevar "_TORCH_RESOLVED_torch_python_${_tag}")
+find_library(
+    ${_torch_python_cachevar}
+    NAMES torch_python
+    PATHS ${_torch_lib_search_dirs}
+    NO_DEFAULT_PATH
+)
+if(NOT ${_torch_python_cachevar})
+    message(
+        FATAL_ERROR
+        "roctx_recordfn: libtorch_python.so not found in any of:\n  "
+        "${_torch_lib_search_dirs}"
+    )
+endif()
+set(_torch_python_lib ${${_torch_python_cachevar}})
 
 # Detect whether c10::DebugInfoKind accepts a custom string_view-backed key.
 # When unavailable, the source falls back to TEST_INFO_2.
@@ -153,7 +172,8 @@ set(CMAKE_REQUIRED_INCLUDES "${_rcfn_saved_includes}")
 
 # --- roctx-recordfn library -------------------------------------------------
 # Usage requirements are PUBLIC so consumers inherit the torch/roctx includes,
-# the torch libraries, and the DebugInfoKind flag.
+# the torch libraries, and the DebugInfoKind flag. torch_python is deliberately
+# not among them; only the pybind module links it.
 set(_rcfn_headers
     capture_buffer.h
     capture_control.h
@@ -195,7 +215,10 @@ endif()
 # --- pybind module ----------------------------------------------------------
 # The "lib" prefix is omitted; the loader resolves the module by tag.
 add_library(${_so_name} MODULE roctx_recordfn_module.cpp)
-target_link_libraries(${_so_name} PRIVATE roctx-recordfn Python3::Module)
+target_link_libraries(
+    ${_so_name}
+    PRIVATE roctx-recordfn ${_torch_python_lib} Python3::Module
+)
 target_compile_options(
     ${_so_name}
     PRIVATE -fvisibility=hidden -Wno-deprecated-declarations

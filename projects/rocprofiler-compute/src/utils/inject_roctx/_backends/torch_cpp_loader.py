@@ -38,10 +38,16 @@ C_TIER_NAMES = frozenset((TIER_PREBUILT, TIER_JIT))
 
 
 def _fingerprint_input_paths() -> tuple[Path, ...]:
-    """All C++ sources and headers plus the build file, sorted for a
-    deterministic fingerprint independent of filesystem enumeration order.
+    """All C++ sources and headers, the build file and the CMake probe scripts,
+    sorted for a deterministic fingerprint independent of filesystem
+    enumeration order.
+
+    The probe scripts resolve the torch include and library directories the
+    extension is built against, so they change the artifact and must rotate the
+    cache tag with it.
     """
     inputs = set(_SO_SOURCE_DIR.glob("*.cpp")) | set(_SO_SOURCE_DIR.glob("*.h"))
+    inputs |= set(_SO_SOURCE_DIR.glob("cmake/*.py"))
     inputs.add(_SO_BUILDFILE)
     return tuple(sorted(inputs))
 
