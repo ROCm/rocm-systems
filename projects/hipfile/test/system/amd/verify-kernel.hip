@@ -68,7 +68,7 @@ launchVerifyAndModify(int32_t *device_buffer_start, size_t device_buffer_size, i
 // Grid-stride byte-wise verify+modify kernel.
 //
 // This kernel verifies:
-//    - bytes within [buf, buf + buf_size) but outside of [buf + data_start, bug + data_start + n)
+//    - bytes within [buf, buf + buf_size) but outside of [buf + data_start, buf + data_start + n)
 //      are untouched (remain equal to slack_sentinel this buffer was initialized
 //      with by hipMemcpy).
 //    - bytes within [device_buffer_start + data_start, device_buffer_start + data_start + n)
