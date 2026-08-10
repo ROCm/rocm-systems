@@ -144,8 +144,8 @@ TEST_F(backend_test, query_record_counter_id_extracts_instance_id_from_record)
 {
     // For SDK v1+ (compile_time_version >= 10000), backend.hpp directly writes
     // record.id into counter_id->handle without making an SDK call.
-    counter_record rec{ counter_instance_id{ 42 }, 0.0 };
-    counter_id     out_id{};
+    const counter_record rec{ counter_instance_id{ 42 }, 0.0 };
+    counter_id           out_id{};
 
     EXPECT_EQ(sut::query_record_counter_id(rec, &out_id), sut::status_success);
     EXPECT_EQ(out_id.handle, std::uint64_t{ 42 });
@@ -153,7 +153,7 @@ TEST_F(backend_test, query_record_counter_id_extracts_instance_id_from_record)
 
 TEST_F(backend_test, query_record_counter_id_returns_error_for_null_output)
 {
-    counter_record rec{ counter_instance_id{ 42 }, 0.0 };
+    const counter_record rec{ counter_instance_id{ 42 }, 0.0 };
 
     EXPECT_EQ(sut::query_record_counter_id(rec, nullptr),
               mock_sdk::STATUS_ERROR_INVALID_ARGUMENT);
