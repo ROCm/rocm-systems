@@ -115,35 +115,14 @@ VPkMadI16Vop3p::VPkMadI16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MAD_I16 does not support DPP", "");
@@ -154,7 +133,8 @@ VPkMadI16Vop3p::VPkMadI16Vop3p(const MachineInst *inst)
 }
 
 VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_mul_lo_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1161)),
+    : Vop3p("v_pk_mul_lo_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1161),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -167,24 +147,10 @@ VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MUL_LO_U16 does not support DPP", "");
@@ -194,7 +160,7 @@ VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
 }
 
 VPkAddI16Vop3p::VPkAddI16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_add_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1162)),
+    : Vop3p("v_pk_add_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1162), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -207,24 +173,10 @@ VPkAddI16Vop3p::VPkAddI16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_ADD_I16 does not support DPP", "");
@@ -234,7 +186,7 @@ VPkAddI16Vop3p::VPkAddI16Vop3p(const MachineInst *inst)
 }
 
 VPkSubI16Vop3p::VPkSubI16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_sub_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1163)),
+    : Vop3p("v_pk_sub_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1163), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -247,24 +199,10 @@ VPkSubI16Vop3p::VPkSubI16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_SUB_I16 does not support DPP", "");
@@ -274,7 +212,8 @@ VPkSubI16Vop3p::VPkSubI16Vop3p(const MachineInst *inst)
 }
 
 VPkLshlrevB16Vop3p::VPkLshlrevB16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_lshlrev_b16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1164)),
+    : Vop3p("v_pk_lshlrev_b16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1164),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -287,24 +226,10 @@ VPkLshlrevB16Vop3p::VPkLshlrevB16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_LSHLREV_B16 does not support DPP", "");
@@ -314,7 +239,8 @@ VPkLshlrevB16Vop3p::VPkLshlrevB16Vop3p(const MachineInst *inst)
 }
 
 VPkLshrrevB16Vop3p::VPkLshrrevB16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_lshrrev_b16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1165)),
+    : Vop3p("v_pk_lshrrev_b16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1165),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -327,24 +253,10 @@ VPkLshrrevB16Vop3p::VPkLshrrevB16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_LSHRREV_B16 does not support DPP", "");
@@ -354,7 +266,8 @@ VPkLshrrevB16Vop3p::VPkLshrrevB16Vop3p(const MachineInst *inst)
 }
 
 VPkAshrrevI16Vop3p::VPkAshrrevI16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_ashrrev_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1166)),
+    : Vop3p("v_pk_ashrrev_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1166),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -367,24 +280,10 @@ VPkAshrrevI16Vop3p::VPkAshrrevI16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_ASHRREV_I16 does not support DPP", "");
@@ -394,7 +293,7 @@ VPkAshrrevI16Vop3p::VPkAshrrevI16Vop3p(const MachineInst *inst)
 }
 
 VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_max_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1167)),
+    : Vop3p("v_pk_max_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1167), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -407,24 +306,10 @@ VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MAX_I16 does not support DPP", "");
@@ -434,7 +319,7 @@ VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
 }
 
 VPkMinI16Vop3p::VPkMinI16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_min_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1168)),
+    : Vop3p("v_pk_min_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1168), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -447,24 +332,10 @@ VPkMinI16Vop3p::VPkMinI16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MIN_I16 does not support DPP", "");
@@ -489,35 +360,14 @@ VPkMadU16Vop3p::VPkMadU16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MAD_U16 does not support DPP", "");
@@ -528,7 +378,7 @@ VPkMadU16Vop3p::VPkMadU16Vop3p(const MachineInst *inst)
 }
 
 VPkAddU16Vop3p::VPkAddU16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_add_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1170)),
+    : Vop3p("v_pk_add_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1170), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -541,24 +391,10 @@ VPkAddU16Vop3p::VPkAddU16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_ADD_U16 does not support DPP", "");
@@ -568,7 +404,7 @@ VPkAddU16Vop3p::VPkAddU16Vop3p(const MachineInst *inst)
 }
 
 VPkSubU16Vop3p::VPkSubU16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_sub_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1171)),
+    : Vop3p("v_pk_sub_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1171), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -581,24 +417,10 @@ VPkSubU16Vop3p::VPkSubU16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_SUB_U16 does not support DPP", "");
@@ -608,7 +430,7 @@ VPkSubU16Vop3p::VPkSubU16Vop3p(const MachineInst *inst)
 }
 
 VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_max_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1172)),
+    : Vop3p("v_pk_max_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1172), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -621,24 +443,10 @@ VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MAX_U16 does not support DPP", "");
@@ -648,7 +456,7 @@ VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
 }
 
 VPkMinU16Vop3p::VPkMinU16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_min_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1173)),
+    : Vop3p("v_pk_min_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1173), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -661,24 +469,10 @@ VPkMinU16Vop3p::VPkMinU16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MIN_U16 does not support DPP", "");
@@ -703,35 +497,14 @@ VPkFmaF16Vop3p::VPkFmaF16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_FMA_F16 does not support DPP", "");
@@ -742,7 +515,7 @@ VPkFmaF16Vop3p::VPkFmaF16Vop3p(const MachineInst *inst)
 }
 
 VPkAddF16Vop3p::VPkAddF16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1175)),
+    : Vop3p("v_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1175), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -755,24 +528,10 @@ VPkAddF16Vop3p::VPkAddF16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_ADD_F16 does not support DPP", "");
@@ -782,7 +541,7 @@ VPkAddF16Vop3p::VPkAddF16Vop3p(const MachineInst *inst)
 }
 
 VPkMulF16Vop3p::VPkMulF16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_mul_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1176)),
+    : Vop3p("v_pk_mul_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1176), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -795,24 +554,10 @@ VPkMulF16Vop3p::VPkMulF16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MUL_F16 does not support DPP", "");
@@ -837,35 +582,14 @@ VPkFmaBf16Vop3p::VPkFmaBf16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_FMA_BF16 does not support DPP", "");
@@ -891,35 +615,14 @@ VPkAddMaxI16Vop3p::VPkAddMaxI16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_ADD_MAX_I16 does not support DPP", "");
@@ -945,35 +648,14 @@ VPkAddMaxU16Vop3p::VPkAddMaxU16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_ADD_MAX_U16 does not support DPP", "");
@@ -999,35 +681,14 @@ VDot4I32Iu8Vop3p::VDot4I32Iu8Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_DOT4_I32_IU8 does not support DPP", "");
@@ -1053,35 +714,14 @@ VDot4U32U8Vop3p::VDot4U32U8Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_DOT4_U32_U8 does not support DPP", "");
@@ -1107,35 +747,14 @@ VDot8I32Iu4Vop3p::VDot8I32Iu4Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_DOT8_I32_IU4 does not support DPP", "");
@@ -1161,35 +780,14 @@ VDot8U32U4Vop3p::VDot8U32U4Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_DOT8_U32_U4 does not support DPP", "");
@@ -1200,7 +798,8 @@ VDot8U32U4Vop3p::VDot8U32U4Vop3p(const MachineInst *inst)
 }
 
 VPkMinNumF16Vop3p::VPkMinNumF16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_min_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1184)),
+    : Vop3p("v_pk_min_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1184),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1213,24 +812,10 @@ VPkMinNumF16Vop3p::VPkMinNumF16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MIN_NUM_F16 does not support DPP", "");
@@ -1240,7 +825,8 @@ VPkMinNumF16Vop3p::VPkMinNumF16Vop3p(const MachineInst *inst)
 }
 
 VPkMaxNumF16Vop3p::VPkMaxNumF16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_max_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1185)),
+    : Vop3p("v_pk_max_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1185),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1253,24 +839,10 @@ VPkMaxNumF16Vop3p::VPkMaxNumF16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MAX_NUM_F16 does not support DPP", "");
@@ -1280,7 +852,8 @@ VPkMaxNumF16Vop3p::VPkMaxNumF16Vop3p(const MachineInst *inst)
 }
 
 VPkMinimumF16Vop3p::VPkMinimumF16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_minimum_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1186)),
+    : Vop3p("v_pk_minimum_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1186),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1293,24 +866,10 @@ VPkMinimumF16Vop3p::VPkMinimumF16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MINIMUM_F16 does not support DPP", "");
@@ -1320,7 +879,8 @@ VPkMinimumF16Vop3p::VPkMinimumF16Vop3p(const MachineInst *inst)
 }
 
 VPkMaximumF16Vop3p::VPkMaximumF16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_maximum_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1187)),
+    : Vop3p("v_pk_maximum_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1187),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1333,24 +893,10 @@ VPkMaximumF16Vop3p::VPkMaximumF16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MAXIMUM_F16 does not support DPP", "");
@@ -1372,38 +918,20 @@ VPkFmaF32Vop3p::VPkFmaF32Vop3p(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::Replicate32);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src1 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::Replicate32);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src2 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::Replicate32);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_FMA_F32 does not support DPP", "");
@@ -1429,35 +957,14 @@ VFmaMixF32Vop3p::VFmaMixF32Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3pVopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1498,35 +1005,14 @@ VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3pVopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1580,35 +1066,14 @@ VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3pVopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1646,7 +1111,7 @@ void VFmaMixhiF16Vop3p::implicit_use_operands(
 }
 
 VPkAddBf16Vop3p::VPkAddBf16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1192)),
+    : Vop3p("v_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1192), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1659,24 +1124,10 @@ VPkAddBf16Vop3p::VPkAddBf16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_ADD_BF16 does not support DPP", "");
@@ -1686,7 +1137,7 @@ VPkAddBf16Vop3p::VPkAddBf16Vop3p(const MachineInst *inst)
 }
 
 VPkMulF32Vop3p::VPkMulF32Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_mul_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1193)),
+    : Vop3p("v_pk_mul_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1193), 2),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1696,27 +1147,15 @@ VPkMulF32Vop3p::VPkMulF32Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::Replicate32);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src1 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::Replicate32);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MUL_F32 does not support DPP", "");
@@ -1726,7 +1165,7 @@ VPkMulF32Vop3p::VPkMulF32Vop3p(const MachineInst *inst)
 }
 
 VPkAddF32Vop3p::VPkAddF32Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_add_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1194)),
+    : Vop3p("v_pk_add_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1194), 2),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1736,27 +1175,15 @@ VPkAddF32Vop3p::VPkAddF32Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::Replicate32);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src1 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::Replicate32);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_ADD_F32 does not support DPP", "");
@@ -1766,7 +1193,7 @@ VPkAddF32Vop3p::VPkAddF32Vop3p(const MachineInst *inst)
 }
 
 VPkMulBf16Vop3p::VPkMulBf16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_mul_bf16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1195)),
+    : Vop3p("v_pk_mul_bf16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1195), 2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1779,24 +1206,10 @@ VPkMulBf16Vop3p::VPkMulBf16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MUL_BF16 does not support DPP", "");
@@ -1806,8 +1219,8 @@ VPkMulBf16Vop3p::VPkMulBf16Vop3p(const MachineInst *inst)
 }
 
 VPkMinNumBf16Vop3p::VPkMinNumBf16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_min_num_bf16", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1196)),
+    : Vop3p("v_pk_min_num_bf16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1196),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1820,24 +1233,10 @@ VPkMinNumBf16Vop3p::VPkMinNumBf16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MIN_NUM_BF16 does not support DPP", "");
@@ -1847,8 +1246,8 @@ VPkMinNumBf16Vop3p::VPkMinNumBf16Vop3p(const MachineInst *inst)
 }
 
 VPkMaxNumBf16Vop3p::VPkMaxNumBf16Vop3p(const MachineInst *inst)
-    : Vop3p("v_pk_max_num_bf16", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1197)),
+    : Vop3p("v_pk_max_num_bf16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1197),
+            2),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1861,24 +1260,10 @@ VPkMaxNumBf16Vop3p::VPkMaxNumBf16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MAX_NUM_BF16 does not support DPP", "");
@@ -1903,35 +1288,14 @@ VPkAddMinI16Vop3p::VPkAddMinI16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_ADD_MIN_I16 does not support DPP", "");
@@ -1957,35 +1321,14 @@ VPkAddMinU16Vop3p::VPkAddMinU16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_ADD_MIN_U16 does not support DPP", "");
@@ -2011,35 +1354,14 @@ VPkMax3I16Vop3p::VPkMax3I16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MAX3_I16 does not support DPP", "");
@@ -2065,35 +1387,14 @@ VPkMax3U16Vop3p::VPkMax3U16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MAX3_U16 does not support DPP", "");
@@ -2119,35 +1420,14 @@ VPkMin3I16Vop3p::VPkMin3I16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MIN3_I16 does not support DPP", "");
@@ -2173,35 +1453,14 @@ VPkMin3U16Vop3p::VPkMin3U16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MIN3_U16 does not support DPP", "");
@@ -2237,15 +1496,6 @@ VWmmaF3216x16x128F8f6f4Vop3p::VWmmaF3216x16x128F8f6f4Vop3p(const MachineInst *in
                                              128),
         OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(gfx1250_matrix_fmt_operand_size_bits(
-                       reinterpret_cast<const OpEncoding *>(inst)->opsel, 16, 128),
-                   OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         gfx1250_matrix_fmt_operand_size_bits(
@@ -2254,28 +1504,10 @@ VWmmaF3216x16x128F8f6f4Vop3p::VWmmaF3216x16x128F8f6f4Vop3p(const MachineInst *in
             16, 128),
         OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(gfx1250_matrix_fmt_operand_size_bits(
-                       ((reinterpret_cast<const OpEncoding *>(inst)->pad_14 << 2) |
-                        reinterpret_cast<const OpEncoding *>(inst)->opsel_hi),
-                       16, 128),
-                   OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X128_F8F6F4 does not support DPP", "");
@@ -2309,35 +1541,14 @@ VPkMinimum3F16Vop3p::VPkMinimum3F16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MINIMUM3_F16 does not support DPP", "");
@@ -2364,35 +1575,14 @@ VPkMaximum3F16Vop3p::VPkMaximum3F16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MAXIMUM3_F16 does not support DPP", "");
@@ -2419,35 +1609,14 @@ VPkMin3NumF16Vop3p::VPkMin3NumF16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MIN3_NUM_F16 does not support DPP", "");
@@ -2474,35 +1643,14 @@ VPkMax3NumF16Vop3p::VPkMax3NumF16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PK_MAX3_NUM_F16 does not support DPP", "");
@@ -2529,35 +1677,14 @@ VFmaMixF32Bf16Vop3p::VFmaMixF32Bf16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3pVopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2598,35 +1725,14 @@ VFmaMixloBf16Vop3p::VFmaMixloBf16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3pVopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2680,35 +1786,14 @@ VFmaMixhiBf16Vop3p::VFmaMixhiBf16Vop3p(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3pVopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2760,38 +1845,19 @@ VWmmaF3216x16x4F32Vop3p::VWmmaF3216x16x4F32Vop3p(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src1 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X4_F32 does not support DPP", "");
@@ -2819,35 +1885,14 @@ VWmmaF3216x16x32F16Vop3p::VWmmaF3216x16x32F16Vop3p(const MachineInst *inst)
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X32_F16 does not support DPP", "");
@@ -2875,35 +1920,14 @@ VWmmaF1616x16x32F16Vop3p::VWmmaF1616x16x32F16Vop3p(const MachineInst *inst)
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         128, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(128, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F16_16X16X32_F16 does not support DPP", "");
@@ -2931,35 +1955,14 @@ VWmmaF3216x16x32Bf16Vop3p::VWmmaF3216x16x32Bf16Vop3p(const MachineInst *inst)
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X32_BF16 does not support DPP", "");
@@ -2987,35 +1990,14 @@ VWmmaBf1616x16x32Bf16Vop3p::VWmmaBf1616x16x32Bf16Vop3p(const MachineInst *inst)
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         128, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(128, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_BF16_16X16X32_BF16 does not support DPP", "");
@@ -3043,35 +2025,14 @@ VWmmaBf16f3216x16x32Bf16Vop3p::VWmmaBf16f3216x16x32Bf16Vop3p(const MachineInst *
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_BF16F32_16X16X32_BF16 does not support DPP", "");
@@ -3098,35 +2059,14 @@ VSwmmacF3216x16x64F16Vop3p::VSwmmacF3216x16x64F16Vop3p(const MachineInst *inst)
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_SWMMAC_F32_16X16X64_F16 does not support DPP", "");
@@ -3162,35 +2102,14 @@ VSwmmacF3216x16x64Bf16Vop3p::VSwmmacF3216x16x64Bf16Vop3p(const MachineInst *inst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_SWMMAC_F32_16X16X64_BF16 does not support DPP", "");
@@ -3226,35 +2145,14 @@ VSwmmacF1616x16x64F16Vop3p::VSwmmacF1616x16x64F16Vop3p(const MachineInst *inst)
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_SWMMAC_F16_16X16X64_F16 does not support DPP", "");
@@ -3290,35 +2188,14 @@ VSwmmacBf1616x16x64Bf16Vop3p::VSwmmacBf1616x16x64Bf16Vop3p(const MachineInst *in
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_SWMMAC_BF16_16X16X64_BF16 does not support DPP", "");
@@ -3354,35 +2231,14 @@ VSwmmacBf16f3216x16x64Bf16Vop3p::VSwmmacBf16f3216x16x64Bf16Vop3p(const MachineIn
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_SWMMAC_BF16F32_16X16X64_BF16 does not support DPP", "");
@@ -3419,35 +2275,14 @@ VWmmaF3216x16x64Fp8Fp8Vop3p::VWmmaF3216x16x64Fp8Fp8Vop3p(const MachineInst *inst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X64_FP8_FP8 does not support DPP", "");
@@ -3475,35 +2310,14 @@ VWmmaF3216x16x64Fp8Bf8Vop3p::VWmmaF3216x16x64Fp8Bf8Vop3p(const MachineInst *inst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X64_FP8_BF8 does not support DPP", "");
@@ -3531,35 +2345,14 @@ VWmmaF3216x16x64Bf8Fp8Vop3p::VWmmaF3216x16x64Bf8Fp8Vop3p(const MachineInst *inst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X64_BF8_FP8 does not support DPP", "");
@@ -3587,35 +2380,14 @@ VWmmaF3216x16x64Bf8Bf8Vop3p::VWmmaF3216x16x64Bf8Bf8Vop3p(const MachineInst *inst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X64_BF8_BF8 does not support DPP", "");
@@ -3643,35 +2415,14 @@ VWmmaF1616x16x64Fp8Fp8Vop3p::VWmmaF1616x16x64Fp8Fp8Vop3p(const MachineInst *inst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         128, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(128, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F16_16X16X64_FP8_FP8 does not support DPP", "");
@@ -3699,35 +2450,14 @@ VWmmaF1616x16x64Fp8Bf8Vop3p::VWmmaF1616x16x64Fp8Bf8Vop3p(const MachineInst *inst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         128, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(128, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F16_16X16X64_FP8_BF8 does not support DPP", "");
@@ -3755,35 +2485,14 @@ VWmmaF1616x16x64Bf8Fp8Vop3p::VWmmaF1616x16x64Bf8Fp8Vop3p(const MachineInst *inst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         128, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(128, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F16_16X16X64_BF8_FP8 does not support DPP", "");
@@ -3811,35 +2520,14 @@ VWmmaF1616x16x64Bf8Bf8Vop3p::VWmmaF1616x16x64Bf8Bf8Vop3p(const MachineInst *inst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         128, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(128, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F16_16X16X64_BF8_BF8 does not support DPP", "");
@@ -3867,35 +2555,14 @@ VWmmaI3216x16x64Iu8Vop3p::VWmmaI3216x16x64Iu8Vop3p(const MachineInst *inst)
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_I32_16X16X64_IU8 does not support DPP", "");
@@ -3922,35 +2589,15 @@ VSwmmacF3216x16x128Fp8Fp8Vop3p::VSwmmacF3216x16x128Fp8Fp8Vop3p(const MachineInst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src2 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_SWMMAC_F32_16X16X128_FP8_FP8 does not support DPP", "");
@@ -3986,35 +2633,15 @@ VSwmmacF3216x16x128Fp8Bf8Vop3p::VSwmmacF3216x16x128Fp8Bf8Vop3p(const MachineInst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src2 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_SWMMAC_F32_16X16X128_FP8_BF8 does not support DPP", "");
@@ -4050,35 +2677,15 @@ VSwmmacF3216x16x128Bf8Fp8Vop3p::VSwmmacF3216x16x128Bf8Fp8Vop3p(const MachineInst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src2 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_SWMMAC_F32_16X16X128_BF8_FP8 does not support DPP", "");
@@ -4114,35 +2721,15 @@ VSwmmacF3216x16x128Bf8Bf8Vop3p::VSwmmacF3216x16x128Bf8Bf8Vop3p(const MachineInst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src2 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_SWMMAC_F32_16X16X128_BF8_BF8 does not support DPP", "");
@@ -4178,35 +2765,15 @@ VSwmmacF1616x16x128Fp8Fp8Vop3p::VSwmmacF1616x16x128Fp8Fp8Vop3p(const MachineInst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src2 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_SWMMAC_F16_16X16X128_FP8_FP8 does not support DPP", "");
@@ -4242,35 +2809,15 @@ VSwmmacF1616x16x128Fp8Bf8Vop3p::VSwmmacF1616x16x128Fp8Bf8Vop3p(const MachineInst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src2 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_SWMMAC_F16_16X16X128_FP8_BF8 does not support DPP", "");
@@ -4306,35 +2853,15 @@ VSwmmacF1616x16x128Bf8Fp8Vop3p::VSwmmacF1616x16x128Bf8Fp8Vop3p(const MachineInst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src2 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_SWMMAC_F16_16X16X128_BF8_FP8 does not support DPP", "");
@@ -4370,35 +2897,15 @@ VSwmmacF1616x16x128Bf8Bf8Vop3p::VSwmmacF1616x16x128Bf8Bf8Vop3p(const MachineInst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src2 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_SWMMAC_F16_16X16X128_BF8_BF8 does not support DPP", "");
@@ -4434,35 +2941,15 @@ VSwmmacI3216x16x128Iu8Vop3p::VSwmmacI3216x16x128Iu8Vop3p(const MachineInst *inst
     src0 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
-  }
+    src2 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_SWMMAC_I32_16X16X128_IU8 does not support DPP", "");
@@ -4499,35 +2986,14 @@ VWmmaF3216x16x128Fp8Fp8Vop3p::VWmmaF3216x16x128Fp8Fp8Vop3p(const MachineInst *in
     src0 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X128_FP8_FP8 does not support DPP", "");
@@ -4555,35 +3021,14 @@ VWmmaF3216x16x128Fp8Bf8Vop3p::VWmmaF3216x16x128Fp8Bf8Vop3p(const MachineInst *in
     src0 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X128_FP8_BF8 does not support DPP", "");
@@ -4611,35 +3056,14 @@ VWmmaF3216x16x128Bf8Fp8Vop3p::VWmmaF3216x16x128Bf8Fp8Vop3p(const MachineInst *in
     src0 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X128_BF8_FP8 does not support DPP", "");
@@ -4667,35 +3091,14 @@ VWmmaF3216x16x128Bf8Bf8Vop3p::VWmmaF3216x16x128Bf8Bf8Vop3p(const MachineInst *in
     src0 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X128_BF8_BF8 does not support DPP", "");
@@ -4723,35 +3126,14 @@ VWmmaF1616x16x128Fp8Fp8Vop3p::VWmmaF1616x16x128Fp8Fp8Vop3p(const MachineInst *in
     src0 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         128, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(128, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F16_16X16X128_FP8_FP8 does not support DPP", "");
@@ -4779,35 +3161,14 @@ VWmmaF1616x16x128Fp8Bf8Vop3p::VWmmaF1616x16x128Fp8Bf8Vop3p(const MachineInst *in
     src0 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         128, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(128, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F16_16X16X128_FP8_BF8 does not support DPP", "");
@@ -4835,35 +3196,14 @@ VWmmaF1616x16x128Bf8Fp8Vop3p::VWmmaF1616x16x128Bf8Fp8Vop3p(const MachineInst *in
     src0 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         128, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(128, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F16_16X16X128_BF8_FP8 does not support DPP", "");
@@ -4891,35 +3231,14 @@ VWmmaF1616x16x128Bf8Bf8Vop3p::VWmmaF1616x16x128Bf8Bf8Vop3p(const MachineInst *in
     src0 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         128, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(128, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F16_16X16X128_BF8_BF8 does not support DPP", "");
@@ -4947,35 +3266,14 @@ VWmmaF3232x16x128F4Vop3p::VWmmaF3232x16x128F4Vop3p(const MachineInst *inst)
     src0 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         256, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src1 = Operand(256, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand(
         512, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src2 = Operand(512, OperandType::OPR_SIMM64, literal64, true);
-  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_32X16X128_F4 does not support DPP", "");
