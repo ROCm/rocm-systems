@@ -148,7 +148,8 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
                                         expectedByLane[laneId],
                                         mask,
                                         input.host_ptr(),
-                                        laneId);
+                                        laneId,
+                                        numTile);
           }
         }
       }

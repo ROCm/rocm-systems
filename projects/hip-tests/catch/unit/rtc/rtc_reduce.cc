@@ -269,7 +269,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_Rtc_Reduce_Simple, float, __half) {
             }
           }
         } else
-          compareFloatingPoint<std::plus<TestType>>(result, expected, mask, input.ptr(), lane);
+          compareFloatingPoint<std::plus<TestType>>(result, expected, mask, input.ptr(), lane,
+                                                    numReduce);
 
       }
       lane++;
