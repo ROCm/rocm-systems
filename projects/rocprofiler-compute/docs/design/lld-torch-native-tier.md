@@ -39,7 +39,8 @@ flowchart LR
   backward, or autograd engine).
 - **Sequence number** (`seqNr`) — PyTorch's per-op id that links a forward op to
   its backward op.
-- **Wire string** — the encoded stack handed to ROCTX: `markers:contexts|backend`.
+- **Wire string** — the encoded stack handed to ROCTX: `markers:contexts`, with
+  an optional trailing `|backend`.
 
 ## Module layout
 
@@ -115,8 +116,9 @@ is thread-confined it takes no locks; correctness rests on balanced push/pop.
   (range flag, leaf flag, snapshot-frame count). `end_cb` reads that record and
   pops precisely those frames, so nested ops stay balanced no matter how many
   frames a given op added.
-- User-scope frames also push a `DebugInfoGuard` onto a parallel `guards`
-  vector; popping it un-publishes the chain.
+- User-scope frames also push a slot onto a parallel `guards` vector; popping
+  the `DebugInfoGuard` un-publishes the chain. The slot is null when the guard
+  could not be built, so every user-scope frame has a slot to pop.
 - The overlay path uses `push_with_prefix_dedup`, so a chain already present as a
   leading prefix is not duplicated.
 
@@ -261,10 +263,16 @@ supports it, otherwise a built-in slot detected at build time.
 
 ## Wire format
 
-A stack renders as `markers:contexts|backend`, frames joined by `/`. `%` and `/`
-within a marker name are percent-encoded (`%25`, `%2F`) so a name cannot be
-misread as a separator; contexts are not encoded. The analysis decoder reverses
-this, verified by a round-trip test.
+A stack renders as `markers:contexts`, frames joined by `/`, followed by an
+optional `|backend` suffix. `%` and `/` within a marker name are percent-encoded
+(`%25`, `%2F`) so a name cannot be misread as a separator; contexts are not
+encoded. The analysis decoder reverses this, verified by a round-trip test.
+
+Operator ranges always append `|torch`. A user scope appends `|<backend>` only
+when the caller passes a non-empty backend, and the binding defaults it to the
+empty string, so `push_user_scope("step", "#1@x")` emits `step:#1@x`. Consumers
+must tolerate the missing field: `_parse_function_backend` in
+`utils/utils_profile.py` tags such rows `Backend="unknown"`.
 
 ## Error and lifetime safety
 
@@ -273,8 +281,11 @@ this, verified by a round-trip test.
 - A partial push in `start_cb` unwinds through a scope guard, so a mid-push
   failure leaves the stack balanced. `push_user_scope` counts the error and
   re-raises to Python; `pop_user_scope` counts and returns.
-- Header-defined globals are `inline` so the static core library, the pybind
-  module, and the test binary share one instance of each.
+- Header-defined globals are `inline`, so every translation unit in a binary
+  binds to one definition. The guarantee is per-binary: the pybind module and
+  the test executable link the static core library into separate images and
+  share no state. `g_thread` is also `thread_local`, so it is one instance per
+  thread.
 
 ## Python API
 

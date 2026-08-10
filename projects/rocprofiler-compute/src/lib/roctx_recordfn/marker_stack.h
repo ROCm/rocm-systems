@@ -15,8 +15,10 @@
 namespace roctx_recordfn::detail
 {
 
-// Per-thread marker state. guards holds one DebugInfoGuard per push_user_scope
-// frame; RecordFunction frames are pushed onto stack without a guard.
+// Per-thread marker state. guards holds one slot per push_user_scope frame,
+// null when the guard could not be built, so every such frame has a slot for
+// pop_user_scope() to pop. RecordFunction frames are pushed onto stack without
+// a guard.
 struct ThreadState
 {
     std::vector<StackEntry>                           stack;
