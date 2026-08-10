@@ -645,7 +645,12 @@ void printMismatch(const T& result, const T& expected, const T* input, unsigned 
 }
 
 template <class Op, class T>
-void compareFloatingPoint(const T& result, const T& expected, unsigned long long mask, const T* input, int laneId)
+void compareFloatingPoint(const T& result,
+                          const T& expected,
+                          unsigned long long mask,
+                          const T* input,
+                          int laneId,
+                          int numReduce)
 {
   using namespace Catch::Matchers;
   std::string opName = opToString<T, Op>();
@@ -675,6 +680,7 @@ void compareFloatingPoint(const T& result, const T& expected, unsigned long long
       }
 
       INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
+      INFO("numReduce: " << numReduce);
       REQUIRE_THAT(__half2float(resultFloat), WithinRel(expectedFloat, eps));
     }
   } else {
@@ -692,6 +698,7 @@ void compareFloatingPoint(const T& result, const T& expected, unsigned long long
         }
 
         INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
+        INFO("numReduce: " << numReduce);
         REQUIRE_THAT(result, WithinRel(expected, eps));
       }
     }
@@ -747,17 +754,18 @@ void runTestReduce(int iteration, Reduce reduce)
         if constexpr (std::is_integral<T>::value || std::is_same<Op<T>, MinOp<T>>::value ||
                       std::is_same<Op<T>, MaxOp<T>>::value) {
           // for integral types or min/max the result should match exactly
-          if constexpr (std::is_same<T, __half>::value)
+          if constexpr (std::is_same<T, __half>::value) {
             REQUIRE(__half2float(result) == __half2float(expected));
-          else {
+          } else {
             if (result != expected) {
               printMismatch(result, expected, waveInput, mask, lane);
               INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
               REQUIRE(result == expected);
             }
           }
-        } else
-          compareFloatingPoint<Op<T>>(result, expected, mask, waveInput, lane);
+        } else {
+          compareFloatingPoint<Op<T>>(result, expected, mask, waveInput, lane, numReduce);
+        }
 
       }
       lane++;

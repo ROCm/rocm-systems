@@ -804,7 +804,8 @@ void aggregateForTypeAndOp(AggregationType aggType,
                                    expected[resultLane],
                                    mask,
                                    h_input.host_ptr(),
-                                   laneId);
+                                   laneId,
+                                   numAggregation);
         }
       }
     }
