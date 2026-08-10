@@ -187,15 +187,35 @@ fail_ce_stream:
   ceDestroyCopyStreams(comm, i);
   goto fail;
 fail:
+  // ncclCeFinalize() runs unconditionally from commFree(), including after a failed
+  // init, and keys its cleanup off these members being non-NULL. Clear everything we
+  // release here so finalize does not deregister/free it a second time or dereference
+  // a window that is already gone.
   if (arWinDev != nullptr) ncclCommWindowDeregister(comm, arWinDev);
   if (ceARTmpBuf != nullptr) ncclMemFree(ceARTmpBuf);
+  comm->ceColl.ceARTmpBuf = nullptr;
+  comm->ceColl.ceARTmpWin = nullptr;
   if (ceWinDev != nullptr) ncclCommWindowDeregister(comm, ceWinDev);
   if (ceDevBase != nullptr) ncclMemFree(ceDevBase);
+  comm->ceColl.baseUCSymReadyPtr = nullptr;
+  comm->ceColl.baseUCSymComplPtr = nullptr;
+  comm->ceColl.ceSyncWin = nullptr;
   if (sigWinDev != nullptr) ncclCommWindowDeregister(comm, sigWinDev);
   if (signalBuf != nullptr) ncclMemFree(signalBuf);
-  if (comm->ceColl.d_barrierSync != nullptr) hipFree(comm->ceColl.d_barrierSync);
-  if (comm->ceColl.scatterStream != nullptr) cudaStreamDestroy(comm->ceColl.scatterStream);
-  if (comm->ceColl.synceEvent != nullptr) cudaEventDestroy(comm->ceColl.synceEvent);
+  comm->ceColl.signalBuffer = nullptr;
+  comm->ceColl.signalWin = nullptr;
+  if (comm->ceColl.d_barrierSync != nullptr) {
+    hipFree(comm->ceColl.d_barrierSync);
+    comm->ceColl.d_barrierSync = nullptr;
+  }
+  if (comm->ceColl.scatterStream != nullptr) {
+    cudaStreamDestroy(comm->ceColl.scatterStream);
+    comm->ceColl.scatterStream = nullptr;
+  }
+  if (comm->ceColl.synceEvent != nullptr) {
+    cudaEventDestroy(comm->ceColl.synceEvent);
+    comm->ceColl.synceEvent = nullptr;
+  }
   goto exit;
 }
 
@@ -1105,11 +1125,15 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     myRecvSlot = (uint8_t*)recvbuff + (size_t)comm->rank * shardBytes;
     recvSlotOffset = (size_t)comm->rank * shardBytes;
 
-    batchOpsParams.srcs[batchOpsParams.numOps] = (void*)outShard;
-    batchOpsParams.dsts[batchOpsParams.numOps] = (void*)myRecvSlot;
-    batchOpsParams.sizes[batchOpsParams.numOps] = shardBytes;
-    batchOpsParams.numOps++;
-
+    // The reduce kernel writes the reduced shard straight into recvbuff, so outShard and
+    // myRecvSlot alias; copying would be a self-overlapping D2D transfer.
+    if (myRecvSlot != outShard) {
+      batchOpsParams.srcs[batchOpsParams.numOps] = (void*)outShard;
+      batchOpsParams.dsts[batchOpsParams.numOps] = (void*)myRecvSlot;
+      batchOpsParams.sizes[batchOpsParams.numOps] = shardBytes;
+      batchOpsParams.numOps++;
+    }
+    // copy from outShard to peerRecvBuff
     for (int r = 1; r < comm->nRanks; r++) {
       int targetRank = (comm->rank + r) % comm->nRanks;
       void* peerRecvBuff;
@@ -1121,7 +1145,6 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     }
     batchOpsParams.intraBatchSync = (batchOpsParams.numOps > comm->ceColl.intraBatchSyncFreq &&
                                      chunkBytes * batchOpsParams.numOps >= comm->ceColl.intraBatchSyncMsgThreshold);
-    ;
     NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &collArgs, &batchOpsParams, ceStream), ret, fail);
     NCCLCHECKGOTO(ncclMemOpSync(comm, &collArgs, ceStream), ret, fail);
   } else {

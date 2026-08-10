@@ -28,6 +28,12 @@ namespace CeMPITestConstants
 {
 constexpr size_t kSmallCount      = 4096;   // elements per rank for fast tests
 constexpr size_t kMediumCount     = 65536;  // elements per rank for larger tests
+// Total AllReduce message size that forces the CE multi-chunk pipeline. A shard
+// spills past one staging slot once the message exceeds NCCL_CE_AR_MAX_MSG_BYTES
+// (256 MiB); 512 MiB yields >= 4 chunks per shard at every rank count, plus a
+// partial tail chunk whenever nRanks is not a power of two. Costs a transient
+// host buffer of the same size per rank in fill/verify.
+constexpr size_t kPipelinedTotalBytes = 512ull * 1024 * 1024;
 constexpr int    kMinRanks2       = 2;
 constexpr int    kMinRanks4       = 4;
 constexpr int    kMinRanks8       = 8;
@@ -474,7 +480,25 @@ protected:
         CeMPITest::TearDown();
     }
 
-    void runAllReduce(int minRanks, size_t count, ncclRedOp_t op, const char* testId)
+    // Assert the chunk layout ncclCeAllReduce() actually picked, read back from its
+    // own INFO line. minChunksPerShard = 0 skips the check; >= 2 requires the
+    // multi-chunk pipeline to have run rather than the single-shot path, which
+    // logs the same CE marker and would otherwise pass unnoticed.
+    void assertCEAllReduceChunking(size_t minChunksPerShard, const char* context)
+    {
+        if(!isCeAllReduceExpected() || minChunksPerShard == 0)
+            return;
+
+        const size_t chunksPerShard = ceLogChunksPerShard(readAllLogs());
+        EXPECT_GE(chunksPerShard, minChunksPerShard)
+            << context << ": expected chunksPerShard >= " << minChunksPerShard
+            << " but the CE AllReduce log reports " << chunksPerShard
+            << " (single-shot path taken, pipeline not exercised)";
+        TEST_INFO("%s: chunk layout assertion — chunksPerShard=%zu", context, chunksPerShard);
+    }
+
+    void runAllReduce(int minRanks, size_t count, ncclRedOp_t op, const char* testId,
+                      size_t minChunksPerShard = 0)
     {
         if(!validateTestPrerequisites(minRanks))
             GTEST_SKIP() << "Need >= " << minRanks << " MPI ranks";
@@ -508,6 +532,7 @@ protected:
         }
 
         assertCEAllReducePathTaken(testId);
+        assertCEAllReduceChunking(minChunksPerShard, testId);
     }
 };
 
@@ -531,11 +556,32 @@ TEST_F(CeMPI_AllReduce, ThreeRanks)
 {
     runAllReduce(3, kSmallCount, ncclSum, "CeMPI_AllReduce/ThreeRanks");
 }
-// CE-MPI-AR-05: Pipelined message (multiple chunks per shard).
+// CE-MPI-AR-05: Large message on the single-shot path. At 8 MiB total a shard
+// still fits one staging slot at any rank count, so despite the size this does
+// not pipeline; CE-MPI-AR-06 covers the multi-chunk path.
 TEST_F(CeMPI_AllReduce, LargeMessage)
 {
-    const size_t largeCount = 8 * 1024 * 1024 / sizeof(float); // 8 MiB per rank
+    const size_t largeCount = 8 * 1024 * 1024 / sizeof(float); // 8 MiB total
     runAllReduce(kMinRanks4, largeCount, ncclSum, "CeMPI_AllReduce/LargeMessage");
+}
+
+// CE-MPI-AR-06: Multi-chunk pipeline (chunksPerShard >= 2).
+//
+// ncclCeAllReduce() pipelines only when a shard does not fit one staging slot,
+// i.e. once the message passes NCCL_CE_AR_MAX_MSG_BYTES. That cap does not gate
+// this path: it only sets ceAllReduceFits in taskAppend(), which gates the
+// unregistered "force" branch. With symmetric windows registered — as allocSymBuf
+// does here — ceAvailable alone selects CE, at any size.
+//
+// This exercises the persistent reduce kernel's double-buffered slot recycling,
+// the cross-rank signal doorbells and the Phase 3 drain loop, none of which run
+// on the single-shot path. At a non-power-of-two rank count it additionally hits
+// the partial tail chunk and the slotChunkBytes rounding from ce75b9a1.
+TEST_F(CeMPI_AllReduce, PipelinedMultiChunk)
+{
+    const size_t pipelinedCount = kPipelinedTotalBytes / sizeof(float);
+    runAllReduce(kMinRanks2, pipelinedCount, ncclSum, "CeMPI_AllReduce/PipelinedMultiChunk",
+                 /*minChunksPerShard=*/2);
 }
 
 // ===========================================================================
