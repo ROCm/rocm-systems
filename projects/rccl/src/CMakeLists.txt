@@ -660,6 +660,7 @@ endif()
 
 set(GEN_DIR "${HIPIFY_DIR}/gensrc")
 set(GEN_SYM_DIR "${GEN_DIR}/symmetric")
+set(GEN_CE_REDUCE_DIR "${GEN_DIR}/ce_reduce")
 
 if(ONLY_FUNCS)
   message(WARNING "Using ONLY_FUNCS = ${ONLY_FUNCS}. Not meant for release builds.")
@@ -689,6 +690,20 @@ if (GENERATE_SYM_KERNELS)
     message(SEND_ERROR "Error: ${gen_sym_py_error}")
     message(FATAL_ERROR "${RCCL_SOURCE_DIR}/src/device/symmetric/generate.py failed")
   endif()
+endif()
+
+# Execute the python script to generate one TU per CE-reduce kernel
+# instantiation (see src/device/ce_reduce/generate.py for why this is split
+# out instead of living in a single ce_reduce.cc).
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/ce_reduce/generate.py ${GEN_CE_REDUCE_DIR}
+    WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
+    RESULT_VARIABLE gen_ce_reduce_py_result
+    ERROR_VARIABLE gen_ce_reduce_py_error
+)
+if (gen_ce_reduce_py_result)
+  message(SEND_ERROR "Error: ${gen_ce_reduce_py_error}")
+  message(FATAL_ERROR "${RCCL_SOURCE_DIR}/src/device/ce_reduce/generate.py failed")
 endif()
 
 # Find the generated files in the output directory
@@ -734,12 +749,12 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric_ll128\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll128\\.cu\\.cpp$")
-  # ce_reduce.cc contains the CE AllReduce __global__ kernel and its launcher;
-  # it is compiled with full HIP by the device linker step (ce_reduce.o) so the
-  # fat binary is properly embedded. ce_coll.cc (no __global__ call sites)
-  # stays in the main target and is compiled --offload-host-only as usual.
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "device/ce_reduce\\.cc$")
-  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, device/ce_reduce.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_all_reduce_fabric_ll.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_all_gather_fabric_ll.cu.cpp, dda_alltoall_fabric.cu.cpp)")
+  # ce_reduce.cc is now pure host code (a dispatcher calling into the
+  # per-instantiation launchers generated under gensrc/ce_reduce/, which are
+  # excluded above by the "gensrc/.*\\.cpp$" filter and compiled separately
+  # by cmake/DeviceLinker.cmake). It stays in the main target and is
+  # compiled --offload-host-only like ce_coll.cc.
+  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_all_reduce_fabric_ll.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_all_gather_fabric_ll.cu.cpp, dda_alltoall_fabric.cu.cpp)")
 endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
