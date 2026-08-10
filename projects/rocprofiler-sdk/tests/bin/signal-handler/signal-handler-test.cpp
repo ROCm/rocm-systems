@@ -429,6 +429,7 @@ mode_bad_spawn(const char* self_path)
     fprintf(stderr, "Parent PID=%d: exit\n", getpid());
     return 0;
 }
+
 }  // namespace
 // ============================================================================
 // Main

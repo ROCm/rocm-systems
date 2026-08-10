@@ -124,3 +124,32 @@ def test_bad_case_markers_flushed(output_dir, mode, process_type):
         f"Profiler may not have flushed marker data before signal death. "
         f"Files: {files}"
     )
+
+
+def test_coordinated_shutdown_no_deadlock(output_dir, mode, process_type):
+    """Coordinated-shutdown case: profiler signal handlers are ACTIVE while the app runs its
+    own coordinated multi-process shutdown (the sglang/vLLM tensor-parallel pattern -- worker
+    children ignore SIGINT and only exit once the parent tells them to).
+
+    The profiler must re-raise to the app's handler BEFORE waiting for children to exit,
+    otherwise it deadlocks: the parent waits for children that are waiting for the parent.
+    Reaching this validator at all means the execute step did not hang (a regression trips the
+    ctest TIMEOUT); here we additionally require the profiler flushed marker data. exit_marker
+    is intentionally NOT required -- finalization runs on the signal, before the app's
+    coordinated shutdown emits it."""
+    if mode != "coordinated":
+        return
+
+    files = find_json_files(output_dir)
+    assert len(files) > 0
+
+    total_markers = 0
+    for path in files:
+        data = load_json(path)
+        total_markers += count_markers_in_json(data)
+
+    assert total_markers > 10, (
+        f"Expected >10 marker events in JSON output, got {total_markers}. "
+        f"Profiler may not have flushed marker data during coordinated shutdown. "
+        f"Files: {files}"
+    )

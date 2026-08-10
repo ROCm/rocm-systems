@@ -10,6 +10,8 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
+find_program(SH_EXECUTABLE NAMES sh REQUIRED)
+
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
@@ -39,6 +41,8 @@ foreach(PROC_TYPE ${PROCESS_TYPES})
     rocprofiler_add_integration_execute_test(
         ${WITH_HANDLING_NAME}
         COMMAND
+            ${SH_EXECUTABLE} -c
+            "rm -rf '${BASE_OUT_DIR}/good-${PROC_TYPE}' && exec \"$@\"" ${SH_EXECUTABLE}
             ${TIMEOUT_CMD} $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace
             --marker-trace --output-format json --disable-signal-handlers -d
             ${BASE_OUT_DIR}/good-${PROC_TYPE} -o out_%pid% --
@@ -67,10 +71,11 @@ foreach(PROC_TYPE ${PROCESS_TYPES})
     rocprofiler_add_integration_execute_test(
         ${NO_HANDLING_NAME}
         COMMAND
-            ${TIMEOUT_CMD} $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace
-            --marker-trace --output-format json -d ${BASE_OUT_DIR}/bad-${PROC_TYPE} -o
-            out_%pid% -- $<TARGET_FILE:signal-handler-test> --${PROC_TYPE}
-            --no-app-signal-handler
+            ${SH_EXECUTABLE} -c "rm -rf '${BASE_OUT_DIR}/bad-${PROC_TYPE}' && exec \"$@\""
+            ${SH_EXECUTABLE} ${TIMEOUT_CMD} $<TARGET_FILE:rocprofiler-sdk::rocprofv3>
+            --hip-trace --marker-trace --output-format json -d
+            ${BASE_OUT_DIR}/bad-${PROC_TYPE} -o out_%pid% --
+            $<TARGET_FILE:signal-handler-test> --${PROC_TYPE} --no-app-signal-handler
         DEPENDS signal-handler-test
         TIMEOUT ${CTEST_TIMEOUT}
         LABELS "integration-tests;signal-handler"
@@ -89,3 +94,43 @@ foreach(PROC_TYPE ${PROCESS_TYPES})
         ARGS --output-dir ${BASE_OUT_DIR}/bad-${PROC_TYPE} --mode bad --process-type
              ${PROC_TYPE})
 endforeach()
+
+# ===========================================================================
+# Coordinated-shutdown case: profiler signal handlers are ACTIVE while the app runs its
+# own coordinated multi-process shutdown (the sglang/vLLM tensor-parallel pattern). Worker
+# children ignore SIGINT and only exit once the parent tells them to. The profiler must
+# re-raise to the app's handler BEFORE waiting for children to exit, else it deadlocks
+# (parent waits for children that are waiting for the parent) and the test hangs -> ctest
+# TIMEOUT.
+#
+# NOTE: unlike the good case, this does NOT pass --disable-signal-handlers, so the
+# profiler's handlers are exercised alongside the app's own (`--fork
+# --app-signal-handler`).
+# ===========================================================================
+set(COORD_NAME "app-coordinated-shutdown-fork")
+
+rocprofiler_add_integration_execute_test(
+    ${COORD_NAME}
+    COMMAND
+        ${SH_EXECUTABLE} -c "rm -rf '${BASE_OUT_DIR}/coordinated-fork' && exec \"$@\""
+        ${SH_EXECUTABLE} ${TIMEOUT_CMD} $<TARGET_FILE:rocprofiler-sdk::rocprofv3>
+        --hip-trace --marker-trace --output-format json -d
+        ${BASE_OUT_DIR}/coordinated-fork -o out_%pid% --
+        $<TARGET_FILE:signal-handler-test> --fork --app-signal-handler
+    DEPENDS signal-handler-test
+    TIMEOUT ${CTEST_TIMEOUT}
+    LABELS "integration-tests;signal-handler"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "clean exit"
+    FIXTURES_SETUP ${COORD_NAME})
+
+rocprofiler_add_integration_validate_test(
+    ${COORD_NAME}
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT ${CTEST_TIMEOUT}
+    LABELS "integration-tests;signal-handler"
+    FIXTURES_REQUIRED ${COORD_NAME}
+    ARGS --output-dir ${BASE_OUT_DIR}/coordinated-fork --mode coordinated --process-type
+         fork)
