@@ -249,20 +249,20 @@ class TestOutputFormatSelection(RocprofsysTest):
         assert result.rocpd_files, "expected at least one rocpd database file"
 
     @pytest.mark.parametrize(
-        "legacy_args",
+        "old_style_args",
         [
-            ["--trace"],
-            ["--profile"],
-            ["--flat-profile"],
-            ["--profile-format", "text"],
+            pytest.param(["--trace"], id="trace"),
+            pytest.param(["--profile"], id="profile"),
+            pytest.param(["--flat-profile"], id="flat_profile"),
+            pytest.param(["--profile-format", "text"], id="profile_format"),
         ],
     )
     @pytest.mark.parametrize("target", TARGETS)
-    def test_conflicts_with_legacy_flags(self, target, legacy_args, cpu_workload):
+    def test_conflicts_with_old_style_flags(self, target, old_style_args, cpu_workload):
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=["--output-format", "rocpd", *legacy_args, "--", cpu_workload],
+            run_args=["--output-format", "rocpd", *old_style_args, "--", cpu_workload],
             fail_on_not_found=True,
             fail_on_pass=True,
         )
@@ -333,13 +333,12 @@ class TestConfigOutput(RocprofsysTest):
 
 # =============================================================================
 # Trace/profile and host/device flags
-# -T/-L/-P/-F and -H/-D each fan one flag out to a few env vars, so they share
+# -T/-P/-F and -H/-D each fan one flag out to a few env vars, so they share
 # one parametrized class instead of several near-identical ones.
 # =============================================================================
 
 CLI_FLAG_ENV_CASES = [
     pytest.param(["-T"], {"ROCPROFSYS_TRACE": True}, "trace", id="trace"),
-    pytest.param(["-L"], {"ROCPROFSYS_TRACE_LEGACY": True}, "trace", id="trace_legacy"),
     pytest.param(["-P"], {"ROCPROFSYS_PROFILE": True}, "profile", id="profile"),
     pytest.param(
         ["-F"],
