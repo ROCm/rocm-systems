@@ -5,6 +5,9 @@
 
 from pathlib import Path
 
+import pytest
+
+from pc_sampling import source_snapshot_analysis
 from pc_sampling.source_snapshot_analysis import (
     find_source_files_common_ancestor,
 )
@@ -22,70 +25,120 @@ def test_find_source_files_common_ancestor_missing_directory_returns_none(tmp_pa
     assert find_source_files_common_ancestor(tmp_path / "missing") is None
 
 
-def test_find_source_files_common_ancestor_empty_directory_returns_none(tmp_path):
-    """Return None when the source snapshot directory is empty."""
+@pytest.mark.parametrize(
+    ("source_paths", "empty_directory_paths", "expected_ancestor"),
+    [
+        pytest.param(
+            (),
+            (),
+            None,
+            id="empty_directory",
+        ),
+        pytest.param(
+            (Path("/home/u/app/kernel.cpp"),),
+            (),
+            Path("/home/u/app"),
+            id="single_file",
+        ),
+        pytest.param(
+            (
+                Path("/home/u/app/src/kernel.cpp"),
+                Path("/home/u/app/include/kernel.hpp"),
+            ),
+            (),
+            Path("/home/u/app"),
+            id="deepest_shared_parent",
+        ),
+        pytest.param(
+            (
+                Path("/home/u/app/kernel.cpp"),
+                Path("/opt/rocm/include/runtime.hpp"),
+            ),
+            (),
+            Path("/"),
+            id="different_top_level_branches",
+        ),
+        pytest.param(
+            (Path("/home/u/app/kernel.cpp"),),
+            (Path("opt/empty"),),
+            Path("/home/u/app"),
+            id="ignores_empty_directories",
+        ),
+    ],
+)
+def test_find_source_files_common_ancestor(
+    tmp_path,
+    source_paths,
+    empty_directory_paths,
+    expected_ancestor,
+):
+    """Return the common ancestor for representative snapshot layouts."""
     source_snapshot_directory = tmp_path / "src"
     source_snapshot_directory.mkdir()
 
-    assert find_source_files_common_ancestor(source_snapshot_directory) is None
+    for source_path in source_paths:
+        create_source_snapshot(source_snapshot_directory, source_path)
 
+    for empty_directory_path in empty_directory_paths:
+        (source_snapshot_directory / empty_directory_path).mkdir(parents=True)
 
-def test_find_source_files_common_ancestor_single_file_returns_parent(tmp_path):
-    """Return the parent directory when the snapshot contains one file."""
-    source_snapshot_directory = tmp_path / "src"
-    create_source_snapshot(
-        source_snapshot_directory,
-        Path("/home/u/app/kernel.cpp"),
-    )
-
-    assert find_source_files_common_ancestor(source_snapshot_directory) == Path(
-        "/home/u/app"
+    assert (
+        find_source_files_common_ancestor(source_snapshot_directory)
+        == expected_ancestor
     )
 
 
-def test_find_source_files_common_ancestor_returns_deepest_shared_parent(tmp_path):
-    """Return the deepest parent shared by all snapshotted source files."""
-    source_snapshot_directory = tmp_path / "src"
-    create_source_snapshot(
-        source_snapshot_directory,
-        Path("/home/u/app/src/kernel.cpp"),
-    )
-    create_source_snapshot(
-        source_snapshot_directory,
-        Path("/home/u/app/include/kernel.hpp"),
-    )
-
-    assert find_source_files_common_ancestor(source_snapshot_directory) == Path(
-        "/home/u/app"
-    )
-
-
-def test_find_source_files_common_ancestor_different_top_level_branches_returns_root(
-    tmp_path,
+@pytest.mark.parametrize(
+    ("source", "common_ancestor", "expected"),
+    [
+        pytest.param(
+            ("/home/u/app/src/kernel.cpp:42 -> /home/u/app/include/kernel.hpp:?"),
+            Path("/home/u/app"),
+            "src/kernel.cpp:42 -> include/kernel.hpp:?",
+            id="multiple_frames",
+        ),
+        pytest.param(
+            "/home/u/app/kernel.cpp",
+            Path("/home/u/app"),
+            "kernel.cpp",
+            id="no_line_token",
+        ),
+        pytest.param(
+            None,
+            Path("/home/u/app"),
+            None,
+            id="null_source",
+        ),
+        pytest.param(
+            "N/A",
+            Path("/home/u/app"),
+            "N/A",
+            id="missing_source_sentinel",
+        ),
+        pytest.param(
+            "/home/u/app/kernel.cpp:42",
+            None,
+            "/home/u/app/kernel.cpp:42",
+            id="missing_ancestor",
+        ),
+        pytest.param(
+            "/home/u/app/kernel.cpp:42",
+            Path("/"),
+            "/home/u/app/kernel.cpp:42",
+            id="filesystem_root_ancestor",
+        ),
+    ],
+)
+def test_make_source_relative_to_common_ancestor(
+    source,
+    common_ancestor,
+    expected,
 ):
-    """Return the root for files from different top-level branches."""
-    source_snapshot_directory = tmp_path / "src"
-    create_source_snapshot(
-        source_snapshot_directory,
-        Path("/home/u/app/kernel.cpp"),
-    )
-    create_source_snapshot(
-        source_snapshot_directory,
-        Path("/opt/rocm/include/runtime.hpp"),
+    transformed_source = (
+        source_snapshot_analysis.make_source_relative_to_common_ancestor(
+            source,
+            common_ancestor,
+        )
     )
 
-    assert find_source_files_common_ancestor(source_snapshot_directory) == Path("/")
-
-
-def test_find_source_files_common_ancestor_ignores_empty_directories(tmp_path):
-    """Ignore empty directories when finding the common source ancestor."""
-    source_snapshot_directory = tmp_path / "src"
-    create_source_snapshot(
-        source_snapshot_directory,
-        Path("/home/u/app/kernel.cpp"),
-    )
-    (source_snapshot_directory / "opt/empty").mkdir(parents=True)
-
-    assert find_source_files_common_ancestor(source_snapshot_directory) == Path(
-        "/home/u/app"
-    )
+    assert transformed_source == expected
