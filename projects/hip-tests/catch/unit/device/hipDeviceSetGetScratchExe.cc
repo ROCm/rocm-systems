@@ -37,23 +37,23 @@
 int main() {
   size_t min = 0, max = 0, orgCurrent = 0;
 
-  HIP_CHECK(hipDeviceGetLimit(&min, hipExtLimitScratchMin));
+  HIP_CHECK(hipDeviceGetLimit(&min, hipExtLimitScratchMin))
   REQUIRE(min == 0);
 
-  HIP_CHECK(hipDeviceGetLimit(&max, hipExtLimitScratchMax));
+  HIP_CHECK(hipDeviceGetLimit(&max, hipExtLimitScratchMax))
   REQUIRE(max > 0);
 
-  HIP_CHECK(hipDeviceGetLimit(&orgCurrent, hipExtLimitScratchCurrent));
+  HIP_CHECK(hipDeviceGetLimit(&orgCurrent, hipExtLimitScratchCurrent))
   REQUIRE(orgCurrent >= 0);
 
   size_t setCurrent = 0.5 * max;
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, setCurrent));
+  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, setCurrent))
 
   size_t getCurrent = 0;
-  HIP_CHECK(hipDeviceGetLimit(&getCurrent, hipExtLimitScratchCurrent));
+  HIP_CHECK(hipDeviceGetLimit(&getCurrent, hipExtLimitScratchCurrent))
   REQUIRE(getCurrent == setCurrent);
 
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, orgCurrent));
+  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, orgCurrent))
 
   return 0;
 }

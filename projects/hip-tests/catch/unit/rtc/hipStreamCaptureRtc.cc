@@ -27,8 +27,8 @@ HIP_TEST_CASE(Unit_hipStreamCaptureRtc) {
   float* data_d = nullptr;
 
   // Init data
-  HIPCHECK(hipMalloc(&data_d, sizeof(float)));
-  HIPCHECK(hipMemcpy(data_d, &data_h, sizeof(float), hipMemcpyHostToDevice));
+  HIPCHECK(hipMalloc(&data_d, sizeof(float)))
+  HIPCHECK(hipMemcpy(data_d, &data_h, sizeof(float), hipMemcpyHostToDevice))
 
   // Compile kernel
   std::vector<char> code;
@@ -38,8 +38,8 @@ HIP_TEST_CASE(Unit_hipStreamCaptureRtc) {
 
   hipDeviceProp_t props;
   int device = 0;
-  HIP_CHECK(hipSetDevice(device));
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipSetDevice(device))
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
 #ifdef __HIP_PLATFORM_AMD__
   std::string sarg = std::string("--gpu-architecture=") + props.gcnArchName;
 #else
@@ -73,53 +73,53 @@ HIP_TEST_CASE(Unit_hipStreamCaptureRtc) {
   hipModule_t module = nullptr;
   hipFunction_t kernel = nullptr;
 #if HT_NVIDIA
-  HIPCHECK(hipInit(0));
+  HIPCHECK(hipInit(0))
   hipCtx_t ctx;
-  HIPCHECK(hipCtxCreate(&ctx, 0, device));
+  HIPCHECK(hipCtxCreate(&ctx, 0, device))
 #endif
 
-  HIPCHECK(hipModuleLoadData(&module, code.data()));
+  HIPCHECK(hipModuleLoadData(&module, code.data()))
 
-  HIPCHECK(hipModuleGetFunction(&kernel, module, "kernel_func"));
+  HIPCHECK(hipModuleGetFunction(&kernel, module, "kernel_func"))
 
   // Start capture
-  HIPCHECK(hipStreamCreate(&stream));
-  HIPCHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIPCHECK(hipStreamCreate(&stream))
+  HIPCHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
 
   // Launch kernel
   auto size = sizeof(float*);
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &data_d, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
-  HIPCHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, stream, nullptr, config));
-  HIPCHECK(hipStreamEndCapture(stream, &graph));
+  HIPCHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, stream, nullptr, config))
+  HIPCHECK(hipStreamEndCapture(stream, &graph))
 
   size_t numNodes = 0;
-  HIPCHECK(hipGraphGetNodes(graph, nullptr, &numNodes));
+  HIPCHECK(hipGraphGetNodes(graph, nullptr, &numNodes))
   INFO("Num of nodes returned by GetNodes : " << numNodes);
   REQUIRE(numNodes == 1);
 
   // Ensure that no actual work has been done for the captured
   // stream before graph execution
   float tmp = 2.0;
-  HIPCHECK(hipMemcpy(&tmp, data_d, sizeof(float), hipMemcpyDeviceToHost));
+  HIPCHECK(hipMemcpy(&tmp, data_d, sizeof(float), hipMemcpyDeviceToHost))
   REQUIRE(tmp == 0.0);
 
-  HIPCHECK(hipGraphInstantiate(&graph_exec, graph, NULL, NULL, 0));
-  HIPCHECK(hipGraphDestroy(graph));
+  HIPCHECK(hipGraphInstantiate(&graph_exec, graph, NULL, NULL, 0))
+  HIPCHECK(hipGraphDestroy(graph))
 
-  HIPCHECK(hipGraphLaunch(graph_exec, stream));
+  HIPCHECK(hipGraphLaunch(graph_exec, stream))
 
-  HIPCHECK(hipStreamSynchronize(stream));
-  HIPCHECK(hipGraphExecDestroy(graph_exec));
-  HIPCHECK(hipStreamDestroy(stream));
+  HIPCHECK(hipStreamSynchronize(stream))
+  HIPCHECK(hipGraphExecDestroy(graph_exec))
+  HIPCHECK(hipStreamDestroy(stream))
 
   // Check that the work was done
-  HIPCHECK(hipMemcpy(&tmp, data_d, sizeof(float), hipMemcpyDeviceToHost));
-  HIPCHECK(hipFree(data_d));
-  HIP_CHECK(hipModuleUnload(module));
+  HIPCHECK(hipMemcpy(&tmp, data_d, sizeof(float), hipMemcpyDeviceToHost))
+  HIPCHECK(hipFree(data_d))
+  HIP_CHECK(hipModuleUnload(module))
 
   REQUIRE(tmp == 1.0);
 #if HT_NVIDIA
-  HIPCHECK(hipCtxDestroy(ctx));
+  HIPCHECK(hipCtxDestroy(ctx))
 #endif
 }

@@ -167,8 +167,8 @@ HIP_TEST_CASE(OOB_hip_module_load_over) {
 
   SECTION("valid - sanity") {
     hipModule_t module{};
-    HIP_CHECK(hipModuleLoad(&module, std::string(kValidModule).c_str()));
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleLoad(&module, std::string(kValidModule).c_str()))
+    HIP_CHECK(hipModuleUnload(module))
   }
 
   SECTION("huge shnum") {
@@ -215,7 +215,7 @@ HIP_TEST_CASE(OOB_hiprtc_roundtrip_loads) {
   static constexpr char kSource[] = "extern \"C\" __global__ void nop() {}\n";
 
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
   std::string arch = std::string("--offload-arch=") + props.gcnArchName;
   const char* options[] = {arch.c_str()};
 
@@ -230,8 +230,8 @@ HIP_TEST_CASE(OOB_hiprtc_roundtrip_loads) {
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 
   hipModule_t module{};
-  HIP_CHECK(hipModuleLoadData(&module, code.data()));
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()))
+  HIP_CHECK(hipModuleUnload(module))
 }
 
 // ---------------------------------------------------------------------------

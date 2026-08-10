@@ -66,7 +66,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_Basic) {
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_A, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
 
@@ -78,7 +78,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_Basic) {
   kNodeParams.sharedMemBytes = 0;
   kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kNodeAdd, graph, nullptr, 0, &kNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kNodeAdd, graph, nullptr, 0, &kNodeParams))
 
   hipMemsetParams memsetParams{};
   memset(&memsetParams, 0, sizeof(memsetParams));
@@ -88,59 +88,59 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_Basic) {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = Nbytes;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
 
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, NULL, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, NULL, 0))
 
   hipHostNodeParams hostParams = {0, 0};
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
-  HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams));
+  HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))
 
   hipEvent_t event;
-  HIP_CHECK(hipEventCreate(&event));
-  HIP_CHECK(hipGraphAddEventRecordNode(&eventRecord, graph, nullptr, 0, event));
-  HIP_CHECK(hipGraphAddEventWaitNode(&eventWait, graph, nullptr, 0, event));
+  HIP_CHECK(hipEventCreate(&event))
+  HIP_CHECK(hipGraphAddEventRecordNode(&eventRecord, graph, nullptr, 0, event))
+  HIP_CHECK(hipGraphAddEventWaitNode(&eventWait, graph, nullptr, 0, event))
 
-  HIP_CHECK(hipGraphCreate(&childGraph, 0));
+  HIP_CHECK(hipGraphCreate(&childGraph, 0))
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_B, childGraph, nullptr, 0, B_d, B_h, Nbytes,
                                     hipMemcpyHostToDevice));
 
-  HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode, graph, nullptr, 0, childGraph));
+  HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode, graph, nullptr, 0, childGraph))
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   SECTION("Create graphExec with Kernel node and verify its enabled status") {
     setEnable = 0;
-    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, kNodeAdd, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, kNodeAdd, &isEnabled));
+    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, kNodeAdd, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, kNodeAdd, &isEnabled))
     REQUIRE(setEnable == isEnabled);
 
     setEnable = 1;
-    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, kNodeAdd, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, kNodeAdd, &isEnabled));
+    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, kNodeAdd, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, kNodeAdd, &isEnabled))
     REQUIRE(setEnable == isEnabled);
   }
   SECTION("Create graphExec with MemCpy node and verify its enabled status") {
     setEnable = 0;
-    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memcpy_A, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memcpy_A, &isEnabled));
+    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memcpy_A, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memcpy_A, &isEnabled))
     REQUIRE(setEnable == isEnabled);
 
     setEnable = 1;
-    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memcpy_A, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memcpy_A, &isEnabled));
+    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memcpy_A, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memcpy_A, &isEnabled))
     REQUIRE(setEnable == isEnabled);
   }
   SECTION("Create graphExec with MemSet node and verify its enabled status") {
     setEnable = 0;
-    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memsetNode, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memsetNode, &isEnabled));
+    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memsetNode, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memsetNode, &isEnabled))
     REQUIRE(setEnable == isEnabled);
 
     setEnable = 1;
-    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memsetNode, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memsetNode, &isEnabled));
+    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memsetNode, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memsetNode, &isEnabled))
     REQUIRE(setEnable == isEnabled);
   }
   setEnable = 1;
@@ -164,10 +164,10 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_Basic) {
     ret = hipGraphNodeSetEnabled(graphExec, eventRecord, setEnable);
     REQUIRE(hipErrorInvalidValue == ret);
   }
-  HIP_CHECK(hipEventDestroy(event));
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(childGraph));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipEventDestroy(event))
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(childGraph))
+  HIP_CHECK(hipGraphDestroy(graph))
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 
@@ -194,8 +194,8 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_KernelNode) {
   HipTest::initArrays<int>(&A_d, nullptr, &C_d, &A_h, nullptr, &C_h, N, false);
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&stream))
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_A, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
 
@@ -206,88 +206,88 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_KernelNode) {
   kNodeParams.sharedMemBytes = 0;
   kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kNodeSquare, graph, nullptr, 0, &kNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kNodeSquare, graph, nullptr, 0, &kNodeParams))
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_C, graph, nullptr, 0, C_h, C_d, Nbytes,
                                     hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &kNodeSquare, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &kNodeSquare, &memcpy_C, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &kNodeSquare, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &kNodeSquare, &memcpy_C, 1))
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   //  Verify the execution result - basic check 1st time
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(true == verifyVectorSquare(A_h, C_h, N));
 
   SECTION("After disabled kernel node and verify the execution result") {
     setEnable = 0;  // for disabled a node
-    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, kNodeSquare, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, kNodeSquare, &getEnable));
+    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, kNodeSquare, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, kNodeSquare, &getEnable))
     REQUIRE(setEnable == getEnable);
 
-    HIP_CHECK(hipMemset(C_d, 0, Nbytes));
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemset(C_d, 0, Nbytes))
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     REQUIRE(true != verifyVectorSquare(A_h, C_h, N));
   }
   SECTION("Again enabled kernel node and verify the execution result") {
     setEnable = 1;  // for enabled a node
-    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, kNodeSquare, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, kNodeSquare, &getEnable));
+    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, kNodeSquare, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, kNodeSquare, &getEnable))
     REQUIRE(setEnable == getEnable);
 
-    HIP_CHECK(hipMemset(C_d, 0, Nbytes));
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemset(C_d, 0, Nbytes))
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     REQUIRE(true == verifyVectorSquare(A_h, C_h, N));
   }
 
   // Code for cloned graph operations
-  HIP_CHECK(hipGraphClone(&clonedGraph, graph));
-  HIP_CHECK(hipGraphInstantiate(&clonedGraphExec, clonedGraph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphNodeFindInClone(&kNodeSquare_C, kNodeSquare, clonedGraph));
+  HIP_CHECK(hipGraphClone(&clonedGraph, graph))
+  HIP_CHECK(hipGraphInstantiate(&clonedGraphExec, clonedGraph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphNodeFindInClone(&kNodeSquare_C, kNodeSquare, clonedGraph))
 
-  HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(true == verifyVectorSquare(A_h, C_h, N));
 
   SECTION("After disabled kernel node in ClonedGraph & verify the result") {
     setEnable = 0;  // for disabled a node
-    HIP_CHECK(hipGraphNodeSetEnabled(clonedGraphExec, kNodeSquare_C, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(clonedGraphExec, kNodeSquare_C, &getEnable));
+    HIP_CHECK(hipGraphNodeSetEnabled(clonedGraphExec, kNodeSquare_C, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(clonedGraphExec, kNodeSquare_C, &getEnable))
     REQUIRE(setEnable == getEnable);
 
-    HIP_CHECK(hipMemset(C_d, 0, Nbytes));
-    HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemset(C_d, 0, Nbytes))
+    HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     REQUIRE(true != verifyVectorSquare(A_h, C_h, N));
   }
   SECTION("Again enabled kernel node in ClonedGraph & verify the result") {
     setEnable = 1;  // for enabled a node
-    HIP_CHECK(hipGraphNodeSetEnabled(clonedGraphExec, kNodeSquare_C, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(clonedGraphExec, kNodeSquare_C, &getEnable));
+    HIP_CHECK(hipGraphNodeSetEnabled(clonedGraphExec, kNodeSquare_C, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(clonedGraphExec, kNodeSquare_C, &getEnable))
     REQUIRE(setEnable == getEnable);
 
-    HIP_CHECK(hipMemset(C_d, 0, Nbytes));
-    HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemset(C_d, 0, Nbytes))
+    HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     REQUIRE(true == verifyVectorSquare(A_h, C_h, N));
   }
 
   HipTest::freeArrays<int>(A_d, nullptr, C_d, A_h, nullptr, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphExecDestroy(clonedGraphExec));
-  HIP_CHECK(hipGraphDestroy(clonedGraph));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphExecDestroy(clonedGraphExec))
+  HIP_CHECK(hipGraphDestroy(clonedGraph))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /* Functional Test for API - hipGraphNodeSetEnabled
@@ -310,8 +310,8 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_MemSet) {
   HipTest::initArrays<char>(&A_d, nullptr, &C_d, &A_h, &B_h, &C_h, N, false);
 
   memset(B_h, val, Nbytes);
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&stream))
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_A, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
@@ -324,87 +324,87 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_MemSet) {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = Nbytes;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_AC, graph, nullptr, 0, C_d, A_d, Nbytes,
                                     hipMemcpyDeviceToDevice));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_C, graph, nullptr, 0, C_h, C_d, Nbytes,
                                     hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &memsetNode, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memsetNode, &memcpy_AC, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_AC, &memcpy_C, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &memsetNode, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memsetNode, &memcpy_AC, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_AC, &memcpy_C, 1))
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   //  Verify the execution result - basic check 1st time
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(true == verifyArray(B_h, C_h, N));
 
   SECTION("After disabled MemSet node and verify the execution result") {
     setEnable = 0;  // for disabled a node
-    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memsetNode, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memsetNode, &getEnable));
+    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memsetNode, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memsetNode, &getEnable))
     REQUIRE(setEnable == getEnable);
 
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     REQUIRE(true == verifyArray(A_h, C_h, N));
   }
   SECTION("Again enabled MemSet node and verify the execution result") {
     setEnable = 1;  // for enabled a node
-    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memsetNode, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memsetNode, &getEnable));
+    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memsetNode, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memsetNode, &getEnable))
     REQUIRE(setEnable == getEnable);
 
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     REQUIRE(true == verifyArray(B_h, C_h, N));
   }
 
   // Code for cloned graph operations
-  HIP_CHECK(hipGraphClone(&clonedGraph, graph));
-  HIP_CHECK(hipGraphInstantiate(&clonedGraphExec, clonedGraph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphNodeFindInClone(&memsetNode_C, memsetNode, clonedGraph));
+  HIP_CHECK(hipGraphClone(&clonedGraph, graph))
+  HIP_CHECK(hipGraphInstantiate(&clonedGraphExec, clonedGraph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphNodeFindInClone(&memsetNode_C, memsetNode, clonedGraph))
 
-  HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(true == verifyArray(B_h, C_h, N));
 
   SECTION("After disabled MemSet node and verify the execution result") {
     setEnable = 0;  // for disabled a node
-    HIP_CHECK(hipGraphNodeSetEnabled(clonedGraphExec, memsetNode_C, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(clonedGraphExec, memsetNode_C, &getEnable));
+    HIP_CHECK(hipGraphNodeSetEnabled(clonedGraphExec, memsetNode_C, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(clonedGraphExec, memsetNode_C, &getEnable))
     REQUIRE(setEnable == getEnable);
 
-    HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     REQUIRE(true == verifyArray(A_h, C_h, N));
   }
   SECTION("Again enabled MemSet node and verify the execution result") {
     setEnable = 1;  // for enabled a node
-    HIP_CHECK(hipGraphNodeSetEnabled(clonedGraphExec, memsetNode_C, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(clonedGraphExec, memsetNode_C, &getEnable));
+    HIP_CHECK(hipGraphNodeSetEnabled(clonedGraphExec, memsetNode_C, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(clonedGraphExec, memsetNode_C, &getEnable))
     REQUIRE(setEnable == getEnable);
 
-    HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     REQUIRE(true == verifyArray(B_h, C_h, N));
   }
 
   HipTest::freeArrays<char>(A_d, nullptr, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphExecDestroy(clonedGraphExec));
-  HIP_CHECK(hipGraphDestroy(clonedGraph));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphExecDestroy(clonedGraphExec))
+  HIP_CHECK(hipGraphDestroy(clonedGraph))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /* Functional Test for API - hipGraphNodeSetEnabled
@@ -430,8 +430,8 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_MemCpy) {
   HipTest::initArrays<int>(&A_d, nullptr, &C_d, &A_h, &B_h, &C_h, N, false);
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&stream))
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_A, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_B, graph, nullptr, 0, A_d, B_h, Nbytes,
@@ -444,85 +444,85 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_MemCpy) {
   kNodeParams.sharedMemBytes = 0;
   kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kNodeSquare, graph, nullptr, 0, &kNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kNodeSquare, graph, nullptr, 0, &kNodeParams))
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_C, graph, nullptr, 0, C_h, C_d, Nbytes,
                                     hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &memcpy_B, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_B, &kNodeSquare, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &kNodeSquare, &memcpy_C, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &memcpy_B, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_B, &kNodeSquare, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &kNodeSquare, &memcpy_C, 1))
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   //  Verify the execution result - basic check 1st time
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(true == verifyVectorSquare(B_h, C_h, N));
 
   SECTION("After disabled MemCpy node and verify the execution result") {
     setEnable = 0;  // for disabled a node
-    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memcpy_B, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memcpy_B, &getEnable));
+    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memcpy_B, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memcpy_B, &getEnable))
     REQUIRE(setEnable == getEnable);
 
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     REQUIRE(true == verifyVectorSquare(A_h, C_h, N));
   }
   SECTION("Again enabled MemCpy node and verify the execution result") {
     setEnable = 1;  // for enabled a node
-    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memcpy_B, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memcpy_B, &getEnable));
+    HIP_CHECK(hipGraphNodeSetEnabled(graphExec, memcpy_B, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(graphExec, memcpy_B, &getEnable))
     REQUIRE(setEnable == getEnable);
 
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     REQUIRE(true == verifyVectorSquare(B_h, C_h, N));
   }
 
   // Code for cloned graph operations
-  HIP_CHECK(hipGraphClone(&clonedGraph, graph));
-  HIP_CHECK(hipGraphInstantiate(&clonedGraphExec, clonedGraph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphNodeFindInClone(&memcpy_B_C, memcpy_B, clonedGraph));
+  HIP_CHECK(hipGraphClone(&clonedGraph, graph))
+  HIP_CHECK(hipGraphInstantiate(&clonedGraphExec, clonedGraph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphNodeFindInClone(&memcpy_B_C, memcpy_B, clonedGraph))
 
-  HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(true == verifyVectorSquare(B_h, C_h, N));
 
   SECTION("After disabled MemSet node and verify the execution result") {
     setEnable = 0;  // for disabled a node
-    HIP_CHECK(hipGraphNodeSetEnabled(clonedGraphExec, memcpy_B_C, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(clonedGraphExec, memcpy_B_C, &getEnable));
+    HIP_CHECK(hipGraphNodeSetEnabled(clonedGraphExec, memcpy_B_C, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(clonedGraphExec, memcpy_B_C, &getEnable))
     REQUIRE(setEnable == getEnable);
 
-    HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     REQUIRE(true == verifyVectorSquare(A_h, C_h, N));
   }
   SECTION("Again enabled MemSet node and verify the execution result") {
     setEnable = 1;  // for enabled a node
-    HIP_CHECK(hipGraphNodeSetEnabled(clonedGraphExec, memcpy_B_C, setEnable));
-    HIP_CHECK(hipGraphNodeGetEnabled(clonedGraphExec, memcpy_B_C, &getEnable));
+    HIP_CHECK(hipGraphNodeSetEnabled(clonedGraphExec, memcpy_B_C, setEnable))
+    HIP_CHECK(hipGraphNodeGetEnabled(clonedGraphExec, memcpy_B_C, &getEnable))
     REQUIRE(setEnable == getEnable);
 
-    HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(clonedGraphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     REQUIRE(true == verifyVectorSquare(B_h, C_h, N));
   }
 
   HipTest::freeArrays<int>(A_d, nullptr, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphExecDestroy(clonedGraphExec));
-  HIP_CHECK(hipGraphDestroy(clonedGraph));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphExecDestroy(clonedGraphExec))
+  HIP_CHECK(hipGraphDestroy(clonedGraph))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -559,7 +559,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Negative_Functional) {
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_A, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_B, graph, nullptr, 0, B_d, B_h, Nbytes,
@@ -572,23 +572,23 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Negative_Functional) {
   kNodeParams.sharedMemBytes = 0;
   kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kNodeAdd, graph, nullptr, 0, &kNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kNodeAdd, graph, nullptr, 0, &kNodeParams))
 
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &kNodeAdd, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_B, &kNodeAdd, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &kNodeAdd, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_B, &kNodeAdd, 1))
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphInstantiate(&graphExec2, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec2, graph, nullptr, nullptr, 0))
 
-  HIP_CHECK(hipGraphClone(&clonedGraph, graph));
-  HIP_CHECK(hipGraphInstantiate(&clonedGraphExec, clonedGraph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphNodeFindInClone(&memcpy_A_C, memcpy_A, clonedGraph));
+  HIP_CHECK(hipGraphClone(&clonedGraph, graph))
+  HIP_CHECK(hipGraphInstantiate(&clonedGraphExec, clonedGraph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphNodeFindInClone(&memcpy_A_C, memcpy_A, clonedGraph))
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_C, graph, nullptr, 0, C_h, C_d, Nbytes,
                                     hipMemcpyDeviceToHost));
-  HIP_CHECK(hipGraphAddDependencies(graph, &kNodeAdd, &memcpy_C, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &kNodeAdd, &memcpy_C, 1))
 
-  HIP_CHECK(hipGraphCreate(&graph2, 0));
+  HIP_CHECK(hipGraphCreate(&graph2, 0))
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_A2, graph2, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
 
@@ -631,24 +631,24 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Negative_Functional) {
     REQUIRE(hipErrorInvalidValue == ret);
   }
   SECTION("Pass hNode a deleted node from same graph where exec was created") {
-    HIP_CHECK(hipGraphDestroyNode(memcpy_A));
+    HIP_CHECK(hipGraphDestroyNode(memcpy_A))
     ret = hipGraphNodeSetEnabled(graphExec, memcpy_A, setEnable);
     REQUIRE(hipErrorInvalidValue == ret);
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec2));
+  HIP_CHECK(hipGraphExecDestroy(graphExec2))
   SECTION("Create graphExec and then delete the graphExec and verify a node") {
     ret = hipGraphNodeSetEnabled(graphExec2, memcpy_B, setEnable);
     REQUIRE(hipErrorInvalidValue == ret);
   }
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
   SECTION("Create graphExec and then delete the graph and verify a node") {
     ret = hipGraphNodeSetEnabled(graphExec, memcpy_B, setEnable);
     REQUIRE(hipErrorInvalidValue == ret);
   }
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphExecDestroy(clonedGraphExec));
-  HIP_CHECK(hipGraphDestroy(clonedGraph));
-  HIP_CHECK(hipGraphDestroy(graph2));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphExecDestroy(clonedGraphExec))
+  HIP_CHECK(hipGraphDestroy(clonedGraph))
+  HIP_CHECK(hipGraphDestroy(graph2))
 }

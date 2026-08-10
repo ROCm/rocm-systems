@@ -45,7 +45,7 @@ __global__ void test_kernel() {
  */
 HIP_TEST_CASE(Unit_Printf_PrintfAltFormsTsts) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
@@ -68,7 +68,7 @@ HIP_TEST_CASE(Unit_Printf_PrintfAltFormsTsts) {
       std::string("0x00000042") + std::string(6, ' ') + "\n";
   CaptureStream captured(stdout);
   hipLaunchKernelGGL(test_kernel, dim3(1), dim3(1), 0, 0);
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipStreamSynchronize(0))
   auto CapturedData = captured.getCapturedData();
   std::string device_output = captured.gulp(CapturedData);
   REQUIRE(device_output == reference);

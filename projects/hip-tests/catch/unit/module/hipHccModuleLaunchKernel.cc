@@ -52,24 +52,24 @@ HIP_TEST_CASE(Unit_hipHccModuleLaunchKernel_basic) {
   for (int i = 0; i < width; i++) {
     A_h[i] = i;
   }
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_d), widthInBytes));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&B_d), widthInBytes));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_d), widthInBytes))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&B_d), widthInBytes))
   void* kernelArgs[3] = {&A_d, &B_d, &widthInBytes};
-  HIP_CHECK(hipMemcpyHtoD((hipDeviceptr_t)A_d, A_h, widthInBytes));
+  HIP_CHECK(hipMemcpyHtoD((hipDeviceptr_t)A_d, A_h, widthInBytes))
   hipModule_t module;
-  HIP_CHECK(hipModuleLoad(&module, fileName));
+  HIP_CHECK(hipModuleLoad(&module, fileName))
   hipFunction_t kernelFunc;
-  HIP_CHECK(hipModuleGetFunction(&kernelFunc, module, kernel_name));
+  HIP_CHECK(hipModuleGetFunction(&kernelFunc, module, kernel_name))
 
   HIP_CHECK(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, width, 1, 1, 0, 0, kernelArgs,
                                      nullptr, nullptr, nullptr));
-  HIP_CHECK(hipMemcpyDtoH(B_h, (hipDeviceptr_t)B_d, widthInBytes));
+  HIP_CHECK(hipMemcpyDtoH(B_h, (hipDeviceptr_t)B_d, widthInBytes))
   for (int i = 0; i < width; i++) {
     REQUIRE(A_h[i] == B_h[i]);
   }
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
   free(A_h);
   free(B_h);
 }
@@ -89,13 +89,13 @@ HIP_TEST_CASE(Unit_hipHccModuleLaunchKernel_NegTst) {
   size_t width = GENERATE(3, 4, 100);
   size_t widthInBytes = width * sizeof(int);
   int *A_d, *B_d;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_d), widthInBytes));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&B_d), widthInBytes));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_d), widthInBytes))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&B_d), widthInBytes))
   void* kernelArgs[3] = {&A_d, &B_d, &widthInBytes};
   hipModule_t module;
-  HIP_CHECK(hipModuleLoad(&module, fileName));
+  HIP_CHECK(hipModuleLoad(&module, fileName))
   hipFunction_t kernelFunc;
-  HIP_CHECK(hipModuleGetFunction(&kernelFunc, module, kernel_name));
+  HIP_CHECK(hipModuleGetFunction(&kernelFunc, module, kernel_name))
   SECTION("nullptr to f(first argument)") {
     HIP_CHECK_ERROR(hipHccModuleLaunchKernel(nullptr, width, 1, 1, width, 1, 1, 0, 0, kernelArgs,
                                              nullptr, nullptr, nullptr),
@@ -126,7 +126,7 @@ HIP_TEST_CASE(Unit_hipHccModuleLaunchKernel_NegTst) {
                                              nullptr, nullptr, nullptr),
                     hipErrorInvalidValue);
   }
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
 }

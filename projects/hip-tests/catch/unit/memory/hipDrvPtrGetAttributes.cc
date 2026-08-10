@@ -27,15 +27,15 @@ constexpr size_t N{1000000};
 /* This testcase verifies Negative Scenarios of
  * hipDrvPointerGetAttributes API */
 HIP_TEST_CASE(Unit_hipDrvPtrGetAttributes_Negative) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   Nbytes = N * sizeof(int);
   int deviceId;
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   int* A_d;
 
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipGetDevice(&deviceId));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipGetDevice(&deviceId))
   unsigned int device_ordinal;
   int* dev_ptr{nullptr};
   void* data[2];
@@ -77,20 +77,20 @@ HIP_TEST_CASE(Unit_hipDrvPtrGetAttributes_Negative) {
   }
 #endif
 
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(A_d))
 }
 
 // Testcase verifies functional scenarios of hipDrvPointerGetAttributes API
 HIP_TEST_CASE(Unit_hipDrvPtrGetAttributes_Functional) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   Nbytes = N * sizeof(int);
   int deviceId;
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   int* A_d;
 
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipGetDevice(&deviceId));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipGetDevice(&deviceId))
 
   SECTION("Passing device attributes to device pointer") {
     unsigned int memory_type;
@@ -151,7 +151,7 @@ HIP_TEST_CASE(Unit_hipDrvPtrGetAttributes_Functional) {
     data[0] = (&host_ptr);
     data[1] = (&device_ordinal);
 
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&pinned_host_ptr), Nbytes, hipHostMallocDefault));
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&pinned_host_ptr), Nbytes, hipHostMallocDefault))
 
     hipPointer_attribute attributes[] = {HIP_POINTER_ATTRIBUTE_HOST_POINTER,
                                          HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL};
@@ -159,8 +159,8 @@ HIP_TEST_CASE(Unit_hipDrvPtrGetAttributes_Functional) {
                                          reinterpret_cast<hipDeviceptr_t>(pinned_host_ptr)));
     REQUIRE(host_ptr == pinned_host_ptr);
     REQUIRE(device_ordinal == deviceId);
-    HIP_CHECK(hipFreeHost(pinned_host_ptr));
+    HIP_CHECK(hipFreeHost(pinned_host_ptr))
   }
 
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(A_d))
 }

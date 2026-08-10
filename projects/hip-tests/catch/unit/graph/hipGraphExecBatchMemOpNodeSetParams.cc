@@ -28,21 +28,21 @@
  *    - HIP_VERSION >= 6.4
  */
 HIP_TEST_CASE(Unit_hipGraphExecBatchMemOpNodeSetParams_NegativeTsts) {
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
   hipGraph_t graph, graph1;
   hipGraphExec_t graphExec;
   hipCtx_t ctx;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  HIP_CHECK(hipCtxCreate(&ctx, 0, device));
+  HIP_CHECK(hipDeviceGet(&device, 0))
+  HIP_CHECK(hipCtxCreate(&ctx, 0, device))
   // Create a HIP graph
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipGraphCreate(&graph1, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipGraphCreate(&graph1, 0))
   INFO("Graph created.");
 
   static hipStreamBatchMemOpParams paramArray[2], newParamArray[2];
   std::vector<hipDeviceptr_t> opsArray(1);
-  HIP_CHECK(hipMalloc((void**)&opsArray[0], sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc((void**)&opsArray[0], sizeof(uint32_t)))
 
   paramArray[0].operation = hipStreamMemOpWriteValue32;
   paramArray[0].writeValue.address = opsArray[0];
@@ -66,12 +66,12 @@ HIP_TEST_CASE(Unit_hipGraphExecBatchMemOpNodeSetParams_NegativeTsts) {
 
   // Add a batch memory operation node to the graph
   hipGraphNode_t batchMemOpNode, batchMemOpNode_1;
-  HIP_CHECK(hipGraphAddBatchMemOpNode(&batchMemOpNode, graph, nullptr, 0, &batchNodeParams));
-  HIP_CHECK(hipGraphAddBatchMemOpNode(&batchMemOpNode_1, graph1, nullptr, 0, &batchNodeParams));
+  HIP_CHECK(hipGraphAddBatchMemOpNode(&batchMemOpNode, graph, nullptr, 0, &batchNodeParams))
+  HIP_CHECK(hipGraphAddBatchMemOpNode(&batchMemOpNode_1, graph1, nullptr, 0, &batchNodeParams))
   INFO("hipGraphAddBatchMemOpNode added successfully.");
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   INFO("Graph instantiated.");
   for (int i = 0; i < totalOps; i++) {
     newParamArray[i] = paramArray[i];
@@ -126,12 +126,12 @@ HIP_TEST_CASE(Unit_hipGraphExecBatchMemOpNodeSetParams_NegativeTsts) {
         hipGraphExecBatchMemOpNodeSetParams(graphExec, batchMemOpNode, &batchNodeParams),
         hipSuccess);
   }
-  HIP_CHECK(hipFree((void*)opsArray[0]));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphDestroy(graph1));
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipCtxPopCurrent(&ctx));
-  HIP_CHECK(hipCtxDestroy(ctx));
+  HIP_CHECK(hipFree((void*)opsArray[0]))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipGraphDestroy(graph1))
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipCtxPopCurrent(&ctx))
+  HIP_CHECK(hipCtxDestroy(ctx))
 }
 /**
  * End doxygen group GraphTest.

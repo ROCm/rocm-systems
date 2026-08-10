@@ -140,15 +140,15 @@ HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Positive_Basic) {
                                               grid.thread_count_ * sizeof(unsigned int));
   LinearAllocGuard<unsigned int> uint_arr(LinearAllocs::hipHostMalloc,
                                           grid.thread_count_ * sizeof(unsigned int));
-  HIP_CHECK(hipMemset(uint_arr_dev.ptr(), 0, grid.thread_count_ * sizeof(unsigned int)));
+  HIP_CHECK(hipMemset(uint_arr_dev.ptr(), 0, grid.thread_count_ * sizeof(unsigned int)))
 
   // Launch Kernel
   coalesced_group_size_getter<<<blocks, threads>>>(uint_arr_dev.ptr(), active_mask);
 
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemset(uint_arr_dev.ptr(), 0, grid.thread_count_ * sizeof(unsigned int)));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemset(uint_arr_dev.ptr(), 0, grid.thread_count_ * sizeof(unsigned int)))
+  HIP_CHECK(hipDeviceSynchronize())
   coalesced_group_thread_rank_getter<<<blocks, threads>>>(uint_arr_dev.ptr(), active_mask);
 
   // Verify coalesced_group.size() values
@@ -175,7 +175,7 @@ HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Positive_Basic) {
 
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Verify coalesced_group.thread_rank() values
   unsigned int coalesced_rank = 0;
@@ -224,15 +224,15 @@ HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic) {
                                               grid.thread_count_ * sizeof(unsigned int));
   LinearAllocGuard<unsigned int> uint_arr(LinearAllocs::hipHostMalloc,
                                           grid.thread_count_ * sizeof(unsigned int));
-  HIP_CHECK(hipMemset(uint_arr_dev.ptr(), 0, grid.thread_count_ * sizeof(unsigned int)));
+  HIP_CHECK(hipMemset(uint_arr_dev.ptr(), 0, grid.thread_count_ * sizeof(unsigned int)))
 
   // Launch Kernel
   coalesced_group_size_getter<<<blocks, threads>>>(uint_arr_dev.ptr(), active_mask);
 
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemset(uint_arr_dev.ptr(), 0, grid.thread_count_ * sizeof(unsigned int)));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemset(uint_arr_dev.ptr(), 0, grid.thread_count_ * sizeof(unsigned int)))
+  HIP_CHECK(hipDeviceSynchronize())
   coalesced_group_thread_rank_getter<<<blocks, threads>>>(uint_arr_dev.ptr(), active_mask);
 
   // Verify coalesced_group.size() values
@@ -259,7 +259,7 @@ HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic) {
 
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Verify coalesced_group.thread_rank() values
   unsigned int coalesced_rank = 0;
@@ -308,15 +308,15 @@ HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Bas
                                               grid.thread_count_ * sizeof(unsigned int));
   LinearAllocGuard<unsigned int> uint_arr(LinearAllocs::hipHostMalloc,
                                           grid.thread_count_ * sizeof(unsigned int));
-  HIP_CHECK(hipMemset(uint_arr_dev.ptr(), 0, grid.thread_count_ * sizeof(unsigned int)));
+  HIP_CHECK(hipMemset(uint_arr_dev.ptr(), 0, grid.thread_count_ * sizeof(unsigned int)))
 
   // Launch Kernel
   coalesced_group_non_member_size_getter<<<blocks, threads>>>(uint_arr_dev.ptr(), active_mask);
 
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemset(uint_arr_dev.ptr(), 0, grid.thread_count_ * sizeof(unsigned int)));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemset(uint_arr_dev.ptr(), 0, grid.thread_count_ * sizeof(unsigned int)))
+  HIP_CHECK(hipDeviceSynchronize())
   coalesced_group_non_member_thread_rank_getter<<<blocks, threads>>>(uint_arr_dev.ptr(),
                                                                      active_mask);
 
@@ -344,7 +344,7 @@ HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Bas
 
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Verify coalesced_group.thread_rank() values
   unsigned int coalesced_rank = 0;
@@ -409,8 +409,8 @@ template <typename T> void CoalescedGroupShflUpTestImpl() {
   LinearAllocGuard<T> arr(LinearAllocs::hipHostMalloc, alloc_size);
 
   coalesced_group_shfl_up<T><<<blocks, threads>>>(arr_dev.ptr(), delta, active_mask);
-  HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   unsigned int coalesced_rank = 0;
   for (int i = 0; i < grid.thread_count_; i++) {
@@ -493,8 +493,8 @@ template <typename T> void CoalescedGroupShflDownTest() {
   LinearAllocGuard<T> arr(LinearAllocs::hipHostMalloc, alloc_size);
 
   coalesced_group_shfl_down<T><<<blocks, threads>>>(arr_dev.ptr(), delta, active_mask);
-  HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   unsigned int coalesced_rank = 0;
   unsigned int coalesced_size = 0;
@@ -585,8 +585,8 @@ template <typename T> void CoalescedGroupShflTest() {
   HIP_CHECK(hipMemcpy(target_lanes_dev.ptr(), target_lanes.ptr(),
                       active_thread_count * sizeof(uint8_t), hipMemcpyHostToDevice));
   coalesced_group_shfl<T><<<blocks, threads>>>(arr_dev.ptr(), target_lanes_dev.ptr(), active_mask);
-  HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
 
   unsigned int coalesced_rank = 0;
@@ -743,9 +743,9 @@ template <bool global_memory, typename T> void CoalescedGroupSyncTest() {
   coalesced_group_sync_check<global_memory><<<blocks, threads, shared_memory_size>>>(
       arr_dev.ptr(), wait_modifiers_dev.ptr(), active_mask);
 
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int i = 0; i < grid.thread_count_; i++) {
     const auto rank_in_block = grid.thread_rank_in_block(i).value();

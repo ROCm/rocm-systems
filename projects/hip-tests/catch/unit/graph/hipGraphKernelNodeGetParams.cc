@@ -31,17 +31,17 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeGetParams_Negative) {
   hipGraphNode_t kNode;
   hipKernelNodeParams kNodeParams{};
 
-  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N))
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   void* kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
   kNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
   kNodeParams.gridDim = dim3(N / THREADS_PER_BLOCK, 1, 1);
   kNodeParams.blockDim = dim3(THREADS_PER_BLOCK, 1, 1);
   kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
-  HIP_CHECK(hipGraphAddKernelNode(&kNode, graph, nullptr, 0, &kNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kNode, graph, nullptr, 0, &kNodeParams))
 
   SECTION("Pass node as nullptr") {
     HIP_CHECK_ERROR(hipGraphKernelNodeGetParams(nullptr, &kNodeParams), hipErrorInvalidValue);
@@ -54,15 +54,15 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeGetParams_Negative) {
 #if HT_NVIDIA  // segfaults on AMD
   SECTION("node is not a kernel node") {
     hipGraphNode_t empty_node;
-    HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, nullptr, 0));
+    HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, nullptr, 0))
     HIP_CHECK_ERROR(hipGraphKernelNodeGetParams(empty_node, &kNodeParams), hipErrorInvalidValue);
   }
 #endif
 
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
-  HIP_CHECK(hipFree(C_d));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
+  HIP_CHECK(hipFree(C_d))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 static bool dim3_compare(dim3 node1, dim3 node2) {
@@ -98,21 +98,21 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeGetParams_Functional) {
   hipGraph_t graph;
   hipGraphNode_t kNode;
   hipKernelNodeParams kNodeParams{};
-  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N))
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   void* kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
   kNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
   kNodeParams.gridDim = dim3(N / THREADS_PER_BLOCK, 1, 1);
   kNodeParams.blockDim = dim3(THREADS_PER_BLOCK, 1, 1);
   kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
-  HIP_CHECK(hipGraphAddKernelNode(&kNode, graph, nullptr, 0, &kNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kNode, graph, nullptr, 0, &kNodeParams))
 
   SECTION("Get Kernel Param and verify.") {
     hipKernelNodeParams kNodeGetParams;
-    HIP_CHECK(hipGraphKernelNodeGetParams(kNode, &kNodeGetParams));
+    HIP_CHECK(hipGraphKernelNodeGetParams(kNode, &kNodeGetParams))
     REQUIRE(node_compare(&kNodeParams, &kNodeGetParams));
   }
 
@@ -124,16 +124,16 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeGetParams_Functional) {
     kNodeParams1.sharedMemBytes = 0;
     kNodeParams1.kernelParams = reinterpret_cast<void**>(kernelArgs);
     kNodeParams1.extra = nullptr;
-    HIP_CHECK(hipGraphKernelNodeSetParams(kNode, &kNodeParams1));
+    HIP_CHECK(hipGraphKernelNodeSetParams(kNode, &kNodeParams1))
 
     hipKernelNodeParams kNodeGetParams1;
-    HIP_CHECK(hipGraphKernelNodeGetParams(kNode, &kNodeGetParams1));
+    HIP_CHECK(hipGraphKernelNodeGetParams(kNode, &kNodeGetParams1))
 
     REQUIRE(node_compare(&kNodeParams1, &kNodeGetParams1));
   }
 
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
-  HIP_CHECK(hipFree(C_d));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
+  HIP_CHECK(hipFree(C_d))
+  HIP_CHECK(hipGraphDestroy(graph))
 }

@@ -13,10 +13,10 @@ void createThenDestroyStreams(int iterations, int burstSize) {
 
   for (int i = 0; i < iterations; i++) {
     for (int j = 0; j < burstSize; j++) {
-      HIPCHECK(hipStreamCreate(&streams[j]));
+      HIPCHECK(hipStreamCreate(&streams[j]))
     }
     for (int j = 0; j < burstSize; j++) {
-      HIPCHECK(hipStreamDestroy(streams[j]));
+      HIPCHECK(hipStreamDestroy(streams[j]))
     }
   }
 
@@ -29,7 +29,7 @@ void waitStreams(int iterations) {
   // TO make this interesting, the test has other threads repeatedly adding and removing streams
   // to the device.
   for (int i = 0; i < iterations; i++) {
-    HIPCHECK(hipDeviceSynchronize());
+    HIPCHECK(hipDeviceSynchronize())
   }
 }
 

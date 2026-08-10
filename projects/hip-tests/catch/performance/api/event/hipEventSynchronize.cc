@@ -18,12 +18,12 @@ class HipEventSynchronizeBenchmark : public Benchmark<HipEventSynchronizeBenchma
  public:
   void operator()(unsigned flag) {
     hipEvent_t event;
-    HIP_CHECK(hipEventCreateWithFlags(&event, flag));
-    HIP_CHECK(hipEventRecord(event));
+    HIP_CHECK(hipEventCreateWithFlags(&event, flag))
+    HIP_CHECK(hipEventRecord(event))
 
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipEventSynchronize(event)); }
 
-    HIP_CHECK(hipEventDestroy(event));
+    HIP_CHECK(hipEventDestroy(event))
   }
 };
 

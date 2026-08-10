@@ -91,7 +91,7 @@ template <typename T> static void runTest() {
   T* gpuTransposeMatrix;
 
   hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
 
   int errors = 0;
 
@@ -102,18 +102,18 @@ template <typename T> static void runTest() {
   init(Matrix);
 
   // allocate the memory on the device side
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&gpuMatrix), NUM * sizeof(T)));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&gpuTransposeMatrix), NUM * sizeof(T)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&gpuMatrix), NUM * sizeof(T)))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&gpuTransposeMatrix), NUM * sizeof(T)))
 
   // Memory transfer from host to device
-  HIP_CHECK(hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(T), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(T), hipMemcpyHostToDevice))
 
   // Lauching kernel from host
   hipLaunchKernelGGL(matrixTranspose<T>, dim3(1), dim3(THREADS_PER_BLOCK_X * THREADS_PER_BLOCK_Y),
                      0, 0, gpuTransposeMatrix, gpuMatrix, WIDTH);
 
   // Memory transfer from device to host
-  HIP_CHECK(hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(T), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(T), hipMemcpyDeviceToHost))
 
   // CPU MatrixTranspose computation
   matrixTransposeCPUReference(cpuTransposeMatrix, Matrix, WIDTH);
@@ -121,8 +121,8 @@ template <typename T> static void runTest() {
   // verify the results
   REQUIRE(errors == compare(TransposeMatrix, cpuTransposeMatrix));
   // free the resources on device side
-  HIP_CHECK(hipFree(gpuMatrix));
-  HIP_CHECK(hipFree(gpuTransposeMatrix));
+  HIP_CHECK(hipFree(gpuMatrix))
+  HIP_CHECK(hipFree(gpuTransposeMatrix))
 
   // free the resources on host side
   free(Matrix);
@@ -201,27 +201,27 @@ __global__ void testShflWithUndefArgs(unsigned long total_out_strings, unsigned 
 HIP_TEST_CASE(Unit_hipShflUndefArgs) {
   hipDeviceProp_t prop;
   int device;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&prop, device))
   size_t count = prop.warpSize;
   unsigned long* str_ctr;
   uint32_t* str_ctr1;
-  HIP_CHECK(hipMalloc(&str_ctr, sizeof(unsigned long)));
-  HIP_CHECK(hipMemset(str_ctr, 0, sizeof(unsigned long)));
-  HIP_CHECK(hipMalloc(&str_ctr1, sizeof(uint32_t) * count));
-  HIP_CHECK(hipMemset(str_ctr1, 0, sizeof(uint32_t) * count));
+  HIP_CHECK(hipMalloc(&str_ctr, sizeof(unsigned long)))
+  HIP_CHECK(hipMemset(str_ctr, 0, sizeof(unsigned long)))
+  HIP_CHECK(hipMalloc(&str_ctr1, sizeof(uint32_t) * count))
+  HIP_CHECK(hipMemset(str_ctr1, 0, sizeof(uint32_t) * count))
   testShflWithUndefArgs<<<1, count>>>(12, str_ctr, str_ctr1);
   uint32_t* out = new uint32_t[count];
   for (int i = 0; i < count; i++) {
     out[i] = 0;
   }
-  HIP_CHECK(hipMemcpy(out, str_ctr1, count * sizeof(uint32_t), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(out, str_ctr1, count * sizeof(uint32_t), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
   for (int i = 0; i < count; i++) {
     REQUIRE(out[i] == 12);
   }
-  HIP_CHECK(hipFree(str_ctr));
-  HIP_CHECK(hipFree(str_ctr1));
+  HIP_CHECK(hipFree(str_ctr))
+  HIP_CHECK(hipFree(str_ctr1))
   delete[] out;
 }
 

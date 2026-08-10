@@ -21,17 +21,17 @@ static hipError_t hipModuleLaunchKernelWrapper(hipFunction_t f, uint32_t gridX, 
 }
 
 HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Positive_Basic) {
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
   ModuleLaunchKernelPositiveBasic<hipModuleLaunchKernelWrapper>();
 }
 
 HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Positive_Parameters) {
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
   ModuleLaunchKernelPositiveParameters<hipModuleLaunchKernelWrapper>();
 }
 
 HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Negative_Parameters) {
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
   ModuleLaunchKernelNegativeParameters<hipModuleLaunchKernelWrapper>();
 }
 constexpr auto fileName = "matmul.code";
@@ -78,7 +78,7 @@ bool Module_Negative_tests() {
   bool testStatus = true;
   constexpr auto matmulK = "matmulK";
   constexpr auto KernelandExtra = "KernelandExtraParams";
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipError_t err;
   struct {
     void* _Ad;
@@ -97,18 +97,18 @@ bool Module_Negative_tests() {
   hipStream_t stream1;
   hipDeviceptr_t* Ad = nullptr;
 #ifdef HT_NVIDIA
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
   hipCtx_t context;
-  HIP_CHECK(hipCtxCreate(&context, 0, 0));
+  HIP_CHECK(hipCtxCreate(&context, 0, 0))
 #endif
 
-  HIP_CHECK(hipModuleLoad(&Module, fileName));
-  HIP_CHECK(hipModuleGetFunction(&MultKernel, Module, matmulK));
-  HIP_CHECK(hipModuleGetFunction(&KernelandExtraParamKernel, Module, KernelandExtra));
+  HIP_CHECK(hipModuleLoad(&Module, fileName))
+  HIP_CHECK(hipModuleGetFunction(&MultKernel, Module, matmulK))
+  HIP_CHECK(hipModuleGetFunction(&KernelandExtraParamKernel, Module, KernelandExtra))
   void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
                      HIP_LAUNCH_PARAM_END};
   void* params[] = {Ad};
-  HIP_CHECK(hipStreamCreate(&stream1));
+  HIP_CHECK(hipStreamCreate(&stream1))
   // Passing nullptr to kernel function
   err = hipModuleLaunchKernel(nullptr, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
                               reinterpret_cast<void**>(&config1));
@@ -156,7 +156,7 @@ bool Module_Negative_tests() {
   }
   // Passing more than maxthreadsperblock to block dimensions
   hipDeviceProp_t deviceProp;
-  HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0))
   err = hipModuleLaunchKernel(MultKernel, 1, 1, 1, deviceProp.maxThreadsPerBlock + 1,
                               deviceProp.maxThreadsPerBlock + 1, deviceProp.maxThreadsPerBlock + 1,
                               0, stream1, NULL, reinterpret_cast<void**>(&config1));
@@ -189,34 +189,34 @@ bool Module_Negative_tests() {
   if (err == hipSuccess) {
     testStatus = false;
   }
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipModuleUnload(Module));
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipModuleUnload(Module))
 #ifdef HT_NVIDIA
-  HIP_CHECK(hipCtxDestroy(context));
+  HIP_CHECK(hipCtxDestroy(context))
 #endif
   return testStatus;
 }
 
 bool Module_GridBlock_Corner_Tests() {
   bool testStatus = true;
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipError_t err;
   hipFunction_t DummyKernel;
   hipModule_t Module;
   hipStream_t stream1;
   hipDevice_t device;
 #ifdef HT_NVIDIA
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
   hipCtx_t context;
-  HIP_CHECK(hipCtxCreate(&context, 0, 0));
+  HIP_CHECK(hipCtxCreate(&context, 0, 0))
 #endif
-  HIP_CHECK(hipModuleLoad(&Module, fileName));
-  HIP_CHECK(hipModuleGetFunction(&DummyKernel, Module, dummyKernel));
-  HIP_CHECK(hipStreamCreate(&stream1));
+  HIP_CHECK(hipModuleLoad(&Module, fileName))
+  HIP_CHECK(hipModuleGetFunction(&DummyKernel, Module, dummyKernel))
+  HIP_CHECK(hipStreamCreate(&stream1))
   // Passing Max int value to block dimensions
   hipDeviceProp_t deviceProp;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  HIP_CHECK(hipGetDeviceProperties(&deviceProp, device));
+  HIP_CHECK(hipDeviceGet(&device, 0))
+  HIP_CHECK(hipGetDeviceProperties(&deviceProp, device))
   unsigned int maxblockX = deviceProp.maxThreadsDim[0];
   unsigned int maxblockY = deviceProp.maxThreadsDim[1];
   unsigned int maxblockZ = deviceProp.maxThreadsDim[2];
@@ -240,32 +240,32 @@ bool Module_GridBlock_Corner_Tests() {
       testStatus = false;
     }
   }
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipModuleUnload(Module));
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipModuleUnload(Module))
 #ifdef HT_NVIDIA
-  HIP_CHECK(hipCtxDestroy(context));
+  HIP_CHECK(hipCtxDestroy(context))
 #endif
   return testStatus;
 }
 
 bool Module_WorkGroup_Test() {
   bool testStatus = true;
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipError_t err;
   hipFunction_t DummyKernel;
   hipModule_t Module;
   hipStream_t stream1;
 #ifdef HT_NVIDIA
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
   hipCtx_t context;
-  HIP_CHECK(hipCtxCreate(&context, 0, 0));
+  HIP_CHECK(hipCtxCreate(&context, 0, 0))
 #endif
-  HIP_CHECK(hipModuleLoad(&Module, fileName));
-  HIP_CHECK(hipModuleGetFunction(&DummyKernel, Module, dummyKernel));
-  HIP_CHECK(hipStreamCreate(&stream1));
+  HIP_CHECK(hipModuleLoad(&Module, fileName))
+  HIP_CHECK(hipModuleGetFunction(&DummyKernel, Module, dummyKernel))
+  HIP_CHECK(hipStreamCreate(&stream1))
   // Passing Max int value to block dimensions
   hipDeviceProp_t deviceProp;
-  HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0))
   double cuberootVal = cbrt(static_cast<double>(deviceProp.maxThreadsPerBlock));
   uint32_t cuberoot_floor = floor(cuberootVal);
   uint32_t cuberoot_ceil = ceil(cuberootVal);
@@ -283,10 +283,10 @@ bool Module_WorkGroup_Test() {
   if (err == hipSuccess) {
     testStatus = false;
   }
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipModuleUnload(Module));
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipModuleUnload(Module))
 #ifdef HT_NVIDIA
-  HIP_CHECK(hipCtxDestroy(context));
+  HIP_CHECK(hipCtxDestroy(context))
 #endif
   return testStatus;
 }
@@ -309,7 +309,7 @@ HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Fntl) {
 
 HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Verify_Capture) {
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
 
@@ -317,10 +317,10 @@ HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Verify_Capture) {
   BEGIN_CAPTURE(stream);
 
   hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
-  HIP_CHECK(hipModuleLaunchKernel(f, 1, 1, 1, 1, 1, 1, 0, stream, nullptr, nullptr));
+  HIP_CHECK(hipModuleLaunchKernel(f, 1, 1, 1, 1, 1, 1, 0, stream, nullptr, nullptr))
 
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipStreamDestroy(stream))
 }

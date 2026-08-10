@@ -231,9 +231,9 @@ template <typename F> static void test_cg_multi_grid_group_type(F kernel_func, i
   // Create a stream each device
   hipStream_t stream[MaxGPUs];
   for (int i = 0; i < num_devices; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     HIP_CHECK(hipDeviceSynchronize());  // Make sure work is done on this device
-    HIP_CHECK(hipStreamCreate(&stream[i]));
+    HIP_CHECK(hipStreamCreate(&stream[i]))
   }
 
   // Allocate host and device memory
@@ -245,23 +245,23 @@ template <typename F> static void test_cg_multi_grid_group_type(F kernel_func, i
   int *is_valid_dev[MaxGPUs], *is_valid_host[MaxGPUs];
   int *sync_dev[MaxGPUs], *sync_result;
   for (int i = 0; i < num_devices; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
 
     if (specific_api_test) {
-      HIP_CHECK(hipMalloc(&num_grids_dev[i], num_bytes));
-      HIP_CHECK(hipHostMalloc(&num_grids_host[i], num_bytes));
+      HIP_CHECK(hipMalloc(&num_grids_dev[i], num_bytes))
+      HIP_CHECK(hipHostMalloc(&num_grids_host[i], num_bytes))
     }
 
-    HIP_CHECK(hipMalloc(&grid_rank_dev[i], num_bytes));
-    HIP_CHECK(hipMalloc(&size_dev[i], num_bytes));
-    HIP_CHECK(hipMalloc(&thd_rank_dev[i], num_bytes));
-    HIP_CHECK(hipMalloc(&is_valid_dev[i], num_bytes));
-    HIP_CHECK(hipMalloc(&sync_dev[i], num_bytes));
+    HIP_CHECK(hipMalloc(&grid_rank_dev[i], num_bytes))
+    HIP_CHECK(hipMalloc(&size_dev[i], num_bytes))
+    HIP_CHECK(hipMalloc(&thd_rank_dev[i], num_bytes))
+    HIP_CHECK(hipMalloc(&is_valid_dev[i], num_bytes))
+    HIP_CHECK(hipMalloc(&sync_dev[i], num_bytes))
 
-    HIP_CHECK(hipHostMalloc(&grid_rank_host[i], num_bytes));
-    HIP_CHECK(hipHostMalloc(&size_host[i], num_bytes));
-    HIP_CHECK(hipHostMalloc(&thd_rank_host[i], num_bytes));
-    HIP_CHECK(hipHostMalloc(&is_valid_host[i], num_bytes));
+    HIP_CHECK(hipHostMalloc(&grid_rank_host[i], num_bytes))
+    HIP_CHECK(hipHostMalloc(&size_host[i], num_bytes))
+    HIP_CHECK(hipHostMalloc(&thd_rank_host[i], num_bytes))
+    HIP_CHECK(hipHostMalloc(&is_valid_host[i], num_bytes))
 
     if (i == 0) {
       HIP_CHECK(
@@ -277,7 +277,7 @@ template <typename F> static void test_cg_multi_grid_group_type(F kernel_func, i
   hipLaunchParams* launchParamsList = new hipLaunchParams[num_devices];
   std::vector<void*> args(MaxGPUs * NumKernelArgs);
   for (int i = 0; i < num_devices; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
 
     args[i * NumKernelArgs] = &grid_rank_dev[i];
     args[i * NumKernelArgs + 1] = &size_dev[i];
@@ -296,18 +296,18 @@ template <typename F> static void test_cg_multi_grid_group_type(F kernel_func, i
     launchParamsList[i].stream = stream[i];
     launchParamsList[i].args = &args[i * NumKernelArgs];
   }
-  HIP_CHECK(hipLaunchCooperativeKernelMultiDevice(launchParamsList, num_devices, 0));
+  HIP_CHECK(hipLaunchCooperativeKernelMultiDevice(launchParamsList, num_devices, 0))
 
   // Copy result from device to host
   for (int i = 0; i < num_devices; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     if (specific_api_test) {
-      HIP_CHECK(hipMemcpy(num_grids_host[i], num_grids_dev[i], num_bytes, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(num_grids_host[i], num_grids_dev[i], num_bytes, hipMemcpyDeviceToHost))
     }
-    HIP_CHECK(hipMemcpy(grid_rank_host[i], grid_rank_dev[i], num_bytes, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(size_host[i], size_dev[i], num_bytes, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(thd_rank_host[i], thd_rank_dev[i], num_bytes, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(is_valid_host[i], is_valid_dev[i], num_bytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(grid_rank_host[i], grid_rank_dev[i], num_bytes, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipMemcpy(size_host[i], size_dev[i], num_bytes, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipMemcpy(thd_rank_host[i], thd_rank_dev[i], num_bytes, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipMemcpy(is_valid_host[i], is_valid_dev[i], num_bytes, hipMemcpyDeviceToHost))
   }
 
   // Validate results
@@ -339,40 +339,40 @@ template <typename F> static void test_cg_multi_grid_group_type(F kernel_func, i
   // Free host and device memory
   delete[] launchParamsList;
   for (int i = 0; i < num_devices; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
 
     if (specific_api_test) {
-      HIP_CHECK(hipFree(num_grids_dev[i]));
-      HIP_CHECK(hipHostFree(num_grids_host[i]));
+      HIP_CHECK(hipFree(num_grids_dev[i]))
+      HIP_CHECK(hipHostFree(num_grids_host[i]))
     }
 
-    HIP_CHECK(hipFree(grid_rank_dev[i]));
-    HIP_CHECK(hipFree(size_dev[i]));
-    HIP_CHECK(hipFree(thd_rank_dev[i]));
-    HIP_CHECK(hipFree(is_valid_dev[i]));
-    HIP_CHECK(hipFree(sync_dev[i]));
+    HIP_CHECK(hipFree(grid_rank_dev[i]))
+    HIP_CHECK(hipFree(size_dev[i]))
+    HIP_CHECK(hipFree(thd_rank_dev[i]))
+    HIP_CHECK(hipFree(is_valid_dev[i]))
+    HIP_CHECK(hipFree(sync_dev[i]))
 
     if (i == 0) {
-      HIP_CHECK(hipHostFree(sync_result));
+      HIP_CHECK(hipHostFree(sync_result))
     }
-    HIP_CHECK(hipHostFree(grid_rank_host[i]));
-    HIP_CHECK(hipHostFree(size_host[i]));
-    HIP_CHECK(hipHostFree(thd_rank_host[i]));
-    HIP_CHECK(hipHostFree(is_valid_host[i]));
-    HIP_CHECK(hipStreamDestroy(stream[i]));
+    HIP_CHECK(hipHostFree(grid_rank_host[i]))
+    HIP_CHECK(hipHostFree(size_host[i]))
+    HIP_CHECK(hipHostFree(thd_rank_host[i]))
+    HIP_CHECK(hipHostFree(is_valid_host[i]))
+    HIP_CHECK(hipStreamDestroy(stream[i]))
   }
 }
 
 HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Basic) {
   int num_devices = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
   num_devices = min(num_devices, MaxGPUs);
 
   // Set `max_threads_per_blk` by taking minimum among all available devices
   int max_threads_per_blk = INT_MAX;
   hipDeviceProp_t device_properties;
   for (int i = 0; i < num_devices; i++) {
-    HIP_CHECK(hipGetDeviceProperties(&device_properties, i));
+    HIP_CHECK(hipGetDeviceProperties(&device_properties, i))
     if (!device_properties.cooperativeMultiDeviceLaunch) {
       HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     }
@@ -415,14 +415,14 @@ HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Barrier) {
   uint32_t warps = GENERATE(4, 8, 16, 32);
   uint32_t block_size = 1;
 
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
   if (num_devices < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   std::vector<hipDeviceProp_t> device_properties(num_devices);
   for (int i = 0; i < num_devices; i++) {
-    HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
+    HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i))
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
       HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     }
@@ -450,7 +450,7 @@ HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Barrier) {
   std::vector<int> max_blocks_per_sm_arr(num_devices);
   int max_blocks_per_sm = INT_MAX;
   for (int i = 0; i < num_devices; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks_per_sm_arr[i], test_kernel,
                                                            num_threads_in_block, 0));
     if (max_blocks_per_sm_arr[i] < max_blocks_per_sm) {
@@ -472,25 +472,25 @@ HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Barrier) {
   std::vector<unsigned int*> per_loop_atomic(num_devices);
   // Allocate and initialize grid-specific counters and values using hipHostMalloc
   unsigned int *grid_counters, *recorded_values, *grid_values;
-  HIP_CHECK(hipHostMalloc(&grid_counters, sizeof(unsigned int) * num_devices));
-  HIP_CHECK(hipHostMalloc(&recorded_values, sizeof(unsigned int) * num_devices * loops));
-  HIP_CHECK(hipHostMalloc(&grid_values, sizeof(unsigned int) * num_devices));
-  HIP_CHECK(hipMemset(grid_counters, 0, num_devices * sizeof(unsigned int)));
-  HIP_CHECK(hipMemset(recorded_values, 0, num_devices * loops * sizeof(unsigned int)));
-  HIP_CHECK(hipMemset(grid_values, 0, num_devices * sizeof(unsigned int)));
+  HIP_CHECK(hipHostMalloc(&grid_counters, sizeof(unsigned int) * num_devices))
+  HIP_CHECK(hipHostMalloc(&recorded_values, sizeof(unsigned int) * num_devices * loops))
+  HIP_CHECK(hipHostMalloc(&grid_values, sizeof(unsigned int) * num_devices))
+  HIP_CHECK(hipMemset(grid_counters, 0, num_devices * sizeof(unsigned int)))
+  HIP_CHECK(hipMemset(recorded_values, 0, num_devices * loops * sizeof(unsigned int)))
+  HIP_CHECK(hipMemset(grid_values, 0, num_devices * sizeof(unsigned int)))
 
   for (int i = 0; i < num_devices; i++) {
     host_buffer[i] =
         reinterpret_cast<unsigned int*>(calloc(total_buffer_len, sizeof(unsigned int)));
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipMalloc(&kernel_buffer[i], sizeof(unsigned int) * total_buffer_len));
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipMalloc(&kernel_buffer[i], sizeof(unsigned int) * total_buffer_len))
     HIP_CHECK(hipMemcpy(kernel_buffer[i], host_buffer[i], sizeof(unsigned int) * total_buffer_len,
                         hipMemcpyHostToDevice));
-    HIP_CHECK(hipMalloc(&kernel_atomic[i], sizeof(unsigned int)));
-    HIP_CHECK(hipMemset(kernel_atomic[i], 0, sizeof(unsigned int)));
-    HIP_CHECK(hipMalloc(&per_loop_atomic[i], loops * sizeof(unsigned int)));
-    HIP_CHECK(hipMemset(per_loop_atomic[i], 0, loops * sizeof(unsigned int)));
-    HIP_CHECK(hipStreamCreate(&streams[i]));
+    HIP_CHECK(hipMalloc(&kernel_atomic[i], sizeof(unsigned int)))
+    HIP_CHECK(hipMemset(kernel_atomic[i], 0, sizeof(unsigned int)))
+    HIP_CHECK(hipMalloc(&per_loop_atomic[i], loops * sizeof(unsigned int)))
+    HIP_CHECK(hipMemset(per_loop_atomic[i], 0, loops * sizeof(unsigned int)))
+    HIP_CHECK(hipStreamCreate(&streams[i]))
   }
 
   // Launch the kernels
@@ -500,7 +500,7 @@ HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Barrier) {
   std::vector<std::vector<void*>> dev_params(num_devices, std::vector<void*>(7, nullptr));
   std::vector<hipLaunchParams> md_params(num_devices);
   for (int i = 0; i < num_devices; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     dev_params[i][0] = reinterpret_cast<void*>(&kernel_atomic[i]);
     dev_params[i][1] = reinterpret_cast<void*>(&kernel_buffer[i]);
     dev_params[i][2] = reinterpret_cast<void*>(&loops);
@@ -516,8 +516,8 @@ HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Barrier) {
     md_params[i].args = dev_params[i].data();
   }
 
-  HIP_CHECK(hipLaunchCooperativeKernelMultiDevice(md_params.data(), num_devices, 0));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipLaunchCooperativeKernelMultiDevice(md_params.data(), num_devices, 0))
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Read back the buffer to host
   for (int dev = 0; dev < num_devices; dev++) {
@@ -532,14 +532,14 @@ HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Barrier) {
   // Verify the recorded values
   verify_recorded_values(recorded_values, loops, num_devices);
 
-  HIP_CHECK(hipHostFree(grid_counters));
-  HIP_CHECK(hipHostFree(recorded_values));
-  HIP_CHECK(hipHostFree(grid_values));
+  HIP_CHECK(hipHostFree(grid_counters))
+  HIP_CHECK(hipHostFree(recorded_values))
+  HIP_CHECK(hipHostFree(grid_values))
   for (int k = 0; k < num_devices; ++k) {
-    HIP_CHECK(hipFree(kernel_buffer[k]));
-    HIP_CHECK(hipFree(kernel_atomic[k]));
-    HIP_CHECK(hipFree(per_loop_atomic[k]));
-    HIP_CHECK(hipStreamDestroy(streams[k]));
+    HIP_CHECK(hipFree(kernel_buffer[k]))
+    HIP_CHECK(hipFree(kernel_atomic[k]))
+    HIP_CHECK(hipFree(per_loop_atomic[k]))
+    HIP_CHECK(hipStreamDestroy(streams[k]))
     free(host_buffer[k]);
   }
 }

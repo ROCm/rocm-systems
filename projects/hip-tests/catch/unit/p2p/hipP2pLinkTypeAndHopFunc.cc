@@ -46,7 +46,7 @@ void getDeviceCount(int* pdevCnt) {
     int devCnt = 1;
     // writing only, no need for read-descriptor
     close(fd[0]);
-    HIP_CHECK(hipGetDeviceCount(&devCnt));
+    HIP_CHECK(hipGetDeviceCount(&devCnt))
     // send the value on the write-descriptor:
     write(fd[1], &devCnt, sizeof(devCnt));
     // close the write descriptor:
@@ -158,8 +158,8 @@ bool testhipLinkTypeHopcountDeviceOrderRev(int numDevices) {
     for (int y = x + 1; y < numDevices; y++) {
       uint32_t linktype1 = 0, linktype2 = 0;
       uint32_t hopcount1 = 0, hopcount2 = 0;
-      HIP_CHECK(hipExtGetLinkTypeAndHopCount(x, y, &linktype1, &hopcount1));
-      HIP_CHECK(hipExtGetLinkTypeAndHopCount(y, x, &linktype2, &hopcount2));
+      HIP_CHECK(hipExtGetLinkTypeAndHopCount(x, y, &linktype1, &hopcount1))
+      HIP_CHECK(hipExtGetLinkTypeAndHopCount(y, x, &linktype2, &hopcount2))
       if (hopcount1 != hopcount2) {
         TestPassed = false;
         break;
@@ -242,7 +242,7 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
   }
   for (auto pos = devicePairList.begin(); pos != devicePairList.end(); pos++) {
     int can_access_peer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, (*pos).device1, (*pos).device2));
+    HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, (*pos).device1, (*pos).device2))
     if (!can_access_peer) {
       continue;
     }
@@ -251,7 +251,7 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
     RSMI_IO_LINK_TYPE linktype2 = RSMI_IOLINK_TYPE_UNDEFINED;
     uint64_t hopcount2 = 0;
     rsmi_status_t retsmi;
-    HIPCHECK(hipExtGetLinkTypeAndHopCount((*pos).device1, (*pos).device2, &linktype1, &hopcount1));
+    HIPCHECK(hipExtGetLinkTypeAndHopCount((*pos).device1, (*pos).device2, &linktype1, &hopcount1))
     retsmi = fntopo_get_link_type((*pos).device1, (*pos).device2, &hopcount2, &linktype2);
     REQUIRE(RSMI_STATUS_SUCCESS == retsmi);
 
@@ -298,7 +298,7 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
 HIP_TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
   int numDevices = 0;
   bool TestPassed = true;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }

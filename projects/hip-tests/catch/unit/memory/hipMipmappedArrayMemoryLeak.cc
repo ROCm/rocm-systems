@@ -39,27 +39,27 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMipmappedArray_NoLeakAfterGetLevel, float, fl
         hipMallocMipmappedArray(&warmup, &desc, extent, kLeakTestLevels, hipArrayDefault),
         hipErrorNotSupported);
     hipArray_t lvl = nullptr;
-    HIP_CHECK(hipGetMipmappedArrayLevel(&lvl, warmup, 0));
-    HIP_CHECK(hipFreeMipmappedArray(warmup));
+    HIP_CHECK(hipGetMipmappedArrayLevel(&lvl, warmup, 0))
+    HIP_CHECK(hipFreeMipmappedArray(warmup))
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   size_t free_before, total;
-  HIP_CHECK(hipMemGetInfo(&free_before, &total));
+  HIP_CHECK(hipMemGetInfo(&free_before, &total))
 
   for (int i = 0; i < kLeakTestIters; i++) {
     hipMipmappedArray_t mipmap = nullptr;
-    HIP_CHECK(hipMallocMipmappedArray(&mipmap, &desc, extent, kLeakTestLevels, hipArrayDefault));
+    HIP_CHECK(hipMallocMipmappedArray(&mipmap, &desc, extent, kLeakTestLevels, hipArrayDefault))
 
     hipArray_t level0 = nullptr;
-    HIP_CHECK(hipGetMipmappedArrayLevel(&level0, mipmap, 0));
+    HIP_CHECK(hipGetMipmappedArrayLevel(&level0, mipmap, 0))
 
-    HIP_CHECK(hipFreeMipmappedArray(mipmap));
+    HIP_CHECK(hipFreeMipmappedArray(mipmap))
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   size_t free_after;
-  HIP_CHECK(hipMemGetInfo(&free_after, &total));
+  HIP_CHECK(hipMemGetInfo(&free_after, &total))
 
   size_t leaked = (free_before > free_after) ? (free_before - free_after) : 0;
   INFO("Leaked bytes after " << kLeakTestIters << " iterations: " << leaked);
@@ -82,30 +82,30 @@ HIP_TEST_CASE(Unit_hipFreeMipmappedArray_NoLeakAfterGetAllLevels) {
         hipErrorNotSupported);
     for (unsigned int lvl = 0; lvl < kLeakTestLevels; lvl++) {
       hipArray_t arr = nullptr;
-      HIP_CHECK(hipGetMipmappedArrayLevel(&arr, warmup, lvl));
+      HIP_CHECK(hipGetMipmappedArrayLevel(&arr, warmup, lvl))
     }
-    HIP_CHECK(hipFreeMipmappedArray(warmup));
+    HIP_CHECK(hipFreeMipmappedArray(warmup))
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   size_t free_before, total;
-  HIP_CHECK(hipMemGetInfo(&free_before, &total));
+  HIP_CHECK(hipMemGetInfo(&free_before, &total))
 
   for (int i = 0; i < kLeakTestIters; i++) {
     hipMipmappedArray_t mipmap = nullptr;
-    HIP_CHECK(hipMallocMipmappedArray(&mipmap, &desc, extent, kLeakTestLevels, hipArrayDefault));
+    HIP_CHECK(hipMallocMipmappedArray(&mipmap, &desc, extent, kLeakTestLevels, hipArrayDefault))
 
     for (unsigned int lvl = 0; lvl < kLeakTestLevels; lvl++) {
       hipArray_t levelArr = nullptr;
-      HIP_CHECK(hipGetMipmappedArrayLevel(&levelArr, mipmap, lvl));
+      HIP_CHECK(hipGetMipmappedArrayLevel(&levelArr, mipmap, lvl))
     }
 
-    HIP_CHECK(hipFreeMipmappedArray(mipmap));
+    HIP_CHECK(hipFreeMipmappedArray(mipmap))
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   size_t free_after;
-  HIP_CHECK(hipMemGetInfo(&free_after, &total));
+  HIP_CHECK(hipMemGetInfo(&free_after, &total))
 
   size_t leaked = (free_before > free_after) ? (free_before - free_after) : 0;
   INFO("Leaked bytes after " << kLeakTestIters << " iterations (all " << kLeakTestLevels
@@ -128,30 +128,30 @@ HIP_TEST_CASE(Unit_hipFreeMipmappedArray_NoLeakAfterDuplicateGetLevel) {
         hipMallocMipmappedArray(&warmup, &desc, extent, kLeakTestLevels, hipArrayDefault),
         hipErrorNotSupported);
     hipArray_t a = nullptr, b = nullptr;
-    HIP_CHECK(hipGetMipmappedArrayLevel(&a, warmup, 0));
-    HIP_CHECK(hipGetMipmappedArrayLevel(&b, warmup, 0));
-    HIP_CHECK(hipFreeMipmappedArray(warmup));
+    HIP_CHECK(hipGetMipmappedArrayLevel(&a, warmup, 0))
+    HIP_CHECK(hipGetMipmappedArrayLevel(&b, warmup, 0))
+    HIP_CHECK(hipFreeMipmappedArray(warmup))
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   size_t free_before, total;
-  HIP_CHECK(hipMemGetInfo(&free_before, &total));
+  HIP_CHECK(hipMemGetInfo(&free_before, &total))
 
   for (int i = 0; i < kLeakTestIters; i++) {
     hipMipmappedArray_t mipmap = nullptr;
-    HIP_CHECK(hipMallocMipmappedArray(&mipmap, &desc, extent, kLeakTestLevels, hipArrayDefault));
+    HIP_CHECK(hipMallocMipmappedArray(&mipmap, &desc, extent, kLeakTestLevels, hipArrayDefault))
 
     hipArray_t level0_a = nullptr;
     hipArray_t level0_b = nullptr;
-    HIP_CHECK(hipGetMipmappedArrayLevel(&level0_a, mipmap, 0));
-    HIP_CHECK(hipGetMipmappedArrayLevel(&level0_b, mipmap, 0));
+    HIP_CHECK(hipGetMipmappedArrayLevel(&level0_a, mipmap, 0))
+    HIP_CHECK(hipGetMipmappedArrayLevel(&level0_b, mipmap, 0))
 
-    HIP_CHECK(hipFreeMipmappedArray(mipmap));
+    HIP_CHECK(hipFreeMipmappedArray(mipmap))
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   size_t free_after;
-  HIP_CHECK(hipMemGetInfo(&free_after, &total));
+  HIP_CHECK(hipMemGetInfo(&free_after, &total))
 
   size_t leaked = (free_before > free_after) ? (free_before - free_after) : 0;
   INFO("Leaked bytes after " << kLeakTestIters << " iterations (duplicate getLevel): " << leaked);

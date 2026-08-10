@@ -90,10 +90,10 @@ static void testMemsetWithExtent(bool bAsync, hipExtent tstExtent) {
   A_h = reinterpret_cast<char*>(malloc(sizeElements));
   REQUIRE(A_h != nullptr);
   memset(A_h, 0, sizeElements);
-  HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent));
+  HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent))
   if (bAsync) {
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
 
     ret = hipMemset3DAsync(devPitchedPtr, MEMSETVAL, extent, stream);
     INFO("testMemsetWithExtent(" << extent.width << "," << extent.height << "," << extent.depth
@@ -105,8 +105,8 @@ static void testMemsetWithExtent(bool bAsync, hipExtent tstExtent) {
                                  << tstExtent.depth << ") memset " << TESTVAL << "ret : " << ret);
     REQUIRE(ret == hipSuccess);
 
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
+    HIP_CHECK(hipStreamDestroy(stream))
   } else {
     ret = hipMemset3D(devPitchedPtr, MEMSETVAL, extent);
     INFO("testMemsetWithExtent(" << extent.width << "," << extent.height << "," << extent.depth
@@ -132,7 +132,7 @@ static void testMemsetWithExtent(bool bAsync, hipExtent tstExtent) {
   myparms.kind = hipMemcpyDeviceToHost;
 #endif
 
-  HIP_CHECK(hipMemcpy3D(&myparms));
+  HIP_CHECK(hipMemcpy3D(&myparms))
 
   for (size_t i = 0; i < elements; i++) {
     if (A_h[i] != MEMSETVAL) {
@@ -143,7 +143,7 @@ static void testMemsetWithExtent(bool bAsync, hipExtent tstExtent) {
     }
   }
 
-  HIP_CHECK(hipFree(devPitchedPtr.ptr));
+  HIP_CHECK(hipFree(devPitchedPtr.ptr))
   free(A_h);
 }
 
@@ -165,21 +165,21 @@ static void testMemsetMaxValue(bool bAsync) {
   REQUIRE(A_h != nullptr);
   memset(A_h, 0, sizeElements);
 
-  HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent));
+  HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent))
   if (bAsync) {
     SECTION("Using user created stream") {
       hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
-      HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipStreamCreate(&stream))
+      HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
+      HIP_CHECK(hipStreamDestroy(stream))
     }
     SECTION("Using hipStreamPerThread") {
-      HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, hipStreamPerThread));
-      HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+      HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, hipStreamPerThread))
+      HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
     }
   } else {
-    HIP_CHECK(hipMemset3D(devPitchedPtr, memsetval, extent));
+    HIP_CHECK(hipMemset3D(devPitchedPtr, memsetval, extent))
   }
 
   hipMemcpy3DParms myparms{};
@@ -194,7 +194,7 @@ static void testMemsetMaxValue(bool bAsync) {
   myparms.kind = hipMemcpyDeviceToHost;
 #endif
 
-  HIP_CHECK(hipMemcpy3D(&myparms));
+  HIP_CHECK(hipMemcpy3D(&myparms))
 
   for (size_t i = 0; i < elements; i++) {
     if (A_h[i] != memsetval) {
@@ -203,7 +203,7 @@ static void testMemsetMaxValue(bool bAsync) {
       REQUIRE(false);
     }
   }
-  HIP_CHECK(hipFree(devPitchedPtr.ptr));
+  HIP_CHECK(hipFree(devPitchedPtr.ptr))
   free(A_h);
 }
 
@@ -219,8 +219,8 @@ static void seekAndSet3DArraySlice(bool bAsync) {
   hipPitchedPtr devicePitchedPointer;
   int memsetval = MEMSETVAL, memsetval4seeked = TESTVAL;
 
-  HIP_CHECK(hipMalloc3D(&devicePitchedPointer, extent));
-  HIP_CHECK(hipMemset3D(devicePitchedPointer, memsetval, extent));
+  HIP_CHECK(hipMalloc3D(&devicePitchedPointer, extent))
+  HIP_CHECK(hipMemset3D(devicePitchedPointer, memsetval, extent))
 
   // select random slice for memset
   unsigned int seed = time(nullptr);
@@ -242,13 +242,13 @@ static void seekAndSet3DArraySlice(bool bAsync) {
   if (bAsync) {
     // Memset selected slice (Async)
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked, extentSlice, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamCreate(&stream))
+    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked, extentSlice, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
+    HIP_CHECK(hipStreamDestroy(stream))
   } else {
     // Memset selected slice
-    HIP_CHECK(hipMemset3D(modDevPitchedPtr, memsetval4seeked, extentSlice));
+    HIP_CHECK(hipMemset3D(modDevPitchedPtr, memsetval4seeked, extentSlice))
   }
 
   // Copy result back to host buffer
@@ -265,7 +265,7 @@ static void seekAndSet3DArraySlice(bool bAsync) {
   myparms.kind = hipMemcpyDeviceToHost;
 #endif
 
-  HIP_CHECK(hipMemcpy3D(&myparms));
+  HIP_CHECK(hipMemcpy3D(&myparms))
 
   for (int z = 0; z < ZSIZE_S; z++) {
     for (int y = 0; y < YSIZE_S; y++) {
@@ -289,7 +289,7 @@ static void seekAndSet3DArraySlice(bool bAsync) {
     }
   }
 
-  HIP_CHECK(hipFree(devicePitchedPointer.ptr));
+  HIP_CHECK(hipFree(devicePitchedPointer.ptr))
 }
 
 /**
@@ -304,8 +304,8 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
   hipPitchedPtr devicePitchedPointer;
   int memsetval = MEMSETVAL, memsetval4seeked = TESTVAL;
 
-  HIP_CHECK(hipMalloc3D(&devicePitchedPointer, extent));
-  HIP_CHECK(hipMemset3D(devicePitchedPointer, memsetval, extent));
+  HIP_CHECK(hipMalloc3D(&devicePitchedPointer, extent))
+  HIP_CHECK(hipMemset3D(devicePitchedPointer, memsetval, extent))
 
   // For memsetting extent/size(10,10,10) in the mid portion of cube(30,30,30),
   // seek device ptr to (10,10,10) and then memset 10 bytes across x,y,z axis.
@@ -331,13 +331,13 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
   if (bAsync) {
     // Memset selected portion (Async)
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked, setExtent, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamCreate(&stream))
+    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked, setExtent, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
+    HIP_CHECK(hipStreamDestroy(stream))
   } else {
     // Memset selected portion
-    HIP_CHECK(hipMemset3D(modDevPitchedPtr, memsetval4seeked, setExtent));
+    HIP_CHECK(hipMemset3D(modDevPitchedPtr, memsetval4seeked, setExtent))
   }
 
   // Copy result back to host buffer
@@ -354,7 +354,7 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
   myparms.kind = hipMemcpyDeviceToHost;
 #endif
 
-  HIP_CHECK(hipMemcpy3D(&myparms));
+  HIP_CHECK(hipMemcpy3D(&myparms))
 
   for (int z = 0; z < ZSIZE_P; z++) {
     for (int y = 0; y < YSIZE_P; y++) {
@@ -379,7 +379,7 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
     }
   }
 
-  HIP_CHECK(hipFree(devicePitchedPointer.ptr));
+  HIP_CHECK(hipFree(devicePitchedPointer.ptr))
 }
 
 

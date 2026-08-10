@@ -44,7 +44,7 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_Scenario1) {
     REQUIRE(status != -1);
     close(fd1[ReadEnd]);
     // Check the total and free memory which is allocated in parent
-    HIP_CHECK(hipMemGetInfo(&free, &total));
+    HIP_CHECK(hipMemGetInfo(&free, &total))
     if ((total - free) >= size) {
       result = 1;
     } else {
@@ -60,7 +60,7 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_Scenario1) {
     close(fd[WriteEnd]);
     // Allocate memory
     char* A_d = nullptr;
-    HIP_CHECK(hipMalloc(&A_d, size));
+    HIP_CHECK(hipMalloc(&A_d, size))
     // Signal the child
     int check = 0;
     status = write(fd1[WriteEnd], &check, sizeof(check));
@@ -72,7 +72,7 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_Scenario1) {
     REQUIRE(status != -1);
     close(fd[ReadEnd]);
     REQUIRE(read_result == 1);
-    HIP_CHECK(hipFree(A_d));
+    HIP_CHECK(hipFree(A_d))
     // wait for child exit
     wait(NULL);
   }
@@ -98,7 +98,7 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_Scenario2) {
     close(fd2[WriteEnd]);
     // Allocate memory
     float* A_d = nullptr;
-    HIP_CHECK(hipMalloc(&A_d, size));
+    HIP_CHECK(hipMalloc(&A_d, size))
     // Signal the parent
     int data = 0;
     status = write(fd[WriteEnd], &data, sizeof(data));
@@ -110,7 +110,7 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_Scenario2) {
     REQUIRE(status != -1);
     close(fd2[ReadEnd]);
     // Free allocated device memory
-    HIP_CHECK(hipFree(A_d));
+    HIP_CHECK(hipFree(A_d))
     exit(0);
   } else {  // Parent
     size_t free = 0, total = 0;
@@ -122,7 +122,7 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_Scenario2) {
     REQUIRE(status != -1);
     close(fd[ReadEnd]);
     // Verify the memory
-    HIP_CHECK(hipMemGetInfo(&free, &total));
+    HIP_CHECK(hipMemGetInfo(&free, &total))
     REQUIRE((total - free) >= size);
     // Signal child that validation is over and child can free memory
     int valid = 0;
@@ -152,9 +152,9 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_Scenario3) {
     close(fd[ReadEnd]);
     // Allocate the memory
     void* A_d = nullptr;
-    HIP_CHECK(hipMalloc(&A_d, size));
+    HIP_CHECK(hipMalloc(&A_d, size))
     // Free the allocated memory
-    HIP_CHECK(hipFree(A_d));
+    HIP_CHECK(hipFree(A_d))
     // Signal the parent about memory free
     int check = 0;
     status = write(fd[WriteEnd], &check, sizeof(check));
@@ -170,7 +170,7 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_Scenario3) {
     close(fd[ReadEnd]);
     size_t free = 0, total = 0;
     // Verify the memory
-    HIP_CHECK(hipMemGetInfo(&free, &total));
+    HIP_CHECK(hipMemGetInfo(&free, &total))
     REQUIRE((total - free) >= 0);
     // wait for child exit
     wait(NULL);
@@ -190,14 +190,14 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_scenario4) {
   } else if (child_pid == 0) {  // Child
     // Allocate the memory
     void* A_d = nullptr;
-    HIP_CHECK(hipMalloc(&A_d, size));
+    HIP_CHECK(hipMalloc(&A_d, size))
     exit(0);
   } else {  // Parent
     // wait for child exit
     wait(NULL);
     size_t free = 0, total = 0;
     // Verify the memory
-    HIP_CHECK(hipMemGetInfo(&free, &total));
+    HIP_CHECK(hipMemGetInfo(&free, &total))
     REQUIRE((total - free) >= 0);
   }
 }
@@ -229,11 +229,11 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_MultiDevice_Scenario5) {
     close(fd1[ReadEnd]);
     int num_devices, result, count = 0;
     // Get the device count
-    HIP_CHECK(hipGetDeviceCount(&num_devices));
+    HIP_CHECK(hipGetDeviceCount(&num_devices))
     for (int i = 0; i < num_devices; i++) {
-      HIP_CHECK(hipSetDevice(i));
+      HIP_CHECK(hipSetDevice(i))
       // Check the memory
-      HIP_CHECK(hipMemGetInfo(&free, &total));
+      HIP_CHECK(hipMemGetInfo(&free, &total))
       if ((total - free) >= size) {
         count += 1;
       }
@@ -253,16 +253,16 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_MultiDevice_Scenario5) {
     close(fd2[WriteEnd]);
     int num_devices;
     // Get the device count
-    HIP_CHECK(hipGetDeviceCount(&num_devices));
+    HIP_CHECK(hipGetDeviceCount(&num_devices))
     std::vector<void*> v(num_devices, nullptr);
     for (int i = 0; i < num_devices; i++) {
-      HIP_CHECK(hipSetDevice(i));
+      HIP_CHECK(hipSetDevice(i))
       // verify the memory
-      HIP_CHECK(hipMemGetInfo(&free, &total));
+      HIP_CHECK(hipMemGetInfo(&free, &total))
       // Allocate memory
-      HIP_CHECK(hipMalloc(&v[i], size));
+      HIP_CHECK(hipMalloc(&v[i], size))
       // Verify the memory
-      HIP_CHECK(hipMemGetInfo(&free, &total));
+      HIP_CHECK(hipMemGetInfo(&free, &total))
     }
     // Signal the child about memory allocation
     int check = 0;
@@ -277,8 +277,8 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_MultiDevice_Scenario5) {
     close(fd2[ReadEnd]);
     // Free the allocated memory on each device
     for (int i = 0; i < num_devices; i++) {
-      HIP_CHECK(hipSetDevice(i));
-      HIP_CHECK(hipFree(v[i]));
+      HIP_CHECK(hipSetDevice(i))
+      HIP_CHECK(hipFree(v[i]))
     }
     // wait for child exit
     wait(NULL);
@@ -304,8 +304,8 @@ static bool testHiddenFreeMemFromChild() {
     setenv("HIP_HIDDEN_FREE_MEM", std::to_string(size_tohide).c_str(), 1);
     // allocate memory in device
     char* d_ptr{nullptr};
-    HIP_CHECK(hipMalloc(&d_ptr, SIZE_TO_ALLOCATE));
-    HIP_CHECK(hipMemGetInfo(&free, &total));
+    HIP_CHECK(hipMalloc(&d_ptr, SIZE_TO_ALLOCATE))
+    HIP_CHECK(hipMemGetInfo(&free, &total))
     min_size = (FREE_MEM_TO_HIDE + SIZE_TO_ALLOCATE);
     if ((total - free) >= min_size) {
       testResult = 1;
@@ -316,7 +316,7 @@ static bool testHiddenFreeMemFromChild() {
     // Wait for signal from parent
     read(fd_p2c[ReadEnd], &result_dummy, sizeof(result_dummy));
     close(fd_p2c[ReadEnd]);
-    HIP_CHECK(hipFree(d_ptr));
+    HIP_CHECK(hipFree(d_ptr))
     exit(0);
   } else if (cPid > 0) {  // parent
     close(fd_c2p[WriteEnd]);
@@ -330,7 +330,7 @@ static bool testHiddenFreeMemFromChild() {
       result &= false;
     }
     size_t free = 0, total = 0, min_size = SIZE_TO_ALLOCATE;
-    HIP_CHECK(hipMemGetInfo(&free, &total));
+    HIP_CHECK(hipMemGetInfo(&free, &total))
     if ((total - free) >= min_size) {
       result &= true;
     } else {
@@ -370,11 +370,11 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_VerifyHiddenFreeMemForAllGpu) {
   // set environment variable from shell
   unsetenv("HIP_HIDDEN_FREE_MEM");
   setenv("HIP_HIDDEN_FREE_MEM", std::to_string(size_tohide).c_str(), 1);
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   for (int dev = 0; dev < numDevices; dev++) {
-    HIP_CHECK(hipSetDevice(dev));
+    HIP_CHECK(hipSetDevice(dev))
     size_t free = 0, total = 0;
-    HIP_CHECK(hipMemGetInfo(&free, &total));
+    HIP_CHECK(hipMemGetInfo(&free, &total))
     REQUIRE((total - free) >= FREE_MEM_TO_HIDE);
   }
 }

@@ -185,7 +185,7 @@ static void HIPRT_CB CallBackFunctn(hipStream_t strm, hipError_t err, void* ChkV
   // The following HIPASSERT() is just to satisfy catch2 framework.
   // As it ensures the use of all the variables.
   HIPASSERT(strm);
-  HIPCHECK(err);
+  HIPCHECK(err)
   if (*(reinterpret_cast<int*>(ChkVal)) == 1) {
     IfTestPassed = true;
   } else {
@@ -244,21 +244,21 @@ HIP_TEST_CASE(Unit_hipStreamPerThreadTst_StrmQuery) {
   int *Ad = nullptr, *Ah = nullptr, NumElms = 4096, CONST_NUM = 123;
   int blockSize = 32, peak_clk;
   hipError_t err;
-  HIP_CHECK(hipMalloc(&Ad, NumElms * sizeof(int)));
+  HIP_CHECK(hipMalloc(&Ad, NumElms * sizeof(int)))
   Ah = new int[NumElms];
   for (int i = 0; i < NumElms; ++i) {
     Ah[i] = CONST_NUM;
   }
-  HIP_CHECK(hipMemcpy(Ad, Ah, NumElms * sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Ad, Ah, NumElms * sizeof(int), hipMemcpyHostToDevice))
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
   SECTION("Test working of hipStreamQuery") {
     if (IsGfx11()) {
-      HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0))
       StreamPerThrd_gfx11<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Ad, NULL, NumElms, peak_clk,
                                                                         1);
     } else {
-      HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0))
       StreamPerThrd<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Ad, NULL, NumElms, peak_clk, 1);
     }
     err = hipStreamQuery(hipStreamPerThread);
@@ -271,19 +271,19 @@ HIP_TEST_CASE(Unit_hipStreamPerThreadTst_StrmQuery) {
   }
   SECTION("check working of hipStreamAddCallback() with hipStreamPerThread") {
     int *Hptr = nullptr, *A_d = nullptr;
-    HIP_CHECK(hipHostMalloc(&Hptr, sizeof(int)));
+    HIP_CHECK(hipHostMalloc(&Hptr, sizeof(int)))
     *Hptr = 0;
-    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), Hptr, 0));
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), Hptr, 0))
     if (IsGfx11()) {
       StreamPerThrd1_gfx11<<<1, 1, 0, hipStreamPerThread>>>(A_d, peak_clk);
     } else {
       StreamPerThrd1<<<1, 1, 0, hipStreamPerThread>>>(A_d, peak_clk);
     }
-    HIP_CHECK(hipStreamAddCallback(hipStreamPerThread, CallBackFunctn, A_d, 0));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
-    HIP_CHECK(hipHostFree(Hptr));
+    HIP_CHECK(hipStreamAddCallback(hipStreamPerThread, CallBackFunctn, A_d, 0))
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
+    HIP_CHECK(hipHostFree(Hptr))
   }
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Ad))
   delete[] Ah;
   REQUIRE(IfTestPassed);
 }
@@ -294,30 +294,30 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_MangdMem) {
 
   int *Hmm = nullptr, NumElms = 4096, CONST_NUM = 123, blockSize = 32;
   SECTION("Using Managed memory") {
-    HIP_CHECK(hipMallocManaged(&Hmm, NumElms * sizeof(int)));
+    HIP_CHECK(hipMallocManaged(&Hmm, NumElms * sizeof(int)))
     for (int i = 0; i < NumElms; ++i) {
       Hmm[i] = CONST_NUM;
     }
   }
   SECTION("Prefetching Managed memory to device") {
-    HIP_CHECK(hipMallocManaged(&Hmm, NumElms * sizeof(int)));
+    HIP_CHECK(hipMallocManaged(&Hmm, NumElms * sizeof(int)))
     for (int i = 0; i < NumElms; ++i) {
       Hmm[i] = CONST_NUM;
     }
-    HIP_CHECK(hipMemPrefetchAsync(Hmm, NumElms * sizeof(int), 0, hipStreamPerThread));
+    HIP_CHECK(hipMemPrefetchAsync(Hmm, NumElms * sizeof(int), 0, hipStreamPerThread))
   }
   int peak_clk;
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
   if (IsGfx11()) {
-    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0));
+    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0))
     StreamPerThrd_gfx11<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Hmm, NULL, NumElms, peak_clk,
                                                                       0);
   } else {
-    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0));
+    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0))
     StreamPerThrd<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Hmm, NULL, NumElms, peak_clk, 0);
   }
-  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
   // Validating the result
   int MisMatch = 0;
   for (int i = 0; i < NumElms; ++i) {
@@ -325,7 +325,7 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_MangdMem) {
       MisMatch++;
     }
   }
-  HIP_CHECK(hipFree(Hmm));
+  HIP_CHECK(hipFree(Hmm))
   REQUIRE(MisMatch == 0);
 }
 
@@ -335,24 +335,24 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_ChildProc) {
   if (fork() == 0) {  //  child process
     int *Ad = nullptr, *Ah = nullptr, NumElms = 4096, CONST_NUM = 123;
     int blockSize = 32, peak_clk;
-    HIP_CHECK(hipMalloc(&Ad, NumElms * sizeof(int)));
+    HIP_CHECK(hipMalloc(&Ad, NumElms * sizeof(int)))
     Ah = new int[NumElms];
     for (int i = 0; i < NumElms; ++i) {
       Ah[i] = CONST_NUM;
     }
-    HIP_CHECK(hipMemcpy(Ad, Ah, NumElms * sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(Ad, Ah, NumElms * sizeof(int), hipMemcpyHostToDevice))
     dim3 dimBlock(blockSize, 1, 1);
     dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
     if (IsGfx11()) {
-      HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0))
       StreamPerThrd_gfx11<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Ad, NULL, NumElms, peak_clk,
                                                                         0);
     } else {
-      HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0))
       StreamPerThrd<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Ad, NULL, NumElms, peak_clk, 0);
     }
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
-    HIP_CHECK(hipMemcpy(Ah, Ad, NumElms * sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
+    HIP_CHECK(hipMemcpy(Ah, Ad, NumElms * sizeof(int), hipMemcpyDeviceToHost))
     int MisMatch = 0;
     for (int i = 0; i < NumElms; ++i) {
       if (Ah[i] != (CONST_NUM + 10)) {
@@ -360,7 +360,7 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_ChildProc) {
       }
     }
     delete[] Ah;
-    HIP_CHECK(hipFree(Ad));
+    HIP_CHECK(hipFree(Ad))
     if (MisMatch) {
       WARN("Data Mismatch observed!!\n");
       exit(9);
@@ -403,33 +403,33 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_StrmWaitEvt) {
   Ah = new int[NumElms];
   Ah1 = new int;
   hipStream_t Strm;
-  HIP_CHECK(hipStreamCreate(&Strm));
+  HIP_CHECK(hipStreamCreate(&Strm))
   for (int i = 0; i < NumElms; ++i) {
     Ah[i] = CONST_NUM;
   }
   Ah1[0] = 0;
-  HIP_CHECK(hipMalloc(&Ad, NumElms * sizeof(int)));
-  HIP_CHECK(hipMemcpy(Ad, Ah, NumElms * sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&Ad, NumElms * sizeof(int)))
+  HIP_CHECK(hipMemcpy(Ad, Ah, NumElms * sizeof(int), hipMemcpyHostToDevice))
   memset(Ah, 0, NumElms * sizeof(int));
-  HIP_CHECK(hipMalloc(&Ad1, sizeof(int)));
-  HIP_CHECK(hipMemset(Ad1, 0, sizeof(int)));
+  HIP_CHECK(hipMalloc(&Ad1, sizeof(int)))
+  HIP_CHECK(hipMemset(Ad1, 0, sizeof(int)))
   int peak_clk;
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
   hipEvent_t e1;
-  HIPCHECK(hipEventCreate(&e1));
+  HIPCHECK(hipEventCreate(&e1))
   if (IsGfx11()) {
-    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0));
+    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0))
     StreamPerThrd_gfx11<<<dimGrid, dimBlock, 0, Strm>>>(Ad, Ad1, NumElms, peak_clk, 1, 1);
   } else {
-    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0));
+    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0))
     StreamPerThrd<<<dimGrid, dimBlock, 0, Strm>>>(Ad, Ad1, NumElms, peak_clk, 1, 1);
   }
-  HIP_CHECK(hipEventRecord(e1, Strm));
-  HIP_CHECK(hipStreamWaitEvent(hipStreamPerThread, e1, 0 /*flags*/));
+  HIP_CHECK(hipEventRecord(e1, Strm))
+  HIP_CHECK(hipStreamWaitEvent(hipStreamPerThread, e1, 0 /*flags*/))
   MiniKernel<<<1, 1, 0, hipStreamPerThread>>>(Ad1);
   sleep(1);
-  HIP_CHECK(hipMemcpy(Ah1, Ad1, sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(Ah1, Ad1, sizeof(int), hipMemcpyDeviceToHost))
   if (*Ah1 != 3) {
     IfTestPassed = false;
     if (*Ah1 == 2) {
@@ -439,17 +439,17 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_StrmWaitEvt) {
     }
   }
   // Validating the result
-  HIP_CHECK(hipMemcpy(Ah, Ad, NumElms * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(Ah, Ad, NumElms * sizeof(int), hipMemcpyDeviceToHost))
   int MisMatch = 0;
   for (int i = 0; i < NumElms; ++i) {
     if (Ah[i] != (CONST_NUM + 10)) {
       MisMatch++;
     }
   }
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Ad1));
-  HIP_CHECK(hipEventDestroy(e1));
-  HIP_CHECK(hipStreamDestroy(Strm));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Ad1))
+  HIP_CHECK(hipEventDestroy(e1))
+  HIP_CHECK(hipStreamDestroy(Strm))
   delete[] Ah;
   delete Ah1;
   if (MisMatch) {
@@ -463,7 +463,7 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_StrmWaitEvt) {
 /* Testing hipLaunchCooperativeKernel() api with hipStreamPerThread*/
 HIP_TEST_CASE(Unit_hipStreamPerThread_CoopLaunch) {
   hipDeviceProp_t device_properties;
-  HIPCHECK(hipGetDeviceProperties(&device_properties, 0));
+  HIPCHECK(hipGetDeviceProperties(&device_properties, 0))
   /* Test whether target device supports cooperative groups ****************/
   if (device_properties.cooperativeLaunch == 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
@@ -484,13 +484,13 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_CoopLaunch) {
     for (int i = 0; i < NumElms; ++i) {
       Ah[i] = Const;
     }
-    HIP_CHECK(hipMalloc(&Ad, sizeof(int) * NumElms));
-    HIP_CHECK(hipMalloc(&DNumElms, sizeof(int)));
+    HIP_CHECK(hipMalloc(&Ad, sizeof(int) * NumElms))
+    HIP_CHECK(hipMalloc(&DNumElms, sizeof(int)))
     HIP_CHECK(
         hipMemcpyAsync(Ad, Ah, sizeof(int) * NumElms, hipMemcpyHostToDevice, hipStreamPerThread));
     HIP_CHECK(
         hipMemcpyAsync(DNumElms, &NumElms, sizeof(int), hipMemcpyHostToDevice, hipStreamPerThread));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
 
     void* coop_params[2];
     coop_params[0] = reinterpret_cast<void*>(&Ad);
@@ -498,7 +498,7 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_CoopLaunch) {
     HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(StreamPerThrdCoopKrnl),
                                          max_active_blocks, warp_size, coop_params, 0,
                                          hipStreamPerThread));
-    HIP_CHECK(hipMemcpy(Ah, Ad, sizeof(int) * NumElms, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(Ah, Ad, sizeof(int) * NumElms, hipMemcpyDeviceToHost))
     // Verifying the result
     int DataMismatch = 0;
     for (int i = 0; i < NumElms; ++i) {
@@ -506,8 +506,8 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_CoopLaunch) {
         DataMismatch++;
       }
     }
-    HIP_CHECK(hipFree(Ad));
-    HIP_CHECK(hipFree(DNumElms));
+    HIP_CHECK(hipFree(Ad))
+    HIP_CHECK(hipFree(DNumElms))
     delete[] Ah;
     if (DataMismatch > 0) {
       REQUIRE(false);

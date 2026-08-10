@@ -46,14 +46,14 @@ class Experiment {
 
   void init() {
     for (hipStream_t& s: streams_){
-      HIP_CHECK(hipStreamCreate(&s));
+      HIP_CHECK(hipStreamCreate(&s))
     }
   }
 
   void cleanup() {
     for (hipStream_t& s: streams_) {
       if (s != nullptr) {
-        HIP_CHECK(hipStreamDestroy(s));
+        HIP_CHECK(hipStreamDestroy(s))
         s = nullptr;
       }
     }
@@ -68,7 +68,7 @@ class Experiment {
         }
       }
       for (const hipStream_t& s: streams_) {
-        HIP_CHECK(hipStreamSynchronize(s));
+        HIP_CHECK(hipStreamSynchronize(s))
       }
     }
   }
@@ -82,7 +82,7 @@ class Experiment {
       }
     }
     for (const hipStream_t& s: streams_) {
-      HIP_CHECK(hipStreamSynchronize(s));
+      HIP_CHECK(hipStreamSynchronize(s))
     }
     auto end = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<microseconds>(end - start);
@@ -105,9 +105,9 @@ HIP_TEST_CASE(Performance_hipPerfMultiStreamKernelLaunch) {
   };
   int clock_rate = 0;  // in kHz
 #if HT_AMD
-  HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeWallClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeWallClockRate, 0))
 #else
-  HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeClockRate, 0))
 #endif
   uint64_t timer_freq_in_hz = clock_rate * 1000;
 
@@ -124,7 +124,7 @@ HIP_TEST_CASE(Performance_hipPerfMultiStreamKernelLaunch) {
     Experiment::Metrics metrics;
     exp.init();
     exp.do_warmup(WARMUP_ITERATIONS, WARMUP_KERNEL_DISPATCHES_PER_STREAM, TimingKernel, timing_count);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     if (KERNEL_SLEEP_US == 0) {
       metrics = exp.run(KERNEL_DISPATCHES_PER_STREAM, EmptyKernel);
     } else {

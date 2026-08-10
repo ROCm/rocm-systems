@@ -208,7 +208,7 @@ template <typename V> bool run_CheckSharedVectorType() {
   if (hipMalloc(&ptr, sizeof(bool)) != HIP_SUCCESS) return false;
   unique_ptr<bool, decltype(hipFree)*> correct{ptr, hipFree};
   hipLaunchKernelGGL((CheckSharedVectorType<V>), dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, correct.get());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   bool passed = true;
   if (hipMemcpyDtoH(&passed, correct.get(), sizeof(bool)) != HIP_SUCCESS) {
     return false;
@@ -237,7 +237,7 @@ HIP_TEST_CASE(Unit_hipVectorTypes_test_on_device) {
 
   unique_ptr<bool, decltype(hipFree)*> correct{ptr, hipFree};
   hipLaunchKernelGGL(CheckVectorTypes, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, correct.get());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   bool passed = true;
   res = hipMemcpyDtoH(&passed, correct.get(), sizeof(bool));
   REQUIRE(res == hipSuccess);
@@ -250,6 +250,6 @@ HIP_TEST_CASE(Unit_hipVectorTypes_test_on_device) {
                longlong2, longlong3, longlong4, ulonglong1, ulonglong2, ulonglong3, ulonglong4,
                float1, float2, float3, float4, double1, double2, double3, double4>();
 
-  HIP_CHECK(hipFree(ptr));
+  HIP_CHECK(hipFree(ptr))
   REQUIRE(passed == true);
 }

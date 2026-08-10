@@ -94,8 +94,8 @@ class WarpBallot : public WarpVoteTest<WarpBallot, uint64_t> {
 HIP_TEST_CASE(Unit_Warp_Ballot_Positive_Basic) {
   int device;
   hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&device_properties, device))
 
   if (!device_properties.arch.hasWarpBallot) {
     HIP_SKIP_TEST("warp ballot is not supported on this device.");

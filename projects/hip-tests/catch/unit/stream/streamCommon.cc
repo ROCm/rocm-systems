@@ -12,7 +12,7 @@ inline namespace internal {
 
 bool checkStreamPriority_(hipStream_t stream, bool checkPriority = false, int priority_ = 0) {
   int priority{0};
-  HIP_CHECK(hipStreamGetPriority(stream, &priority));
+  HIP_CHECK(hipStreamGetPriority(stream, &priority))
   if (checkPriority) {
     if (priority_ != priority) {
       UNSCOPED_INFO("Priority Mismatch, Expected Priority: " << priority_
@@ -21,7 +21,7 @@ bool checkStreamPriority_(hipStream_t stream, bool checkPriority = false, int pr
     }
   } else {
     int priority_low{0}, priority_high{0};
-    HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high));
+    HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high))
     if (priority_low < priority || priority_high > priority) {
       UNSCOPED_INFO("Priority Mismatch, Expected Priority Range: "
                     << priority_low << " - " << priority_high << " Actual Priority: " << priority);
@@ -33,7 +33,7 @@ bool checkStreamPriority_(hipStream_t stream, bool checkPriority = false, int pr
 
 bool checkStreamFlags_(hipStream_t stream, bool checkFlags = false, unsigned flags_ = 0) {
   unsigned flags{0};
-  HIP_CHECK(hipStreamGetFlags(stream, &flags));
+  HIP_CHECK(hipStreamGetFlags(stream, &flags))
   if (checkFlags) {
     if (flags_ != flags) {
       UNSCOPED_INFO("Flags Mismatch, Expected Flag: " << flags_ << " Actual Flag: " << flags);

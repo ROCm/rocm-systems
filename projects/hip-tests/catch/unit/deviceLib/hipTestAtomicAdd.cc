@@ -59,21 +59,21 @@ template <typename T> bool atomictest_manywaves(const T& initial_val) {
   T* hOData = reinterpret_cast<T*>(malloc(memSize));
   *hOData = initial_val;
   T* dOData;
-  HIP_CHECK(hipMalloc(&dOData, memSize));
+  HIP_CHECK(hipMalloc(&dOData, memSize))
   // copy host memory to device to initialize to zero
-  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice))
 
   // execute the kernel
   hipLaunchKernelGGL(atomic_manywaves, dim3(numBlocks), dim3(ThreadsperBlock), 0, 0, dOData);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
   REQUIRE(hOData[0] ==
           initial_val + static_cast<T>(INCREMENT_VALUE * (ThreadsperBlock * numBlocks)));
 
   // Cleanup memory
   free(hOData);
-  HIP_CHECK(hipFree(dOData));
+  HIP_CHECK(hipFree(dOData))
 
   return true;
 }
@@ -85,20 +85,20 @@ template <typename T> bool atomictestnoret_manywaves(const T& initial_val) {
   T* hOData = reinterpret_cast<T*>(malloc(memSize));
   *hOData = initial_val;
   T* dOData;
-  HIP_CHECK(hipMalloc(&dOData, memSize));
+  HIP_CHECK(hipMalloc(&dOData, memSize))
   // copy host memory to device to initialize to zero
-  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice))
 
   // execute the kernel
   hipLaunchKernelGGL(atomicnoret_manywaves, dim3(numBlocks), dim3(ThreadsperBlock), 0, 0, dOData);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
   REQUIRE(hOData[0] == initial_val + (INCREMENT_VALUE * (ThreadsperBlock * numBlocks)));
 
   // Cleanup memory
   free(hOData);
-  HIP_CHECK(hipFree(dOData));
+  HIP_CHECK(hipFree(dOData))
 
   return true;
 }
@@ -110,20 +110,20 @@ template <typename T> bool atomictest_simple(const T& initial_val) {
   T* hOData = reinterpret_cast<T*>(malloc(memSize));
   *hOData = initial_val;
   T* dOData;
-  HIP_CHECK(hipMalloc(&dOData, memSize));
+  HIP_CHECK(hipMalloc(&dOData, memSize))
   // copy host memory to device to initialize to zero
-  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice))
 
   // execute the kernel
   hipLaunchKernelGGL(atomic_simple, dim3(numBlocks), dim3(ThreadsperBlock), 0, 0, dOData);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
   REQUIRE(hOData[0] == initial_val + INCREMENT_VALUE);
 
   // Cleanup memory
   free(hOData);
-  HIP_CHECK(hipFree(dOData));
+  HIP_CHECK(hipFree(dOData))
 
   return true;
 }
@@ -135,20 +135,20 @@ template <typename T> bool atomictestnoret_simple(const T& initial_val) {
   T* hOData = reinterpret_cast<T*>(malloc(memSize));
   *hOData = initial_val;
   T* dOData;
-  HIP_CHECK(hipMalloc(&dOData, memSize));
+  HIP_CHECK(hipMalloc(&dOData, memSize))
   // copy host memory to device to initialize to zero
-  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice))
 
   // execute the kernel
   hipLaunchKernelGGL(atomicnoret_simple, dim3(numBlocks), dim3(ThreadsperBlock), 0, 0, dOData);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
   REQUIRE(hOData[0] == initial_val + INCREMENT_VALUE);
 
   // Cleanup memory
   free(hOData);
-  HIP_CHECK(hipFree(dOData));
+  HIP_CHECK(hipFree(dOData))
 
   return true;
 }

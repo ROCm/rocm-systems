@@ -39,7 +39,7 @@
  */
 HIP_TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeGetParams_Negative_Parameters) {
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   VulkanTest vkt(enable_validation);
   hipExternalSemaphoreSignalParams signal_params = {};
@@ -53,7 +53,7 @@ HIP_TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeGetParams_Negative_Parame
   hipExternalSemaphoreSignalNodeParams retrieved_params;
 
   hipGraphNode_t node = nullptr;
-  HIP_CHECK(hipGraphAddExternalSemaphoresSignalNode(&node, graph, nullptr, 0, &node_params));
+  HIP_CHECK(hipGraphAddExternalSemaphoresSignalNode(&node, graph, nullptr, 0, &node_params))
 
   SECTION("node == nullptr") {
     HIP_CHECK_ERROR(hipGraphExternalSemaphoresSignalNodeGetParams(nullptr, &retrieved_params),
@@ -69,11 +69,11 @@ HIP_TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeGetParams_Negative_Parame
 #if HT_NVIDIA
   SECTION("Node is destroyed") {
     hipGraph_t graph_temp = nullptr;
-    HIP_CHECK(hipGraphCreate(&graph_temp, 0));
+    HIP_CHECK(hipGraphCreate(&graph_temp, 0))
     hipGraphNode_t node_temp = nullptr;
     HIP_CHECK(
         hipGraphAddExternalSemaphoresSignalNode(&node_temp, graph_temp, nullptr, 0, &node_params));
-    HIP_CHECK(hipGraphDestroy(graph_temp));
+    HIP_CHECK(hipGraphDestroy(graph_temp))
     HIP_CHECK_ERROR(hipGraphExternalSemaphoresSignalNodeGetParams(node_temp, &retrieved_params),
                     hipErrorInvalidValue);
   }

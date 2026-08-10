@@ -111,13 +111,13 @@ static bool cpu_to_gpu_coherency() {
   int numDevices = 0;
   int deviceFineGrain = 0;
 
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices < 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 
   SECTION("With device fine grained buffer") {
-    HIP_CHECK(hipDeviceGetAttribute(&deviceFineGrain, hipDeviceAttributeFineGrainSupport, 0));
+    HIP_CHECK(hipDeviceGetAttribute(&deviceFineGrain, hipDeviceAttributeFineGrainSupport, 0))
     if (deviceFineGrain == 0) {
       HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
     }
@@ -128,16 +128,16 @@ static bool cpu_to_gpu_coherency() {
   SECTION("With host(SVM) fine grained buffer") { HIP_CHECK(hipHostMalloc(&A_d, Nbytes)); }
   A_h = A_d;
 
-  HIP_CHECK(hipHostMalloc(&dresult, sizeof(unsigned int)));
+  HIP_CHECK(hipHostMalloc(&dresult, sizeof(unsigned int)))
   *dresult = 0;
   // Allocate Host Side Memory. Coherent Fine-grained Memory for array B.
   fprintf(stderr, "info: allocate host mem (%zu bytes)\n", Nbytes);
-  HIP_CHECK(hipHostMalloc(&B_h, Nbytes, (hipHostMallocCoherent | hipHostMallocMapped)));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&B_d), B_h, 0));
+  HIP_CHECK(hipHostMalloc(&B_h, Nbytes, (hipHostMallocCoherent | hipHostMallocMapped)))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&B_d), B_h, 0))
   X_h = reinterpret_cast<int*>(malloc(Nbytes));
-  HIP_CHECK(X_h == 0 ? hipErrorOutOfMemory : hipSuccess);
+  HIP_CHECK(X_h == 0 ? hipErrorOutOfMemory : hipSuccess)
   Y_h = reinterpret_cast<int*>(malloc(Nbytes));
-  HIP_CHECK(Y_h == 0 ? hipErrorOutOfMemory : hipSuccess);
+  HIP_CHECK(Y_h == 0 ? hipErrorOutOfMemory : hipSuccess)
 
   // Initialize the arrays and atomic variables.
   for (size_t i = 0; i < N; i++) {
@@ -148,29 +148,29 @@ static bool cpu_to_gpu_coherency() {
   // Initialize shared atomic flags between CPU and GPU.
   unsigned int *AA1_h, *AA2_h, *BA1_h, *BA2_h;
   unsigned int *AA1_d, *AA2_d, *BA1_d, *BA2_d;
-  HIP_CHECK(hipHostMalloc(&AA1_h, sizeof(unsigned int), hipHostMallocCoherent));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&AA1_d), AA1_h, 0));
+  HIP_CHECK(hipHostMalloc(&AA1_h, sizeof(unsigned int), hipHostMallocCoherent))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&AA1_d), AA1_h, 0))
   *AA1_h = 0;
-  HIP_CHECK(hipHostMalloc(&AA2_h, sizeof(unsigned int), hipHostMallocCoherent));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&AA2_d), AA2_h, 0));
+  HIP_CHECK(hipHostMalloc(&AA2_h, sizeof(unsigned int), hipHostMallocCoherent))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&AA2_d), AA2_h, 0))
   *AA2_h = 0;
-  HIP_CHECK(hipHostMalloc(&BA1_h, sizeof(unsigned int), hipHostMallocCoherent));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&BA1_d), BA1_h, 0));
+  HIP_CHECK(hipHostMalloc(&BA1_h, sizeof(unsigned int), hipHostMallocCoherent))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&BA1_d), BA1_h, 0))
   *BA1_h = 0;
-  HIP_CHECK(hipHostMalloc(&BA2_h, sizeof(unsigned int), hipHostMallocCoherent));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&BA2_d), BA2_h, 0));
+  HIP_CHECK(hipHostMalloc(&BA2_h, sizeof(unsigned int), hipHostMallocCoherent))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&BA2_d), BA2_h, 0))
   *BA2_h = 0;
 
   // Skip the first stream, ensure stream is non-blocking.
   hipStream_t stream;
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking))
 
-  HIP_CHECK(hipMalloc(&X_d, Nbytes));
-  HIP_CHECK(hipMalloc(&Y_d, Nbytes));
+  HIP_CHECK(hipMalloc(&X_d, Nbytes))
+  HIP_CHECK(hipMalloc(&Y_d, Nbytes))
 
-  HIP_CHECK(hipMemcpy(X_d, X_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Y_d, Y_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(X_d, X_h, Nbytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Y_d, Y_h, Nbytes, hipMemcpyHostToDevice))
 
   // Launch the GPU kernel.
   const unsigned blocks = 1;
@@ -178,20 +178,20 @@ static bool cpu_to_gpu_coherency() {
   hipLaunchKernelGGL(gpu_kernel, dim3(blocks), dim3(threadsPerBlock), 0, stream, A_d, B_d, X_d, Y_d,
                      N, AA1_d, AA2_d, BA1_d, BA2_d, dresult);
   // Check if launch failed.
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   // Do not sync the launched stream, instead run the cpu_thread.
   std::thread host_thread(cpu_thread, A_h, B_h, X_h, Y_h, N, AA1_h, AA2_h, BA1_h, BA2_h, &hresult);
   // Wait for Device side to finish.
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   host_thread.join();
   REQUIRE(*dresult == 0);
   REQUIRE(hresult == 0);
 
   // Evaluate the resultant arrays A and B.
   A_res = reinterpret_cast<int*>(malloc(Nbytes));
-  HIP_CHECK(A_res == 0 ? hipErrorOutOfMemory : hipSuccess);
-  HIP_CHECK(hipMemcpy(A_res, A_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(A_res == 0 ? hipErrorOutOfMemory : hipSuccess)
+  HIP_CHECK(hipMemcpy(A_res, A_d, Nbytes, hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < N; i++) {
     REQUIRE(A_res[i] == (100000000 + i));
@@ -200,22 +200,22 @@ static bool cpu_to_gpu_coherency() {
 
   // Free all the device and host memory allocated.
   if (deviceFineGrain) {
-    HIP_CHECK(hipFree(A_d));
+    HIP_CHECK(hipFree(A_d))
   } else {
-    HIP_CHECK(hipHostFree(A_d));
+    HIP_CHECK(hipHostFree(A_d))
   }
-  HIP_CHECK(hipFree(X_d));
-  HIP_CHECK(hipFree(Y_d));
-  HIP_CHECK(hipHostFree(AA1_h));
-  HIP_CHECK(hipHostFree(AA2_h));
-  HIP_CHECK(hipHostFree(BA1_h));
-  HIP_CHECK(hipHostFree(BA2_h));
-  HIP_CHECK(hipHostFree(B_h));
-  HIP_CHECK(hipHostFree(dresult));
+  HIP_CHECK(hipFree(X_d))
+  HIP_CHECK(hipFree(Y_d))
+  HIP_CHECK(hipHostFree(AA1_h))
+  HIP_CHECK(hipHostFree(AA2_h))
+  HIP_CHECK(hipHostFree(BA1_h))
+  HIP_CHECK(hipHostFree(BA2_h))
+  HIP_CHECK(hipHostFree(B_h))
+  HIP_CHECK(hipHostFree(dresult))
   free(X_h);
   free(Y_h);
   free(A_res);
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
   return true;
 }
 

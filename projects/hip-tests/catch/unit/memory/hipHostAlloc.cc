@@ -37,7 +37,7 @@ static void CheckHostPointer(int NUMELEMENTS, int* ptr, unsigned eventFlags, int
   hipEvent_t e;
 
   // Init:
-  HIP_CHECK(hipStreamCreate(&s));
+  HIP_CHECK(hipStreamCreate(&s))
   HIP_CHECK(hipEventCreateWithFlags(&e, eventFlags))
   dim3 dimBlock(64, 1, 1);
   dim3 dimGrid(NUMELEMENTS / dimBlock.x, 1, 1);
@@ -46,21 +46,21 @@ static void CheckHostPointer(int NUMELEMENTS, int* ptr, unsigned eventFlags, int
 
   // Init array to know state:
   HipTest::launchKernel(Set, dimGrid, dimBlock, 0, 0x0, ptr, -42);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   HipTest::launchKernel(Set, dimGrid, dimBlock, 0, s, ptr, expected);
-  HIP_CHECK(hipEventRecord(e, s));
+  HIP_CHECK(hipEventRecord(e, s))
 
   // Host waits for event :
   switch (syncMethod) {
     case SYNC_EVENT:
-      HIP_CHECK(hipEventSynchronize(e));
+      HIP_CHECK(hipEventSynchronize(e))
       break;
     case SYNC_STREAM:
-      HIP_CHECK(hipStreamSynchronize(s));
+      HIP_CHECK(hipStreamSynchronize(s))
       break;
     case SYNC_DEVICE:
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
       break;
     default:
       REQUIRE(false);
@@ -72,8 +72,8 @@ static void CheckHostPointer(int NUMELEMENTS, int* ptr, unsigned eventFlags, int
     REQUIRE(ptr[i] == expected);
   }
 
-  HIP_CHECK(hipStreamDestroy(s));
-  HIP_CHECK(hipEventDestroy(e));
+  HIP_CHECK(hipStreamDestroy(s))
+  HIP_CHECK(hipEventDestroy(e))
 }
 
 static __global__ void write_integer(int* memory, int value) {
@@ -94,11 +94,11 @@ HIP_TEST_CASE(Unit_hipHostAlloc_Positive) {
   int* host_memory = nullptr;
   int flags = get_flags();
 
-  HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&host_memory), sizeof(int), flags));
+  HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&host_memory), sizeof(int), flags))
 
   REQUIRE(host_memory != nullptr);
 
-  HIP_CHECK(hipFreeHost(host_memory));
+  HIP_CHECK(hipFreeHost(host_memory))
 }
 
 HIP_TEST_CASE(Unit_hipHostAlloc_DataValidation) {
@@ -108,17 +108,17 @@ HIP_TEST_CASE(Unit_hipHostAlloc_DataValidation) {
   hipEvent_t event = nullptr;
   int flags = get_flags();
 
-  HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&host_memory), sizeof(int), flags));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&device_memory), host_memory, 0));
+  HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&host_memory), sizeof(int), flags))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&device_memory), host_memory, 0))
 
   write_integer<<<1, 1>>>(device_memory, validation_number);
 
   SECTION("device sync") { HIP_CHECK(hipDeviceSynchronize()); }
 
   SECTION("event sync") {
-    HIP_CHECK(hipEventCreateWithFlags(&event, 0));
-    HIP_CHECK(hipEventRecord(event, nullptr));
-    HIP_CHECK(hipEventSynchronize(event));
+    HIP_CHECK(hipEventCreateWithFlags(&event, 0))
+    HIP_CHECK(hipEventRecord(event, nullptr))
+    HIP_CHECK(hipEventSynchronize(event))
   }
 
   SECTION("stream sync") { HIP_CHECK(hipStreamSynchronize(nullptr)); }
@@ -126,10 +126,10 @@ HIP_TEST_CASE(Unit_hipHostAlloc_DataValidation) {
   REQUIRE(*host_memory == validation_number);
 
   if (event != nullptr) {
-    HIP_CHECK(hipEventDestroy(event));
+    HIP_CHECK(hipEventDestroy(event))
   }
 
-  HIP_CHECK(hipFreeHost(host_memory));
+  HIP_CHECK(hipFreeHost(host_memory))
 }
 
 HIP_TEST_CASE(Unit_hipHostAlloc_Negative) {
@@ -172,8 +172,8 @@ HIP_TEST_CASE(Unit_hipHostAlloc_Basic) {
 
   hipDeviceProp_t prop;
   int device;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&prop, device))
   if (prop.canMapHostMemory != 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
   } else {
@@ -190,30 +190,30 @@ HIP_TEST_CASE(Unit_hipHostAlloc_Basic) {
     }
 #endif
 
-    HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&B_h), SIZE, flag));
-    HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&C_h), SIZE, hipHostAllocMapped));
+    HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&B_h), SIZE, flag))
+    HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&C_h), SIZE, hipHostAllocMapped))
 
-    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&C_d), C_h, 0));
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&C_d), C_h, 0))
 
     HipTest::setDefaultData<float>(LEN, A_h, B_h, C_h);
 
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&B_d), SIZE));
-    HIP_CHECK(hipMemcpy(B_d, B_h, SIZE, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&B_d), SIZE))
+    HIP_CHECK(hipMemcpy(B_d, B_h, SIZE, hipMemcpyHostToDevice))
 
     dim3 dimGrid(LEN / 512, 1, 1);
     dim3 dimBlock(512, 1, 1);
     HipTest::launchKernel<float>(HipTest::vectorADD<float>, dimGrid, dimBlock, 0, 0,
                                  static_cast<const float*>(A_d), static_cast<const float*>(B_d),
                                  C_d, static_cast<size_t>(LEN));
-    HIP_CHECK(hipMemcpy(C_h, C_d, LEN * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemcpy(C_h, C_d, LEN * sizeof(float), hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
     HipTest::checkVectorADD<float>(A_h, B_h, C_h, NUMELEMENTS);
 
-    HIP_CHECK(hipHostFree(A_h));
-    HIP_CHECK(hipHostFree(B_h));
-    HIP_CHECK(hipHostFree(C_h));
-    HIP_CHECK(hipFree(B_d));
+    HIP_CHECK(hipHostFree(A_h))
+    HIP_CHECK(hipHostFree(B_h))
+    HIP_CHECK(hipHostFree(C_h))
+    HIP_CHECK(hipFree(B_d))
   }
 }
 
@@ -226,12 +226,12 @@ HIP_TEST_CASE(Unit_hipHostAlloc_Basic) {
  */
 HIP_TEST_CASE(Unit_hipHostAlloc_Default) {
   int* A = nullptr;
-  HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocDefault));
+  HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocDefault))
   std::string kPtrType{"default"};
   CheckHostPointer(NUMELEMENTS, A, 0, SYNC_DEVICE, kPtrType);
   CheckHostPointer(NUMELEMENTS, A, 0, SYNC_STREAM, kPtrType);
   CheckHostPointer(NUMELEMENTS, A, 0, SYNC_EVENT, kPtrType);
-  HIP_CHECK(hipHostFree(A));
+  HIP_CHECK(hipHostFree(A))
 }
 
 /**
@@ -363,7 +363,7 @@ HIP_TEST_CASE(Unit_hipHostAlloc_ArgValidation) {
   }
 
   SECTION("Pass size as zero and check ptr reset") {
-    HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&ptr), 0, hipHostMallocDefault));
+    HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&ptr), 0, hipHostMallocDefault))
     REQUIRE(ptr == nullptr);
   }
 }
@@ -383,6 +383,6 @@ HIP_TEST_CASE(Unit_hipHostAlloc_Capture) {
 
   if (capture_error == hipSuccess) {
     REQUIRE(host_memory != nullptr);
-    HIP_CHECK(hipFreeHost(host_memory));
+    HIP_CHECK(hipFreeHost(host_memory))
   }
 }

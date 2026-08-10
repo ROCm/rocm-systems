@@ -28,7 +28,7 @@ constexpr uint32_t kMaskWordBits = 32;
 
 void RequireDevice() {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -38,10 +38,10 @@ std::vector<uint32_t> DefaultCuMask() {
   RequireDevice();
 
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, device));
+  HIP_CHECK(hipGetDeviceProperties(&properties, device))
   REQUIRE(properties.multiProcessorCount > 0);
 
   const size_t words = (static_cast<size_t>(properties.multiProcessorCount) + kMaskWordBits - 1) /
@@ -56,7 +56,7 @@ std::vector<uint32_t> DefaultCuMask() {
 
 std::vector<uint32_t> QueryCuMask(hipStream_t stream, size_t words) {
   std::vector<uint32_t> mask(words, 0);
-  HIP_CHECK(hipExtStreamGetCUMask(stream, static_cast<uint32_t>(mask.size()), mask.data()));
+  HIP_CHECK(hipExtStreamGetCUMask(stream, static_cast<uint32_t>(mask.size()), mask.data()))
   return mask;
 }
 
@@ -66,7 +66,7 @@ bool CreateStreamWithMaskOrSkip(hipStream_t* stream, const std::vector<uint32_t>
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 }  // namespace

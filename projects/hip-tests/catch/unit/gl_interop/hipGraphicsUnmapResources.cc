@@ -20,7 +20,7 @@ HIP_TEST_CASE(Unit_hipGraphicsUnmapResources_Negative_Parameters) {
   std::vector<int> gl_devices(device_count, -1);
 
   // Initialize GL interop
-  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll));
+  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll))
   REQUIRE(gl_device_count == 1);
   REQUIRE(gl_devices.at(0) == 0);
 
@@ -28,9 +28,9 @@ HIP_TEST_CASE(Unit_hipGraphicsUnmapResources_Negative_Parameters) {
 
   hipGraphicsResource* vbo_resource;
 
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&vbo_resource, vbo, hipGraphicsRegisterFlagsNone));
+  HIP_CHECK(hipGraphicsGLRegisterBuffer(&vbo_resource, vbo, hipGraphicsRegisterFlagsNone))
 
-  HIP_CHECK(hipGraphicsMapResources(1, &vbo_resource, 0));
+  HIP_CHECK(hipGraphicsMapResources(1, &vbo_resource, 0))
 
   SECTION("count == 0") {
     HIP_CHECK_ERROR(hipGraphicsUnmapResources(0, &vbo_resource, 0), hipErrorInvalidValue);
@@ -42,20 +42,20 @@ HIP_TEST_CASE(Unit_hipGraphicsUnmapResources_Negative_Parameters) {
 
   SECTION("not mapped resource") {
     hipGraphicsResource* not_mapped_resource;
-    HIP_CHECK(hipGraphicsGLRegisterBuffer(&not_mapped_resource, vbo, hipGraphicsRegisterFlagsNone));
+    HIP_CHECK(hipGraphicsGLRegisterBuffer(&not_mapped_resource, vbo, hipGraphicsRegisterFlagsNone))
     HIP_CHECK_ERROR(hipGraphicsUnmapResources(1, &not_mapped_resource, 0), hipErrorNotMapped);
-    HIP_CHECK(hipGraphicsUnregisterResource(not_mapped_resource));
+    HIP_CHECK(hipGraphicsUnregisterResource(not_mapped_resource))
   }
 
   SECTION("invalid stream") {
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamCreate(&stream))
+    HIP_CHECK(hipStreamDestroy(stream))
     HIP_CHECK_ERROR(hipGraphicsUnmapResources(1, &vbo_resource, stream),
                     hipErrorContextIsDestroyed);
   }
 
-  HIP_CHECK(hipGraphicsUnmapResources(1, &vbo_resource, 0));
+  HIP_CHECK(hipGraphicsUnmapResources(1, &vbo_resource, 0))
 
-  HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource));
+  HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource))
 }

@@ -53,16 +53,16 @@ template <typename T> void captureSequenceBranched(T* hostMem1, T* devMem1, T* h
   }  // unused hostMem2
   size_t Nbytes = N * sizeof(T);
 
-  HIP_CHECK(hipEventRecord(events[0], captureStream));
-  HIP_CHECK(hipStreamWaitEvent(streams[0], events[0], 0));
-  HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0));
-  HIP_CHECK(hipMemsetAsync(devMem1, 0, Nbytes, streams[0]));
-  HIP_CHECK(hipMemcpyAsync(devMem1, hostMem1, Nbytes, hipMemcpyHostToDevice, streams[0]));
-  HIP_CHECK(hipEventRecord(events[1], streams[0]));
-  HIP_CHECK(hipMemsetAsync(devMem2, 0, Nbytes, streams[1]));
-  HIP_CHECK(hipEventRecord(events[2], streams[1]));
-  HIP_CHECK(hipStreamWaitEvent(captureStream, events[1], 0));
-  HIP_CHECK(hipStreamWaitEvent(captureStream, events[2], 0));
+  HIP_CHECK(hipEventRecord(events[0], captureStream))
+  HIP_CHECK(hipStreamWaitEvent(streams[0], events[0], 0))
+  HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0))
+  HIP_CHECK(hipMemsetAsync(devMem1, 0, Nbytes, streams[0]))
+  HIP_CHECK(hipMemcpyAsync(devMem1, hostMem1, Nbytes, hipMemcpyHostToDevice, streams[0]))
+  HIP_CHECK(hipEventRecord(events[1], streams[0]))
+  HIP_CHECK(hipMemsetAsync(devMem2, 0, Nbytes, streams[1]))
+  HIP_CHECK(hipEventRecord(events[2], streams[1]))
+  HIP_CHECK(hipStreamWaitEvent(captureStream, events[1], 0))
+  HIP_CHECK(hipStreamWaitEvent(captureStream, events[2], 0))
 }
 
 template <typename T>

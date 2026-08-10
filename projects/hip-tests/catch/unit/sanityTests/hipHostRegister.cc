@@ -48,22 +48,22 @@ constexpr int NBUF_FLAGS = 3;
  *    - unit/sanityTests/hipHostRegister.cc
  */
 HIP_TEST_CASE(Unit_hipHostRegister_RegisterUnregister) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   for (int count = 1; count <= NUM_ITERATIONS; ++count) {
     size_t size = count * MEM_SIZE;
     void* ptr = calloc(1, size);
     REQUIRE(ptr != nullptr);
 
-    HIP_CHECK(hipHostRegister(ptr, size, hipHostRegisterPortable));
+    HIP_CHECK(hipHostRegister(ptr, size, hipHostRegisterPortable))
 
     void* dptr = nullptr;
-    HIP_CHECK(hipMalloc(&dptr, size));
-    HIP_CHECK(hipMemcpy(dptr, ptr, size, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(ptr, dptr, size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipFree(dptr));
+    HIP_CHECK(hipMalloc(&dptr, size))
+    HIP_CHECK(hipMemcpy(dptr, ptr, size, hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(ptr, dptr, size, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipFree(dptr))
 
-    HIP_CHECK(hipHostUnregister(ptr));
+    HIP_CHECK(hipHostUnregister(ptr))
     free(ptr);
   }
 }
@@ -97,10 +97,10 @@ HIP_TEST_CASE(Unit_hipHostRegister_Nbuf_MultiFlag_RegisterUnregister) {
     for (int ii = 0; ii < NBUF_FLAGS; ++ii) {
       unsigned int fl = flags[ii];
       for (int i = 0; i < NBUF_ALLOCATIONS; ++i) {
-        HIP_CHECK(hipHostRegister(ptrs[i], size, fl));
+        HIP_CHECK(hipHostRegister(ptrs[i], size, fl))
       }
       for (int ur = 0; ur < NBUF_ALLOCATIONS; ++ur) {
-        HIP_CHECK(hipHostUnregister(ptrs[ur]));
+        HIP_CHECK(hipHostUnregister(ptrs[ur]))
       }
     }
 

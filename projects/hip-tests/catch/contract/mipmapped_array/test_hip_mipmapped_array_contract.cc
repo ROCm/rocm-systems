@@ -54,12 +54,12 @@ HIP_TEST_CASE(Contract_MipmappedArray_HipMallocMipmappedArray_MallocAndGetLevel_
     (void)hipGetLastError();
     HIP_SKIP_TEST("Mipmapped arrays are not supported by this device/runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   cleanup.Add([mipmap] { (void)hipFreeMipmappedArray(mipmap); });
   REQUIRE(mipmap != nullptr);
 
   hipArray_t level0 = nullptr;
-  HIP_CHECK(hipGetMipmappedArrayLevel(&level0, mipmap, 0));
+  HIP_CHECK(hipGetMipmappedArrayLevel(&level0, mipmap, 0))
   REQUIRE(level0 != nullptr);
 }
 
@@ -72,7 +72,7 @@ HIP_TEST_CASE(Contract_MipmappedArray_HipMipmappedArrayCreate_Default_DriverCrea
   // on NVIDIA) and needs an initialized primary context; prime one so the test
   // passes even as the first HIP call in the process (e.g. under ctest
   // isolation). Harmless success on AMD.
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
 
   // The driver-style mipmapped-array APIs take the driver handle type
   // `hipmipmappedArray`. On AMD it aliases hipMipmappedArray_t; on NVIDIA it is
@@ -87,12 +87,12 @@ HIP_TEST_CASE(Contract_MipmappedArray_HipMipmappedArrayCreate_Default_DriverCrea
     (void)hipGetLastError();
     HIP_SKIP_TEST("Mipmapped arrays are not supported by this device/runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   cleanup.Add([mipmap] { (void)hipMipmappedArrayDestroy(mipmap); });
   REQUIRE(mipmap != nullptr);
 
   hipArray_t level0 = nullptr;
-  HIP_CHECK(hipMipmappedArrayGetLevel(&level0, mipmap, 0));
+  HIP_CHECK(hipMipmappedArrayGetLevel(&level0, mipmap, 0))
   REQUIRE(level0 != nullptr);
 }
 
@@ -110,7 +110,7 @@ HIP_TEST_CASE(Contract_MipmappedArray_HipGetMipmappedArrayLevel_GetLevelOutOfRan
     (void)hipGetLastError();
     HIP_SKIP_TEST("Mipmapped arrays are not supported by this device/runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   cleanup.Add([mipmap] { (void)hipFreeMipmappedArray(mipmap); });
   REQUIRE(mipmap != nullptr);
 
@@ -134,12 +134,12 @@ HIP_TEST_CASE(Contract_MipmappedArray_HipMipmappedArrayGetMemoryRequirements_Def
     (void)hipGetLastError();
     HIP_SKIP_TEST("Mipmapped arrays are not supported by this device/runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   cleanup.Add([mipmap] { (void)hipFreeMipmappedArray(mipmap); });
   REQUIRE(mipmap != nullptr);
 
   hipDevice_t device = 0;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   hipArrayMemoryRequirements req{};
   const hipError_t req_status =
@@ -153,7 +153,7 @@ HIP_TEST_CASE(Contract_MipmappedArray_HipMipmappedArrayGetMemoryRequirements_Def
 #if HT_AMD
   // Some runtime paths do not implement this query; accept unsupported.
   if (req_status != hipErrorNotSupported) {
-    HIP_CHECK(req_status);
+    HIP_CHECK(req_status)
   } else {
     (void)hipGetLastError();
   }
@@ -165,7 +165,7 @@ HIP_TEST_CASE(Contract_MipmappedArray_HipMipmappedArrayGetMemoryRequirements_Def
   // invalid-value outcomes as "not queryable on this path"; a success is also
   // contract-compliant.
   if (req_status != hipErrorNotSupported && req_status != hipErrorInvalidValue) {
-    HIP_CHECK(req_status);
+    HIP_CHECK(req_status)
   } else {
     (void)hipGetLastError();
   }

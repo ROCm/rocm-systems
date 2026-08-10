@@ -41,7 +41,7 @@ static __global__ void doubleKernel(int* arr, size_t arrSize) {
  */
 static inline int getCurrentDevice() {
   int currentDevice = -1;
-  HIP_CHECK(hipGetDevice(&currentDevice));
+  HIP_CHECK(hipGetDevice(&currentDevice))
   return currentDevice;
 }
 
@@ -152,32 +152,32 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_Positive_Basic) {
 
   // By default, without setting any device, validate that 0th device is being used
   int device;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   REQUIRE(device == 0);
 
   // Set the devices 1 and 0 as valid ones using hipSetValidDevices
   int valid_devices1[] = {1, 0};
-  HIP_CHECK(hipSetValidDevices(valid_devices1, 2));
+  HIP_CHECK(hipSetValidDevices(valid_devices1, 2))
 
   // Fetch the device and validate that the device 1 is being used currently
   // Since the device 1 is set as the first valid device earlier
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   REQUIRE(device == 1);
 
   if (totalDevices > 2) {
     // Set the device 2 as the current device
-    HIP_CHECK(hipSetDevice(2));
+    HIP_CHECK(hipSetDevice(2))
     // Fetch the device and validate that the device 2 is being used currently
     // This is to confirm that hipSetDevice sets the device (if the device exists)
     // irrespective of the valid devices set by the app
-    HIP_CHECK(hipGetDevice(&device));
+    HIP_CHECK(hipGetDevice(&device))
     REQUIRE(device == 2);
     // Set 0 as the valid device
     int valid_devices2[] = {0};
-    HIP_CHECK(hipSetValidDevices(valid_devices2, 1));
+    HIP_CHECK(hipSetValidDevices(valid_devices2, 1))
     // Fetch the device and validate that the device 2 is the current device still
     // Since hipSetValidDevices doesn't take effect once hipSetDevice is set
-    HIP_CHECK(hipGetDevice(&device));
+    HIP_CHECK(hipGetDevice(&device))
     REQUIRE(device == 2);
   }
 }
@@ -199,13 +199,13 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_Positive_Basic) {
  */
 HIP_TEST_CASE(Unit_hipSetValidDevices_WithAllDevicesInSystem) {
   int deviceCount;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
 
   SECTION("Set all devices one after another") {
     for (int deviceId = 0; deviceId < deviceCount; ++deviceId) {
       int length = 1;
       int deviceArr[1] = {deviceId};
-      HIP_CHECK(hipSetValidDevices(deviceArr, length));
+      HIP_CHECK(hipSetValidDevices(deviceArr, length))
 
       REQUIRE(getCurrentDevice() == deviceId);
       performOperations();
@@ -218,7 +218,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_WithAllDevicesInSystem) {
       devices.push_back(deviceId);
     }
     int length = devices.size();
-    HIP_CHECK(hipSetValidDevices(devices.data(), length));
+    HIP_CHECK(hipSetValidDevices(devices.data(), length))
 
     REQUIRE(getCurrentDevice() == (deviceCount - 1));
     performOperations();
@@ -254,7 +254,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_Positive_Cases) {
   SECTION("length is 0 and deviceArr is nullPtr") {
     int length = 0;
     int* deviceArr = nullptr;
-    HIP_CHECK(hipSetValidDevices(deviceArr, length));
+    HIP_CHECK(hipSetValidDevices(deviceArr, length))
 
     REQUIRE(getCurrentDevice() == 0);
   }
@@ -262,7 +262,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_Positive_Cases) {
   SECTION("length is 0 and deviceArr is valid") {
     int length = 0;
     int deviceArr[2] = {1, 0};
-    HIP_CHECK(hipSetValidDevices(deviceArr, length));
+    HIP_CHECK(hipSetValidDevices(deviceArr, length))
 
     REQUIRE(getCurrentDevice() == 0);
   }
@@ -270,7 +270,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_Positive_Cases) {
   SECTION("length < dev arr size") {
     int length = 1;
     int deviceArr[2] = {1, 0};
-    HIP_CHECK(hipSetValidDevices(deviceArr, length));
+    HIP_CHECK(hipSetValidDevices(deviceArr, length))
 
     REQUIRE(getCurrentDevice() == 1);
   }
@@ -278,7 +278,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_Positive_Cases) {
   SECTION("Len < dev arr size and dev arr contains invalid devices") {
     int length = 1;
     int deviceArr[2] = {1, deviceCount};
-    HIP_CHECK(hipSetValidDevices(deviceArr, length));
+    HIP_CHECK(hipSetValidDevices(deviceArr, length))
 
     REQUIRE(getCurrentDevice() == 1);
   }
@@ -317,7 +317,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_MultiProcess) {
 
   int length = 2;
   int deviceArr[2] = {1, 0};
-  HIP_CHECK(hipSetValidDevices(deviceArr, length));
+  HIP_CHECK(hipSetValidDevices(deviceArr, length))
 
   REQUIRE(getCurrentDevice() == 1);
   performOperations();
@@ -334,14 +334,14 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_MultiProcess) {
  */
 void launchFunction(int deviceId) {
   int device = -1;
-  HIP_CHECK_THREAD(hipGetDevice(&device));
+  HIP_CHECK_THREAD(hipGetDevice(&device))
   REQUIRE_THREAD(device == 0);
 
   int length = 1;
   int deviceArr[1] = {deviceId};
-  HIP_CHECK_THREAD(hipSetValidDevices(deviceArr, length));
+  HIP_CHECK_THREAD(hipSetValidDevices(deviceArr, length))
 
-  HIP_CHECK_THREAD(hipGetDevice(&device));
+  HIP_CHECK_THREAD(hipGetDevice(&device))
   REQUIRE_THREAD(device == deviceId);
   performOperations(true);
 }
@@ -409,45 +409,45 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_with_hipMemcpyPeer) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   int canAccessPeer = -1;
-  HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 1, 0));
+  HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 1, 0))
   if (!canAccessPeer) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
   REQUIRE(canAccessPeer == 1);
-  HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
+  HIP_CHECK(hipDeviceEnablePeerAccess(1, 0))
   REQUIRE(getCurrentDevice() == 0);
 
   int* dev0_Arr = nullptr;
-  HIP_CHECK(hipMalloc(&dev0_Arr, NBYTES));
+  HIP_CHECK(hipMalloc(&dev0_Arr, NBYTES))
   REQUIRE(dev0_Arr != nullptr);
 
   int srcHostMem[N];
   for (int i = 0; i < N; i++) {
     srcHostMem[i] = 5;
   }
-  HIP_CHECK(hipMemcpy(dev0_Arr, srcHostMem, N * sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dev0_Arr, srcHostMem, N * sizeof(int), hipMemcpyHostToDevice))
 
   int length = 1;
   int deviceArr[1] = {1};
-  HIP_CHECK(hipSetValidDevices(deviceArr, length));
+  HIP_CHECK(hipSetValidDevices(deviceArr, length))
 
   REQUIRE(getCurrentDevice() == 1);
 
   int* dev1_Arr = nullptr;
-  HIP_CHECK(hipMalloc(&dev1_Arr, NBYTES));
+  HIP_CHECK(hipMalloc(&dev1_Arr, NBYTES))
   REQUIRE(dev1_Arr != nullptr);
 
-  HIP_CHECK(hipMemcpyPeer(dev1_Arr, 1, dev0_Arr, 0, N * sizeof(int)));
+  HIP_CHECK(hipMemcpyPeer(dev1_Arr, 1, dev0_Arr, 0, N * sizeof(int)))
 
   int dstHostMem[N];
   for (int i = 0; i < N; i++) {
     dstHostMem[i] = 0;
   }
 
-  HIP_CHECK(hipMemcpy(dstHostMem, dev1_Arr, N * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(dstHostMem, dev1_Arr, N * sizeof(int), hipMemcpyDeviceToHost))
   for (int i = 0; i < N; i++) {
     REQUIRE(dstHostMem[i] == 5);
   }
-  HIP_CHECK(hipFree(dev0_Arr));
-  HIP_CHECK(hipFree(dev1_Arr));
+  HIP_CHECK(hipFree(dev0_Arr))
+  HIP_CHECK(hipFree(dev1_Arr))
 }

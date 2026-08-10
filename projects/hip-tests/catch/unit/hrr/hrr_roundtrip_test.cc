@@ -589,14 +589,14 @@ static void hrr_run_roundtrip(const std::string& direct_case,
 }
 
 static bool hrr_find_peer_accessible_pair(int& src_dev, int& dst_dev, int& ndev) {
-  HIP_CHECK(hipGetDeviceCount(&ndev));
+  HIP_CHECK(hipGetDeviceCount(&ndev))
   if (ndev < 2) return false;
 
   for (int src = 0; src < ndev; ++src) {
     for (int dst = 0; dst < ndev; ++dst) {
       if (src == dst) continue;
       int can_access = 0;
-      HIP_CHECK(hipDeviceCanAccessPeer(&can_access, src, dst));
+      HIP_CHECK(hipDeviceCanAccessPeer(&can_access, src, dst))
       if (can_access) {
         src_dev = src;
         dst_dev = dst;

@@ -24,7 +24,7 @@ class FreeAsyncBenchmark : public Benchmark<FreeAsyncBenchmark> {
 
     TIMED_SECTION_STREAM(kTimerTypeEvent, stream) { HIP_CHECK(hipFreeAsync(dev_ptr, stream)); }
 
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 };
 

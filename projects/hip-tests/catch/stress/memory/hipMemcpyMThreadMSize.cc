@@ -53,7 +53,7 @@ inline int RandomPeerDst(int intra_dev, int n_gpu, std::mt19937& gen) {
       continue;
     }
     int p = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&p, intra_dev, j));
+    HIP_CHECK(hipDeviceCanAccessPeer(&p, intra_dev, j))
     if (p) {
       return j;
     }
@@ -110,7 +110,7 @@ template <typename TestType> void Memcpy_And_verify(size_t NUM_ELM, std::mt19937
               << " NUM_ELM=" << NUM_ELM << " bytes=" << requested_bytes << std::endl;
 
     HipTest::initArrays<TestType>(nullptr, nullptr, nullptr, &A_h, &B_h, nullptr, NUM_ELM);
-    HIP_CHECK(hipGetDeviceCount(&Available_Gpus));
+    HIP_CHECK(hipGetDeviceCount(&Available_Gpus))
     if (Available_Gpus <= 0) {
       HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_h, B_h, nullptr, false);
       continue;
@@ -124,30 +124,30 @@ template <typename TestType> void Memcpy_And_verify(size_t NUM_ELM, std::mt19937
       case TEST_MEMCPY: {
         // One random GPU; P2P is covered in TEST_MEMCPYD2D / ASYNC.
         const int d = RandomDeviceIndex(Available_Gpus, gen);
-        HIP_CHECK(hipSetDevice(d));
-        HIP_CHECK(hipMalloc(&A_d[d], NUM_ELM * sizeof(TestType)));
-        HIP_CHECK(hipMemcpy(A_d[d], A_h, NUM_ELM * sizeof(TestType), hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(B_h, A_d[d], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipSetDevice(d))
+        HIP_CHECK(hipMalloc(&A_d[d], NUM_ELM * sizeof(TestType)))
+        HIP_CHECK(hipMemcpy(A_d[d], A_h, NUM_ELM * sizeof(TestType), hipMemcpyHostToDevice))
+        HIP_CHECK(hipMemcpy(B_h, A_d[d], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost))
         HipTest::checkTest(A_h, B_h, NUM_ELM);
         break;
       }
       case TEST_MEMCPYH2D:  // To test hipMemcpyHtoD()
       {
         const int d = RandomDeviceIndex(Available_Gpus, gen);
-        HIP_CHECK(hipSetDevice(d));
-        HIP_CHECK(hipMalloc(&A_d[d], NUM_ELM * sizeof(TestType)));
-        HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(A_d[d]), A_h, NUM_ELM * sizeof(TestType)));
-        HIP_CHECK(hipMemcpy(B_h, A_d[d], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipSetDevice(d))
+        HIP_CHECK(hipMalloc(&A_d[d], NUM_ELM * sizeof(TestType)))
+        HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(A_d[d]), A_h, NUM_ELM * sizeof(TestType)))
+        HIP_CHECK(hipMemcpy(B_h, A_d[d], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost))
         HipTest::checkTest(A_h, B_h, NUM_ELM);
         break;
       }
       case TEST_MEMCPYD2H:  // To test hipMemcpyDtoH()--done
       {
         const int d = RandomDeviceIndex(Available_Gpus, gen);
-        HIP_CHECK(hipSetDevice(d));
-        HIP_CHECK(hipMalloc(&A_d[d], NUM_ELM * sizeof(TestType)));
-        HIP_CHECK(hipMemcpy(A_d[d], A_h, NUM_ELM * sizeof(TestType), hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpyDtoH(B_h, hipDeviceptr_t(A_d[d]), NUM_ELM * sizeof(TestType)));
+        HIP_CHECK(hipSetDevice(d))
+        HIP_CHECK(hipMalloc(&A_d[d], NUM_ELM * sizeof(TestType)))
+        HIP_CHECK(hipMemcpy(A_d[d], A_h, NUM_ELM * sizeof(TestType), hipMemcpyHostToDevice))
+        HIP_CHECK(hipMemcpyDtoH(B_h, hipDeviceptr_t(A_d[d]), NUM_ELM * sizeof(TestType)))
         HipTest::checkTest(A_h, B_h, NUM_ELM);
         break;
       }
@@ -157,85 +157,85 @@ template <typename TestType> void Memcpy_And_verify(size_t NUM_ELM, std::mt19937
         const int intra_dev = RandomDeviceIndex(Available_Gpus, gen);
         const int peer_dst = RandomPeerDst(intra_dev, Available_Gpus, gen);
 
-        HIP_CHECK(hipSetDevice(intra_dev));
-        HIP_CHECK(hipMalloc(&A_d[intra_dev], NUM_ELM * sizeof(TestType)));
+        HIP_CHECK(hipSetDevice(intra_dev))
+        HIP_CHECK(hipMalloc(&A_d[intra_dev], NUM_ELM * sizeof(TestType)))
         if (peer_dst >= 0) {
-          HIP_CHECK(hipSetDevice(peer_dst));
-          HIP_CHECK(hipMalloc(&A_d[peer_dst], NUM_ELM * sizeof(TestType)));
+          HIP_CHECK(hipSetDevice(peer_dst))
+          HIP_CHECK(hipMalloc(&A_d[peer_dst], NUM_ELM * sizeof(TestType)))
         }
 
         TestType* scratch_d[MAX_GPU]{};
-        HIP_CHECK(hipSetDevice(intra_dev));
-        HIP_CHECK(hipMalloc(&scratch_d[intra_dev], NUM_ELM * sizeof(TestType)));
+        HIP_CHECK(hipSetDevice(intra_dev))
+        HIP_CHECK(hipMalloc(&scratch_d[intra_dev], NUM_ELM * sizeof(TestType)))
 
         {
           const int i = intra_dev;
           std::cout << "[Stress_hipMemcpy_multiDevice_AllAPIs] hipMemcpyDtoD intra dev=" << i
                     << " bytes=" << (NUM_ELM * sizeof(TestType)) << std::endl;
-          HIP_CHECK(hipSetDevice(i));
-          HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(A_d[i]), A_h, NUM_ELM * sizeof(TestType)));
+          HIP_CHECK(hipSetDevice(i))
+          HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(A_d[i]), A_h, NUM_ELM * sizeof(TestType)))
           HIP_CHECK(hipMemcpyDtoD(hipDeviceptr_t(scratch_d[i]), hipDeviceptr_t(A_d[i]),
                                   NUM_ELM * sizeof(TestType)));
           HIP_CHECK(hipMemcpyDtoD(hipDeviceptr_t(A_d[i]), hipDeviceptr_t(scratch_d[i]),
                                   NUM_ELM * sizeof(TestType)));
-          HIP_CHECK(hipMemcpy(B_h, A_d[i], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost));
+          HIP_CHECK(hipMemcpy(B_h, A_d[i], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost))
           HipTest::checkTest(A_h, B_h, NUM_ELM);
         }
 
         if (peer_dst >= 0) {
           std::cout << "[Stress_hipMemcpy_multiDevice_AllAPIs] hipMemcpyDtoD peer " << intra_dev << "->"
                     << peer_dst << " bytes=" << (NUM_ELM * sizeof(TestType)) << std::endl;
-          HIP_CHECK(hipSetDevice(peer_dst));
+          HIP_CHECK(hipSetDevice(peer_dst))
           HIP_CHECK(hipMemcpyDtoD(hipDeviceptr_t(A_d[peer_dst]), hipDeviceptr_t(A_d[intra_dev]),
                                   NUM_ELM * sizeof(TestType)));
-          HIP_CHECK(hipMemcpy(B_h, A_d[peer_dst], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost));
+          HIP_CHECK(hipMemcpy(B_h, A_d[peer_dst], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost))
           HipTest::checkTest(A_h, B_h, NUM_ELM);
         }
 
-        HIP_CHECK(hipSetDevice(intra_dev));
-        HIP_CHECK(hipFree(scratch_d[intra_dev]));
+        HIP_CHECK(hipSetDevice(intra_dev))
+        HIP_CHECK(hipFree(scratch_d[intra_dev]))
         break;
       }
       case TEST_MEMCPYASYNC: {
         // One random GPU; P2P is covered in TEST_MEMCPYD2DASYNC.
         const int d = RandomDeviceIndex(Available_Gpus, gen);
-        HIP_CHECK(hipSetDevice(d));
-        HIP_CHECK(hipMalloc(&A_d[d], NUM_ELM * sizeof(TestType)));
-        HIP_CHECK(hipStreamCreate(&stream[d]));
+        HIP_CHECK(hipSetDevice(d))
+        HIP_CHECK(hipMalloc(&A_d[d], NUM_ELM * sizeof(TestType)))
+        HIP_CHECK(hipStreamCreate(&stream[d]))
         stream_ok[d] = true;
         HIP_CHECK(hipMemcpyAsync(A_d[d], A_h, NUM_ELM * sizeof(TestType), hipMemcpyHostToDevice,
                                  stream[d]));
         HIP_CHECK(hipMemcpyAsync(B_h, A_d[d], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost,
                                  stream[d]));
-        HIP_CHECK(hipStreamSynchronize(stream[d]));
+        HIP_CHECK(hipStreamSynchronize(stream[d]))
         HipTest::checkTest(A_h, B_h, NUM_ELM);
         break;
       }
       case TEST_MEMCPYH2DASYNC:  // To test hipMemcpyHtoDAsync()
       {
         const int d = RandomDeviceIndex(Available_Gpus, gen);
-        HIP_CHECK(hipSetDevice(d));
-        HIP_CHECK(hipMalloc(&A_d[d], NUM_ELM * sizeof(TestType)));
-        HIP_CHECK(hipStreamCreate(&stream[d]));
+        HIP_CHECK(hipSetDevice(d))
+        HIP_CHECK(hipMalloc(&A_d[d], NUM_ELM * sizeof(TestType)))
+        HIP_CHECK(hipStreamCreate(&stream[d]))
         stream_ok[d] = true;
         HIP_CHECK(hipMemcpyHtoDAsync(hipDeviceptr_t(A_d[d]), A_h, NUM_ELM * sizeof(TestType),
                                      stream[d]));
-        HIP_CHECK(hipStreamSynchronize(stream[d]));
-        HIP_CHECK(hipMemcpy(B_h, A_d[d], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipStreamSynchronize(stream[d]))
+        HIP_CHECK(hipMemcpy(B_h, A_d[d], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost))
         HipTest::checkTest(A_h, B_h, NUM_ELM);
         break;
       }
       case TEST_MEMCPYD2HASYNC:  // To test hipMemcpyDtoHAsync()
       {
         const int d = RandomDeviceIndex(Available_Gpus, gen);
-        HIP_CHECK(hipSetDevice(d));
-        HIP_CHECK(hipMalloc(&A_d[d], NUM_ELM * sizeof(TestType)));
-        HIP_CHECK(hipStreamCreate(&stream[d]));
+        HIP_CHECK(hipSetDevice(d))
+        HIP_CHECK(hipMalloc(&A_d[d], NUM_ELM * sizeof(TestType)))
+        HIP_CHECK(hipStreamCreate(&stream[d]))
         stream_ok[d] = true;
-        HIP_CHECK(hipMemcpy(A_d[d], A_h, NUM_ELM * sizeof(TestType), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(A_d[d], A_h, NUM_ELM * sizeof(TestType), hipMemcpyHostToDevice))
         HIP_CHECK(hipMemcpyDtoHAsync(B_h, hipDeviceptr_t(A_d[d]), NUM_ELM * sizeof(TestType),
                                      stream[d]));
-        HIP_CHECK(hipStreamSynchronize(stream[d]));
+        HIP_CHECK(hipStreamSynchronize(stream[d]))
         HipTest::checkTest(A_h, B_h, NUM_ELM);
         break;
       }
@@ -245,57 +245,57 @@ template <typename TestType> void Memcpy_And_verify(size_t NUM_ELM, std::mt19937
         const int intra_dev = RandomDeviceIndex(Available_Gpus, gen);
         const int peer_dst = RandomPeerDst(intra_dev, Available_Gpus, gen);
 
-        HIP_CHECK(hipSetDevice(intra_dev));
-        HIP_CHECK(hipMalloc(&A_d[intra_dev], NUM_ELM * sizeof(TestType)));
-        HIP_CHECK(hipStreamCreate(&stream[intra_dev]));
+        HIP_CHECK(hipSetDevice(intra_dev))
+        HIP_CHECK(hipMalloc(&A_d[intra_dev], NUM_ELM * sizeof(TestType)))
+        HIP_CHECK(hipStreamCreate(&stream[intra_dev]))
         stream_ok[intra_dev] = true;
         if (peer_dst >= 0) {
-          HIP_CHECK(hipSetDevice(peer_dst));
-          HIP_CHECK(hipMalloc(&A_d[peer_dst], NUM_ELM * sizeof(TestType)));
+          HIP_CHECK(hipSetDevice(peer_dst))
+          HIP_CHECK(hipMalloc(&A_d[peer_dst], NUM_ELM * sizeof(TestType)))
         }
 
         TestType* scratch_d[MAX_GPU]{};
-        HIP_CHECK(hipSetDevice(intra_dev));
-        HIP_CHECK(hipMalloc(&scratch_d[intra_dev], NUM_ELM * sizeof(TestType)));
+        HIP_CHECK(hipSetDevice(intra_dev))
+        HIP_CHECK(hipMalloc(&scratch_d[intra_dev], NUM_ELM * sizeof(TestType)))
 
         {
           const int i = intra_dev;
           std::cout << "[Stress_hipMemcpy_multiDevice_AllAPIs] hipMemcpyDtoDAsync intra dev=" << i
                     << " bytes=" << (NUM_ELM * sizeof(TestType)) << std::endl;
-          HIP_CHECK(hipSetDevice(i));
-          HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(A_d[i]), A_h, NUM_ELM * sizeof(TestType)));
+          HIP_CHECK(hipSetDevice(i))
+          HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(A_d[i]), A_h, NUM_ELM * sizeof(TestType)))
           HIP_CHECK(hipMemcpyDtoDAsync(hipDeviceptr_t(scratch_d[i]), hipDeviceptr_t(A_d[i]),
                                        NUM_ELM * sizeof(TestType), stream[i]));
           HIP_CHECK(hipMemcpyDtoDAsync(hipDeviceptr_t(A_d[i]), hipDeviceptr_t(scratch_d[i]),
                                        NUM_ELM * sizeof(TestType), stream[i]));
-          HIP_CHECK(hipStreamSynchronize(stream[i]));
-          HIP_CHECK(hipMemcpy(B_h, A_d[i], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost));
+          HIP_CHECK(hipStreamSynchronize(stream[i]))
+          HIP_CHECK(hipMemcpy(B_h, A_d[i], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost))
           HipTest::checkTest(A_h, B_h, NUM_ELM);
         }
 
         if (peer_dst >= 0) {
           std::cout << "[Stress_hipMemcpy_multiDevice_AllAPIs] hipMemcpyDtoDAsync peer " << intra_dev
                     << "->" << peer_dst << " bytes=" << (NUM_ELM * sizeof(TestType)) << std::endl;
-          HIP_CHECK(hipSetDevice(peer_dst));
+          HIP_CHECK(hipSetDevice(peer_dst))
           HIP_CHECK(hipMemcpyDtoDAsync(hipDeviceptr_t(A_d[peer_dst]), hipDeviceptr_t(A_d[intra_dev]),
                                        NUM_ELM * sizeof(TestType), stream[intra_dev]));
-          HIP_CHECK(hipStreamSynchronize(stream[intra_dev]));
-          HIP_CHECK(hipMemcpy(B_h, A_d[peer_dst], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost));
+          HIP_CHECK(hipStreamSynchronize(stream[intra_dev]))
+          HIP_CHECK(hipMemcpy(B_h, A_d[peer_dst], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost))
           HipTest::checkTest(A_h, B_h, NUM_ELM);
         }
 
-        HIP_CHECK(hipSetDevice(intra_dev));
-        HIP_CHECK(hipFree(scratch_d[intra_dev]));
+        HIP_CHECK(hipSetDevice(intra_dev))
+        HIP_CHECK(hipFree(scratch_d[intra_dev]))
         break;
       }
     }
     for (int i = 0; i < Available_Gpus; ++i) {
       if (A_d[i]) {
-        HIP_CHECK(hipSetDevice(i));
-        HIP_CHECK(hipFree(A_d[i]));
+        HIP_CHECK(hipSetDevice(i))
+        HIP_CHECK(hipFree(A_d[i]))
       }
       if (stream_ok[i]) {
-        HIP_CHECK(hipStreamDestroy(stream[i]));
+        HIP_CHECK(hipStreamDestroy(stream[i]))
       }
     }
     HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_h, B_h, nullptr, false);
@@ -333,7 +333,7 @@ HIP_TEST_CASE(Stress_hipMemcpy_multiDevice_AllAPIs) {
   constexpr int kPow2EndPower = 32;
 
   size_t free = 0, total = 0;
-  HIP_CHECK(hipMemGetInfo(&free, &total));
+  HIP_CHECK(hipMemGetInfo(&free, &total))
 
   const int* const extra_elm_steps = isQuickLevel() ? kNumElmStepsQuick : kNumElmSteps;
   const size_t extra_elm_count =
@@ -389,7 +389,7 @@ HIP_TEST_CASE(Stress_hipMemcpy_multiDevice_AllAPIs) {
               << " NUM_ELM=" << NUM_ELM << " bytes=" << requested_bytes << std::endl;
     if (requested_bytes <= free) {
       Memcpy_And_verify<char>(NUM_ELM, gen);
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
     } else {
       std::cout << "[Stress_hipMemcpy_multiDevice_AllAPIs] skip (need " << requested_bytes
                 << " B, free " << free << " B)" << std::endl;

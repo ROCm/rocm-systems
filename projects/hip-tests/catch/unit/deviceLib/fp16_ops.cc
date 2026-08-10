@@ -65,28 +65,28 @@ HIP_TEST_CASE(Unit_fp16_arith) {
     std::vector<float> in1(num_of_ops, input1);
     std::vector<float> in2(num_of_ops, input2);
     float *din1, *din2, *dout;
-    HIP_CHECK(hipMalloc(&dout, sizeof(float) * num_of_ops));
-    HIP_CHECK(hipMalloc(&din1, sizeof(float) * num_of_ops));
-    HIP_CHECK(hipMalloc(&din2, sizeof(float) * num_of_ops));
+    HIP_CHECK(hipMalloc(&dout, sizeof(float) * num_of_ops))
+    HIP_CHECK(hipMalloc(&din1, sizeof(float) * num_of_ops))
+    HIP_CHECK(hipMalloc(&din2, sizeof(float) * num_of_ops))
 
-    HIP_CHECK(hipMemcpy(din1, in1.data(), sizeof(float) * in1.size(), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(din2, in2.data(), sizeof(float) * in2.size(), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(din1, in1.data(), sizeof(float) * in1.size(), hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(din2, in2.data(), sizeof(float) * in2.size(), hipMemcpyHostToDevice))
 
     fp16_arith_gpu<<<1, 1>>>(din1, din2, dout);
     std::vector<float> cpuout(num_of_ops, 0.0f);
     fp16_arith_cpu(in1, in2, cpuout);
 
     std::vector<float> out(num_of_ops, 0.0f);
-    HIP_CHECK(hipMemcpy(out.data(), dout, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data(), dout, sizeof(float) * out.size(), hipMemcpyDeviceToHost))
 
     for (size_t i = 0; i < out.size(); i++) {
       INFO("Iter: " << i << " In1: " << in1[i] << " CPU res: " << cpuout[i]
                     << " GPU res: " << out[i]);
       REQUIRE(out[i] == Catch::Approx(cpuout[i]).epsilon(0.1));
     }
-    HIP_CHECK(hipFree(dout));
-    HIP_CHECK(hipFree(din1));
-    HIP_CHECK(hipFree(din2));
+    HIP_CHECK(hipFree(dout))
+    HIP_CHECK(hipFree(din1))
+    HIP_CHECK(hipFree(din2))
   }
 }
 
@@ -145,19 +145,19 @@ HIP_TEST_CASE(Unit_fp162_arith) {
     std::vector<float2> in1(num_of_ops, float2{input1, input2});
     std::vector<float2> in2(num_of_ops, float2{input1_gen.get(), input1_gen.get()});
     float2 *din1, *din2, *dout;
-    HIP_CHECK(hipMalloc(&dout, sizeof(float2) * num_of_ops));
-    HIP_CHECK(hipMalloc(&din1, sizeof(float2) * num_of_ops));
-    HIP_CHECK(hipMalloc(&din2, sizeof(float2) * num_of_ops));
+    HIP_CHECK(hipMalloc(&dout, sizeof(float2) * num_of_ops))
+    HIP_CHECK(hipMalloc(&din1, sizeof(float2) * num_of_ops))
+    HIP_CHECK(hipMalloc(&din2, sizeof(float2) * num_of_ops))
 
-    HIP_CHECK(hipMemcpy(din1, in1.data(), sizeof(float2) * in1.size(), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(din2, in2.data(), sizeof(float2) * in2.size(), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(din1, in1.data(), sizeof(float2) * in1.size(), hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(din2, in2.data(), sizeof(float2) * in2.size(), hipMemcpyHostToDevice))
 
     fp162_arith_gpu<<<1, 1>>>(din1, din2, dout);
     std::vector<float2> cpuout(num_of_ops, float2{0.0f, 0.0f});
     fp162_arith_cpu(in1, in2, cpuout);
 
     std::vector<float2> out(num_of_ops, float2{0.0f, 0.0f});
-    HIP_CHECK(hipMemcpy(out.data(), dout, sizeof(float2) * out.size(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data(), dout, sizeof(float2) * out.size(), hipMemcpyDeviceToHost))
 
     for (size_t i = 0; i < out.size(); i++) {
       INFO("Iter: " << i << " In1: " << in1[i].x << " - " << in1[i].y << " CPU res: " << cpuout[i].x
@@ -165,9 +165,9 @@ HIP_TEST_CASE(Unit_fp162_arith) {
       REQUIRE(out[i].x == Catch::Approx(cpuout[i].x).epsilon(0.1));
       REQUIRE(out[i].y == Catch::Approx(cpuout[i].y).epsilon(0.1));
     }
-    HIP_CHECK(hipFree(dout));
-    HIP_CHECK(hipFree(din1));
-    HIP_CHECK(hipFree(din2));
+    HIP_CHECK(hipFree(dout))
+    HIP_CHECK(hipFree(din1))
+    HIP_CHECK(hipFree(din2))
   }
 }
 

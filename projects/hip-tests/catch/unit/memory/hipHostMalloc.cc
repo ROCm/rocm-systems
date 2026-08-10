@@ -41,7 +41,7 @@ void CheckHostPointer(int numElements, int* ptr, unsigned eventFlags, int syncMe
   hipEvent_t e;
 
   // Init:
-  HIP_CHECK(hipStreamCreate(&s));
+  HIP_CHECK(hipStreamCreate(&s))
   HIP_CHECK(hipEventCreateWithFlags(&e, eventFlags))
   dim3 dimBlock(64, 1, 1);
   dim3 dimGrid(numElements / dimBlock.x, 1, 1);
@@ -50,21 +50,21 @@ void CheckHostPointer(int numElements, int* ptr, unsigned eventFlags, int syncMe
 
   // Init array to know state:
   HipTest::launchKernel(Set, dimGrid, dimBlock, 0, 0x0, ptr, -42);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   HipTest::launchKernel(Set, dimGrid, dimBlock, 0, s, ptr, expected);
-  HIP_CHECK(hipEventRecord(e, s));
+  HIP_CHECK(hipEventRecord(e, s))
 
   // Host waits for event :
   switch (syncMethod) {
     case SYNC_EVENT:
-      HIP_CHECK(hipEventSynchronize(e));
+      HIP_CHECK(hipEventSynchronize(e))
       break;
     case SYNC_STREAM:
-      HIP_CHECK(hipStreamSynchronize(s));
+      HIP_CHECK(hipStreamSynchronize(s))
       break;
     case SYNC_DEVICE:
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
       break;
     default:
       assert(0);
@@ -77,8 +77,8 @@ void CheckHostPointer(int numElements, int* ptr, unsigned eventFlags, int syncMe
     }
   }
 
-  HIP_CHECK(hipStreamDestroy(s));
-  HIP_CHECK(hipEventDestroy(e));
+  HIP_CHECK(hipStreamDestroy(s))
+  HIP_CHECK(hipEventDestroy(e))
 }
 /*
 This testcase performs the basic scenario of hipHostMalloc API
@@ -92,8 +92,8 @@ HIP_TEST_CASE(Unit_hipHostMalloc_Basic) {
 
   hipDeviceProp_t prop;
   int device;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&prop, device))
   if (prop.canMapHostMemory != 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
   } else {
@@ -110,30 +110,30 @@ HIP_TEST_CASE(Unit_hipHostMalloc_Basic) {
     SECTION("hipHostMallocCoherent") { flag = hipHostMallocCoherent; }
     SECTION("hipHostMallocNonCoherent") { flag = hipHostMallocNonCoherent; }
 #endif
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&B_h), SIZE, flag));
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&C_h), SIZE, hipHostMallocMapped));
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&B_h), SIZE, flag))
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&C_h), SIZE, hipHostMallocMapped))
 
-    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&C_d), C_h, 0));
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&C_d), C_h, 0))
 
     HipTest::setDefaultData<float>(LEN, A_h, B_h, C_h);
 
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&B_d), SIZE));
-    HIP_CHECK(hipMemcpy(B_d, B_h, SIZE, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&B_d), SIZE))
+    HIP_CHECK(hipMemcpy(B_d, B_h, SIZE, hipMemcpyHostToDevice))
 
     dim3 dimGrid(LEN / 512, 1, 1);
     dim3 dimBlock(512, 1, 1);
     HipTest::launchKernel<float>(HipTest::vectorADD<float>, dimGrid, dimBlock, 0, 0,
                                  static_cast<const float*>(A_d), static_cast<const float*>(B_d),
                                  C_d, static_cast<size_t>(LEN));
-    HIP_CHECK(hipMemcpy(C_h, C_d, LEN * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemcpy(C_h, C_d, LEN * sizeof(float), hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
     HipTest::checkVectorADD<float>(A_h, B_h, C_h, numElements);
 
-    HIP_CHECK(hipHostFree(A_h));
-    HIP_CHECK(hipHostFree(B_h));
-    HIP_CHECK(hipHostFree(C_h));
-    HIP_CHECK(hipFree(B_d));
+    HIP_CHECK(hipHostFree(A_h))
+    HIP_CHECK(hipHostFree(B_h))
+    HIP_CHECK(hipHostFree(C_h))
+    HIP_CHECK(hipFree(B_d))
   }
 }
 /*
@@ -161,12 +161,12 @@ This testcase verifies the hipHostMalloc API by
 */
 HIP_TEST_CASE(Unit_hipHostMalloc_NonCoherent) {
   int* A = nullptr;
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes, hipHostMallocNonCoherent));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes, hipHostMallocNonCoherent))
   const char* ptrType = "non-coherent";
   CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_DEVICE, ptrType);
   CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_STREAM, ptrType);
   CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_EVENT, ptrType);
-  HIP_CHECK(hipFreeHost(A));
+  HIP_CHECK(hipFreeHost(A))
 }
 
 /*
@@ -189,7 +189,7 @@ HIP_TEST_CASE(Unit_hipHostMalloc_Coherent) {
     CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_STREAM, ptrType);
     CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_EVENT, ptrType);
 
-    HIP_CHECK(hipFreeHost(A));
+    HIP_CHECK(hipFreeHost(A))
   } else {
     HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
   }
@@ -205,12 +205,12 @@ This testcase verifies the hipHostMalloc API by
 */
 HIP_TEST_CASE(Unit_hipHostMalloc_Default) {
   int* A = nullptr;
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes))
   const char* ptrType = "default";
   CheckHostPointer(numElements, A, 0, SYNC_DEVICE, ptrType);
   CheckHostPointer(numElements, A, 0, SYNC_STREAM, ptrType);
   CheckHostPointer(numElements, A, 0, SYNC_EVENT, ptrType);
-  HIP_CHECK(hipFreeHost(A));
+  HIP_CHECK(hipFreeHost(A))
 }
 
 /*
@@ -241,6 +241,6 @@ HIP_TEST_CASE(Unit_hipHostMalloc_Capture) {
   END_CAPTURE_SYNC(capture_error);
 
   if (host_ptr != nullptr) {
-    HIP_CHECK(hipHostFree(host_ptr));
+    HIP_CHECK(hipHostFree(host_ptr))
   }
 }

@@ -70,14 +70,14 @@ __global__ void verifyArray(int *arr, int size, int refValue, int* status) {
  */
 bool validateDeviceArray(int *arr, int size, int refValue) {
   int *devStatus = nullptr;
-  HIP_CHECK(hipMalloc(&devStatus, sizeof(int)));
+  HIP_CHECK(hipMalloc(&devStatus, sizeof(int)))
   REQUIRE(devStatus != nullptr);
 
   verifyArray<<<1, 1>>>(arr, size, refValue, devStatus);
   int status;
-  HIP_CHECK(hipMemcpy(&status, devStatus, sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&status, devStatus, sizeof(int), hipMemcpyDeviceToHost))
 
-  HIP_CHECK(hipFree(devStatus));
+  HIP_CHECK(hipFree(devStatus))
 
   if ( status == 1 ) {
     return true;
@@ -107,14 +107,14 @@ __global__ void verifyCharArray(char *arr, int size,
  */
 bool validateCharDeviceArray(char *arr, int size, int refValue) {
   int *devStatus = nullptr;
-  HIP_CHECK(hipMalloc(&devStatus, sizeof(int)));
+  HIP_CHECK(hipMalloc(&devStatus, sizeof(int)))
   REQUIRE(devStatus != nullptr);
 
   verifyCharArray<<< 1, 1 >>>(arr, size, refValue, devStatus);
   int status;
-  HIP_CHECK(hipMemcpy(&status, devStatus, sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&status, devStatus, sizeof(int), hipMemcpyDeviceToHost))
 
-  HIP_CHECK(hipFree(devStatus));
+  HIP_CHECK(hipFree(devStatus))
 
   if ( status == 1 ) {
     return true;

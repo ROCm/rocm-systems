@@ -61,11 +61,11 @@ static void runUnsafeAtomicAddCoherentNoUnsafeFlagTest(const std::string& gfxNam
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType),
                           hipHostMallocCoherent));
   result[0] = INITIAL_VAL;
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0))
   hipLaunchKernelGGL(AtomicCheck<TestType>, dim3(1), dim3(1), 0, 0, A_d, result_d);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
   bool testResult;
 
   if ((std::is_same<TestType, float>::value)) {
@@ -85,8 +85,8 @@ static void runUnsafeAtomicAddCoherentNoUnsafeFlagTest(const std::string& gfxNam
     REQUIRE(A_h[0] == INITIAL_VAL + INC_VAL);
     REQUIRE(result[0] == INITIAL_VAL);
   }
-  HIP_CHECK(hipHostFree(A_h));
-  HIP_CHECK(hipHostFree(result));
+  HIP_CHECK(hipHostFree(A_h))
+  HIP_CHECK(hipHostFree(result))
 }
 
 // Helper function for "without any flag" test
@@ -100,11 +100,11 @@ static void runUnsafeAtomicAddCoherentWithoutFlagTest(const std::string& gfxName
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType),
                           hipHostMallocCoherent));
   result[0] = INITIAL_VAL;
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0))
   hipLaunchKernelGGL(AtomicCheck<TestType>, dim3(1), dim3(1), 0, 0, A_d, result_d);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
   bool testResult;
 
   if ((std::is_same<TestType, float>::value)) {
@@ -124,8 +124,8 @@ static void runUnsafeAtomicAddCoherentWithoutFlagTest(const std::string& gfxName
     REQUIRE(A_h[0] == INITIAL_VAL + INC_VAL);
     REQUIRE(result[0] == INITIAL_VAL);
   }
-  HIP_CHECK(hipHostFree(A_h));
-  HIP_CHECK(hipHostFree(result));
+  HIP_CHECK(hipHostFree(A_h))
+  HIP_CHECK(hipHostFree(result))
 }
 
 // Helper function for "with -munsafe-fp-atomics flag" test
@@ -139,11 +139,11 @@ static void runUnsafeAtomicAddCoherentUnsafeFlagTest(const std::string& gfxName)
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType),
                           hipHostMallocCoherent));
   result[0] = INITIAL_VAL;
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0))
   hipLaunchKernelGGL(AtomicCheck<TestType>, dim3(1), dim3(1), 0, 0, A_d, result_d);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
   bool testResult;
 
   if ((std::is_same<TestType, float>::value)) {
@@ -163,15 +163,15 @@ static void runUnsafeAtomicAddCoherentUnsafeFlagTest(const std::string& gfxName)
     REQUIRE(A_h[0] == INITIAL_VAL + INC_VAL);
     REQUIRE(result[0] == INITIAL_VAL);
   }
-  HIP_CHECK(hipHostFree(A_h));
-  HIP_CHECK(hipHostFree(result));
+  HIP_CHECK(hipHostFree(A_h))
+  HIP_CHECK(hipHostFree(result))
 }
 
 TEST_CASE(Unit_unsafeAtomicAdd_Coherent) {
   hipDeviceProp_t prop;
   int device;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&prop, device))
   std::string gfxName(prop.gcnArchName);
 
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {

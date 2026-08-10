@@ -283,16 +283,16 @@ HIP_TEST_CASE(Unit_ext_ocp_fp8_device_matches_host) {
 
   float* d_in = nullptr;
   float* d_out = nullptr;
-  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * n));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * n));
-  HIP_CHECK(hipMemcpy(d_in, reps.data(), sizeof(float) * n, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * n))
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * n))
+  HIP_CHECK(hipMemcpy(d_in, reps.data(), sizeof(float) * n, hipMemcpyHostToDevice))
 
   fp8_e4m3_roundtrip_kernel<<<(n / 256) + 1, 256>>>(d_in, d_out, n);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   std::vector<float> dev(n, 0.0f);
-  HIP_CHECK(hipMemcpy(dev.data(), d_out, sizeof(float) * n, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(dev.data(), d_out, sizeof(float) * n, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (size_t i = 0; i < n; ++i) {
     __hipext_ocp_fp8_e4m3 h(reps[i]);
@@ -302,6 +302,6 @@ HIP_TEST_CASE(Unit_ext_ocp_fp8_device_matches_host) {
     REQUIRE(dev[i] == reps[i]);  // representable -> exact
   }
 
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipFree(d_in))
+  HIP_CHECK(hipFree(d_out))
 }

@@ -368,13 +368,13 @@ static bool TestAllocInAllThread(int test_type, T value, size_t sizeBufferPerThr
   size_t arraysize = (sizeBufferPerThread * BLOCKSIZE * GRIDSIZE);
   outputVec_h = reinterpret_cast<T*>(malloc(sizeof(T) * arraysize));
   REQUIRE(outputVec_h != nullptr);
-  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(T) * arraysize)));
+  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(T) * arraysize)))
   // Launch Test Kernel
   kerTestDynamicAllocInAllThread<T>
       <<<GRIDSIZE, BLOCKSIZE>>>(outputVec_d, test_type, value, sizeBufferPerThread);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   // Copy to host buffer
-  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(T) * arraysize, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(T) * arraysize, hipMemcpyDefault))
   bool bPassed = true;
   for (size_t idx = 0; idx < arraysize; idx++) {
     if (outputVec_h[idx] != value) {
@@ -382,7 +382,7 @@ static bool TestAllocInAllThread(int test_type, T value, size_t sizeBufferPerThr
       break;
     }
   }
-  HIP_CHECK(hipFree(outputVec_d));
+  HIP_CHECK(hipFree(outputVec_d))
   free(outputVec_h);
   return bPassed;
 }
@@ -398,13 +398,13 @@ template <typename T> static bool TestMemoryAccessInAllThread(int test_type, int
   T data_value = std::numeric_limits<T>::max();
   outputVec_h = reinterpret_cast<T*>(malloc(sizeof(T) * arraysize));
   REQUIRE(outputVec_h != nullptr);
-  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(T) * arraysize)));
+  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(T) * arraysize)))
   // Launch Test Kernel
   kerTestAccessInAllThreadsInBlock<T>
       <<<GRIDSIZE, BLOCKSIZE>>>(outputVec_d, test_type, data_value, thread_idx);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   // Copy to host buffer
-  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(T) * arraysize, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(T) * arraysize, hipMemcpyDefault))
   bool bPassed = true;
   for (size_t idx = 0; idx < arraysize; idx++) {
     if (outputVec_h[idx] != data_value) {
@@ -412,7 +412,7 @@ template <typename T> static bool TestMemoryAccessInAllThread(int test_type, int
       break;
     }
   }
-  HIP_CHECK(hipFree(outputVec_d));
+  HIP_CHECK(hipFree(outputVec_d))
   free(outputVec_h);
   return bPassed;
 }
@@ -476,30 +476,30 @@ static bool TestMemoryAcrossMulKernels(int test_type, bool multistream = false) 
   T data_value = std::numeric_limits<T>::max();
   outputVec_h = reinterpret_cast<T*>(malloc(sizeof(T) * arraysize));
   REQUIRE(outputVec_h != nullptr);
-  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(T) * arraysize)));
+  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(T) * arraysize)))
   // Launch Test Kernel
   if (multistream) {
     hipStream_t stream1, stream2, stream3;
-    HIP_CHECK(hipStreamCreate(&stream1));
-    HIP_CHECK(hipStreamCreate(&stream2));
-    HIP_CHECK(hipStreamCreate(&stream3));
+    HIP_CHECK(hipStreamCreate(&stream1))
+    HIP_CHECK(hipStreamCreate(&stream2))
+    HIP_CHECK(hipStreamCreate(&stream3))
     kerAlloc<T><<<GRIDSIZE, BLOCKSIZE, 0, stream1>>>(test_type);
-    HIP_CHECK(hipStreamSynchronize(stream1));
+    HIP_CHECK(hipStreamSynchronize(stream1))
     kerWrite<T><<<GRIDSIZE, BLOCKSIZE, 0, stream2>>>(data_value);
-    HIP_CHECK(hipStreamSynchronize(stream2));
+    HIP_CHECK(hipStreamSynchronize(stream2))
     kerFree<T><<<GRIDSIZE, BLOCKSIZE, 0, stream3>>>(outputVec_d, test_type);
-    HIP_CHECK(hipStreamSynchronize(stream3));
-    HIP_CHECK(hipStreamDestroy(stream1));
-    HIP_CHECK(hipStreamDestroy(stream2));
-    HIP_CHECK(hipStreamDestroy(stream3));
+    HIP_CHECK(hipStreamSynchronize(stream3))
+    HIP_CHECK(hipStreamDestroy(stream1))
+    HIP_CHECK(hipStreamDestroy(stream2))
+    HIP_CHECK(hipStreamDestroy(stream3))
   } else {
     kerAlloc<T><<<GRIDSIZE, BLOCKSIZE>>>(test_type);
     kerWrite<T><<<GRIDSIZE, BLOCKSIZE>>>(data_value);
     kerFree<T><<<GRIDSIZE, BLOCKSIZE>>>(outputVec_d, test_type);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   }
   // Copy to host buffer
-  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(T) * arraysize, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(T) * arraysize, hipMemcpyDefault))
   bool bPassed = true;
   for (size_t idx = 0; idx < arraysize; idx++) {
     if (outputVec_h[idx] != data_value) {
@@ -507,7 +507,7 @@ static bool TestMemoryAcrossMulKernels(int test_type, bool multistream = false) 
       break;
     }
   }
-  HIP_CHECK(hipFree(outputVec_d));
+  HIP_CHECK(hipFree(outputVec_d))
   free(outputVec_h);
   return bPassed;
 }
@@ -543,7 +543,7 @@ template <typename T> static bool TestDevMemAllocMulKerMulThrd(int test_type) {
   T data_value = std::numeric_limits<T>::max();
   outputVec_h = reinterpret_cast<T*>(malloc(sizeof(T) * arraysize));
   REQUIRE(outputVec_h != nullptr);
-  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(T) * arraysize)));
+  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(T) * arraysize)))
   // Launch all Test Kernel threads
   std::thread threadAlloc(runKerAlloc<T>, test_type);
   threadAlloc.join();
@@ -552,9 +552,9 @@ template <typename T> static bool TestDevMemAllocMulKerMulThrd(int test_type) {
   std::thread threadFree(runKerFree<T>, outputVec_d, test_type);
   threadFree.join();
   // Wait for all kernels in device
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   // Copy to host buffer
-  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(T) * arraysize, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(T) * arraysize, hipMemcpyDefault))
   bool bPassed = true;
   for (size_t idx = 0; idx < arraysize; idx++) {
     if (outputVec_h[idx] != data_value) {
@@ -562,7 +562,7 @@ template <typename T> static bool TestDevMemAllocMulKerMulThrd(int test_type) {
       break;
     }
   }
-  HIP_CHECK(hipFree(outputVec_d));
+  HIP_CHECK(hipFree(outputVec_d))
   free(outputVec_h);
   return bPassed;
 }
@@ -576,13 +576,13 @@ static bool TestMemoryAccessInAllThread_CmplxStr(int test_type) {
   size_t arraysize = GRIDSIZE;
   result_h = reinterpret_cast<int*>(malloc(sizeof(int) * arraysize));
   REQUIRE(result_h != nullptr);
-  HIP_CHECK(hipMalloc(&result_d, (sizeof(int) * arraysize)));
-  HIP_CHECK(hipMemset(result_d, 0, (sizeof(int) * arraysize)));
+  HIP_CHECK(hipMalloc(&result_d, (sizeof(int) * arraysize)))
+  HIP_CHECK(hipMemset(result_d, 0, (sizeof(int) * arraysize)))
   // Launch Test Kernel
   kerTestAccessInAllThreads_CmplxStr<<<GRIDSIZE, BLOCKSIZE>>>(test_type, result_d);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   // Copy to host buffer
-  HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int) * arraysize, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int) * arraysize, hipMemcpyDefault))
   bool bPassed = true;
   for (size_t idx = 0; idx < GRIDSIZE; idx++) {
     if (result_h[idx] != 1) {
@@ -590,7 +590,7 @@ static bool TestMemoryAccessInAllThread_CmplxStr(int test_type) {
       break;
     }
   }
-  HIP_CHECK(hipFree(result_d));
+  HIP_CHECK(hipFree(result_d))
   free(result_h);
   return bPassed;
 }
@@ -605,10 +605,10 @@ static bool TestMemoryAccessInAllThread_Union(int test_type) {
   size_t arraysize = (BLOCKSIZE * GRIDSIZE);
   outputVec_h = reinterpret_cast<testInfoUnion*>(malloc(sizeof(testInfoUnion) * arraysize));
   REQUIRE(outputVec_h != nullptr);
-  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(testInfoUnion) * arraysize)));
+  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(testInfoUnion) * arraysize)))
   // Launch Test Kernel
   kerTestAccessInAllThreadsForUnion<<<GRIDSIZE, BLOCKSIZE>>>(outputVec_d, test_type);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   // Copy to host buffer
   HIP_CHECK(
       hipMemcpy(outputVec_h, outputVec_d, sizeof(testInfoUnion) * arraysize, hipMemcpyDefault));
@@ -643,7 +643,7 @@ static bool TestMemoryAccessInAllThread_Union(int test_type) {
     }
     if (bPassed == false) break;
   }
-  HIP_CHECK(hipFree(outputVec_d));
+  HIP_CHECK(hipFree(outputVec_d))
   free(outputVec_h);
   return bPassed;
 }
@@ -659,14 +659,14 @@ static bool TestAlloc_Load_SingleKer_AllocFree(int test_type, int value,
   size_t arraysize = (sizeBufferPerThread * BLOCKSIZE * GRIDSIZE);
   outputVec_h = reinterpret_cast<int*>(malloc(sizeof(int) * arraysize));
   REQUIRE(outputVec_h != nullptr);
-  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(int) * arraysize)));
+  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(int) * arraysize)))
   // Launch Test Kernel
   hipModule_t Module;
   hipFunction_t Function;
-  HIP_CHECK(hipModuleLoad(&Module, DEV_ALLOC_SINGKER_COBJ));
-  HIP_CHECK(hipModuleGetFunction(&Function, Module, DEV_ALLOC_SINGKER_COBJ_FUNC));
+  HIP_CHECK(hipModuleLoad(&Module, DEV_ALLOC_SINGKER_COBJ))
+  HIP_CHECK(hipModuleGetFunction(&Function, Module, DEV_ALLOC_SINGKER_COBJ_FUNC))
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   struct {
     void* _Output_d;
@@ -684,9 +684,9 @@ static bool TestAlloc_Load_SingleKer_AllocFree(int test_type, int value,
                     HIP_LAUNCH_PARAM_END};
   HIP_CHECK(hipModuleLaunchKernel(Function, GRIDSIZE, 1, 1, BLOCKSIZE, 1, 1, 0, stream, NULL,
                                   reinterpret_cast<void**>(&config)));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   // Copy to host buffer
-  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(int) * arraysize, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(int) * arraysize, hipMemcpyDefault))
   bool bPassed = true;
   for (size_t idx = 0; idx < arraysize; idx++) {
     if (outputVec_h[idx] != value) {
@@ -694,9 +694,9 @@ static bool TestAlloc_Load_SingleKer_AllocFree(int test_type, int value,
       break;
     }
   }
-  HIP_CHECK(hipModuleUnload(Module));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(outputVec_d));
+  HIP_CHECK(hipModuleUnload(Module))
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(outputVec_d))
   free(outputVec_h);
   return bPassed;
 }
@@ -712,22 +712,22 @@ static bool TestAlloc_Load_MultKernels(int test_type, int value) {
   size_t arraysize = (BLOCKSIZE * GRIDSIZE);
   outputVec_h = reinterpret_cast<int*>(malloc(sizeof(int) * arraysize));
   REQUIRE(outputVec_h != nullptr);
-  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(int) * arraysize)));
-  HIP_CHECK(hipMalloc(&dev_addr, (sizeof(int*))));
+  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(int) * arraysize)))
+  HIP_CHECK(hipMalloc(&dev_addr, (sizeof(int*))))
   // Launch Test Kernel
   hipModule_t ModuleAlloc, ModuleWrite, ModuleFree;
   hipFunction_t FunctionAlloc, FunctionAcess, FunctionFree;
   // Load ker_Alloc_MultCodeObj
-  HIP_CHECK(hipModuleLoad(&ModuleAlloc, DEV_ALLOC_MULCOBJ));
-  HIP_CHECK(hipModuleLoad(&ModuleWrite, DEV_WRITE_MULCOBJ));
-  HIP_CHECK(hipModuleLoad(&ModuleFree, DEV_FREE_MULCOBJ));
-  HIP_CHECK(hipModuleGetFunction(&FunctionAlloc, ModuleAlloc, DEV_ALLOC_MULCODEOBJ_ALLOC));
+  HIP_CHECK(hipModuleLoad(&ModuleAlloc, DEV_ALLOC_MULCOBJ))
+  HIP_CHECK(hipModuleLoad(&ModuleWrite, DEV_WRITE_MULCOBJ))
+  HIP_CHECK(hipModuleLoad(&ModuleFree, DEV_FREE_MULCOBJ))
+  HIP_CHECK(hipModuleGetFunction(&FunctionAlloc, ModuleAlloc, DEV_ALLOC_MULCODEOBJ_ALLOC))
   // Load ker_Write_MultCodeObj
-  HIP_CHECK(hipModuleGetFunction(&FunctionAcess, ModuleWrite, DEV_ALLOC_MULCODEOBJ_WRITE));
+  HIP_CHECK(hipModuleGetFunction(&FunctionAcess, ModuleWrite, DEV_ALLOC_MULCODEOBJ_WRITE))
   // Load ker_Free_MultCodeObj
-  HIP_CHECK(hipModuleGetFunction(&FunctionFree, ModuleFree, DEV_ALLOC_MULCODEOBJ_FREE));
+  HIP_CHECK(hipModuleGetFunction(&FunctionFree, ModuleFree, DEV_ALLOC_MULCODEOBJ_FREE))
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   struct {
     void** __dev_addr;
@@ -770,9 +770,9 @@ static bool TestAlloc_Load_MultKernels(int test_type, int value) {
   // Launch ker_Free_MultCodeObj
   HIP_CHECK(hipModuleLaunchKernel(FunctionFree, GRIDSIZE, 1, 1, BLOCKSIZE, 1, 1, 0, stream, NULL,
                                   reinterpret_cast<void**>(&config3)));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   // Copy to host buffer
-  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(int) * arraysize, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(int) * arraysize, hipMemcpyDefault))
   bool bPassed = true;
   for (size_t idx = 0; idx < arraysize; idx++) {
     if (outputVec_h[idx] != value) {
@@ -780,12 +780,12 @@ static bool TestAlloc_Load_MultKernels(int test_type, int value) {
       break;
     }
   }
-  HIP_CHECK(hipModuleUnload(ModuleAlloc));
-  HIP_CHECK(hipModuleUnload(ModuleWrite));
-  HIP_CHECK(hipModuleUnload(ModuleFree));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(dev_addr));
-  HIP_CHECK(hipFree(outputVec_d));
+  HIP_CHECK(hipModuleUnload(ModuleAlloc))
+  HIP_CHECK(hipModuleUnload(ModuleWrite))
+  HIP_CHECK(hipModuleUnload(ModuleFree))
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(dev_addr))
+  HIP_CHECK(hipFree(outputVec_d))
   free(outputVec_h);
   return bPassed;
 }
@@ -803,13 +803,13 @@ template <typename T> static bool TestMemoryAcrossMulKernelsUsingGraph(int test_
   T data_value = std::numeric_limits<T>::max();
   outputVec_h = reinterpret_cast<T*>(malloc(sizeof(T) * arraysize));
   REQUIRE(outputVec_h != nullptr);
-  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(T) * arraysize)));
+  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(T) * arraysize)))
   // Launch Test Kernels using graph
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   // Create Allocation Kernel Node
   hipGraphNode_t kernelnode_1;
   hipKernelNodeParams kernelNodeParams1{};
@@ -820,7 +820,7 @@ template <typename T> static bool TestMemoryAcrossMulKernelsUsingGraph(int test_
   kernelNodeParams1.sharedMemBytes = 0;
   kernelNodeParams1.kernelParams = reinterpret_cast<void**>(kernelArgs1);
   kernelNodeParams1.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernelnode_1, graph, nullptr, 0, &kernelNodeParams1));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelnode_1, graph, nullptr, 0, &kernelNodeParams1))
   // Create Write Kernel Node
   hipGraphNode_t kernelnode_2;
   hipKernelNodeParams kernelNodeParams2{};
@@ -831,7 +831,7 @@ template <typename T> static bool TestMemoryAcrossMulKernelsUsingGraph(int test_
   kernelNodeParams2.sharedMemBytes = 0;
   kernelNodeParams2.kernelParams = reinterpret_cast<void**>(kernelArgs2);
   kernelNodeParams2.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernelnode_2, graph, nullptr, 0, &kernelNodeParams2));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelnode_2, graph, nullptr, 0, &kernelNodeParams2))
   // Create Free Kernel Node
   hipGraphNode_t kernelnode_3;
   hipKernelNodeParams kernelNodeParams3{};
@@ -842,19 +842,19 @@ template <typename T> static bool TestMemoryAcrossMulKernelsUsingGraph(int test_
   kernelNodeParams3.sharedMemBytes = 0;
   kernelNodeParams3.kernelParams = reinterpret_cast<void**>(kernelArgs3);
   kernelNodeParams3.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernelnode_3, graph, nullptr, 0, &kernelNodeParams3));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelnode_3, graph, nullptr, 0, &kernelNodeParams3))
   // Create Memcpy Node
   hipGraphNode_t memcpyD2H;
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H, graph, nullptr, 0, outputVec_h, outputVec_d,
                                     (sizeof(T) * arraysize), hipMemcpyDeviceToHost));
   // Create dependencies for graph
-  HIP_CHECK(hipGraphAddDependencies(graph, &kernelnode_1, &kernelnode_2, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &kernelnode_2, &kernelnode_3, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &kernelnode_3, &memcpyD2H, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &kernelnode_1, &kernelnode_2, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &kernelnode_2, &kernelnode_3, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &kernelnode_3, &memcpyD2H, 1))
   // Instantiate and launch the graphs
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
   bool bPassed = true;
   for (size_t idx = 0; idx < arraysize; idx++) {
     if (outputVec_h[idx] != data_value) {
@@ -862,10 +862,10 @@ template <typename T> static bool TestMemoryAcrossMulKernelsUsingGraph(int test_
       break;
     }
   }
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(outputVec_d));
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipFree(outputVec_d))
   free(outputVec_h);
   return bPassed;
 }
@@ -879,12 +879,12 @@ static bool TestAllocInDeviceFunc(int test_type) {
   size_t arraysize = (INTERNAL_BUFFER_SIZE * BLOCKSIZE * GRIDSIZE);
   outputVec_h = reinterpret_cast<int*>(malloc(sizeof(int) * arraysize));
   REQUIRE(outputVec_h != nullptr);
-  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(int) * arraysize)));
+  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(int) * arraysize)))
   // Launch Test Kernel
   kerTestAllocationUsingDevFunc<<<GRIDSIZE, BLOCKSIZE>>>(outputVec_d, test_type);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   // Copy to host buffer
-  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(int) * arraysize, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(int) * arraysize, hipMemcpyDefault))
   bool bPassed = true;
   for (size_t idx = 0; idx < arraysize; idx++) {
     if (outputVec_h[idx] != (idx / INTERNAL_BUFFER_SIZE)) {
@@ -892,7 +892,7 @@ static bool TestAllocInDeviceFunc(int test_type) {
       break;
     }
   }
-  HIP_CHECK(hipFree(outputVec_d));
+  HIP_CHECK(hipFree(outputVec_d))
   free(outputVec_h);
   return bPassed;
 }
@@ -906,7 +906,7 @@ static bool TestAllocInDeviceFunc(int test_type) {
 HIP_TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_PrimitiveDataType) {
   int pcieAtomic = 0;
   constexpr size_t sizePerThread = 128;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
@@ -1120,7 +1120,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_PrimitiveDataType) {
 HIP_TEST_CASE(Unit_deviceAllocation_ComplexDataType) {
   int pcieAtomic = 0;
   constexpr size_t sizePerThread = 64;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
@@ -1161,7 +1161,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_ComplexDataType) {
 HIP_TEST_CASE(Unit_deviceAllocation_CodeObjects) {
   int pcieAtomic = 0;
   constexpr size_t sizePerThread = 128;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
@@ -1236,7 +1236,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_CodeObjects) {
  */
 HIP_TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_Graph) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
@@ -1268,7 +1268,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_Graph) {
  */
 HIP_TEST_CASE(Unit_deviceAllocation_New_PerThread_Graph) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
@@ -1300,7 +1300,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_New_PerThread_Graph) {
  */
 HIP_TEST_CASE(Unit_deviceAllocation_DeviceFunc) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
@@ -1319,7 +1319,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_DeviceFunc) {
  */
 HIP_TEST_CASE(Unit_deviceAllocation_VirtualFunction) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
@@ -1328,12 +1328,12 @@ HIP_TEST_CASE(Unit_deviceAllocation_VirtualFunction) {
   size_t arraysize = (sizeBufferPerThread * BLOCKSIZE * GRIDSIZE);
   outputVec_h = reinterpret_cast<int*>(malloc(sizeof(int) * arraysize));
   REQUIRE(outputVec_h != nullptr);
-  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(int) * arraysize)));
+  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(int) * arraysize)))
   // Launch Test Kernel
   kerTestDynamicAllocVirtualFunc<<<GRIDSIZE, BLOCKSIZE>>>(outputVec_d, sizeBufferPerThread);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   // Copy to host buffer
-  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(int) * arraysize, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(int) * arraysize, hipMemcpyDefault))
   bool bPassed = true;
   for (size_t idx = 0; idx < arraysize; idx++) {
     if (outputVec_h[idx] != (idx / sizeBufferPerThread)) {
@@ -1342,7 +1342,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_VirtualFunction) {
     }
   }
   REQUIRE(true == bPassed);
-  HIP_CHECK(hipFree(outputVec_d));
+  HIP_CHECK(hipFree(outputVec_d))
   free(outputVec_h);
 }
 
@@ -1354,7 +1354,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_VirtualFunction) {
  */
 HIP_TEST_CASE(Unit_deviceAllocation_SingKernels_MulThreads) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
@@ -1403,7 +1403,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_SingKernels_MulThreads) {
  */
 HIP_TEST_CASE(Unit_deviceAllocation_Malloc_MulCodeObj) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
@@ -1416,7 +1416,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_Malloc_MulCodeObj) {
  */
 HIP_TEST_CASE(Unit_deviceAllocation_New_MulCodeObj) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
@@ -1430,10 +1430,10 @@ HIP_TEST_CASE(Unit_deviceAllocation_New_MulCodeObj) {
  */
 HIP_TEST_CASE(Unit_deviceAllocationFollowedByDeviceReset) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   REQUIRE(true == TestAllocInDeviceFunc(TEST_MALLOC_FREE));
-  HIP_CHECK(hipDeviceReset());
+  HIP_CHECK(hipDeviceReset())
 }

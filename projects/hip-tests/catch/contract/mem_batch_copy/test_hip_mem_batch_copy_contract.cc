@@ -17,7 +17,7 @@ constexpr size_t kBytes = 256;
 
 int CurrentDevice() {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   return device;
 }
 
@@ -51,19 +51,19 @@ HIP_TEST_CASE(Contract_MemBatchCopy_HipMemcpyBatchAsync_TwoOps_RoundTripBytes) {
   void* dev_dst_b = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&dev_src_a, kBytes));
+  HIP_CHECK(hipMalloc(&dev_src_a, kBytes))
   cleanup.Add([dev_src_a] { (void)hipFree(dev_src_a); });
-  HIP_CHECK(hipMalloc(&dev_src_b, kBytes));
+  HIP_CHECK(hipMalloc(&dev_src_b, kBytes))
   cleanup.Add([dev_src_b] { (void)hipFree(dev_src_b); });
-  HIP_CHECK(hipMalloc(&dev_dst_a, kBytes));
+  HIP_CHECK(hipMalloc(&dev_dst_a, kBytes))
   cleanup.Add([dev_dst_a] { (void)hipFree(dev_dst_a); });
-  HIP_CHECK(hipMalloc(&dev_dst_b, kBytes));
+  HIP_CHECK(hipMalloc(&dev_dst_b, kBytes))
   cleanup.Add([dev_dst_b] { (void)hipFree(dev_dst_b); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
-  HIP_CHECK(hipMemcpy(dev_src_a, src_a.data(), kBytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dev_src_b, src_b.data(), kBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dev_src_a, src_a.data(), kBytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(dev_src_b, src_b.data(), kBytes, hipMemcpyHostToDevice))
 
   // A batch of two independent device-to-device copies must deliver each source
   // to its matching destination after the stream is synchronized, behaving like
@@ -89,11 +89,11 @@ HIP_TEST_CASE(Contract_MemBatchCopy_HipMemcpyBatchAsync_TwoOps_RoundTripBytes) {
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Batch memcpy is not supported by this device/runtime path.");
   }
-  HIP_CHECK(status);
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(status)
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipMemcpy(out_a.data(), dev_dst_a, kBytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(out_b.data(), dev_dst_b, kBytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out_a.data(), dev_dst_a, kBytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(out_b.data(), dev_dst_b, kBytes, hipMemcpyDeviceToHost))
   REQUIRE(out_a == src_a);
   REQUIRE(out_b == src_b);
 }
@@ -108,13 +108,13 @@ HIP_TEST_CASE(Contract_MemBatchCopy_HipMemcpyBatchAsync_WithAttributes_RoundTrip
   void* dev_dst = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&dev_src, kBytes));
+  HIP_CHECK(hipMalloc(&dev_src, kBytes))
   cleanup.Add([dev_src] { (void)hipFree(dev_src); });
-  HIP_CHECK(hipMalloc(&dev_dst, kBytes));
+  HIP_CHECK(hipMalloc(&dev_dst, kBytes))
   cleanup.Add([dev_dst] { (void)hipFree(dev_dst); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipMemcpy(dev_src, src.data(), kBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dev_src, src.data(), kBytes, hipMemcpyHostToDevice))
 
   // A per-copy attribute selecting stream access ordering and device location
   // hints must not change the copy result: the destination still receives the
@@ -136,10 +136,10 @@ HIP_TEST_CASE(Contract_MemBatchCopy_HipMemcpyBatchAsync_WithAttributes_RoundTrip
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Batch memcpy is not supported by this device/runtime path.");
   }
-  HIP_CHECK(status);
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(status)
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipMemcpy(out.data(), dev_dst, kBytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out.data(), dev_dst, kBytes, hipMemcpyDeviceToHost))
   REQUIRE(out == src);
 }
 
@@ -150,11 +150,11 @@ HIP_TEST_CASE(Contract_MemBatchCopy_HipMemcpyBatchAsync_NullDestination_IsReject
   void* dev_src = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&dev_src, kBytes));
+  HIP_CHECK(hipMalloc(&dev_src, kBytes))
   cleanup.Add([dev_src] { (void)hipFree(dev_src); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipMemcpy(dev_src, src.data(), kBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dev_src, src.data(), kBytes, hipMemcpyHostToDevice))
 
   // A batch containing a null destination must not silently succeed. The exact
   // error code is backend-specific, so only a non-success status is required.
@@ -167,7 +167,7 @@ HIP_TEST_CASE(Contract_MemBatchCopy_HipMemcpyBatchAsync_NullDestination_IsReject
   attribute.srcLocHint = DeviceLocation();
   attribute.dstLocHint = DeviceLocation();
 
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   void* dsts[1] = {nullptr};
   void* srcs[1] = {dev_src};
   size_t sizes[1] = {kBytes};

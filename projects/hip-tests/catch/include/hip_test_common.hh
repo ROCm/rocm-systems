@@ -295,10 +295,10 @@ inline std::string& threadInfoMessageBuffer() {
 #define HIP_TEX_REFERENCE hipTexRef
 #define HIP_ARRAY hipArray_t
 static void initHipCtx(hipCtx_t* pcontext) {
-  HIPCHECK(hipInit(0));
+  HIPCHECK(hipInit(0))
   hipDevice_t device;
-  HIPCHECK(hipDeviceGet(&device, 0));
-  HIPCHECK(hipCtxCreate(pcontext, 0, device));
+  HIPCHECK(hipDeviceGet(&device, 0))
+  HIPCHECK(hipCtxCreate(pcontext, 0, device))
 }
 
 // hipLibrary* / hipModuleLoad use the CUDA driver API on NVIDIA and require
@@ -330,8 +330,8 @@ static inline int getWarpSize() {
 #elif HT_AMD
   int device = -1;
   int warpSize = -1;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipDeviceGetAttribute(&warpSize, hipDeviceAttributeWarpSize, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipDeviceGetAttribute(&warpSize, hipDeviceAttributeWarpSize, device))
   return warpSize;
 #else
   std::cout<<"Have to be either Nvidia or AMD platform, asserting"<<std::endl;
@@ -345,8 +345,8 @@ static inline bool IsGfx11() {
 #elif HT_AMD
   int device = -1;
   hipDeviceProp_t props{};
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   // Get GCN Arch Name and compare to check if it is gfx11
   std::string arch = std::string(props.gcnArchName);
   auto pos = arch.find("gfx11");
@@ -366,8 +366,8 @@ static inline bool IsNavi4X() {
 #elif HT_AMD
   int device = -1;
   hipDeviceProp_t props{};
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   std::string arch = std::string(props.gcnArchName);
   if (arch.find("gfx1200") != std::string::npos ||
       arch.find("gfx1201") != std::string::npos) {
@@ -388,8 +388,8 @@ static inline bool IsStrixHalo() {
 #elif HT_AMD
   int device = -1;
   hipDeviceProp_t props{};
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   // Get GCN Arch Name and compare to check if it is gfx1151
   std::string arch = std::string(props.gcnArchName);
   if (arch.find("gfx1151") != std::string::npos) {
@@ -407,7 +407,7 @@ static inline bool IsStrixHalo() {
 namespace HipTest {
 static inline int getDeviceCount() {
   int dev = 0;
-  HIP_CHECK(hipGetDeviceCount(&dev));
+  HIP_CHECK(hipGetDeviceCount(&dev))
   return dev;
 }
 
@@ -423,9 +423,9 @@ static inline double elapsed_time(long long startTimeUs, long long stopTimeUs) {
 
 static inline unsigned setNumBlocks(unsigned blocksPerCU, unsigned threadsPerBlock, size_t N) {
   int device{0};
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   hipDeviceProp_t props{};
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
 
   unsigned blocks = props.multiProcessorCount * blocksPerCU;
   if (blocks * threadsPerBlock < N) {
@@ -444,9 +444,9 @@ static inline void setNumBlocksThread(unsigned blocksPerCU, unsigned threadsPerB
   int device{0};
   blocks = 0;  // incase error has occured in some other thread and the next call might not execute,
                // we set the blocks size to 0
-  HIP_CHECK_THREAD(hipGetDevice(&device));
+  HIP_CHECK_THREAD(hipGetDevice(&device))
   hipDeviceProp_t props{};
-  HIP_CHECK_THREAD(hipGetDeviceProperties(&props, device));
+  HIP_CHECK_THREAD(hipGetDeviceProperties(&props, device))
 
   blocks = props.multiProcessorCount * blocksPerCU;
   if (blocks * threadsPerBlock > N) {
@@ -467,23 +467,23 @@ inline bool isImageSupported() {
   int imageSupport = 1;
 #if HT_AMD
   int device;
-  HIP_CHECK(hipGetDevice(&device));
-  HIPCHECK(hipDeviceGetAttribute(&imageSupport, hipDeviceAttributeImageSupport, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIPCHECK(hipDeviceGetAttribute(&imageSupport, hipDeviceAttributeImageSupport, device))
 #endif
   return imageSupport != 0;
 }
 
 inline bool isManagedMemorySupportedOnDevice(int device) {
   int managed = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, device));
+  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, device))
   return managed != 0;
 }
 
 inline bool isPcieAtomicSupported() {
   int pcieAtomic = 1;
   int device;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, device))
   return pcieAtomic;
 }
 
@@ -494,7 +494,7 @@ inline bool isP2PSupported(int& d1, int& d2) {
     int canAccess = 0;
     for (auto j = 0u; j < num_devices; ++j) {
       if (i != j) {
-        HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, i, j));
+        HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, i, j))
         if (!canAccess) {
           supported = 0;
           d1 = i;
@@ -509,15 +509,15 @@ inline bool isP2PSupported(int& d1, int& d2) {
 
 inline bool checkConcurrentKernels(int num_devices) {
   for (auto i = 0; i < num_devices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     int concurrent_kernels = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, i));
+    HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, i))
     if (!concurrent_kernels) {
       return false;
     }
   }
   if (num_devices > 1) {
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
   }
   return true;
 }
@@ -525,8 +525,8 @@ inline bool checkConcurrentKernels(int num_devices) {
 inline bool isXnackOn() {
   hipDeviceProp_t prop;
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&prop, device))
   std::string gfxName(prop.gcnArchName);
   return gfxName.find("xnack+") != std::string::npos;
 }
@@ -536,8 +536,8 @@ inline bool areWarpMatchFunctionsSupported() {
 #if HT_NVIDIA
   int device;
   hipDeviceProp_t prop;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&prop, device))
   if (prop.major < 7) {
     matchFunctionsSupported = 0;
   }
@@ -548,9 +548,9 @@ inline bool areWarpMatchFunctionsSupported() {
 inline bool isKernelArgPrefetchSupported() {
 #if HT_AMD && HT_LINUX
   int deviceId = 0;
-  HIP_CHECK(hipGetDevice(&deviceId));
+  HIP_CHECK(hipGetDevice(&deviceId))
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+  HIP_CHECK(hipGetDeviceProperties(&props, deviceId))
   std::cout << "Device Id = " << deviceId << " props.major = " << props.major
             << " props.minor = " << props.minor << std::endl;
   return (props.major == 12 && props.minor >= 5) ? true : false;
@@ -680,7 +680,7 @@ void launchKernel(K kernel, Dim numBlocks, Dim numThreads, std::uint32_t memPerB
   launchRTCKernel<Typenames...>(kernel, numBlocks, numThreads, memPerBlock, stream,
                                 std::forward<Args>(packedArgs)...);
 #endif
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 }
 
 //---
@@ -690,7 +690,7 @@ struct Pinned {
 
   static void* Alloc(size_t sizeBytes) {
     void* p;
-    HIPCHECK(hipHostMalloc((void**)&p, sizeBytes));
+    HIPCHECK(hipHostMalloc((void**)&p, sizeBytes))
     return p;
   };
 };
@@ -725,7 +725,7 @@ template <> struct MemTraits<Memcpy> {
   static void Copy(void* dest, const void* src, size_t sizeBytes, hipMemcpyKind kind,
                    hipStream_t stream) {
     (void)stream;
-    HIPCHECK(hipMemcpy(dest, src, sizeBytes, kind));
+    HIPCHECK(hipMemcpy(dest, src, sizeBytes, kind))
   }
 };
 
@@ -733,7 +733,7 @@ template <> struct MemTraits<Memcpy> {
 template <> struct MemTraits<MemcpyAsync> {
   static void Copy(void* dest, const void* src, size_t sizeBytes, hipMemcpyKind kind,
                    hipStream_t stream) {
-    HIPCHECK(hipMemcpyAsync(dest, src, sizeBytes, kind, stream));
+    HIPCHECK(hipMemcpyAsync(dest, src, sizeBytes, kind, stream))
   }
 };
 
@@ -771,7 +771,7 @@ class BlockingContext {
         std::this_thread::yield();
       }
     };
-    HIP_CHECK(hipStreamAddCallback(stream, blocking_callback, (void*)&blocked, 0));
+    HIP_CHECK(hipStreamAddCallback(stream, blocking_callback, (void*)&blocked, 0))
   }
 
   void unblock_stream() {

@@ -15,13 +15,13 @@ bool ManagedMemorySupported() {
   void* ptr = nullptr;
   const hipError_t status = hipMallocManaged(&ptr, kAttachBytes, hipMemAttachGlobal);
   if (status == hipSuccess) {
-    HIP_CHECK(hipFree(ptr));
+    HIP_CHECK(hipFree(ptr))
     return true;
   }
   if (status == hipErrorNotSupported || status == hipErrorOutOfMemory) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return false;
 }
 
@@ -50,13 +50,13 @@ HIP_TEST_CASE(Contract_StreamAttach_HipStreamAttachMemAsync_ManagedOnCreatedStre
   int* data = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost));
+  HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost))
   cleanup.Add([data] { (void)hipFree(data); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
-  HIP_CHECK(hipStreamAttachMemAsync(stream, AttachPtr(data), 0, hipMemAttachSingle));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamAttachMemAsync(stream, AttachPtr(data), 0, hipMemAttachSingle))
+  HIP_CHECK(hipStreamSynchronize(stream))
 }
 
 // @asserts: hipStreamAttachMemAsync - attaching managed memory with hipMemAttachGlobal on the null stream succeeds
@@ -66,11 +66,11 @@ HIP_TEST_CASE(Contract_StreamAttach_HipStreamAttachMemAsync_NullStreamAttachGlob
 
   int* data = nullptr;
 
-  HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost));
+  HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost))
   cleanup.Add([data] { (void)hipFree(data); });
 
-  HIP_CHECK(hipStreamAttachMemAsync(nullptr, AttachPtr(data), 0, hipMemAttachGlobal));
-  HIP_CHECK(hipStreamSynchronize(nullptr));
+  HIP_CHECK(hipStreamAttachMemAsync(nullptr, AttachPtr(data), 0, hipMemAttachGlobal))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 }
 
 // @asserts: hipStreamAttachMemAsync - a non-zero length with hipMemAttachSingle on a created stream succeeds
@@ -81,20 +81,20 @@ HIP_TEST_CASE(Contract_StreamAttach_HipStreamAttachMemAsync_NonZeroLengthAttachS
   int* data = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost));
+  HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost))
   cleanup.Add([data] { (void)hipFree(data); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
-  HIP_CHECK(hipStreamAttachMemAsync(stream, AttachPtr(data), kAttachBytes, hipMemAttachSingle));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamAttachMemAsync(stream, AttachPtr(data), kAttachBytes, hipMemAttachSingle))
+  HIP_CHECK(hipStreamSynchronize(stream))
 }
 
 // @asserts: hipStreamAttachMemAsync - rejects a null device pointer with a non-success error
 HIP_TEST_CASE(Contract_StreamAttach_HipStreamAttachMemAsync_NullDevPtr_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   REQUIRE(hipStreamAttachMemAsync(stream, nullptr, kAttachBytes, hipMemAttachSingle) != hipSuccess);
@@ -107,7 +107,7 @@ HIP_TEST_CASE(Contract_StreamAttach_HipStreamAttachMemAsync_NullStreamAttachSing
 
   int* data = nullptr;
 
-  HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost));
+  HIP_CHECK(hipMallocManaged(&data, kAttachBytes, hipMemAttachHost))
   cleanup.Add([data] { (void)hipFree(data); });
 
   REQUIRE(hipStreamAttachMemAsync(nullptr, AttachPtr(data), 0, hipMemAttachSingle) != hipSuccess);

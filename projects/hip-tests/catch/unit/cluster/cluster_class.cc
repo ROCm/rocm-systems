@@ -58,8 +58,8 @@ HIP_TEST_CASE(Unit_cluster_coop_group_class) {
   std::array<cluster_output, total_threads> out;
 
   cluster_output* d_out;
-  HIP_CHECK(hipMalloc(&d_out, sizeof(cluster_output) * total_threads));
-  HIP_CHECK(hipMemset(d_out, 0, sizeof(cluster_output) * total_threads));
+  HIP_CHECK(hipMalloc(&d_out, sizeof(cluster_output) * total_threads))
+  HIP_CHECK(hipMemset(d_out, 0, sizeof(cluster_output) * total_threads))
   cluster_class_validation<<<grid, block>>>(d_out);
   HIP_CHECK(
       hipMemcpy(out.data(), d_out, sizeof(cluster_output) * total_threads, hipMemcpyDeviceToHost));

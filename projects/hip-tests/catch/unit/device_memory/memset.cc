@@ -83,7 +83,7 @@ template <typename T> void MemsetPinnedCommon(kernel_sig<T> memset_kernel) {
         <<<thread_count, block_count>>>(result.host_ptr(), expected_value, element_count);
   }
 
-  HIP_CHECK(hipStreamSynchronize(nullptr));
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
   ArrayMismatch(reference.host_ptr(), result.host_ptr(), element_count);
 }

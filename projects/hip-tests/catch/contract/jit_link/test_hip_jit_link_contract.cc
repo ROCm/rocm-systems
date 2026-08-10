@@ -29,7 +29,7 @@ constexpr char kMissingFile[] = "hip-contract-test-missing.spv";
 
 hipLinkState_t CreateLinkState() {
   hipLinkState_t state = nullptr;
-  HIP_CHECK(hipLinkCreate(0, nullptr, nullptr, &state));
+  HIP_CHECK(hipLinkCreate(0, nullptr, nullptr, &state))
   REQUIRE(state != nullptr);
   return state;
 }
@@ -44,7 +44,7 @@ HIP_TEST_CASE(Contract_JitLink_HipLinkCreate_NullState_IsRejected) {
 HIP_TEST_CASE(Contract_JitLink_HipLinkCreate_Destroy_RoundTrips) {
   hipLinkState_t state = CreateLinkState();
 
-  HIP_CHECK(hipLinkDestroy(state));
+  HIP_CHECK(hipLinkDestroy(state))
 }
 
 // @asserts: hipLinkDestroy - rejects a null link state handle
@@ -58,7 +58,7 @@ HIP_TEST_CASE(Contract_JitLink_HipLinkComplete_NullOutputs_AreRejected) {
 
   REQUIRE(hipLinkComplete(state, nullptr, nullptr) != hipSuccess);
 
-  HIP_CHECK(hipLinkDestroy(state));
+  HIP_CHECK(hipLinkDestroy(state))
 }
 
 // @asserts: hipLinkAddData - rejects a null/invalid image and a malformed input of a valid type
@@ -70,7 +70,7 @@ HIP_TEST_CASE(Contract_JitLink_HipLinkAddData_InvalidImage_IsRejected) {
   REQUIRE(hipLinkAddData(state, hipJitInputPtx, const_cast<uint32_t*>(&kDummyInput),
                          sizeof(kDummyInput), "ptx", 0, nullptr, nullptr) != hipSuccess);
 
-  HIP_CHECK(hipLinkDestroy(state));
+  HIP_CHECK(hipLinkDestroy(state))
 }
 
 // @asserts: hipLinkAddFile - rejects adding a file with an unsupported input type / missing file
@@ -80,6 +80,6 @@ HIP_TEST_CASE(Contract_JitLink_HipLinkAddFile_InvalidInputType_IsRejected) {
   REQUIRE(hipLinkAddFile(state, hipJitInputFatBinary, kMissingFile, 0, nullptr, nullptr) !=
           hipSuccess);
 
-  HIP_CHECK(hipLinkDestroy(state));
+  HIP_CHECK(hipLinkDestroy(state))
 }
 #endif  // HT_AMD

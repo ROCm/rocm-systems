@@ -197,14 +197,14 @@ hipPerfStreamConcurrency::~hipPerfStreamConcurrency() {}
 
 bool hipPerfStreamConcurrency::open(int deviceId) {
   int nGpu = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpu));
+  HIP_CHECK(hipGetDeviceCount(&nGpu))
   if (nGpu < 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 
-  HIP_CHECK(hipSetDevice(deviceId));
+  HIP_CHECK(hipSetDevice(deviceId))
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+  HIP_CHECK(hipGetDeviceProperties(&props, deviceId))
   CONSOLE_PRINT("info: running on bus 0x%x %s with %d CUs and device ID: %d", props.pciBusID,
                 props.name, props.multiProcessorCount, deviceId);
 
@@ -219,7 +219,7 @@ bool hipPerfStreamConcurrency::run(unsigned int testCase, unsigned int deviceId)
   unsigned int numStreams = getNumStreams();
   unsigned int numKernels = getNumKernels();
 
-  HIP_CHECK(hipDeviceGetAttribute(&clkFrequency, hipDeviceAttributeClockRate, deviceId));
+  HIP_CHECK(hipDeviceGetAttribute(&clkFrequency, hipDeviceAttributeClockRate, deviceId))
   if (clkFrequency == 0) {
     CONSOLE_PRINT("clkFrequency = 0, set it to 1000000\n");
     clkFrequency = 1000000;
@@ -240,12 +240,12 @@ bool hipPerfStreamConcurrency::run(unsigned int testCase, unsigned int deviceId)
   bufSize = width_ * sizeof(uint);
   // Create streams for concurrency
   for (uint i = 0; i < numStreams; i++) {
-    HIP_CHECK(hipStreamCreate(&streams[i]));
+    HIP_CHECK(hipStreamCreate(&streams[i]))
   }
 
   // Allocate memory on the host and device
   for (uint i = 0; i < numKernels; i++) {
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&hPtr[i]), bufSize, hipHostMallocDefault));
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&hPtr[i]), bufSize, hipHostMallocDefault))
     setData(hPtr[i], 0xdeadbeef);
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dPtr[i]), bufSize))
   }
@@ -268,7 +268,7 @@ bool hipPerfStreamConcurrency::run(unsigned int testCase, unsigned int deviceId)
 
   // Synchronize to make sure all the copies are completed
   for (uint i = 0; i < numStreams; i++) {
-    HIP_CHECK(hipStreamSynchronize(streams[i]));
+    HIP_CHECK(hipStreamSynchronize(streams[i]))
   }
   // Warm-up kernel with lower iteration
   if (testCase == 0) {
@@ -284,7 +284,7 @@ bool hipPerfStreamConcurrency::run(unsigned int testCase, unsigned int deviceId)
 
   // Synchronize all the concurrent streans to have completed execution
   for (uint i = 0; i < numStreams; i++) {
-    HIP_CHECK(hipStreamSynchronize(streams[i]));
+    HIP_CHECK(hipStreamSynchronize(streams[i]))
   }
 
   auto all_end = std::chrono::steady_clock::now();
@@ -302,13 +302,13 @@ bool hipPerfStreamConcurrency::run(unsigned int testCase, unsigned int deviceId)
   }
 
   for (uint i = 0; i < numStreams; i++) {
-    HIP_CHECK(hipStreamDestroy(streams[i]));
+    HIP_CHECK(hipStreamDestroy(streams[i]))
   }
 
   // Free host and device memory
   for (uint i = 0; i < numKernels; i++) {
-    HIP_CHECK(hipHostFree(hPtr[i]));
-    HIP_CHECK(hipFree(dPtr[i]));
+    HIP_CHECK(hipHostFree(hPtr[i]))
+    HIP_CHECK(hipFree(dPtr[i]))
   }
 
   delete[] streams;

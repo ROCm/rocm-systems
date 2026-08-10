@@ -28,13 +28,13 @@ std::array<uint8_t, kByteCount> MakePattern(uint8_t seed) {
 
 int CurrentDevice() {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   return device;
 }
 
 int DeviceCount() {
   int count = 0;
-  HIP_CHECK(hipGetDeviceCount(&count));
+  HIP_CHECK(hipGetDeviceCount(&count))
   return count;
 }
 
@@ -46,7 +46,7 @@ bool TryMalloc3D(hipPitchedPtr* device_ptr, hipExtent extent) {
   if (status == hipErrorOutOfMemory || status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return false;
 }
 }  // namespace
@@ -63,15 +63,15 @@ HIP_TEST_CASE(Contract_PeerCopy_HipMemcpyPeer_SelfDevice1D_CopiesBytes) {
 
   int* device_src = nullptr;
   int* device_dst = nullptr;
-  HIP_CHECK(hipMalloc(&device_src, kByteCount));
+  HIP_CHECK(hipMalloc(&device_src, kByteCount))
   cleanup.Add([device_src] { (void)hipFree(device_src); });
-  HIP_CHECK(hipMalloc(&device_dst, kByteCount));
+  HIP_CHECK(hipMalloc(&device_dst, kByteCount))
   cleanup.Add([device_dst] { (void)hipFree(device_dst); });
-  HIP_CHECK(hipMemcpy(device_src, src.data(), kByteCount, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(device_src, src.data(), kByteCount, hipMemcpyHostToDevice))
 
-  HIP_CHECK(hipMemcpyPeer(device_dst, device, device_src, device, kByteCount));
+  HIP_CHECK(hipMemcpyPeer(device_dst, device, device_src, device, kByteCount))
 
-  HIP_CHECK(hipMemcpy(dst.data(), device_dst, kByteCount, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(dst.data(), device_dst, kByteCount, hipMemcpyDeviceToHost))
   REQUIRE(dst == src);
 }
 
@@ -85,20 +85,20 @@ HIP_TEST_CASE(Contract_PeerCopy_HipMemcpyPeerAsync_SelfDevice1DAsync_CopiesBytes
   int* device_src = nullptr;
   int* device_dst = nullptr;
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipMalloc(&device_src, kByteCount));
+  HIP_CHECK(hipMalloc(&device_src, kByteCount))
   cleanup.Add([device_src] { (void)hipFree(device_src); });
-  HIP_CHECK(hipMalloc(&device_dst, kByteCount));
+  HIP_CHECK(hipMalloc(&device_dst, kByteCount))
   cleanup.Add([device_dst] { (void)hipFree(device_dst); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipMemcpy(device_src, src.data(), kByteCount, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(device_src, src.data(), kByteCount, hipMemcpyHostToDevice))
 
   // The async self-peer copy must complete and be visible after the stream is
   // synchronized.
-  HIP_CHECK(hipMemcpyPeerAsync(device_dst, device, device_src, device, kByteCount, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpyPeerAsync(device_dst, device, device_src, device, kByteCount, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipMemcpy(dst.data(), device_dst, kByteCount, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(dst.data(), device_dst, kByteCount, hipMemcpyDeviceToHost))
   REQUIRE(dst == src);
 }
 
@@ -129,7 +129,7 @@ HIP_TEST_CASE(Contract_PeerCopy_HipMemcpy3DPeer_SelfDevice3D_CopiesExtent) {
   up.dstPtr = device_src;
   up.extent = extent;
   up.kind = hipMemcpyHostToDevice;
-  HIP_CHECK(hipMemcpy3D(&up));
+  HIP_CHECK(hipMemcpy3D(&up))
 
   hipMemcpy3DPeerParms peer{};
   peer.srcPtr = device_src;
@@ -137,7 +137,7 @@ HIP_TEST_CASE(Contract_PeerCopy_HipMemcpy3DPeer_SelfDevice3D_CopiesExtent) {
   peer.dstPtr = device_dst;
   peer.dstDevice = device;
   peer.extent = extent;
-  HIP_CHECK(hipMemcpy3DPeer(&peer));
+  HIP_CHECK(hipMemcpy3DPeer(&peer))
 
   // Read the destination back and confirm the bytes survived the peer copy.
   hipMemcpy3DParms down{};
@@ -145,7 +145,7 @@ HIP_TEST_CASE(Contract_PeerCopy_HipMemcpy3DPeer_SelfDevice3D_CopiesExtent) {
   down.dstPtr = make_hipPitchedPtr(dst.data(), kWidth, kWidth, kHeight);
   down.extent = extent;
   down.kind = hipMemcpyDeviceToHost;
-  HIP_CHECK(hipMemcpy3D(&down));
+  HIP_CHECK(hipMemcpy3D(&down))
 
   REQUIRE(dst == src);
 }
@@ -169,7 +169,7 @@ HIP_TEST_CASE(Contract_PeerCopy_HipMemcpy3DPeerAsync_SelfDevice3DAsync_CopiesExt
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
   cleanup.Add([p0 = device_dst.ptr] { (void)hipFree(p0); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   hipMemcpy3DParms up{};
@@ -177,7 +177,7 @@ HIP_TEST_CASE(Contract_PeerCopy_HipMemcpy3DPeerAsync_SelfDevice3DAsync_CopiesExt
   up.dstPtr = device_src;
   up.extent = extent;
   up.kind = hipMemcpyHostToDevice;
-  HIP_CHECK(hipMemcpy3D(&up));
+  HIP_CHECK(hipMemcpy3D(&up))
 
   hipMemcpy3DPeerParms peer{};
   peer.srcPtr = device_src;
@@ -185,15 +185,15 @@ HIP_TEST_CASE(Contract_PeerCopy_HipMemcpy3DPeerAsync_SelfDevice3DAsync_CopiesExt
   peer.dstPtr = device_dst;
   peer.dstDevice = device;
   peer.extent = extent;
-  HIP_CHECK(hipMemcpy3DPeerAsync(&peer, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpy3DPeerAsync(&peer, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   hipMemcpy3DParms down{};
   down.srcPtr = device_dst;
   down.dstPtr = make_hipPitchedPtr(dst.data(), kWidth, kWidth, kHeight);
   down.extent = extent;
   down.kind = hipMemcpyDeviceToHost;
-  HIP_CHECK(hipMemcpy3D(&down));
+  HIP_CHECK(hipMemcpy3D(&down))
 
   REQUIRE(dst == src);
 }
@@ -210,17 +210,17 @@ HIP_TEST_CASE(Contract_PeerCopy_HipMemcpyPeer_InvalidDevice_IsRejected) {
 
   int* device_src = nullptr;
   int* device_dst = nullptr;
-  HIP_CHECK(hipMalloc(&device_src, kByteCount));
+  HIP_CHECK(hipMalloc(&device_src, kByteCount))
   cleanup.Add([device_src] { (void)hipFree(device_src); });
-  HIP_CHECK(hipMalloc(&device_dst, kByteCount));
+  HIP_CHECK(hipMalloc(&device_dst, kByteCount))
   cleanup.Add([device_dst] { (void)hipFree(device_dst); });
 
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   const hipError_t status =
       hipMemcpyPeer(device_dst, device, device_src, invalid_device, kByteCount);
   REQUIRE(status != hipSuccess);
   // The rejected copy sets a sticky last error matching the returned status;
   // consume it, then confirm the error state is clear.
   HIP_CHECK_ERROR(hipGetLastError(), status);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 }

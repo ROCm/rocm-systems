@@ -110,8 +110,8 @@ void create_linked_lists_on_device(hipStream_t stream, Node* pNodes, unsigned in
                            // allocated (they hold the head of each list).
   create_linked_lists_on_device<<<(numLists + 255) / 256, 256, 0, stream>>>(pNodes, pAllocator,
                                                                             ListLength);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipStreamSynchronize(stream))
 }
 
 void verify_linked_lists_on_device(hipStream_t stream, Node* pNodes, unsigned int* pNumCorrect,
@@ -121,8 +121,8 @@ void verify_linked_lists_on_device(hipStream_t stream, Node* pNodes, unsigned in
   verify_linked_lists_on_device<<<(numLists + 255) / 256, 256, 0, stream>>>(pNodes, pNumCorrect,
                                                                             ListLength);
 
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   int correct_count = *pNumCorrect;
   if (correct_count != ListLength * numLists) {
@@ -160,11 +160,11 @@ void verify_linked_lists_on_device(hipStream_t stream, Node* pNodes, unsigned in
 HIP_TEST_CASE(Unit_svm_shared_address_space_fine_grain_buffers) {
   const unsigned int num_elements = 1024;
   int num_devices = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
 
   for (int id = 0; id < num_devices; id++) {
     int pcieAtomic = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, id));
+    HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, id))
     if (!pcieAtomic) {
       HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
     }
@@ -174,19 +174,19 @@ HIP_TEST_CASE(Unit_svm_shared_address_space_fine_grain_buffers) {
   std::vector<hipStream_t> streams(num_devices);
 
   for (int d = 0; d < num_devices; d++) {
-    HIP_CHECK(hipSetDevice(d));
-    HIP_CHECK(hipStreamCreate(&streams[d]));
+    HIP_CHECK(hipSetDevice(d))
+    HIP_CHECK(hipStreamCreate(&streams[d]))
   }
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   unsigned int numLists = num_elements;
   unsigned int ListLength = 32;
   Node* pNodes = nullptr;
   unsigned int* pAllocator = nullptr;
   unsigned int* pNumCorrect = nullptr;
-  HIP_CHECK(hipHostMalloc(&pNodes, sizeof(Node) * ListLength * numLists, hipHostMallocNonCoherent));
-  HIP_CHECK(hipHostMalloc(&pAllocator, sizeof(unsigned int), hipHostMallocCoherent));
-  HIP_CHECK(hipHostMalloc(&pNumCorrect, sizeof(unsigned int), hipHostMallocCoherent));
+  HIP_CHECK(hipHostMalloc(&pNodes, sizeof(Node) * ListLength * numLists, hipHostMallocNonCoherent))
+  HIP_CHECK(hipHostMalloc(&pAllocator, sizeof(unsigned int), hipHostMallocCoherent))
+  HIP_CHECK(hipHostMalloc(&pNumCorrect, sizeof(unsigned int), hipHostMallocCoherent))
 
   // Create linked list on one device and verify on another device (or the host).
   // Do this for all possible combinations of devices and host within the platform.
@@ -198,25 +198,25 @@ HIP_TEST_CASE(Unit_svm_shared_address_space_fine_grain_buffers) {
       {
         create_linked_lists_on_host(pNodes, numLists, ListLength);
       } else {
-        HIP_CHECK(hipSetDevice(ci));
+        HIP_CHECK(hipSetDevice(ci))
         create_linked_lists_on_device(streams[ci], pNodes, pAllocator, numLists, ListLength);
       }
 
       if (vi == num_devices) {
         verify_linked_lists_on_host(pNodes, numLists, ListLength);
       } else {
-        HIP_CHECK(hipSetDevice(vi));
+        HIP_CHECK(hipSetDevice(vi))
         verify_linked_lists_on_device(streams[vi], pNodes, pNumCorrect, numLists, ListLength);
       }
     }
   }
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipHostFree(pNodes));
-  HIP_CHECK(hipHostFree(pAllocator));
-  HIP_CHECK(hipHostFree(pNumCorrect));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipHostFree(pNodes))
+  HIP_CHECK(hipHostFree(pAllocator))
+  HIP_CHECK(hipHostFree(pNumCorrect))
   for (int d = 0; d < num_devices; d++) {
-    HIP_CHECK(hipStreamDestroy(streams[d]));
+    HIP_CHECK(hipStreamDestroy(streams[d]))
   }
   REQUIRE(true);
 }
@@ -247,18 +247,18 @@ HIP_TEST_CASE(Unit_svm_shared_address_space_fine_grain_buffers) {
 */
 HIP_TEST_CASE(Unit_svm_shared_address_space_fine_grain_system) {
   int num_devices = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
 
   for (int id = 0; id < num_devices; id++) {
     int pcieAtomic = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, id));
+    HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, id))
     if (!pcieAtomic) {
       HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
     }
 
     int pageableAccess = 0;
     // This need xnack+ on MiXXX. If xnack is off on MiXXX, try ENV HSA_XNACK=1
-    HIP_CHECK(hipDeviceGetAttribute(&pageableAccess, hipDeviceAttributePageableMemoryAccess, id));
+    HIP_CHECK(hipDeviceGetAttribute(&pageableAccess, hipDeviceAttributePageableMemoryAccess, id))
     if (!pageableAccess) {
       HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
     }
@@ -269,10 +269,10 @@ HIP_TEST_CASE(Unit_svm_shared_address_space_fine_grain_system) {
   std::vector<hipStream_t> streams(num_devices);
 
   for (int d = 0; d < num_devices; d++) {
-    HIP_CHECK(hipSetDevice(d));
-    HIP_CHECK(hipStreamCreate(&streams[d]));
+    HIP_CHECK(hipSetDevice(d))
+    HIP_CHECK(hipStreamCreate(&streams[d]))
   }
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   unsigned int numLists = num_elements;
   unsigned int ListLength = 32;
@@ -292,25 +292,25 @@ HIP_TEST_CASE(Unit_svm_shared_address_space_fine_grain_system) {
       {
         create_linked_lists_on_host(pNodes, numLists, ListLength);
       } else {
-        HIP_CHECK(hipSetDevice(ci));
+        HIP_CHECK(hipSetDevice(ci))
         create_linked_lists_on_device(streams[ci], pNodes, pAllocator, numLists, ListLength);
       }
 
       if (vi == num_devices) {
         verify_linked_lists_on_host(pNodes, numLists, ListLength);
       } else {
-        HIP_CHECK(hipSetDevice(vi));
+        HIP_CHECK(hipSetDevice(vi))
         verify_linked_lists_on_device(streams[vi], pNodes, pNumCorrect, numLists, ListLength);
       }
     }
   }
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   align_free(pNodes);
   align_free(pAllocator);
   align_free(pNumCorrect);
   for (int d = 0; d < num_devices; d++) {
-    HIP_CHECK(hipStreamDestroy(streams[d]));
+    HIP_CHECK(hipStreamDestroy(streams[d]))
   }
   REQUIRE(true);
 }

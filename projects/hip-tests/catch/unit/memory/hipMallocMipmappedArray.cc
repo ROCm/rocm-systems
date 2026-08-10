@@ -35,7 +35,7 @@ static constexpr auto ARRAY_LOOP{100};
  *
  */
 static void MallocMipmappedArray_DiffSizes(int gpu) {
-  HIP_CHECK_THREAD(hipSetDevice(gpu));
+  HIP_CHECK_THREAD(hipSetDevice(gpu))
   // Use of GENERATE in thead function causes random failures with multithread condition.
   std::vector<size_t> runs{ARRAY_SIZE, BIG_ARRAY_SIZE};
   for (const auto& size : runs) {
@@ -45,7 +45,7 @@ static void MallocMipmappedArray_DiffSizes(int gpu) {
       hipChannelFormatDesc channelDesc = hipCreateChannelDesc<float>();
       std::array<hipMipmappedArray_t, ARRAY_LOOP> arr;
       size_t pavail, avail, total;
-      HIP_CHECK_THREAD(hipMemGetInfo(&pavail, &total));
+      HIP_CHECK_THREAD(hipMemGetInfo(&pavail, &total))
 
       for (int i = 0; i < ARRAY_LOOP; i++) {
         HIP_CHECK_THREAD(hipMallocMipmappedArray(&arr[i], &channelDesc,
@@ -53,10 +53,10 @@ static void MallocMipmappedArray_DiffSizes(int gpu) {
                                                  (1 + numLevels), hipArrayDefault));
       }
       for (int i = 0; i < ARRAY_LOOP; i++) {
-        HIP_CHECK_THREAD(hipFreeMipmappedArray(arr[i]));
+        HIP_CHECK_THREAD(hipFreeMipmappedArray(arr[i]))
       }
 
-      HIP_CHECK_THREAD(hipMemGetInfo(&avail, &total));
+      HIP_CHECK_THREAD(hipMemGetInfo(&avail, &total))
       REQUIRE_THREAD(pavail == avail);
     }
   }
@@ -143,9 +143,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocMipmappedArray_happy, char, uint2, int4, sh
     HIP_CHECK_IGNORED_RETURN(hipMallocMipmappedArray(&array, &desc, extent, numLevels, flags),
                              hipErrorNotSupported);
     hipArray_t hipArray = nullptr;
-    HIP_CHECK(hipGetMipmappedArrayLevel(&hipArray, array, 0));
+    HIP_CHECK(hipGetMipmappedArrayLevel(&hipArray, array, 0))
     checkMipmappedArrayIsExpected(hipArray, desc, extent, flags);
-    HIP_CHECK(hipFreeMipmappedArray(array));
+    HIP_CHECK(hipFreeMipmappedArray(array))
   }
 }
 
@@ -405,5 +405,5 @@ HIP_TEST_CASE(Unit_hipGetMipmappedArrayLevel_Negative) {
     HIP_CHECK_ERROR(hipGetMipmappedArrayLevel(&level_array, nullptr, 1),
                     hipErrorInvalidResourceHandle);
   }
-  HIP_CHECK(hipFreeMipmappedArray(array));
+  HIP_CHECK(hipFreeMipmappedArray(array))
 }

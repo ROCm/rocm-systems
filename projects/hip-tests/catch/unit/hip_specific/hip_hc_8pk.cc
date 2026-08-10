@@ -41,7 +41,7 @@ HIP_TEST_CASE(Unit_Device__hip_hc_add8pk_Sanity_Positive) {
   for (int i = 0; i < 10; ++i) {
     __hip_hc_add8pk_kernel<<<1, 1>>>(out.ptr(), make_char4(0, 0, 0, input1[i]),
                                      make_char4(0, 0, 0, input2[i]));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(out.ptr()[0].x == 0);
     REQUIRE(out.ptr()[0].y == 0);
     REQUIRE(out.ptr()[0].z == 0);
@@ -74,7 +74,7 @@ HIP_TEST_CASE(Unit_Device__hip_hc_sub8pk_Sanity_Positive) {
   for (int i = 0; i < 10; ++i) {
     __hip_hc_sub8pk_kernel<<<1, 1>>>(out.ptr(), make_char4(0, 0, 0, input1[i]),
                                      make_char4(0, 0, 0, input2[i]));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(out.ptr()[0].x == 0);
     REQUIRE(out.ptr()[0].y == 0);
     REQUIRE(out.ptr()[0].z == 0);
@@ -107,7 +107,7 @@ HIP_TEST_CASE(Unit_Device__hip_hc_mul8pk_Sanity_Positive) {
   for (int i = 0; i < 10; ++i) {
     __hip_hc_mul8pk_kernel<<<1, 1>>>(out.ptr(), make_char4(0, 0, 0, input1[i]),
                                      make_char4(0, 0, 0, input2[i]));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(out.ptr()[0].x == 0);
     REQUIRE(out.ptr()[0].y == 0);
     REQUIRE(out.ptr()[0].z == 0);

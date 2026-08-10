@@ -46,32 +46,32 @@ HIP_TEST_CASE(Performance_KernelLaunchLatency_IncreasingNumberOfStreams) {
     launchOnNullStream = false;
   }
 
-  HIP_CHECK(hipEventCreate(&start));
-  HIP_CHECK(hipEventCreate(&stop));
+  HIP_CHECK(hipEventCreate(&start))
+  HIP_CHECK(hipEventCreate(&stop))
 
   for (auto& numHipStreams : streamsNumber) {
     vector<hipStream_t> streams(numHipStreams);
 
     if (isBlocking) {
       for (int i = 0; i < numHipStreams; ++i) {
-        HIP_CHECK(hipStreamCreate(&streams[i]));
+        HIP_CHECK(hipStreamCreate(&streams[i]))
       }
     } else {
       for (int i = 0; i < numHipStreams; ++i) {
-        HIP_CHECK(hipStreamCreateWithFlags(&streams[i], hipStreamNonBlocking));
+        HIP_CHECK(hipStreamCreateWithFlags(&streams[i], hipStreamNonBlocking))
       }
     }
 
     auto kernelStart = std::chrono::steady_clock::now();
     for (int i = 0; i < NITER; ++i) {
       if (launchOnNullStream) {
-        HIP_CHECK(hipEventRecord(start, NULL));
+        HIP_CHECK(hipEventRecord(start, NULL))
         _noop_kernel<<<1, 1>>>();
-        HIP_CHECK(hipEventRecord(stop, NULL));
+        HIP_CHECK(hipEventRecord(stop, NULL))
       } else {
-        HIP_CHECK(hipEventRecord(start, streams[0]));
+        HIP_CHECK(hipEventRecord(start, streams[0]))
         _noop_kernel<<<1, 1, 0, streams[0]>>>();
-        HIP_CHECK(hipEventRecord(stop, streams[0]));
+        HIP_CHECK(hipEventRecord(stop, streams[0]))
       }
       do {
         err = hipEventQuery(stop);
@@ -83,12 +83,12 @@ HIP_TEST_CASE(Performance_KernelLaunchLatency_IncreasingNumberOfStreams) {
     cout << "hipLaunchKernel average duration with " << numHipStreams
          << " streams: " << usec / NITER << " us" << std::endl;
 
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     for (int i = 0; i < numHipStreams; ++i) {
-      HIP_CHECK(hipStreamDestroy(streams[i]));
+      HIP_CHECK(hipStreamDestroy(streams[i]))
     }
   }
-  HIP_CHECK(hipEventDestroy(start));
-  HIP_CHECK(hipEventDestroy(stop));
+  HIP_CHECK(hipEventDestroy(start))
+  HIP_CHECK(hipEventDestroy(stop))
 }

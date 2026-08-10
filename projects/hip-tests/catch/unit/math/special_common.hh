@@ -105,12 +105,12 @@ void SpecialSimpleTest(F kernel, const ValidatorBuilder& validator_builder, cons
   LinearAllocGuard<T> y{LinearAllocs::hipHostMalloc, num_args * sizeof(T)};
   LinearAllocGuard<T> y_dev{LinearAllocs::hipMalloc, num_args * sizeof(T)};
 
-  HIP_CHECK(hipMemcpy(x_dev.ptr(), x, num_args * sizeof(T), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(x_dev.ptr(), x, num_args * sizeof(T), hipMemcpyHostToDevice))
 
   kernel<<<1, num_args>>>(y_dev.ptr(), num_args, x_dev.ptr());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
-  HIP_CHECK(hipMemcpy(y.ptr(), y_dev.ptr(), num_args * sizeof(T), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(y.ptr(), y_dev.ptr(), num_args * sizeof(T), hipMemcpyDeviceToHost))
 
   for (auto i = 0u; i < num_args; ++i) {
     const auto actual_val = y.ptr()[i];

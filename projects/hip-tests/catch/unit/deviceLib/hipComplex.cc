@@ -143,13 +143,13 @@ template <typename T1, typename T2> bool test_makehipComplex_dev() {
   }
   unsigned int size2 = LEN * sizeof(T2);
   unsigned int size1 = LEN * sizeof(T1);
-  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Ad), size2));
-  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Bd), size2));
-  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Cd), size1));
-  HIPCHECK(hipMemcpy(Ad, A, size2, hipMemcpyHostToDevice));
-  HIPCHECK(hipMemcpy(Bd, B, size2, hipMemcpyHostToDevice));
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Ad), size2))
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Bd), size2))
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Cd), size1))
+  HIPCHECK(hipMemcpy(Ad, A, size2, hipMemcpyHostToDevice))
+  HIPCHECK(hipMemcpy(Bd, B, size2, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(testMakeComplexFunc, dim3(1), dim3(LEN), 0, 0, Ad, Bd, Cd);
-  HIPCHECK(hipMemcpy(C, Cd, size1, hipMemcpyDeviceToHost));
+  HIPCHECK(hipMemcpy(C, Cd, size1, hipMemcpyDeviceToHost))
   // Validate the output of the kernel functions.
   for (uint32_t i = 0; i < LEN; i++) {
     if ((A[i] != C[i].x) || (B[i] != C[i].y)) {
@@ -157,9 +157,9 @@ template <typename T1, typename T2> bool test_makehipComplex_dev() {
       break;
     }
   }
-  HIPCHECK(hipFree(Cd));
-  HIPCHECK(hipFree(Bd));
-  HIPCHECK(hipFree(Ad));
+  HIPCHECK(hipFree(Cd))
+  HIPCHECK(hipFree(Bd))
+  HIPCHECK(hipFree(Ad))
   delete[] C;
   delete[] B;
   delete[] A;
@@ -185,13 +185,13 @@ bool test_complexMathFunc1_dev(enum ComplexFuncType mathFuncType) {
     B[i].y = (2 * i + 1) * 1.0 + 0.5;
   }
   unsigned int size = LEN * sizeof(T1);
-  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Ad), size));
-  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Bd), size));
-  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Cd), size));
-  HIPCHECK(hipMemcpy(Ad, A, size, hipMemcpyHostToDevice));
-  HIPCHECK(hipMemcpy(Bd, B, size, hipMemcpyHostToDevice));
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Ad), size))
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Bd), size))
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Cd), size))
+  HIPCHECK(hipMemcpy(Ad, A, size, hipMemcpyHostToDevice))
+  HIPCHECK(hipMemcpy(Bd, B, size, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(testComplexMathFunc1, dim3(1), dim3(LEN), 0, 0, Ad, Bd, Cd, mathFuncType);
-  HIPCHECK(hipMemcpy(C, Cd, size, hipMemcpyDeviceToHost));
+  HIPCHECK(hipMemcpy(C, Cd, size, hipMemcpyDeviceToHost))
   // Validate the output of the kernel functions.
   T2 epsilon = 0.0001f;
   T2 real, imag;
@@ -218,9 +218,9 @@ bool test_complexMathFunc1_dev(enum ComplexFuncType mathFuncType) {
       break;
     }
   }
-  HIPCHECK(hipFree(Cd));
-  HIPCHECK(hipFree(Bd));
-  HIPCHECK(hipFree(Ad));
+  HIPCHECK(hipFree(Cd))
+  HIPCHECK(hipFree(Bd))
+  HIPCHECK(hipFree(Ad))
   delete[] C;
   delete[] B;
   delete[] A;
@@ -244,11 +244,11 @@ bool test_complexMathFunc2_dev(enum ComplexFuncType mathFuncType) {
   }
   unsigned int size1 = LEN * sizeof(T1);
   unsigned int size2 = LEN * sizeof(T2);
-  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Ad), size1));
-  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Bd), size2));
-  HIPCHECK(hipMemcpy(Ad, A, size1, hipMemcpyHostToDevice));
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Ad), size1))
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Bd), size2))
+  HIPCHECK(hipMemcpy(Ad, A, size1, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(testComplexMathFunc2, dim3(1), dim3(LEN), 0, 0, Ad, Bd, mathFuncType);
-  HIPCHECK(hipMemcpy(B, Bd, size2, hipMemcpyDeviceToHost));
+  HIPCHECK(hipMemcpy(B, Bd, size2, hipMemcpyDeviceToHost))
   // Validate the output of the kernel functions.
   T2 epsilon = 0.0001f;
   if (mathFuncType == COMPLEX_REAL) {
@@ -287,8 +287,8 @@ bool test_complexMathFunc2_dev(enum ComplexFuncType mathFuncType) {
       }
     }
   }
-  HIPCHECK(hipFree(Bd));
-  HIPCHECK(hipFree(Ad));
+  HIPCHECK(hipFree(Bd))
+  HIPCHECK(hipFree(Ad))
   delete[] B;
   delete[] A;
   return TestPassed;

@@ -42,9 +42,9 @@ static void launchAtomicFunction(int* Hptr, int val, int TestToRun) {
   unsigned int memSize = sizeof(int) * 1;
   int* dptr{nullptr};
   // allocate device memory
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dptr), memSize));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dptr), memSize))
   // copy host memory to device
-  HIP_CHECK(hipMemcpy(dptr, Hptr, memSize, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dptr, Hptr, memSize, hipMemcpyHostToDevice))
   // launch kernel function
   if (TestToRun == 1) {
     AtomicCheckInc<<<1, 1>>>(dptr);
@@ -52,7 +52,7 @@ static void launchAtomicFunction(int* Hptr, int val, int TestToRun) {
     AtomicCheckDec<<<1, 1>>>(dptr);
   }
   // copy back from device to host
-  HIP_CHECK(hipMemcpy(Hptr, dptr, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(Hptr, dptr, memSize, hipMemcpyDeviceToHost))
   // verify the results.
   if (TestToRun == 1) {
     int result = verifyResultInc(val);
@@ -62,7 +62,7 @@ static void launchAtomicFunction(int* Hptr, int val, int TestToRun) {
     REQUIRE(result == Hptr[0]);
   }
   // Cleanup memory
-  HIP_CHECK(hipFree(dptr));
+  HIP_CHECK(hipFree(dptr))
 }
 
 HIP_TEST_CASE(Unit_AtomicFunctions_Inc) {

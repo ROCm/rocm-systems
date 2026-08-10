@@ -31,11 +31,11 @@ HIP_TEST_CASE(Contract_Transfer_HipMemcpy_HostToDeviceToHost_RoundTripsBytes) {
   std::array<uint8_t, kElementCount> dst{};
   void* device_ptr = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
-  HIP_CHECK(hipMemcpy(device_ptr, src.data(), src.size(), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(device_ptr, src.data(), src.size(), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost))
 
   REQUIRE(dst == src);
 }
@@ -48,14 +48,14 @@ HIP_TEST_CASE(Contract_Transfer_HipMemcpy_DeviceToDevice_CopiesBytes) {
   void* src_device_ptr = nullptr;
   void* dst_device_ptr = nullptr;
 
-  HIP_CHECK(hipMalloc(&src_device_ptr, src.size()));
+  HIP_CHECK(hipMalloc(&src_device_ptr, src.size()))
   cleanup.Add([src_device_ptr] { (void)hipFree(src_device_ptr); });
-  HIP_CHECK(hipMalloc(&dst_device_ptr, dst.size()));
+  HIP_CHECK(hipMalloc(&dst_device_ptr, dst.size()))
   cleanup.Add([dst_device_ptr] { (void)hipFree(dst_device_ptr); });
 
-  HIP_CHECK(hipMemcpy(src_device_ptr, src.data(), src.size(), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dst_device_ptr, src_device_ptr, src.size(), hipMemcpyDeviceToDevice));
-  HIP_CHECK(hipMemcpy(dst.data(), dst_device_ptr, dst.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(src_device_ptr, src.data(), src.size(), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(dst_device_ptr, src_device_ptr, src.size(), hipMemcpyDeviceToDevice))
+  HIP_CHECK(hipMemcpy(dst.data(), dst_device_ptr, dst.size(), hipMemcpyDeviceToHost))
 
   REQUIRE(dst == src);
 }
@@ -65,7 +65,7 @@ HIP_TEST_CASE(Contract_Transfer_HipMemcpy_ZeroBytes_Succeeds) {
   uint8_t src = 0x1;
   uint8_t dst = 0x2;
 
-  HIP_CHECK(hipMemcpy(&dst, &src, 0, hipMemcpyHostToHost));
+  HIP_CHECK(hipMemcpy(&dst, &src, 0, hipMemcpyHostToHost))
 
   REQUIRE(dst == 0x2);
 }
@@ -76,7 +76,7 @@ HIP_TEST_CASE(Contract_Transfer_HipMemcpy_InvalidDirection_ReturnsInvalidMemcpyD
   const auto src = MakePattern(0x9a);
   void* device_ptr = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK_ERROR(hipMemcpy(device_ptr, src.data(), src.size(), static_cast<hipMemcpyKind>(-1)),
                   hipErrorInvalidMemcpyDirection);

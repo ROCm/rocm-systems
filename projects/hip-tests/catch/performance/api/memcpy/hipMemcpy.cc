@@ -36,9 +36,9 @@ static void RunBenchmark(LinearAllocs dst_allocation_type, LinearAllocs src_allo
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
 
     LinearAllocGuard<int> src_allocation(src_allocation_type, size);
-    HIP_CHECK(hipSetDevice(dst_device));
+    HIP_CHECK(hipSetDevice(dst_device))
     LinearAllocGuard<int> dst_allocation(dst_allocation_type, size);
-    HIP_CHECK(hipSetDevice(src_device));
+    HIP_CHECK(hipSetDevice(src_device))
     benchmark.Run(dst_allocation.ptr(), src_allocation.ptr(), size, kind);
   }
 }

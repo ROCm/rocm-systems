@@ -56,14 +56,14 @@ HIP_TEST_CASE(Performance_hipGraph_ParallelGraph) {
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memCpy1, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memCpy2, graph, nullptr, 0, B_d, B_h, Nbytes,
                                     hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memCpy1, &memCpy2, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memCpy1, &memCpy2, 1))
 
   for (int i = 0; i < kNumNode; i++) {
     hipKernelNodeParams kernelNodeParams{};
@@ -74,27 +74,27 @@ HIP_TEST_CASE(Performance_hipGraph_ParallelGraph) {
     kernelNodeParams.sharedMemBytes = 0;
     kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
     kernelNodeParams.extra = nullptr;
-    HIP_CHECK(hipGraphAddKernelNode(&kNode[i], graph, nullptr, 0, &kernelNodeParams));
-    HIP_CHECK(hipGraphAddDependencies(graph, &memCpy2, &kNode[i], 1));
+    HIP_CHECK(hipGraphAddKernelNode(&kNode[i], graph, nullptr, 0, &kernelNodeParams))
+    HIP_CHECK(hipGraphAddDependencies(graph, &memCpy2, &kNode[i], 1))
   }
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memCpy3, graph, nullptr, 0, C_h, C_d, Nbytes,
                                     hipMemcpyDeviceToHost));
   for (int i = 0; i < kNumNode; i++) {
-    HIP_CHECK(hipGraphAddDependencies(graph, &kNode[i], &memCpy3, 1));
+    HIP_CHECK(hipGraphAddDependencies(graph, &kNode[i], &memCpy3, 1))
   }
 
   hipGraphNode_t* nodes{nullptr};
   size_t numNodes = 0;
-  HIP_CHECK(hipGraphGetNodes(graph, nodes, &numNodes));
+  HIP_CHECK(hipGraphGetNodes(graph, nodes, &numNodes))
   INFO("Num of nodes in the graph: " << numNodes);
   INFO("Number Graph Launches: " << GRAPH_LAUNCH_ITERATIONS);
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   // start time
   auto start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < GRAPH_LAUNCH_ITERATIONS; i++) {
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
   }
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   // Stop time
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = stop - start;
@@ -105,9 +105,9 @@ HIP_TEST_CASE(Performance_hipGraph_ParallelGraph) {
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 /**
  * Test Description
@@ -125,20 +125,20 @@ HIP_TEST_CASE(Performance_hipGraph_ParallelGraph) {
 HIP_TEST_CASE(Performance_hipGraph_WithStreamOperations) {
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   int *A_d, *B_d, *C_d, *A_h, *B_h, *C_h;
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
 
   auto start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < GRAPH_LAUNCH_ITERATIONS; i++) {
-    HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyDefault, stream));
-    HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyDefault, stream));
+    HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyDefault, stream))
+    HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyDefault, stream))
     for (int i = 0; i < kNumNode; i++) {
       hipLaunchKernelGGL(vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream, A_d, B_d, C_d,
                          NElem);
     }
-    HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDefault, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDefault, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = stop - start;
@@ -149,7 +149,7 @@ HIP_TEST_CASE(Performance_hipGraph_WithStreamOperations) {
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 /**
  * Test Description
@@ -168,27 +168,27 @@ HIP_TEST_CASE(Performance_hipGraph_WithStreamCapture) {
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   hipGraph_t graph;
   hipStream_t stream, streamForGraph;
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   int *A_d, *B_d, *C_d, *A_h, *B_h, *C_h;
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyDefault, stream));
-  HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyDefault, stream));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyDefault, stream))
+  HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyDefault, stream))
   for (int i = 0; i < kNumNode; i++) {
     hipLaunchKernelGGL(vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream, A_d, B_d, C_d,
                        NElem);
   }
-  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDefault, stream));
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDefault, stream))
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
 
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   auto start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < GRAPH_LAUNCH_ITERATIONS; i++) {
-    HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
+    HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
   }
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = stop - start;
   INFO("Time taken for Graph via Stream Capture: "
@@ -198,7 +198,7 @@ HIP_TEST_CASE(Performance_hipGraph_WithStreamCapture) {
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**

@@ -28,14 +28,14 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeArray_DifferentSizes, uchar2, char, ushort, s
   extent.height = height;
   hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
 
-  HIP_CHECK(hipMallocArray(&arrayPtr, &desc, extent.width, extent.height, hipArrayDefault));
+  HIP_CHECK(hipMallocArray(&arrayPtr, &desc, extent.width, extent.height, hipArrayDefault))
 
-  HIP_CHECK(hipFreeArray(arrayPtr));
+  HIP_CHECK(hipFreeArray(arrayPtr))
 }
 
 HIP_TEST_CASE(Unit_hipFreeArray_NegativeArray) {
 #if HT_NVIDIA
-  HIP_CHECK(hipFreeArray(nullptr));
+  HIP_CHECK(hipFreeArray(nullptr))
 #else
   HIP_CHECK_ERROR(hipFreeArray(nullptr), hipErrorInvalidValue);
 #endif
@@ -56,9 +56,9 @@ HIP_TEST_CASE(Unit_hipFreeArray_DoubleFree) {
   extent.height = height;
   hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
 
-  HIP_CHECK(hipMallocArray(&arrayPtr, &desc, extent.width, extent.height, hipArrayDefault));
+  HIP_CHECK(hipMallocArray(&arrayPtr, &desc, extent.width, extent.height, hipArrayDefault))
 
-  HIP_CHECK(hipFreeArray(arrayPtr));
+  HIP_CHECK(hipFreeArray(arrayPtr))
   HIP_CHECK_ERROR(hipFreeArray(arrayPtr), hipErrorContextIsDestroyed);
 }
 
@@ -85,11 +85,11 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeArray_MultiThreaded, char, int, float2, float
   std::vector<std::thread> threads;
 
   for (auto arr : arr_ptrs) {
-    HIP_CHECK(hipMallocArray(&arr, &desc, extent.width, extent.height, hipArrayDefault));
+    HIP_CHECK(hipMallocArray(&arr, &desc, extent.width, extent.height, hipArrayDefault))
 
     threads.emplace_back([arr] {
-      HIP_CHECK_THREAD(hipFreeArray(arr));
-      HIP_CHECK_THREAD(hipStreamQuery(nullptr));
+      HIP_CHECK_THREAD(hipFreeArray(arr))
+      HIP_CHECK_THREAD(hipStreamQuery(nullptr))
     });
   }
 

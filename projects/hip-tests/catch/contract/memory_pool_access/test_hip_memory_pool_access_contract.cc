@@ -12,8 +12,8 @@ namespace {
 bool MemoryPoolsSupported() {
   int device = 0;
   int supported = 0;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeMemoryPoolsSupported, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeMemoryPoolsSupported, device))
   return supported != 0;
 }
 
@@ -25,7 +25,7 @@ void SkipIfMemoryPoolsUnsupported() {
 
 hipMemPoolProps CurrentDevicePoolProps() {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   hipMemPoolProps props{};
   props.allocType = hipMemAllocationTypePinned;
   props.handleTypes = hipMemHandleTypeNone;
@@ -43,13 +43,13 @@ bool CreatePool(hipMemPool_t* pool) {
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return false;
 }
 
 hipMemAccessDesc CurrentDeviceAccessDesc(hipMemAccessFlags flags) {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   hipMemAccessDesc desc{};
   desc.location.type = hipMemLocationTypeDevice;
   desc.location.id = device;
@@ -74,7 +74,7 @@ HIP_TEST_CASE(Contract_MemoryPoolAccess_HipMemPoolSetAccess_CurrentDevice_Succee
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("hipMemPoolSetAccess is not supported by this device/runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 }
 
 // @asserts: hipMemPoolGetAccess - reads back the read-write flags previously granted to the current device via SetAccess
@@ -94,9 +94,9 @@ HIP_TEST_CASE(Contract_MemoryPoolAccess_HipMemPoolGetAccess_CurrentDevice_Return
   if (set_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("hipMemPoolSetAccess is not supported by this device/runtime path.");
   }
-  HIP_CHECK(set_status);
+  HIP_CHECK(set_status)
   hipMemLocation location = access.location;
-  HIP_CHECK(hipMemPoolGetAccess(&flags, pool, &location));
+  HIP_CHECK(hipMemPoolGetAccess(&flags, pool, &location))
 
   REQUIRE((flags & hipMemAccessFlagsProtReadWrite) == hipMemAccessFlagsProtReadWrite);
 }
@@ -117,7 +117,7 @@ HIP_TEST_CASE(Contract_MemoryPoolAccess_HipMemPoolSetAccess_NoneCurrentDevice_Is
   if (set_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("hipMemPoolSetAccess is not supported by this device/runtime path.");
   }
-  HIP_CHECK(set_status);
+  HIP_CHECK(set_status)
 
   access.flags = hipMemAccessFlagsProtNone;
   const hipError_t revoke_status = hipMemPoolSetAccess(pool, &access, 1);

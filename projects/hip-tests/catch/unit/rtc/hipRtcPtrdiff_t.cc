@@ -53,10 +53,10 @@ HIP_TEST_CASE(Unit_hipRTC_Ptrdiff_t_Check) {
   unsigned int Nbytes = sizeof(unsigned int);
   result_h = new unsigned int;
   *result_h = 0;
-  HIP_CHECK(hipMalloc(&result_d, Nbytes));
-  HIP_CHECK(hipMemcpy(result_d, result_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&result_d, Nbytes))
+  HIP_CHECK(hipMemcpy(result_d, result_h, Nbytes, hipMemcpyHostToDevice))
   hipDeviceProp_t prop;
-  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0))
   std::string architecture = prop.gcnArchName;
   std::string complete_CO = "--gpu-architecture=" + architecture;
   hiprtcProgram prog;
@@ -94,17 +94,17 @@ HIP_TEST_CASE(Unit_hipRTC_Ptrdiff_t_Check) {
                               HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
   hipModule_t module;
   hipFunction_t function;
-  HIP_CHECK(hipModuleLoadData(&module, codec.data()));
-  HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipModuleLoadData(&module, codec.data()))
+  HIP_CHECK(hipModuleGetFunction(&function, module, kername))
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter))
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost))
   if (*result_h != 1) {
     REQUIRE(false);
   }
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
-  HIP_CHECK(hipFree(result_d));
+  HIP_CHECK(hipFree(result_d))
   delete result_h;
   delete[] compiler_options;
 }

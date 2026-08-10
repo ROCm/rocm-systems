@@ -30,20 +30,20 @@ HIP_TEST_CASE(Unit_hipStreamGetPriority_spt_BasicTst) {
   int priority_low = 0;
   int priority_high = 0;
   int devID = GENERATE(range(0, HipTest::getDeviceCount()));
-  HIP_CHECK(hipSetDevice(devID));
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high));
+  HIP_CHECK(hipSetDevice(devID))
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high))
   hipStream_t stream{};
   int priority = 0;
   SECTION("Null Stream") {
-    HIP_CHECK(hipStreamGetPriority_spt(nullptr, &priority));
+    HIP_CHECK(hipStreamGetPriority_spt(nullptr, &priority))
     // valid priority
     REQUIRE(priority_low >= priority);
     REQUIRE(priority >= priority_high);
   }
   SECTION("Created Stream") {
     SECTION("Default Priority") {
-      HIP_CHECK(hipStreamCreate(&stream));
-      HIP_CHECK(hipStreamGetPriority_spt(stream, &priority));
+      HIP_CHECK(hipStreamCreate(&stream))
+      HIP_CHECK(hipStreamGetPriority_spt(stream, &priority))
       // valid priority
       // Lower the value higher the priority,
       // higher the value lower the priority
@@ -51,26 +51,26 @@ HIP_TEST_CASE(Unit_hipStreamGetPriority_spt_BasicTst) {
       REQUIRE(priority >= priority_high);
     }
     SECTION("High Priority") {
-      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, priority_high));
-      HIP_CHECK(hipStreamGetPriority_spt(stream, &priority));
+      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, priority_high))
+      HIP_CHECK(hipStreamGetPriority_spt(stream, &priority))
       REQUIRE(priority == priority_high);
     }
     SECTION("Higher Priority") {
-      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamNonBlocking, priority_high - 1));
-      HIP_CHECK(hipStreamGetPriority_spt(stream, &priority));
+      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamNonBlocking, priority_high - 1))
+      HIP_CHECK(hipStreamGetPriority_spt(stream, &priority))
       REQUIRE(priority == priority_high);
     }
     SECTION("Low Priority") {
-      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, priority_low));
-      HIP_CHECK(hipStreamGetPriority_spt(stream, &priority));
+      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, priority_low))
+      HIP_CHECK(hipStreamGetPriority_spt(stream, &priority))
       REQUIRE(priority_low == priority);
     }
     SECTION("Lower Priority") {
-      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamNonBlocking, priority_low + 1));
-      HIP_CHECK(hipStreamGetPriority_spt(stream, &priority));
+      HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamNonBlocking, priority_low + 1))
+      HIP_CHECK(hipStreamGetPriority_spt(stream, &priority))
       REQUIRE(priority_low == priority);
     }
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 
@@ -91,13 +91,13 @@ HIP_TEST_CASE(Unit_hipStreamGetPriority_spt_NegativeCases) {
   REQUIRE(res == hipErrorInvalidValue);
   // priority as nullptr
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   res = hipStreamGetPriority_spt(stream, nullptr);
   REQUIRE(res == hipErrorInvalidValue);
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
   // stream as nullptr
   int priority = -1;
-  HIP_CHECK(hipStreamGetPriority_spt(nullptr, &priority));
+  HIP_CHECK(hipStreamGetPriority_spt(nullptr, &priority))
 }
 /**
  * Test Description
@@ -119,17 +119,17 @@ HIP_TEST_CASE(Unit_hipStreamGetPriority_spt_StreamsWithCUMask) {
   int priority_low = 0;
   int priority_high = 0;
   // Test is to get the Stream Priority Range
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high));
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high))
   priority_normal = (priority_low + priority_high) / 2;
   // Check if priorities are indeed supported
   REQUIRE_FALSE(priority_low == priority_high);
   // Creating a stream with hipExtStreamCreateWithCUMask and checking
   // priority.
   const uint32_t cuMask = 0xffffffff;
-  HIP_CHECK(hipExtStreamCreateWithCUMask(&stream, 1, &cuMask));
-  HIP_CHECK(hipStreamGetPriority_spt(stream, &priority));
+  HIP_CHECK(hipExtStreamCreateWithCUMask(&stream, 1, &cuMask))
+  HIP_CHECK(hipStreamGetPriority_spt(stream, &priority))
   REQUIRE_FALSE(priority_normal != priority);
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 #endif
 

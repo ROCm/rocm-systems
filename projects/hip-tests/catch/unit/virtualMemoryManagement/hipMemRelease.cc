@@ -40,7 +40,7 @@ HIP_TEST_CASE(Unit_hipMemRelease_Capture) {
   size_t allocation_granularity = 0;
   int device_id = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, device_id));
+  HIP_CHECK(hipDeviceGet(&device, device_id))
 
   hipMemAllocationProp allocation_prop{};
   allocation_prop.type = hipMemAllocationTypePinned;
@@ -49,15 +49,15 @@ HIP_TEST_CASE(Unit_hipMemRelease_Capture) {
 
   HIP_CHECK(hipMemGetAllocationGranularity(&allocation_granularity, &allocation_prop,
                                            hipMemAllocationGranularityMinimum));
-  HIP_CHECK(hipMemCreate(&allocation_handle, allocation_granularity, &allocation_prop, 0));
+  HIP_CHECK(hipMemCreate(&allocation_handle, allocation_granularity, &allocation_prop, 0))
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemRelease(allocation_handle));
+  HIP_CHECK(hipMemRelease(allocation_handle))
   END_CAPTURE(stream);
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**

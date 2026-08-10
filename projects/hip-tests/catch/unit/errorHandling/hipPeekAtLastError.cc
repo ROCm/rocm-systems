@@ -30,11 +30,11 @@
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipPeekAtLastError_Positive_Basic) {
-  HIP_CHECK(hipPeekAtLastError());
+  HIP_CHECK(hipPeekAtLastError())
   HIP_CHECK_ERROR(hipMalloc(nullptr, 1), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
-  HIP_CHECK(hipPeekAtLastError());
+  HIP_CHECK(hipPeekAtLastError())
 }
 
 /**
@@ -57,8 +57,8 @@ HIP_TEST_CASE(Unit_hipPeekAtLastError_Positive_Threaded) {
    public:
     void TestPart2() { REQUIRE_THREAD(hipMalloc(nullptr, 1) == hipErrorInvalidValue); }
     void TestPart3() {
-      HIP_CHECK(hipPeekAtLastError());
-      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipPeekAtLastError())
+      HIP_CHECK(hipGetLastError())
     }
     void TestPart4() { REQUIRE_THREAD(hipPeekAtLastError() == hipErrorInvalidValue); }
   };
@@ -81,9 +81,9 @@ HIP_TEST_CASE(Unit_hipPeekAtLastError_Positive_Threaded) {
 HIP_TEST_CASE(Unit_hipPeekAtLastError_Positive) {
     HIP_CHECK_ERROR(hipMalloc(nullptr, 1), hipErrorInvalidValue);
     int* A_d;
-    HIP_CHECK(hipMalloc(&A_d, 1024));
+    HIP_CHECK(hipMalloc(&A_d, 1024))
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
-    HIP_CHECK(hipFree(A_d));
+    HIP_CHECK(hipFree(A_d))
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
 }
@@ -105,10 +105,10 @@ HIP_TEST_CASE(Unit_hipPeekAtLastError_Chk_Updated_Status) {
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
     int* C_d;
-    HIP_CHECK(hipMalloc(&C_d, 1024));
+    HIP_CHECK(hipMalloc(&C_d, 1024))
     HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(-1, hipGraphMemAttrUsedMemCurrent, &value),
                     hipErrorInvalidDevice);
-    HIP_CHECK(hipFree(C_d));
+    HIP_CHECK(hipFree(C_d))
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidDevice);
 }
 /**
@@ -129,8 +129,8 @@ HIP_TEST_CASE(Unit_hipPeekAtLastError_Chk_Along_hipGetLastError) {
     HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
     int* C_d;
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipSuccess);
-    HIP_CHECK(hipMalloc(&C_d, 1024));
-    HIP_CHECK(hipFree(C_d));
+    HIP_CHECK(hipMalloc(&C_d, 1024))
+    HIP_CHECK(hipFree(C_d))
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipSuccess);
 }
 
@@ -151,39 +151,39 @@ HIP_TEST_CASE(Unit_hipPeekAtLastError_Error_Combinations) {
   int value = 0;
   hipGraph_t graph;
   SECTION("A case with Error-Error-Success-Success") {
-      HIP_CHECK(hipPeekAtLastError());
+      HIP_CHECK(hipPeekAtLastError())
       HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
       HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(-1, hipGraphMemAttrUsedMemCurrent, &value),
                       hipErrorInvalidDevice);
       HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidDevice);
       int* A_d;
-      HIP_CHECK(hipMalloc(&A_d, 1024));
-      HIP_CHECK(hipFree(A_d));
+      HIP_CHECK(hipMalloc(&A_d, 1024))
+      HIP_CHECK(hipFree(A_d))
       HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidDevice);
   }
   SECTION("A case with Error-Success-Error-Success") {
       HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
       int* A_d;
-      HIP_CHECK(hipMalloc(&A_d, 1024));
+      HIP_CHECK(hipMalloc(&A_d, 1024))
       HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(-1, hipGraphMemAttrUsedMemCurrent, &value),
                       hipErrorInvalidDevice);
-      HIP_CHECK(hipFree(A_d));
+      HIP_CHECK(hipFree(A_d))
       HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidDevice);
   }
   SECTION("A case with Success-Error-Error-Success") {
       int *A_d;
-      HIP_CHECK(hipMalloc(&A_d, 1024));
+      HIP_CHECK(hipMalloc(&A_d, 1024))
       HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
       HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(-1, hipGraphMemAttrUsedMemCurrent, &value),
                       hipErrorInvalidDevice);
-      HIP_CHECK(hipFree(A_d));
+      HIP_CHECK(hipFree(A_d))
       HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidDevice);
   }
   SECTION("A Case with Success-Error-Success-Error") {
       int *A_d;
-      HIP_CHECK(hipMalloc(&A_d, 1024));
+      HIP_CHECK(hipMalloc(&A_d, 1024))
       HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
-      HIP_CHECK(hipFree(A_d));
+      HIP_CHECK(hipFree(A_d))
       HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(-1, hipGraphMemAttrUsedMemCurrent, &value),
                       hipErrorInvalidDevice);
       HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidDevice);
@@ -213,7 +213,7 @@ static void thread_func() {
 HIP_TEST_CASE(Unit_hipPeekAtLastError_With_Thread) {
   hipGraph_t graph;
     int *A_d;
-    HIP_CHECK(hipMalloc(&A_d, 1024));
+    HIP_CHECK(hipMalloc(&A_d, 1024))
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     std::thread t(thread_func);
     t.join();
@@ -235,13 +235,13 @@ HIP_TEST_CASE(Unit_hipPeekAtLastError_With_Thread) {
 HIP_TEST_CASE(Unit_hipPeekAtLastError_MultiProcess) {
   hipGraph_t graph;
     int *A_d;
-    HIP_CHECK(hipMalloc(&A_d, 1024));
+    HIP_CHECK(hipMalloc(&A_d, 1024))
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     hip::SpawnProc proc("hipPeekAtLastErrorEnv_Exe", true);
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
     REQUIRE(proc.run() == 1);
-    HIP_CHECK(hipFree(A_d));
+    HIP_CHECK(hipFree(A_d))
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
 }
 static void __global__ emptyKernl() {}
@@ -264,10 +264,10 @@ HIP_TEST_CASE(Unit_hipPeekAtLastError_Kernel_Invalid_Config) {
   hipError_t ret;
     hipLaunchKernelGGL(emptyKernl, dim3(0), dim3(0), 0, 0);
     int* A_d;
-    HIP_CHECK(hipMalloc(&A_d, 1024));
+    HIP_CHECK(hipMalloc(&A_d, 1024))
     ret = hipPeekAtLastError();
     REQUIRE(ret == hipErrorInvalidConfiguration);
-    HIP_CHECK(hipFree(A_d));
+    HIP_CHECK(hipFree(A_d))
 }
 #endif
 /**

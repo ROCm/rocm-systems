@@ -28,7 +28,7 @@ void getGranularity(size_t* granularity, hipMemAllocationGranularity_flags optio
   prop.type = hipMemAllocationTypePinned;
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
-  HIP_CHECK(hipMemGetAllocationGranularity(granularity, &prop, option));
+  HIP_CHECK(hipMemGetAllocationGranularity(granularity, &prop, option))
 }
 
 /**
@@ -43,12 +43,12 @@ void getGranularity(size_t* granularity, hipMemAllocationGranularity_flags optio
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemGetAllocationGranularity_AllGPUs) {
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   for (int dev = 0; dev < numDevices; dev++) {
     hipDevice_t device;
-    HIP_CHECK(hipDeviceGet(&device, dev));
+    HIP_CHECK(hipDeviceGet(&device, dev))
     checkVMMSupported(device);
 
     size_t min_granularity = 0;
@@ -76,10 +76,10 @@ HIP_TEST_CASE(Unit_hipMemGetAllocationGranularity_AllGPUs) {
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemGetAllocationGranularity_NegativeTests) {
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
   size_t granularity = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
@@ -104,7 +104,7 @@ HIP_TEST_CASE(Unit_hipMemGetAllocationGranularity_NegativeTests) {
 #if HT_AMD  // succeeds on NVIDIA
   SECTION("device id > highest device id") {
     int numDevices = 0;
-    HIP_CHECK(hipGetDeviceCount(&numDevices));
+    HIP_CHECK(hipGetDeviceCount(&numDevices))
     prop.location.id = numDevices;  // set to non existing device
     REQUIRE(hipErrorInvalidValue == hipMemGetAllocationGranularity(
                                         &granularity, &prop, hipMemAllocationGranularityMinimum));
@@ -133,7 +133,7 @@ HIP_TEST_CASE(Unit_hipMemGetAllocationGranularity_Capture) {
   size_t granularity = 0;
   constexpr int kDeviceId = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  HIP_CHECK(hipDeviceGet(&device, kDeviceId))
 
   hipMemAllocationProp allocation_prop{};
   allocation_prop.type = hipMemAllocationTypePinned;
@@ -141,7 +141,7 @@ HIP_TEST_CASE(Unit_hipMemGetAllocationGranularity_Capture) {
   allocation_prop.location.id = device;  // Current Device
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
@@ -149,7 +149,7 @@ HIP_TEST_CASE(Unit_hipMemGetAllocationGranularity_Capture) {
                                            hipMemAllocationGranularityMinimum));
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 
   CTX_DESTROY();
 }

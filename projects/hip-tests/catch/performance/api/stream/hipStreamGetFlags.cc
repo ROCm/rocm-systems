@@ -19,7 +19,7 @@ class StreamGetFlagsBenchmark : public Benchmark<StreamGetFlagsBenchmark> {
     unsigned int returned_flags{};
     hipStream_t stream;
 
-    HIP_CHECK(hipStreamCreateWithFlags(&stream, expected_flag));
+    HIP_CHECK(hipStreamCreateWithFlags(&stream, expected_flag))
     TIMED_SECTION(kTimerTypeCpu){HIP_CHECK(hipStreamGetFlags(stream, &returned_flags))} HIP_CHECK(
         hipStreamDestroy(stream));
   }

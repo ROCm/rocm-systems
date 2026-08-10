@@ -113,7 +113,7 @@ HIP_TEST_CASE(Contract_ExternalResource_HipSignalExternalSemaphoresAsync_SignalS
 #if HT_AMD
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // Signalling a batch that contains a null external-semaphore handle must be
@@ -140,7 +140,7 @@ HIP_TEST_CASE(Contract_ExternalResource_HipWaitExternalSemaphoresAsync_WaitSemap
 #if HT_AMD || (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // Waiting on a batch that contains a null external-semaphore handle must be

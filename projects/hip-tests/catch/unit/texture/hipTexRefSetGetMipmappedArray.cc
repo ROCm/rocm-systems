@@ -14,7 +14,7 @@ HIP_TEST_CASE(Unit_hipTexRefSetGetMipmappedArray) {
 
   // Retrieve the texture reference for our symbol
   const textureReference* texRefConst = nullptr;
-  HIP_CHECK(hipGetTextureReference(&texRefConst, &tex));
+  HIP_CHECK(hipGetTextureReference(&texRefConst, &tex))
   REQUIRE(texRefConst != nullptr);
   // Implementation expects non-const textureReference*
   textureReference* texRef = const_cast<textureReference*>(texRefConst);
@@ -46,15 +46,15 @@ HIP_TEST_CASE(Unit_hipTexRefSetGetMipmappedArray) {
       WARN("Skipping section: " << HipTest::SkipReason::kMipmappedArraysUnsupported);
       return;
     }
-    HIP_CHECK(res);
-    HIP_CHECK(hipFree(nullptr));
-    HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"));
-    HIP_CHECK(hipModuleGetTexRef(&texRef, module, "tex"));
-    HIP_CHECK(hipTexRefSetFlags(texRef, HIP_TRSF_NORMALIZED_COORDINATES));
-    HIP_CHECK(hipTexRefSetMipmappedArray(texRef, mipmapped_array, HIP_TRSA_OVERRIDE_FORMAT));
-    HIP_CHECK(hipTexRefGetMipMappedArray(&outArr, texRef));
+    HIP_CHECK(res)
+    HIP_CHECK(hipFree(nullptr))
+    HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"))
+    HIP_CHECK(hipModuleGetTexRef(&texRef, module, "tex"))
+    HIP_CHECK(hipTexRefSetFlags(texRef, HIP_TRSF_NORMALIZED_COORDINATES))
+    HIP_CHECK(hipTexRefSetMipmappedArray(texRef, mipmapped_array, HIP_TRSA_OVERRIDE_FORMAT))
+    HIP_CHECK(hipTexRefGetMipMappedArray(&outArr, texRef))
     REQUIRE(outArr == mipmapped_array);
-    HIP_CHECK(hipFreeMipmappedArray(mipmapped_array));
+    HIP_CHECK(hipFreeMipmappedArray(mipmapped_array))
   }
 
   SECTION("Invalid arguments: null pointers") {

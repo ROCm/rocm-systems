@@ -17,9 +17,9 @@ class Memcpy2DToArrayAsyncBenchmark : public Benchmark<Memcpy2DToArrayAsyncBench
   void operator()(hipArray_t dst, const void* src, size_t src_pitch, size_t width, size_t height,
                   hipMemcpyKind kind, const hipStream_t& stream) {
     TIMED_SECTION_STREAM(kTimerTypeEvent, stream) {
-      HIP_CHECK(hipMemcpy2DToArrayAsync(dst, 0, 0, src, src_pitch, width, height, kind, stream));
+      HIP_CHECK(hipMemcpy2DToArrayAsync(dst, 0, 0, src, src_pitch, width, height, kind, stream))
     }
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 };
 
@@ -43,9 +43,9 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
 
     LinearAllocGuard2D<int> device_allocation(width, height);
-    HIP_CHECK(hipSetDevice(dst_device));
+    HIP_CHECK(hipSetDevice(dst_device))
     ArrayAllocGuard<int> array_allocation(make_hipExtent(width, height, 0), hipArrayDefault);
-    HIP_CHECK(hipSetDevice(src_device));
+    HIP_CHECK(hipSetDevice(src_device))
     benchmark.Run(array_allocation.ptr(), device_allocation.ptr(), device_allocation.pitch(),
                   device_allocation.width(), device_allocation.height(), hipMemcpyDeviceToDevice,
                   stream);

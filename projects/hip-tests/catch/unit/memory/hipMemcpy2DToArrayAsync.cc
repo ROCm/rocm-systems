@@ -84,7 +84,7 @@ HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Positive_Synchronization_Behavior) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   SECTION("Host to Array") {
     const auto width = GENERATE(16, 32, 48);
@@ -274,11 +274,11 @@ HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Capture) {
   auto host_data = std::make_unique<float[]>(kNumWidth * kNumHeight);
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   hipArray_t device_array = nullptr;
   const hipChannelFormatDesc channel_desc = hipCreateChannelDesc<float>();
-  HIP_CHECK(hipMallocArray(&device_array, &channel_desc, kNumWidth, kNumHeight, hipArrayDefault));
+  HIP_CHECK(hipMallocArray(&device_array, &channel_desc, kNumWidth, kNumHeight, hipArrayDefault))
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
@@ -286,6 +286,6 @@ HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Capture) {
                                     kHostRowBytes, kNumHeight, hipMemcpyHostToDevice, stream));
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFreeArray(device_array));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFreeArray(device_array))
 }

@@ -61,32 +61,32 @@ void test_syncthreads_count(int blockSize) {
   int *allThreadsIdD, *allThreadsIdH;
 
   // Allocate device memory
-  HIP_CHECK(hipMalloc((void**)&syncTestD, nBytes));
-  HIP_CHECK(hipMalloc((void**)&allThreadsZeroD, nBytes));
-  HIP_CHECK(hipMalloc((void**)&allThreadsOneD, nBytes));
-  HIP_CHECK(hipMalloc((void**)&oddThreadsOneD, nBytes));
-  HIP_CHECK(hipMalloc((void**)&allThreadsMinusOneD, nBytes));
-  HIP_CHECK(hipMalloc((void**)&allThreadsIdD, nBytes));
+  HIP_CHECK(hipMalloc((void**)&syncTestD, nBytes))
+  HIP_CHECK(hipMalloc((void**)&allThreadsZeroD, nBytes))
+  HIP_CHECK(hipMalloc((void**)&allThreadsOneD, nBytes))
+  HIP_CHECK(hipMalloc((void**)&oddThreadsOneD, nBytes))
+  HIP_CHECK(hipMalloc((void**)&allThreadsMinusOneD, nBytes))
+  HIP_CHECK(hipMalloc((void**)&allThreadsIdD, nBytes))
 
   // Allocate host memory
-  HIP_CHECK(hipHostMalloc((void**)&syncTestH, nBytes));
-  HIP_CHECK(hipHostMalloc((void**)&allThreadsZeroH, nBytes));
-  HIP_CHECK(hipHostMalloc((void**)&allThreadsOneH, nBytes));
-  HIP_CHECK(hipHostMalloc((void**)&oddThreadsOneH, nBytes));
-  HIP_CHECK(hipHostMalloc((void**)&allThreadsMinusOneH, nBytes));
-  HIP_CHECK(hipHostMalloc((void**)&allThreadsIdH, nBytes));
+  HIP_CHECK(hipHostMalloc((void**)&syncTestH, nBytes))
+  HIP_CHECK(hipHostMalloc((void**)&allThreadsZeroH, nBytes))
+  HIP_CHECK(hipHostMalloc((void**)&allThreadsOneH, nBytes))
+  HIP_CHECK(hipHostMalloc((void**)&oddThreadsOneH, nBytes))
+  HIP_CHECK(hipHostMalloc((void**)&allThreadsMinusOneH, nBytes))
+  HIP_CHECK(hipHostMalloc((void**)&allThreadsIdH, nBytes))
 
   // Launch Kernel
   hipLaunchKernelGGL(kernel_syncthreads_count, 2, blockSize, 0, 0, syncTestD, allThreadsZeroD,
                      allThreadsOneD, oddThreadsOneD, allThreadsMinusOneD, allThreadsIdD);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(syncTestH, syncTestD, nBytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(allThreadsZeroH, allThreadsZeroD, nBytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(allThreadsOneH, allThreadsOneD, nBytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(oddThreadsOneH, oddThreadsOneD, nBytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(allThreadsMinusOneH, allThreadsMinusOneD, nBytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(allThreadsIdH, allThreadsIdD, nBytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(syncTestH, syncTestD, nBytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(allThreadsZeroH, allThreadsZeroD, nBytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(allThreadsOneH, allThreadsOneD, nBytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(oddThreadsOneH, oddThreadsOneD, nBytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(allThreadsMinusOneH, allThreadsMinusOneD, nBytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(allThreadsIdH, allThreadsIdD, nBytes, hipMemcpyDeviceToHost))
 
   // Validate results for both the blocks together
   for (int i = 0; i < 2 * blockSize; ++i) {
@@ -99,20 +99,20 @@ void test_syncthreads_count(int blockSize) {
   }
 
   // Free device memory
-  HIP_CHECK(hipFree(syncTestD));
-  HIP_CHECK(hipFree(allThreadsZeroD));
-  HIP_CHECK(hipFree(allThreadsOneD));
-  HIP_CHECK(hipFree(oddThreadsOneD));
-  HIP_CHECK(hipFree(allThreadsMinusOneD));
-  HIP_CHECK(hipFree(allThreadsIdD));
+  HIP_CHECK(hipFree(syncTestD))
+  HIP_CHECK(hipFree(allThreadsZeroD))
+  HIP_CHECK(hipFree(allThreadsOneD))
+  HIP_CHECK(hipFree(oddThreadsOneD))
+  HIP_CHECK(hipFree(allThreadsMinusOneD))
+  HIP_CHECK(hipFree(allThreadsIdD))
 
   // Free host memory
-  HIP_CHECK(hipHostFree(syncTestH));
-  HIP_CHECK(hipHostFree(allThreadsZeroH));
-  HIP_CHECK(hipHostFree(allThreadsOneH));
-  HIP_CHECK(hipHostFree(oddThreadsOneH));
-  HIP_CHECK(hipHostFree(allThreadsMinusOneH));
-  HIP_CHECK(hipHostFree(allThreadsIdH));
+  HIP_CHECK(hipHostFree(syncTestH))
+  HIP_CHECK(hipHostFree(allThreadsZeroH))
+  HIP_CHECK(hipHostFree(allThreadsOneH))
+  HIP_CHECK(hipHostFree(oddThreadsOneH))
+  HIP_CHECK(hipHostFree(allThreadsMinusOneH))
+  HIP_CHECK(hipHostFree(allThreadsIdH))
 }
 
 HIP_TEST_CASE(Unit_syncthreads_count) {

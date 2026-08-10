@@ -33,19 +33,19 @@ template <typename T> static void runTestShfl_1() {
 
   T* d_Input;
   T* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, sizeof(T) * size));
-  HIP_CHECK(hipMalloc(&d_Output, sizeof(T) * size));
+  HIP_CHECK(hipMalloc(&d_Input, sizeof(T) * size))
+  HIP_CHECK(hipMalloc(&d_Output, sizeof(T) * size))
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, sizeof(T) * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, sizeof(T) * size, hipMemcpyDefault))
   hipLaunchKernelGGL(shfl_1<T>, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, sizeof(T) * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, sizeof(T) * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareEqual(Output[i], Expected[i]));
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 template <typename T> __global__ void shfl_2(T* Input, T* Output) {
@@ -75,19 +75,19 @@ template <typename T> static void runTestShfl_2() {
 
   T* d_Input;
   T* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, sizeof(T) * size));
-  HIP_CHECK(hipMalloc(&d_Output, sizeof(T) * size));
+  HIP_CHECK(hipMalloc(&d_Input, sizeof(T) * size))
+  HIP_CHECK(hipMalloc(&d_Output, sizeof(T) * size))
 
-  HIP_CHECK(hipMemcpy(d_Input, &Input, sizeof(T) * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, &Input, sizeof(T) * size, hipMemcpyDefault))
   hipLaunchKernelGGL(shfl_2<T>, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(&Output, d_Output, sizeof(T) * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&Output, d_Output, sizeof(T) * size, hipMemcpyDefault))
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareEqual(Output[i], Expected[i]));
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 __global__ void shfl_3(int* Input, int* Output) {
@@ -120,10 +120,10 @@ static void runTestShfl_3() {
 
   int* d_Input;
   int* d_Output;
-  HIP_CHECK(hipMalloc(&d_Input, Input.size() * sizeof(Input[0])));
-  HIP_CHECK(hipMalloc(&d_Output, Output.size() * sizeof(Output[0])));
+  HIP_CHECK(hipMalloc(&d_Input, Input.size() * sizeof(Input[0])))
+  HIP_CHECK(hipMalloc(&d_Output, Output.size() * sizeof(Output[0])))
 
-  HIP_CHECK(hipMemcpy(d_Input, Input.data(), Input.size() * sizeof(Input[0]), hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_Input, Input.data(), Input.size() * sizeof(Input[0]), hipMemcpyDefault))
   hipLaunchKernelGGL(shfl_3, 1, warpSize, 0, 0, d_Input, d_Output);
 
   HIP_CHECK(
@@ -132,8 +132,8 @@ static void runTestShfl_3() {
     REQUIRE(Output[i] == Expected[i]);
   }
 
-  HIP_CHECK(hipFree(d_Input));
-  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Input))
+  HIP_CHECK(hipFree(d_Output))
 }
 
 /**

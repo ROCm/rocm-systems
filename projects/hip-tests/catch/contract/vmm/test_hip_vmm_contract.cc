@@ -25,7 +25,7 @@ std::array<uint8_t, kElementCount> MakePattern(uint8_t seed) {
 
 int CurrentDevice() {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   return device;
 }
 
@@ -54,7 +54,7 @@ void SkipIfVmmUnsupported() {
 size_t AllocationGranularity() {
   const auto prop = DeviceAllocationProp();
   size_t granularity = 0;
-  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum))
   return granularity;
 }
 
@@ -67,7 +67,7 @@ bool CreateAllocationHandle(hipMemGenericAllocationHandle_t* handle, size_t size
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return false;
 }
 }
@@ -87,7 +87,7 @@ HIP_TEST_CASE(Contract_Vmm_HipMemAddressReserve_Free_Succeeds) {
   const size_t size = AllocationGranularity();
   void* address = nullptr;
 
-  HIP_CHECK(hipMemAddressReserve(&address, size, 0, nullptr, 0));
+  HIP_CHECK(hipMemAddressReserve(&address, size, 0, nullptr, 0))
   cleanup.Add([address, size] { (void)hipMemAddressFree(address, size); });
 
   REQUIRE(address != nullptr);
@@ -119,14 +119,14 @@ HIP_TEST_CASE(Contract_Vmm_HipMemMap_MapUnmap_SucceedsWhenSupported) {
   }
   cleanup.Add([handle] { (void)hipMemRelease(handle); });
 
-  HIP_CHECK(hipMemAddressReserve(&address, size, 0, nullptr, 0));
+  HIP_CHECK(hipMemAddressReserve(&address, size, 0, nullptr, 0))
   cleanup.Add([address, size] { (void)hipMemAddressFree(address, size); });
 
   const hipError_t map_status = hipMemMap(address, size, 0, handle, 0);
   if (map_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("hipMemMap is not supported by this device/runtime path.");
   }
-  HIP_CHECK(map_status);
+  HIP_CHECK(map_status)
   cleanup.Add([address, size] { (void)hipMemUnmap(address, size); });
 }
 
@@ -145,24 +145,24 @@ HIP_TEST_CASE(Contract_Vmm_HipMemSetAccess_Default_AllowsRoundTripWhenSupported)
   }
   cleanup.Add([handle] { (void)hipMemRelease(handle); });
 
-  HIP_CHECK(hipMemAddressReserve(&address, size, 0, nullptr, 0));
+  HIP_CHECK(hipMemAddressReserve(&address, size, 0, nullptr, 0))
   cleanup.Add([address, size] { (void)hipMemAddressFree(address, size); });
 
   const hipError_t map_status = hipMemMap(address, size, 0, handle, 0);
   if (map_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("hipMemMap is not supported by this device/runtime path.");
   }
-  HIP_CHECK(map_status);
+  HIP_CHECK(map_status)
   cleanup.Add([address, size] { (void)hipMemUnmap(address, size); });
 
   hipMemAccessDesc access{};
   access.location.type = hipMemLocationTypeDevice;
   access.location.id = CurrentDevice();
   access.flags = hipMemAccessFlagsProtReadWrite;
-  HIP_CHECK(hipMemSetAccess(address, size, &access, 1));
+  HIP_CHECK(hipMemSetAccess(address, size, &access, 1))
 
-  HIP_CHECK(hipMemcpy(address, src.data(), src.size(), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dst.data(), address, dst.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(address, src.data(), src.size(), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(dst.data(), address, dst.size(), hipMemcpyDeviceToHost))
 
   REQUIRE(dst == src);
 }

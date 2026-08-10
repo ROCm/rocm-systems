@@ -48,12 +48,12 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Host_N_PinnedMem, int, float, doubl
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
   auto memcpy_d2d_type = GENERATE(0, 1);
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, *A_d{nullptr}, *B_d{nullptr};
   size_t pitch_A, pitch_B;
   size_t width{NUM_W * sizeof(TestType)};
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   // Allocating memory
   if (mem_type) {
@@ -68,8 +68,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Host_N_PinnedMem, int, float, doubl
   } else {
     d2d_type = hipMemcpyDeviceToDeviceNoCU;
   }
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H));
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&B_d), &pitch_B, width, NUM_H));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H))
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&B_d), &pitch_B, width, NUM_H))
 
   // Initialize the data
   HipTest::setDefaultData<TestType>(NUM_W * NUM_H, A_h, B_h, C_h);
@@ -85,7 +85,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Host_N_PinnedMem, int, float, doubl
     // hipMemcpy2DAsync Device to Host
     HIP_CHECK(hipMemcpy2DAsync(B_h, COLUMNS * sizeof(TestType), B_d, pitch_B,
                                COLUMNS * sizeof(TestType), ROWS, hipMemcpyDeviceToHost, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
   SECTION("Calling Async apis with hipStreamPerThread") {
     // Host to Device
@@ -101,7 +101,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Host_N_PinnedMem, int, float, doubl
     HIP_CHECK(hipMemcpy2DAsync(B_h, COLUMNS * sizeof(TestType), B_d, pitch_B,
                                COLUMNS * sizeof(TestType), ROWS, hipMemcpyDeviceToHost,
                                hipStreamPerThread));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
   }
 
   // Validating the result
@@ -109,14 +109,14 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Host_N_PinnedMem, int, float, doubl
 
 
   // DeAllocating the memory
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
   if (mem_type) {
     HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_h, B_h, C_h, true);
   } else {
     HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_h, B_h, C_h, false);
   }
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice, int, float, double) {
@@ -126,13 +126,13 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice, int
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, *A_d{nullptr};
   size_t pitch_A;
   size_t width{NUM_W * sizeof(TestType)};
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   hipStream_t stream;
 
   if (numDevices > 1) {
-    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
+    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1))
     if (canAccessPeer) {
-      HIP_CHECK(hipSetDevice(0));
+      HIP_CHECK(hipSetDevice(0))
 
       // Allocating memory
       if (mem_type) {
@@ -142,17 +142,17 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice, int
         HipTest::initArrays<TestType>(nullptr, nullptr, nullptr, &A_h, &B_h, &C_h, NUM_W * NUM_H,
                                       false);
       }
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H))
       char* X_d{nullptr};
       size_t pitch_X;
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&X_d), &pitch_X, width, NUM_H));
+      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&X_d), &pitch_X, width, NUM_H))
 
       // Initialize the data
       HipTest::setDefaultData<TestType>(NUM_W * NUM_H, A_h, B_h, C_h);
 
       // Change device
-      HIP_CHECK(hipSetDevice(1));
-      HIP_CHECK(hipStreamCreate(&stream));
+      HIP_CHECK(hipSetDevice(1))
+      HIP_CHECK(hipStreamCreate(&stream))
 
       // Host to Device
       HIP_CHECK(hipMemcpy2DAsync(A_d, pitch_A, A_h, COLUMNS * sizeof(TestType),
@@ -165,20 +165,20 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice, int
       // Device to Host
       HIP_CHECK(hipMemcpy2DAsync(B_h, COLUMNS * sizeof(TestType), X_d, pitch_X,
                                  COLUMNS * sizeof(TestType), ROWS, hipMemcpyDeviceToHost, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       // Validating the result
       REQUIRE(HipTest::checkArray<TestType>(A_h, B_h, COLUMNS, ROWS) == true);
 
       // DeAllocating the memory
-      HIP_CHECK(hipFree(A_d));
+      HIP_CHECK(hipFree(A_d))
       if (mem_type) {
         HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_h, B_h, C_h, true);
       } else {
         HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_h, B_h, C_h, false);
       }
-      HIP_CHECK(hipFree(X_d));
-      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_CHECK(hipFree(X_d))
+      HIP_CHECK(hipStreamDestroy(stream))
     } else {
       HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
@@ -196,7 +196,7 @@ static void hipMemcpy2DAsync_Basic_Size_Test(size_t inc) {
   size_t size = sizeof(int) * N * inc;
 
   size_t free, total;
-  HIP_CHECK(hipMemGetInfo(&free, &total));
+  HIP_CHECK(hipMemGetInfo(&free, &total))
 
   if (free < 2 * size)
     newSize = (free - defaultProgramSize) / 2;
@@ -207,9 +207,9 @@ static void hipMemcpy2DAsync_Basic_Size_Test(size_t inc) {
   INFO("Free memory: " << free / 1024.0 / 1024.0 << " MB or " << free << " Bytes");
   INFO("NewSize:" << newSize / 1024.0 / 1024.0 << "MB or " << newSize << " Bytes");
 
-  HIP_CHECK(hipHostMalloc(&in, newSize));
-  HIP_CHECK(hipHostMalloc(&out, newSize));
-  HIP_CHECK(hipMalloc(&dev, newSize));
+  HIP_CHECK(hipHostMalloc(&in, newSize))
+  HIP_CHECK(hipHostMalloc(&out, newSize))
+  HIP_CHECK(hipMalloc(&dev, newSize))
 
   inp = newSize / (sizeof(int) * N);
   for (size_t i = 0; i < N; i++) {
@@ -219,21 +219,21 @@ static void hipMemcpy2DAsync_Basic_Size_Test(size_t inc) {
   size_t pitch = sizeof(int) * inp;
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
-  HIP_CHECK(hipMemcpy2DAsync(dev, pitch, in, pitch, sizeof(int), N, hipMemcpyHostToDevice, stream));
+  HIP_CHECK(hipMemcpy2DAsync(dev, pitch, in, pitch, sizeof(int), N, hipMemcpyHostToDevice, stream))
   HIP_CHECK(
       hipMemcpy2DAsync(out, pitch, dev, pitch, sizeof(int), N, hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   for (size_t i = 0; i < N; i++) {
     REQUIRE(out[i * inp] == value);
   }
 
-  HIP_CHECK(hipFree(dev));
-  HIP_CHECK(hipHostFree(in));
-  HIP_CHECK(hipHostFree(out));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(dev))
+  HIP_CHECK(hipHostFree(in))
+  HIP_CHECK(hipHostFree(out))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -253,10 +253,10 @@ static void hipMemcpy2DAsync_Basic_Size_Test(size_t inc) {
 HIP_TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_Basic_Size_Test) {
   size_t input = 1 << 20;
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   for (int i = 0; i < numDevices; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
 
     SECTION("Verify hipMemcpy2DAsync with 1 << 20 size") {
       hipMemcpy2DAsync_Basic_Size_Test(input);

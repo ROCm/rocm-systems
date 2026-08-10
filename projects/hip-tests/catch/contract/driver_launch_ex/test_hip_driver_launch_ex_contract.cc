@@ -36,13 +36,13 @@
 namespace {
 int CurrentDevice() {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   return device;
 }
 
 void SkipIfIntegratedDevice() {
   hipDeviceProp_t props{};
-  HIP_CHECK(hipGetDeviceProperties(&props, CurrentDevice()));
+  HIP_CHECK(hipGetDeviceProperties(&props, CurrentDevice()))
   if (props.integrated != 0) {
     HIP_SKIP_TEST("driver-style extended launch and SM resource split are only "
                   "exercised on discrete GPUs.");
@@ -54,8 +54,8 @@ void SkipIfIntegratedDevice() {
 class ScopedDeviceInt {
  public:
   explicit ScopedDeviceInt(int initial_value) {
-    HIP_CHECK(hipMalloc(&ptr_, sizeof(int)));
-    HIP_CHECK(hipMemset(ptr_, initial_value, sizeof(int)));
+    HIP_CHECK(hipMalloc(&ptr_, sizeof(int)))
+    HIP_CHECK(hipMemset(ptr_, initial_value, sizeof(int)))
   }
   ~ScopedDeviceInt() {
     if (ptr_ != nullptr) {
@@ -97,7 +97,7 @@ bool CompileModuleSource(std::vector<char>& code) {
                                    nullptr, nullptr));
 #if HT_AMD
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, CurrentDevice()));
+  HIP_CHECK(hipGetDeviceProperties(&properties, CurrentDevice()))
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
   const char* options[] = {offload_arch.c_str()};
   const int num_options = 1;
@@ -155,11 +155,11 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_HipLaunchKernelExC_Default_WritesExpectedV
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipLaunchKernelExC is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(status)
+  HIP_CHECK(hipDeviceSynchronize())
 
   int observed = -1;
-  HIP_CHECK(hipMemcpy(&observed, device_value.get(), sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&observed, device_value.get(), sizeof(int), hipMemcpyDeviceToHost))
   REQUIRE(observed == kExpected);
 }
 
@@ -179,7 +179,7 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_HipDevSmResourceSplit_Default_ProducesBoun
   if (query_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Device resource queries are not supported by this runtime path.");
   }
-  HIP_CHECK(query_status);
+  HIP_CHECK(query_status)
   REQUIRE(device_resource.type == hipDevResourceTypeSm);
   REQUIRE(device_resource.sm.smCount > 0);
 
@@ -200,7 +200,7 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_HipDevSmResourceSplit_Default_ProducesBoun
     (void)hipGetLastError();
     HIP_SKIP_TEST("SM resource group splitting is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   REQUIRE(group.sm.smCount > 0);
   REQUIRE(group.sm.smCount <= device_resource.sm.smCount);
@@ -226,14 +226,14 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_HipDrvLaunchKernelEx_Default_WritesExpecte
   // context; when this is the first HIP call in the process (e.g. under ctest
   // isolation) none exists yet and the load fails with invalid-device-context.
   // hipFree(0) is the canonical no-op prime; harmless success on AMD.
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()))
   REQUIRE(module != nullptr);
   cleanup.Add([module] { (void)hipModuleUnload(module); });
 
   hipFunction_t function = nullptr;
-  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
+  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"))
   REQUIRE(function != nullptr);
 
   ScopedDeviceInt device_value(0);
@@ -258,10 +258,10 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_HipDrvLaunchKernelEx_Default_WritesExpecte
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipDrvLaunchKernelEx is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(status)
+  HIP_CHECK(hipDeviceSynchronize())
 
   int observed = -1;
-  HIP_CHECK(hipMemcpy(&observed, device_value.get(), sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&observed, device_value.get(), sizeof(int), hipMemcpyDeviceToHost))
   REQUIRE(observed == kExpected);
 }

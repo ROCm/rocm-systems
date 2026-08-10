@@ -38,11 +38,11 @@ __global__ void Dim3VectorKernel(dim3* vector, const uint32_t x, const uint32_t 
 HIP_TEST_CASE(Unit_dim3_Empty_Positive_Device) {
   dim3 vector_h{0, 0, 0};
   dim3* vector_d;
-  HIP_CHECK(hipMalloc(&vector_d, sizeof(dim3)));
-  HIP_CHECK(hipMemcpy(vector_d, &vector_h, sizeof(dim3), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&vector_d, sizeof(dim3)))
+  HIP_CHECK(hipMemcpy(vector_d, &vector_h, sizeof(dim3), hipMemcpyHostToDevice))
   Dim3VectorKernel<<<1, 1, 0, 0>>>(vector_d);
-  HIP_CHECK(hipMemcpy(&vector_h, vector_d, sizeof(dim3), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipFree(vector_d));
+  HIP_CHECK(hipMemcpy(&vector_h, vector_d, sizeof(dim3), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipFree(vector_d))
 
   REQUIRE(vector_h.x == 1);
   REQUIRE(vector_h.y == 1);
@@ -65,14 +65,14 @@ HIP_TEST_CASE(Unit_dim3_Empty_Positive_Device) {
 HIP_TEST_CASE(Unit_dim3_X_Positive_Device) {
   dim3 vector_h{0, 0, 0};
   dim3* vector_d;
-  HIP_CHECK(hipMalloc(&vector_d, sizeof(dim3)));
-  HIP_CHECK(hipMemcpy(vector_d, &vector_h, sizeof(dim3), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&vector_d, sizeof(dim3)))
+  HIP_CHECK(hipMemcpy(vector_d, &vector_h, sizeof(dim3), hipMemcpyHostToDevice))
   uint32_t value_x =
       GENERATE(std::numeric_limits<uint32_t>::min(), std::numeric_limits<uint32_t>::max() / 2,
                std::numeric_limits<uint32_t>::max());
   Dim3VectorKernel<<<1, 1, 0, 0>>>(vector_d, value_x);
-  HIP_CHECK(hipMemcpy(&vector_h, vector_d, sizeof(dim3), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipFree(vector_d));
+  HIP_CHECK(hipMemcpy(&vector_h, vector_d, sizeof(dim3), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipFree(vector_d))
 
   REQUIRE(vector_h.x == value_x);
   REQUIRE(vector_h.y == 1);
@@ -95,8 +95,8 @@ HIP_TEST_CASE(Unit_dim3_X_Positive_Device) {
 HIP_TEST_CASE(Unit_dim3_XY_Positive_Device) {
   dim3 vector_h{0, 0, 0};
   dim3* vector_d;
-  HIP_CHECK(hipMalloc(&vector_d, sizeof(dim3)));
-  HIP_CHECK(hipMemcpy(vector_d, &vector_h, sizeof(dim3), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&vector_d, sizeof(dim3)))
+  HIP_CHECK(hipMemcpy(vector_d, &vector_h, sizeof(dim3), hipMemcpyHostToDevice))
   uint32_t value_x =
       GENERATE(std::numeric_limits<uint32_t>::min(), std::numeric_limits<uint32_t>::max() / 2,
                std::numeric_limits<uint32_t>::max());
@@ -104,8 +104,8 @@ HIP_TEST_CASE(Unit_dim3_XY_Positive_Device) {
       GENERATE(std::numeric_limits<uint32_t>::min(), std::numeric_limits<uint32_t>::max() / 2,
                std::numeric_limits<uint32_t>::max());
   Dim3VectorKernel<<<1, 1, 0, 0>>>(vector_d, value_x, value_y);
-  HIP_CHECK(hipMemcpy(&vector_h, vector_d, sizeof(dim3), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipFree(vector_d));
+  HIP_CHECK(hipMemcpy(&vector_h, vector_d, sizeof(dim3), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipFree(vector_d))
 
   REQUIRE(vector_h.x == value_x);
   REQUIRE(vector_h.y == value_y);
@@ -128,8 +128,8 @@ HIP_TEST_CASE(Unit_dim3_XY_Positive_Device) {
 HIP_TEST_CASE(Unit_dim3_XYZ_Positive_Device) {
   dim3 vector_h{0, 0, 0};
   dim3* vector_d;
-  HIP_CHECK(hipMalloc(&vector_d, sizeof(dim3)));
-  HIP_CHECK(hipMemcpy(vector_d, &vector_h, sizeof(dim3), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&vector_d, sizeof(dim3)))
+  HIP_CHECK(hipMemcpy(vector_d, &vector_h, sizeof(dim3), hipMemcpyHostToDevice))
   uint32_t value_x =
       GENERATE(std::numeric_limits<uint32_t>::min(), std::numeric_limits<uint32_t>::max() / 2,
                std::numeric_limits<uint32_t>::max());
@@ -141,8 +141,8 @@ HIP_TEST_CASE(Unit_dim3_XYZ_Positive_Device) {
       GENERATE(std::numeric_limits<uint32_t>::min(), std::numeric_limits<uint32_t>::max() / 2,
                std::numeric_limits<uint32_t>::max());
   Dim3VectorKernel<<<1, 1, 0, 0>>>(vector_d, value_x, value_y, value_z);
-  HIP_CHECK(hipMemcpy(&vector_h, vector_d, sizeof(dim3), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipFree(vector_d));
+  HIP_CHECK(hipMemcpy(&vector_h, vector_d, sizeof(dim3), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipFree(vector_d))
 
   REQUIRE(vector_h.x == value_x);
   REQUIRE(vector_h.y == value_y);

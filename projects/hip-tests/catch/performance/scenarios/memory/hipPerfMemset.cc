@@ -81,14 +81,14 @@ class hipPerfMemset {
 
 bool hipPerfMemset::open(int deviceId) {
   int nGpu = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpu));
+  HIP_CHECK(hipGetDeviceCount(&nGpu))
   if (nGpu < 1) {
     return false;
   }
 
-  HIP_CHECK(hipSetDevice(deviceId));
+  HIP_CHECK(hipSetDevice(deviceId))
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+  HIP_CHECK(hipGetDeviceProperties(&props, deviceId))
   CONSOLE_PRINT("info: running on bus 0x%x %s with %d CUs and device id: %d\n", props.pciBusID,
                 props.name, props.multiProcessorCount, deviceId);
   return true;
@@ -102,52 +102,52 @@ void hipPerfMemset::run1D(unsigned int test, T memsetval, enum MemsetType type, 
 
   bufSize_ = testNumEle_ * sizeof(uint32_t);
 
-  HIP_CHECK(hipMalloc(&A_d, bufSize_));
+  HIP_CHECK(hipMalloc(&A_d, bufSize_))
 
   A_h = reinterpret_cast<T*>(malloc(bufSize_));
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking))
 
   // Warm-up
   if (async) {
-    HIP_CHECK(hipMemsetAsync((void*)A_d, memsetval, bufSize_, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemsetAsync((void*)A_d, memsetval, bufSize_, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
   } else {
-    HIP_CHECK(hipMemset((void*)A_d, memsetval, bufSize_));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemset((void*)A_d, memsetval, bufSize_))
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   auto start = std::chrono::steady_clock::now();
 
   for (uint i = 0; i < NUM_ITER; i++) {
     if (type == hipMemsetTypeDefault && !async) {
-      HIP_CHECK(hipMemset(reinterpret_cast<void*>(A_d), memsetval, bufSize_));
+      HIP_CHECK(hipMemset(reinterpret_cast<void*>(A_d), memsetval, bufSize_))
     } else if (type == hipMemsetTypeDefault && async) {
-      HIP_CHECK(hipMemsetAsync(A_d, memsetval, bufSize_, stream));
+      HIP_CHECK(hipMemsetAsync(A_d, memsetval, bufSize_, stream))
     } else if (type == hipMemsetTypeD8 && !async) {
-      HIP_CHECK(hipMemsetD8((hipDeviceptr_t)A_d, memsetval, bufSize_));
+      HIP_CHECK(hipMemsetD8((hipDeviceptr_t)A_d, memsetval, bufSize_))
     } else if (type == hipMemsetTypeD8 && async) {
-      HIP_CHECK(hipMemsetD8Async((hipDeviceptr_t)A_d, memsetval, bufSize_, stream));
+      HIP_CHECK(hipMemsetD8Async((hipDeviceptr_t)A_d, memsetval, bufSize_, stream))
     } else if (type == hipMemsetTypeD16 && !async) {
-      HIP_CHECK(hipMemsetD16((hipDeviceptr_t)A_d, memsetval, bufSize_ / sizeof(T)));
+      HIP_CHECK(hipMemsetD16((hipDeviceptr_t)A_d, memsetval, bufSize_ / sizeof(T)))
     } else if (type == hipMemsetTypeD16 && async) {
-      HIP_CHECK(hipMemsetD16Async((hipDeviceptr_t)A_d, memsetval, bufSize_ / sizeof(T), stream));
+      HIP_CHECK(hipMemsetD16Async((hipDeviceptr_t)A_d, memsetval, bufSize_ / sizeof(T), stream))
     } else if (type == hipMemsetTypeD32 && !async) {
-      HIP_CHECK(hipMemsetD32((hipDeviceptr_t)A_d, memsetval, bufSize_ / sizeof(T)));
+      HIP_CHECK(hipMemsetD32((hipDeviceptr_t)A_d, memsetval, bufSize_ / sizeof(T)))
     } else if (type == hipMemsetTypeD32 && async) {
-      HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)A_d, memsetval, bufSize_ / sizeof(T), stream));
+      HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)A_d, memsetval, bufSize_ / sizeof(T), stream))
     }
   }
   if (async) {
-    HIPCHECK(hipStreamSynchronize(stream));
+    HIPCHECK(hipStreamSynchronize(stream))
   } else {
-    HIPCHECK(hipDeviceSynchronize());
+    HIPCHECK(hipDeviceSynchronize())
   }
 
   auto end = std::chrono::steady_clock::now();
 
-  HIP_CHECK(hipMemcpy(A_h, A_d, bufSize_, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(A_h, A_d, bufSize_, hipMemcpyDeviceToHost))
 
   for (int i = 0; i < bufSize_ / sizeof(T); i++) {
     if (A_h[i] != memsetval) {
@@ -157,7 +157,7 @@ void hipPerfMemset::run1D(unsigned int test, T memsetval, enum MemsetType type, 
     }
   }
 
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(A_d))
   free(A_h);
 
   std::chrono::duration<double> diff = end - start;
@@ -182,7 +182,7 @@ void hipPerfMemset::run2D(unsigned int test, T memsetval, enum MemsetType type, 
 
   T *A_h, *A_d;
 
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH))
   A_h = reinterpret_cast<char*>(malloc(sizeElements));
 
   for (size_t i = 0; i < elements; i++) {
@@ -190,35 +190,35 @@ void hipPerfMemset::run2D(unsigned int test, T memsetval, enum MemsetType type, 
   }
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking))
 
   // Warm-up
   if (async) {
-    HIP_CHECK(hipMemset2DAsync(A_d, pitch_A, memsetval, numW, numH, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemset2DAsync(A_d, pitch_A, memsetval, numW, numH, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
   } else {
-    HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, numW, numH));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, numW, numH))
+    HIP_CHECK(hipDeviceSynchronize())
   }
   auto start = std::chrono::steady_clock::now();
 
   for (uint i = 0; i < NUM_ITER; i++) {
     if (type == hipMemsetTypeDefault && !async) {
-      HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, numW, numH));
+      HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, numW, numH))
     } else if (type == hipMemsetTypeDefault && async) {
-      HIP_CHECK(hipMemset2DAsync(A_d, pitch_A, memsetval, numW, numH, stream));
+      HIP_CHECK(hipMemset2DAsync(A_d, pitch_A, memsetval, numW, numH, stream))
     }
   }
 
   if (async) {
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
   } else {
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   auto end = std::chrono::steady_clock::now();
 
-  HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, numW, numH, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, numW, numH, hipMemcpyDeviceToHost))
 
   for (int i = 0; i < elements; i++) {
     if (A_h[i] != memsetval) {
@@ -237,8 +237,8 @@ void hipPerfMemset::run2D(unsigned int test, T memsetval, enum MemsetType type, 
             << "(GB/s) for " << std::setw(5) << bufSize_ << " x " << std::setw(5) << bufSize_
             << " bytes : " << std::setw(7) << perf << "\n";
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(A_d))
   free(A_h);
 }
 
@@ -254,14 +254,14 @@ void hipPerfMemset::run3D(unsigned int test, T memsetval, enum MemsetType type, 
   size_t elements = numW * numH * depth;
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking))
 
   T* A_h;
 
   hipExtent extent = make_hipExtent(width, numH, depth);
   hipPitchedPtr devPitchedPtr;
 
-  HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent));
+  HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent))
   A_h = reinterpret_cast<char*>(malloc(sizeElements));
   HIPASSERT(A_h != NULL);
 
@@ -271,27 +271,27 @@ void hipPerfMemset::run3D(unsigned int test, T memsetval, enum MemsetType type, 
 
   // Warm up
   if (async) {
-    HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
   } else {
-    HIP_CHECK(hipMemset3D(devPitchedPtr, memsetval, extent));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemset3D(devPitchedPtr, memsetval, extent))
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   auto start = std::chrono::steady_clock::now();
 
   for (uint i = 0; i < NUM_ITER; i++) {
     if (type == hipMemsetTypeDefault && !async) {
-      HIP_CHECK(hipMemset3D(devPitchedPtr, memsetval, extent));
+      HIP_CHECK(hipMemset3D(devPitchedPtr, memsetval, extent))
     } else if (type == hipMemsetTypeDefault && async) {
-      HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream));
+      HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream))
     }
   }
 
   if (async) {
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
   } else {
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   auto end = std::chrono::steady_clock::now();
@@ -307,7 +307,7 @@ void hipPerfMemset::run3D(unsigned int test, T memsetval, enum MemsetType type, 
 
   myparms.kind = hipMemcpyDeviceToHost;
 
-  HIP_CHECK(hipMemcpy3D(&myparms));
+  HIP_CHECK(hipMemcpy3D(&myparms))
 
   for (int i = 0; i < elements; i++) {
     if (A_h[i] != memsetval) {
@@ -324,7 +324,7 @@ void hipPerfMemset::run3D(unsigned int test, T memsetval, enum MemsetType type, 
 
   CONSOLE_PRINT("hipPerf3DMemset%s[%d] (GB/s) for %5zu x %5zu x %zu bytes : %7.2f\n",
                 (async ? "Async" : "     "), test, bufSize_, bufSize_, depth, perf);
-  HIP_CHECK(hipFree(devPitchedPtr.ptr));
+  HIP_CHECK(hipFree(devPitchedPtr.ptr))
   free(A_h);
 }
 

@@ -41,7 +41,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Memory) {
     void* hipIpcGetMemHandle_ptr = nullptr;
 
     int currentHipVersion = 0;
-    HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+    HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
     HIP_CHECK(hipGetProcAddress("hipIpcGetMemHandle", &hipIpcGetMemHandle_ptr, currentHipVersion, 0,
                                 nullptr));
@@ -54,19 +54,19 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Memory) {
     fillHostArray(srcHostMem, N, 10);
 
     int* devMemSrc = nullptr;
-    HIP_CHECK(hipMalloc(&devMemSrc, Nbytes));
+    HIP_CHECK(hipMalloc(&devMemSrc, Nbytes))
     REQUIRE(devMemSrc != nullptr);
-    HIP_CHECK(hipMemcpy(devMemSrc, srcHostMem, Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(devMemSrc, srcHostMem, Nbytes, hipMemcpyHostToDevice))
 
     hipIpcMemHandle_t handle;
-    HIP_CHECK(dyn_hipIpcGetMemHandle_ptr(&handle, devMemSrc));
+    HIP_CHECK(dyn_hipIpcGetMemHandle_ptr(&handle, devMemSrc))
 
     REQUIRE(write(fd[1], &handle, sizeof(handle)) >= 0);
     REQUIRE(close(fd[1]) == 0);
 
     REQUIRE(wait(NULL) >= 0);
 
-    HIP_CHECK(hipFree(devMemSrc));
+    HIP_CHECK(hipFree(devMemSrc))
     free(srcHostMem);
   } else {  // child process
     // Validating hipIpcOpenMemHandle, hipIpcCloseMemHandle API's
@@ -74,7 +74,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Memory) {
     void* hipIpcCloseMemHandle_ptr = nullptr;
 
     int currentHipVersion = 0;
-    HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+    HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
     HIP_CHECK(hipGetProcAddress("hipIpcOpenMemHandle", &hipIpcOpenMemHandle_ptr, currentHipVersion,
                                 0, nullptr));
@@ -101,10 +101,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Memory) {
     int* dstHostMem = reinterpret_cast<int*>(malloc(Nbytes));
     REQUIRE(dstHostMem != nullptr);
 
-    HIP_CHECK(hipMemcpy(dstHostMem, devPtr, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(dstHostMem, devPtr, Nbytes, hipMemcpyDeviceToHost))
     REQUIRE(validateHostArray(dstHostMem, N, 11) == true);
 
-    HIP_CHECK(dyn_hipIpcCloseMemHandle_ptr(devPtr));
+    HIP_CHECK(dyn_hipIpcCloseMemHandle_ptr(devPtr))
 
     free(dstHostMem);
   }
@@ -135,7 +135,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Event) {
     void* hipIpcGetEventHandle_ptr = nullptr;
 
     int currentHipVersion = 0;
-    HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+    HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
     HIP_CHECK(hipGetProcAddress("hipIpcGetEventHandle", &hipIpcGetEventHandle_ptr,
                                 currentHipVersion, 0, nullptr));
@@ -145,24 +145,24 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Event) {
             hipIpcGetEventHandle_ptr);
 
     hipEvent_t start = nullptr;
-    HIP_CHECK(hipEventCreateWithFlags(&start, hipEventInterprocess | hipEventDisableTiming));
+    HIP_CHECK(hipEventCreateWithFlags(&start, hipEventInterprocess | hipEventDisableTiming))
     REQUIRE(start != nullptr);
 
     hipIpcEventHandle_t handle;
-    HIP_CHECK(dyn_hipIpcGetEventHandle_ptr(&handle, start));
+    HIP_CHECK(dyn_hipIpcGetEventHandle_ptr(&handle, start))
 
     REQUIRE(write(fd[1], &handle, sizeof(hipIpcEventHandle_t)) >= 0);
     REQUIRE(close(fd[1]) == 0);
 
     REQUIRE(wait(NULL) >= 0);
 
-    HIP_CHECK(hipEventDestroy(start));
+    HIP_CHECK(hipEventDestroy(start))
   } else {  // child process
     // Validating hipIpcOpenMemHandle API
     void* hipIpcOpenEventHandle_ptr = nullptr;
 
     int currentHipVersion = 0;
-    HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+    HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
     HIP_CHECK(hipGetProcAddress("hipIpcOpenEventHandle", &hipIpcOpenEventHandle_ptr,
                                 currentHipVersion, 0, nullptr));
@@ -176,11 +176,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Event) {
     REQUIRE(close(fd[0]) == 0);
 
     hipEvent_t start = nullptr;
-    HIP_CHECK(dyn_hipIpcOpenEventHandle_ptr(&start, handle));
+    HIP_CHECK(dyn_hipIpcOpenEventHandle_ptr(&start, handle))
     REQUIRE(start != nullptr);
 
     hipEvent_t stop = nullptr;
-    HIP_CHECK(hipEventCreate(&stop));
+    HIP_CHECK(hipEventCreate(&stop))
     REQUIRE(stop != nullptr);
 
     int N = 40;
@@ -191,27 +191,27 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Event) {
     fillHostArray(hostMem, N, 10);
 
     int* devMem = nullptr;
-    HIP_CHECK(hipMalloc(&devMem, Nbytes));
+    HIP_CHECK(hipMalloc(&devMem, Nbytes))
     REQUIRE(devMem != nullptr);
 
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
 
-    HIP_CHECK(hipEventRecord(start, stream));
+    HIP_CHECK(hipEventRecord(start, stream))
 
-    HIP_CHECK(hipMemcpyAsync(devMem, hostMem, Nbytes, hipMemcpyHostToDevice, stream));
+    HIP_CHECK(hipMemcpyAsync(devMem, hostMem, Nbytes, hipMemcpyHostToDevice, stream))
     addOneKernel<<<1, 1>>>(devMem, N);
-    HIP_CHECK(hipMemcpyAsync(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost, stream));
+    HIP_CHECK(hipMemcpyAsync(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost, stream))
 
-    HIP_CHECK(hipEventRecord(stop, stream));
-    HIP_CHECK(hipEventSynchronize(stop));
+    HIP_CHECK(hipEventRecord(stop, stream))
+    HIP_CHECK(hipEventSynchronize(stop))
 
     REQUIRE(validateHostArray(hostMem, N, 11) == true);
 
-    HIP_CHECK(hipEventDestroy(stop));
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipEventDestroy(stop))
+    HIP_CHECK(hipEventDestroy(start))
+    HIP_CHECK(hipStreamDestroy(stream))
     free(hostMem);
-    HIP_CHECK(hipFree(devMem));
+    HIP_CHECK(hipFree(devMem))
   }
 }

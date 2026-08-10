@@ -14,7 +14,7 @@ HIP_TEST_CASE(Unit_texRefSetGetMipmapLevelClamp) {
 
   // Retrieve the texture reference for our symbol
   const textureReference* texRefConst = nullptr;
-  HIP_CHECK(hipGetTextureReference(&texRefConst, &tex));
+  HIP_CHECK(hipGetTextureReference(&texRefConst, &tex))
   REQUIRE(texRefConst != nullptr);
   // Implementation expects non-const textureReference*
   textureReference* texRef = const_cast<textureReference*>(texRefConst);
@@ -24,7 +24,7 @@ HIP_TEST_CASE(Unit_texRefSetGetMipmapLevelClamp) {
 
   SECTION("Set mipmap level clamp to custom values and verify") {
     float newMin = 1.5f, newMax = 5.5f;
-    HIP_CHECK(hipTexRefSetMipmapLevelClamp(texRef, newMin, newMax));
+    HIP_CHECK(hipTexRefSetMipmapLevelClamp(texRef, newMin, newMax))
     auto res = hipTexRefGetMipmapLevelClamp(&minClamp, &maxClamp, texRefConst);
     REQUIRE(res == hipErrorInvalidValue);
     REQUIRE(minClamp == newMin);

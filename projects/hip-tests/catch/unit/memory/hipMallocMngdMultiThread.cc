@@ -38,22 +38,22 @@ static bool IfTestPassed = true;
 static void LaunchKrnl(int* Hmm1, size_t NumElms, int InitVal, int GpuOrdnl, int AdviseFlg) {
   int* Hmm2 = NULL;
   hipStream_t strm;
-  HIPCHECK(hipSetDevice(GpuOrdnl));
-  HIPCHECK(hipStreamCreate(&strm));
+  HIPCHECK(hipSetDevice(GpuOrdnl))
+  HIPCHECK(hipStreamCreate(&strm))
   if (AdviseFlg == 0) {
-    HIPCHECK(hipMemAdvise(Hmm1, NumElms * sizeof(int), hipMemAdviseSetReadMostly, GpuOrdnl));
+    HIPCHECK(hipMemAdvise(Hmm1, NumElms * sizeof(int), hipMemAdviseSetReadMostly, GpuOrdnl))
   } else if (AdviseFlg == 1) {
-    HIPCHECK(hipMemAdvise(Hmm1, NumElms * sizeof(int), hipMemAdviseSetPreferredLocation, GpuOrdnl));
+    HIPCHECK(hipMemAdvise(Hmm1, NumElms * sizeof(int), hipMemAdviseSetPreferredLocation, GpuOrdnl))
   } else if (AdviseFlg == 2) {
-    HIPCHECK(hipMemAdvise(Hmm1, NumElms * sizeof(int), hipMemAdviseSetAccessedBy, GpuOrdnl));
+    HIPCHECK(hipMemAdvise(Hmm1, NumElms * sizeof(int), hipMemAdviseSetAccessedBy, GpuOrdnl))
   } else if (AdviseFlg == 3) {
-    HIPCHECK(hipMemPrefetchAsync(Hmm1, NumElms * sizeof(int), GpuOrdnl, strm));
-    HIPCHECK(hipStreamSynchronize(strm));
+    HIPCHECK(hipMemPrefetchAsync(Hmm1, NumElms * sizeof(int), GpuOrdnl, strm))
+    HIPCHECK(hipStreamSynchronize(strm))
   }
-  HIPCHECK(hipMallocManaged(&Hmm2, (sizeof(int) * NumElms)));
+  HIPCHECK(hipMallocManaged(&Hmm2, (sizeof(int) * NumElms)))
   for (int i = 0; i < 2; ++i) {
     KrnlWth2MemTypes<<<((NumElms + 63) / 64), 64, 0, strm>>>(Hmm2, Hmm1, NumElms);
-    HIPCHECK(hipStreamSynchronize(strm));
+    HIPCHECK(hipStreamSynchronize(strm))
   }
   // Verifying the result
   int DataMismatch = 0;
@@ -66,31 +66,31 @@ static void LaunchKrnl(int* Hmm1, size_t NumElms, int InitVal, int GpuOrdnl, int
     WARN("Data Mismatch observed at line: " << __LINE__);
     IfTestPassed = false;
   }
-  HIPCHECK(hipFree(Hmm2));
-  HIPCHECK(hipStreamDestroy(strm));
+  HIPCHECK(hipFree(Hmm2))
+  HIPCHECK(hipStreamDestroy(strm))
 }
 
 static void LaunchKrnl2(int* Hmm, size_t NumElms, int InitVal, int HmmMem) {
   int *ptr = nullptr, blockSize = 64;
   std::unique_ptr<int[]> host_ptr;
   hipStream_t strm;
-  HIPCHECK(hipStreamCreate(&strm));
+  HIPCHECK(hipStreamCreate(&strm))
   if (HmmMem == 0) {
     host_ptr = std::make_unique<int[]>(NumElms);
-    HIPCHECK(hipMalloc(&ptr, (sizeof(int) * NumElms)));
+    HIPCHECK(hipMalloc(&ptr, (sizeof(int) * NumElms)))
   } else {
-    HIPCHECK(hipMallocManaged(&ptr, (sizeof(int) * NumElms)));
+    HIPCHECK(hipMallocManaged(&ptr, (sizeof(int) * NumElms)))
   }
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
   for (int i = 0; i < (isQuickLevel() ? 1 : 2); ++i) {
     KrnlWth2MemTypes<<<dimGrid, dimBlock, 0, strm>>>(ptr, Hmm, NumElms);
   }
-  HIPCHECK(hipStreamSynchronize(strm));
+  HIPCHECK(hipStreamSynchronize(strm))
   // Verifying the result
   int DataMismatch = 0;
   if (HmmMem == 0) {
-    HIPCHECK(hipMemcpy(host_ptr.get(), ptr, (sizeof(int) * NumElms), hipMemcpyDeviceToHost));
+    HIPCHECK(hipMemcpy(host_ptr.get(), ptr, (sizeof(int) * NumElms), hipMemcpyDeviceToHost))
     for (size_t i = 0; i < NumElms; ++i) {
       if (host_ptr[i] != (InitVal + 10)) {
         DataMismatch++;
@@ -112,14 +112,14 @@ static void LaunchKrnl2(int* Hmm, size_t NumElms, int InitVal, int HmmMem) {
 static void LaunchKrnl3(int* Dptr, size_t NumElms, int InitVal) {
   int *Hmm = NULL, blockSize = 64;
   hipStream_t strm;
-  HIPCHECK(hipStreamCreate(&strm));
-  HIPCHECK(hipMallocManaged(&Hmm, (sizeof(int) * NumElms)));
+  HIPCHECK(hipStreamCreate(&strm))
+  HIPCHECK(hipMallocManaged(&Hmm, (sizeof(int) * NumElms)))
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
   for (int i = 0; i < (isQuickLevel() ? 1 : 2); ++i) {
     KrnlWth2MemTypes<<<dimGrid, dimBlock, 0, strm>>>(Hmm, Dptr, NumElms);
   }
-  HIPCHECK(hipStreamSynchronize(strm));
+  HIPCHECK(hipStreamSynchronize(strm))
   // Verifying the result
   int DataMismatch = 0;
   for (size_t i = 0; i < NumElms; ++i) {
@@ -137,8 +137,8 @@ static void LaunchKrnl3(int* Dptr, size_t NumElms, int InitVal) {
 static void LaunchKrnl5(int* Hmm1, size_t NumElms, int InitVal, int KerneltoLaunch) {
   int *Hmm2 = NULL, blockSize = 64;
   hipStream_t strm;
-  HIPCHECK(hipStreamCreate(&strm));
-  HIPCHECK(hipMallocManaged(&Hmm2, (sizeof(int) * NumElms)));
+  HIPCHECK(hipStreamCreate(&strm))
+  HIPCHECK(hipMallocManaged(&Hmm2, (sizeof(int) * NumElms)))
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
   for (int i = 0; i < (isQuickLevel() ? 1 : 2); ++i) {
@@ -148,7 +148,7 @@ static void LaunchKrnl5(int* Hmm1, size_t NumElms, int InitVal, int KerneltoLaun
       KernelMul_MngdMem123<<<dimGrid, dimBlock, 0, strm>>>(Hmm2, Hmm1, NumElms);
     }
   }
-  HIPCHECK(hipStreamSynchronize(strm));
+  HIPCHECK(hipStreamSynchronize(strm))
   // Verifying the result
   int DataMismatch = 0;
   if (KerneltoLaunch == 0) {
@@ -178,10 +178,10 @@ static void TestFlagParamGlobal(int dev) {
   float *Ad = NULL, *Ah = NULL;
   Ah = new float[NUM_ELMS];
   hipStream_t strm;
-  HIPCHECK(hipSetDevice(dev));
-  HIPCHECK(hipStreamCreate(&strm));
+  HIPCHECK(hipSetDevice(dev))
+  HIPCHECK(hipStreamCreate(&strm))
   // Testing hipMemAttachGlobal Flag
-  HIPCHECK(hipMallocManaged(&HmmAG, NUM_ELMS * sizeof(float), hipMemAttachGlobal));
+  HIPCHECK(hipMallocManaged(&HmmAG, NUM_ELMS * sizeof(float), hipMemAttachGlobal))
 
   // Initializing HmmAG memory
   for (int i = 0; i < NUM_ELMS; i++) {
@@ -193,14 +193,14 @@ static void TestFlagParamGlobal(int dev) {
   int numBlocks = (NUM_ELMS + blockSize - 1) / blockSize;
   dim3 dimGrid(numBlocks, 1, 1);
   dim3 dimBlock(blockSize, 1, 1);
-  HIPCHECK(hipSetDevice(dev));
-  HIPCHECK(hipMalloc(&Ad, NUM_ELMS * sizeof(float)));
-  HIPCHECK(hipMemset(Ad, 0, NUM_ELMS * sizeof(float)));
+  HIPCHECK(hipSetDevice(dev))
+  HIPCHECK(hipMalloc(&Ad, NUM_ELMS * sizeof(float)))
+  HIPCHECK(hipMemset(Ad, 0, NUM_ELMS * sizeof(float)))
   for (int i = 0; i < ITERATIONS; ++i) {
     HmmMultiThread<<<dimGrid, dimBlock, 0, strm>>>(NUM_ELMS, HmmAG, Ad);
-    HIPCHECK(hipStreamSynchronize(strm));
+    HIPCHECK(hipStreamSynchronize(strm))
   }
-  HIPCHECK(hipMemcpy(Ah, Ad, NUM_ELMS * sizeof(float), hipMemcpyDeviceToHost));
+  HIPCHECK(hipMemcpy(Ah, Ad, NUM_ELMS * sizeof(float), hipMemcpyDeviceToHost))
   for (int j = 0; j < NUM_ELMS; ++j) {
     if (Ah[j] != (INIT_VAL * INIT_VAL)) {
       DataMismatch++;
@@ -212,10 +212,10 @@ static void TestFlagParamGlobal(int dev) {
     IfTestPassed = false;
   }
 
-  HIPCHECK(hipFree(Ad));
+  HIPCHECK(hipFree(Ad))
   delete[] Ah;
-  HIPCHECK(hipFree(HmmAG));
-  HIPCHECK(hipStreamDestroy(strm));
+  HIPCHECK(hipFree(HmmAG))
+  HIPCHECK(hipStreamDestroy(strm))
 }
 
 
@@ -224,10 +224,10 @@ static void TestFlagParamHost(int dev) {
   float *HmmAH1 = nullptr, *HmmAH2 = nullptr, INIT_VAL = 2.5;
   int NUM_ELMS = 4096, ITERATIONS = 10;
   hipStream_t strm;
-  HIPCHECK(hipSetDevice(dev));
-  HIPCHECK(hipStreamCreate(&strm));
-  HIPCHECK(hipMallocManaged(&HmmAH1, NUM_ELMS * sizeof(float), hipMemAttachHost));
-  HIPCHECK(hipMallocManaged(&HmmAH2, NUM_ELMS * sizeof(float), hipMemAttachHost));
+  HIPCHECK(hipSetDevice(dev))
+  HIPCHECK(hipStreamCreate(&strm))
+  HIPCHECK(hipMallocManaged(&HmmAH1, NUM_ELMS * sizeof(float), hipMemAttachHost))
+  HIPCHECK(hipMallocManaged(&HmmAH2, NUM_ELMS * sizeof(float), hipMemAttachHost))
   // Initializing HmmAH memory
   for (int i = 0; i < NUM_ELMS; i++) {
     HmmAH1[i] = INIT_VAL;
@@ -239,7 +239,7 @@ static void TestFlagParamHost(int dev) {
   dim3 dimBlock(blockSize, 1, 1);
   for (int i = 0; i < ITERATIONS; ++i) {
     HmmMultiThread<<<dimGrid, dimBlock, 0, strm>>>(NUM_ELMS, HmmAH1, HmmAH2);
-    HIPCHECK(hipStreamSynchronize(strm));
+    HIPCHECK(hipStreamSynchronize(strm))
   }
   for (int j = 0; j < NUM_ELMS; ++j) {
     if (HmmAH2[j] != (INIT_VAL * INIT_VAL)) {
@@ -252,22 +252,22 @@ static void TestFlagParamHost(int dev) {
     INFO("Data Mismatch observed when kernel launched on device: " << dev);
     IfTestPassed = false;
   }
-  HIPCHECK(hipFree(HmmAH1));
-  HIPCHECK(hipFree(HmmAH2));
-  HIPCHECK(hipStreamDestroy(strm));
+  HIPCHECK(hipFree(HmmAH1))
+  HIPCHECK(hipFree(HmmAH2))
+  HIPCHECK(hipStreamDestroy(strm))
 }
 
 static void AllocateHmmMemory(int flag, int device) {
   int ITERATIONS = 10;
   void *HmmAG = NULL, *HmmAH = NULL;
-  HIPCHECK(hipSetDevice(device));
+  HIPCHECK(hipSetDevice(device))
   for (int i = 0; i < ITERATIONS; ++i) {
     if (!flag) {
-      HIPCHECK(hipMallocManaged(&HmmAG, (2 * 4096), hipMemAttachGlobal));
-      HIPCHECK(hipFree(HmmAG));
+      HIPCHECK(hipMallocManaged(&HmmAG, (2 * 4096), hipMemAttachGlobal))
+      HIPCHECK(hipFree(HmmAG))
     } else {
-      HIPCHECK(hipMallocManaged(&HmmAH, (2 * 4096), hipMemAttachHost));
-      HIPCHECK(hipFree(HmmAH));
+      HIPCHECK(hipMallocManaged(&HmmAH, (2 * 4096), hipMemAttachHost))
+      HIPCHECK(hipFree(HmmAH))
     }
   }
 }
@@ -280,7 +280,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiThread) {
   int ITERATIONS = 10;
 
 
-  HIP_CHECK(hipGetDeviceCount(&NumDevs));
+  HIP_CHECK(hipGetDeviceCount(&NumDevs))
   std::vector<std::thread> T1;
   std::vector<std::thread> T2;
   for (int i = 0; i < NumDevs; ++i) {
@@ -327,13 +327,13 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
 
   IfTestPassed = true;
   int Ngpus = 0;
-  HIP_CHECK(hipGetDeviceCount(&Ngpus));
+  HIP_CHECK(hipGetDeviceCount(&Ngpus))
   if (Ngpus < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   int InitVal = 123, *Hmm1 = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 4;
-  HIP_CHECK(hipMallocManaged(&Hmm1, (NumElms * sizeof(int))));
+  HIP_CHECK(hipMallocManaged(&Hmm1, (NumElms * sizeof(int))))
   for (int i = 0; i < NumElms; ++i) {
     Hmm1[i] = InitVal;
   }
@@ -353,7 +353,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
       }
     }
   }
-  HIP_CHECK(hipFree(Hmm1));
+  HIP_CHECK(hipFree(Hmm1))
   REQUIRE(IfTestPassed);
 }
 
@@ -369,11 +369,11 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
   int HmmMem2 = 0, *HstPtr = nullptr;  //  to indicate the thread that
   //  hipMalloc() memory has to be used
   HstPtr = reinterpret_cast<int*>(new int[NumElms]);
-  HIP_CHECK(hipMalloc(&Hmm, (NumElms * sizeof(int))));
+  HIP_CHECK(hipMalloc(&Hmm, (NumElms * sizeof(int))))
   for (int i = 0; i < NumElms; ++i) {
     HstPtr[i] = InitVal;
   }
-  HIP_CHECK(hipMemcpy(Hmm, HstPtr, (NumElms * sizeof(int)), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Hmm, HstPtr, (NumElms * sizeof(int)), hipMemcpyHostToDevice))
   std::vector<std::thread> Thrds;
   for (int i = 0; i < TotThrds; ++i) {
     Thrds.push_back(std::thread(LaunchKrnl2, Hmm, NumElms, InitVal, HmmMem2));
@@ -386,7 +386,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
   }
   HIP_CHECK_THREAD_FINALIZE();
   delete[] HstPtr;
-  HIP_CHECK(hipFree(Hmm));
+  HIP_CHECK(hipFree(Hmm))
 }
 
 
@@ -398,11 +398,11 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
   IfTestPassed = true;
   int InitVal = 123, *Dptr = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 8, TotThrds = 2;
   int* HstPtr = reinterpret_cast<int*>(new int[NumElms]);
-  HIP_CHECK(hipMalloc(&Dptr, (NumElms * sizeof(int))));
+  HIP_CHECK(hipMalloc(&Dptr, (NumElms * sizeof(int))))
   for (int i = 0; i < NumElms; ++i) {
     HstPtr[i] = InitVal;
   }
-  HIP_CHECK(hipMemcpy(Dptr, HstPtr, (NumElms * sizeof(int)), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Dptr, HstPtr, (NumElms * sizeof(int)), hipMemcpyHostToDevice))
   std::vector<std::thread> Thrds;
   for (int i = 0; i < TotThrds; ++i) {
     Thrds.push_back(std::thread(LaunchKrnl3, Dptr, NumElms, InitVal));
@@ -415,7 +415,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
   }
   HIP_CHECK_THREAD_FINALIZE();
   delete[] HstPtr;
-  HIP_CHECK(hipFree(Dptr));
+  HIP_CHECK(hipFree(Dptr))
 }
 
 //  The following section tests the scenario wherein multiple threads use their
@@ -429,7 +429,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
   int *Hmm1 = NULL, TotlThrds = 4, InitVal = 123;
   int HmmMem = 1;  //  to indicate the thread that Hmm memory need to be
   //  used inside it
-  HIP_CHECK(hipMallocManaged(&Hmm1, (NumElms * sizeof(int))));
+  HIP_CHECK(hipMallocManaged(&Hmm1, (NumElms * sizeof(int))))
   for (int i = 0; i < NumElms; ++i) {
     Hmm1[i] = InitVal;
   }
@@ -457,11 +457,11 @@ HIP_TEST_CASE(Unit_hipMallocManaged_TwoKrnlsComnHmmMem) {
   IfTestPassed = true;
   int InitVal = 123, *Dptr = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 4, TotThrds = 2;
   int* HstPtr = reinterpret_cast<int*>(new int[NumElms]);
-  HIP_CHECK(hipMalloc(&Dptr, (NumElms * sizeof(int))));
+  HIP_CHECK(hipMalloc(&Dptr, (NumElms * sizeof(int))))
   for (int i = 0; i < NumElms; ++i) {
     HstPtr[i] = InitVal;
   }
-  HIP_CHECK(hipMemcpy(Dptr, HstPtr, (NumElms * sizeof(int)), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Dptr, HstPtr, (NumElms * sizeof(int)), hipMemcpyHostToDevice))
   std::vector<std::thread> Thrds;
   for (int i = 0; i < TotThrds; ++i) {
     Thrds.push_back(std::thread(LaunchKrnl5, Dptr, NumElms, InitVal, i));
@@ -474,5 +474,5 @@ HIP_TEST_CASE(Unit_hipMallocManaged_TwoKrnlsComnHmmMem) {
   }
   HIP_CHECK_THREAD_FINALIZE();
   delete[] HstPtr;
-  HIP_CHECK(hipFree(Dptr));
+  HIP_CHECK(hipFree(Dptr))
 }

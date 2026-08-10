@@ -40,7 +40,7 @@ HIP_TEST_CASE(Unit_hipMipmappedArrayCreate_Negative_Parameters) {
 
   unsigned int levels = 1 + std::log2(desc.Depth);
 
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
 
   SECTION("mipmappedArray is nullptr") {
     HIP_CHECK_ERROR(hipMipmappedArrayCreate(nullptr, &desc, levels), hipErrorInvalidValue);

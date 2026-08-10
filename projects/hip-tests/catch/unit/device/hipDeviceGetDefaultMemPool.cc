@@ -37,7 +37,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetDefaultMemPool_Positive_Basic) {
   }
 
   hipMemPool_t mem_pool;
-  HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, device));
+  HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, device))
   REQUIRE(mem_pool != nullptr);
 }
 

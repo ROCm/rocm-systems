@@ -17,13 +17,13 @@ class MemPoolGetAttributeBenchmark : public Benchmark<MemPoolGetAttributeBenchma
   void operator()(const hipMemPoolAttr attribute) {
     hipMemPool_t mem_pool{nullptr};
     hipMemPoolProps pool_props = CreateMemPoolProps(0, hipMemHandleTypeNone);
-    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
 
     uint64_t value{0};
 
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attribute, &value)); }
 
-    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+    HIP_CHECK(hipMemPoolDestroy(mem_pool))
   }
 };
 

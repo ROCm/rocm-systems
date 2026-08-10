@@ -39,7 +39,7 @@ bool CompileKernelSource(std::vector<char>& code) {
 
 #if HT_AMD
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, 0));
+  HIP_CHECK(hipGetDeviceProperties(&properties, 0))
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
   const char* options[] = {offload_arch.c_str()};
   const int num_options = 1;
@@ -79,13 +79,13 @@ void LoadContractKernel(std::vector<char>& code, hipLibrary_t& library, hipKerne
   // points run. On NVIDIA these map to the CUDA driver API (cuLibrary*/cuKernel*),
   // which requires a bound primary context; hipFree(0) is the canonical no-op
   // that forces primary-context initialization and is a harmless success on AMD.
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
   if (!CompileKernelSource(code)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
   }
-  HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+  HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0))
   REQUIRE(library != nullptr);
-  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));
+  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName))
   REQUIRE(kernel != nullptr);
 }
 }  // namespace
@@ -98,7 +98,7 @@ HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelGetAttribute_Default_Retu
   LoadContractKernel(code, library, kernel);
 
   hipDevice_t device = 0;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   // The maximum thread count reported for a launchable kernel must be positive,
   // and its static resource usages (register and shared-memory counts) must be
@@ -110,10 +110,10 @@ HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelGetAttribute_Default_Retu
   REQUIRE(max_threads_per_block > 0);
 
   int num_registers = -1;
-  HIP_CHECK(hipKernelGetAttribute(&num_registers, HIP_FUNC_ATTRIBUTE_NUM_REGS, kernel, device));
+  HIP_CHECK(hipKernelGetAttribute(&num_registers, HIP_FUNC_ATTRIBUTE_NUM_REGS, kernel, device))
   REQUIRE(num_registers >= 0);
 
-  HIP_CHECK(hipLibraryUnload(library));
+  HIP_CHECK(hipLibraryUnload(library))
 }
 
 // @asserts: hipKernelSetAttribute - setting max dynamic shared memory to zero is either accepted or reported as unsupported, never another error
@@ -124,7 +124,7 @@ HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynami
   LoadContractKernel(code, library, kernel);
 
   hipDevice_t device = 0;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   // Setting the max dynamic shared memory to zero is a benign, portable request:
   // the runtime must either accept it or report that the attribute cannot be set
@@ -132,10 +132,10 @@ HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynami
   const hipError_t status = hipKernelSetAttribute(
       HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, 0, kernel, device);
   if (status != hipSuccess && status != hipErrorNotSupported) {
-    HIP_CHECK(status);
+    HIP_CHECK(status)
   }
 
-  HIP_CHECK(hipLibraryUnload(library));
+  HIP_CHECK(hipLibraryUnload(library))
 }
 
 // @asserts: hipKernelGetParamInfo - reports the first parameter at offset zero with size at least that of a device pointer
@@ -151,10 +151,10 @@ HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelGetParamInfo_Default_Retu
   // used.
   size_t param_offset = static_cast<size_t>(-1);
   size_t param_size = 0;
-  HIP_CHECK(hipKernelGetParamInfo(kernel, 0, &param_offset, &param_size));
+  HIP_CHECK(hipKernelGetParamInfo(kernel, 0, &param_offset, &param_size))
 
   REQUIRE(param_offset == 0);
   REQUIRE(param_size >= sizeof(void*));
 
-  HIP_CHECK(hipLibraryUnload(library));
+  HIP_CHECK(hipLibraryUnload(library))
 }

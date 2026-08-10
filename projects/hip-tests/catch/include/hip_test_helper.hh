@@ -23,7 +23,7 @@
 namespace HipTest {
 static inline int getGeviceCount() {
   int dev = 0;
-  HIP_CHECK(hipGetDeviceCount(&dev));
+  HIP_CHECK(hipGetDeviceCount(&dev))
   return dev;
 }
 

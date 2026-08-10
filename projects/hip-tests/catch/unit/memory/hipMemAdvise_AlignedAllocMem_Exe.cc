@@ -29,9 +29,9 @@ __global__ void MemAdvise_Exe(int* Hmm, int n) {
 
 static int hipMemAdvise_AlignedAllocMem_Exe() {
   int managedMem = 0, pageMemAccess = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pageMemAccess, hipDeviceAttributePageableMemoryAccess, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pageMemAccess, hipDeviceAttributePageableMemoryAccess, 0))
   std::cout << "\n hipDeviceAttributePageableMemoryAccess:" << pageMemAccess;
-  HIP_CHECK(hipDeviceGetAttribute(&managedMem, hipDeviceAttributeManagedMemory, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&managedMem, hipDeviceAttributeManagedMemory, 0))
   std::cout << "\n hipDeviceAttributeManagedMemory: " << managedMem;
 
   if ((managedMem == 1) && (pageMemAccess == 1)) {
@@ -44,14 +44,14 @@ static int hipMemAdvise_AlignedAllocMem_Exe() {
 
     hipStream_t strm;
     int DataMismatch = 0;
-    HIP_CHECK(hipStreamCreate(&strm));
+    HIP_CHECK(hipStreamCreate(&strm))
     // The following hipMemAdvise() call is made to know if advise on
     // aligned_alloc() is causing any issue
-    HIP_CHECK(hipMemAdvise(Mllc, MemSz, hipMemAdviseSetPreferredLocation, 0));
-    HIP_CHECK(hipMemPrefetchAsync(Mllc, MemSz, 0, strm));
-    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipMemAdvise(Mllc, MemSz, hipMemAdviseSetPreferredLocation, 0))
+    HIP_CHECK(hipMemPrefetchAsync(Mllc, MemSz, 0, strm))
+    HIP_CHECK(hipStreamSynchronize(strm))
     MemAdvise_Exe<<<(NumElms / 32), 32, 0, strm>>>(Mllc, NumElms);
-    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipStreamSynchronize(strm))
     for (int i = 0; i < NumElms; ++i) {
       if (Mllc[i] != (InitVal + 10)) {
         DataMismatch++;

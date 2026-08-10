@@ -234,32 +234,32 @@ static __global__ void kerFree(int* outputBuf, int test_type) {
 static bool TestAllocationOfAllAvailableMemory(int test_type, int category, size_t mem_chunk_size) {
   size_t avail1 = 0, avail2 = 0, tot = 0;
   constexpr size_t host_alloc = 2147483648;  // 2 GB
-  HIP_CHECK(hipMemGetInfo(&avail1, &tot));
+  HIP_CHECK(hipMemGetInfo(&avail1, &tot))
 #if HT_NVIDIA
-  HIP_CHECK(hipDeviceSetLimit(hipLimitMallocHeapSize, avail1));
+  HIP_CHECK(hipDeviceSetLimit(hipLimitMallocHeapSize, avail1))
 #endif
   size_t *tot_alloc_mem_d = nullptr, *tot_alloc_mem_h = nullptr;
   tot_alloc_mem_h = reinterpret_cast<size_t*>(malloc(sizeof(size_t)));
   REQUIRE(nullptr != tot_alloc_mem_h);
-  HIP_CHECK(hipMalloc(&tot_alloc_mem_d, sizeof(size_t)));
+  HIP_CHECK(hipMalloc(&tot_alloc_mem_d, sizeof(size_t)))
   REQUIRE(nullptr != tot_alloc_mem_d);
   char* devptrHost = nullptr;
   if (category == ALLOCATE_ONHOST_HIPMALLOCMANAGED) {
-    HIP_CHECK(hipMallocManaged(&devptrHost, host_alloc));
+    HIP_CHECK(hipMallocManaged(&devptrHost, host_alloc))
   } else if (category == ALLOCATE_ONHOST_HIPMALLOC) {
-    HIP_CHECK(hipMalloc(&devptrHost, host_alloc));
+    HIP_CHECK(hipMalloc(&devptrHost, host_alloc))
   }
-  HIP_CHECK(hipMemGetInfo(&avail1, &tot));
+  HIP_CHECK(hipMemGetInfo(&avail1, &tot))
   INFO("Total available memory " << tot);
   INFO("Available memory before allocation " << avail1);
   // Launch Test Kernel
   kerAllocTillExhaust<<<1, 1>>>(test_type, tot_alloc_mem_d, mem_chunk_size);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   // Copy to host buffer
-  HIP_CHECK(hipMemcpy(tot_alloc_mem_h, tot_alloc_mem_d, sizeof(size_t), hipMemcpyDefault));
-  HIP_CHECK(hipMemGetInfo(&avail2, &tot));
+  HIP_CHECK(hipMemcpy(tot_alloc_mem_h, tot_alloc_mem_d, sizeof(size_t), hipMemcpyDefault))
+  HIP_CHECK(hipMemGetInfo(&avail2, &tot))
   kerFreeAll<<<1, 1>>>(test_type);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   // Copy to host buffer
   bool bPassed = false;
   INFO("Available memory after allocation " << avail2);
@@ -290,7 +290,7 @@ static bool TestMemoryAllocationInLoop(int test_type, bool isMultikernel = false
   int arraysize = (BLOCKSIZE * GRIDSIZE);
   outputVec_h = reinterpret_cast<int*>(malloc(sizeof(int) * arraysize));
   REQUIRE(outputVec_h != nullptr);
-  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(int) * arraysize)));
+  HIP_CHECK(hipMalloc(&outputVec_d, (sizeof(int) * arraysize)))
   bool bPassed = true;
   // Launch Test Kernel
   int max_index = 0;
@@ -307,9 +307,9 @@ static bool TestMemoryAllocationInLoop(int test_type, bool isMultikernel = false
     } else {
       kerBlockLevelMemoryAllocation<<<GRIDSIZE, BLOCKSIZE>>>(outputVec_d, test_type);
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     // Copy to host buffer
-    HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(int) * arraysize, hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(outputVec_h, outputVec_d, sizeof(int) * arraysize, hipMemcpyDefault))
     bPassed = true;
     for (int idx = 0; idx < arraysize; idx++) {
       if (outputVec_h[idx] != idx) {
@@ -319,7 +319,7 @@ static bool TestMemoryAllocationInLoop(int test_type, bool isMultikernel = false
     }
     if (!bPassed) break;
   }
-  HIP_CHECK(hipFree(outputVec_d));
+  HIP_CHECK(hipFree(outputVec_d))
   free(outputVec_h);
   return bPassed;
 }
@@ -402,22 +402,22 @@ HIP_TEST_CASE(Stress_deviceAllocation_new_hipmalloc) {
 HIP_TEST_CASE(Stress_deviceAllocation_Negative) {
   int *ret_d{nullptr}, *ret_h{nullptr};
   size_t avail = 0, tot = 0;
-  HIP_CHECK(hipMemGetInfo(&avail, &tot));
+  HIP_CHECK(hipMemGetInfo(&avail, &tot))
   printf("Available Memory in GPU = %zu \n", avail);
   ret_h = reinterpret_cast<int*>(malloc(sizeof(int)));
   REQUIRE(ret_h != nullptr);
-  HIP_CHECK(hipMalloc(&ret_d, (sizeof(int))));
+  HIP_CHECK(hipMalloc(&ret_d, (sizeof(int))))
   SECTION("Test allocation with malloc") {
     kerTestDynamicAllocNeg<<<1, 1>>>(TEST_MALLOC_FREE, (avail + 1), ret_d);
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipMemcpy(ret_h, ret_d, sizeof(int), hipMemcpyDefault));
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipMemcpy(ret_h, ret_d, sizeof(int), hipMemcpyDefault))
     REQUIRE(0 == *ret_h);
   }
 
   SECTION("Test allocation with new") {
     kerTestDynamicAllocNeg<<<1, 1>>>(TEST_NEW_DELETE, (avail + 1), ret_d);
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipMemcpy(ret_h, ret_d, sizeof(int), hipMemcpyDefault));
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipMemcpy(ret_h, ret_d, sizeof(int), hipMemcpyDefault))
     REQUIRE(0 == *ret_h);
   }
   hipFree(ret_d);

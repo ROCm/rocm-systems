@@ -40,7 +40,7 @@ HIP_TEST_CASE(Contract_HostAllocAliases_HipHostAlloc_Default_ReturnsUsablePinned
   void* host_ptr = nullptr;
   const auto pattern = MakePattern(0x12);
 
-  HIP_CHECK(hipHostAlloc(&host_ptr, kElementCount, hipHostAllocDefault));
+  HIP_CHECK(hipHostAlloc(&host_ptr, kElementCount, hipHostAllocDefault))
   cleanup.Add([host_ptr] { (void)hipFreeHost(host_ptr); });
 
   REQUIRE(host_ptr != nullptr);
@@ -53,7 +53,7 @@ HIP_TEST_CASE(Contract_HostAllocAliases_HipMallocHost_Default_ReturnsUsablePoint
   void* host_ptr = nullptr;
   const auto pattern = MakePattern(0x34);
 
-  HIP_CHECK(hipMallocHost(&host_ptr, kElementCount));
+  HIP_CHECK(hipMallocHost(&host_ptr, kElementCount))
   cleanup.Add([host_ptr] { (void)hipFreeHost(host_ptr); });
 
   REQUIRE(host_ptr != nullptr);
@@ -70,8 +70,8 @@ HIP_TEST_CASE(Contract_HostAllocAliases_HipMemAllocHost_Default_ReturnsUsablePoi
   // an initialized primary context; prime one so the test passes even when it is
   // the first HIP call in the process (e.g. run in isolation under ctest). The
   // runtime-API siblings above auto-initialize, so only this variant needs it.
-  HIP_CHECK(hipFree(0));
-  HIP_CHECK(hipMemAllocHost(&host_ptr, kElementCount));
+  HIP_CHECK(hipFree(0))
+  HIP_CHECK(hipMemAllocHost(&host_ptr, kElementCount))
   cleanup.Add([host_ptr] { (void)hipFreeHost(host_ptr); });
 
   REQUIRE(host_ptr != nullptr);
@@ -82,7 +82,7 @@ HIP_TEST_CASE(Contract_HostAllocAliases_HipMemAllocHost_Default_ReturnsUsablePoi
 HIP_TEST_CASE(Contract_HostAllocAliases_HipFreeHost_NullSucceeds_InvalidPointerRejected) {
   int stack_value = 0;
 
-  HIP_CHECK(hipFreeHost(nullptr));
+  HIP_CHECK(hipFreeHost(nullptr))
   REQUIRE(hipFreeHost(&stack_value) != hipSuccess);
 }
 
@@ -105,12 +105,12 @@ HIP_TEST_CASE(Contract_HostAllocAliases_HipHostAlloc_InvalidArgs_AreRejected) {
 HIP_TEST_CASE(Contract_HostAllocAliases_HipExtMallocWithFlags_Default_DefaultAllocatesAndZeroSizeIsNull) {
   void* device_ptr = nullptr;
 
-  HIP_CHECK(hipExtMallocWithFlags(&device_ptr, kElementCount, hipDeviceMallocDefault));
+  HIP_CHECK(hipExtMallocWithFlags(&device_ptr, kElementCount, hipDeviceMallocDefault))
   REQUIRE(device_ptr != nullptr);
-  HIP_CHECK(hipFree(device_ptr));
+  HIP_CHECK(hipFree(device_ptr))
 
   device_ptr = reinterpret_cast<void*>(0x1);
-  HIP_CHECK(hipExtMallocWithFlags(&device_ptr, 0, hipDeviceMallocDefault));
+  HIP_CHECK(hipExtMallocWithFlags(&device_ptr, 0, hipDeviceMallocDefault))
   REQUIRE(device_ptr == nullptr);
 }
 

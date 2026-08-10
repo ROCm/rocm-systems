@@ -36,7 +36,7 @@ HIP_TEST_CASE(Unit_hiprtc_saxpy) {
                       0, nullptr, nullptr);
   hipDeviceProp_t props;
   int device = 0;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
 #ifdef __HIP_PLATFORM_AMD__
   std::string sarg = std::string("--gpu-architecture=") + props.gcnArchName;
 #else
@@ -65,14 +65,14 @@ HIP_TEST_CASE(Unit_hiprtc_saxpy) {
   size_t bufferSize = n * sizeof(float);
 
   float *dX, *dY, *dOut;
-  HIP_CHECK(hipMalloc(&dX, bufferSize));
-  HIP_CHECK(hipMalloc(&dY, bufferSize));
-  HIP_CHECK(hipMalloc(&dOut, bufferSize));
+  HIP_CHECK(hipMalloc(&dX, bufferSize))
+  HIP_CHECK(hipMalloc(&dY, bufferSize))
+  HIP_CHECK(hipMalloc(&dOut, bufferSize))
 
   hipModule_t module;
   hipFunction_t kernel;
-  HIP_CHECK(hipModuleLoadData(&module, code.data()));
-  HIP_CHECK(hipModuleGetFunction(&kernel, module, "saxpy"));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()))
+  HIP_CHECK(hipModuleGetFunction(&kernel, module, "saxpy"))
 
   float a = 5.1f;
   unique_ptr<float[]> hX{new float[n]};
@@ -83,8 +83,8 @@ HIP_TEST_CASE(Unit_hiprtc_saxpy) {
     hY[i] = static_cast<float>(i * 2);
   }
 
-  HIP_CHECK(hipMemcpy(dX, hX.get(), bufferSize, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dY, hY.get(), bufferSize, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dX, hX.get(), bufferSize, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(dY, hY.get(), bufferSize, hipMemcpyHostToDevice))
 
   struct {
     float a_;
@@ -101,13 +101,13 @@ HIP_TEST_CASE(Unit_hiprtc_saxpy) {
   HIP_CHECK(hipModuleLaunchKernel(kernel, NUM_BLOCKS, 1, 1, NUM_THREADS, 1, 1, 0, nullptr, nullptr,
                                   config));
 
-  HIP_CHECK(hipMemcpy(hOut.get(), dOut, bufferSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOut.get(), dOut, bufferSize, hipMemcpyDeviceToHost))
 
-  HIP_CHECK(hipFree(dX));
-  HIP_CHECK(hipFree(dY));
-  HIP_CHECK(hipFree(dOut));
+  HIP_CHECK(hipFree(dX))
+  HIP_CHECK(hipFree(dY))
+  HIP_CHECK(hipFree(dOut))
 
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
 
   for (size_t i = 0; i < n; ++i) {
     INFO("For " << i << " Value: " << fabs(a * hX[i] + hY[i] - hOut[i])

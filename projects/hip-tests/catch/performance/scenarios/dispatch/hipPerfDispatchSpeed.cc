@@ -59,7 +59,7 @@ HIP_TEST_CASE(Performance_hipPerfDispatchAndExecutionSpeed) {
   // set up timing kernel
   uint64_t timer_freq_in_hz;
   int clock_rate = 0;  // in kHz
-  HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeWallClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeWallClockRate, 0))
   timer_freq_in_hz = clock_rate * 1000;
   uint64_t timing_in_us = 4;  // CHANGE THIS TO CHANGE EXECUTION TIME
   const uint64_t timing_count = timer_freq_in_hz * timing_in_us / 1000000;
@@ -73,8 +73,8 @@ HIP_TEST_CASE(Performance_hipPerfDispatchAndExecutionSpeed) {
 
   hipEvent_t startEvent, stopEvent;
 
-  HIP_CHECK(hipEventCreate(&startEvent));
-  HIP_CHECK(hipEventCreate(&stopEvent));
+  HIP_CHECK(hipEventCreate(&startEvent))
+  HIP_CHECK(hipEventCreate(&stopEvent))
 
 
   // run twice for both dispatch speed and full kernel latency
@@ -123,7 +123,7 @@ HIP_TEST_CASE(Performance_hipPerfDispatchAndExecutionSpeed) {
           hipLaunchKernelGGL(_TimingKernel, dim3(blocks), dim3(threads_per_block), 0,
                              hipStream_t(0), timing_count);
         }
-        HIP_CHECK(hipStreamSynchronize(0));
+        HIP_CHECK(hipStreamSynchronize(0))
 
         for (int it = 0; it < iterations; it++) {
           switch (mode) {
@@ -131,7 +131,7 @@ HIP_TEST_CASE(Performance_hipPerfDispatchAndExecutionSpeed) {
               startWall = std::chrono::high_resolution_clock::now();
               break;
             case TimingMode_HIPEvent:
-              HIP_CHECK(hipEventRecord(startEvent, 0));
+              HIP_CHECK(hipEventRecord(startEvent, 0))
               break;
             default:
               CONSOLE_PRINT("Unknown Mode");
@@ -160,8 +160,8 @@ HIP_TEST_CASE(Performance_hipPerfDispatchAndExecutionSpeed) {
               break;
             }
             case TimingMode_HIPEvent: {
-              HIP_CHECK(hipEventRecord(stopEvent, 0));
-              HIP_CHECK(hipEventSynchronize(stopEvent));
+              HIP_CHECK(hipEventRecord(stopEvent, 0))
+              HIP_CHECK(hipEventSynchronize(stopEvent))
               float elapsed;
               HIP_CHECK(hipEventElapsedTime(&elapsed, startEvent, stopEvent));  // in milliseconds
               finalPerf += (elapsed * 1000.0f) / testList[openTest];            // convert ms to µs
@@ -181,10 +181,10 @@ HIP_TEST_CASE(Performance_hipPerfDispatchAndExecutionSpeed) {
     }
   }
 
-  HIP_CHECK(hipEventDestroy(startEvent));
-  HIP_CHECK(hipEventDestroy(stopEvent));
+  HIP_CHECK(hipEventDestroy(startEvent))
+  HIP_CHECK(hipEventDestroy(stopEvent))
 
-  HIP_CHECK(hipFree(srcBuffer));
+  HIP_CHECK(hipFree(srcBuffer))
 }
 
 

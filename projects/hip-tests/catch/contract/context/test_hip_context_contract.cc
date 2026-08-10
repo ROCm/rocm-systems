@@ -16,7 +16,7 @@ namespace {
 // so that driver-style queries are only exercised against a real ordinal.
 int RequireDeviceCount() {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -27,7 +27,7 @@ int RequireDeviceCount() {
 // context contract builds on.
 hipDevice_t DeviceForOrdinalZero() {
   hipDevice_t device = 0;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   return device;
 }
 
@@ -40,8 +40,8 @@ hipDevice_t DeviceForOrdinalZero() {
 class ScopedDevice {
  public:
   explicit ScopedDevice(int next) {
-    HIP_CHECK(hipGetDevice(&previous_));
-    HIP_CHECK(hipSetDevice(next));
+    HIP_CHECK(hipGetDevice(&previous_))
+    HIP_CHECK(hipSetDevice(next))
   }
   ~ScopedDevice() { static_cast<void>(hipSetDevice(previous_)); }
 
@@ -58,10 +58,10 @@ HIP_TEST_CASE(Contract_Context_HipDeviceGet_Default_ReturnsHandleForOrdinalZero)
   RequireDeviceCount();
 
   hipDevice_t device = 0;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   std::array<char, 256> name{};
-  HIP_CHECK(hipDeviceGetName(name.data(), static_cast<int>(name.size()), device));
+  HIP_CHECK(hipDeviceGetName(name.data(), static_cast<int>(name.size()), device))
 
   // The name must be a non-empty, NUL-terminated string; exact content is
   // backend-specific and therefore not asserted.
@@ -78,7 +78,7 @@ HIP_TEST_CASE(Contract_Context_HipDeviceComputeCapability_Default_IsPositive) {
 
   int major = -1;
   int minor = -1;
-  HIP_CHECK(hipDeviceComputeCapability(&major, &minor, device));
+  HIP_CHECK(hipDeviceComputeCapability(&major, &minor, device))
 
   REQUIRE(major >= 0);
   REQUIRE(minor >= 0);
@@ -93,11 +93,11 @@ HIP_TEST_CASE(Contract_Context_HipDeviceTotalMem_Default_MatchesProperties) {
   const hipDevice_t device = DeviceForOrdinalZero();
 
   size_t total_bytes = 0;
-  HIP_CHECK(hipDeviceTotalMem(&total_bytes, device));
+  HIP_CHECK(hipDeviceTotalMem(&total_bytes, device))
   REQUIRE(total_bytes > 0);
 
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, 0));
+  HIP_CHECK(hipGetDeviceProperties(&properties, 0))
 
   REQUIRE(total_bytes == properties.totalGlobalMem);
 }
@@ -109,7 +109,7 @@ HIP_TEST_CASE(Contract_Context_HipDeviceGetUuid_AndPciBusId_Succeed) {
   const hipDevice_t device = DeviceForOrdinalZero();
 
   hipUUID uuid{};
-  HIP_CHECK(hipDeviceGetUuid(&uuid, device));
+  HIP_CHECK(hipDeviceGetUuid(&uuid, device))
 
   // hipUUID is a fixed 16-byte structure; a provisioned device exposes at least
   // one non-zero byte, but content/format is backend-specific.
@@ -140,12 +140,12 @@ HIP_TEST_CASE(Contract_Context_HipDevicePrimaryCtxRetain_Release_RoundTrips) {
   const hipDevice_t device = DeviceForOrdinalZero();
 
   hipCtx_t context = nullptr;
-  HIP_CHECK(hipDevicePrimaryCtxRetain(&context, device));
+  HIP_CHECK(hipDevicePrimaryCtxRetain(&context, device))
   REQUIRE(context != nullptr);
 
   unsigned int flags = 0;
   int active = -1;
-  HIP_CHECK(hipDevicePrimaryCtxGetState(device, &flags, &active));
+  HIP_CHECK(hipDevicePrimaryCtxGetState(device, &flags, &active))
 
   // Retain alone does not portably mark the primary context active on AMD HIP;
   // the state query must still return a well-defined boolean active flag.
@@ -155,10 +155,10 @@ HIP_TEST_CASE(Contract_Context_HipDevicePrimaryCtxRetain_Release_RoundTrips) {
   // both AMD HIP and CUDA backends. ScopedDevice restores the previous current
   // device when the test case scope exits so this does not leak into later tests.
   const ScopedDevice scoped_device(0);
-  HIP_CHECK(hipDevicePrimaryCtxGetState(device, &flags, &active));
+  HIP_CHECK(hipDevicePrimaryCtxGetState(device, &flags, &active))
   REQUIRE(active == 1);
 
-  HIP_CHECK(hipDevicePrimaryCtxRelease(device));
+  HIP_CHECK(hipDevicePrimaryCtxRelease(device))
 }
 
 // @asserts: hipCtxGetCurrent - when a current context exists its hipCtxGetDevice matches the runtime current device
@@ -166,7 +166,7 @@ HIP_TEST_CASE(Contract_Context_HipCtxGetCurrent_AndDevice_AreConsistent) {
   RequireDeviceCount();
 
   hipCtx_t current = nullptr;
-  HIP_CHECK(hipCtxGetCurrent(&current));
+  HIP_CHECK(hipCtxGetCurrent(&current))
 
   if (current == nullptr) {
     // Some runtime paths report no current context without an active driver-style
@@ -175,10 +175,10 @@ HIP_TEST_CASE(Contract_Context_HipCtxGetCurrent_AndDevice_AreConsistent) {
   }
 
   hipDevice_t context_device = 0;
-  HIP_CHECK(hipCtxGetDevice(&context_device));
+  HIP_CHECK(hipCtxGetDevice(&context_device))
 
   int runtime_device = -1;
-  HIP_CHECK(hipGetDevice(&runtime_device));
+  HIP_CHECK(hipGetDevice(&runtime_device))
 
   REQUIRE(context_device == runtime_device);
 }

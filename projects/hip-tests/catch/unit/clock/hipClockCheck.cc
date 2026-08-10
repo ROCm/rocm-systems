@@ -96,27 +96,27 @@ void execute_clock_kernels(void (*kernel)(long long*, long long*, float*, float*
   }
   auto cpu_result = std::accumulate(in.begin(), in.end(), 0.0f);
 
-  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float)));
-  HIP_CHECK(hipMalloc(&d_clock_start, sizeof(long long)));
-  HIP_CHECK(hipMalloc(&d_clock_end, sizeof(long long)));
+  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size))
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float)))
+  HIP_CHECK(hipMalloc(&d_clock_start, sizeof(long long)))
+  HIP_CHECK(hipMalloc(&d_clock_end, sizeof(long long)))
 
-  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * in.size(), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemset(d_out, 0, sizeof(float)));
-  HIP_CHECK(hipMemset(d_clock_start, 0, sizeof(long long)));
-  HIP_CHECK(hipMemset(d_clock_end, 0, sizeof(long long)));
+  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * in.size(), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemset(d_out, 0, sizeof(float)))
+  HIP_CHECK(hipMemset(d_clock_start, 0, sizeof(long long)))
+  HIP_CHECK(hipMemset(d_clock_end, 0, sizeof(long long)))
 
   hipLaunchKernelGGL(kernel, 1, size, 0, nullptr, d_clock_start, d_clock_end, d_in, d_out);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipMemcpy(&clock_start, d_clock_start, sizeof(long long), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(&clock_end, d_clock_end, sizeof(long long), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(&out, d_out, sizeof(float), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&clock_start, d_clock_start, sizeof(long long), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(&clock_end, d_clock_end, sizeof(long long), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(&out, d_out, sizeof(float), hipMemcpyDeviceToHost))
 
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
-  HIP_CHECK(hipFree(d_clock_start));
-  HIP_CHECK(hipFree(d_clock_end));
+  HIP_CHECK(hipFree(d_in))
+  HIP_CHECK(hipFree(d_out))
+  HIP_CHECK(hipFree(d_clock_start))
+  HIP_CHECK(hipFree(d_clock_end))
 
   // Make sure the math happenned correctly
   INFO("sum(1.0f, 2.0f, ..., 32.0f) gpu result: " << out << " cpu: " << cpu_result);

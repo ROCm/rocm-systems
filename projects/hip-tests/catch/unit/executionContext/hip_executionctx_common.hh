@@ -36,18 +36,18 @@ inline hipError_t GetSmResourceDesc(hipDevResourceDesc_t* desc) {
 // pattern being: hipExecutionCtxDestroy(ctx) to detach the stream, then
 // hipStreamDestroy(stream) to release it).
 inline void MakeCtxAndStream(hipExecutionCtx_t& ctx, hipStream_t& stream) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   hipDevResourceDesc_t desc{};
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
   ctx = nullptr;
-  HIP_CHECK(hipGreenCtxCreate(&ctx, desc, 0, 0));
+  HIP_CHECK(hipGreenCtxCreate(&ctx, desc, 0, 0))
   REQUIRE(ctx != nullptr);
 
   stream = nullptr;
-  HIP_CHECK(hipExecutionCtxStreamCreate(&stream, ctx, hipStreamNonBlocking, 0));
+  HIP_CHECK(hipExecutionCtxStreamCreate(&stream, ctx, hipStreamNonBlocking, 0))
   REQUIRE(stream != nullptr);
 }
 
@@ -56,14 +56,14 @@ inline void MakeCtxAndStream(hipExecutionCtx_t& ctx, hipStream_t& stream) {
 // The context, stream, and all allocations are cleaned up before returning.
 inline void RunVectorAddOnResource(hipDevResource* resource, int device) {
   hipDevResourceDesc_t desc{};
-  HIP_CHECK(hipDevResourceGenerateDesc(&desc, resource, 1));
+  HIP_CHECK(hipDevResourceGenerateDesc(&desc, resource, 1))
 
   hipExecutionCtx_t ctx = nullptr;
-  HIP_CHECK(hipGreenCtxCreate(&ctx, desc, device, 0));
+  HIP_CHECK(hipGreenCtxCreate(&ctx, desc, device, 0))
   REQUIRE(ctx != nullptr);
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipExecutionCtxStreamCreate(&stream, ctx, hipStreamNonBlocking, 0));
+  HIP_CHECK(hipExecutionCtxStreamCreate(&stream, ctx, hipStreamNonBlocking, 0))
   REQUIRE(stream != nullptr);
 
   constexpr size_t kN = 1024;
@@ -85,31 +85,31 @@ inline void RunVectorAddOnResource(hipDevResource* resource, int device) {
   int* d_a = nullptr;
   int* d_b = nullptr;
   int* d_c = nullptr;
-  HIP_CHECK(hipMalloc(&d_a, kBytes));
-  HIP_CHECK(hipMalloc(&d_b, kBytes));
-  HIP_CHECK(hipMalloc(&d_c, kBytes));
+  HIP_CHECK(hipMalloc(&d_a, kBytes))
+  HIP_CHECK(hipMalloc(&d_b, kBytes))
+  HIP_CHECK(hipMalloc(&d_c, kBytes))
 
-  HIP_CHECK(hipMemcpyAsync(d_a, h_a, kBytes, hipMemcpyHostToDevice, stream));
-  HIP_CHECK(hipMemcpyAsync(d_b, h_b, kBytes, hipMemcpyHostToDevice, stream));
+  HIP_CHECK(hipMemcpyAsync(d_a, h_a, kBytes, hipMemcpyHostToDevice, stream))
+  HIP_CHECK(hipMemcpyAsync(d_b, h_b, kBytes, hipMemcpyHostToDevice, stream))
 
   constexpr int kThreads = 256;
   const int blocks = static_cast<int>((kN + kThreads - 1) / kThreads);
   HipTest::vectorADD<<<blocks, kThreads, 0, stream>>>(d_a, d_b, d_c, kN);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
-  HIP_CHECK(hipMemcpyAsync(h_c, d_c, kBytes, hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpyAsync(h_c, d_c, kBytes, hipMemcpyDeviceToHost, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   for (size_t i = 0; i < kN; i++) {
     REQUIRE(h_c[i] == h_a[i] + h_b[i]);
   }
 
-  HIP_CHECK(hipFree(d_a));
-  HIP_CHECK(hipFree(d_b));
-  HIP_CHECK(hipFree(d_c));
+  HIP_CHECK(hipFree(d_a))
+  HIP_CHECK(hipFree(d_b))
+  HIP_CHECK(hipFree(d_c))
   free(h_a);
   free(h_b);
   free(h_c);
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 }

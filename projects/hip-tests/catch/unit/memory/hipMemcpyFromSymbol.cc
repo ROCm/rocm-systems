@@ -110,7 +110,7 @@ HIP_TEST_CASE(Unit_hipMemcpyToFromSymbol_SyncAndAsync) {
   if (streamType == StreamTestType::StreamPerThread) {
     stream = hipStreamPerThread;
   } else if (streamType == StreamTestType::CreatedStream) {
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
   }
   INFO("Stream :: " << streamType);
 
@@ -131,7 +131,7 @@ HIP_TEST_CASE(Unit_hipMemcpyToFromSymbol_SyncAndAsync) {
 
       HIP_CHECK(hipMemcpyFromSymbolAsync(&result, HIP_SYMBOL(devSymbol), sizeof(int), 0,
                                          hipMemcpyDeviceToHost, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     if (memcpy_err == hipSuccess) {
       REQUIRE(result == set);
@@ -156,7 +156,7 @@ HIP_TEST_CASE(Unit_hipMemcpyToFromSymbol_SyncAndAsync) {
 
       HIP_CHECK(hipMemcpyFromSymbolAsync(&result, HIP_SYMBOL(devSymbol), sizeof(int) * size, 0,
                                          hipMemcpyDeviceToHost, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     if (memcpy_err == hipSuccess) {
       for (size_t i = 0; i < size; i++) {
@@ -188,7 +188,7 @@ HIP_TEST_CASE(Unit_hipMemcpyToFromSymbol_SyncAndAsync) {
                                          hipMemcpyDeviceToHost, stream));
       HIP_CHECK(hipMemcpyFromSymbolAsync(result + 5, HIP_SYMBOL(devSymbol), offset, offset,
                                          hipMemcpyDeviceToHost, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     if (memcpy_err == hipSuccess) {
       for (size_t i = 0; i < size; i++) {
@@ -198,7 +198,7 @@ HIP_TEST_CASE(Unit_hipMemcpyToFromSymbol_SyncAndAsync) {
   }
 
   if (streamType == StreamTestType::CreatedStream) {
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 
@@ -217,7 +217,7 @@ HIP_TEST_CASE(Unit_hipMemcpyToFromSymbol_SyncAndAsync) {
 */
 HIP_TEST_CASE(Unit_hipMemcpyToFromSymbol_Capture) {
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   constexpr int kExpectedValue = 42;
   int host_value = 0;
@@ -241,8 +241,8 @@ HIP_TEST_CASE(Unit_hipMemcpyToFromSymbol_Capture) {
 
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   REQUIRE(host_value == kExpectedValue);
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }

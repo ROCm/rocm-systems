@@ -89,10 +89,10 @@ HIP_TEST_CASE(Unit_hipTestHalfConstexpr_DeviceConstexpr) {
   float* results_d = nullptr;
   std::vector<float> results_h(numResults, 0.0f);
 
-  HIP_CHECK(hipMalloc(&results_d, numResults * sizeof(float)));
+  HIP_CHECK(hipMalloc(&results_d, numResults * sizeof(float)))
 
   testConstexprHalfDevice<<<1, 1>>>(results_d);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   HIP_CHECK(hipMemcpy(results_h.data(), results_d, numResults * sizeof(float),
                       hipMemcpyDeviceToHost));
@@ -102,5 +102,5 @@ HIP_TEST_CASE(Unit_hipTestHalfConstexpr_DeviceConstexpr) {
   REQUIRE(results_h[1] == Catch::Approx(3.14159f).epsilon(0.01));  // kConstPi
   REQUIRE(results_h[2] == Catch::Approx(6.28f).epsilon(0.01));  // 2 * pi
 
-  HIP_CHECK(hipFree(results_d));
+  HIP_CHECK(hipFree(results_d))
 }

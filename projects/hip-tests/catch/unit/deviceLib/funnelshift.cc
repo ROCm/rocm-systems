@@ -94,7 +94,7 @@ HIP_TEST_CASE(Unit_funnelshift) {
   unsigned int* golden_rc;
 
   hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
   INFO("System minor : " << devProp.minor);
   INFO("System major : " << devProp.major);
   INFO("agent prop name : " << devProp.name);
@@ -122,14 +122,14 @@ HIP_TEST_CASE(Unit_funnelshift) {
     golden_rc[i] = cpu_funnelshift_rc(LO_INT, HI_INT, i);
   }
 
-  HIP_CHECK(hipMalloc((void**)&device_l_output, NUM_TESTS * sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc((void**)&device_lc_output, NUM_TESTS * sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc((void**)&device_r_output, NUM_TESTS * sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc((void**)&device_rc_output, NUM_TESTS * sizeof(unsigned int)));
+  HIP_CHECK(hipMalloc((void**)&device_l_output, NUM_TESTS * sizeof(unsigned int)))
+  HIP_CHECK(hipMalloc((void**)&device_lc_output, NUM_TESTS * sizeof(unsigned int)))
+  HIP_CHECK(hipMalloc((void**)&device_r_output, NUM_TESTS * sizeof(unsigned int)))
+  HIP_CHECK(hipMalloc((void**)&device_rc_output, NUM_TESTS * sizeof(unsigned int)))
 
   hipLaunchKernelGGL(funnelshift_kernel, dim3(1), dim3(1), 0, 0, device_l_output, device_lc_output,
                      device_r_output, device_rc_output);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   HIP_CHECK(hipMemcpy(host_l_output, device_l_output, NUM_TESTS * sizeof(unsigned int),
                       hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(host_lc_output, device_lc_output, NUM_TESTS * sizeof(unsigned int),
@@ -178,10 +178,10 @@ HIP_TEST_CASE(Unit_funnelshift) {
     }
   }
 
-  HIP_CHECK(hipFree(device_l_output));
-  HIP_CHECK(hipFree(device_lc_output));
-  HIP_CHECK(hipFree(device_r_output));
-  HIP_CHECK(hipFree(device_rc_output));
+  HIP_CHECK(hipFree(device_l_output))
+  HIP_CHECK(hipFree(device_lc_output))
+  HIP_CHECK(hipFree(device_r_output))
+  HIP_CHECK(hipFree(device_rc_output))
 
   free(host_l_output);
   free(host_lc_output);

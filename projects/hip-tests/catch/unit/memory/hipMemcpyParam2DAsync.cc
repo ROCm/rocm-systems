@@ -49,7 +49,7 @@ HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior) {
 
   constexpr bool async = true;
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   SECTION("Host to Device") {
     Memcpy2DHtoDSyncBehavior(
@@ -125,14 +125,14 @@ HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_Negative_Parameters) {
     }
     SECTION("dpitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       HIP_CHECK_ERROR(MemcpyParam2DAdapter<async>()(dst, static_cast<size_t>(attr) + 1, src, spitch,
                                                     width, height, kind),
                       hipErrorInvalidValue);
     }
     SECTION("spitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       HIP_CHECK_ERROR(MemcpyParam2DAdapter<async>()(dst, dpitch, src, static_cast<size_t>(attr) + 1,
                                                     width, height, kind),
                       hipErrorInvalidValue);
@@ -202,11 +202,11 @@ HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_Capture) {
   constexpr size_t kWidthInBytes = NUM_W * sizeof(int);
   constexpr size_t kHeight = NUM_H;
 
-  HIP_CHECK(hipMallocPitch(&device_a, &pitch_a, kWidthInBytes, kHeight));
-  HIP_CHECK(hipMallocPitch(&device_b, &pitch_b, kWidthInBytes, kHeight));
+  HIP_CHECK(hipMallocPitch(&device_a, &pitch_a, kWidthInBytes, kHeight))
+  HIP_CHECK(hipMallocPitch(&device_b, &pitch_b, kWidthInBytes, kHeight))
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   hip_Memcpy2D memcpy_desc{};
   memcpy_desc.srcMemoryType = hipMemoryTypeDevice;
@@ -220,10 +220,10 @@ HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_Capture) {
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemcpyParam2DAsync(&memcpy_desc, stream));
+  HIP_CHECK(hipMemcpyParam2DAsync(&memcpy_desc, stream))
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(device_a));
-  HIP_CHECK(hipFree(device_b));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(device_a))
+  HIP_CHECK(hipFree(device_b))
 }

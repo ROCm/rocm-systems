@@ -128,7 +128,7 @@ template <typename T> void MemcpyDeviceToPinnedCommon(kernel_sig<T> memcpy_kerne
         <<<thread_count, block_count>>>(result.host_ptr(), src_allocation.ptr(), element_count);
   }
 
-  HIP_CHECK(hipStreamSynchronize(nullptr));
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
   ArrayMismatch(input.host_ptr(), result.host_ptr(), element_count);
 }
@@ -155,7 +155,7 @@ template <typename T> void MemcpyPinnedToPinnedCommon(kernel_sig<T> memcpy_kerne
         <<<thread_count, block_count>>>(result.host_ptr(), input.host_ptr(), element_count);
   }
 
-  HIP_CHECK(hipStreamSynchronize(nullptr));
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
   ArrayMismatch(input.host_ptr(), result.host_ptr(), element_count);
 }

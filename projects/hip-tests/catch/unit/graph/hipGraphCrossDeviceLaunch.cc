@@ -21,9 +21,9 @@
 // launch_stream - created on launch_dev (caller-owned)
 // ---------------------------------------------------------------------------
 static void setupCrossDeviceStream(int inst_dev, int launch_dev, hipStream_t& launch_stream) {
-  HIP_CHECK(hipSetDevice(launch_dev));
-  HIP_CHECK(hipStreamCreate(&launch_stream));
-  HIP_CHECK(hipSetDevice(inst_dev));
+  HIP_CHECK(hipSetDevice(launch_dev))
+  HIP_CHECK(hipStreamCreate(&launch_stream))
+  HIP_CHECK(hipSetDevice(inst_dev))
 }
 
 struct HostCheckContext {
@@ -54,17 +54,17 @@ static void recordHostValue(void* user_data) {
  */
 HIP_TEST_CASE(Unit_hipGraphCrossDeviceLaunch_CrossStreamDependencyOrdering) {
   int nGpus = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpus));
+  HIP_CHECK(hipGetDeviceCount(&nGpus))
   if (nGpus < 2) HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
 
   hipStream_t launch_stream;
   setupCrossDeviceStream(1, 0, launch_stream);
 
-  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipSetDevice(1))
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   int* d_value = nullptr;
-  HIP_CHECK(hipMalloc(&d_value, sizeof(int)));
+  HIP_CHECK(hipMalloc(&d_value, sizeof(int)))
   int h_value = 0;
 
   constexpr int expected_value = 1234;
@@ -77,7 +77,7 @@ HIP_TEST_CASE(Unit_hipGraphCrossDeviceLaunch_CrossStreamDependencyOrdering) {
   set_params.gridDim = dim3(1);
   set_params.blockDim = dim3(1);
   set_params.kernelParams = reinterpret_cast<void**>(set_args);
-  HIP_CHECK(hipGraphAddKernelNode(&set_node, graph, nullptr, 0, &set_params));
+  HIP_CHECK(hipGraphAddKernelNode(&set_node, graph, nullptr, 0, &set_params))
 
   hipGraphNode_t memcpy_node = nullptr;
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_node, graph, &set_node, 1, &h_value, d_value,
@@ -91,23 +91,23 @@ HIP_TEST_CASE(Unit_hipGraphCrossDeviceLaunch_CrossStreamDependencyOrdering) {
   host_params.fn = recordHostValue;
   host_params.userData = &context;
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipGraphAddHostNode(&host_node, graph, &memcpy_node, 1, &host_params));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipGraphAddHostNode(&host_node, graph, &memcpy_node, 1, &host_params))
 
-  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipSetDevice(1))
   hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipGraphLaunch(graph_exec, launch_stream));
-  HIP_CHECK(hipStreamSynchronize(launch_stream));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipGraphLaunch(graph_exec, launch_stream))
+  HIP_CHECK(hipStreamSynchronize(launch_stream))
 
   REQUIRE(context.observed == context.expected);
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(d_value));
-  HIP_CHECK(hipStreamDestroy(launch_stream));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipFree(d_value))
+  HIP_CHECK(hipStreamDestroy(launch_stream))
 }
 
 /**
@@ -126,7 +126,7 @@ HIP_TEST_CASE(Unit_hipGraphCrossDeviceLaunch_CrossStreamDependencyOrdering) {
  */
 HIP_TEST_CASE(Unit_hipGraphCrossDeviceLaunch_ExplicitNodes) {
   int nGpus = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpus));
+  HIP_CHECK(hipGetDeviceCount(&nGpus))
   if (nGpus < 2) HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
 
   constexpr size_t N = 1024;
@@ -137,14 +137,14 @@ HIP_TEST_CASE(Unit_hipGraphCrossDeviceLaunch_ExplicitNodes) {
   hipStream_t launch_stream;
   setupCrossDeviceStream(1, 0, launch_stream);
 
-  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipSetDevice(1))
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t memcpy_A, memcpy_B, kernel_node, memcpy_C;
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_A, graph, nullptr, 0, A_d, A_h, Nbytes,
@@ -159,28 +159,28 @@ HIP_TEST_CASE(Unit_hipGraphCrossDeviceLaunch_ExplicitNodes) {
   kNodeParams.gridDim = dim3(blocks);
   kNodeParams.blockDim = dim3(threadsPerBlock);
   kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_node, graph, nullptr, 0, &kNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_node, graph, nullptr, 0, &kNodeParams))
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_C, graph, nullptr, 0, C_h, C_d, Nbytes,
                                     hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &kernel_node, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_B, &kernel_node, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &kernel_node, &memcpy_C, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &kernel_node, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_B, &kernel_node, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &kernel_node, &memcpy_C, 1))
 
-  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipSetDevice(1))
   hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipGraphLaunch(graph_exec, launch_stream));
-  HIP_CHECK(hipStreamSynchronize(launch_stream));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipGraphLaunch(graph_exec, launch_stream))
+  HIP_CHECK(hipStreamSynchronize(launch_stream))
 
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(launch_stream));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(launch_stream))
 }
 

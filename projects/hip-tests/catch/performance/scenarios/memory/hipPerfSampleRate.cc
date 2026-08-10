@@ -116,15 +116,15 @@ void hipPerfSampleRate::close() {}
 
 bool hipPerfSampleRate::open(void) {
   int nGpu = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpu));
+  HIP_CHECK(hipGetDeviceCount(&nGpu))
   if (nGpu < 1) {
     return false;
   }
 
   int deviceId = 0;
   hipDeviceProp_t props;
-  HIP_CHECK(hipSetDevice(deviceId));
-  HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+  HIP_CHECK(hipSetDevice(deviceId))
+  HIP_CHECK(hipGetDeviceProperties(&props, deviceId))
   CONSOLE_PRINT("info: running on bus 0x%x %s with %d CUs and device id: %d\n", props.pciBusID,
                 props.name, props.multiProcessorCount, deviceId);
   numCUs = props.multiProcessorCount;
@@ -172,28 +172,28 @@ void hipPerfSampleRate::run(unsigned int test) {
   outBufSize_ = sizes[NUM_SIZES - 1] * sizes[NUM_SIZES - 1] * typeSizes[NUM_TYPES - 1];
 
   // Allocate memory on the host and device
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&hOutPtr), outBufSize_, hipHostMallocDefault));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&hOutPtr), outBufSize_, hipHostMallocDefault))
   setData(reinterpret_cast<void*>(hOutPtr), 0xdeadbeef);
-  HIP_CHECK(hipMalloc(reinterpret_cast<uint**>(&dOutPtr), outBufSize_));
+  HIP_CHECK(hipMalloc(reinterpret_cast<uint**>(&dOutPtr), outBufSize_))
 
   // Allocate 2D array in Device
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dPtr), numBufs_ * sizeof(void*)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dPtr), numBufs_ * sizeof(void*)))
 
   for (uint i = 0; i < numBufs_; i++) {
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&hInPtr[i]), bufSize_, hipHostMallocDefault));
-    HIP_CHECK(hipMalloc(reinterpret_cast<uint**>(&dInPtr[i]), bufSize_));
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&hInPtr[i]), bufSize_, hipHostMallocDefault))
+    HIP_CHECK(hipMalloc(reinterpret_cast<uint**>(&dInPtr[i]), bufSize_))
     setData(hInPtr[i], 0x3f800000);
   }
 
   // Populate array of pointers with array addresses
-  HIP_CHECK(hipMemcpy(dPtr, dInPtr, numBufs_ * sizeof(void*), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dPtr, dInPtr, numBufs_ * sizeof(void*), hipMemcpyHostToDevice))
 
   // Copy memory from host to device
   for (uint i = 0; i < numBufs_; i++) {
-    HIP_CHECK(hipMemcpy(dInPtr[i], hInPtr[i], bufSize_, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dInPtr[i], hInPtr[i], bufSize_, hipMemcpyHostToDevice))
   }
 
-  HIP_CHECK(hipMemcpy(dOutPtr, hOutPtr, outBufSize_, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dOutPtr, hOutPtr, outBufSize_, hipMemcpyHostToDevice))
 
   // Prepare kernel launch parameters
   // outBufSize_/sizeof(uint) - Grid size in 3D
@@ -221,7 +221,7 @@ void hipPerfSampleRate::run(unsigned int test) {
                     blocks);
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   auto all_end = std::chrono::steady_clock::now();
   std::chrono::duration<double> all_kernel_time = all_end - all_start;
 
@@ -231,15 +231,15 @@ void hipPerfSampleRate::run(unsigned int test) {
   CONSOLE_PRINT("Domain %u x %u bufs %u %s %u x %u (GB/s) %f\n", sizes[NUM_SIZES - 1],
                 sizes[NUM_SIZES - 1], numBufs_, types[typeIdx_].c_str(), width_, width_, perf);
 
-  HIP_CHECK(hipFree(dOutPtr));
+  HIP_CHECK(hipFree(dOutPtr))
 
   // Free host and device memory
   for (uint i = 0; i < numBufs_; i++) {
-    HIP_CHECK(hipHostFree(hInPtr[i]));
-    HIP_CHECK(hipFree(dInPtr[i]));
+    HIP_CHECK(hipHostFree(hInPtr[i]))
+    HIP_CHECK(hipFree(dInPtr[i]))
   }
-  HIP_CHECK(hipHostFree(hOutPtr));
-  HIP_CHECK(hipFree(dPtr));
+  HIP_CHECK(hipHostFree(hOutPtr))
+  HIP_CHECK(hipFree(dPtr))
   delete[] hInPtr;
   delete[] dInPtr;
 }

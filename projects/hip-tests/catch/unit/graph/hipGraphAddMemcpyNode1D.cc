@@ -38,16 +38,16 @@
 HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Positive_Basic) {
   constexpr auto f = [](void* dst, void* src, size_t count, hipMemcpyKind direction) {
     hipGraph_t graph = nullptr;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
     hipGraphNode_t node = nullptr;
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&node, graph, nullptr, 0, dst, src, count, direction));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&node, graph, nullptr, 0, dst, src, count, direction))
     hipGraphExec_t graph_exec = nullptr;
-    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
+    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread))
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
 
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec))
+    HIP_CHECK(hipGraphDestroy(graph))
 
     return hipSuccess;
   };
@@ -130,7 +130,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Positive_Basic) {
 HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   hipGraphNode_t node = nullptr;
   int src[2] = {}, dst[2] = {};
 
@@ -165,7 +165,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Negative_Parameters) {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**

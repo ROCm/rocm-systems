@@ -53,18 +53,18 @@ bool testCodeObjFile(const char* codeObjFile) {
     B[i] = 0.0f;
   }
 
-  HIP_CHECK(hipMalloc(&Ad, SIZE));
-  HIP_CHECK(hipMalloc(&Bd, SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&Ad, SIZE))
+  HIP_CHECK(hipMalloc(&Bd, SIZE))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice))
 
   hipModule_t Module;
   hipFunction_t Function;
-  HIP_CHECK(hipModuleLoad(&Module, codeObjFile));
-  HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
+  HIP_CHECK(hipModuleLoad(&Module, codeObjFile))
+  HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name))
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   struct {
     void* _Ad;
@@ -79,10 +79,10 @@ bool testCodeObjFile(const char* codeObjFile) {
   HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, stream, NULL,
                                   reinterpret_cast<void**>(&config)));
 
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipStreamDestroy(stream))
 
-  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost))
 
   bool btestPassed = true;
   for (uint32_t i = 0; i < LEN; i++) {
@@ -91,11 +91,11 @@ bool testCodeObjFile(const char* codeObjFile) {
       break;
     }
   }
-  HIP_CHECK(hipFree(Bd));
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Bd))
+  HIP_CHECK(hipFree(Ad))
   delete[] B;
   delete[] A;
-  HIP_CHECK(hipModuleUnload(Module));
+  HIP_CHECK(hipModuleUnload(Module))
   return btestPassed;
 }
 
@@ -106,7 +106,7 @@ bool testMultiTargArchCodeObj() {
 #ifdef __linux__
   char command[COMMAND_LEN];
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
   // Hardcoding the codeobject lines in multiple string to avoid cpplint warning
   std::string CodeObjL1 = "#include \"hip/hip_runtime.h\"\n";
   std::string CodeObjL2 = "extern \"C\" __global__ void hello_world(float* a, float* b) {\n";

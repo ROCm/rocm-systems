@@ -79,19 +79,19 @@ template <typename T> bool dataTypesRunChar1() {
     hostC[i] = (T)i;
   }
 
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceA), NUM * sizeof(T)));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceB), NUM * sizeof(T)));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceC), NUM * sizeof(T)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceA), NUM * sizeof(T)))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceB), NUM * sizeof(T)))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceC), NUM * sizeof(T)))
 
-  HIP_CHECK(hipMemcpy(deviceB, hostB, NUM * sizeof(T), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(deviceC, hostC, NUM * sizeof(T), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceB, hostB, NUM * sizeof(T), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(deviceC, hostC, NUM * sizeof(T), hipMemcpyHostToDevice))
 
   hipLaunchKernelGGL(HIP_KERNEL_NAME(vectoradd_char1),
                      dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
                      dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, deviceA, deviceB,
                      deviceC, WIDTH, HEIGHT);
 
-  HIP_CHECK(hipMemcpy(hostA, deviceA, NUM * sizeof(T), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostA, deviceA, NUM * sizeof(T), hipMemcpyDeviceToHost))
 
   bool ret = false;
   // verify the results
@@ -107,9 +107,9 @@ template <typename T> bool dataTypesRunChar1() {
     ret = true;
   }
 
-  HIP_CHECK(hipFree(deviceA));
-  HIP_CHECK(hipFree(deviceB));
-  HIP_CHECK(hipFree(deviceC));
+  HIP_CHECK(hipFree(deviceA))
+  HIP_CHECK(hipFree(deviceB))
+  HIP_CHECK(hipFree(deviceC))
 
   free(hostA);
   free(hostB);
@@ -140,19 +140,19 @@ template <typename T> bool dataTypesRunChar2() {
     hostC[i] = (T)i;
   }
 
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceA), NUM * sizeof(T)));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceB), NUM * sizeof(T)));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceC), NUM * sizeof(T)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceA), NUM * sizeof(T)))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceB), NUM * sizeof(T)))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceC), NUM * sizeof(T)))
 
-  HIP_CHECK(hipMemcpy(deviceB, hostB, NUM * sizeof(T), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(deviceC, hostC, NUM * sizeof(T), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceB, hostB, NUM * sizeof(T), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(deviceC, hostC, NUM * sizeof(T), hipMemcpyHostToDevice))
 
   hipLaunchKernelGGL(HIP_KERNEL_NAME(vectoradd_char2),
                      dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
                      dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, deviceA, deviceB,
                      deviceC, WIDTH, HEIGHT);
 
-  HIP_CHECK(hipMemcpy(hostA, deviceA, NUM * sizeof(T), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostA, deviceA, NUM * sizeof(T), hipMemcpyDeviceToHost))
 
   bool ret = false;
   // verify the results
@@ -168,9 +168,9 @@ template <typename T> bool dataTypesRunChar2() {
     ret = true;
   }
 
-  HIP_CHECK(hipFree(deviceA));
-  HIP_CHECK(hipFree(deviceB));
-  HIP_CHECK(hipFree(deviceC));
+  HIP_CHECK(hipFree(deviceA))
+  HIP_CHECK(hipFree(deviceB))
+  HIP_CHECK(hipFree(deviceC))
 
   free(hostA);
   free(hostB);
@@ -201,19 +201,19 @@ template <typename T> bool dataTypesRunChar3() {
     hostC[i] = (T)i;
   }
 
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceA), NUM * sizeof(T)));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceB), NUM * sizeof(T)));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceC), NUM * sizeof(T)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceA), NUM * sizeof(T)))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceB), NUM * sizeof(T)))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceC), NUM * sizeof(T)))
 
-  HIP_CHECK(hipMemcpy(deviceB, hostB, NUM * sizeof(T), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(deviceC, hostC, NUM * sizeof(T), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceB, hostB, NUM * sizeof(T), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(deviceC, hostC, NUM * sizeof(T), hipMemcpyHostToDevice))
 
   hipLaunchKernelGGL(HIP_KERNEL_NAME(vectoradd_char3),
                      dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
                      dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, deviceA, deviceB,
                      deviceC, WIDTH, HEIGHT);
 
-  HIP_CHECK(hipMemcpy(hostA, deviceA, NUM * sizeof(T), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostA, deviceA, NUM * sizeof(T), hipMemcpyDeviceToHost))
 
   bool ret = false;
   // verify the results
@@ -228,9 +228,9 @@ template <typename T> bool dataTypesRunChar3() {
   } else {
     ret = true;
   }
-  HIP_CHECK(hipFree(deviceA));
-  HIP_CHECK(hipFree(deviceB));
-  HIP_CHECK(hipFree(deviceC));
+  HIP_CHECK(hipFree(deviceA))
+  HIP_CHECK(hipFree(deviceB))
+  HIP_CHECK(hipFree(deviceC))
 
   free(hostA);
   free(hostB);
@@ -260,19 +260,19 @@ template <typename T> bool dataTypesRunChar4() {
     hostB[i] = (T)i;
     hostC[i] = (T)i;
   }
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceA), NUM * sizeof(T)));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceB), NUM * sizeof(T)));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceC), NUM * sizeof(T)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceA), NUM * sizeof(T)))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceB), NUM * sizeof(T)))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&deviceC), NUM * sizeof(T)))
 
-  HIP_CHECK(hipMemcpy(deviceB, hostB, NUM * sizeof(T), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(deviceC, hostC, NUM * sizeof(T), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceB, hostB, NUM * sizeof(T), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(deviceC, hostC, NUM * sizeof(T), hipMemcpyHostToDevice))
 
   hipLaunchKernelGGL(HIP_KERNEL_NAME(vectoradd_char4),
                      dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
                      dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, deviceA, deviceB,
                      deviceC, WIDTH, HEIGHT);
 
-  HIP_CHECK(hipMemcpy(hostA, deviceA, NUM * sizeof(T), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostA, deviceA, NUM * sizeof(T), hipMemcpyDeviceToHost))
 
   bool ret = false;
   // verify the results
@@ -287,9 +287,9 @@ template <typename T> bool dataTypesRunChar4() {
   } else {
     ret = true;
   }
-  HIP_CHECK(hipFree(deviceA));
-  HIP_CHECK(hipFree(deviceB));
-  HIP_CHECK(hipFree(deviceC));
+  HIP_CHECK(hipFree(deviceA))
+  HIP_CHECK(hipFree(deviceB))
+  HIP_CHECK(hipFree(deviceC))
 
   free(hostA);
   free(hostB);

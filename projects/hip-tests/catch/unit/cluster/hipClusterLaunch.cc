@@ -92,11 +92,11 @@ HIP_TEST_CASE(Unit_hipClusterLaunch_LaunchApi_Basic) {
   assert(hptr_in != nullptr && hptr_out != nullptr && dptr_in != nullptr && dptr_out != nullptr);
 
   size_t n = num_size;
-  HIP_CHECK(hipMemcpy(dptr_in, hptr_in, num_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dptr_in, hptr_in, num_size, hipMemcpyHostToDevice))
   void* kernel_params[] = {&dptr_in, &dptr_out, &n};
   SetupAndLaunchCluster(kernel_params);
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipMemcpy(hptr_out, dptr_out, num_size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipMemcpy(hptr_out, dptr_out, num_size, hipMemcpyDeviceToHost))
 
   REQUIRE(bma.ValidateArrays(hptr_in, hptr_out));
 

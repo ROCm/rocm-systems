@@ -38,7 +38,7 @@ enum MemsetType {
 // specified value
 template <typename T> void check_device_data(T* devPtr, T value, size_t numElems) {
   std::unique_ptr<T[]> hostPtr(new T[numElems]);
-  HIP_CHECK(hipMemcpy(hostPtr.get(), devPtr, numElems * sizeof(T), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostPtr.get(), devPtr, numElems * sizeof(T), hipMemcpyDeviceToHost))
   HIP_ASSERT_VEC_EQ(hostPtr.get(), value, numElems);
 }
 
@@ -70,14 +70,14 @@ void checkMemset(T value, size_t count, MemsetType memsetType, bool async = fals
                  MemsetMallocType mallocType = hipDeviceMalloc_t, T* devPtr = nullptr) {
   hipStream_t stream{nullptr};
   if (async) {
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
   }
 
   // Allocate Memory
   if (mallocType == hipDeviceMalloc_t) {
-    HIP_CHECK(hipMalloc(&devPtr, count * sizeof(T)));
+    HIP_CHECK(hipMalloc(&devPtr, count * sizeof(T)))
   } else if (mallocType == hipHostMalloc_t) {
-    HIP_CHECK(hipHostMalloc(&devPtr, count * sizeof(T)));
+    HIP_CHECK(hipHostMalloc(&devPtr, count * sizeof(T)))
   }
 
   // memset API calls
@@ -122,14 +122,14 @@ void checkMemset(T value, size_t count, MemsetType memsetType, bool async = fals
 
   // Cleanup
   if (async) {
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 
   // Free memory
   if (mallocType == hipDeviceMalloc_t) {
-    HIP_CHECK(hipFree(devPtr));
+    HIP_CHECK(hipFree(devPtr))
   } else if (mallocType == hipHostMalloc_t) {
-    HIP_CHECK(hipHostFree(devPtr));
+    HIP_CHECK(hipHostFree(devPtr))
   }
 }
 
@@ -173,7 +173,7 @@ template <typename T> void partialMemsetTest(T valA, T valB, size_t count, size_
                                              MemsetType memsetType, bool async) {
   T* devPtr;
   size_t subSize{count - offset};
-  HIP_CHECK(hipMalloc(&devPtr, count * sizeof(T)));
+  HIP_CHECK(hipMalloc(&devPtr, count * sizeof(T)))
 
   // Set entire region to be first value.
   INFO("Setting full region");
@@ -185,7 +185,7 @@ template <typename T> void partialMemsetTest(T valA, T valB, size_t count, size_
 
   // Ensure the first section remains unchanged
   check_device_data(devPtr, valA, offset);
-  HIP_CHECK(hipFree(devPtr));
+  HIP_CHECK(hipFree(devPtr))
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_1D) {
@@ -239,7 +239,7 @@ void check_device_data_2D(T* devPtr, T value, size_t pitch, size_t width, size_t
 template <typename T> void checkMemset2D(T value, size_t width, size_t height, bool async = false,
                                          size_t pitch = 0, T* devPtr = nullptr) {
   hipStream_t stream{nullptr};
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   constexpr size_t elementSize = sizeof(T);
   bool freeDevPtr = false;
   if (devPtr == nullptr) {
@@ -250,19 +250,19 @@ template <typename T> void checkMemset2D(T value, size_t width, size_t height, b
 
   if (!async) {
     INFO("Testing hipMemset2D call");
-    HIP_CHECK(hipMemset2D(devPtr, pitch, value, width * elementSize, height));
+    HIP_CHECK(hipMemset2D(devPtr, pitch, value, width * elementSize, height))
   } else {
     INFO("Testing hipMemset2DAsync call");
-    HIP_CHECK(hipMemset2DAsync(devPtr, pitch, value, width * elementSize, height, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemset2DAsync(devPtr, pitch, value, width * elementSize, height, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
   if (width * height > 0) {
     check_device_data_2D(devPtr, value, pitch, width, height);
   }
   if (freeDevPtr) {
-    HIP_CHECK(hipFree(devPtr));
+    HIP_CHECK(hipFree(devPtr))
   }
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_ZeroValue_2D) {
@@ -319,7 +319,7 @@ HIP_TEST_CASE(Unit_hipMemsetFunctional_ZeroSize_2D) {
     checkMemset2D(testValue, 0, 0, true, pitch, devPtr);
     check_device_data_2D(devPtr, initValue, pitch, width, height);
   }
-  HIP_CHECK(hipFree(devPtr));
+  HIP_CHECK(hipFree(devPtr))
 }
 
 // Helper function that sets a full region of memory with an initial value, sets a smaller subregion
@@ -332,7 +332,7 @@ template <typename T> void partialMemsetTest2D(T valA, T valB, size_t width, siz
   size_t subWidth{width - widthOffset};
   size_t subHeight{height - heightOffset};
   constexpr size_t elementSize = sizeof(T);
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devPtr), &pitch, width * elementSize, height));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devPtr), &pitch, width * elementSize, height))
 
   // Set entire region to be first value.
   INFO("Setting full square region");
@@ -359,7 +359,7 @@ template <typename T> void partialMemsetTest2D(T valA, T valB, size_t width, siz
       HIP_ASSERT(hostPtr[idx] == comparVal);
     }
   }
-  HIP_CHECK(hipFree(devPtr));
+  HIP_CHECK(hipFree(devPtr))
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_2D) {
@@ -391,7 +391,7 @@ std::unique_ptr<T[]> get_device_data_3D(hipPitchedPtr& devPitchedPtr, hipExtent 
   myparms.srcPtr = devPitchedPtr;
   myparms.extent = extent;
   myparms.kind = hipMemcpyDeviceToHost;
-  HIP_CHECK(hipMemcpy3D(&myparms));
+  HIP_CHECK(hipMemcpy3D(&myparms))
   return hostPtr;
 }
 
@@ -420,19 +420,19 @@ void check_device_data_3D(hipPitchedPtr& devPitchedPtr, T value, hipExtent exten
 template <typename T>
 void checkMemset3D(hipPitchedPtr& devPitchedPtr, T value, hipExtent extent, bool async = false) {
   hipStream_t stream{nullptr};
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   if (!async) {
     INFO("Testing hipMemset3D call");
-    HIP_CHECK(hipMemset3D(devPitchedPtr, value, extent));
+    HIP_CHECK(hipMemset3D(devPitchedPtr, value, extent))
   } else {
     INFO("Testing hipMemset3DAsync call");
-    HIP_CHECK(hipMemset3DAsync(devPitchedPtr, value, extent, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemset3DAsync(devPitchedPtr, value, extent, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
   if (extent.width * extent.height * extent.depth > 0) {
     check_device_data_3D(devPitchedPtr, value, extent);
   }
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 void check_memset_3D(std::string sectionStr, size_t width, size_t height, size_t depth,
@@ -444,7 +444,7 @@ void check_memset_3D(std::string sectionStr, size_t width, size_t height, size_t
 
   hipExtent allocExtent = anyZero ? make_hipExtent(FULL_DIM, FULL_DIM, FULL_DIM) : extent;
   hipPitchedPtr devPitchedPtr{};
-  HIP_CHECK(hipMalloc3D(&devPitchedPtr, allocExtent));
+  HIP_CHECK(hipMalloc3D(&devPitchedPtr, allocExtent))
   if (anyZero) {
     checkMemset3D(devPitchedPtr, fullVal, allocExtent, false);
   }
@@ -462,7 +462,7 @@ void check_memset_3D(std::string sectionStr, size_t width, size_t height, size_t
       check_device_data_3D(devPitchedPtr, fullVal, allocExtent);
     }
   }
-  HIP_CHECK(hipFree(devPitchedPtr.ptr));
+  HIP_CHECK(hipFree(devPitchedPtr.ptr))
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_ZeroValue_3D) {
@@ -498,7 +498,7 @@ void partialMemsetTest3D(T valA, T valB, size_t width, size_t height, size_t dep
   hipExtent extent = make_hipExtent(width * sizeof(T), height, depth);
   hipExtent subExtent = make_hipExtent(subWidth * sizeof(T), subHeight, subDepth);
   hipPitchedPtr devPitchedPtr{};
-  HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent));
+  HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent))
 
   // Set entire region to be first value.
   INFO("Setting full cuboid region");
@@ -527,7 +527,7 @@ void partialMemsetTest3D(T valA, T valB, size_t width, size_t height, size_t dep
       }
     }
   }
-  HIP_CHECK(hipFree(devPitchedPtr.ptr));
+  HIP_CHECK(hipFree(devPitchedPtr.ptr))
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_3D) {
@@ -556,16 +556,16 @@ TEST_CASE("Unit_hipMemset_UnalignedKernelCornerCases", "[fillBuffer][unaligned]"
     constexpr size_t kMaxFill = 64;
     std::vector<unsigned char> host(kSlack + kMaxFill + kSlack, 0);
     void* registered = host.data() + 1;  // odd address inside the slack region
-    HIP_CHECK(hipHostRegister(registered, kMaxFill + 32, hipHostRegisterDefault));
+    HIP_CHECK(hipHostRegister(registered, kMaxFill + 32, hipHostRegisterDefault))
     void* devPtr = nullptr;
-    HIP_CHECK(hipHostGetDevicePointer(&devPtr, registered, 0));
+    HIP_CHECK(hipHostGetDevicePointer(&devPtr, registered, 0))
 
     for (size_t fillSize : {16U, 17U, 30U, 31U, 32U, 33U, 47U, 48U}) {
       const unsigned char value = 0xA5;
       // Reset the surrounding region so we can check no overrun occurred.
       std::fill(host.begin(), host.end(), 0u);
-      HIP_CHECK(hipMemset(devPtr, value, fillSize));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipMemset(devPtr, value, fillSize))
+      HIP_CHECK(hipDeviceSynchronize())
       const unsigned char* base = static_cast<const unsigned char*>(registered);
       for (size_t i = 0; i < fillSize; ++i) {
         CAPTURE(fillSize, i);
@@ -576,18 +576,18 @@ TEST_CASE("Unit_hipMemset_UnalignedKernelCornerCases", "[fillBuffer][unaligned]"
       HIP_ASSERT(base[fillSize] == 0u);
     }
 
-    HIP_CHECK(hipHostUnregister(registered));
+    HIP_CHECK(hipHostUnregister(registered))
   }
 
   SECTION("Body-cleanup path across pattern sizes 1/2/4 at varied sizes") {
     constexpr size_t kAllocBytes = 256;
     void* base = nullptr;
-    HIP_CHECK(hipMalloc(&base, kAllocBytes));
+    HIP_CHECK(hipMalloc(&base, kAllocBytes))
 
     auto runFill = [&](size_t patternSize, uint64_t patternValue,
                        size_t fillBytes) {
       // Reset whole buffer to a sentinel.
-      HIP_CHECK(hipMemset(base, 0u, kAllocBytes));
+      HIP_CHECK(hipMemset(base, 0u, kAllocBytes))
       void* dst = static_cast<unsigned char*>(base) + 8;  // 8-aligned, not 16
       switch (patternSize) {
         case 1:
@@ -606,7 +606,7 @@ TEST_CASE("Unit_hipMemset_UnalignedKernelCornerCases", "[fillBuffer][unaligned]"
                                  fillBytes / 4));
           break;
       }
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
       std::vector<unsigned char> hostCopy(kAllocBytes, 0);
       HIP_CHECK(hipMemcpy(hostCopy.data(), base, kAllocBytes,
                           hipMemcpyDeviceToHost));
@@ -637,7 +637,7 @@ TEST_CASE("Unit_hipMemset_UnalignedKernelCornerCases", "[fillBuffer][unaligned]"
       runFill(4, 0xA53C7E91ULL, fillBytes);
     }
 
-    HIP_CHECK(hipFree(base));
+    HIP_CHECK(hipFree(base))
   }
 }
 
@@ -656,18 +656,18 @@ TEST_CASE("Unit_hipMemsetD16_UnalignedPatternFill", "[fillBuffer][unaligned]") {
   constexpr size_t kElemSize = sizeof(unsigned short);  // 2
 
   void* base = nullptr;
-  HIP_CHECK(hipMalloc(&base, kAllocBytes));
+  HIP_CHECK(hipMalloc(&base, kAllocBytes))
 
   for (size_t offset : {1U}) {
     for (size_t count : {8U, 12U, 15U, 16U, 31U, 50U, 64U, 100U}) {
       // Fill whole buffer with sentinel.
-      HIP_CHECK(hipMemset(base, kSentinel, kAllocBytes));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipMemset(base, kSentinel, kAllocBytes))
+      HIP_CHECK(hipDeviceSynchronize())
 
       void* dst = static_cast<unsigned char*>(base) + offset;
       HIP_CHECK(hipMemsetD16(reinterpret_cast<hipDeviceptr_t>(dst),
                              kPattern, count));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
 
       std::vector<unsigned char> hostCopy(kAllocBytes, 0);
       HIP_CHECK(hipMemcpy(hostCopy.data(), base, kAllocBytes,
@@ -693,7 +693,7 @@ TEST_CASE("Unit_hipMemsetD16_UnalignedPatternFill", "[fillBuffer][unaligned]") {
     }
   }
 
-  HIP_CHECK(hipFree(base));
+  HIP_CHECK(hipFree(base))
 }
 
 TEST_CASE("Unit_hipMemsetD32_UnalignedPatternFill", "[fillBuffer][unaligned]") {
@@ -703,18 +703,18 @@ TEST_CASE("Unit_hipMemsetD32_UnalignedPatternFill", "[fillBuffer][unaligned]") {
   constexpr size_t kElemSize = sizeof(unsigned int);  // 4
 
   void* base = nullptr;
-  HIP_CHECK(hipMalloc(&base, kAllocBytes));
+  HIP_CHECK(hipMalloc(&base, kAllocBytes))
 
   for (size_t offset : {1U, 2U, 3U}) {
     for (size_t count : {4U, 6U, 7U, 8U, 15U, 25U, 32U, 50U}) {
       // Fill whole buffer with sentinel.
-      HIP_CHECK(hipMemset(base, kSentinel, kAllocBytes));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipMemset(base, kSentinel, kAllocBytes))
+      HIP_CHECK(hipDeviceSynchronize())
 
       void* dst = static_cast<unsigned char*>(base) + offset;
       HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(dst),
                              static_cast<int>(kPattern), count));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
 
       std::vector<unsigned char> hostCopy(kAllocBytes, 0);
       HIP_CHECK(hipMemcpy(hostCopy.data(), base, kAllocBytes,
@@ -740,7 +740,7 @@ TEST_CASE("Unit_hipMemsetD32_UnalignedPatternFill", "[fillBuffer][unaligned]") {
     }
   }
 
-  HIP_CHECK(hipFree(base));
+  HIP_CHECK(hipFree(base))
 }
 
 TEST_CASE("Unit_hipMemsetD16Async_UnalignedPatternFill", "[fillBuffer][unaligned]") {
@@ -750,21 +750,21 @@ TEST_CASE("Unit_hipMemsetD16Async_UnalignedPatternFill", "[fillBuffer][unaligned
   constexpr size_t kElemSize = sizeof(unsigned short);  // 2
 
   void* base = nullptr;
-  HIP_CHECK(hipMalloc(&base, kAllocBytes));
+  HIP_CHECK(hipMalloc(&base, kAllocBytes))
 
   hipStream_t stream{nullptr};
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   for (size_t offset : {1U}) {
     for (size_t count : {8U, 12U, 15U, 16U, 31U, 50U, 64U, 100U}) {
       // Fill whole buffer with sentinel.
-      HIP_CHECK(hipMemset(base, kSentinel, kAllocBytes));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipMemset(base, kSentinel, kAllocBytes))
+      HIP_CHECK(hipDeviceSynchronize())
 
       void* dst = static_cast<unsigned char*>(base) + offset;
       HIP_CHECK(hipMemsetD16Async(reinterpret_cast<hipDeviceptr_t>(dst),
                                   kPattern, count, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       std::vector<unsigned char> hostCopy(kAllocBytes, 0);
       HIP_CHECK(hipMemcpy(hostCopy.data(), base, kAllocBytes,
@@ -790,8 +790,8 @@ TEST_CASE("Unit_hipMemsetD16Async_UnalignedPatternFill", "[fillBuffer][unaligned
     }
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(base));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(base))
 }
 
 TEST_CASE("Unit_hipMemsetD32Async_UnalignedPatternFill", "[fillBuffer][unaligned]") {
@@ -801,21 +801,21 @@ TEST_CASE("Unit_hipMemsetD32Async_UnalignedPatternFill", "[fillBuffer][unaligned
   constexpr size_t kElemSize = sizeof(unsigned int);  // 4
 
   void* base = nullptr;
-  HIP_CHECK(hipMalloc(&base, kAllocBytes));
+  HIP_CHECK(hipMalloc(&base, kAllocBytes))
 
   hipStream_t stream{nullptr};
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   for (size_t offset : {1U, 2U, 3U}) {
     for (size_t count : {4U, 6U, 7U, 8U, 15U, 25U, 32U, 50U}) {
       // Fill whole buffer with sentinel.
-      HIP_CHECK(hipMemset(base, kSentinel, kAllocBytes));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipMemset(base, kSentinel, kAllocBytes))
+      HIP_CHECK(hipDeviceSynchronize())
 
       void* dst = static_cast<unsigned char*>(base) + offset;
       HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(dst),
                                   static_cast<int>(kPattern), count, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       std::vector<unsigned char> hostCopy(kAllocBytes, 0);
       HIP_CHECK(hipMemcpy(hostCopy.data(), base, kAllocBytes,
@@ -841,6 +841,6 @@ TEST_CASE("Unit_hipMemsetD32Async_UnalignedPatternFill", "[fillBuffer][unaligned
     }
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(base));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(base))
 }

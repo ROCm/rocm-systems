@@ -33,18 +33,18 @@
  */
 HIP_TEST_CASE(Unit_hipDeviceReset_Positive_Basic) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   INFO("Current device is: " << device);
-  HIP_CHECK(hipDeviceReset());
+  HIP_CHECK(hipDeviceReset())
 
   unsigned int flags_before = 0u;
-  HIP_CHECK(hipGetDeviceFlags(&flags_before));
+  HIP_CHECK(hipGetDeviceFlags(&flags_before))
   hipSharedMemConfig mem_config_before;
-  HIP_CHECK(hipDeviceGetSharedMemConfig(&mem_config_before));
+  HIP_CHECK(hipDeviceGetSharedMemConfig(&mem_config_before))
 
   void* ptr = nullptr;
-  HIP_CHECK(hipMalloc(&ptr, 500));
+  HIP_CHECK(hipMalloc(&ptr, 500))
 
   const auto cache_config_ret = hipDeviceSetCacheConfig(hipFuncCachePreferL1);
   REQUIRE((cache_config_ret == hipSuccess || cache_config_ret == hipErrorNotSupported));
@@ -54,9 +54,9 @@ HIP_TEST_CASE(Unit_hipDeviceReset_Positive_Basic) {
                                                         : hipSharedMemBankSizeFourByte);
   REQUIRE((shared_mem_config_ret == hipSuccess || shared_mem_config_ret == hipErrorNotSupported));
 
-  HIP_CHECK(hipSetDeviceFlags(hipDeviceScheduleBlockingSync));
+  HIP_CHECK(hipSetDeviceFlags(hipDeviceScheduleBlockingSync))
 
-  HIP_CHECK(hipDeviceReset());
+  HIP_CHECK(hipDeviceReset())
 
   unsigned int flags_after = 0u;
   CHECK(hipGetDeviceFlags(&flags_after) == hipSuccess);
@@ -94,17 +94,17 @@ HIP_TEST_CASE(Unit_hipDeviceReset_Positive_Basic) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipDeviceReset_Positive_Threaded) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   INFO("Current device is: " << 0);
-  HIP_CHECK(hipDeviceReset());
+  HIP_CHECK(hipDeviceReset())
 
   unsigned int flags_before = 0u;
-  HIP_CHECK(hipGetDeviceFlags(&flags_before));
+  HIP_CHECK(hipGetDeviceFlags(&flags_before))
   hipSharedMemConfig mem_config_before;
-  HIP_CHECK(hipDeviceGetSharedMemConfig(&mem_config_before));
+  HIP_CHECK(hipDeviceGetSharedMemConfig(&mem_config_before))
 
   void* ptr = nullptr;
-  HIP_CHECK(hipMalloc(&ptr, 500));
+  HIP_CHECK(hipMalloc(&ptr, 500))
 
   const auto cache_config_ret = hipDeviceSetCacheConfig(hipFuncCachePreferL1);
   REQUIRE((cache_config_ret == hipSuccess || cache_config_ret == hipErrorNotSupported));
@@ -115,11 +115,11 @@ HIP_TEST_CASE(Unit_hipDeviceReset_Positive_Threaded) {
   REQUIRE((shared_mem_config_ret == hipSuccess || shared_mem_config_ret == hipErrorNotSupported));
 
 
-  HIP_CHECK(hipSetDeviceFlags(hipDeviceScheduleBlockingSync));
+  HIP_CHECK(hipSetDeviceFlags(hipDeviceScheduleBlockingSync))
 
   std::thread([] {
-    HIP_CHECK_THREAD(hipSetDevice(0));
-    HIP_CHECK_THREAD(hipDeviceReset());
+    HIP_CHECK_THREAD(hipSetDevice(0))
+    HIP_CHECK_THREAD(hipDeviceReset())
   }).join();
   HIP_CHECK_THREAD_FINALIZE();
 

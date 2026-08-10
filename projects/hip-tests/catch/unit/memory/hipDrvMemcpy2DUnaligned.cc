@@ -35,16 +35,16 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_NegTst) {
   cols = GENERATE(3, 4, 100);
   int *srcD, *srcH;
   int *dstD, *dstH;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD), sizeof(int) * rows * cols));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dstD), sizeof(int) * rows * cols));
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&srcH), sizeof(int) * rows * cols));
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&dstH), sizeof(int) * rows * cols));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD), sizeof(int) * rows * cols))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dstD), sizeof(int) * rows * cols))
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&srcH), sizeof(int) * rows * cols))
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&dstH), sizeof(int) * rows * cols))
 
   // initialise array with corresponding index values
   for (int i = 0; i < rows * cols; i++) {
     srcH[i] = i;
   }
-  HIP_CHECK(hipMemcpyHtoD(srcD, srcH, sizeof(int) * rows * cols));
+  HIP_CHECK(hipMemcpyHtoD(srcD, srcH, sizeof(int) * rows * cols))
 
   hip_Memcpy2D pCopy;
 
@@ -153,10 +153,10 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_NegTst) {
     pCopy.dstPitch = cols * sizeof(int);
     HIP_CHECK_ERROR(hipDrvMemcpy2DUnaligned(&pCopy), hipErrorInvalidValue);
   }
-  HIP_CHECK(hipFree(srcH));
-  HIP_CHECK(hipFree(srcD));
-  HIP_CHECK(hipFree(dstD));
-  HIP_CHECK(hipFree(dstH));
+  HIP_CHECK(hipFree(srcH))
+  HIP_CHECK(hipFree(srcD))
+  HIP_CHECK(hipFree(dstD))
+  HIP_CHECK(hipFree(dstH))
 }
 
 /**
@@ -180,8 +180,8 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_FuncTst) {
     cols = GENERATE(3, 4, 100);
     int *srcD, *srcH;
     int *dstD, *dstH;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD), sizeof(int) * rows * cols));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dstD), sizeof(int) * rows * cols));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD), sizeof(int) * rows * cols))
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dstD), sizeof(int) * rows * cols))
     srcH = reinterpret_cast<int*>(malloc(sizeof(int) * rows * cols));
     dstH = reinterpret_cast<int*>(malloc(sizeof(int) * rows * cols));
 
@@ -201,44 +201,44 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_FuncTst) {
     pCopy.dstPitch = cols * sizeof(int);
 
     SECTION("Device to Device") {
-      HIP_CHECK(hipMemcpyHtoD(srcD, srcH, sizeof(int) * rows * cols));
+      HIP_CHECK(hipMemcpyHtoD(srcD, srcH, sizeof(int) * rows * cols))
       pCopy.srcMemoryType = hipMemoryTypeDevice;
       pCopy.dstMemoryType = hipMemoryTypeDevice;
       pCopy.srcDevice = srcD;
       pCopy.dstDevice = dstD;
-      HIP_CHECK(hipDrvMemcpy2DUnaligned(&pCopy));
-      HIP_CHECK(hipMemcpyDtoH(dstH, dstD, sizeof(int) * rows * cols));
+      HIP_CHECK(hipDrvMemcpy2DUnaligned(&pCopy))
+      HIP_CHECK(hipMemcpyDtoH(dstH, dstD, sizeof(int) * rows * cols))
     }
     SECTION("Device to Host") {
-      HIP_CHECK(hipMemcpyHtoD(srcD, srcH, sizeof(int) * rows * cols));
+      HIP_CHECK(hipMemcpyHtoD(srcD, srcH, sizeof(int) * rows * cols))
       pCopy.srcMemoryType = hipMemoryTypeDevice;
       pCopy.dstMemoryType = hipMemoryTypeHost;
       pCopy.srcDevice = srcD;
       pCopy.dstHost = dstH;
-      HIP_CHECK(hipDrvMemcpy2DUnaligned(&pCopy));
+      HIP_CHECK(hipDrvMemcpy2DUnaligned(&pCopy))
     }
     SECTION("Host to Device") {
       pCopy.srcMemoryType = hipMemoryTypeHost;
       pCopy.dstMemoryType = hipMemoryTypeDevice;
       pCopy.srcHost = srcH;
       pCopy.dstDevice = dstD;
-      HIP_CHECK(hipDrvMemcpy2DUnaligned(&pCopy));
-      HIP_CHECK(hipMemcpyDtoH(dstH, dstD, sizeof(int) * rows * cols));
+      HIP_CHECK(hipDrvMemcpy2DUnaligned(&pCopy))
+      HIP_CHECK(hipMemcpyDtoH(dstH, dstD, sizeof(int) * rows * cols))
     }
     SECTION("Host to Host") {
       pCopy.srcMemoryType = hipMemoryTypeHost;
       pCopy.dstMemoryType = hipMemoryTypeHost;
       pCopy.srcHost = srcH;
       pCopy.dstHost = dstH;
-      HIP_CHECK(hipDrvMemcpy2DUnaligned(&pCopy));
+      HIP_CHECK(hipDrvMemcpy2DUnaligned(&pCopy))
     }
 
     for (int i = 0; i < rows * cols; i++) {
       REQUIRE(dstH[i] == i);
     }
 
-    HIP_CHECK(hipFree(srcD));
-    HIP_CHECK(hipFree(dstD));
+    HIP_CHECK(hipFree(srcD))
+    HIP_CHECK(hipFree(dstD))
     free(srcH);
     free(dstH);
   }
@@ -284,7 +284,7 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Basic) {
  *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior) {
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   SECTION("Host to Device") { Memcpy2DHtoDSyncBehavior<true>(DrvMemcpy2DUnalignedAdapter(), true); }
 

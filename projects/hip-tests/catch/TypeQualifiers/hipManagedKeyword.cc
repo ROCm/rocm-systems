@@ -31,7 +31,7 @@ static __global__ void managed_touch(int* p) { (void)*p; }
 
 HIP_TEST_CASE(Unit_hipManagedKeyword_SingleGpu) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   for (int i = 0; i < numDevices; i++) {
     CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(i)
   }
@@ -45,8 +45,8 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_SingleGpu) {
   int numBlocks = N / blockSize;
 
   managed_add<<<numBlocks, blockSize>>>(N);
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipGetLastError())
 
   for (size_t i = 0; i < N; i++) {
     INFO("Reading output from managed variable: Index: " << i << " output: " << m_B[i]);
@@ -56,16 +56,16 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_SingleGpu) {
 
 HIP_TEST_CASE(Unit_hipManagedKeyword_MultiGpu) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   for (int i = 0; i < numDevices; i++) {
     CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(i)
   }
 
   for (int i = 0; i < numDevices; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     managed_inc<<<1, 1>>>();
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   INFO("Inc counter should match the device count: " << m_X << " Device count: " << numDevices);
@@ -76,7 +76,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipPointerGetAttributes_BeforeKernel) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
   hipPointerAttribute_t attrs{};
-  HIP_CHECK(hipPointerGetAttributes(&attrs, &m_pa_before));
+  HIP_CHECK(hipPointerGetAttributes(&attrs, &m_pa_before))
   REQUIRE(attrs.type == hipMemoryTypeManaged);
   REQUIRE(attrs.isManaged == true);
   REQUIRE(attrs.hostPointer != nullptr);
@@ -88,11 +88,11 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipPointerGetAttributes_AfterKernel) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
   managed_touch<<<1, 1>>>(&m_pa_after);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   hipPointerAttribute_t attrs{};
-  HIP_CHECK(hipPointerGetAttributes(&attrs, &m_pa_after));
+  HIP_CHECK(hipPointerGetAttributes(&attrs, &m_pa_after))
   REQUIRE(attrs.type == hipMemoryTypeManaged);
   REQUIRE(attrs.isManaged == true);
   REQUIRE(attrs.hostPointer != nullptr);

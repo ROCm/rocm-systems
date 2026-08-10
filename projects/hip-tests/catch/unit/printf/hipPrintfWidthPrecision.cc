@@ -44,7 +44,7 @@ __global__ void test_kernel_width() {
  */
 HIP_TEST_CASE(Unit_Printf_PrintfWidthPrecision) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
@@ -65,7 +65,7 @@ hello
 )here");
   CaptureStream captured(stdout);
   hipLaunchKernelGGL(test_kernel_width, dim3(1), dim3(1), 0, 0);
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipStreamSynchronize(0))
   auto CapturedData = captured.getCapturedData();
   std::string device_output = captured.gulp(CapturedData);
   REQUIRE(device_output == reference);

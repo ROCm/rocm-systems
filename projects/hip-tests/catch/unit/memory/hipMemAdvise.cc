@@ -61,11 +61,11 @@ HIP_TEST_CASE(Unit_hipMemAdvise_Set_Unset_Basic) {
   const auto SetUnset = [=](const hipMemoryAdvise advice) {
     LinearAllocGuard<uint8_t> alloc(LinearAllocs::hipMallocManaged, kPageSize);
     int32_t attribute = 0;
-    HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, advice, device));
+    HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, advice, device))
     HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute), GetMemAdviceAttr(advice),
                                       alloc.ptr(), kPageSize));
     REQUIRE((advice == hipMemAdviseSetReadMostly ? 1 : device) == attribute);
-    HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, GetUnsetMemAdvice(advice), device));
+    HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, GetUnsetMemAdvice(advice), device))
     HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute), GetMemAdviceAttr(advice),
                                       alloc.ptr(), kPageSize));
     REQUIRE((advice == hipMemAdviseSetReadMostly ? 0 : hipInvalidDeviceId) == attribute);
@@ -97,7 +97,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_No_Flag_Interference) {
     LinearAllocGuard<void> alloc(LinearAllocs::hipMallocManaged, kPageSize);
 
     for (const auto a : advice) {
-      HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, a, device));
+      HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, a, device))
     }
 
     for (const auto a : advice) {
@@ -122,7 +122,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_Rounding) {
       GENERATE_COPY(std::make_pair(kPageSize / 4, kPageSize / 2),   // Withing page
                     std::make_pair(kPageSize / 2, kPageSize),       // Across page border
                     std::make_pair(kPageSize / 2, kPageSize * 2));  // Across two page borders
-  HIP_CHECK(hipMemAdvise(alloc.ptr() + offset, width, hipMemAdviseSetAccessedBy, device));
+  HIP_CHECK(hipMemAdvise(alloc.ptr() + offset, width, hipMemAdviseSetAccessedBy, device))
   constexpr auto RoundDown = [](const intptr_t a, const intptr_t n) { return a - a % n; };
   constexpr auto RoundUp = [RoundDown](const intptr_t a, const intptr_t n) {
     return RoundDown(a + n - 1, n);
@@ -148,7 +148,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch) {
 
   const auto Test = [](const int device, const hipMemoryAdvise advice) {
     LinearAllocGuard<void> alloc(LinearAllocs::hipMallocManaged, kPageSize);
-    HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, advice, device));
+    HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, advice, device))
     int32_t attribute = 0;
     HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
                                       hipMemRangeAttributeLastPrefetchLocation, alloc.ptr(),
@@ -174,15 +174,15 @@ HIP_TEST_CASE(Unit_hipMemAdvise_Read_Write_After_Advise) {
   constexpr size_t count = kPageSize / sizeof(*alloc.ptr());
 
   const auto ReadWriteManagedMemory = [&](const int device, const hipMemoryAdvise advice) {
-    HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, advice, device));
+    HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, advice, device))
 
     std::fill_n(alloc.ptr(), count, -1);
     ArrayFindIfNot(alloc.ptr(), -1, count);
     for (int i = 0; i < static_cast<int>(supported_devices.size()); ++i) {
-      HIP_CHECK(hipSetDevice(supported_devices[i]));
+      HIP_CHECK(hipSetDevice(supported_devices[i]))
       VectorIncrement<<<count / 1024 + 1, 1024>>>(alloc.ptr(), 1, count);
-      HIP_CHECK(hipGetLastError());
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipGetLastError())
+      HIP_CHECK(hipDeviceSynchronize())
       ArrayFindIfNot(alloc.ptr(), i, count);
     }
 
@@ -222,11 +222,11 @@ HIP_TEST_CASE(Unit_hipMemAdvise_Prefetch_After_Advise) {
   const auto device = GENERATE_COPY(from_range(supported_devices));
 
   LinearAllocGuard<int> alloc(LinearAllocs::hipMallocManaged, kPageSize);
-  HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, advice, device));
+  HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, advice, device))
 
   for (const auto d : supported_devices) {
-    HIP_CHECK(hipMemPrefetchAsync(alloc.ptr(), kPageSize, d));
-    HIP_CHECK(hipStreamSynchronize(nullptr));
+    HIP_CHECK(hipMemPrefetchAsync(alloc.ptr(), kPageSize, d))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
     int32_t attribute = 0;
     HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
                                       hipMemRangeAttributeLastPrefetchLocation, alloc.ptr(),
@@ -251,7 +251,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_AccessedBy_All_Devices) {
 
   LinearAllocGuard<void> alloc(LinearAllocs::hipMallocManaged, kPageSize);
   for (const auto device : supported_devices) {
-    HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, hipMemAdviseSetAccessedBy, device));
+    HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, hipMemAdviseSetAccessedBy, device))
   }
   std::vector<int> accessed_by(supported_devices.size(), hipInvalidDeviceId);
   HIP_CHECK(hipMemRangeGetAttribute(accessed_by.data(), sizeof(int) * accessed_by.size(),

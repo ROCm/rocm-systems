@@ -42,19 +42,19 @@ static char memSetVal = 'a';
 HIP_TEMPLATE_TEST_CASE(Unit_hipGraphAddMemsetNode_Positive_Basic, uint8_t, uint16_t, uint32_t) {
   const auto f = [](hipMemsetParams* params) {
     hipGraph_t graph = nullptr;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
 
     hipGraphNode_t node = nullptr;
-    HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, params));
+    HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, params))
 
     hipGraphExec_t graph_exec = nullptr;
-    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
-    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread))
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
 
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec))
+    HIP_CHECK(hipGraphDestroy(graph))
 
     return hipSuccess;
   };
@@ -90,7 +90,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipGraphAddMemsetNode_Positive_Basic, uint8_t, uint1
 HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   LinearAllocGuard<int> alloc(LinearAllocs::hipMalloc, 4 * sizeof(int));
   hipMemsetParams params = {};
@@ -105,7 +105,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_Negative_Parameters) {
   hipGraphNode_t node = nullptr;
   MemsetCommonNegative(std::bind(hipGraphAddMemsetNode, &node, graph, nullptr, 0, _1), params);
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 /*
  * Allocate a 2D array using hipMallocPitch. Initialize the allocated memory
@@ -126,9 +126,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocPitch_2D) {
     }
   }
   // 2D Memory allocation hipMallocPitch
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH))
   // Create Graph
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   hipGraphNode_t memsetNode, memcpyNode;
   // Add MemSet Node
   hipMemsetParams memsetParams{};
@@ -139,7 +139,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocPitch_2D) {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = numW;
   memsetParams.height = numH;
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
   nodeDependencies.push_back(memsetNode);
   // Add MemCpy Node
   hipMemcpy3DParms myparms{};
@@ -155,10 +155,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocPitch_2D) {
   // Create executable graph
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Verfication
   for (size_t i = 0; i < numW; i++) {
@@ -166,11 +166,11 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocPitch_2D) {
       REQUIRE(*(A_h + i * numH + j) == memSetVal);
     }
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
   delete[] A_h;
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(A_d))
 }
 /*
  * Allocate a 1D array using hipMallocPitch. Initialize the allocated memory using
@@ -187,9 +187,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocPitch_1D) {
   hipGraph_t graph;
   std::vector<hipGraphNode_t> nodeDependencies;
   // 1D Memory allocation hipMallocPitch
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, 1));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, 1))
   // Create Graph
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   hipGraphNode_t memsetNode, memcpyNode;
   // Add MemSet Node
   hipMemsetParams memsetParams{};
@@ -200,7 +200,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocPitch_1D) {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = numW;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
   nodeDependencies.push_back(memsetNode);
   // Add MemCpy Node
   hipMemcpy3DParms myparms{};
@@ -217,19 +217,19 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocPitch_1D) {
   // Create executable graph
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Verfication
   for (size_t i = 0; i < numW; i++) {
     REQUIRE(A_h[i] == memSetVal);
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
+  HIP_CHECK(hipFree(A_d))
 }
 /*
  * Allocate a 2D array using hipMalloc3D. Initialize the allocated memory using
@@ -254,10 +254,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc3D_2D) {
   hipExtent extent3D = make_hipExtent(width, numH, 1);
 
   // Allocate 3D memory.
-  HIPCHECK(hipMalloc3D(&A_d, extent3D));
+  HIPCHECK(hipMalloc3D(&A_d, extent3D))
 
   // Create Graph
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   hipGraphNode_t memsetNode, memcpyNode;
 
   // Add MemSet Node
@@ -269,7 +269,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc3D_2D) {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = numW;
   memsetParams.height = numH;
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
   nodeDependencies.push_back(memsetNode);
 
   // MemCpy params
@@ -289,10 +289,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc3D_2D) {
   // Create executable graph
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Verfication
   for (size_t i = 0; i < numW; i++) {
@@ -300,11 +300,11 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc3D_2D) {
       REQUIRE(*(A_h + i * numH + j) == memSetVal);
     }
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
   delete[] A_h;
-  HIP_CHECK(hipFree(A_d.ptr));
+  HIP_CHECK(hipFree(A_d.ptr))
 }
 /*
  * Allocate a 1D array using hipMalloc3D. Initialize the allocated
@@ -325,10 +325,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc3D_1D) {
   hipExtent extent1D = make_hipExtent(width, 1, 1);
 
   // Allocate 3D memory.
-  HIPCHECK(hipMalloc3D(&A_d, extent1D));
+  HIPCHECK(hipMalloc3D(&A_d, extent1D))
 
   // Create Graph
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   hipGraphNode_t memsetNode, memcpyNode;
 
   // Add MemSet Node
@@ -340,7 +340,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc3D_1D) {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = numW;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
   nodeDependencies.push_back(memsetNode);
 
   // MemCpy params
@@ -360,19 +360,19 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc3D_1D) {
   // Create executable graph
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Verfication
   for (size_t i = 0; i < numW; i++) {
     REQUIRE(A_h[i] == memSetVal);
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
   HIP_CHECK(hipStreamDestroy(streamForGraph))
-  HIP_CHECK(hipFree(A_d.ptr));
+  HIP_CHECK(hipFree(A_d.ptr))
 }
 /*
  * Allocate a 1D array using hipMalloc. Initialize the allocated memory using
@@ -388,13 +388,13 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc_1D) {
   std::vector<char> A_h(NumW, ' ');
 
   // Allocate memory to Device pointer
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_d), Nbytes1D));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_d), Nbytes1D))
 
   // Create the graph
   hipGraph_t graph;
   std::vector<hipGraphNode_t> nodeDependencies;
   hipGraphNode_t memsetNode, memcpyNode;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   // Add Memset node
   hipMemsetParams memsetParams{};
@@ -405,7 +405,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc_1D) {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = NumW;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
   nodeDependencies.push_back(memsetNode);
   // Add MemCpy Node
   hipPitchedPtr devPitchedPtr{A_d, Nbytes1D, NumW, 0};
@@ -423,19 +423,19 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc_1D) {
   // Create executable graph
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Verfication
   for (size_t i = 0; i < NumW; i++) {
     REQUIRE(A_h[i] == memSetVal);
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
+  HIP_CHECK(hipFree(A_d))
 }
 
 HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocManaged) {
@@ -449,12 +449,12 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocManaged) {
   // Initialize the host memory
   std::vector<char> A_h(SIZE, ' ');
   // Device Memory
-  HIP_CHECK(hipMallocManaged(&A_d, SIZE * sizeof(char)));
+  HIP_CHECK(hipMallocManaged(&A_d, SIZE * sizeof(char)))
   // Create the graph
   hipGraph_t graph;
   std::vector<hipGraphNode_t> nodeDependencies;
   hipGraphNode_t memsetNode, memcpyNode;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   // Add Memset node
   hipMemsetParams memsetParams{};
@@ -465,7 +465,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocManaged) {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = SIZE;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
   nodeDependencies.push_back(memsetNode);
 
   // Add MemCpy Node
@@ -486,20 +486,20 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocManaged) {
   // Create executable graph
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Verfication
   for (size_t i = 0; i < SIZE; i++) {
     REQUIRE(A_h[i] == memSetVal);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
+  HIP_CHECK(hipFree(A_d))
 }
 
 /**

@@ -29,7 +29,7 @@ static hipError_t test_hipDeviceGetAttribute(int deviceId, hipDeviceAttribute_t 
   if (expectedValue != -1) {
     std::cout << " expected value " << expectedValue;
   }
-  HIP_CHECK(hipDeviceGetAttribute(&value, attr, deviceId));
+  HIP_CHECK(hipDeviceGetAttribute(&value, attr, deviceId))
   std::cout << " actual value " << value << std::endl;
   if ((expectedValue != -1) && value != expectedValue) {
     std::cout << "fail" << std::endl;
@@ -45,7 +45,7 @@ static hipError_t test_hipDeviceGetHdpAddress(int deviceId, hipDeviceAttribute_t
   if (expectedValue != reinterpret_cast<uint32_t*>(0xdeadbeef)) {
     std::cout << " expected value " << expectedValue;
   }
-  HIP_CHECK(hipDeviceGetAttribute(reinterpret_cast<int*>(&value), attr, deviceId));
+  HIP_CHECK(hipDeviceGetAttribute(reinterpret_cast<int*>(&value), attr, deviceId))
   std::cout << " actual value " << value << std::endl;
   if ((expectedValue != reinterpret_cast<uint32_t*>(0xdeadbeef)) && value != expectedValue) {
     std::cout << "fail" << std::endl;
@@ -68,9 +68,9 @@ static hipError_t test_hipDeviceGetHdpAddress(int deviceId, hipDeviceAttribute_t
  */
 HIP_TEST_CASE(Unit_hipGetDeviceAttribute_CheckAttrValues) {
   int deviceId;
-  HIP_CHECK(hipGetDevice(&deviceId));
+  HIP_CHECK(hipGetDevice(&deviceId))
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+  HIP_CHECK(hipGetDeviceProperties(&props, deviceId))
   printf("info: running on device #%d %s\n", deviceId, props.name);
 
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeMaxThreadsPerBlock,
@@ -91,10 +91,10 @@ HIP_TEST_CASE(Unit_hipGetDeviceAttribute_CheckAttrValues) {
                                        props.sharedMemPerBlock));
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeTotalConstantMemory,
                                        props.totalConstMem));
-  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeWarpSize, props.warpSize));
+  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeWarpSize, props.warpSize))
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeMaxRegistersPerBlock,
                                        props.regsPerBlock));
-  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeClockRate, props.clockRate));
+  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeClockRate, props.clockRate))
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeMemoryClockRate,
                                        props.memoryClockRate));
   HIP_CHECK(
@@ -103,8 +103,8 @@ HIP_TEST_CASE(Unit_hipGetDeviceAttribute_CheckAttrValues) {
                                        props.multiProcessorCount));
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeIsMultiGpuBoard,
                                        props.isMultiGpuBoard));
-  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeComputeMode, props.computeMode));
-  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeL2CacheSize, props.l2CacheSize));
+  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeComputeMode, props.computeMode))
+  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeL2CacheSize, props.l2CacheSize))
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeMaxThreadsPerMultiProcessor,
                                        props.maxThreadsPerMultiProcessor));
   HIP_CHECK(
@@ -113,9 +113,9 @@ HIP_TEST_CASE(Unit_hipGetDeviceAttribute_CheckAttrValues) {
       test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeComputeCapabilityMinor, props.minor));
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeConcurrentKernels,
                                        props.concurrentKernels));
-  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributePciBusId, props.pciBusID));
-  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributePciDeviceId, props.pciDeviceID));
-  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeIntegrated, props.integrated));
+  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributePciBusId, props.pciBusID))
+  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributePciDeviceId, props.pciDeviceID))
+  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeIntegrated, props.integrated))
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeMaxTexture1DWidth,
                                        props.maxTexture1D));
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeMaxTexture2DWidth,
@@ -165,18 +165,18 @@ HIP_TEST_CASE(Unit_hipGetDeviceAttribute_CheckAttrValues) {
       test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeAsicRevision, props.asicRevision));
   HIP_CHECK(
       test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeManagedMemory, props.managedMemory));
-  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeNumberOfXccs));
-  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeExpertSchedMode));
+  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeNumberOfXccs))
+  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeExpertSchedMode))
 #endif
 
-  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeMaxPitch, props.memPitch));
+  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeMaxPitch, props.memPitch))
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeTextureAlignment,
                                        props.textureAlignment));
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeKernelExecTimeout,
                                        props.kernelExecTimeoutEnabled));
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeCanMapHostMemory,
                                        props.canMapHostMemory));
-  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeEccEnabled, props.ECCEnabled));
+  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeEccEnabled, props.ECCEnabled))
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeTexturePitchAlignment,
                                        props.texturePitchAlignment));
 }
@@ -203,12 +203,12 @@ HIP_TEST_CASE(Unit_hipGetDeviceAttribute_CheckAttrValues) {
 HIP_TEST_CASE(Unit_hipDeviceGetAttribute_NegTst) {
   int deviceCount = 0;
   int pi = -1;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   REQUIRE(deviceCount != 0);
   printf("No.of gpus in the system: %d\n", deviceCount);
 
   int device;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   // pi is nullptr
   SECTION("pi is nullptr") {
@@ -252,12 +252,12 @@ HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported) {
 
   if (ret_val == hipSuccess) {
     auto x = std::unique_ptr<int>(new int);
-    HIP_CHECK(hipHostRegister(x.get(), sizeof(int), hipHostRegisterDefault));
+    HIP_CHECK(hipHostRegister(x.get(), sizeof(int), hipHostRegisterDefault))
 
     void* device_memory;
-    HIP_CHECK(hipHostGetDevicePointer(&device_memory, x.get(), 0));
+    HIP_CHECK(hipHostGetDevicePointer(&device_memory, x.get(), 0))
 
-    HIP_CHECK(hipHostUnregister(x.get()));
+    HIP_CHECK(hipHostUnregister(x.get()))
     HIP_CHECK_ERROR(hipHostGetDevicePointer(&device_memory, x.get(), 0), hipErrorInvalidValue);
   } else {
     HIP_SKIP_TEST(
@@ -268,9 +268,9 @@ HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported) {
 
 HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported) {
   int hipVmmSupported = 0, hipDmaBufSupported = 0, hipRDMAWithHipVMMSupported = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&hipRDMAWithHipVMMSupported, hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported, 0));
-  HIP_CHECK(hipDeviceGetAttribute(&hipVmmSupported, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
-  HIP_CHECK(hipDeviceGetAttribute(&hipDmaBufSupported, hipDeviceAttributeDmaBufSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&hipRDMAWithHipVMMSupported, hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported, 0))
+  HIP_CHECK(hipDeviceGetAttribute(&hipVmmSupported, hipDeviceAttributeVirtualMemoryManagementSupported, 0))
+  HIP_CHECK(hipDeviceGetAttribute(&hipDmaBufSupported, hipDeviceAttributeDmaBufSupported, 0))
   INFO("hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported: " << hipRDMAWithHipVMMSupported);
   INFO("hipDeviceAttributeVirtualMemoryManagementSupported: " << hipVmmSupported);
   INFO("hipDeviceAttributeDmaBufSupported: " << hipDmaBufSupported);

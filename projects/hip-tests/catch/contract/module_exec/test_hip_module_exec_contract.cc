@@ -40,7 +40,7 @@ bool CompileModuleSource(std::vector<char>& code) {
   // any allocation would otherwise fail with "invalid device context". hipFree(0)
   // is the canonical no-op that forces primary-context initialization, and is a
   // harmless success on AMD where the runtime already auto-initializes.
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
 
   hiprtcProgram program{};
   HIPRTC_CHECK(hiprtcCreateProgram(&program, kModuleSource, "module_exec_contract.cu", 0, nullptr,
@@ -48,7 +48,7 @@ bool CompileModuleSource(std::vector<char>& code) {
 
 #if HT_AMD
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, 0));
+  HIP_CHECK(hipGetDeviceProperties(&properties, 0))
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
   const char* options[] = {offload_arch.c_str()};
   const int num_options = 1;
@@ -90,14 +90,14 @@ void LoadContractModule(hipModule_t& module) {
   if (!CompileModuleSource(code)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
   }
-  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()))
   REQUIRE(module != nullptr);
 }
 
 // Resolves the write_value symbol from a loaded module into a non-null function
 // handle so the occupancy and cooperative-launch contracts share one lookup.
 void ResolveWriteValue(hipModule_t module, hipFunction_t& function) {
-  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
+  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"))
   REQUIRE(function != nullptr);
 }
 
@@ -105,7 +105,7 @@ void ResolveWriteValue(hipModule_t module, hipFunction_t& function) {
 // the cooperative-launch contracts can skip cleanly on paths that lack it.
 bool CooperativeLaunchSupported() {
   int current_device = 0;
-  HIP_CHECK(hipGetDevice(&current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
   int cooperative_launch = 0;
   HIP_CHECK(hipDeviceGetAttribute(&cooperative_launch, hipDeviceAttributeCooperativeLaunch,
                                   current_device));
@@ -124,7 +124,7 @@ HIP_TEST_CASE(Contract_ModuleExec_HipModuleGetFunctionCount_Default_ReturnsPosit
   // count. The exact count is backend-specific (backends may expose helper
   // symbols), so only the lower bound is part of the contract.
   unsigned int count = 0;
-  HIP_CHECK(hipModuleGetFunctionCount(&count, module));
+  HIP_CHECK(hipModuleGetFunctionCount(&count, module))
   REQUIRE(count >= 1);
 }
 
@@ -157,7 +157,7 @@ HIP_TEST_CASE(Contract_ModuleExec_HipModuleOccupancyMaxPotentialBlockSize_Defaul
   // values are device-specific and are not pinned.
   int min_grid_size = 0;
   int block_size = 0;
-  HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSize(&min_grid_size, &block_size, function, 0, 0));
+  HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSize(&min_grid_size, &block_size, function, 0, 0))
   REQUIRE(block_size > 0);
   REQUIRE(min_grid_size >= 0);
 }
@@ -258,19 +258,19 @@ HIP_TEST_CASE(Contract_ModuleExec_HipModuleLaunchCooperativeKernel_Default_Write
   ResolveWriteValue(module, function);
 
   int* device_value = nullptr;
-  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)))
   cleanup.Add([device_value] { (void)hipFree(device_value); });
-  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
+  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)))
 
   // A cooperative launch of the resolved function with a single-thread grid must
   // execute and publish the expected value deterministically.
   int value = kExpectedValue;
   void* kernel_args[] = {&device_value, &value};
-  HIP_CHECK(hipModuleLaunchCooperativeKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipModuleLaunchCooperativeKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args))
+  HIP_CHECK(hipDeviceSynchronize())
 
   int result = 0;
-  HIP_CHECK(hipMemcpy(&result, device_value, sizeof(result), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&result, device_value, sizeof(result), hipMemcpyDeviceToHost))
   REQUIRE(result == kExpectedValue);
 }
 

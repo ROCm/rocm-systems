@@ -353,13 +353,13 @@ hipPerfMandelBrot::~hipPerfMandelBrot() {}
 
 void hipPerfMandelBrot::open(int deviceId) {
   int nGpu = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpu));
+  HIP_CHECK(hipGetDeviceCount(&nGpu))
   if (nGpu < 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
-  HIP_CHECK(hipSetDevice(deviceId));
+  HIP_CHECK(hipSetDevice(deviceId))
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+  HIP_CHECK(hipGetDeviceProperties(&props, deviceId))
 
   CONSOLE_PRINT("info: running on bus 0x%x %s with %d CUs and device id: %d\n", props.pciBusID,
                 props.name, props.multiProcessorCount, deviceId);
@@ -438,12 +438,12 @@ bool hipPerfMandelBrot::run(unsigned int testCase) {
 
   // Create streams for concurrency
   for (uint i = 0; i < numStreams; i++) {
-    HIP_CHECK(hipStreamCreate(&streams[i]));
+    HIP_CHECK(hipStreamCreate(&streams[i]))
   }
 
   // Allocate memory on the host and device
   for (uint i = 0; i < numKernels; i++) {
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&hPtr[i]), bufSize, hipHostMallocDefault));
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&hPtr[i]), bufSize, hipHostMallocDefault))
     setData(hPtr[i], 0xdeadbeef);
     HIP_CHECK(hipMalloc(reinterpret_cast<uint**>(&dPtr[i]), bufSize))
   }
@@ -455,11 +455,11 @@ bool hipPerfMandelBrot::run(unsigned int testCase) {
 
   // Copy memory asynchronously and concurrently from host to device
   for (uint i = 0; i < numKernels; i++) {
-    HIP_CHECK(hipMemcpy(dPtr[i], hPtr[i], bufSize, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dPtr[i], hPtr[i], bufSize, hipMemcpyHostToDevice))
   }
 
   // Synchronize to make sure all the copies are completed
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipStreamSynchronize(0))
 
   int kernelIdx;
   if (testCase == 0 || testCase == 5 || testCase == 10) {
@@ -489,7 +489,7 @@ bool hipPerfMandelBrot::run(unsigned int testCase) {
       }
 
       // Synchronize all the concurrent streams to have completed execution
-      HIP_CHECK(hipStreamSynchronize(0));
+      HIP_CHECK(hipStreamSynchronize(0))
 
       auto all_end = std::chrono::steady_clock::now();
       std::chrono::duration<double> all_kernel_time = all_end - all_start;
@@ -507,7 +507,7 @@ bool hipPerfMandelBrot::run(unsigned int testCase) {
                               threads_per_block, i);
       }
       // Synchronize all the concurrent streams to have completed execution
-      HIP_CHECK(hipStreamSynchronize(0));
+      HIP_CHECK(hipStreamSynchronize(0))
 
       auto all_end = std::chrono::steady_clock::now();
       std::chrono::duration<double> all_kernel_time = all_end - all_start;
@@ -517,7 +517,7 @@ bool hipPerfMandelBrot::run(unsigned int testCase) {
 
   // Copy data back from device to the host
   for (uint i = 0; i < numKernels; i++) {
-    HIP_CHECK(hipMemcpy(hPtr[i], dPtr[i], bufSize, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hPtr[i], dPtr[i], bufSize, hipMemcpyDeviceToHost))
   }
   for (uint i = 0; i < numKernels; i++) {
     checkData(hPtr[i]);
@@ -544,13 +544,13 @@ bool hipPerfMandelBrot::run(unsigned int testCase) {
   }
 
   for (uint i = 0; i < numStreams; i++) {
-    HIP_CHECK(hipStreamDestroy(streams[i]));
+    HIP_CHECK(hipStreamDestroy(streams[i]))
   }
 
   // Free host and device memory
   for (uint i = 0; i < numKernels; i++) {
-    HIP_CHECK(hipHostFree(hPtr[i]));
-    HIP_CHECK(hipFree(dPtr[i]));
+    HIP_CHECK(hipHostFree(hPtr[i]))
+    HIP_CHECK(hipFree(dPtr[i]))
   }
   delete[] hPtr;
   delete[] dPtr;

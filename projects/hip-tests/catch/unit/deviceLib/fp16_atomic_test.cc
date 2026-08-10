@@ -36,20 +36,20 @@ HIP_TEST_CASE(Unit_fp16_atomic_add) {
 
     float* d_values;
     __half* d_result;
-    HIP_CHECK(hipMalloc(&d_values, sizeof(float) * total_threads));
-    HIP_CHECK(hipMalloc(&d_result, sizeof(__half)));
+    HIP_CHECK(hipMalloc(&d_values, sizeof(float) * total_threads))
+    HIP_CHECK(hipMalloc(&d_result, sizeof(__half)))
 
     HIP_CHECK(
         hipMemcpy(d_values, h_values.data(), sizeof(float) * total_threads, hipMemcpyHostToDevice));
 
     __half zero = __float2half_rn(0.0f);
-    HIP_CHECK(hipMemcpy(d_result, &zero, sizeof(__half), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_result, &zero, sizeof(__half), hipMemcpyHostToDevice))
 
     fp16_atomic_add_kernel<<<num_blocks, num_threads>>>(d_result, d_values, total_threads);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     __half h_result;
-    HIP_CHECK(hipMemcpy(&h_result, d_result, sizeof(__half), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&h_result, d_result, sizeof(__half), hipMemcpyDeviceToHost))
 
     float expected = static_cast<float>(total_threads);
     float actual = __half2float(h_result);
@@ -58,8 +58,8 @@ HIP_TEST_CASE(Unit_fp16_atomic_add) {
     // Allow small error due to fp16 precision (10 bits mantissa)
     REQUIRE(std::fabs(actual - expected) / expected < 0.01f);
 
-    HIP_CHECK(hipFree(d_values));
-    HIP_CHECK(hipFree(d_result));
+    HIP_CHECK(hipFree(d_values))
+    HIP_CHECK(hipFree(d_result))
   }
 
   SECTION("fp162 atomic add") {
@@ -74,20 +74,20 @@ HIP_TEST_CASE(Unit_fp16_atomic_add) {
 
     float2* d_values;
     __half2* d_result;
-    HIP_CHECK(hipMalloc(&d_values, sizeof(float2) * total_threads));
-    HIP_CHECK(hipMalloc(&d_result, sizeof(__half2)));
+    HIP_CHECK(hipMalloc(&d_values, sizeof(float2) * total_threads))
+    HIP_CHECK(hipMalloc(&d_result, sizeof(__half2)))
 
     HIP_CHECK(hipMemcpy(d_values, h_values.data(), sizeof(float2) * total_threads,
                         hipMemcpyHostToDevice));
 
     __half2 zero = __float22half2_rn(float2{0.0f, 0.0f});
-    HIP_CHECK(hipMemcpy(d_result, &zero, sizeof(__half2), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_result, &zero, sizeof(__half2), hipMemcpyHostToDevice))
 
     fp162_atomic_add_kernel<<<num_blocks, num_threads>>>(d_result, d_values, total_threads);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     __half2 h_result;
-    HIP_CHECK(hipMemcpy(&h_result, d_result, sizeof(__half2), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&h_result, d_result, sizeof(__half2), hipMemcpyDeviceToHost))
 
     float2 expected =
         float2{static_cast<float>(total_threads), static_cast<float>(total_threads * 2)};
@@ -98,8 +98,8 @@ HIP_TEST_CASE(Unit_fp16_atomic_add) {
     REQUIRE(std::fabs(actual.x - expected.x) / expected.x < 0.01f);
     REQUIRE(std::fabs(actual.y - expected.y) / expected.y < 0.01f);
 
-    HIP_CHECK(hipFree(d_values));
-    HIP_CHECK(hipFree(d_result));
+    HIP_CHECK(hipFree(d_values))
+    HIP_CHECK(hipFree(d_result))
   }
 
   SECTION("fp16 atomic add - concurrent stress test") {
@@ -117,20 +117,20 @@ HIP_TEST_CASE(Unit_fp16_atomic_add) {
 
     float* d_values;
     __half* d_result;
-    HIP_CHECK(hipMalloc(&d_values, sizeof(float) * total_threads));
-    HIP_CHECK(hipMalloc(&d_result, sizeof(__half)));
+    HIP_CHECK(hipMalloc(&d_values, sizeof(float) * total_threads))
+    HIP_CHECK(hipMalloc(&d_result, sizeof(__half)))
 
     HIP_CHECK(
         hipMemcpy(d_values, h_values.data(), sizeof(float) * total_threads, hipMemcpyHostToDevice));
 
     __half zero = __float2half_rn(0.0f);
-    HIP_CHECK(hipMemcpy(d_result, &zero, sizeof(__half), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_result, &zero, sizeof(__half), hipMemcpyHostToDevice))
 
     fp16_atomic_add_kernel<<<num_blocks, num_threads>>>(d_result, d_values, total_threads);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     __half h_result;
-    HIP_CHECK(hipMemcpy(&h_result, d_result, sizeof(__half), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&h_result, d_result, sizeof(__half), hipMemcpyDeviceToHost))
 
     float actual = __half2float(h_result);
 
@@ -138,7 +138,7 @@ HIP_TEST_CASE(Unit_fp16_atomic_add) {
     // Higher tolerance for large sums due to accumulated rounding
     REQUIRE(std::fabs(actual - sum_expected) / sum_expected < 0.08f);
 
-    HIP_CHECK(hipFree(d_values));
-    HIP_CHECK(hipFree(d_result));
+    HIP_CHECK(hipFree(d_values))
+    HIP_CHECK(hipFree(d_result))
   }
 }

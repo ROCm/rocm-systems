@@ -14,26 +14,26 @@
 
 ModuleGuard ModuleGuard::LoadModule(const char* fname) {
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoad(&module, fname));
+  HIP_CHECK(hipModuleLoad(&module, fname))
   return ModuleGuard{module};
 }
 
 ModuleGuard ModuleGuard::InitModule(const char* fname) {
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
   return LoadModule(fname);
 }
 
 ModuleGuard ModuleGuard::LoadModuleDataFile(const char* fname) {
   const auto loaded_module = LoadModuleIntoBuffer(fname);
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoadData(&module, loaded_module.data()));
+  HIP_CHECK(hipModuleLoadData(&module, loaded_module.data()))
   return ModuleGuard{module};
 }
 
 ModuleGuard ModuleGuard::LoadModuleDataRTC(const char* code) {
   const auto rtc = CreateRTCCharArray(code);
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoadData(&module, rtc.data()));
+  HIP_CHECK(hipModuleLoadData(&module, rtc.data()))
   return ModuleGuard{module};
 }
 

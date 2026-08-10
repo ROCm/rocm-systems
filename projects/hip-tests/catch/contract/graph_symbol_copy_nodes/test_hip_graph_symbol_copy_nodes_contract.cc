@@ -33,17 +33,17 @@ void ResetSymbol() {
   // Launch the touch kernel once so the compiler keeps the symbol live, then
   // zero it through the runtime symbol-copy path.
   hipLaunchKernelGGL(TouchGraphSymbolKernel, dim3(1), dim3(1), 0, 0);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   const int zero = 0;
-  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_contract_graph_symbol), &zero, sizeof(zero)));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_contract_graph_symbol), &zero, sizeof(zero)))
+  HIP_CHECK(hipDeviceSynchronize())
 }
 
 int ReadSymbol() {
   int value = -1;
-  HIP_CHECK(hipMemcpyFromSymbol(&value, HIP_SYMBOL(g_contract_graph_symbol), sizeof(value)));
+  HIP_CHECK(hipMemcpyFromSymbol(&value, HIP_SYMBOL(g_contract_graph_symbol), sizeof(value)))
   return value;
 }
 }  // namespace
@@ -59,9 +59,9 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_HipGraphAddMemcpyNodeToSymbol_AddToF
   hipGraphNode_t to_node = nullptr;
   hipGraphNode_t from_node = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   // A to-symbol node writes a host value into the device global; a dependent
@@ -76,10 +76,10 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_HipGraphAddMemcpyNodeToSymbol_AddToF
                                             &g_contract_graph_symbol, sizeof(result), 0,
                                             hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
   cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(result == kFirstValue);
   REQUIRE(ReadSymbol() == kFirstValue);
@@ -96,9 +96,9 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_HipGraphMemcpyNodeSetParamsToSymbol_
   hipGraphNode_t to_node = nullptr;
   hipGraphNode_t from_node = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   // Build the graph with a first source, then rewrite both nodes on the graph
@@ -122,10 +122,10 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_HipGraphMemcpyNodeSetParamsToSymbol_
                                                   &g_contract_graph_symbol,
                                                   sizeof(second_result), 0, hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
   cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(second_result == kSecondValue);
   REQUIRE(ReadSymbol() == kSecondValue);
@@ -142,9 +142,9 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_HipGraphExecMemcpyNodeSetParamsToSym
   hipGraphNode_t to_node = nullptr;
   hipGraphNode_t from_node = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   int first_source = kFirstValue;
@@ -156,7 +156,7 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_HipGraphExecMemcpyNodeSetParamsToSym
                                             &g_contract_graph_symbol,
                                             sizeof(first_result), 0, hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
   cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
 
   // Rewrite both nodes on the executable graph before launch. The launched graph
@@ -172,8 +172,8 @@ HIP_TEST_CASE(Contract_GraphSymbolCopyNodes_HipGraphExecMemcpyNodeSetParamsToSym
                                                       sizeof(second_result), 0,
                                                       hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(second_result == kSecondValue);
   REQUIRE(ReadSymbol() == kSecondValue);

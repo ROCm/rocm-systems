@@ -481,13 +481,13 @@ void NormSimpleTest(F kernel, RF ref_func, const ValidatorBuilder& validator_bui
   LinearAllocGuard<T> y_dev{LinearAllocs::hipMalloc, sizeof(T)};
 
   std::fill_n(x.ptr(), max_dim, 1);
-  HIP_CHECK(hipMemcpy(x_dev.ptr(), x.ptr(), max_dim * sizeof(T), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(x_dev.ptr(), x.ptr(), max_dim * sizeof(T), hipMemcpyHostToDevice))
 
   for (uint64_t i = 1u; i < max_dim; i++) {
     kernel<<<1, 1>>>(y_dev.ptr(), i, x_dev.ptr());
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
 
-    HIP_CHECK(hipMemcpy(y.ptr(), y_dev.ptr(), sizeof(T), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(y.ptr(), y_dev.ptr(), sizeof(T), hipMemcpyDeviceToHost))
     const auto actual_val = *y.ptr();
     const auto ref_val = static_cast<T>(ref_func(i, x.ptr()));
     const auto validator = validator_builder(ref_val);

@@ -40,14 +40,14 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_Cooper
   hipGraph_t graph = nullptr;
   hipGraphNode_t kernel_node = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)))
   cleanup.Add([device_value] { (void)hipFree(device_value); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   void* args[] = {&device_value, &value};
   auto params = KernelNodeParams(args);
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_node, graph, nullptr, 0, &params));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_node, graph, nullptr, 0, &params))
 
   // Request the cooperative attribute on the kernel node. Runtime paths that do
   // not support this attribute must be treated as a clean skip rather than a
@@ -59,7 +59,7 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_Cooper
   if (set_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Cooperative kernel node attribute is not supported by this runtime path.");
   }
-  HIP_CHECK(set_status);
+  HIP_CHECK(set_status)
 
   // The attribute set on the node must be observable through a subsequent get.
   hipKernelNodeAttrValue get_value{};
@@ -68,7 +68,7 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_Cooper
   if (get_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Cooperative kernel node attribute is not supported by this runtime path.");
   }
-  HIP_CHECK(get_status);
+  HIP_CHECK(get_status)
 
   REQUIRE(get_value.cooperative == 1);
 }
@@ -76,7 +76,7 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_Cooper
 // @asserts: hipGraphKernelNodeSetAttribute - an access-policy-window attribute set on a kernel node round-trips through a subsequent get
 HIP_TEST_CASE(Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_AccessPolicyWindow_RoundTrips) {
   int device_ordinal = 0;
-  HIP_CHECK(hipGetDevice(&device_ordinal));
+  HIP_CHECK(hipGetDevice(&device_ordinal))
 
   // The access policy window is only meaningful on devices that report a
   // positive maximum window size. A reported size of zero indicates the device
@@ -96,16 +96,16 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_Access
   hipGraph_t graph = nullptr;
   hipGraphNode_t kernel_node = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)))
   cleanup.Add([device_value] { (void)hipFree(device_value); });
-  HIP_CHECK(hipMalloc(&device_buffer, kBufferSize));
+  HIP_CHECK(hipMalloc(&device_buffer, kBufferSize))
   cleanup.Add([device_buffer] { (void)hipFree(device_buffer); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   void* args[] = {&device_value, &value};
   auto params = KernelNodeParams(args);
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_node, graph, nullptr, 0, &params));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_node, graph, nullptr, 0, &params))
 
   // Build a portable access policy window over the tiny device buffer, clamping
   // the window size to the device-reported maximum.
@@ -122,7 +122,7 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_Access
   if (set_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Access policy window kernel node attribute is not supported by this runtime path.");
   }
-  HIP_CHECK(set_status);
+  HIP_CHECK(set_status)
 
   // The window configured on the node must round-trip through a subsequent get.
   hipKernelNodeAttrValue get_value{};
@@ -131,7 +131,7 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_Access
   if (get_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Access policy window kernel node attribute is not supported by this runtime path.");
   }
-  HIP_CHECK(get_status);
+  HIP_CHECK(get_status)
 
   REQUIRE(get_value.accessPolicyWindow.base_ptr == set_value.accessPolicyWindow.base_ptr);
   REQUIRE(get_value.accessPolicyWindow.num_bytes == set_value.accessPolicyWindow.num_bytes);
@@ -149,15 +149,15 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_Defaul
   hipGraphNode_t kernel_node = nullptr;
   hipGraphNode_t empty_node = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)))
   cleanup.Add([device_value] { (void)hipFree(device_value); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   void* args[] = {&device_value, &value};
   auto params = KernelNodeParams(args);
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_node, graph, nullptr, 0, &params));
-  HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_node, graph, nullptr, 0, &params))
+  HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, nullptr, 0))
 
   hipKernelNodeAttrValue attr_value{};
   attr_value.cooperative = 1;

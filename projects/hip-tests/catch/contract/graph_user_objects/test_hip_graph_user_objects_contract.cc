@@ -29,7 +29,7 @@ bool TryCreateUserObject(hipUserObject_t* object, int* counter) {
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 }  // namespace
@@ -46,8 +46,8 @@ HIP_TEST_CASE(Contract_GraphUserObjects_HipUserObjectRelease_CreateRelease_Invok
 
   // The single initial reference is released, which must drop the refcount to
   // zero and run the destructor exactly once.
-  HIP_CHECK(hipUserObjectRelease(object, 1));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipUserObjectRelease(object, 1))
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(counter == 1);
 }
@@ -63,17 +63,17 @@ HIP_TEST_CASE(Contract_GraphUserObjects_HipUserObjectRetain_Release_BalancesRefc
   REQUIRE(object != nullptr);
 
   // Retain two extra references so the object holds three references total.
-  HIP_CHECK(hipUserObjectRetain(object, 2));
+  HIP_CHECK(hipUserObjectRetain(object, 2))
 
   // Releasing the two retained references must not run the destructor while a
   // reference still remains.
-  HIP_CHECK(hipUserObjectRelease(object, 2));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipUserObjectRelease(object, 2))
+  HIP_CHECK(hipDeviceSynchronize())
   REQUIRE(counter == 0);
 
   // Releasing the final initial reference drops the refcount to zero.
-  HIP_CHECK(hipUserObjectRelease(object, 1));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipUserObjectRelease(object, 1))
+  HIP_CHECK(hipDeviceSynchronize())
   // BACKEND-DIFF: user-object destructor semantics after a retain diverge. AMD
   // fires the destructor once on release-to-zero; NVIDIA (cudaUserObject*) never
   // fires it on this retain/release path. Behavioral delta; the #else branch is
@@ -106,21 +106,21 @@ HIP_TEST_CASE(Contract_GraphUserObjects_HipGraphRetainUserObject_GraphRetainRele
   REQUIRE(object != nullptr);
 
   hip::contract::ContractCleanup cleanup;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   // The graph takes its own reference on the object, and then releases it. This
   // reference is independent of the standalone initial reference, so releasing
   // it must not run the destructor while the standalone reference remains.
-  HIP_CHECK(hipGraphRetainUserObject(graph, object, 1, 0));
-  HIP_CHECK(hipGraphReleaseUserObject(graph, object, 1));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGraphRetainUserObject(graph, object, 1, 0))
+  HIP_CHECK(hipGraphReleaseUserObject(graph, object, 1))
+  HIP_CHECK(hipDeviceSynchronize())
   REQUIRE(counter == 0);
 
   // Releasing the standalone initial reference drops the refcount to zero and
   // runs the destructor exactly once, independent of graph destruction.
-  HIP_CHECK(hipUserObjectRelease(object, 1));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipUserObjectRelease(object, 1))
+  HIP_CHECK(hipDeviceSynchronize())
   REQUIRE(counter == 1);
 }
 

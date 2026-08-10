@@ -251,18 +251,18 @@ template <typename F> static void test_cg_grid_group_type(F kernel_func, int blo
   dim3 *group_dim_dev, *group_dim_host;
 
   // Allocate device memory
-  HIP_CHECK(hipMalloc(&size_dev, num_bytes));
-  HIP_CHECK(hipMalloc(&thd_rank_dev, num_bytes));
-  HIP_CHECK(hipMalloc(&is_valid_dev, num_bytes));
-  HIP_CHECK(hipMalloc(&sync_dev, num_bytes));
-  HIP_CHECK(hipMalloc(&group_dim_dev, num_dim3_bytes));
+  HIP_CHECK(hipMalloc(&size_dev, num_bytes))
+  HIP_CHECK(hipMalloc(&thd_rank_dev, num_bytes))
+  HIP_CHECK(hipMalloc(&is_valid_dev, num_bytes))
+  HIP_CHECK(hipMalloc(&sync_dev, num_bytes))
+  HIP_CHECK(hipMalloc(&group_dim_dev, num_dim3_bytes))
 
   // Allocate host memory
-  HIP_CHECK(hipHostMalloc(&size_host, num_bytes));
-  HIP_CHECK(hipHostMalloc(&thd_rank_host, num_bytes));
-  HIP_CHECK(hipHostMalloc(&is_valid_host, num_bytes));
-  HIP_CHECK(hipHostMalloc(&sync_host, num_bytes));
-  HIP_CHECK(hipHostMalloc(&group_dim_host, num_dim3_bytes));
+  HIP_CHECK(hipHostMalloc(&size_host, num_bytes))
+  HIP_CHECK(hipHostMalloc(&thd_rank_host, num_bytes))
+  HIP_CHECK(hipHostMalloc(&is_valid_host, num_bytes))
+  HIP_CHECK(hipHostMalloc(&sync_host, num_bytes))
+  HIP_CHECK(hipHostMalloc(&group_dim_host, num_dim3_bytes))
 
   // Launch Kernel
   void* params[5];
@@ -271,14 +271,14 @@ template <typename F> static void test_cg_grid_group_type(F kernel_func, int blo
   params[2] = &is_valid_dev;
   params[3] = &sync_dev;
   params[4] = &group_dim_dev;
-  HIP_CHECK(hipLaunchCooperativeKernel(kernel_func, 2, block_size, params, 0, 0));
+  HIP_CHECK(hipLaunchCooperativeKernel(kernel_func, 2, block_size, params, 0, 0))
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(size_host, size_dev, num_bytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(thd_rank_host, thd_rank_dev, num_bytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(is_valid_host, is_valid_dev, num_bytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(sync_host, sync_dev, num_bytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(group_dim_host, group_dim_dev, num_dim3_bytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(size_host, size_dev, num_bytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(thd_rank_host, thd_rank_dev, num_bytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(is_valid_host, is_valid_dev, num_bytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(sync_host, sync_dev, num_bytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(group_dim_host, group_dim_dev, num_dim3_bytes, hipMemcpyDeviceToHost))
 
   // Validate results for both blocks together
   for (int i = 0; i < 2 * block_size; ++i) {
@@ -294,26 +294,26 @@ template <typename F> static void test_cg_grid_group_type(F kernel_func, int blo
   }
 
   // Free device memory
-  HIP_CHECK(hipFree(size_dev));
-  HIP_CHECK(hipFree(thd_rank_dev));
-  HIP_CHECK(hipFree(is_valid_dev));
-  HIP_CHECK(hipFree(sync_dev));
-  HIP_CHECK(hipFree(group_dim_dev));
+  HIP_CHECK(hipFree(size_dev))
+  HIP_CHECK(hipFree(thd_rank_dev))
+  HIP_CHECK(hipFree(is_valid_dev))
+  HIP_CHECK(hipFree(sync_dev))
+  HIP_CHECK(hipFree(group_dim_dev))
 
   // Free host memory
-  HIP_CHECK(hipHostFree(size_host));
-  HIP_CHECK(hipHostFree(thd_rank_host));
-  HIP_CHECK(hipHostFree(is_valid_host));
-  HIP_CHECK(hipHostFree(sync_host));
-  HIP_CHECK(hipHostFree(group_dim_host));
+  HIP_CHECK(hipHostFree(size_host))
+  HIP_CHECK(hipHostFree(thd_rank_host))
+  HIP_CHECK(hipHostFree(is_valid_host))
+  HIP_CHECK(hipHostFree(sync_host))
+  HIP_CHECK(hipHostFree(group_dim_host))
 }
 
 HIP_TEST_CASE(Unit_hipCGGridGroupType_Basic) {
   // Use default device for validating the test
   int device;
   hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&device_properties, device))
 
   if (!device_properties.cooperativeLaunch) {
     HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
@@ -354,11 +354,11 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_Basic) {
 
 HIP_TEST_CASE(Unit_hipCGGridGroupType_DataSharing) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   hipDeviceProp_t device_properties;
 
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  HIP_CHECK(hipGetDeviceProperties(&device_properties, device))
 
   if (!device_properties.cooperativeLaunch) {
     HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
@@ -380,7 +380,7 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_DataSharing) {
 
   // Create Streams
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   // Allocate and initialize data
 
@@ -393,14 +393,14 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_DataSharing) {
 
   unsigned int *dev_mem_1, *host_mem_1;
   host_mem_1 = reinterpret_cast<unsigned int*>(malloc(sizeof(unsigned int) * width));
-  HIP_CHECK(hipMalloc(&dev_mem_1, sizeof(unsigned int) * width));
+  HIP_CHECK(hipMalloc(&dev_mem_1, sizeof(unsigned int) * width))
   HIP_CHECK(hipMemcpyAsync(dev_mem_1, input_buffer, sizeof(unsigned int) * width,
                            hipMemcpyHostToDevice, stream));
 
   unsigned int *dev_mem_2, *host_mem_2;
   host_mem_2 = reinterpret_cast<unsigned int*>(malloc(sizeof(unsigned int) * width));
-  HIP_CHECK(hipMalloc(&dev_mem_2, sizeof(unsigned int) * width));
-  HIP_CHECK(hipMemsetAsync(dev_mem_2, 0, width * sizeof(unsigned int), stream));
+  HIP_CHECK(hipMalloc(&dev_mem_2, sizeof(unsigned int) * width))
+  HIP_CHECK(hipMemsetAsync(dev_mem_2, 0, width * sizeof(unsigned int), stream))
 
   // Launch the kernels
   INFO("Launching a cooperative kernel with " << num_blocks << " blocks, each with " << warp_size
@@ -411,7 +411,7 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_DataSharing) {
   coop_params[1] = reinterpret_cast<void*>(&dev_mem_2);
   coop_params[2] = reinterpret_cast<void*>(&loops);
   coop_params[3] = reinterpret_cast<void*>(&width);
-  HIP_CHECK(hipLaunchCooperativeKernel(coop_kernel, num_blocks, warp_size, coop_params, 0, stream));
+  HIP_CHECK(hipLaunchCooperativeKernel(coop_kernel, num_blocks, warp_size, coop_params, 0, stream))
 
   // Read back the buffers and print out their data
   HIP_CHECK(hipMemcpyAsync(host_mem_1, dev_mem_1, sizeof(unsigned int) * width,
@@ -419,13 +419,13 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_DataSharing) {
   HIP_CHECK(hipMemcpyAsync(host_mem_2, dev_mem_2, sizeof(unsigned int) * width,
                            hipMemcpyDeviceToHost, stream));
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   verify_coop_buffers(input_buffer, host_mem_1, host_mem_2, loops, width);
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(dev_mem_1));
-  HIP_CHECK(hipFree(dev_mem_2));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(dev_mem_1))
+  HIP_CHECK(hipFree(dev_mem_2))
   free(input_buffer);
   free(host_mem_1);
   free(host_mem_2);
@@ -433,11 +433,11 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_DataSharing) {
 
 HIP_TEST_CASE(Unit_hipCGGridGroupType_Barrier) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   hipDeviceProp_t device_properties;
 
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  HIP_CHECK(hipGetDeviceProperties(&device_properties, device))
 
   if (!device_properties.cooperativeLaunch) {
     HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
@@ -474,13 +474,13 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_Barrier) {
       reinterpret_cast<unsigned int*>(calloc(total_buffer_len, sizeof(unsigned int)));
 
   unsigned int* kernel_buffer;
-  HIP_CHECK(hipMalloc(&kernel_buffer, sizeof(unsigned int) * total_buffer_len));
+  HIP_CHECK(hipMalloc(&kernel_buffer, sizeof(unsigned int) * total_buffer_len))
   HIP_CHECK(hipMemcpy(kernel_buffer, host_buffer, sizeof(unsigned int) * total_buffer_len,
                       hipMemcpyHostToDevice));
 
   unsigned int* kernel_atomic;
-  HIP_CHECK(hipMalloc(&kernel_atomic, sizeof(unsigned int)));
-  HIP_CHECK(hipMemset(kernel_atomic, 0, sizeof(unsigned int)));
+  HIP_CHECK(hipMalloc(&kernel_atomic, sizeof(unsigned int)))
+  HIP_CHECK(hipMemset(kernel_atomic, 0, sizeof(unsigned int)))
 
   // Launch the kernel
   INFO("Launching a cooperative kernel with " << warps << " warps in " << requested_blocks
@@ -499,7 +499,7 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_Barrier) {
 
   verify_barrier_buffer(loops, requested_blocks, host_buffer);
 
-  HIP_CHECK(hipFree(kernel_buffer));
-  HIP_CHECK(hipFree(kernel_atomic));
+  HIP_CHECK(hipFree(kernel_buffer))
+  HIP_CHECK(hipFree(kernel_atomic))
   free(host_buffer);
 }

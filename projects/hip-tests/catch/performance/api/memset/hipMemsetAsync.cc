@@ -21,9 +21,9 @@ class MemsetAsyncBenchmark : public Benchmark<MemsetAsyncBenchmark> {
 
   void operator()() {
     TIMED_SECTION_STREAM(kTimerTypeEvent, stream_.stream()) {
-      HIP_CHECK(hipMemsetAsync(dst_.ptr(), 17, size_, stream_.stream()));
+      HIP_CHECK(hipMemsetAsync(dst_.ptr(), 17, size_, stream_.stream()))
     }
-    HIP_CHECK(hipStreamSynchronize(stream_.stream()));
+    HIP_CHECK(hipStreamSynchronize(stream_.stream()))
   }
 
  private:

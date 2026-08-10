@@ -23,7 +23,7 @@ __global__ void FuncAttributesKernel(int* output) {
 // contracts are only exercised against a provisioned runtime.
 void RequireDevice() {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -35,7 +35,7 @@ HIP_TEST_CASE(Contract_FuncAttributes_HipFuncGetAttributes_Default_ReturnsSaneSt
   RequireDevice();
 
   hipFuncAttributes attributes{};
-  HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<const void*>(FuncAttributesKernel)));
+  HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<const void*>(FuncAttributesKernel)))
 
   // A launchable function must accept at least one thread per block; the exact
   // ceiling is device- and kernel-dependent and therefore not asserted.
@@ -74,10 +74,10 @@ HIP_TEST_CASE(Contract_FuncAttributes_HipFuncGetAttribute_s_MatchesScalarGetAttr
   RequireDevice();
 
   hipFuncAttributes attributes{};
-  HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<const void*>(FuncAttributesKernel)));
+  HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<const void*>(FuncAttributesKernel)))
 
   hipFunction_t function = nullptr;
-  HIP_CHECK(hipGetFuncBySymbol(&function, reinterpret_cast<const void*>(FuncAttributesKernel)));
+  HIP_CHECK(hipGetFuncBySymbol(&function, reinterpret_cast<const void*>(FuncAttributesKernel)))
   REQUIRE(function != nullptr);
 
   int max_threads_per_block = 0;
@@ -94,7 +94,7 @@ HIP_TEST_CASE(Contract_FuncAttributes_HipGetFuncBySymbol_Default_ResolvesInSourc
   RequireDevice();
 
   hipFunction_t function = nullptr;
-  HIP_CHECK(hipGetFuncBySymbol(&function, reinterpret_cast<const void*>(FuncAttributesKernel)));
+  HIP_CHECK(hipGetFuncBySymbol(&function, reinterpret_cast<const void*>(FuncAttributesKernel)))
   REQUIRE(function != nullptr);
 
   // The resolved handle must be usable with the driver-style attribute query,
@@ -111,8 +111,8 @@ HIP_TEST_CASE(Contract_FuncAttributes_HipFuncSetAttribute_MaxDynamicSharedMemory
 
   int current_device = 0;
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDevice(&current_device));
-  HIP_CHECK(hipGetDeviceProperties(&properties, current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
+  HIP_CHECK(hipGetDeviceProperties(&properties, current_device))
 
   // Choose a small request that stays within the per-block shared-memory limit
   // so the hint is representable. When the device reports no per-block shared
@@ -142,7 +142,7 @@ HIP_TEST_CASE(Contract_FuncAttributes_HipFuncSetAttribute_PreferredCarveout_IsAc
     // contract-compliant outcome, not a failure.
     return;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 }
 
 // @asserts: hipFuncSetCacheConfig - the neutral per-function cache preference is accepted

@@ -50,7 +50,7 @@ bool CreateTextureOrSkip(hipTextureObject_t* texture, const HIP_RESOURCE_DESC* r
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 }  // namespace
@@ -61,7 +61,7 @@ HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectCreate_AndDestroyLinearResource
   hip::contract::ContractCleanup cleanup;
 
   void* device_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&device_ptr, kLinearBytes));
+  HIP_CHECK(hipMalloc(&device_ptr, kLinearBytes))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   const auto resource = LinearResourceDesc(device_ptr);
@@ -82,7 +82,7 @@ HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectGetResourceDesc_Default_RoundTr
   hip::contract::ContractCleanup cleanup;
 
   void* device_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&device_ptr, kLinearBytes));
+  HIP_CHECK(hipMalloc(&device_ptr, kLinearBytes))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   const auto resource = LinearResourceDesc(device_ptr);
@@ -95,7 +95,7 @@ HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectGetResourceDesc_Default_RoundTr
   cleanup.Add([texture] { (void)hipTexObjectDestroy(texture); });
 
   HIP_RESOURCE_DESC returned{};
-  HIP_CHECK(hipTexObjectGetResourceDesc(&returned, texture));
+  HIP_CHECK(hipTexObjectGetResourceDesc(&returned, texture))
 
   REQUIRE(returned.resType == resource.resType);
   REQUIRE(returned.res.linear.devPtr == resource.res.linear.devPtr);
@@ -110,7 +110,7 @@ HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectGetTextureDesc_Default_RoundTri
   hip::contract::ContractCleanup cleanup;
 
   void* device_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&device_ptr, kLinearBytes));
+  HIP_CHECK(hipMalloc(&device_ptr, kLinearBytes))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   const auto resource = LinearResourceDesc(device_ptr);
@@ -124,7 +124,7 @@ HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectGetTextureDesc_Default_RoundTri
   cleanup.Add([texture] { (void)hipTexObjectDestroy(texture); });
 
   HIP_TEXTURE_DESC returned{};
-  HIP_CHECK(hipTexObjectGetTextureDesc(&returned, texture));
+  HIP_CHECK(hipTexObjectGetTextureDesc(&returned, texture))
 
   REQUIRE(returned.addressMode[0] == texture_desc.addressMode[0]);
   REQUIRE(returned.addressMode[1] == texture_desc.addressMode[1]);
@@ -140,7 +140,7 @@ HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectGetResourceDesc_CreateAndGetRes
 
   hipArray_t array = nullptr;
   const auto channel = hipCreateChannelDesc<uint8_t>();
-  HIP_CHECK(hipMallocArray(&array, &channel, kArrayWidth, kArrayHeight));
+  HIP_CHECK(hipMallocArray(&array, &channel, kArrayWidth, kArrayHeight))
   cleanup.Add([array] { (void)hipFreeArray(array); });
 
   const auto resource = ArrayResourceDesc(array);
@@ -153,7 +153,7 @@ HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectGetResourceDesc_CreateAndGetRes
   cleanup.Add([texture] { (void)hipTexObjectDestroy(texture); });
 
   HIP_RESOURCE_DESC returned{};
-  HIP_CHECK(hipTexObjectGetResourceDesc(&returned, texture));
+  HIP_CHECK(hipTexObjectGetResourceDesc(&returned, texture))
 
   REQUIRE(returned.resType == HIP_RESOURCE_TYPE_ARRAY);
   REQUIRE(returned.res.array.hArray == array);
@@ -174,7 +174,7 @@ HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectGetResourceViewDesc_Default_IsQ
 
   hipArray_t array = nullptr;
   const auto channel = hipCreateChannelDesc<float>();
-  HIP_CHECK(hipMallocArray(&array, &channel, kArrayWidth, 1));
+  HIP_CHECK(hipMallocArray(&array, &channel, kArrayWidth, 1))
   cleanup.Add([array] { (void)hipFreeArray(array); });
 
   const auto resource = ArrayResourceDesc(array);
@@ -196,7 +196,7 @@ HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectGetResourceViewDesc_Default_IsQ
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("hipTexObjectGetResourceViewDesc is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   REQUIRE(returned.format == view.format);
   REQUIRE(returned.width == view.width);
@@ -209,7 +209,7 @@ HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectCreate_InvalidArgs_AreRejected)
   hip::contract::ContractCleanup cleanup;
 
   void* device_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&device_ptr, kLinearBytes));
+  HIP_CHECK(hipMalloc(&device_ptr, kLinearBytes))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   const auto resource = LinearResourceDesc(device_ptr);

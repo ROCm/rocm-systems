@@ -45,15 +45,15 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Positive_Basic) {
   std::vector<hipModule_t> modules_list(device_count);
 
   for (int index = 0; index < device_count; index++) {
-    HIP_CHECK(hipSetDevice(index));
-    HIP_CHECK(hipStreamCreate(&streams_list[index]));
-    HIP_CHECK(hipModuleLoad(&modules_list[index], "launch_kernel_module.code"));
+    HIP_CHECK(hipSetDevice(index))
+    HIP_CHECK(hipStreamCreate(&streams_list[index]))
+    HIP_CHECK(hipModuleLoad(&modules_list[index], "launch_kernel_module.code"))
   }
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   for (int index = 0; index < device_count; index++) {
     hipFunction_t kernelFunction;
-    HIP_CHECK(hipModuleGetFunction(&kernelFunction, modules_list[index], "CoopKernel"));
+    HIP_CHECK(hipModuleGetFunction(&kernelFunction, modules_list[index], "CoopKernel"))
     params_list[index].function = kernelFunction;
     params_list[index].gridDimX = 1;
     params_list[index].gridDimY = 1;
@@ -66,15 +66,15 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Positive_Basic) {
     params_list[index].hStream = streams_list[index];
   }
 
-  HIP_CHECK(hipModuleLaunchCooperativeKernelMultiDevice(params_list.data(), device_count, 0u));
+  HIP_CHECK(hipModuleLaunchCooperativeKernelMultiDevice(params_list.data(), device_count, 0u))
 
   for (const auto params : params_list) {
-    HIP_CHECK(hipStreamSynchronize(params.hStream));
+    HIP_CHECK(hipStreamSynchronize(params.hStream))
   }
 
   for (int index = 0; index < device_count; index++) {
-    HIP_CHECK(hipStreamDestroy(params_list[index].hStream));
-    HIP_CHECK(hipModuleUnload(modules_list[index]));
+    HIP_CHECK(hipStreamDestroy(params_list[index].hStream))
+    HIP_CHECK(hipModuleUnload(modules_list[index]))
   }
 }
 
@@ -102,15 +102,15 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_Paramete
   std::vector<hipModule_t> modules_list(device_count);
 
   for (int index = 0; index < device_count; index++) {
-    HIP_CHECK(hipSetDevice(index));
-    HIP_CHECK(hipStreamCreate(&streams_list[index]));
-    HIP_CHECK(hipModuleLoad(&modules_list[index], "launch_kernel_module.code"));
+    HIP_CHECK(hipSetDevice(index))
+    HIP_CHECK(hipStreamCreate(&streams_list[index]))
+    HIP_CHECK(hipModuleLoad(&modules_list[index], "launch_kernel_module.code"))
   }
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   for (int index = 0; index < device_count; index++) {
     hipFunction_t kernelFunction;
-    HIP_CHECK(hipModuleGetFunction(&kernelFunction, modules_list[index], "CoopKernel"));
+    HIP_CHECK(hipModuleGetFunction(&kernelFunction, modules_list[index], "CoopKernel"))
     params_list[index].function = kernelFunction;
     params_list[index].gridDimX = 1;
     params_list[index].gridDimY = 1;
@@ -174,8 +174,8 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_Paramete
           hipErrorInvalidValue);
     }
     SECTION("Stream doesn't match across all devices") {
-      HIP_CHECK(hipStreamDestroy(params_list[1].hStream));
-      HIP_CHECK(hipStreamCreate(&params_list[1].hStream));
+      HIP_CHECK(hipStreamDestroy(params_list[1].hStream))
+      HIP_CHECK(hipStreamCreate(&params_list[1].hStream))
 #if HT_AMD
       HIP_CHECK_ERROR(
           hipModuleLaunchCooperativeKernelMultiDevice(params_list.data(), device_count, 0u),
@@ -189,8 +189,8 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_Paramete
   }
 
   for (int index = 0; index < device_count; index++) {
-    HIP_CHECK(hipStreamDestroy(params_list[index].hStream));
-    HIP_CHECK(hipModuleUnload(modules_list[index]));
+    HIP_CHECK(hipStreamDestroy(params_list[index].hStream))
+    HIP_CHECK(hipModuleUnload(modules_list[index]))
   }
 }
 
@@ -213,7 +213,7 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_MultiKer
   }
 
   int device_count;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
@@ -221,14 +221,14 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_MultiKer
   std::vector<hipModule_t> modules_list(device_count);
 
   for (int index = 0; index < device_count; index++) {
-    HIP_CHECK(hipSetDevice(index));
-    HIP_CHECK(hipModuleLoad(&modules_list[index], "launch_kernel_module.code"));
+    HIP_CHECK(hipSetDevice(index))
+    HIP_CHECK(hipModuleLoad(&modules_list[index], "launch_kernel_module.code"))
   }
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   for (int index = 0; index < device_count; index++) {
     hipFunction_t kernelFunction;
-    HIP_CHECK(hipModuleGetFunction(&kernelFunction, modules_list[index], "CoopKernel"));
+    HIP_CHECK(hipModuleGetFunction(&kernelFunction, modules_list[index], "CoopKernel"))
     params_list[index].function = kernelFunction;
     params_list[index].gridDimX = 1;
     params_list[index].gridDimY = 1;
@@ -238,7 +238,7 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_MultiKer
     params_list[index].blockDimZ = 1;
     params_list[index].kernelParams = nullptr;
     params_list[index].sharedMemBytes = 0;
-    HIP_CHECK(hipStreamCreate(&params_list[index].hStream));
+    HIP_CHECK(hipStreamCreate(&params_list[index].hStream))
   }
 
 #if HT_AMD
@@ -250,8 +250,8 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_MultiKer
 #endif
 
   for (int index = 0; index < device_count; index++) {
-    HIP_CHECK(hipStreamDestroy(params_list[index].hStream));
-    HIP_CHECK(hipModuleUnload(modules_list[index]));
+    HIP_CHECK(hipStreamDestroy(params_list[index].hStream))
+    HIP_CHECK(hipModuleUnload(modules_list[index]))
   }
 }
 

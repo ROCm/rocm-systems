@@ -11,9 +11,9 @@ static __global__ void write_integer(int* memory, int value) { *memory = value; 
 HIP_TEST_CASE(Unit_hipMallocHost_Positive) {
   int* host_memory = nullptr;
 
-  HIP_CHECK(hipMallocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)));
+  HIP_CHECK(hipMallocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)))
   REQUIRE(host_memory != nullptr);
-  HIP_CHECK(hipHostFree(host_memory));
+  HIP_CHECK(hipHostFree(host_memory))
 }
 
 HIP_TEST_CASE(Unit_hipMallocHost_DataValidation) {
@@ -21,16 +21,16 @@ HIP_TEST_CASE(Unit_hipMallocHost_DataValidation) {
   int* host_memory = nullptr;
   hipEvent_t event = nullptr;
 
-  HIP_CHECK(hipMallocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)));
+  HIP_CHECK(hipMallocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)))
 
   write_integer<<<1, 1>>>(host_memory, validation_number);
 
   SECTION("device sync") { HIP_CHECK(hipDeviceSynchronize()); }
 
   SECTION("event sync") {
-    HIP_CHECK(hipEventCreateWithFlags(&event, 0));
-    HIP_CHECK(hipEventRecord(event, nullptr));
-    HIP_CHECK(hipEventSynchronize(event));
+    HIP_CHECK(hipEventCreateWithFlags(&event, 0))
+    HIP_CHECK(hipEventRecord(event, nullptr))
+    HIP_CHECK(hipEventSynchronize(event))
   }
 
   SECTION("stream sync") { HIP_CHECK(hipStreamSynchronize(nullptr)); }
@@ -38,10 +38,10 @@ HIP_TEST_CASE(Unit_hipMallocHost_DataValidation) {
   REQUIRE(*host_memory == validation_number);
 
   if (event != nullptr) {
-    HIP_CHECK(hipEventDestroy(event));
+    HIP_CHECK(hipEventDestroy(event))
   }
 
-  HIP_CHECK(hipHostFree(host_memory));
+  HIP_CHECK(hipHostFree(host_memory))
 }
 
 HIP_TEST_CASE(Unit_hipMallocHost_Negative) {
@@ -69,6 +69,6 @@ HIP_TEST_CASE(Unit_hipMallocHost_Capture) {
 
   if (capture_error == hipSuccess) {
     REQUIRE(host_memory != nullptr);
-    HIP_CHECK(hipHostFree(host_memory));
+    HIP_CHECK(hipHostFree(host_memory))
   }
 }

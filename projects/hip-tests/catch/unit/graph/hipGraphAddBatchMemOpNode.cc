@@ -28,18 +28,18 @@
  *    - HIP_VERSION >= 6.4
  */
 HIP_TEST_CASE(Unit_hipGraphAddBatchMemOpNode_NegativeTsts) {
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
   hipGraph_t graph;
   hipCtx_t ctx;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  HIP_CHECK(hipCtxCreate(&ctx, 0, device));
+  HIP_CHECK(hipDeviceGet(&device, 0))
+  HIP_CHECK(hipCtxCreate(&ctx, 0, device))
   // Create a HIP graph
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   INFO("Graph created.");
   static hipStreamBatchMemOpParams paramArray[2];
   std::vector<hipDeviceptr_t> opsArray(1);
-  HIP_CHECK(hipMalloc((void**)&opsArray[0], sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc((void**)&opsArray[0], sizeof(uint32_t)))
 
   paramArray[0].operation = hipStreamMemOpWriteValue32;
   paramArray[0].writeValue.address = opsArray[0];
@@ -97,10 +97,10 @@ HIP_TEST_CASE(Unit_hipGraphAddBatchMemOpNode_NegativeTsts) {
                     hipErrorInvalidValue);
   }
 #endif
-  HIP_CHECK(hipFree((void*)opsArray[0]));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipCtxPopCurrent(&ctx));
-  HIP_CHECK(hipCtxDestroy(ctx));
+  HIP_CHECK(hipFree((void*)opsArray[0]))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipCtxPopCurrent(&ctx))
+  HIP_CHECK(hipCtxDestroy(ctx))
 }
 /**
  * End doxygen group GraphTest.

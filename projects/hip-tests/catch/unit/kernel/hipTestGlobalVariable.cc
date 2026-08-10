@@ -43,15 +43,15 @@ void runTestConstantGlobalVar() {
   for (unsigned i = 0; i < LEN; i++) {
     A[i] = 0;
   }
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
   hipLaunchKernelGGL(kernel, dim3(1, 1, 1), dim3(LEN, 1, 1), 0, 0, Ad);
-  HIP_CHECK(hipMemcpy(A, Ad, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(A, Ad, SIZE, hipMemcpyDeviceToHost))
 
   for (unsigned i = 0; i < LEN; i++) {
     REQUIRE(123 == A[i]);
   }
   delete[] A;
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Ad))
 }
 
 __device__ int GlobalArray[LEN];
@@ -71,16 +71,16 @@ void runTestGlobalArray() {
     A[i] = 0;
   }
 
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
   hipLaunchKernelGGL(kernelWrite, dim3(1, 1, 1), dim3(LEN, 1, 1), 0, 0);
   hipLaunchKernelGGL(kernelRead, dim3(1, 1, 1), dim3(LEN, 1, 1), 0, 0, Ad);
-  HIP_CHECK(hipMemcpy(A, Ad, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(A, Ad, SIZE, hipMemcpyDeviceToHost))
 
   for (unsigned i = 0; i < LEN; i++) {
     REQUIRE(i == A[i]);
   }
   delete[] A;
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Ad))
 }
 
 HIP_TEST_CASE(Unit_kernel_chkGlobalArrAndGlobalVaribleViaKernelFn) {

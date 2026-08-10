@@ -25,16 +25,16 @@ class MemPoolImportFromShareableHandleBenchmark
 #endif
 
     hipMemPoolProps props = CreateMemPoolProps(0, kHandleType);
-    HIP_CHECK(hipMemPoolCreate(&mem_pool, &props));
-    HIP_CHECK(hipMemPoolExportToShareableHandle(&share_handle, mem_pool, kHandleType, 0));
+    HIP_CHECK(hipMemPoolCreate(&mem_pool, &props))
+    HIP_CHECK(hipMemPoolExportToShareableHandle(&share_handle, mem_pool, kHandleType, 0))
 
     TIMED_SECTION(kTimerTypeCpu) {
       HIP_CHECK(hipMemPoolImportFromShareableHandle(&mem_pool_shareable, (void*)share_handle,
                                                     kHandleType, 0));
     }
 
-    HIP_CHECK(hipMemPoolDestroy(mem_pool_shareable));
-    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+    HIP_CHECK(hipMemPoolDestroy(mem_pool_shareable))
+    HIP_CHECK(hipMemPoolDestroy(mem_pool))
   }
 };
 

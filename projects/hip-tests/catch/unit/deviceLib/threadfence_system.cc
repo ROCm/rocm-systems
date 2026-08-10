@@ -37,7 +37,7 @@ __global__ void gpu_round_robin(const int id, const int num_dev, const int num_i
 
 HIP_TEST_CASE(Unit_threadfence_system) {
   int num_gpus = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_gpus));
+  HIP_CHECK(hipGetDeviceCount(&num_gpus))
   REQUIRE(num_gpus > 0);
 
   volatile int* data = nullptr;
@@ -50,7 +50,7 @@ HIP_TEST_CASE(Unit_threadfence_system) {
 
   volatile int* flag = nullptr;
   if (hipHostMalloc(&flag, sizeof(int), hipHostMallocCoherent) != hipSuccess) {
-    HIP_CHECK(hipHostFree((void*)data));
+    HIP_CHECK(hipHostFree((void*)data))
     HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
   }
   *flag = 0;
@@ -93,8 +93,8 @@ HIP_TEST_CASE(Unit_threadfence_system) {
 
   bool passed = *data == expected_data && *flag == expected_flag;
 
-  HIP_CHECK(hipHostFree((void*)data));
-  HIP_CHECK(hipHostFree((void*)flag));
+  HIP_CHECK(hipHostFree((void*)data))
+  HIP_CHECK(hipHostFree((void*)flag))
 
   REQUIRE(passed == true);
 }

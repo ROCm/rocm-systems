@@ -74,13 +74,13 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_StreamApis_Negative) {
   // hipStreamWaitEvent section isolates the detach check on `detached`
   // (otherwise an unrecorded event would also fail).
   hipStream_t helper = nullptr;
-  HIP_CHECK(hipStreamCreate(&helper));
+  HIP_CHECK(hipStreamCreate(&helper))
   hipEvent_t event = nullptr;
-  HIP_CHECK(hipEventCreate(&event));
-  HIP_CHECK(hipEventRecord(event, helper));
-  HIP_CHECK(hipStreamSynchronize(helper));
+  HIP_CHECK(hipEventCreate(&event))
+  HIP_CHECK(hipEventRecord(event, helper))
+  HIP_CHECK(hipStreamSynchronize(helper))
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   SECTION("hipStreamWaitEvent") {
     HIP_CHECK_ERROR(hipStreamWaitEvent(detached, event, 0), hipErrorStreamDetached);
@@ -95,9 +95,9 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_StreamApis_Negative) {
     HIP_CHECK_ERROR(hipLaunchHostFunc(detached, HostFnNoop, nullptr), hipErrorStreamDetached);
   }
 
-  HIP_CHECK(hipEventDestroy(event));
-  HIP_CHECK(hipStreamDestroy(helper));
-  HIP_CHECK(hipStreamDestroy(detached));
+  HIP_CHECK(hipEventDestroy(event))
+  HIP_CHECK(hipStreamDestroy(helper))
+  HIP_CHECK(hipStreamDestroy(detached))
 }
 
 /**
@@ -115,9 +115,9 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_EventRecord_Negative) {
   MakeCtxAndStream(ctx, detached);
 
   hipEvent_t event = nullptr;
-  HIP_CHECK(hipEventCreate(&event));
+  HIP_CHECK(hipEventCreate(&event))
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   SECTION("hipEventRecord") {
     HIP_CHECK_ERROR(hipEventRecord(event, detached), hipErrorStreamDetached);
@@ -127,8 +127,8 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_EventRecord_Negative) {
     HIP_CHECK_ERROR(hipEventRecordWithFlags(event, detached, 0), hipErrorStreamDetached);
   }
 
-  HIP_CHECK(hipEventDestroy(event));
-  HIP_CHECK(hipStreamDestroy(detached));
+  HIP_CHECK(hipEventDestroy(event))
+  HIP_CHECK(hipStreamDestroy(detached))
 }
 
 /**
@@ -147,7 +147,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_KernelLaunch_Negative) {
   hipStream_t detached = nullptr;
   MakeCtxAndStream(ctx, detached);
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   SECTION("triple-chevron launch (hipLaunchKernel)") {
     NoOpKernel<<<dim3(1), dim3(1), 0, detached>>>();
@@ -167,7 +167,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_KernelLaunch_Negative) {
         hipErrorStreamDetached);
   }
 
-  HIP_CHECK(hipStreamDestroy(detached));
+  HIP_CHECK(hipStreamDestroy(detached))
 }
 
 /**
@@ -191,20 +191,20 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MemcpyAsync_Negative) {
   void* h_dst = nullptr;
   void* d_src = nullptr;
   void* d_dst = nullptr;
-  HIP_CHECK(hipHostMalloc(&h_src, kBytes));
-  HIP_CHECK(hipHostMalloc(&h_dst, kBytes));
-  HIP_CHECK(hipMalloc(&d_src, kBytes));
-  HIP_CHECK(hipMalloc(&d_dst, kBytes));
+  HIP_CHECK(hipHostMalloc(&h_src, kBytes))
+  HIP_CHECK(hipHostMalloc(&h_dst, kBytes))
+  HIP_CHECK(hipMalloc(&d_src, kBytes))
+  HIP_CHECK(hipMalloc(&d_dst, kBytes))
 
   // 2D / 3D scratch buffers, all pre-detach.
   constexpr size_t k2DPitch = 64;
   constexpr size_t k2DRows = 4;
   void* d_2d_src = nullptr;
   void* d_2d_dst = nullptr;
-  HIP_CHECK(hipMalloc(&d_2d_src, k2DPitch * k2DRows));
-  HIP_CHECK(hipMalloc(&d_2d_dst, k2DPitch * k2DRows));
+  HIP_CHECK(hipMalloc(&d_2d_src, k2DPitch * k2DRows))
+  HIP_CHECK(hipMalloc(&d_2d_dst, k2DPitch * k2DRows))
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   SECTION("hipMemcpyAsync") {
     HIP_CHECK_ERROR(
@@ -263,13 +263,13 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MemcpyAsync_Negative) {
                     hipErrorStreamDetached);
   }
 
-  HIP_CHECK(hipFree(d_2d_src));
-  HIP_CHECK(hipFree(d_2d_dst));
-  HIP_CHECK(hipFree(d_src));
-  HIP_CHECK(hipFree(d_dst));
-  HIP_CHECK(hipHostFree(h_src));
-  HIP_CHECK(hipHostFree(h_dst));
-  HIP_CHECK(hipStreamDestroy(detached));
+  HIP_CHECK(hipFree(d_2d_src))
+  HIP_CHECK(hipFree(d_2d_dst))
+  HIP_CHECK(hipFree(d_src))
+  HIP_CHECK(hipFree(d_dst))
+  HIP_CHECK(hipHostFree(h_src))
+  HIP_CHECK(hipHostFree(h_dst))
+  HIP_CHECK(hipStreamDestroy(detached))
 }
 
 /**
@@ -289,14 +289,14 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MemsetAsync_Negative) {
 
   constexpr size_t kBytes = 256;
   void* d_buf = nullptr;
-  HIP_CHECK(hipMalloc(&d_buf, kBytes));
+  HIP_CHECK(hipMalloc(&d_buf, kBytes))
 
   constexpr size_t k2DPitch = 64;
   constexpr size_t k2DRows = 4;
   void* d_2d = nullptr;
-  HIP_CHECK(hipMalloc(&d_2d, k2DPitch * k2DRows));
+  HIP_CHECK(hipMalloc(&d_2d, k2DPitch * k2DRows))
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   SECTION("hipMemsetAsync") {
     HIP_CHECK_ERROR(hipMemsetAsync(d_buf, 0, kBytes, detached), hipErrorStreamDetached);
@@ -330,9 +330,9 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MemsetAsync_Negative) {
     HIP_CHECK_ERROR(hipMemset3DAsync(pitched, 0, extent, detached), hipErrorStreamDetached);
   }
 
-  HIP_CHECK(hipFree(d_2d));
-  HIP_CHECK(hipFree(d_buf));
-  HIP_CHECK(hipStreamDestroy(detached));
+  HIP_CHECK(hipFree(d_2d))
+  HIP_CHECK(hipFree(d_buf))
+  HIP_CHECK(hipStreamDestroy(detached))
 }
 
 /**
@@ -358,19 +358,19 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MempoolAsync_Negative) {
   MakeCtxAndStream(ctx, detached);
 
   hipMemPool_t pool = nullptr;
-  HIP_CHECK(hipDeviceGetDefaultMemPool(&pool, 0));
+  HIP_CHECK(hipDeviceGetDefaultMemPool(&pool, 0))
   REQUIRE(pool != nullptr);
 
   // Pre-allocate a buffer through the pool on a non-detached stream so the
   // hipFreeAsync section has a valid pointer to free (the detach assertion
   // fires before the actual free, so no leak occurs).
   hipStream_t helper = nullptr;
-  HIP_CHECK(hipStreamCreate(&helper));
+  HIP_CHECK(hipStreamCreate(&helper))
   void* d_pool_buf = nullptr;
-  HIP_CHECK(hipMallocFromPoolAsync(&d_pool_buf, 256, pool, helper));
-  HIP_CHECK(hipStreamSynchronize(helper));
+  HIP_CHECK(hipMallocFromPoolAsync(&d_pool_buf, 256, pool, helper))
+  HIP_CHECK(hipStreamSynchronize(helper))
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   SECTION("hipMallocAsync") {
     void* d_ptr = nullptr;
@@ -388,10 +388,10 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MempoolAsync_Negative) {
   }
 
   // Free the pre-allocated buffer cleanly via the helper stream.
-  HIP_CHECK(hipFreeAsync(d_pool_buf, helper));
-  HIP_CHECK(hipStreamSynchronize(helper));
-  HIP_CHECK(hipStreamDestroy(helper));
-  HIP_CHECK(hipStreamDestroy(detached));
+  HIP_CHECK(hipFreeAsync(d_pool_buf, helper))
+  HIP_CHECK(hipStreamSynchronize(helper))
+  HIP_CHECK(hipStreamDestroy(helper))
+  HIP_CHECK(hipStreamDestroy(detached))
 }
 
 /**
@@ -409,7 +409,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MempoolAsync_Negative) {
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_HmmAsync_Negative) {
   int managed_supported = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&managed_supported, hipDeviceAttributeManagedMemory, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&managed_supported, hipDeviceAttributeManagedMemory, 0))
   if (managed_supported == 0) {
     SKIP("Device does not support managed memory; skipping HMM detach checks");
   }
@@ -420,9 +420,9 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_HmmAsync_Negative) {
 
   constexpr size_t kBytes = 256;
   int* managed_ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(reinterpret_cast<void**>(&managed_ptr), kBytes));
+  HIP_CHECK(hipMallocManaged(reinterpret_cast<void**>(&managed_ptr), kBytes))
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   SECTION("hipMemPrefetchAsync") {
     int concurrent = 0;
@@ -455,8 +455,8 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_HmmAsync_Negative) {
         hipErrorStreamDetached);
   }
 
-  HIP_CHECK(hipFree(managed_ptr));
-  HIP_CHECK(hipStreamDestroy(detached));
+  HIP_CHECK(hipFree(managed_ptr))
+  HIP_CHECK(hipStreamDestroy(detached))
 }
 
 /**
@@ -475,20 +475,20 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_GraphLaunch_Negative) {
   MakeCtxAndStream(ctx, detached);
 
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   hipGraphNode_t empty_node = nullptr;
-  HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, nullptr, 0))
   hipGraphExec_t exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0))
   REQUIRE(exec != nullptr);
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   HIP_CHECK_ERROR(hipGraphLaunch(exec, detached), hipErrorStreamDetached);
 
-  HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(detached));
+  HIP_CHECK(hipGraphExecDestroy(exec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(detached))
 }
 
 /**
@@ -505,7 +505,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_StreamCapture_Negative) {
   hipStream_t detached = nullptr;
   MakeCtxAndStream(ctx, detached);
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   SECTION("hipStreamBeginCapture") {
     HIP_CHECK_ERROR(hipStreamBeginCapture(detached, hipStreamCaptureModeRelaxed),
@@ -514,11 +514,11 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_StreamCapture_Negative) {
 
   SECTION("hipStreamBeginCaptureToGraph") {
     hipGraph_t graph = nullptr;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
     HIP_CHECK_ERROR(hipStreamBeginCaptureToGraph(detached, graph, nullptr, nullptr, 0,
                                                  hipStreamCaptureModeRelaxed),
                     hipErrorStreamDetached);
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphDestroy(graph))
   }
 
   SECTION("hipStreamEndCapture") {
@@ -526,7 +526,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_StreamCapture_Negative) {
     HIP_CHECK_ERROR(hipStreamEndCapture(detached, &out_graph), hipErrorStreamDetached);
   }
 
-  HIP_CHECK(hipStreamDestroy(detached));
+  HIP_CHECK(hipStreamDestroy(detached))
 }
 
 /**
@@ -549,20 +549,20 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_ActiveCapture_Invalidated) {
   MakeCtxAndStream(ctx, detached);
 
   hipStream_t regular = nullptr;
-  HIP_CHECK(hipStreamCreate(&regular));
+  HIP_CHECK(hipStreamCreate(&regular))
 
-  HIP_CHECK(hipStreamBeginCapture(detached, hipStreamCaptureModeRelaxed));
-  HIP_CHECK(hipStreamBeginCapture(regular, hipStreamCaptureModeRelaxed));
+  HIP_CHECK(hipStreamBeginCapture(detached, hipStreamCaptureModeRelaxed))
+  HIP_CHECK(hipStreamBeginCapture(regular, hipStreamCaptureModeRelaxed))
 
   hipStreamCaptureStatus status_before = hipStreamCaptureStatusNone;
   unsigned long long capture_id = 0;
-  HIP_CHECK(hipStreamGetCaptureInfo(detached, &status_before, &capture_id));
+  HIP_CHECK(hipStreamGetCaptureInfo(detached, &status_before, &capture_id))
   REQUIRE(status_before == hipStreamCaptureStatusActive);
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   hipStreamCaptureStatus status_after = hipStreamCaptureStatusNone;
-  HIP_CHECK(hipStreamGetCaptureInfo(detached, &status_after, &capture_id));
+  HIP_CHECK(hipStreamGetCaptureInfo(detached, &status_after, &capture_id))
   REQUIRE(status_after == hipStreamCaptureStatusInvalidated);
 
   hipGraph_t out_graph = nullptr;
@@ -570,13 +570,13 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_ActiveCapture_Invalidated) {
 
   // Control: the regular stream's capture is unaffected and ends cleanly.
   hipGraph_t regular_graph = nullptr;
-  HIP_CHECK(hipStreamEndCapture(regular, &regular_graph));
+  HIP_CHECK(hipStreamEndCapture(regular, &regular_graph))
   if (regular_graph != nullptr) {
-    HIP_CHECK(hipGraphDestroy(regular_graph));
+    HIP_CHECK(hipGraphDestroy(regular_graph))
   }
 
-  HIP_CHECK(hipStreamDestroy(regular));
-  HIP_CHECK(hipStreamDestroy(detached));
+  HIP_CHECK(hipStreamDestroy(regular))
+  HIP_CHECK(hipStreamDestroy(detached))
 }
 
 /**
@@ -597,34 +597,34 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_ParallelCapture_Invalidated) {
   hipStream_t origin = nullptr;
   MakeCtxAndStream(ctx, origin);
   hipStream_t fork = nullptr;
-  HIP_CHECK(hipExecutionCtxStreamCreate(&fork, ctx, hipStreamNonBlocking, 0));
+  HIP_CHECK(hipExecutionCtxStreamCreate(&fork, ctx, hipStreamNonBlocking, 0))
   REQUIRE(fork != nullptr);
 
   hipEvent_t fork_event = nullptr;
-  HIP_CHECK(hipEventCreate(&fork_event));
+  HIP_CHECK(hipEventCreate(&fork_event))
 
-  HIP_CHECK(hipStreamBeginCapture(origin, hipStreamCaptureModeRelaxed));
-  HIP_CHECK(hipEventRecord(fork_event, origin));
-  HIP_CHECK(hipStreamWaitEvent(fork, fork_event, 0));
+  HIP_CHECK(hipStreamBeginCapture(origin, hipStreamCaptureModeRelaxed))
+  HIP_CHECK(hipEventRecord(fork_event, origin))
+  HIP_CHECK(hipStreamWaitEvent(fork, fork_event, 0))
 
   hipStreamCaptureStatus origin_status = hipStreamCaptureStatusNone;
   hipStreamCaptureStatus fork_status = hipStreamCaptureStatusNone;
   unsigned long long capture_id = 0;
-  HIP_CHECK(hipStreamGetCaptureInfo(origin, &origin_status, &capture_id));
-  HIP_CHECK(hipStreamGetCaptureInfo(fork, &fork_status, &capture_id));
+  HIP_CHECK(hipStreamGetCaptureInfo(origin, &origin_status, &capture_id))
+  HIP_CHECK(hipStreamGetCaptureInfo(fork, &fork_status, &capture_id))
   REQUIRE(origin_status == hipStreamCaptureStatusActive);
   REQUIRE(fork_status == hipStreamCaptureStatusActive);
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
-  HIP_CHECK(hipStreamGetCaptureInfo(origin, &origin_status, &capture_id));
-  HIP_CHECK(hipStreamGetCaptureInfo(fork, &fork_status, &capture_id));
+  HIP_CHECK(hipStreamGetCaptureInfo(origin, &origin_status, &capture_id))
+  HIP_CHECK(hipStreamGetCaptureInfo(fork, &fork_status, &capture_id))
   REQUIRE(origin_status == hipStreamCaptureStatusInvalidated);
   REQUIRE(fork_status == hipStreamCaptureStatusInvalidated);
 
-  HIP_CHECK(hipEventDestroy(fork_event));
-  HIP_CHECK(hipStreamDestroy(fork));
-  HIP_CHECK(hipStreamDestroy(origin));
+  HIP_CHECK(hipEventDestroy(fork_event))
+  HIP_CHECK(hipStreamDestroy(fork))
+  HIP_CHECK(hipStreamDestroy(origin))
 }
 
 /**
@@ -650,32 +650,32 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MetadataGetters_Succeed) {
   int priority_before = 0;
   hipDevice_t device_before = -1;
   unsigned long long id_before = 0;
-  HIP_CHECK(hipStreamGetFlags(detached, &flags_before));
-  HIP_CHECK(hipStreamGetPriority(detached, &priority_before));
-  HIP_CHECK(hipStreamGetDevice(detached, &device_before));
-  HIP_CHECK(hipStreamGetId(detached, &id_before));
+  HIP_CHECK(hipStreamGetFlags(detached, &flags_before))
+  HIP_CHECK(hipStreamGetPriority(detached, &priority_before))
+  HIP_CHECK(hipStreamGetDevice(detached, &device_before))
+  HIP_CHECK(hipStreamGetId(detached, &id_before))
 
 #if HT_AMD
   // hipExtStreamGetCUMask is an AMD-only extension; skip this leg when
   // targeting the NVIDIA backend, which does not expose an analogous getter.
   hipDeviceProp_t props{};
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
   const uint32_t cu_mask_size =
       (static_cast<uint32_t>(props.multiProcessorCount) / 32) + 1;
   std::vector<uint32_t> cu_mask_before(cu_mask_size, 0);
-  HIP_CHECK(hipExtStreamGetCUMask(detached, cu_mask_before.size(), cu_mask_before.data()));
+  HIP_CHECK(hipExtStreamGetCUMask(detached, cu_mask_before.size(), cu_mask_before.data()))
 #endif
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   unsigned int flags_after = 0;
   int priority_after = 0;
   hipDevice_t device_after = -1;
   unsigned long long id_after = 0;
-  HIP_CHECK(hipStreamGetFlags(detached, &flags_after));
-  HIP_CHECK(hipStreamGetPriority(detached, &priority_after));
-  HIP_CHECK(hipStreamGetDevice(detached, &device_after));
-  HIP_CHECK(hipStreamGetId(detached, &id_after));
+  HIP_CHECK(hipStreamGetFlags(detached, &flags_after))
+  HIP_CHECK(hipStreamGetPriority(detached, &priority_after))
+  HIP_CHECK(hipStreamGetDevice(detached, &device_after))
+  HIP_CHECK(hipStreamGetId(detached, &id_after))
 
   REQUIRE(flags_after == flags_before);
   REQUIRE(priority_after == priority_before);
@@ -684,7 +684,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MetadataGetters_Succeed) {
 
 #if HT_AMD
   std::vector<uint32_t> cu_mask_after(cu_mask_size, 0);
-  HIP_CHECK(hipExtStreamGetCUMask(detached, cu_mask_after.size(), cu_mask_after.data()));
+  HIP_CHECK(hipExtStreamGetCUMask(detached, cu_mask_after.size(), cu_mask_after.data()))
   for (size_t i = 0; i < cu_mask_before.size(); ++i) {
     REQUIRE(cu_mask_after[i] == cu_mask_before[i]);
   }
@@ -692,15 +692,15 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MetadataGetters_Succeed) {
 
   // Attribute get/set/copy must also still work post-detach.
   hipStreamAttrValue attr_value{};
-  HIP_CHECK(hipStreamGetAttribute(detached, hipStreamAttributeSynchronizationPolicy, &attr_value));
-  HIP_CHECK(hipStreamSetAttribute(detached, hipStreamAttributeSynchronizationPolicy, &attr_value));
+  HIP_CHECK(hipStreamGetAttribute(detached, hipStreamAttributeSynchronizationPolicy, &attr_value))
+  HIP_CHECK(hipStreamSetAttribute(detached, hipStreamAttributeSynchronizationPolicy, &attr_value))
 
   hipStream_t regular = nullptr;
-  HIP_CHECK(hipStreamCreate(&regular));
-  HIP_CHECK(hipStreamCopyAttributes(regular, detached));
-  HIP_CHECK(hipStreamDestroy(regular));
+  HIP_CHECK(hipStreamCreate(&regular))
+  HIP_CHECK(hipStreamCopyAttributes(regular, detached))
+  HIP_CHECK(hipStreamDestroy(regular))
 
-  HIP_CHECK(hipStreamDestroy(detached));
+  HIP_CHECK(hipStreamDestroy(detached))
 }
 
 /**
@@ -718,8 +718,8 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_StreamOutlivesCtx) {
   hipStream_t stream = nullptr;
   MakeCtxAndStream(ctx, stream);
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -738,8 +738,8 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_StreamDestroyedBeforeCtx) {
   hipStream_t stream = nullptr;
   MakeCtxAndStream(ctx, stream);
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 }
 
 /**
@@ -753,29 +753,29 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_StreamDestroyedBeforeCtx) {
  *  - HIP_VERSION >= 7.2
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MultipleStreams) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipDevResourceDesc_t desc{};
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
   hipExecutionCtx_t ctx = nullptr;
-  HIP_CHECK(hipGreenCtxCreate(&ctx, desc, 0, 0));
+  HIP_CHECK(hipGreenCtxCreate(&ctx, desc, 0, 0))
   REQUIRE(ctx != nullptr);
 
   constexpr int kNumStreams = 4;
   hipStream_t streams[kNumStreams] = {nullptr, nullptr, nullptr, nullptr};
   for (int i = 0; i < kNumStreams; ++i) {
-    HIP_CHECK(hipExecutionCtxStreamCreate(&streams[i], ctx, hipStreamNonBlocking, 0));
+    HIP_CHECK(hipExecutionCtxStreamCreate(&streams[i], ctx, hipStreamNonBlocking, 0))
     REQUIRE(streams[i] != nullptr);
   }
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   for (int i = 0; i < kNumStreams; ++i) {
     HIP_CHECK_ERROR(hipStreamSynchronize(streams[i]), hipErrorStreamDetached);
   }
   for (int i = 0; i < kNumStreams; ++i) {
-    HIP_CHECK(hipStreamDestroy(streams[i]));
+    HIP_CHECK(hipStreamDestroy(streams[i]))
   }
 }
 
@@ -789,16 +789,16 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MultipleStreams) {
  *  - HIP_VERSION >= 7.2
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_EmptyCtx) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipDevResourceDesc_t desc{};
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
   hipExecutionCtx_t ctx = nullptr;
-  HIP_CHECK(hipGreenCtxCreate(&ctx, desc, 0, 0));
+  HIP_CHECK(hipGreenCtxCreate(&ctx, desc, 0, 0))
   REQUIRE(ctx != nullptr);
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 }
 
 /**
@@ -812,12 +812,12 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_EmptyCtx) {
  *  - HIP_VERSION >= 7.2
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MultiCtx_Isolation) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   hipDevResource input{};
-  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm))
 
   unsigned int totalSMs = input.sm.smCount;
   unsigned int alignment = input.sm.smCoscheduledAlignment;
@@ -832,37 +832,37 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MultiCtx_Isolation) {
 
   hipDevResource result[2] = {};
   hipDevResource remainder{};
-  HIP_CHECK(hipDevSmResourceSplit(result, 2, &input, &remainder, 0, params));
+  HIP_CHECK(hipDevSmResourceSplit(result, 2, &input, &remainder, 0, params))
 
   hipDevResourceDesc_t desc1{};
   hipDevResourceDesc_t desc2{};
-  HIP_CHECK(hipDevResourceGenerateDesc(&desc1, &result[0], 1));
-  HIP_CHECK(hipDevResourceGenerateDesc(&desc2, &result[1], 1));
+  HIP_CHECK(hipDevResourceGenerateDesc(&desc1, &result[0], 1))
+  HIP_CHECK(hipDevResourceGenerateDesc(&desc2, &result[1], 1))
 
   hipExecutionCtx_t ctx1 = nullptr;
   hipExecutionCtx_t ctx2 = nullptr;
-  HIP_CHECK(hipGreenCtxCreate(&ctx1, desc1, 0, 0));
-  HIP_CHECK(hipGreenCtxCreate(&ctx2, desc2, 0, 0));
+  HIP_CHECK(hipGreenCtxCreate(&ctx1, desc1, 0, 0))
+  HIP_CHECK(hipGreenCtxCreate(&ctx2, desc2, 0, 0))
   REQUIRE(ctx1 != nullptr);
   REQUIRE(ctx2 != nullptr);
 
   hipStream_t stream1 = nullptr;
   hipStream_t stream2 = nullptr;
-  HIP_CHECK(hipExecutionCtxStreamCreate(&stream1, ctx1, hipStreamNonBlocking, 0));
-  HIP_CHECK(hipExecutionCtxStreamCreate(&stream2, ctx2, hipStreamNonBlocking, 0));
+  HIP_CHECK(hipExecutionCtxStreamCreate(&stream1, ctx1, hipStreamNonBlocking, 0))
+  HIP_CHECK(hipExecutionCtxStreamCreate(&stream2, ctx2, hipStreamNonBlocking, 0))
 
   // Destroy ctx1 only - stream1 should detach, stream2 should remain alive.
-  HIP_CHECK(hipExecutionCtxDestroy(ctx1));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx1))
 
   HIP_CHECK_ERROR(hipStreamSynchronize(stream1), hipErrorStreamDetached);
-  HIP_CHECK(hipStreamSynchronize(stream2));
+  HIP_CHECK(hipStreamSynchronize(stream2))
 
   // Destroy ctx2 - stream2 detaches now too.
-  HIP_CHECK(hipExecutionCtxDestroy(ctx2));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx2))
   HIP_CHECK_ERROR(hipStreamSynchronize(stream2), hipErrorStreamDetached);
 
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipStreamDestroy(stream2))
 }
 
 /**
@@ -881,26 +881,26 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_RegularStream_NotAffected) {
   MakeCtxAndStream(ctx, ctx_stream);
 
   hipStream_t regular = nullptr;
-  HIP_CHECK(hipStreamCreate(&regular));
+  HIP_CHECK(hipStreamCreate(&regular))
 
   constexpr size_t kBytes = 256;
   void* h_src = nullptr;
   void* h_dst = nullptr;
   void* d_buf = nullptr;
-  HIP_CHECK(hipHostMalloc(&h_src, kBytes));
-  HIP_CHECK(hipHostMalloc(&h_dst, kBytes));
-  HIP_CHECK(hipMalloc(&d_buf, kBytes));
+  HIP_CHECK(hipHostMalloc(&h_src, kBytes))
+  HIP_CHECK(hipHostMalloc(&h_dst, kBytes))
+  HIP_CHECK(hipMalloc(&d_buf, kBytes))
   for (size_t i = 0; i < kBytes; ++i) {
     static_cast<unsigned char*>(h_src)[i] = static_cast<unsigned char>(i & 0xFF);
     static_cast<unsigned char*>(h_dst)[i] = 0;
   }
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   // The regular stream is unaffected: round-trip a memcpy through it.
-  HIP_CHECK(hipMemcpyAsync(d_buf, h_src, kBytes, hipMemcpyHostToDevice, regular));
-  HIP_CHECK(hipMemcpyAsync(h_dst, d_buf, kBytes, hipMemcpyDeviceToHost, regular));
-  HIP_CHECK(hipStreamSynchronize(regular));
+  HIP_CHECK(hipMemcpyAsync(d_buf, h_src, kBytes, hipMemcpyHostToDevice, regular))
+  HIP_CHECK(hipMemcpyAsync(h_dst, d_buf, kBytes, hipMemcpyDeviceToHost, regular))
+  HIP_CHECK(hipStreamSynchronize(regular))
   for (size_t i = 0; i < kBytes; ++i) {
     REQUIRE(static_cast<unsigned char*>(h_dst)[i] == static_cast<unsigned char>(i & 0xFF));
   }
@@ -908,11 +908,11 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_RegularStream_NotAffected) {
   // The ctx-owned stream should be detached.
   HIP_CHECK_ERROR(hipStreamSynchronize(ctx_stream), hipErrorStreamDetached);
 
-  HIP_CHECK(hipFree(d_buf));
-  HIP_CHECK(hipHostFree(h_src));
-  HIP_CHECK(hipHostFree(h_dst));
-  HIP_CHECK(hipStreamDestroy(regular));
-  HIP_CHECK(hipStreamDestroy(ctx_stream));
+  HIP_CHECK(hipFree(d_buf))
+  HIP_CHECK(hipHostFree(h_src))
+  HIP_CHECK(hipHostFree(h_dst))
+  HIP_CHECK(hipStreamDestroy(regular))
+  HIP_CHECK(hipStreamDestroy(ctx_stream))
 }
 
 /**
@@ -932,16 +932,16 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_DefaultStreams_NeverDetach) {
   hipExecutionCtx_t ctx = nullptr;
   hipStream_t scratch = nullptr;
   MakeCtxAndStream(ctx, scratch);
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
-  HIP_CHECK(hipStreamDestroy(scratch));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
+  HIP_CHECK(hipStreamDestroy(scratch))
 
   // hipStreamQuery may legitimately return hipErrorNotReady if work is in
   // flight; both hipSuccess and hipErrorNotReady are acceptable as
   // not-detached responses.
   SECTION("hipStreamSynchronize on default streams") {
-    HIP_CHECK(hipStreamSynchronize(nullptr));
-    HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipStreamSynchronize(nullptr))
+    HIP_CHECK(hipStreamSynchronize(hipStreamLegacy))
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
   }
 
   SECTION("hipStreamQuery on default streams") {
@@ -976,10 +976,10 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_StreamMemOps_Negative) {
   // exists so the ptr argument is non-null and a meaningful target if the
   // detach guard were ever (incorrectly) bypassed.
   uint64_t* d_signal64 = nullptr;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_signal64), sizeof(uint64_t)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_signal64), sizeof(uint64_t)))
   uint32_t* d_signal32 = reinterpret_cast<uint32_t*>(d_signal64);
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   SECTION("hipStreamWaitValue32") {
     HIP_CHECK_ERROR(hipStreamWaitValue32(detached, d_signal32, 0u, hipStreamWaitValueEq, 0xFFFFFFFFu),
@@ -1016,8 +1016,8 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_StreamMemOps_Negative) {
     HIP_CHECK_ERROR(hipStreamBatchMemOp(detached, 1, &op, 0), hipErrorStreamDetached);
   }
 
-  HIP_CHECK(hipFree(d_signal64));
-  HIP_CHECK(hipStreamDestroy(detached));
+  HIP_CHECK(hipFree(d_signal64))
+  HIP_CHECK(hipStreamDestroy(detached))
 }
 
 /**
@@ -1039,10 +1039,10 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MemcpyBatch_Negative) {
   constexpr size_t kBytes = 256;
   void* h_buf = nullptr;
   void* d_buf = nullptr;
-  HIP_CHECK(hipHostMalloc(&h_buf, kBytes));
-  HIP_CHECK(hipMalloc(&d_buf, kBytes));
+  HIP_CHECK(hipHostMalloc(&h_buf, kBytes))
+  HIP_CHECK(hipMalloc(&d_buf, kBytes))
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   SECTION("hipMemcpyBatchAsync") {
     void* dsts[1] = {d_buf};
@@ -1065,9 +1065,9 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_MemcpyBatch_Negative) {
                     hipErrorStreamDetached);
   }
 
-  HIP_CHECK(hipFree(d_buf));
-  HIP_CHECK(hipHostFree(h_buf));
-  HIP_CHECK(hipStreamDestroy(detached));
+  HIP_CHECK(hipFree(d_buf))
+  HIP_CHECK(hipHostFree(h_buf))
+  HIP_CHECK(hipStreamDestroy(detached))
 }
 
 /**
@@ -1098,57 +1098,57 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_EventRecordedBeforeDetach_Still
 
   hipEvent_t start = nullptr;
   hipEvent_t stop = nullptr;
-  HIP_CHECK(hipEventCreate(&start));
-  HIP_CHECK(hipEventCreate(&stop));
+  HIP_CHECK(hipEventCreate(&start))
+  HIP_CHECK(hipEventCreate(&stop))
 
   // Drive a tiny bit of real work on the ctx stream and record both events
   // around it so the events have a well-defined completion ordering.
-  HIP_CHECK(hipEventRecord(start, detached));
+  HIP_CHECK(hipEventRecord(start, detached))
   constexpr size_t kBytes = 64;
   void* d_buf = nullptr;
-  HIP_CHECK(hipMalloc(&d_buf, kBytes));
-  HIP_CHECK(hipMemsetAsync(d_buf, 0, kBytes, detached));
-  HIP_CHECK(hipEventRecord(stop, detached));
+  HIP_CHECK(hipMalloc(&d_buf, kBytes))
+  HIP_CHECK(hipMemsetAsync(d_buf, 0, kBytes, detached))
+  HIP_CHECK(hipEventRecord(stop, detached))
 
   // Make sure both events are completed BEFORE we destroy the ctx, so the
   // post-detach assertions below are about event lifetime, not about
   // pending work on a now-detached stream.
-  HIP_CHECK(hipStreamSynchronize(detached));
+  HIP_CHECK(hipStreamSynchronize(detached))
 
-  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx))
 
   SECTION("hipEventQuery survives detach") {
-    HIP_CHECK(hipEventQuery(start));
-    HIP_CHECK(hipEventQuery(stop));
+    HIP_CHECK(hipEventQuery(start))
+    HIP_CHECK(hipEventQuery(stop))
   }
 
   SECTION("hipEventSynchronize survives detach") {
-    HIP_CHECK(hipEventSynchronize(start));
-    HIP_CHECK(hipEventSynchronize(stop));
+    HIP_CHECK(hipEventSynchronize(start))
+    HIP_CHECK(hipEventSynchronize(stop))
   }
 
   SECTION("hipEventElapsedTime survives detach") {
     float ms = -1.0f;
-    HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
+    HIP_CHECK(hipEventElapsedTime(&ms, start, stop))
     REQUIRE(ms >= 0.0f);
   }
 
   SECTION("hipStreamWaitEvent on regular stream still works") {
     hipStream_t regular = nullptr;
-    HIP_CHECK(hipStreamCreate(&regular));
+    HIP_CHECK(hipStreamCreate(&regular))
     // Waiting on a completed pre-detach event from a non-ctx stream must
     // succeed and not poison the regular stream.
-    HIP_CHECK(hipStreamWaitEvent(regular, stop, 0));
+    HIP_CHECK(hipStreamWaitEvent(regular, stop, 0))
     // The regular stream still accepts and completes work afterwards.
-    HIP_CHECK(hipMemsetAsync(d_buf, 0, kBytes, regular));
-    HIP_CHECK(hipStreamSynchronize(regular));
-    HIP_CHECK(hipStreamDestroy(regular));
+    HIP_CHECK(hipMemsetAsync(d_buf, 0, kBytes, regular))
+    HIP_CHECK(hipStreamSynchronize(regular))
+    HIP_CHECK(hipStreamDestroy(regular))
   }
 
-  HIP_CHECK(hipFree(d_buf));
-  HIP_CHECK(hipEventDestroy(start));
-  HIP_CHECK(hipEventDestroy(stop));
-  HIP_CHECK(hipStreamDestroy(detached));
+  HIP_CHECK(hipFree(d_buf))
+  HIP_CHECK(hipEventDestroy(start))
+  HIP_CHECK(hipEventDestroy(stop))
+  HIP_CHECK(hipStreamDestroy(detached))
 }
 
 /**

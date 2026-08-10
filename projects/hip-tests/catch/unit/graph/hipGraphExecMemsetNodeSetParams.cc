@@ -44,7 +44,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic, uint
   const size_t width = GENERATE(1, 64, kPageSize / sizeof(TestType) + 1);
 
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t node = nullptr;
   LinearAllocGuard<TestType> initial_alloc(LinearAllocs::hipMalloc, 2 * sizeof(TestType));
@@ -54,10 +54,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic, uint
   initial_params.elementSize = sizeof(TestType);
   initial_params.width = 2;
   initial_params.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &initial_params));
+  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &initial_params))
 
   hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
   LinearAllocGuard2D<TestType> alloc(width, 1);
   constexpr TestType set_value = 42;
@@ -67,10 +67,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic, uint
   params.width = width;
   params.height = 1;
   params.value = set_value;
-  HIP_CHECK(hipGraphExecMemsetNodeSetParams(graph_exec, node, &params));
+  HIP_CHECK(hipGraphExecMemsetNodeSetParams(graph_exec, node, &params))
 
   hipMemsetParams retrieved_params = {};
-  HIP_CHECK(hipGraphMemsetNodeGetParams(node, &retrieved_params));
+  HIP_CHECK(hipGraphMemsetNodeGetParams(node, &retrieved_params))
   REQUIRE(initial_params.dst == retrieved_params.dst);
   REQUIRE(initial_params.elementSize == retrieved_params.elementSize);
   REQUIRE(initial_params.width == retrieved_params.width);
@@ -78,11 +78,11 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic, uint
   REQUIRE(initial_params.pitch == retrieved_params.pitch);
   REQUIRE(initial_params.value == retrieved_params.value);
 
-  HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread));
-  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread))
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
+  HIP_CHECK(hipGraphDestroy(graph))
 
   LinearAllocGuard<TestType> buffer(LinearAllocs::hipHostMalloc, width * sizeof(TestType));
   HIP_CHECK(hipMemcpy2D(buffer.ptr(), width * sizeof(TestType), alloc.ptr(), alloc.pitch(),
@@ -118,7 +118,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters) {
   using namespace std::placeholders;
 
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   LinearAllocGuard<int> alloc(LinearAllocs::hipMalloc, 4 * sizeof(int));
   hipMemsetParams params = {};
@@ -132,7 +132,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters) {
   HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &params))
 
   hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
   SECTION("pGraphExec == nullptr") {
     HIP_CHECK_ERROR(hipGraphExecMemsetNodeSetParams(nullptr, node, &params), hipErrorInvalidValue);
@@ -149,7 +149,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters) {
     if (HipTest::getDeviceCount() < 2) {
       WARN("Skipping section: fewer than two GPUs (second device required for this negative case).");
     } else {
-      HIP_CHECK(hipSetDevice(1));
+      HIP_CHECK(hipSetDevice(1))
       LinearAllocGuard<int> new_alloc(LinearAllocs::hipMalloc, 4 * sizeof(int));
       params.dst = new_alloc.ptr();
       HIP_CHECK_ERROR(hipGraphExecMemsetNodeSetParams(graph_exec, node, &params),
@@ -157,8 +157,8 @@ HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters) {
     }
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -175,7 +175,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters) {
 HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node) {
 
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   LinearAllocGuard2D<int> alloc(2, 2);
   hipMemsetParams params = {};
@@ -190,13 +190,13 @@ HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node)
   HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &params))
 
   hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
   params.width = 2;
   HIP_CHECK_ERROR(hipGraphExecMemsetNodeSetParams(graph_exec, node, &params), hipErrorInvalidValue);
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**

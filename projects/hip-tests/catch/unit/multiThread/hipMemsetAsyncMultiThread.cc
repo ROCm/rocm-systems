@@ -50,9 +50,9 @@ template <typename Func, typename T> void threadCall(Func f, hipStream_t stream)
   T* ptr{nullptr};
   constexpr size_t size = 1024;
   const size_t iter = isQuickLevel() ? 8 : 512;
-  HIP_CHECK_THREAD(hipMalloc(&ptr, sizeof(T) * size));
+  HIP_CHECK_THREAD(hipMalloc(&ptr, sizeof(T) * size))
   hipEvent_t event{};
-  HIP_CHECK_THREAD(hipEventCreate(&event));
+  HIP_CHECK_THREAD(hipEventCreate(&event))
 
   union overlay_val_t {
     T t_val;
@@ -64,13 +64,13 @@ template <typename Func, typename T> void threadCall(Func f, hipStream_t stream)
     overlay_val.u_val =
         static_cast<unsigned_t>(distribution(engine));  // generate an unsigned int number
     if constexpr (cast_2_void) {
-      HIP_CHECK_THREAD(f((void*)ptr, overlay_val.t_val, size, stream));
+      HIP_CHECK_THREAD(f((void*)ptr, overlay_val.t_val, size, stream))
     } else {
-      HIP_CHECK_THREAD(f(*(hipDeviceptr_t*)&ptr, overlay_val.t_val, size, stream));
+      HIP_CHECK_THREAD(f(*(hipDeviceptr_t*)&ptr, overlay_val.t_val, size, stream))
     }
     HIP_CHECK_THREAD(
         hipMemcpyAsync(dst.data(), ptr, size * sizeof(T), hipMemcpyDeviceToHost, stream));
-    HIP_CHECK_THREAD(hipEventRecord(event, stream));
+    HIP_CHECK_THREAD(hipEventRecord(event, stream))
     HIP_CHECK_THREAD(hipStreamWaitEvent(stream, event, 0));  // wait till memcpy is done
     REQUIRE_THREAD(std::all_of(dst.begin(), dst.end(), [&](T v) {
       // If this test ever fails, add prints here on mismatch
@@ -78,8 +78,8 @@ template <typename Func, typename T> void threadCall(Func f, hipStream_t stream)
     }));
   }
 
-  HIP_CHECK_THREAD(hipEventDestroy(event));
-  HIP_CHECK_THREAD(hipFree(ptr));
+  HIP_CHECK_THREAD(hipEventDestroy(event))
+  HIP_CHECK_THREAD(hipFree(ptr))
 }
 
 // Func -> Memset/MemsetD[8/16/32], T - type of data to be worked on
@@ -108,7 +108,7 @@ template <typename Func, typename T> void launchThreads(Func f, TestType type) {
   std::vector<hipStream_t> streams(num_streams, nullptr);
 
   for (size_t i = 0; i < num_streams; i++) {
-    HIP_CHECK(hipStreamCreate(&streams[i]));
+    HIP_CHECK(hipStreamCreate(&streams[i]))
     REQUIRE(streams[i] != nullptr);
   }
 
@@ -127,7 +127,7 @@ template <typename Func, typename T> void launchThreads(Func f, TestType type) {
   HIP_CHECK_THREAD_FINALIZE();  // Make sure all thread have exited properly
 
   for (size_t i = 0; i < num_streams; i++) {
-    HIP_CHECK(hipStreamDestroy(streams[i]));
+    HIP_CHECK(hipStreamDestroy(streams[i]))
   }
 }
 

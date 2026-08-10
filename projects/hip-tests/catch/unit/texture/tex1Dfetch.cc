@@ -44,7 +44,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex1Dfetch_Positive_ReadModeElementType, char, unsig
 
   const auto alloc_size = tex_h.size() * sizeof(vec4<TestType>);
   LinearAllocGuard<vec4<TestType>> tex_alloc_d(LinearAllocs::hipMalloc, alloc_size);
-  HIP_CHECK(hipMemcpy(tex_alloc_d.ptr(), tex_h.data(), alloc_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(tex_alloc_d.ptr(), tex_h.data(), alloc_size, hipMemcpyHostToDevice))
 
   hipResourceDesc res_desc;
   memset(&res_desc, 0, sizeof(res_desc));
@@ -69,8 +69,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex1Dfetch_Positive_ReadModeElementType, char, unsig
       <<<num_blocks, num_threads>>>(out_alloc_d.ptr(), tex_h.size(), tex.object());
 
   std::vector<vec4<TestType>> out_alloc_h(tex_h.size());
-  HIP_CHECK(hipMemcpy(out_alloc_h.data(), out_alloc_d.ptr(), alloc_size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(out_alloc_h.data(), out_alloc_d.ptr(), alloc_size, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (auto i = 0u; i < out_alloc_h.size(); ++i) {
     const auto ref_val = tex_h[i];
@@ -106,7 +106,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex1Dfetch_Positive_ReadModeNormalizedFloat, char, u
 
   const auto alloc_size = tex_h.size() * sizeof(vec4<TestType>);
   LinearAllocGuard<vec4<TestType>> tex_alloc_d(LinearAllocs::hipMalloc, alloc_size);
-  HIP_CHECK(hipMemcpy(tex_alloc_d.ptr(), tex_h.data(), alloc_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(tex_alloc_d.ptr(), tex_h.data(), alloc_size, hipMemcpyHostToDevice))
 
   hipResourceDesc res_desc;
   memset(&res_desc, 0, sizeof(res_desc));
@@ -134,7 +134,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex1Dfetch_Positive_ReadModeNormalizedFloat, char, u
   std::vector<vec4<float>> out_alloc_h(tex_h.size());
   HIP_CHECK(hipMemcpy(out_alloc_h.data(), out_alloc_d.ptr(), tex_h.size() * sizeof(vec4<float>),
                       hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (auto i = 0u; i < out_alloc_h.size(); ++i) {
     const auto ref_val = Vec4Map(tex_h[i]);

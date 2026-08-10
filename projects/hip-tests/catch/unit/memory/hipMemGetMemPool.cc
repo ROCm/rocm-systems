@@ -18,7 +18,7 @@
 
 HIP_TEST_CASE(Unit_hipMemGetMemPool_Negative) {
   int dev;
-  HIP_CHECK(hipGetDevice(&dev));
+  HIP_CHECK(hipGetDevice(&dev))
 
   hipMemPool_t pool;
   hipMemLocation location{};
@@ -53,7 +53,7 @@ HIP_TEST_CASE(Unit_hipMemGetMemPool_Negative) {
 
 HIP_TEST_CASE(Unit_hipMemGetMemPool_Basic) {
   int dev;
-  HIP_CHECK(hipGetDevice(&dev));
+  HIP_CHECK(hipGetDevice(&dev))
 
   auto alloc_type = GENERATE(hipMemAllocationTypePinned, hipMemAllocationTypeManaged);
 
@@ -62,17 +62,17 @@ HIP_TEST_CASE(Unit_hipMemGetMemPool_Basic) {
   prop.allocType = alloc_type;
   prop.location.id = dev;
   prop.location.type = hipMemLocationTypeDevice;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &prop));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &prop))
 
   hipMemLocation location{};
   location.id = dev;
   location.type = hipMemLocationTypeDevice;
-  HIP_CHECK(hipMemGetMemPool(&curr_mem_pool, &location, alloc_type));
+  HIP_CHECK(hipMemGetMemPool(&curr_mem_pool, &location, alloc_type))
   REQUIRE(curr_mem_pool != nullptr);
 
-  HIP_CHECK(hipMemSetMemPool(&location, alloc_type, mem_pool));
-  HIP_CHECK(hipMemGetMemPool(&curr_mem_pool, &location, alloc_type));
+  HIP_CHECK(hipMemSetMemPool(&location, alloc_type, mem_pool))
+  HIP_CHECK(hipMemGetMemPool(&curr_mem_pool, &location, alloc_type))
   REQUIRE(curr_mem_pool == mem_pool);
 
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
 }

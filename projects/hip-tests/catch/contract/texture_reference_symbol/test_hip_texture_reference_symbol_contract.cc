@@ -58,7 +58,7 @@ bool IsUnsupported(hipError_t status) { return status == hipErrorNotSupported; }
 
 int CurrentDevice() {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   return device;
 }
 
@@ -91,7 +91,7 @@ bool CompileModuleSourceText(const char* source, std::vector<char>& code) {
                                    nullptr, nullptr));
 #if HT_AMD
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, CurrentDevice()));
+  HIP_CHECK(hipGetDeviceProperties(&properties, CurrentDevice()))
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
   const char* options[] = {offload_arch.c_str()};
   const int num_options = 1;
@@ -149,7 +149,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipGetTextureReference_Default_Res
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipGetTextureReference is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   REQUIRE(reference != nullptr);
 }
 
@@ -163,7 +163,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipBindTexture_BindUnbindLinearMem
 
   constexpr size_t kBytes = 4096;
   void* device_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&device_ptr, kBytes));
+  HIP_CHECK(hipMalloc(&device_ptr, kBytes))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   const hipChannelFormatDesc channel = FloatChannel();
@@ -173,11 +173,11 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipBindTexture_BindUnbindLinearMem
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipBindTexture is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   cleanup.Add([&] { (void)hipUnbindTexture(&g_tex_ref_symbol_1d); });
 
   size_t alignment = 1;
-  HIP_CHECK(hipGetTextureAlignmentOffset(&alignment, &g_tex_ref_symbol_1d));
+  HIP_CHECK(hipGetTextureAlignmentOffset(&alignment, &g_tex_ref_symbol_1d))
   // A freshly bound base allocation has a zero alignment offset.
   REQUIRE(alignment == 0);
 }
@@ -192,7 +192,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipBindTexture2D_Default_Succeeds)
   constexpr size_t kHeight = 64;
   void* device_ptr = nullptr;
   size_t pitch = 0;
-  HIP_CHECK(hipMallocPitch(&device_ptr, &pitch, kWidth * sizeof(float), kHeight));
+  HIP_CHECK(hipMallocPitch(&device_ptr, &pitch, kWidth * sizeof(float), kHeight))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   const hipChannelFormatDesc channel = FloatChannel();
@@ -203,8 +203,8 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipBindTexture2D_Default_Succeeds)
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipBindTexture2D is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
-  HIP_CHECK(hipUnbindTexture(&g_tex_ref_symbol_2d));
+  HIP_CHECK(status)
+  HIP_CHECK(hipUnbindTexture(&g_tex_ref_symbol_2d))
 }
 
 // hipBindTextureToArray binds a HIP array to a registered 2D texture symbol.
@@ -220,7 +220,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipBindTextureToArray_Default_Succ
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipMallocArray is not supported by this runtime path.");
   }
-  HIP_CHECK(alloc_status);
+  HIP_CHECK(alloc_status)
   cleanup.Add([array] { (void)hipFreeArray(array); });
 
   const hipError_t status = hipBindTextureToArray(&g_tex_ref_symbol_2d, array, &channel);
@@ -228,8 +228,8 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipBindTextureToArray_Default_Succ
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipBindTextureToArray is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
-  HIP_CHECK(hipUnbindTexture(&g_tex_ref_symbol_2d));
+  HIP_CHECK(status)
+  HIP_CHECK(hipUnbindTexture(&g_tex_ref_symbol_2d))
 }
 
 // ---------------------------------------------------------------------------
@@ -253,7 +253,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipTexRefSetAddress_ModuleTexRef_A
   }
 
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()))
   REQUIRE(module != nullptr);
   cleanup.Add([module] { (void)hipModuleUnload(module); });
 
@@ -263,33 +263,33 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipTexRefSetAddress_ModuleTexRef_A
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipModuleGetTexRef is not supported by this runtime path.");
   }
-  HIP_CHECK(ref_status);
+  HIP_CHECK(ref_status)
   REQUIRE(reference != nullptr);
 
   // Address round-trip: bind a linear device allocation and read the bound
   // pointer back.
   constexpr size_t kBytes = 4096;
   void* device_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&device_ptr, kBytes));
+  HIP_CHECK(hipMalloc(&device_ptr, kBytes))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(hipTexRefSetAddress(nullptr, reference, reinterpret_cast<hipDeviceptr_t>(device_ptr),
                                 kBytes));
   hipDeviceptr_t bound = 0;
-  HIP_CHECK(hipTexRefGetAddress(&bound, reference));
+  HIP_CHECK(hipTexRefGetAddress(&bound, reference))
   REQUIRE(bound == reinterpret_cast<hipDeviceptr_t>(device_ptr));
 
   // Array round-trip: set the format the array uses, bind a HIP array, and read
   // the bound array handle back.
-  HIP_CHECK(hipTexRefSetFormat(reference, HIP_AD_FORMAT_FLOAT, 1));
+  HIP_CHECK(hipTexRefSetFormat(reference, HIP_AD_FORMAT_FLOAT, 1))
   const hipChannelFormatDesc channel = FloatChannel();
   hipArray_t array = nullptr;
-  HIP_CHECK(hipMallocArray(&array, &channel, 64, 64, hipArrayDefault));
+  HIP_CHECK(hipMallocArray(&array, &channel, 64, 64, hipArrayDefault))
   cleanup.Add([array] { (void)hipFreeArray(array); });
 
-  HIP_CHECK(hipTexRefSetArray(reference, array, HIP_TRSA_OVERRIDE_FORMAT));
+  HIP_CHECK(hipTexRefSetArray(reference, array, HIP_TRSA_OVERRIDE_FORMAT))
   hipArray_t bound_array = nullptr;
-  HIP_CHECK(hipTexRefGetArray(&bound_array, reference));
+  HIP_CHECK(hipTexRefGetArray(&bound_array, reference))
   REQUIRE(bound_array == array);
 }
 
@@ -409,7 +409,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipTexRefSetMipmappedArray_ModuleT
   }
 
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()))
   REQUIRE(module != nullptr);
   cleanup.Add([module] { (void)hipModuleUnload(module); });
 
@@ -419,7 +419,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipTexRefSetMipmappedArray_ModuleT
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipModuleGetTexRef is not supported by this runtime path.");
   }
-  HIP_CHECK(ref_status);
+  HIP_CHECK(ref_status)
   REQUIRE(reference != nullptr);
 
   // Create a small float mipmapped array; where the device/runtime path does not
@@ -434,12 +434,12 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipTexRefSetMipmappedArray_ModuleT
     (void)hipGetLastError();
     HIP_SKIP_TEST("Mipmapped arrays are not supported by this device/runtime path.");
   }
-  HIP_CHECK(alloc_status);
+  HIP_CHECK(alloc_status)
   cleanup.Add([mipmap] { (void)hipFreeMipmappedArray(mipmap); });
 
   // Normalized coordinates are required before a mipmapped array is bound to the
   // reference (the runtime rejects the bind as an invalid texture otherwise).
-  HIP_CHECK(hipTexRefSetFlags(reference, HIP_TRSF_NORMALIZED_COORDINATES));
+  HIP_CHECK(hipTexRefSetFlags(reference, HIP_TRSF_NORMALIZED_COORDINATES))
 
   // Bind the mipmapped array to the reference, then read the bound handle back.
   const hipError_t set_status =
@@ -448,7 +448,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipTexRefSetMipmappedArray_ModuleT
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipTexRefSetMipmappedArray is not supported by this runtime path.");
   }
-  HIP_CHECK(set_status);
+  HIP_CHECK(set_status)
 
   hipMipmappedArray_t bound = nullptr;
   const hipError_t get_status = hipTexRefGetMipMappedArray(&bound, reference);
@@ -456,7 +456,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipTexRefSetMipmappedArray_ModuleT
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipTexRefGetMipMappedArray is not supported by this runtime path.");
   }
-  HIP_CHECK(get_status);
+  HIP_CHECK(get_status)
   REQUIRE(bound == mipmap);
 }
 
@@ -484,7 +484,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipTexRefSetAddress2D_ModuleTexRef
   }
 
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()))
   REQUIRE(module != nullptr);
   cleanup.Add([module] { (void)hipModuleUnload(module); });
 
@@ -494,7 +494,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipTexRefSetAddress2D_ModuleTexRef
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipModuleGetTexRef is not supported by this runtime path.");
   }
-  HIP_CHECK(ref_status);
+  HIP_CHECK(ref_status)
   REQUIRE(reference != nullptr);
 
   // A pitched 2D float allocation is the operand for the 2D address bind.
@@ -502,10 +502,10 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipTexRefSetAddress2D_ModuleTexRef
   constexpr size_t kHeight = 256;
   void* device_ptr = nullptr;
   size_t pitch = 0;
-  HIP_CHECK(hipMallocPitch(&device_ptr, &pitch, kWidth * sizeof(float), kHeight));
+  HIP_CHECK(hipMallocPitch(&device_ptr, &pitch, kWidth * sizeof(float), kHeight))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
-  HIP_CHECK(hipTexRefSetFormat(reference, HIP_AD_FORMAT_FLOAT, 1));
+  HIP_CHECK(hipTexRefSetFormat(reference, HIP_AD_FORMAT_FLOAT, 1))
 
   HIP_ARRAY_DESCRIPTOR descriptor{};
   descriptor.Width = kWidth;
@@ -519,7 +519,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipTexRefSetAddress2D_ModuleTexRef
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipTexRefSetAddress2D is not supported by this runtime path.");
   }
-  HIP_CHECK(set_status);
+  HIP_CHECK(set_status)
 
   // No 2D getter exists; cross-check the recorded base address through the linear
   // getter. Where that getter is not implemented for a 2D binding it reports
@@ -530,7 +530,7 @@ HIP_TEST_CASE(Contract_TextureReferenceSymbol_HipTexRefSetAddress2D_ModuleTexRef
     (void)hipGetLastError();
     HIP_SKIP_TEST("hipTexRefGetAddress is not supported for a 2D binding on this runtime path.");
   }
-  HIP_CHECK(get_status);
+  HIP_CHECK(get_status)
   REQUIRE(bound == reinterpret_cast<hipDeviceptr_t>(device_ptr));
 }
 

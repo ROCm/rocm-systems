@@ -40,8 +40,8 @@ HIP_TEST_CASE(Unit_hipMipmappedArrayGetLevel_Negative_Parameters) {
 
   unsigned int levels = 1 + std::log2(desc.Depth);
 
-  HIP_CHECK(hipFree(0));
-  HIP_CHECK(hipMipmappedArrayCreate(&array, &desc, levels));
+  HIP_CHECK(hipFree(0))
+  HIP_CHECK(hipMipmappedArrayCreate(&array, &desc, levels))
 
   hipArray_t levelArray;
 
@@ -57,7 +57,7 @@ HIP_TEST_CASE(Unit_hipMipmappedArrayGetLevel_Negative_Parameters) {
     HIP_CHECK_ERROR(hipMipmappedArrayGetLevel(&levelArray, array, levels), hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipMipmappedArrayDestroy(array));
+  HIP_CHECK(hipMipmappedArrayDestroy(array))
   (void)hipGetLastError();
 }
 

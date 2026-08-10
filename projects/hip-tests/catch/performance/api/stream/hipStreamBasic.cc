@@ -21,7 +21,7 @@ class HipDeviceGetStreamPriorityRangeBenchmark
   void operator()() {
     int priority_min, priority_max;
     TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_min, &priority_max));
+      HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_min, &priority_max))
     }
   }
 };
@@ -31,21 +31,21 @@ class HipStreamQueryBenchmark : public Benchmark<HipStreamQueryBenchmark> {
   void operator()(bool perform_work) {
     hipError_t error;
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     void* dptr;
 
     if (perform_work) {
-      HIP_CHECK(hipMallocAsync(&dptr, 2048 * 4, stream));
+      HIP_CHECK(hipMallocAsync(&dptr, 2048 * 4, stream))
     }
 
     TIMED_SECTION(kTimerTypeCpu) { error = hipStreamQuery(stream); }
 
     if (perform_work) {
-      HIP_CHECK(hipFreeAsync(dptr, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipFreeAsync(dptr, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
 
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 };
 
@@ -54,11 +54,11 @@ class HipStreamSynchronizeBenchmark : public Benchmark<HipStreamSynchronizeBench
   void operator()() {
     hipError_t error;
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
 
     TIMED_SECTION(kTimerTypeCpu) { error = hipStreamSynchronize(stream); }
 
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 };
 
@@ -66,7 +66,7 @@ class HipStreamDestroyBenchmark : public Benchmark<HipStreamDestroyBenchmark> {
  public:
   void operator()() {
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
 
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipStreamDestroy(stream)); }
   }
@@ -79,7 +79,7 @@ class HipStreamCreateBenchmark : public Benchmark<HipStreamCreateBenchmark> {
 
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipStreamCreate(&stream)); }
 
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 };
 
@@ -90,14 +90,14 @@ class HipStreamCreateWithPriorityBenchmark
     hipStream_t stream;
     int priority_min, priority_max, priority_mid;
 
-    HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_min, &priority_max));
+    HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_min, &priority_max))
     priority_mid = (priority_max + priority_min) / 2;
 
     TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipStreamCreateWithPriority(&stream, flag, priority_mid));
+      HIP_CHECK(hipStreamCreateWithPriority(&stream, flag, priority_mid))
     }
 
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 };
 
@@ -120,7 +120,7 @@ class HipStreamCreateWithFlagsBenchmark : public Benchmark<HipStreamCreateWithFl
 
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipStreamCreateWithFlags(&stream, flag)); }
 
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 };
 

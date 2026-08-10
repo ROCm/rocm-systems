@@ -79,7 +79,7 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_Positive_Synchronization_Behavior) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   SECTION("Array to host") {
     const auto width = GENERATE(16, 32, 48);

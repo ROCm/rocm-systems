@@ -29,7 +29,7 @@ HIP_TEST_CASE(Unit_hipDeviceGraphMemTrim_Positive_Default) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
 
   // Check for each device
-  HIP_CHECK(hipDeviceGraphMemTrim(device));
+  HIP_CHECK(hipDeviceGraphMemTrim(device))
 }
 
 /**
@@ -46,10 +46,10 @@ HIP_TEST_CASE(Unit_hipDeviceGraphMemTrim_Positive_Default) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGraphMemTrim_Negative_Parameters) {
   int device_id = 0;
-  HIP_CHECK(hipSetDevice(device_id));
+  HIP_CHECK(hipSetDevice(device_id))
 
   int num_dev = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_dev));
+  HIP_CHECK(hipGetDeviceCount(&num_dev))
 
   SECTION("Device is not valid") {
     HIP_CHECK_ERROR(hipDeviceGraphMemTrim(num_dev), hipErrorInvalidDevice);

@@ -78,27 +78,27 @@ static void resetSyncState() {
 
 static void thread1_global_capture_with_events() {
   float* d_data;
-  HIP_CHECK(hipMalloc(&d_data, 1024 * sizeof(float)));
+  HIP_CHECK(hipMalloc(&d_data, 1024 * sizeof(float)))
 
   // Create streams and events
-  HIP_CHECK(hipStreamCreate(&g_capture_stream));
-  HIP_CHECK(hipStreamCreate(&g_non_capture_stream));
-  HIP_CHECK(hipEventCreate(&g_normal_event));
-  HIP_CHECK(hipEventCreate(&g_captured_event));
+  HIP_CHECK(hipStreamCreate(&g_capture_stream))
+  HIP_CHECK(hipStreamCreate(&g_non_capture_stream))
+  HIP_CHECK(hipEventCreate(&g_normal_event))
+  HIP_CHECK(hipEventCreate(&g_captured_event))
 
   // Record normal event BEFORE capture
   dummyKernel<<<1, 256, 0, g_non_capture_stream>>>(d_data, 1024);
-  HIP_CHECK(hipEventRecord(g_normal_event, g_non_capture_stream));
-  HIP_CHECK(hipStreamSynchronize(g_non_capture_stream));
+  HIP_CHECK(hipEventRecord(g_normal_event, g_non_capture_stream))
+  HIP_CHECK(hipStreamSynchronize(g_non_capture_stream))
 
   // Start GLOBAL capture
-  HIP_CHECK(hipStreamBeginCapture(g_capture_stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(g_capture_stream, hipStreamCaptureModeGlobal))
 
   // Launch kernel during capture
   dummyKernel<<<1, 256, 0, g_capture_stream>>>(d_data, 1024);
 
   // Record captured event DURING capture
-  HIP_CHECK(hipEventRecord(g_captured_event, g_capture_stream));
+  HIP_CHECK(hipEventRecord(g_captured_event, g_capture_stream))
 
   // Signal thread 2 to start
   g_thread1_capturing = true;
@@ -115,34 +115,34 @@ static void thread1_global_capture_with_events() {
 
   // Cleanup - capture may have been invalidated
   if (endResult == hipSuccess && graph != nullptr) {
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphDestroy(graph))
   }
-  HIP_CHECK(hipEventDestroy(g_captured_event));
-  HIP_CHECK(hipEventDestroy(g_normal_event));
-  HIP_CHECK(hipFree(d_data));
-  HIP_CHECK(hipStreamDestroy(g_non_capture_stream));
-  HIP_CHECK(hipStreamDestroy(g_capture_stream));
+  HIP_CHECK(hipEventDestroy(g_captured_event))
+  HIP_CHECK(hipEventDestroy(g_normal_event))
+  HIP_CHECK(hipFree(d_data))
+  HIP_CHECK(hipStreamDestroy(g_non_capture_stream))
+  HIP_CHECK(hipStreamDestroy(g_capture_stream))
 }
 
 static void thread1_threadlocal_capture_with_events() {
   float* d_data;
-  HIP_CHECK(hipMalloc(&d_data, 1024 * sizeof(float)));
+  HIP_CHECK(hipMalloc(&d_data, 1024 * sizeof(float)))
 
-  HIP_CHECK(hipStreamCreate(&g_capture_stream));
-  HIP_CHECK(hipStreamCreate(&g_non_capture_stream));
-  HIP_CHECK(hipEventCreate(&g_normal_event));
-  HIP_CHECK(hipEventCreate(&g_captured_event));
+  HIP_CHECK(hipStreamCreate(&g_capture_stream))
+  HIP_CHECK(hipStreamCreate(&g_non_capture_stream))
+  HIP_CHECK(hipEventCreate(&g_normal_event))
+  HIP_CHECK(hipEventCreate(&g_captured_event))
 
   // Record normal event BEFORE capture
   dummyKernel<<<1, 256, 0, g_non_capture_stream>>>(d_data, 1024);
-  HIP_CHECK(hipEventRecord(g_normal_event, g_non_capture_stream));
-  HIP_CHECK(hipStreamSynchronize(g_non_capture_stream));
+  HIP_CHECK(hipEventRecord(g_normal_event, g_non_capture_stream))
+  HIP_CHECK(hipStreamSynchronize(g_non_capture_stream))
 
   // Start THREAD_LOCAL capture
-  HIP_CHECK(hipStreamBeginCapture(g_capture_stream, hipStreamCaptureModeThreadLocal));
+  HIP_CHECK(hipStreamBeginCapture(g_capture_stream, hipStreamCaptureModeThreadLocal))
 
   dummyKernel<<<1, 256, 0, g_capture_stream>>>(d_data, 1024);
-  HIP_CHECK(hipEventRecord(g_captured_event, g_capture_stream));
+  HIP_CHECK(hipEventRecord(g_captured_event, g_capture_stream))
 
   g_thread1_capturing = true;
   g_thread2_can_start = true;
@@ -155,13 +155,13 @@ static void thread1_threadlocal_capture_with_events() {
   hipError_t endResult = hipStreamEndCapture(g_capture_stream, &graph);
 
   if (endResult == hipSuccess && graph != nullptr) {
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphDestroy(graph))
   }
-  HIP_CHECK(hipEventDestroy(g_captured_event));
-  HIP_CHECK(hipEventDestroy(g_normal_event));
-  HIP_CHECK(hipFree(d_data));
-  HIP_CHECK(hipStreamDestroy(g_non_capture_stream));
-  HIP_CHECK(hipStreamDestroy(g_capture_stream));
+  HIP_CHECK(hipEventDestroy(g_captured_event))
+  HIP_CHECK(hipEventDestroy(g_normal_event))
+  HIP_CHECK(hipFree(d_data))
+  HIP_CHECK(hipStreamDestroy(g_non_capture_stream))
+  HIP_CHECK(hipStreamDestroy(g_capture_stream))
 }
 
 // ============================================================================
@@ -194,12 +194,12 @@ static void thread2_relaxed_mode_event_query_normal() {
 
   hipStreamCaptureMode oldMode;
   hipStreamCaptureMode newMode = hipStreamCaptureModeRelaxed;
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&newMode));
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&newMode))
   oldMode = newMode;
 
   g_thread2_result = hipEventQuery(g_normal_event);
 
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&oldMode));
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&oldMode))
   g_thread2_done = true;
 }
 
@@ -211,12 +211,12 @@ static void thread2_threadlocal_mode_event_query_normal() {
 
   hipStreamCaptureMode oldMode;
   hipStreamCaptureMode newMode = hipStreamCaptureModeThreadLocal;
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&newMode));
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&newMode))
   oldMode = newMode;
 
   g_thread2_result = hipEventQuery(g_normal_event);
 
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&oldMode));
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&oldMode))
   g_thread2_done = true;
 }
 
@@ -250,12 +250,12 @@ static void thread2_relaxed_mode_event_sync_normal() {
 
   hipStreamCaptureMode oldMode;
   hipStreamCaptureMode newMode = hipStreamCaptureModeRelaxed;
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&newMode));
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&newMode))
   oldMode = newMode;
 
   g_thread2_result = hipEventSynchronize(g_normal_event);
 
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&oldMode));
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&oldMode))
   g_thread2_done = true;
 }
 
@@ -267,12 +267,12 @@ static void thread2_threadlocal_mode_event_sync_normal() {
 
   hipStreamCaptureMode oldMode;
   hipStreamCaptureMode newMode = hipStreamCaptureModeThreadLocal;
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&newMode));
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&newMode))
   oldMode = newMode;
 
   g_thread2_result = hipEventSynchronize(g_normal_event);
 
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&oldMode));
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&oldMode))
   g_thread2_done = true;
 }
 
@@ -468,18 +468,18 @@ HIP_TEST_CASE(Unit_hipEventQuery_SameThread_GlobalCapture) {
   hipEvent_t normalEvent;
   float* d_data;
 
-  HIP_CHECK(hipStreamCreate(&captureStream));
-  HIP_CHECK(hipStreamCreate(&otherStream));
-  HIP_CHECK(hipEventCreate(&normalEvent));
-  HIP_CHECK(hipMalloc(&d_data, 1024 * sizeof(float)));
+  HIP_CHECK(hipStreamCreate(&captureStream))
+  HIP_CHECK(hipStreamCreate(&otherStream))
+  HIP_CHECK(hipEventCreate(&normalEvent))
+  HIP_CHECK(hipMalloc(&d_data, 1024 * sizeof(float)))
 
   // Record event before capture
   dummyKernel<<<1, 256, 0, otherStream>>>(d_data, 1024);
-  HIP_CHECK(hipEventRecord(normalEvent, otherStream));
-  HIP_CHECK(hipStreamSynchronize(otherStream));
+  HIP_CHECK(hipEventRecord(normalEvent, otherStream))
+  HIP_CHECK(hipStreamSynchronize(otherStream))
 
   // Start GLOBAL capture
-  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeGlobal))
   dummyKernel<<<1, 256, 0, captureStream>>>(d_data, 1024);
 
   // Try to query event while capturing - should fail
@@ -491,10 +491,10 @@ HIP_TEST_CASE(Unit_hipEventQuery_SameThread_GlobalCapture) {
   hipError_t endResult = hipStreamEndCapture(captureStream, &graph);
   REQUIRE(endResult == hipErrorStreamCaptureInvalidated);
 
-  HIP_CHECK(hipEventDestroy(normalEvent));
-  HIP_CHECK(hipFree(d_data));
-  HIP_CHECK(hipStreamDestroy(otherStream));
-  HIP_CHECK(hipStreamDestroy(captureStream));
+  HIP_CHECK(hipEventDestroy(normalEvent))
+  HIP_CHECK(hipFree(d_data))
+  HIP_CHECK(hipStreamDestroy(otherStream))
+  HIP_CHECK(hipStreamDestroy(captureStream))
 }
 
 /**
@@ -507,18 +507,18 @@ HIP_TEST_CASE(Unit_hipEventQuery_SameThread_RelaxedCapture) {
   hipEvent_t normalEvent;
   float* d_data;
 
-  HIP_CHECK(hipStreamCreate(&captureStream));
-  HIP_CHECK(hipStreamCreate(&otherStream));
-  HIP_CHECK(hipEventCreate(&normalEvent));
-  HIP_CHECK(hipMalloc(&d_data, 1024 * sizeof(float)));
+  HIP_CHECK(hipStreamCreate(&captureStream))
+  HIP_CHECK(hipStreamCreate(&otherStream))
+  HIP_CHECK(hipEventCreate(&normalEvent))
+  HIP_CHECK(hipMalloc(&d_data, 1024 * sizeof(float)))
 
   // Record event before capture
   dummyKernel<<<1, 256, 0, otherStream>>>(d_data, 1024);
-  HIP_CHECK(hipEventRecord(normalEvent, otherStream));
-  HIP_CHECK(hipStreamSynchronize(otherStream));
+  HIP_CHECK(hipEventRecord(normalEvent, otherStream))
+  HIP_CHECK(hipStreamSynchronize(otherStream))
 
   // Start RELAXED capture
-  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeRelaxed));
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeRelaxed))
   dummyKernel<<<1, 256, 0, captureStream>>>(d_data, 1024);
 
   // Query event while capturing in RELAXED mode - should succeed
@@ -527,13 +527,13 @@ HIP_TEST_CASE(Unit_hipEventQuery_SameThread_RelaxedCapture) {
 
   // End capture successfully
   hipGraph_t graph;
-  HIP_CHECK(hipStreamEndCapture(captureStream, &graph));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamEndCapture(captureStream, &graph))
+  HIP_CHECK(hipGraphDestroy(graph))
 
-  HIP_CHECK(hipEventDestroy(normalEvent));
-  HIP_CHECK(hipFree(d_data));
-  HIP_CHECK(hipStreamDestroy(otherStream));
-  HIP_CHECK(hipStreamDestroy(captureStream));
+  HIP_CHECK(hipEventDestroy(normalEvent))
+  HIP_CHECK(hipFree(d_data))
+  HIP_CHECK(hipStreamDestroy(otherStream))
+  HIP_CHECK(hipStreamDestroy(captureStream))
 }
 
 /**

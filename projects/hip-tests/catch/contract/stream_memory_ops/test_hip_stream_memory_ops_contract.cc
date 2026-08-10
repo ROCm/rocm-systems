@@ -15,7 +15,7 @@ namespace {
 // contracts are only exercised against a provisioned runtime.
 void RequireDevice() {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -29,7 +29,7 @@ void RequireDevice() {
 // rather than reporting a contract violation.
 void RequireStreamWaitValueSupport() {
   int current_device = -1;
-  HIP_CHECK(hipGetDevice(&current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
 
   int can_use_stream_wait_value = 0;
   HIP_CHECK(hipDeviceGetAttribute(&can_use_stream_wait_value,
@@ -48,24 +48,24 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_HipStreamWriteValue32_Default_BecomesVisi
 
   hipStream_t stream = nullptr;
   uint32_t* device_ptr = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_ptr), sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_ptr), sizeof(uint32_t)))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   // Start from a known zero value so the written sentinel is unambiguous.
   const uint32_t initial = 0u;
-  HIP_CHECK(hipMemcpy(device_ptr, &initial, sizeof(uint32_t), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(device_ptr, &initial, sizeof(uint32_t), hipMemcpyHostToDevice))
 
   // hipStreamWriteValue32 enqueues a device-side write of the sentinel into the
   // buffer. After the stream drains, the write must be visible to a subsequent
   // device-to-host copy that is ordered behind it on the same stream.
   const uint32_t sentinel = 0xABCD1234u;
-  HIP_CHECK(hipStreamWriteValue32(stream, device_ptr, sentinel, 0));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamWriteValue32(stream, device_ptr, sentinel, 0))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   uint32_t observed = 0u;
-  HIP_CHECK(hipMemcpy(&observed, device_ptr, sizeof(uint32_t), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&observed, device_ptr, sizeof(uint32_t), hipMemcpyDeviceToHost))
   REQUIRE(observed == sentinel);
 }
 
@@ -77,23 +77,23 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_HipStreamWriteValue64_Default_BecomesVisi
 
   hipStream_t stream = nullptr;
   uint64_t* device_ptr = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_ptr), sizeof(uint64_t)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_ptr), sizeof(uint64_t)))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   // Start from a known zero value so the written sentinel is unambiguous.
   const uint64_t initial = 0ull;
-  HIP_CHECK(hipMemcpy(device_ptr, &initial, sizeof(uint64_t), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(device_ptr, &initial, sizeof(uint64_t), hipMemcpyHostToDevice))
 
   // hipStreamWriteValue64 is the 64-bit counterpart of hipStreamWriteValue32;
   // the written sentinel must be visible after the stream drains.
   const uint64_t sentinel = 0xABCD1234DEADBEEFull;
-  HIP_CHECK(hipStreamWriteValue64(stream, device_ptr, sentinel, 0));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamWriteValue64(stream, device_ptr, sentinel, 0))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   uint64_t observed = 0ull;
-  HIP_CHECK(hipMemcpy(&observed, device_ptr, sizeof(uint64_t), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&observed, device_ptr, sizeof(uint64_t), hipMemcpyDeviceToHost))
   REQUIRE(observed == sentinel);
 }
 
@@ -106,16 +106,16 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_HipStreamWaitValue32_WaitValueGte_GatesLa
   hipStream_t stream = nullptr;
   uint32_t* gate_ptr = nullptr;
   uint32_t* done_ptr = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&gate_ptr), sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&gate_ptr), sizeof(uint32_t)))
   cleanup.Add([gate_ptr] { (void)hipFree(gate_ptr); });
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&done_ptr), sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&done_ptr), sizeof(uint32_t)))
   cleanup.Add([done_ptr] { (void)hipFree(done_ptr); });
 
   const uint32_t initial = 0u;
-  HIP_CHECK(hipMemcpy(gate_ptr, &initial, sizeof(uint32_t), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(done_ptr, &initial, sizeof(uint32_t), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(gate_ptr, &initial, sizeof(uint32_t), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(done_ptr, &initial, sizeof(uint32_t), hipMemcpyHostToDevice))
 
   // Enqueue the satisfying write of the gate value ahead of the wait on the same
   // stream. Because a single stream executes its operations in issue order, the
@@ -123,18 +123,18 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_HipStreamWaitValue32_WaitValueGte_GatesLa
   // greater-than-or-equal condition is met without any host-side signalling.
   // This ordering is what makes the test deadlock-free.
   const uint32_t threshold = 1u;
-  HIP_CHECK(hipStreamWriteValue32(stream, gate_ptr, threshold, 0));
-  HIP_CHECK(hipStreamWaitValue32(stream, gate_ptr, threshold, hipStreamWaitValueGte));
+  HIP_CHECK(hipStreamWriteValue32(stream, gate_ptr, threshold, 0))
+  HIP_CHECK(hipStreamWaitValue32(stream, gate_ptr, threshold, hipStreamWaitValueGte))
 
   // The done sentinel is written strictly after the wait. If the wait failed to
   // gate later work correctly, this write would still land, but the contract we
   // assert is that the stream drains cleanly and the ordered write is visible.
   const uint32_t done = 0xFEEDBEEFu;
-  HIP_CHECK(hipStreamWriteValue32(stream, done_ptr, done, 0));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamWriteValue32(stream, done_ptr, done, 0))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   uint32_t observed = 0u;
-  HIP_CHECK(hipMemcpy(&observed, done_ptr, sizeof(uint32_t), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&observed, done_ptr, sizeof(uint32_t), hipMemcpyDeviceToHost))
   REQUIRE(observed == done);
 }
 
@@ -147,16 +147,16 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_HipStreamWaitValue64_Gte_GatesLaterStream
   hipStream_t stream = nullptr;
   uint64_t* gate_ptr = nullptr;
   uint64_t* done_ptr = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&gate_ptr), sizeof(uint64_t)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&gate_ptr), sizeof(uint64_t)))
   cleanup.Add([gate_ptr] { (void)hipFree(gate_ptr); });
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&done_ptr), sizeof(uint64_t)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&done_ptr), sizeof(uint64_t)))
   cleanup.Add([done_ptr] { (void)hipFree(done_ptr); });
 
   const uint64_t initial = 0ull;
-  HIP_CHECK(hipMemcpy(gate_ptr, &initial, sizeof(uint64_t), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(done_ptr, &initial, sizeof(uint64_t), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(gate_ptr, &initial, sizeof(uint64_t), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(done_ptr, &initial, sizeof(uint64_t), hipMemcpyHostToDevice))
 
   // Enqueue the satisfying 64-bit write of the gate value ahead of the wait on
   // the same stream. Because a single stream executes its operations in issue
@@ -165,18 +165,18 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_HipStreamWaitValue64_Gte_GatesLaterStream
   // signalling. This ordering is what makes the test deadlock-free and mirrors
   // the 32-bit gate contract for the 64-bit hipStreamWaitValue64 API.
   const uint64_t threshold = 1ull;
-  HIP_CHECK(hipStreamWriteValue64(stream, gate_ptr, threshold, 0));
-  HIP_CHECK(hipStreamWaitValue64(stream, gate_ptr, threshold, hipStreamWaitValueGte));
+  HIP_CHECK(hipStreamWriteValue64(stream, gate_ptr, threshold, 0))
+  HIP_CHECK(hipStreamWaitValue64(stream, gate_ptr, threshold, hipStreamWaitValueGte))
 
   // The done sentinel is written strictly after the wait. If the wait failed to
   // gate later work correctly, this write would still land, but the contract we
   // assert is that the stream drains cleanly and the ordered write is visible.
   const uint64_t done = 0xFEEDBEEFCAFEF00Dull;
-  HIP_CHECK(hipStreamWriteValue64(stream, done_ptr, done, 0));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamWriteValue64(stream, done_ptr, done, 0))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   uint64_t observed = 0ull;
-  HIP_CHECK(hipMemcpy(&observed, done_ptr, sizeof(uint64_t), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&observed, done_ptr, sizeof(uint64_t), hipMemcpyDeviceToHost))
   REQUIRE(observed == done);
 }
 
@@ -192,17 +192,17 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_HipStreamBatchMemOp_Default_AppliesWrites
   hipStream_t stream = nullptr;
   uint32_t* value32_ptr = nullptr;
   uint64_t* value64_ptr = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&value32_ptr), sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&value32_ptr), sizeof(uint32_t)))
   cleanup.Add([value32_ptr] { (void)hipFree(value32_ptr); });
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&value64_ptr), sizeof(uint64_t)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&value64_ptr), sizeof(uint64_t)))
   cleanup.Add([value64_ptr] { (void)hipFree(value64_ptr); });
 
   const uint32_t initial32 = 0u;
   const uint64_t initial64 = 0ull;
-  HIP_CHECK(hipMemcpy(value32_ptr, &initial32, sizeof(uint32_t), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(value64_ptr, &initial64, sizeof(uint64_t), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(value32_ptr, &initial32, sizeof(uint32_t), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(value64_ptr, &initial64, sizeof(uint64_t), hipMemcpyHostToDevice))
 
   // Describe a batch of two write operations: a 32-bit write and a 64-bit write.
   // Only the write op types are used here because barrier and flush-remote-write
@@ -228,13 +228,13 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_HipStreamBatchMemOp_Default_AppliesWrites
     // report is a contract-compliant outcome.
     HIP_SKIP_TEST("hipStreamBatchMemOp is not supported on this device");
   }
-  HIP_CHECK(batch_status);
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(batch_status)
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   uint32_t observed32 = 0u;
   uint64_t observed64 = 0ull;
-  HIP_CHECK(hipMemcpy(&observed32, value32_ptr, sizeof(uint32_t), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(&observed64, value64_ptr, sizeof(uint64_t), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&observed32, value32_ptr, sizeof(uint32_t), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(&observed64, value64_ptr, sizeof(uint64_t), hipMemcpyDeviceToHost))
 
   // Both writes in the batch must have been applied by the time the stream
   // drains, exactly as a sequence of scalar writes would have been.
@@ -250,7 +250,7 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_HipStreamWriteValue32_Default_RejectsInva
   hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // A null address is a caller error. When the write API is supported it must be

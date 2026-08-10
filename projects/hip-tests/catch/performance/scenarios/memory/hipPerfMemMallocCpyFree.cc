@@ -47,14 +47,14 @@ void testInit(size_t size, int* A) {
   CONSOLE_PRINT("Initial: hipMalloc(%zu) cost %.2fus\n", size, uS);
 
   start = clock();
-  HIP_CHECK(hipMemcpy(Ad, A, size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(Ad, A, size, hipMemcpyHostToDevice))
+  HIP_CHECK(hipDeviceSynchronize())
   end = clock();
   uS = (end - start) * 1000000. / CLOCKS_PER_SEC;
   CONSOLE_PRINT("hipMemcpy(%zu) cost %.2fus\n", size, uS);
 
   start = clock();
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Ad))
   end = clock();
   uS = (end - start) * 1000000. / CLOCKS_PER_SEC;
   CONSOLE_PRINT("hipFree(%zu) cost %.2fus\n", size, uS);
@@ -68,7 +68,7 @@ static bool hipPerfMemMallocCpyFree_test() {
   int* A;
   hipDeviceProp_t props;
   memset(&props, 0, sizeof(props));
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
   CONSOLE_PRINT("totalGlobalMem: %zu\n", props.totalGlobalMem);
 
   int num = NUM_SIZE;
@@ -78,7 +78,7 @@ static bool hipPerfMemMallocCpyFree_test() {
   for (int i = 0; i < num; i++) {
     start = clock();
     for (int j = 0; j < NUM_ITER; j++) {
-      HIP_CHECK(hipMalloc(&Ad[j], size[i]));
+      HIP_CHECK(hipMalloc(&Ad[j], size[i]))
     }
     end = clock();
     uS = (end - start) * 1000000. / (NUM_ITER * CLOCKS_PER_SEC);
@@ -86,16 +86,16 @@ static bool hipPerfMemMallocCpyFree_test() {
 
     start = clock();
     for (int j = 0; j < NUM_ITER; j++) {
-      HIP_CHECK(hipMemcpy(Ad[j], A, size[i], hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpy(Ad[j], A, size[i], hipMemcpyHostToDevice))
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     end = clock();
     uS = (end - start) * 1000000. / (NUM_ITER * CLOCKS_PER_SEC);
     CONSOLE_PRINT("hipMemcpy(%zu) cost %.2fus\n", size[i], uS);
 
     start = clock();
     for (int j = 0; j < NUM_ITER; j++) {
-      HIP_CHECK(hipFree(Ad[j]));
+      HIP_CHECK(hipFree(Ad[j]))
       Ad[j] = nullptr;
     }
     end = clock();
@@ -120,7 +120,7 @@ static bool hipPerfMemMallocCpyFree_test() {
 
 HIP_TEST_CASE(Performance_hipPerfMemMallocCpyFree_test) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   if (numDevices <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);

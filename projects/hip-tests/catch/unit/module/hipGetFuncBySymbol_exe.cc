@@ -58,11 +58,11 @@ int main() {
   }
 
   int* d_a = nullptr;
-  HIP_CHECK(hipMalloc(&d_a, SIZE));
+  HIP_CHECK(hipMalloc(&d_a, SIZE))
   if (d_a == nullptr) {
     return -1;
   }
-  HIP_CHECK(hipMemcpy(d_a, h_a, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_a, h_a, SIZE, hipMemcpyHostToDevice))
 
   dim3 blocksPerGrid(1, 1, 1);
   dim3 threadsPerBlock(1, 1, 64);
@@ -78,7 +78,7 @@ int main() {
     return -1;
   }
 
-  HIP_CHECK(hipMemcpy(h_a, d_a, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(h_a, d_a, SIZE, hipMemcpyDeviceToHost))
 
   for (int i = 0; i < ARR_SIZE; i++) {
     if (h_a[i] != output_ref[i]) {
@@ -88,7 +88,7 @@ int main() {
 
   free(h_a);
   free(output_ref);
-  HIP_CHECK(hipFree(d_a));
+  HIP_CHECK(hipFree(d_a))
 
   return 0;
 }

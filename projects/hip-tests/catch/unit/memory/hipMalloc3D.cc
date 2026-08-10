@@ -21,7 +21,7 @@ This API verifies hipMalloc3D API by allocating memory in smaller chunks for
 CHUNK_LOOP iterations
 */
 static void MemoryAlloc3DDiffSizes(int gpu) {
-  HIPCHECK(hipSetDevice(gpu));
+  HIPCHECK(hipSetDevice(gpu))
   std::vector<size_t> array_size;
   array_size.push_back(SMALL_SIZE);
   array_size.push_back(BIG_SIZE);
@@ -31,12 +31,12 @@ static void MemoryAlloc3DDiffSizes(int gpu) {
     hipPitchedPtr devPitchedPtr[CHUNK_LOOP];
     hipExtent extent = make_hipExtent(width, height, depth);
     size_t ptot, pavail;
-    HIPCHECK(hipMemGetInfo(&pavail, &ptot));
+    HIPCHECK(hipMemGetInfo(&pavail, &ptot))
     for (int i = 0; i < CHUNK_LOOP; i++) {
-      HIPCHECK(hipMalloc3D(&devPitchedPtr[i], extent));
+      HIPCHECK(hipMalloc3D(&devPitchedPtr[i], extent))
     }
     for (int i = 0; i < CHUNK_LOOP; i++) {
-      HIPCHECK(hipFree(devPitchedPtr[i].ptr));
+      HIPCHECK(hipFree(devPitchedPtr[i].ptr))
     }
   }
 }
@@ -63,13 +63,13 @@ HIP_TEST_CASE(Unit_hipMalloc3D_Basic) {
   hipPitchedPtr devPitchedPtr[NumAllocations];
   hipExtent extent = make_hipExtent(width, height, depth);
   size_t tot, avail, itot, iavail, ptot, pavail;
-  HIP_CHECK(hipMemGetInfo(&pavail, &ptot));
+  HIP_CHECK(hipMemGetInfo(&pavail, &ptot))
 
   for (int i = 0; i < NumAllocations; i++) {
     REQUIRE(hipMalloc3D(&devPitchedPtr[i], extent) == hipSuccess);
   }
 
-  HIP_CHECK(hipMemGetInfo(&iavail, &itot));
+  HIP_CHECK(hipMemGetInfo(&iavail, &itot))
 
   if (iavail >= pavail)
     WARN(
@@ -78,10 +78,10 @@ HIP_TEST_CASE(Unit_hipMalloc3D_Basic) {
         << pavail << " after: " << iavail);
 
   for (int i = 0; i < NumAllocations; i++) {
-    HIPCHECK(hipFree(devPitchedPtr[i].ptr));
+    HIPCHECK(hipFree(devPitchedPtr[i].ptr))
   }
 
-  HIP_CHECK(hipMemGetInfo(&avail, &tot));
+  HIP_CHECK(hipMemGetInfo(&avail, &tot))
 
   // as the runtime might cache some of the allocations and also it is difficult the
   // available amount returned is the same as the one we got the first time because of

@@ -85,8 +85,8 @@ HIP_TEST_CASE(Contract_OccupancyExt_HipOccupancyMaxActiveBlocksPerMultiprocessor
 HIP_TEST_CASE(Contract_OccupancyExt_HipOccupancyMaxPotentialClusterSize_ClusterQueries_CapabilityGatedRange) {
   int current_device = 0;
   hipDeviceProp_t props{};
-  HIP_CHECK(hipGetDevice(&current_device));
-  HIP_CHECK(hipGetDeviceProperties(&props, current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
+  HIP_CHECK(hipGetDeviceProperties(&props, current_device))
 
   if (!props.clusterLaunch) {
     HIP_SKIP_TEST("Cluster launch is not supported on this device.");
@@ -114,11 +114,11 @@ HIP_TEST_CASE(Contract_OccupancyExt_HipOccupancyMaxPotentialClusterSize_ClusterQ
   const void* kernel = reinterpret_cast<const void*>(&OccupancyExtKernel);
 
   int cluster_size = -1;
-  HIP_CHECK(hipOccupancyMaxPotentialClusterSize(&cluster_size, kernel, &config));
+  HIP_CHECK(hipOccupancyMaxPotentialClusterSize(&cluster_size, kernel, &config))
   REQUIRE(cluster_size >= 1);
 
   int num_clusters = -1;
-  HIP_CHECK(hipOccupancyMaxActiveClusters(&num_clusters, kernel, &config));
+  HIP_CHECK(hipOccupancyMaxActiveClusters(&num_clusters, kernel, &config))
   REQUIRE(num_clusters >= 0);
 }
 #endif  // HT_AMD

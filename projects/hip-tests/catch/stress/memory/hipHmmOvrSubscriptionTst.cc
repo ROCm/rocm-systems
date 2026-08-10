@@ -25,8 +25,8 @@ HIP_TEST_CASE(Stress_HMM_OverSubscriptionTst) {
 #if HT_AMD  // For AMD this gcn arch needs to have xnack+
     int device = 0;
     hipDeviceProp_t props{};
-    HIP_CHECK(hipGetDevice(&device));
-    HIP_CHECK(hipGetDeviceProperties(&props, device));
+    HIP_CHECK(hipGetDevice(&device))
+    HIP_CHECK(hipGetDeviceProperties(&props, device))
     std::string arch(props.gcnArchName);
     return arch.find("xnack+") != std::string::npos;
 #else  // For CUDA this depends on SM and attribute check should be fine
@@ -38,7 +38,7 @@ HIP_TEST_CASE(Stress_HMM_OverSubscriptionTst) {
     hip::SpawnProc proc("hold_memory", true);
     proc.run_async();
     size_t freeMem, totalMem;
-    HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem));
+    HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem))
 
     constexpr float oversub_factor = 1.2f;
     auto system_ram = HipTest::getAvailableSystemMemoryInMB();  // In MB
@@ -52,11 +52,11 @@ HIP_TEST_CASE(Stress_HMM_OverSubscriptionTst) {
       constexpr size_t oneGB = 1024 * 1024 * 1024;
 
       hipStream_t stream;
-      HIP_CHECK_THREAD(hipStreamCreate(&stream));
+      HIP_CHECK_THREAD(hipStreamCreate(&stream))
 
       float* data;
       constexpr size_t alloc_elem = oneGB / sizeof(float);
-      HIP_CHECK_THREAD(hipMallocManaged(&data, oneGB, hipMemAttachGlobal));
+      HIP_CHECK_THREAD(hipMallocManaged(&data, oneGB, hipMemAttachGlobal))
 
       constexpr float init_val = 1.1f;
 
@@ -69,14 +69,14 @@ HIP_TEST_CASE(Stress_HMM_OverSubscriptionTst) {
       // Page migrated to GPU
       floatx2<<<(alloc_elem / 256) + 1, 256, 0, stream>>>(data, alloc_elem);
 
-      HIP_CHECK_THREAD(hipStreamSynchronize(stream));
+      HIP_CHECK_THREAD(hipStreamSynchronize(stream))
 
       // Back to host
       REQUIRE_THREAD(
           std::all_of(data, data + alloc_elem, [](float a) { return a == (2.0f * init_val); }));
 
-      HIP_CHECK_THREAD(hipFree(data));
-      HIP_CHECK_THREAD(hipStreamDestroy(stream));
+      HIP_CHECK_THREAD(hipFree(data))
+      HIP_CHECK_THREAD(hipStreamDestroy(stream))
     };
 
     std::vector<std::thread> thread_pool;

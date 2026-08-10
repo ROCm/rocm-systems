@@ -26,26 +26,26 @@ HIP_TEST_CASE(Unit_hipMalloc_Positive_Basic) {
   void* ptr = nullptr;
   const auto alloc_size =
       GENERATE_COPY(10, page_size / 2, page_size, page_size * 3 / 2, page_size * 2);
-  HIP_CHECK(hipMalloc(&ptr, alloc_size));
+  HIP_CHECK(hipMalloc(&ptr, alloc_size))
   CHECK(ptr != nullptr);
   CHECK(reinterpret_cast<intptr_t>(ptr) % DEV_MEM_ALIGNMENT == 0);
-  HIP_CHECK(hipFree(ptr));
+  HIP_CHECK(hipFree(ptr))
 }
 
 HIP_TEST_CASE(Unit_hipMalloc_Positive_Zero_Size) {
   void* ptr = reinterpret_cast<void*>(0x1);
-  HIP_CHECK(hipMalloc(&ptr, 0));
+  HIP_CHECK(hipMalloc(&ptr, 0))
   REQUIRE(ptr == nullptr);
 }
 
 HIP_TEST_CASE(Unit_hipMalloc_Positive_Alignment) {
   void *ptr1 = nullptr, *ptr2 = nullptr;
-  HIP_CHECK(hipMalloc(&ptr1, 1));
-  HIP_CHECK(hipMalloc(&ptr2, 10));
+  HIP_CHECK(hipMalloc(&ptr1, 1))
+  HIP_CHECK(hipMalloc(&ptr2, 10))
   CHECK(reinterpret_cast<intptr_t>(ptr1) % DEV_MEM_ALIGNMENT == 0);
   CHECK(reinterpret_cast<intptr_t>(ptr2) % DEV_MEM_ALIGNMENT == 0);
-  HIP_CHECK(hipFree(ptr1));
-  HIP_CHECK(hipFree(ptr2));
+  HIP_CHECK(hipFree(ptr1))
+  HIP_CHECK(hipFree(ptr2))
 }
 
 HIP_TEST_CASE(Unit_hipMalloc_Negative_Parameters) {
@@ -117,12 +117,12 @@ static void performOperations(char* devMem, size_t size) {
   const size_t sizeToCheck = (size < ONE_MB) ? size : ONE_MB;
   constexpr char value = 'A';
 
-  HIP_CHECK(hipMemset(devMem, value, sizeToCheck));
+  HIP_CHECK(hipMemset(devMem, value, sizeToCheck))
   addKernel<<<1, 1>>>(devMem, sizeToCheck);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   std::vector<char> arrToCheck(sizeToCheck, 0);
 
-  HIP_CHECK(hipMemcpy(arrToCheck.data(), devMem, sizeToCheck, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(arrToCheck.data(), devMem, sizeToCheck, hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < sizeToCheck; i++) {
     INFO("At index : " << i << " Got value : " << arrToCheck[i] << " Expected value : B ");
@@ -144,7 +144,7 @@ static void performOperations(char* devMem, size_t size) {
 HIP_TEST_CASE(Unit_hipMalloc_Allocate90PercentOfDeviceMemory) {
   char* devMem = nullptr;
   size_t freeVRAM = 0, totalVRAM = 0;
-  HIP_CHECK(hipMemGetInfo(&freeVRAM, &totalVRAM));
+  HIP_CHECK(hipMemGetInfo(&freeVRAM, &totalVRAM))
   INFO("Available device memory : " << freeVRAM);
 
   /**
@@ -155,11 +155,11 @@ HIP_TEST_CASE(Unit_hipMalloc_Allocate90PercentOfDeviceMemory) {
   size_t size = (freeVRAM * 9) / 10;
   INFO("Size going to allocate : " << size);
 
-  HIP_CHECK(hipMalloc(&devMem, size));
+  HIP_CHECK(hipMalloc(&devMem, size))
   REQUIRE(devMem != nullptr);
 
   performOperations(devMem, size);
-  HIP_CHECK(hipFree(devMem));
+  HIP_CHECK(hipFree(devMem))
 }
 
 /**
@@ -176,7 +176,7 @@ HIP_TEST_CASE(Unit_hipMalloc_Allocate90PercentOfDeviceMemory) {
  */
 HIP_TEST_CASE(Unit_hipMalloc_Positive_APU_LargeAllocSpill) {
   hipDeviceProp_t prop{};
-  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0))
   if (!prop.integrated) {
     HIP_SKIP_TEST("dGPU --- APU spill regression test does not apply");
     return;
@@ -190,17 +190,17 @@ HIP_TEST_CASE(Unit_hipMalloc_Positive_APU_LargeAllocSpill) {
   }
 
   char* devMem = nullptr;
-  HIP_CHECK(hipMalloc(&devMem, size));
+  HIP_CHECK(hipMalloc(&devMem, size))
   REQUIRE(devMem != nullptr);
 
   constexpr int fill = 0xCD;
-  HIP_CHECK(hipMemset(devMem, fill, size));
+  HIP_CHECK(hipMemset(devMem, fill, size))
 
   // Sample-verify head and tail; full read-back is bandwidth-bound at GiB
   // scale but touching both ends catches page-table or aperture mismatches.
   constexpr size_t sample = static_cast<size_t>(64) * 1024;
   std::vector<char> head(sample), tail(sample);
-  HIP_CHECK(hipMemcpy(head.data(), devMem, sample, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(head.data(), devMem, sample, hipMemcpyDeviceToHost))
   HIP_CHECK(hipMemcpy(tail.data(), devMem + (size - sample), sample,
                       hipMemcpyDeviceToHost));
   for (size_t i = 0; i < sample; ++i) {
@@ -208,7 +208,7 @@ HIP_TEST_CASE(Unit_hipMalloc_Positive_APU_LargeAllocSpill) {
     REQUIRE(tail[i] == static_cast<char>(fill));
   }
 
-  HIP_CHECK(hipFree(devMem));
+  HIP_CHECK(hipFree(devMem))
 }
 
 // Commenting this due to defect SWDEV-501675
@@ -233,7 +233,7 @@ HIP_TEST_CASE(Unit_hipMalloc_Positive_APU_LargeAllocSpill) {
 HIP_TEST_CASE(Unit_hipMalloc_Allocate110PercentOfDeviceMemory) {
   char *devMem = nullptr;
   size_t freeVRAM = 0, totalVRAM = 0;
-  HIP_CHECK(hipMemGetInfo(&freeVRAM, &totalVRAM));
+  HIP_CHECK(hipMemGetInfo(&freeVRAM, &totalVRAM))
   INFO("Available Free device memory : " << freeVRAM);
 
   // Allocating 110% of available VRAM
@@ -273,10 +273,10 @@ HIP_TEST_CASE(Unit_hipMalloc_Allocate110PercentOfDeviceMemory) {
   }
   INFO("Size going to allocate : " << size);
 
-  HIP_CHECK(hipMalloc(&devMem, size));
+  HIP_CHECK(hipMalloc(&devMem, size))
   REQUIRE(devMem != nullptr);
   performOperations(devMem, size);
-  HIP_CHECK(hipFree(devMem));
+  HIP_CHECK(hipFree(devMem))
 #endif
 }
 #endif
@@ -306,7 +306,7 @@ HIP_TEST_CASE(Unit_hipMalloc_Allocate110PercentOfDeviceMemory) {
 HIP_TEST_CASE(Unit_hipMalloc_AllocateAvailableVRAMAndPossibleRAM) {
   char *devMem = nullptr;
   size_t freeVRAM = 0, totalVRAM = 0;
-  HIP_CHECK(hipMemGetInfo(&freeVRAM, &totalVRAM));
+  HIP_CHECK(hipMemGetInfo(&freeVRAM, &totalVRAM))
   INFO("Available Free device memory : " << freeVRAM);
 
   size_t totalRAM = getTotalRAM();
@@ -342,10 +342,10 @@ HIP_TEST_CASE(Unit_hipMalloc_AllocateAvailableVRAMAndPossibleRAM) {
   HIP_CHECK_ERROR(hipMalloc(&devMem, size), hipErrorOutOfMemory);
 #else
   INFO("WINDOWS");
-  HIP_CHECK(hipMalloc(&devMem, size));
+  HIP_CHECK(hipMalloc(&devMem, size))
   REQUIRE(devMem != nullptr);
   performOperations(devMem, size);
-  HIP_CHECK(hipFree(devMem));
+  HIP_CHECK(hipFree(devMem))
 #endif
 }
 
@@ -397,7 +397,7 @@ HIP_TEST_CASE(Unit_hipMalloc_AllocateMoreThanTotalVRAM) {
   char *devMem = nullptr;
 
   size_t freeVRAM = 0, totalVRAM = 0;
-  HIP_CHECK(hipMemGetInfo(&freeVRAM, &totalVRAM));
+  HIP_CHECK(hipMemGetInfo(&freeVRAM, &totalVRAM))
   INFO("Available total device memory : " << totalVRAM);
 
   size_t size = totalVRAM + ONE_MB;
@@ -436,10 +436,10 @@ HIP_TEST_CASE(Unit_hipMalloc_AllocateMoreThanTotalVRAM) {
   }
   INFO("Size going to allocate : " << size);
 
-  HIP_CHECK(hipMalloc(&devMem, size));
+  HIP_CHECK(hipMalloc(&devMem, size))
   REQUIRE(devMem != nullptr);
   performOperations(devMem, size);
-  HIP_CHECK(hipFree(devMem));
+  HIP_CHECK(hipFree(devMem))
 #endif
 }
 #endif

@@ -40,7 +40,7 @@ bool CompileModuleSource(std::vector<char>& code) {
   // any allocation would otherwise fail with "invalid device context". hipFree(0)
   // is the canonical no-op that forces primary-context initialization, and is a
   // harmless success on AMD where the runtime already auto-initializes.
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
 
   hiprtcProgram program{};
   HIPRTC_CHECK(hiprtcCreateProgram(&program, kModuleSource, "module_load_ex_contract.cu", 0, nullptr,
@@ -48,7 +48,7 @@ bool CompileModuleSource(std::vector<char>& code) {
 
 #if HT_AMD
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, 0));
+  HIP_CHECK(hipGetDeviceProperties(&properties, 0))
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
   const char* options[] = {offload_arch.c_str()};
   const int num_options = 1;
@@ -91,7 +91,7 @@ void LoadContractModuleEx(hipModule_t& module) {
   if (!CompileModuleSource(code)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
   }
-  HIP_CHECK(hipModuleLoadDataEx(&module, code.data(), 0, nullptr, nullptr));
+  HIP_CHECK(hipModuleLoadDataEx(&module, code.data(), 0, nullptr, nullptr))
   REQUIRE(module != nullptr);
 }
 }  // namespace
@@ -108,7 +108,7 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_HipModuleLoadDataEx_ZeroOptions_LoadsAndUnlo
   // point with zero options must behave like the plain load: it must produce a
   // non-null module handle and unload again without error.
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoadDataEx(&module, code.data(), 0, nullptr, nullptr));
+  HIP_CHECK(hipModuleLoadDataEx(&module, code.data(), 0, nullptr, nullptr))
   cleanup.Add([module] { (void)hipModuleUnload(module); });
   REQUIRE(module != nullptr);
 }
@@ -137,14 +137,14 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_HipModuleLoadDataEx_WithJitOptions_ResolvesS
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("This runtime path does not support the requested JIT option.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   cleanup.Add([module] { (void)hipModuleUnload(module); });
   REQUIRE(module != nullptr);
 
   // A symbol that exists in the loaded module must resolve to a non-null
   // function handle regardless of the JIT options that were supplied.
   hipFunction_t function = nullptr;
-  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
+  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"))
   REQUIRE(function != nullptr);
 }
 
@@ -167,22 +167,22 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_HipModuleLaunchKernel_Default_LaunchWritesEx
   cleanup.Add([module] { (void)hipModuleUnload(module); });
 
   hipFunction_t function = nullptr;
-  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
+  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"))
   REQUIRE(function != nullptr);
 
   int* device_value = nullptr;
-  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)))
   cleanup.Add([device_value] { (void)hipFree(device_value); });
-  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
+  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)))
 
   // Launch the resolved function through the driver-style module launch entry
   // point with a single-thread grid so the write is deterministic.
   int value = kExpectedValue;
   void* kernel_args[] = {&device_value, &value};
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args, nullptr));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args, nullptr))
+  HIP_CHECK(hipDeviceSynchronize())
 
   int result = 0;
-  HIP_CHECK(hipMemcpy(&result, device_value, sizeof(result), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&result, device_value, sizeof(result), hipMemcpyDeviceToHost))
   REQUIRE(result == kExpectedValue);
 }

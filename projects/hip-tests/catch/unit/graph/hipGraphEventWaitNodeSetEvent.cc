@@ -34,22 +34,22 @@ Testcase Scenarios :
  */
 static void validateEventWaitNodeSetEvent(unsigned flag) {
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   // Create events
   hipEvent_t event1, event2, event_out;
-  HIP_CHECK(hipEventCreate(&event1));
-  HIP_CHECK(hipEventCreateWithFlags(&event2, flag));
+  HIP_CHECK(hipEventCreate(&event1))
+  HIP_CHECK(hipEventCreateWithFlags(&event2, flag))
   hipGraphNode_t eventwait;
-  HIP_CHECK(hipGraphAddEventWaitNode(&eventwait, graph, nullptr, 0, event1));
+  HIP_CHECK(hipGraphAddEventWaitNode(&eventwait, graph, nullptr, 0, event1))
   // Set a different event
-  HIP_CHECK(hipGraphEventWaitNodeSetEvent(eventwait, event2));
-  HIP_CHECK(hipGraphEventWaitNodeGetEvent(eventwait, &event_out));
+  HIP_CHECK(hipGraphEventWaitNodeSetEvent(eventwait, event2))
+  HIP_CHECK(hipGraphEventWaitNodeGetEvent(eventwait, &event_out))
   // validate set event and get event are same
   REQUIRE(event2 == event_out);
   // Free resources
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipEventDestroy(event1));
-  HIP_CHECK(hipEventDestroy(event2));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipEventDestroy(event1))
+  HIP_CHECK(hipEventDestroy(event2))
 }
 
 /**
@@ -57,19 +57,19 @@ static void validateEventWaitNodeSetEvent(unsigned flag) {
  */
 static void setEventRecordNode() {
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   // Create events
   hipEvent_t event1, event2;
-  HIP_CHECK(hipEventCreate(&event1));
-  HIP_CHECK(hipEventCreate(&event2));
+  HIP_CHECK(hipEventCreate(&event1))
+  HIP_CHECK(hipEventCreate(&event2))
   hipGraphNode_t eventrec;
-  HIP_CHECK(hipGraphAddEventRecordNode(&eventrec, graph, nullptr, 0, event1));
+  HIP_CHECK(hipGraphAddEventRecordNode(&eventrec, graph, nullptr, 0, event1))
   // Set a different event eventrec using hipGraphEventWaitNodeSetEvent
   HIP_CHECK_ERROR(hipGraphEventWaitNodeSetEvent(eventrec, event2), hipErrorInvalidValue);
   // Free resources
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipEventDestroy(event1));
-  HIP_CHECK(hipEventDestroy(event2));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipEventDestroy(event1))
+  HIP_CHECK(hipEventDestroy(event2))
 }
 
 /**
@@ -85,14 +85,14 @@ HIP_TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_SetProp) {
   hipGraph_t graph1, graph2;
   hipStream_t streamForGraph1, streamForGraph2;
   hipGraphExec_t graphExec1, graphExec2;
-  HIP_CHECK(hipStreamCreate(&streamForGraph1));
-  HIP_CHECK(hipGraphCreate(&graph1, 0));
-  HIP_CHECK(hipGraphCreate(&graph2, 0));
-  HIP_CHECK(hipStreamCreate(&streamForGraph2));
+  HIP_CHECK(hipStreamCreate(&streamForGraph1))
+  HIP_CHECK(hipGraphCreate(&graph1, 0))
+  HIP_CHECK(hipGraphCreate(&graph2, 0))
+  HIP_CHECK(hipStreamCreate(&streamForGraph2))
 
   hipEvent_t event1, event2;
-  HIP_CHECK(hipEventCreateWithFlags(&event1, hipEventDefault));
-  HIP_CHECK(hipEventCreateWithFlags(&event2, hipEventBlockingSync));
+  HIP_CHECK(hipEventCreateWithFlags(&event1, hipEventDefault))
+  HIP_CHECK(hipEventCreateWithFlags(&event2, hipEventBlockingSync))
   hipGraphNode_t event_rec_node, event_wait_node;
   int *inp_h, *inp_d, *out_h_g1, *out_d_g1, *out_h_g2, *out_d_g2;
   // Allocate host buffers
@@ -103,9 +103,9 @@ HIP_TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_SetProp) {
   out_h_g2 = reinterpret_cast<int*>(malloc(memsize));
   REQUIRE(out_h_g2 != nullptr);
   // Allocate device buffers
-  HIP_CHECK(hipMalloc(&inp_d, memsize));
-  HIP_CHECK(hipMalloc(&out_d_g1, memsize));
-  HIP_CHECK(hipMalloc(&out_d_g2, memsize));
+  HIP_CHECK(hipMalloc(&inp_d, memsize))
+  HIP_CHECK(hipMalloc(&out_d_g1, memsize))
+  HIP_CHECK(hipMalloc(&out_d_g2, memsize))
   // Initialize host buffer
   for (uint32_t i = 0; i < N; i++) {
     inp_h[i] = i;
@@ -114,7 +114,7 @@ HIP_TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_SetProp) {
   }
   // Graph1 creation ...........
   // Create event1 record node in graph1
-  HIP_CHECK(hipGraphAddEventRecordNode(&event_rec_node, graph1, nullptr, 0, event1));
+  HIP_CHECK(hipGraphAddEventRecordNode(&event_rec_node, graph1, nullptr, 0, event1))
 
   // Create memcpy and kernel nodes for graph1
   hipGraphNode_t memcpyH2D, memcpyD2H_1, kernelnode_1;
@@ -131,15 +131,15 @@ HIP_TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_SetProp) {
   kernelNodeParams1.sharedMemBytes = 0;
   kernelNodeParams1.kernelParams = reinterpret_cast<void**>(kernelArgs1);
   kernelNodeParams1.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernelnode_1, graph1, nullptr, 0, &kernelNodeParams1));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelnode_1, graph1, nullptr, 0, &kernelNodeParams1))
   // Create dependencies for graph1
-  HIP_CHECK(hipGraphAddDependencies(graph1, &memcpyH2D, &event_rec_node, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph1, &event_rec_node, &kernelnode_1, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph1, &kernelnode_1, &memcpyD2H_1, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph1, &memcpyH2D, &event_rec_node, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph1, &event_rec_node, &kernelnode_1, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph1, &kernelnode_1, &memcpyD2H_1, 1))
 
   // Graph2 creation ...........
   // Create event1 record node in graph2
-  HIP_CHECK(hipGraphAddEventWaitNode(&event_wait_node, graph2, nullptr, 0, event1));
+  HIP_CHECK(hipGraphAddEventWaitNode(&event_wait_node, graph2, nullptr, 0, event1))
   // Create memcpy and kernel nodes for graph2
   hipGraphNode_t memcpyD2H_2, kernelnode_2;
   hipKernelNodeParams kernelNodeParams2{};
@@ -153,22 +153,22 @@ HIP_TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_SetProp) {
   kernelNodeParams2.sharedMemBytes = 0;
   kernelNodeParams2.kernelParams = reinterpret_cast<void**>(kernelArgs2);
   kernelNodeParams2.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernelnode_2, graph2, nullptr, 0, &kernelNodeParams2));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelnode_2, graph2, nullptr, 0, &kernelNodeParams2))
   // Create dependencies for graph2
-  HIP_CHECK(hipGraphAddDependencies(graph2, &event_wait_node, &kernelnode_2, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph2, &kernelnode_2, &memcpyD2H_2, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph2, &event_wait_node, &kernelnode_2, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph2, &kernelnode_2, &memcpyD2H_2, 1))
 
   // Instantiate and launch the graphs
-  HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphInstantiate(&graphExec2, graph2, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec2, graph2, nullptr, nullptr, 0))
   // Set event
-  HIP_CHECK(hipGraphEventRecordNodeSetEvent(event_rec_node, event2));
-  HIP_CHECK(hipGraphEventWaitNodeSetEvent(event_wait_node, event2));
+  HIP_CHECK(hipGraphEventRecordNodeSetEvent(event_rec_node, event2))
+  HIP_CHECK(hipGraphEventWaitNodeSetEvent(event_wait_node, event2))
 
-  HIP_CHECK(hipGraphLaunch(graphExec1, streamForGraph1));
-  HIP_CHECK(hipGraphLaunch(graphExec2, streamForGraph2));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph1));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph2));
+  HIP_CHECK(hipGraphLaunch(graphExec1, streamForGraph1))
+  HIP_CHECK(hipGraphLaunch(graphExec2, streamForGraph2))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph1))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph2))
   // Validate output
   bool btestPassed1 = true;
   for (uint32_t i = 0; i < N; i++) {
@@ -187,20 +187,20 @@ HIP_TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_SetProp) {
   }
   REQUIRE(btestPassed2 == true);
   // Destroy all resources
-  HIP_CHECK(hipFree(inp_d));
-  HIP_CHECK(hipFree(out_d_g1));
-  HIP_CHECK(hipFree(out_d_g2));
+  HIP_CHECK(hipFree(inp_d))
+  HIP_CHECK(hipFree(out_d_g1))
+  HIP_CHECK(hipFree(out_d_g2))
   free(inp_h);
   free(out_h_g1);
   free(out_h_g2);
-  HIP_CHECK(hipGraphExecDestroy(graphExec1));
-  HIP_CHECK(hipGraphExecDestroy(graphExec2));
-  HIP_CHECK(hipGraphDestroy(graph1));
-  HIP_CHECK(hipGraphDestroy(graph2));
-  HIP_CHECK(hipEventDestroy(event1));
-  HIP_CHECK(hipEventDestroy(event2));
-  HIP_CHECK(hipStreamDestroy(streamForGraph1));
-  HIP_CHECK(hipStreamDestroy(streamForGraph2));
+  HIP_CHECK(hipGraphExecDestroy(graphExec1))
+  HIP_CHECK(hipGraphExecDestroy(graphExec2))
+  HIP_CHECK(hipGraphDestroy(graph1))
+  HIP_CHECK(hipGraphDestroy(graph2))
+  HIP_CHECK(hipEventDestroy(event1))
+  HIP_CHECK(hipEventDestroy(event2))
+  HIP_CHECK(hipStreamDestroy(streamForGraph1))
+  HIP_CHECK(hipStreamDestroy(streamForGraph2))
 }
 /**
  * Scenario 1
@@ -218,12 +218,12 @@ HIP_TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_SetGet) {
  */
 HIP_TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_Negative) {
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   hipEvent_t event1, event2;
-  HIP_CHECK(hipEventCreate(&event1));
-  HIP_CHECK(hipEventCreate(&event2));
+  HIP_CHECK(hipEventCreate(&event1))
+  HIP_CHECK(hipEventCreate(&event2))
   hipGraphNode_t eventwait;
-  HIP_CHECK(hipGraphAddEventWaitNode(&eventwait, graph, nullptr, 0, event1));
+  HIP_CHECK(hipGraphAddEventWaitNode(&eventwait, graph, nullptr, 0, event1))
   SECTION("node = nullptr") {
     HIP_CHECK_ERROR(hipGraphEventWaitNodeSetEvent(nullptr, event2), hipErrorInvalidValue);
   }
@@ -234,7 +234,7 @@ HIP_TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_Negative) {
 
   SECTION("input node is empty node") {
     hipGraphNode_t EmptyGraphNode;
-    HIP_CHECK(hipGraphAddEmptyNode(&EmptyGraphNode, graph, nullptr, 0));
+    HIP_CHECK(hipGraphAddEmptyNode(&EmptyGraphNode, graph, nullptr, 0))
     HIP_CHECK_ERROR(hipGraphEventWaitNodeSetEvent(EmptyGraphNode, event2), hipErrorInvalidValue);
   }
 
@@ -243,7 +243,7 @@ HIP_TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_Negative) {
     char* A_d;
     hipGraphNode_t memset_A;
     hipMemsetParams memsetParams{};
-    HIP_CHECK(hipMalloc(&A_d, Nbytes));
+    HIP_CHECK(hipMalloc(&A_d, Nbytes))
     memset(&memsetParams, 0, sizeof(memsetParams));
     memsetParams.dst = reinterpret_cast<void*>(A_d);
     memsetParams.value = 0;
@@ -251,9 +251,9 @@ HIP_TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_Negative) {
     memsetParams.elementSize = sizeof(char);
     memsetParams.width = Nbytes;
     memsetParams.height = 1;
-    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
+    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams))
     HIP_CHECK_ERROR(hipGraphEventWaitNodeSetEvent(memset_A, event2), hipErrorInvalidValue);
-    HIP_CHECK(hipFree(A_d));
+    HIP_CHECK(hipFree(A_d))
   }
 
   SECTION("input node is event record node") { setEventRecordNode(); }
@@ -268,7 +268,7 @@ HIP_TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_Negative) {
     HIP_CHECK_ERROR(hipGraphEventWaitNodeSetEvent(eventwait, event_uninit), hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipEventDestroy(event1));
-  HIP_CHECK(hipEventDestroy(event2));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipEventDestroy(event1))
+  HIP_CHECK(hipEventDestroy(event2))
 }

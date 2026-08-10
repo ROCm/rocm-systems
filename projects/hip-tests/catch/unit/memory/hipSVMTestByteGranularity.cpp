@@ -74,24 +74,24 @@ __global__ void sum_neighbor_locations(char* a, unsigned int num_devices,
 */
 HIP_TEST_CASE(Unit_svm_byte_granularity) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   const int num_elements = 2048;
   int num_devices = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
   int num_devices_plus_host = num_devices + 1;
   std::vector<hipStream_t> streams(num_devices);
 
   for (int d = 0; d < num_devices; d++) {
-    HIP_CHECK(hipSetDevice(d));
-    HIP_CHECK(hipStreamCreate(&streams[d]));
+    HIP_CHECK(hipSetDevice(d))
+    HIP_CHECK(hipStreamCreate(&streams[d]))
   }
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   char* pA = nullptr;
   // hipHostMallocNonCoherent means CL_MEM_SVM_FINE_GRAIN_BUFFER
-  HIP_CHECK(hipHostMalloc(&pA, sizeof(char) * num_elements, hipHostMallocNonCoherent));
+  HIP_CHECK(hipHostMalloc(&pA, sizeof(char) * num_elements, hipHostMallocNonCoherent))
   unsigned int** error_counts = (unsigned int**)malloc(sizeof(void*) * num_devices);
 
   for (unsigned int i = 0; i < num_devices; i++) {
@@ -106,29 +106,29 @@ HIP_TEST_CASE(Unit_svm_byte_granularity) {
   // get all the devices going simultaneously
   for (unsigned int d = 0; d < num_devices; d++)  // device ids starting at 1.
   {
-    HIP_CHECK(hipSetDevice(d));
+    HIP_CHECK(hipSetDevice(d))
     write_owned_locations<<<num_elements, 1, 0, streams[d]>>>(pA, num_devices_plus_host, d);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
   }
   unsigned int host_id = num_devices;  // host code will take the id above the devices.
   for (unsigned int i = num_devices; i < num_elements; i += num_devices_plus_host) pA[i] = host_id;
 
   for (unsigned int d = 0; d < num_devices; d++) {
-    HIP_CHECK(hipStreamSynchronize(streams[d]));
+    HIP_CHECK(hipStreamSynchronize(streams[d]))
   }
 
   // now check that each device can see the byte writes made by the other devices.
   // adjusted so sum_neighbor_locations doesn't read past end of buffer
   size_t adjusted_num_elements = num_elements - num_devices;
   for (unsigned int d = 0; d < num_devices; d++) {
-    HIP_CHECK(hipSetDevice(d));
+    HIP_CHECK(hipSetDevice(d))
     sum_neighbor_locations<<<adjusted_num_elements, 1, 0, streams[d]>>>(pA, num_devices_plus_host,
                                                                         error_counts[d]);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
   }
 
   for (unsigned int d = 0; d < num_devices; d++) {
-    HIP_CHECK(hipStreamSynchronize(streams[d]));
+    HIP_CHECK(hipStreamSynchronize(streams[d]))
   }
   // see if any of the devices found errors
   for (unsigned int d = 0; d < num_devices; d++) {
@@ -148,10 +148,10 @@ HIP_TEST_CASE(Unit_svm_byte_granularity) {
     }
   }
   for (unsigned int i = 0; i < num_devices; i++) {
-    HIP_CHECK(hipStreamDestroy(streams[i]));
-    HIP_CHECK(hipHostFree(error_counts[i]));
+    HIP_CHECK(hipStreamDestroy(streams[i]))
+    HIP_CHECK(hipHostFree(error_counts[i]))
   }
   free(error_counts);
-  HIP_CHECK(hipHostFree(pA));
+  HIP_CHECK(hipHostFree(pA))
   REQUIRE(true);
 }

@@ -49,7 +49,7 @@ void GetCodeObjectUsingRTC(size_t codeSize, std::vector<char>& code) {
 
   hipDeviceProp_t props;
   int device = 0;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
 #ifdef __HIP_PLATFORM_AMD__
   std::string sarg = std::string("--gpu-architecture=") + props.gcnArchName;
 #else
@@ -107,7 +107,7 @@ HIP_TEST_CASE(Stress_hipModuleLoadUnload) {
     }
 
     hipModule_t module;
-    HIP_CHECK(hipModuleLoad(&module, co_file.c_str()));
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleLoad(&module, co_file.c_str()))
+    HIP_CHECK(hipModuleUnload(module))
   }
 }

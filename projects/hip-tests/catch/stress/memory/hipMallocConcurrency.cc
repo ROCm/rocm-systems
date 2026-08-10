@@ -66,18 +66,18 @@ static bool validateMemoryOnGPU(int gpu) {
   constexpr auto threadsPerBlock = 256;
   size_t Nbytes = N * sizeof(int);
 
-  HIP_CHECK(hipSetDevice(gpu));
+  HIP_CHECK(hipSetDevice(gpu))
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
 
   hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
                      static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d, N);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
 
   if (!HipTest::checkVectorADD(A_h, B_h, C_h, N)) {
     UNSCOPED_INFO("Validation PASSED for gpu " << gpu);
@@ -100,21 +100,21 @@ static bool regressAllocInLoop(int gpu) {
   int i = 0;
   int* ptr;
 
-  HIP_CHECK(hipSetDevice(gpu));
+  HIP_CHECK(hipSetDevice(gpu))
   numBytes = BuffSizeBC;
 
   // Exercise allocation in loop with bigger chunks
   for (i = 0; i < MaxAllocFree_BigChunks; i++) {
-    HIP_CHECK(hipMalloc(&ptr, numBytes));
-    HIP_CHECK(hipFree(ptr));
+    HIP_CHECK(hipMalloc(&ptr, numBytes))
+    HIP_CHECK(hipFree(ptr))
   }
 
   // Exercise allocation in loop with smaller chunks and maximum iters
   numBytes = BuffSizeSC;
 
   for (i = 0; i < MaxAllocFree_SmallChunks; i++) {
-    HIP_CHECK(hipMalloc(&ptr, numBytes));
-    HIP_CHECK(hipFree(ptr));
+    HIP_CHECK(hipMalloc(&ptr, numBytes))
+    HIP_CHECK(hipFree(ptr))
   }
   return true;
 }
@@ -131,18 +131,18 @@ static bool validateMemoryOnGpuMThread(int gpu) {
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
   size_t Nbytes = N * sizeof(int);
-  HIPCHECK(hipSetDevice(gpu));
+  HIPCHECK(hipSetDevice(gpu))
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIPCHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-  HIPCHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  HIPCHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
+  HIPCHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
 
   hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
                      static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d, N);
-  HIP_CHECK(hipGetLastError());
-  HIPCHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGetLastError())
+  HIPCHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
 
   if (!HipTest::checkVectorADD(A_h, B_h, C_h, N)) {
     UNSCOPED_INFO("Validation PASSED for gpu " << gpu);
@@ -165,20 +165,20 @@ static bool regressAllocInLoopMthread(int gpu) {
   int i = 0;
   int* ptr;
 
-  HIPCHECK(hipSetDevice(gpu));
+  HIPCHECK(hipSetDevice(gpu))
   numBytes = BuffSizeBC;
 
   // Exercise allocation in loop with bigger chunks
   for (i = 0; i < MaxAllocFree_BigChunks; i++) {
-    HIPCHECK(hipMalloc(&ptr, numBytes));
-    HIPCHECK(hipFree(ptr));
+    HIPCHECK(hipMalloc(&ptr, numBytes))
+    HIPCHECK(hipFree(ptr))
   }
 
   // Exercise allocation in loop with smaller chunks and maximum iters
   numBytes = BuffSizeSC;
   for (i = 0; i < MaxAllocFree_SmallChunks; i++) {
-    HIPCHECK(hipMalloc(&ptr, numBytes));
-    HIPCHECK(hipFree(ptr));
+    HIPCHECK(hipMalloc(&ptr, numBytes))
+    HIPCHECK(hipFree(ptr))
   }
 
   return true;
@@ -201,7 +201,7 @@ HIP_TEST_CASE(Stress_hipMalloc_LoopRegressionAllocFreeCycles) {
   int devCnt = 0;
 
   // Get GPU count
-  HIP_CHECK(hipGetDeviceCount(&devCnt));
+  HIP_CHECK(hipGetDeviceCount(&devCnt))
   REQUIRE(devCnt > 0);
 
   CHECK(regressAllocInLoop(0) == true);
@@ -223,13 +223,13 @@ HIP_TEST_CASE(Stress_hipMalloc_AllocateAndPoolBuffers) {
   int devCnt{0}, *ptr{nullptr};
 
   // Get GPU count
-  HIP_CHECK(hipGetDeviceCount(&devCnt));
+  HIP_CHECK(hipGetDeviceCount(&devCnt))
   REQUIRE(devCnt > 0);
 
   // Allocate small chunks of memory million times
   for (int i = 0; i < MaxAllocPoolIter; i++) {
     if ((err = hipMalloc(&ptr, BuffSize)) != hipSuccess) {
-      HIP_CHECK(hipMemGetInfo(&avail, &tot));
+      HIP_CHECK(hipMemGetInfo(&avail, &tot))
 
       INFO("Loop regression pool allocation failure. "
            << "Total gpu memory " << tot / (1024.0 * 1024.0) << ", Free memory "
@@ -244,7 +244,7 @@ HIP_TEST_CASE(Stress_hipMalloc_AllocateAndPoolBuffers) {
 
   // Free ptrs at later point of time
   for (auto& t : ptrlist) {
-    HIP_CHECK(hipFree(t));
+    HIP_CHECK(hipFree(t))
   }
   ret = validateMemoryOnGPU(0);
   REQUIRE(ret == true);
@@ -260,7 +260,7 @@ HIP_TEST_CASE(Stress_hipMalloc_Multithreaded_MultiGPU) {
   int devCnt;
 
   // Get GPU count
-  HIP_CHECK(hipGetDeviceCount(&devCnt));
+  HIP_CHECK(hipGetDeviceCount(&devCnt))
   REQUIRE(devCnt > 0);
 
   for (int i = 0; i < devCnt; i++) {

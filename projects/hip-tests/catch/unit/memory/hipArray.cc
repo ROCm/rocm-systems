@@ -14,8 +14,8 @@ HIP_TEST_CASE(Unit_hipArray_Valid) {
   desc.NumChannels = 1;
   desc.Width = 1024;
   desc.Height = 1024;
-  HIP_CHECK(hipArrayCreate(&array, &desc));
-  HIP_CHECK(hipFreeArray(array));
+  HIP_CHECK(hipArrayCreate(&array, &desc))
+  HIP_CHECK(hipFreeArray(array))
 }
 
 HIP_TEST_CASE(Unit_hipArray_Invalid) {
@@ -41,8 +41,8 @@ HIP_TEST_CASE(Unit_hipArray_DoubleFree) {
   desc.NumChannels = 1;
   desc.Width = 1024;
   desc.Height = 1024;
-  HIP_CHECK(hipArrayCreate(&array, &desc));
-  HIP_CHECK(hipFreeArray(array));
+  HIP_CHECK(hipArrayCreate(&array, &desc))
+  HIP_CHECK(hipFreeArray(array))
   REQUIRE(hipFreeArray(array) == hipErrorContextIsDestroyed);
 }
 HIP_TEST_CASE(Unit_hipArray_TrippleDestroy) {
@@ -54,8 +54,8 @@ HIP_TEST_CASE(Unit_hipArray_TrippleDestroy) {
   desc.NumChannels = 1;
   desc.Width = 1024;
   desc.Height = 1024;
-  HIP_CHECK(hipArrayCreate(&array, &desc));
-  HIP_CHECK(hipArrayDestroy(array));
+  HIP_CHECK(hipArrayCreate(&array, &desc))
+  HIP_CHECK(hipArrayDestroy(array))
   REQUIRE(hipArrayDestroy(array) == hipErrorContextIsDestroyed);
   REQUIRE(hipArrayDestroy(array) == hipErrorContextIsDestroyed);
 }

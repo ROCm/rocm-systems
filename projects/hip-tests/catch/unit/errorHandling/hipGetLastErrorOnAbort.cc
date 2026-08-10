@@ -36,7 +36,7 @@ HIP_TEST_CASE(Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations) {
   DISABLE_CORE_DUMPS();
 
   int* devMem = nullptr;
-  HIP_CHECK(hipMalloc(&devMem, sizeBytes));
+  HIP_CHECK(hipMalloc(&devMem, sizeBytes))
   REQUIRE(devMem != nullptr);
 
   hipError_t ret;
@@ -53,7 +53,7 @@ HIP_TEST_CASE(Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations) {
   ret = hipGetLastError();
   REQUIRE(ret == hipSuccess);
 
-  HIP_CHECK(hipFree(devMem));
+  HIP_CHECK(hipFree(devMem))
 
   // Performing Invalid operation
   squareKernel<<<1, 1, 0, 0>>>(nullptr);
@@ -93,7 +93,7 @@ HIP_TEST_CASE(Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations) {
  */
 HIP_TEST_CASE(Unit_hipGetLastError_KernelFailure_TwoDevices) {
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   if (deviceCount < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
@@ -101,7 +101,7 @@ HIP_TEST_CASE(Unit_hipGetLastError_KernelFailure_TwoDevices) {
   DISABLE_CORE_DUMPS();
 
   // Perform Invalid operation on Device 0
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   hipError_t ret;
 
@@ -162,13 +162,13 @@ HIP_TEST_CASE(Unit_hipGetLastError_KernelFailure_TwoStreams) {
   DISABLE_CORE_DUMPS();
 
   int* devMem = nullptr;
-  HIP_CHECK(hipMalloc(&devMem, sizeBytes));
+  HIP_CHECK(hipMalloc(&devMem, sizeBytes))
   REQUIRE(devMem != nullptr);
 
   hipStream_t stream1, stream2;
 
-  HIP_CHECK(hipStreamCreate(&stream1));
-  HIP_CHECK(hipStreamCreate(&stream2));
+  HIP_CHECK(hipStreamCreate(&stream1))
+  HIP_CHECK(hipStreamCreate(&stream2))
 
   hipError_t ret;
 

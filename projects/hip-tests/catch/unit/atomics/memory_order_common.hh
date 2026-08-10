@@ -181,7 +181,7 @@ template <BuiltinAtomicOperation operation, int memory_order, int memory_scope> 
   } else if (memory_scope == __HIP_MEMORY_SCOPE_WORKGROUP) {
     blocks = 1;
     int warp_size = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
     threads = warp_size * 2;
   } else if (memory_scope == __HIP_MEMORY_SCOPE_AGENT) {
     blocks = 2;
@@ -194,7 +194,7 @@ template <BuiltinAtomicOperation operation, int memory_order, int memory_scope> 
   if constexpr (operation == BuiltinAtomicOperation::kAnd) {
      flagvalue = 1;
   }
-  HIP_CHECK(hipMemcpy(flag.ptr(), &flagvalue, sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(flag.ptr(), &flagvalue, sizeof(int), hipMemcpyHostToDevice))
 
   LinearAllocGuard<int> ret(LinearAllocs::hipMallocManaged, sizeof(int));
 
@@ -202,7 +202,7 @@ template <BuiltinAtomicOperation operation, int memory_order, int memory_scope> 
     const auto alloc_type = LinearAllocs::hipMalloc;
     LinearAllocGuard<int> data(alloc_type, sizeof(int));
 
-    HIP_CHECK(hipMemset(data.ptr(), 0, sizeof(int)));
+    HIP_CHECK(hipMemset(data.ptr(), 0, sizeof(int)))
     TestKernel<operation, memory_order, memory_scope>
         <<<blocks, threads>>>(flag.ptr(), data.ptr(), ret.ptr());
   }
@@ -214,7 +214,7 @@ template <BuiltinAtomicOperation operation, int memory_order, int memory_scope> 
     }
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(ret.ptr()[0] == kTestValue);
 }
@@ -231,13 +231,13 @@ template <BuiltinAtomicOperation operation, int memory_order> void SystemTest() 
   LinearAllocGuard<int> flag(LinearAllocs::hipMallocManaged, sizeof(int));
   LinearAllocGuard<int> ret(LinearAllocs::hipMallocManaged, sizeof(int));
 
-  HIP_CHECK(hipMemset(flag.ptr(), 0, sizeof(int)));
+  HIP_CHECK(hipMemset(flag.ptr(), 0, sizeof(int)))
 
   SECTION("Global memory") {
     const auto alloc_type = GENERATE(LinearAllocs::hipHostMalloc , LinearAllocs::hipMallocManaged);
     LinearAllocGuard<int> data(alloc_type, sizeof(int));
 
-    HIP_CHECK(hipMemset(data.ptr(), 0, sizeof(int)));
+    HIP_CHECK(hipMemset(data.ptr(), 0, sizeof(int)))
 
     if constexpr(operation == BuiltinAtomicOperation::kAnd) {
       flag.ptr()[0] = 1;
@@ -250,7 +250,7 @@ template <BuiltinAtomicOperation operation, int memory_order> void SystemTest() 
       ConsumerKernel<operation, memory_order, __HIP_MEMORY_SCOPE_SYSTEM>
           <<<1, 1>>>(flag.ptr(), data.ptr(), ret.ptr());
 
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
       host_thread.join();
     }
 
@@ -262,7 +262,7 @@ template <BuiltinAtomicOperation operation, int memory_order> void SystemTest() 
       ProducerKernel<operation, memory_order, __HIP_MEMORY_SCOPE_SYSTEM>
           <<<1, 1>>>(flag.ptr(), data.ptr());
 
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
       host_thread.join();
     }
   }
@@ -385,7 +385,7 @@ template <BuiltinAtomicOperation operation, int memory_scope> void Test() {
   } else if (memory_scope == __HIP_MEMORY_SCOPE_WORKGROUP) {
     blocks = 1;
     int warp_size = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
     threads = warp_size * 4;
   } else if (memory_scope == __HIP_MEMORY_SCOPE_AGENT) {
     blocks = 4;
@@ -395,8 +395,8 @@ template <BuiltinAtomicOperation operation, int memory_scope> void Test() {
   LinearAllocGuard<int> counter1(LinearAllocs::hipMallocManaged, sizeof(int));
   LinearAllocGuard<int> counter2(LinearAllocs::hipMallocManaged, sizeof(int));
 
-  HIP_CHECK(hipMemset(counter1.ptr(), 0, sizeof(int)));
-  HIP_CHECK(hipMemset(counter2.ptr(), 0, sizeof(int)));
+  HIP_CHECK(hipMemset(counter1.ptr(), 0, sizeof(int)))
+  HIP_CHECK(hipMemset(counter2.ptr(), 0, sizeof(int)))
 
   SECTION("Global memory") {
     const auto alloc_type = LinearAllocs::hipMalloc;
@@ -406,8 +406,8 @@ template <BuiltinAtomicOperation operation, int memory_scope> void Test() {
     if constexpr (operation == BuiltinAtomicOperation::kAnd) {
        flagvalue = 1;
     }
-    HIP_CHECK(hipMemcpy(flag1.ptr(), &flagvalue, sizeof(int), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(flag2.ptr(), &flagvalue, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(flag1.ptr(), &flagvalue, sizeof(int), hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(flag2.ptr(), &flagvalue, sizeof(int), hipMemcpyHostToDevice))
 
     TestKernel<operation, memory_scope>
         <<<blocks, threads>>>(flag1.ptr(), flag2.ptr(), counter1.ptr(), counter2.ptr());
@@ -419,7 +419,7 @@ template <BuiltinAtomicOperation operation, int memory_scope> void Test() {
     }
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(counter1.ptr()[0] != 0);
   REQUIRE(counter2.ptr()[0] != 0);
@@ -438,8 +438,8 @@ template <BuiltinAtomicOperation operation> void SystemTest() {
   LinearAllocGuard<int> counter2(LinearAllocs::hipMallocManaged, sizeof(int));
   std::vector<StreamGuard> streams;
 
-  HIP_CHECK(hipMemset(counter1.ptr(), 0, sizeof(int)));
-  HIP_CHECK(hipMemset(counter2.ptr(), 0, sizeof(int)));
+  HIP_CHECK(hipMemset(counter1.ptr(), 0, sizeof(int)))
+  HIP_CHECK(hipMemset(counter2.ptr(), 0, sizeof(int)))
 
   for (auto j = 0; j < 2; ++j) {
       streams.emplace_back(Streams::created);
@@ -453,8 +453,8 @@ template <BuiltinAtomicOperation operation> void SystemTest() {
     if constexpr (operation == BuiltinAtomicOperation::kAnd) {
        flagvalue = 1;
     }
-    HIP_CHECK(hipMemcpy(flag1.ptr(), &flagvalue, sizeof(int), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(flag2.ptr(), &flagvalue, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(flag1.ptr(), &flagvalue, sizeof(int), hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(flag2.ptr(), &flagvalue, sizeof(int), hipMemcpyHostToDevice))
 
     const auto &stream1 = streams[0].stream();
     ConsumerKernel<operation, __HIP_MEMORY_SCOPE_SYSTEM>
@@ -469,7 +469,7 @@ template <BuiltinAtomicOperation operation> void SystemTest() {
         std::thread([&] { Producer<operation, __HIP_MEMORY_SCOPE_SYSTEM>(flag1.ptr()); });
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   host_producer.join();
   host_consumer.join();
 

@@ -36,28 +36,28 @@ static void HipGetSymbolSizeAddressTest(const void* symbol) {
 
   T* symbol_ptr = nullptr;
   size_t symbol_size = 0;
-  HIP_CHECK(hipGetSymbolAddress(reinterpret_cast<void**>(&symbol_ptr), symbol));
-  HIP_CHECK(hipGetSymbolSize(&symbol_size, symbol));
+  HIP_CHECK(hipGetSymbolAddress(reinterpret_cast<void**>(&symbol_ptr), symbol))
+  HIP_CHECK(hipGetSymbolSize(&symbol_size, symbol))
   REQUIRE(symbol_size == size);
   REQUIRE(symbol_ptr != nullptr);
 
   LinearAllocGuard<bool> equal_addresses(LinearAllocs::hipMalloc, sizeof(bool));
   HIP_CHECK(hipMemset(equal_addresses.ptr(), false, sizeof(*equal_addresses.ptr())))
   validation_kernel<<<1, 1>>>(symbol_ptr, equal_addresses.ptr());
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipStreamSynchronize(nullptr));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   bool ok = false;
-  HIP_CHECK(hipMemcpy(&ok, equal_addresses.ptr(), sizeof(ok), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&ok, equal_addresses.ptr(), sizeof(ok), hipMemcpyDeviceToHost))
   REQUIRE(ok);
 
   constexpr T expected_value = 42;
   std::array<T, N> fill_buffer;
   std::fill_n(fill_buffer.begin(), N, expected_value);
-  HIP_CHECK(hipMemcpy(symbol_ptr, fill_buffer.data(), symbol_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(symbol_ptr, fill_buffer.data(), symbol_size, hipMemcpyHostToDevice))
 
 
   std::array<T, N> read_buffer;
-  HIP_CHECK(hipMemcpy(read_buffer.data(), symbol_ptr, symbol_size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(read_buffer.data(), symbol_ptr, symbol_size, hipMemcpyDeviceToHost))
   ArrayFindIfNot(read_buffer.data(), expected_value, read_buffer.size());
 }
 

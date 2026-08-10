@@ -61,9 +61,9 @@ HIP_TEST_CASE(Unit_hipEventCreateWithFlags_Positive) {
 #endif
 
   hipEvent_t event;
-  HIP_CHECK(hipEventCreateWithFlags(&event, flagUnderTest));
+  HIP_CHECK(hipEventCreateWithFlags(&event, flagUnderTest))
   REQUIRE(event != nullptr);
-  HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipEventDestroy(event))
 }
 
 /**
@@ -95,7 +95,7 @@ static void check_output(int* inp, int* out, size_t size) {
 // local function
 static void testMemCoherency(eSyncToTest test, eMemoryToTest mem, uint32_t flags) {
   hipDeviceProp_t prop;
-  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0))
   // If the GPU is not large bar then exit the test
   if (prop.isLargeBar != 1) {
     HIP_SKIP_TEST("large BAR (resizable BAR) is not supported on this device.");
@@ -103,53 +103,53 @@ static void testMemCoherency(eSyncToTest test, eMemoryToTest mem, uint32_t flags
   constexpr auto blocksPerCU = 6;
   unsigned grid_size = HipTest::setNumBlocks(blocksPerCU, block_size, buffer_size);
   hipEvent_t event;
-  HIP_CHECK(hipEventCreateWithFlags(&event, flags));
+  HIP_CHECK(hipEventCreateWithFlags(&event, flags))
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreateWithFlags(&stream, 0x0));
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, 0x0))
   int *ibuf_h, *buf_d;
   ibuf_h = new int[buffer_size];
   REQUIRE(ibuf_h != nullptr);
   int total_iter = 0;
   if (mem == eMemoryToTest::eHostVisibleMemory) {
-    HIP_CHECK(hipMalloc(&buf_d, buffer_size * sizeof(int)));
+    HIP_CHECK(hipMalloc(&buf_d, buffer_size * sizeof(int)))
     total_iter = test_iteration_hstvismem();
   } else if (mem == eMemoryToTest::eNonCoherentHostMemory) {
-    HIP_CHECK(hipHostMalloc(&buf_d, buffer_size * sizeof(int), hipHostMallocNonCoherent));
+    HIP_CHECK(hipHostMalloc(&buf_d, buffer_size * sizeof(int), hipHostMallocNonCoherent))
     total_iter = test_iteration_noncohmem();
   } else if (mem == eMemoryToTest::eCoherentHostMemory) {
-    HIP_CHECK(hipHostMalloc(&buf_d, buffer_size * sizeof(int), hipHostMallocCoherent));
+    HIP_CHECK(hipHostMalloc(&buf_d, buffer_size * sizeof(int), hipHostMallocCoherent))
     total_iter = test_iteration_noncohmem();
   }
   for (int iter = 0; iter < total_iter; iter++) {
     // Inititalize the buffer with random data
     init_input(ibuf_h, buffer_size);
-    HIP_CHECK(hipMemcpy(buf_d, ibuf_h, sizeof(int) * buffer_size, hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(buf_d, ibuf_h, sizeof(int) * buffer_size, hipMemcpyDefault))
     if (flags & hipEventDisableSystemFence) {
       vector_square_system_scope_atomic<int><<<grid_size, block_size, 0, stream>>>(buf_d, buf_d, buffer_size);
     } else {
       HipTest::vector_square<int><<<grid_size, block_size, 0, stream>>>(buf_d, buf_d, buffer_size);
     }
-    HIP_CHECK(hipEventRecord(event, stream));
+    HIP_CHECK(hipEventRecord(event, stream))
     // test different synchronization APIs
     if (test == eSyncToTest::eStreamSynchronize) {
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     } else if (test == eSyncToTest::eDeviceSynchronize) {
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
     } else if (test == eSyncToTest::eEventSynchronize) {
-      HIP_CHECK(hipEventSynchronize(event));
+      HIP_CHECK(hipEventSynchronize(event))
     } else if (test == eSyncToTest::eStreamWaitEvent) {
-      HIP_CHECK(hipStreamWaitEvent(stream, event, 0));
+      HIP_CHECK(hipStreamWaitEvent(stream, event, 0))
     }
     check_output(ibuf_h, buf_d, buffer_size);
   }
   delete[] ibuf_h;
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipEventDestroy(event))
   if (mem == eMemoryToTest::eHostVisibleMemory) {
-    HIP_CHECK(hipFree(buf_d));
+    HIP_CHECK(hipFree(buf_d))
   } else if ((mem == eMemoryToTest::eNonCoherentHostMemory) ||
              (mem == eMemoryToTest::eCoherentHostMemory)) {
-    HIP_CHECK(hipHostFree(buf_d));
+    HIP_CHECK(hipHostFree(buf_d))
   }
 }
 
@@ -351,23 +351,23 @@ HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DefaultFlg_CohHstMem) {
  */
 HIP_TEST_CASE(Unit_hipEventCreateWithFlags_Verify_Capture) {
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   hipStreamCaptureMode mode = GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
                                        hipStreamCaptureModeRelaxed);
-  HIP_CHECK(hipStreamBeginCapture(stream, mode));
+  HIP_CHECK(hipStreamBeginCapture(stream, mode))
 
   const unsigned int flags = GENERATE(hipEventDefault, hipEventBlockingSync, hipEventDisableTiming,
                                       hipEventInterprocess | hipEventDisableTiming);
   hipEvent_t event;
-  HIP_CHECK(hipEventCreateWithFlags(&event, flags));
+  HIP_CHECK(hipEventCreateWithFlags(&event, flags))
   REQUIRE(event != nullptr);
   hipGraph_t graph;
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipEventDestroy(event));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipEventDestroy(event))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**

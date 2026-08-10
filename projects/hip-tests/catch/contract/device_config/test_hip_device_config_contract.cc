@@ -12,7 +12,7 @@ namespace {
 // limit contracts are only exercised against a provisioned runtime.
 void RequireDevice() {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -38,7 +38,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceGetCacheConfig_Default_ReturnsEnumV
   RequireDevice();
 
   hipFuncCache_t config = hipFuncCachePreferNone;
-  HIP_CHECK(hipDeviceGetCacheConfig(&config));
+  HIP_CHECK(hipDeviceGetCacheConfig(&config))
 
   // The queried preference must be a documented enumerator; the specific value
   // is device- and backend-dependent and therefore not asserted.
@@ -52,7 +52,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceSetCacheConfig_Default_IsAcceptedOr
   // Save the current preference so the device configuration is restored even if
   // the set path is honored, avoiding cross-test contamination.
   hipFuncCache_t saved = hipFuncCachePreferNone;
-  HIP_CHECK(hipDeviceGetCacheConfig(&saved));
+  HIP_CHECK(hipDeviceGetCacheConfig(&saved))
 
   const hipError_t status = hipDeviceSetCacheConfig(hipFuncCachePreferNone);
   if (status == hipErrorNotSupported) {
@@ -60,11 +60,11 @@ HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceSetCacheConfig_Default_IsAcceptedOr
     // report is a contract-compliant outcome, not a failure.
     return;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   // The runtime may coerce the request; the exact post-state is not part of the
   // contract, so only the saved preference is restored.
-  HIP_CHECK(hipDeviceSetCacheConfig(saved));
+  HIP_CHECK(hipDeviceSetCacheConfig(saved))
 }
 
 // @asserts: hipDeviceGetSharedMemConfig - when supported, reports one of the documented hipSharedMemConfig enumerators
@@ -78,7 +78,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceGetSharedMemConfig_Default_ReturnsE
     // backends; an unsupported report is contract-compliant.
     return;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   // When supported, the reported value must be a documented enumerator.
   REQUIRE(IsKnownSharedMemConfig(config));
@@ -96,7 +96,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceGetLimit_Default_ReportsStackAndHea
     if (status == hipErrorUnsupportedLimit) {
       continue;
     }
-    HIP_CHECK(status);
+    HIP_CHECK(status)
     // value is a well-defined size_t; its magnitude is device-dependent and is
     // therefore not asserted against any specific bound.
     (void)value;
@@ -129,7 +129,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceSetLimit_Default_RoundTripsOrIsUnsu
   if (get_status == hipErrorUnsupportedLimit) {
     return;
   }
-  HIP_CHECK(get_status);
+  HIP_CHECK(get_status)
 
   // Setting the limit back to its current value performs no global mutation and
   // must either succeed or report the limit as unsupported for set.
@@ -137,7 +137,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceSetLimit_Default_RoundTripsOrIsUnsu
   if (set_status == hipErrorUnsupportedLimit) {
     return;
   }
-  HIP_CHECK(set_status);
+  HIP_CHECK(set_status)
 }
 
 // @asserts: hipGetDeviceFlags - the schedule subfield is a documented mode and greatest stream priority <= least
@@ -145,7 +145,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_HipGetDeviceFlags_AndStreamPriorityRange_Are
   RequireDevice();
 
   unsigned int flags = 0;
-  HIP_CHECK(hipGetDeviceFlags(&flags));
+  HIP_CHECK(hipGetDeviceFlags(&flags))
 
   // The schedule subfield must resolve to one of the documented scheduling
   // modes. Backends may report additional device-specific flag bits (for
@@ -157,7 +157,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_HipGetDeviceFlags_AndStreamPriorityRange_Are
 
   int least_priority = 0;
   int greatest_priority = 0;
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&least_priority, &greatest_priority));
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&least_priority, &greatest_priority))
 
   // HIP orders stream priorities so that the greatest (highest) priority is a
   // numerically smaller-or-equal value than the least priority.

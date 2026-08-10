@@ -13,7 +13,7 @@ HIP_TEST_CASE(Unit_hipTexRefSetGetMipmapFilterMode) {
 
   // Retrieve the texture reference for our symbol
   const textureReference* texRefConst = nullptr;
-  HIP_CHECK(hipGetTextureReference(&texRefConst, &tex));
+  HIP_CHECK(hipGetTextureReference(&texRefConst, &tex))
   REQUIRE(texRefConst != nullptr);
   // Implementation expects non-const textureReference*
   textureReference* texRef = const_cast<textureReference*>(texRefConst);
@@ -21,14 +21,14 @@ HIP_TEST_CASE(Unit_hipTexRefSetGetMipmapFilterMode) {
   hipTextureFilterMode mipMode;
 
   SECTION("Set mipmap filter mode to Linear and verify") {
-    HIP_CHECK(hipTexRefSetMipmapFilterMode(texRef, hipFilterModeLinear));
+    HIP_CHECK(hipTexRefSetMipmapFilterMode(texRef, hipFilterModeLinear))
     auto res = hipTexRefGetMipmapFilterMode(&mipMode, texRef);
     REQUIRE(res == hipErrorInvalidValue);
     REQUIRE(mipMode == hipFilterModeLinear);
   }
 
   SECTION("Set mipmap filter mode back to Point and verify") {
-    HIP_CHECK(hipTexRefSetMipmapFilterMode(texRef, hipFilterModePoint));
+    HIP_CHECK(hipTexRefSetMipmapFilterMode(texRef, hipFilterModePoint))
     auto res = hipTexRefGetMipmapFilterMode(&mipMode, texRef);
     REQUIRE(res == hipErrorInvalidValue);
     REQUIRE(mipMode == hipFilterModePoint);

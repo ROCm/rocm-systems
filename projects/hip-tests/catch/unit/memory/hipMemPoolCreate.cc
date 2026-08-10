@@ -36,7 +36,7 @@ HIP_TEST_CASE(Unit_hipMemPoolCreate_Negative_Parameter) {
   checkMempoolSupported(0)
 
       int num_dev = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_dev));
+  HIP_CHECK(hipGetDeviceCount(&num_dev))
 
   hipMemPoolProps pool_props;
   memset(&pool_props, 0, sizeof(pool_props));
@@ -88,9 +88,9 @@ HIP_TEST_CASE(Unit_hipMemPoolCreate_With_maxSize) {
 #endif
   float *A = nullptr, *B = nullptr;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   hipMemPool_t mem_pool = nullptr;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
   HIP_CHECK(
       hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), 1024 * 1024 * 512, mem_pool, stream));
 #if HT_AMD
@@ -101,9 +101,9 @@ HIP_TEST_CASE(Unit_hipMemPoolCreate_With_maxSize) {
   HIP_CHECK(
       hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), 1024 * 1024 * 513, mem_pool, stream));
 #endif
-  HIP_CHECK(hipFreeAsync(A, stream));
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFreeAsync(A, stream))
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 HIP_TEST_CASE(Unit_hipMemPoolCreate_Without_maxSize) {
@@ -117,17 +117,17 @@ HIP_TEST_CASE(Unit_hipMemPoolCreate_Without_maxSize) {
 
   float *A = nullptr, *B = nullptr;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   hipMemPool_t mem_pool = nullptr;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
   HIP_CHECK(
       hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), 1024 * 1024 * 512, mem_pool, stream));
   HIP_CHECK(
       hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), 1024 * 1024 * 513, mem_pool, stream));
-  HIP_CHECK(hipFreeAsync(A, stream));
-  HIP_CHECK(hipFreeAsync(B, stream));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK(hipFreeAsync(A, stream))
+  HIP_CHECK(hipFreeAsync(B, stream))
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
 }
 
 static __global__ void setKer(int* devptr) {
@@ -148,7 +148,7 @@ static __global__ void setKer(int* devptr) {
  */
 HIP_TEST_CASE(Unit_hipMemPoolCreate_DeviceTest) {
   checkMempoolSupported(0) int num_devices = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
   checkIfMultiDev(num_devices)
       // Scenario1
       SECTION("Simple Device Test") {
@@ -158,8 +158,8 @@ HIP_TEST_CASE(Unit_hipMemPoolCreate_DeviceTest) {
       prop.allocType = hipMemAllocationTypePinned;
       prop.location.id = dev;
       prop.location.type = hipMemLocationTypeDevice;
-      HIP_CHECK(hipMemPoolCreate(&mem_pool, &prop));
-      HIP_CHECK(hipMemPoolDestroy(mem_pool));
+      HIP_CHECK(hipMemPoolCreate(&mem_pool, &prop))
+      HIP_CHECK(hipMemPoolDestroy(mem_pool))
     }
   }
   // Scenario2
@@ -172,21 +172,21 @@ HIP_TEST_CASE(Unit_hipMemPoolCreate_DeviceTest) {
     prop.allocType = hipMemAllocationTypePinned;
     prop.location.id = 0;
     prop.location.type = hipMemLocationTypeDevice;
-    HIP_CHECK(hipMemPoolCreate(&mem_pool, &prop));
+    HIP_CHECK(hipMemPoolCreate(&mem_pool, &prop))
     // Try allocating from mempool in other device context
     for (int dev = 1; dev < num_devices; dev++) {
       int* A_d;
-      HIP_CHECK(hipSetDevice(dev));
+      HIP_CHECK(hipSetDevice(dev))
       HIP_CHECK(
           hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), N * sizeof(int), mem_pool, 0));
-      HIP_CHECK(hipStreamSynchronize(0));
-      HIP_CHECK(hipSetDevice(0));
+      HIP_CHECK(hipStreamSynchronize(0))
+      HIP_CHECK(hipSetDevice(0))
       // Launch kernel to access A_d and free it on dev 0 context
       setKer<<<N / numThreadsPerBlk, numThreadsPerBlk, 0, 0>>>(A_d);
-      HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), 0));
-      HIP_CHECK(hipStreamSynchronize(0));
+      HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), 0))
+      HIP_CHECK(hipStreamSynchronize(0))
     }
-    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+    HIP_CHECK(hipMemPoolDestroy(mem_pool))
   }
 }
 

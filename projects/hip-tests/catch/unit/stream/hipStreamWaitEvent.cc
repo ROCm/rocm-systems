@@ -26,10 +26,10 @@ HIP_TEST_CASE(Unit_hipStreamWaitEvent_Negative) {
   if (streamType == StreamTestType::StreamPerThread) {
     stream = hipStreamPerThread;
   } else if (streamType == StreamTestType::CreatedStream) {
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
   }
 
-  HIP_CHECK(hipEventCreate(&event));
+  HIP_CHECK(hipEventCreate(&event))
 
   REQUIRE((stream != nullptr) != (streamType == StreamTestType::NullStream));
   REQUIRE(event != nullptr);
@@ -46,10 +46,10 @@ HIP_TEST_CASE(Unit_hipStreamWaitEvent_Negative) {
     HIP_CHECK_ERROR(hipStreamWaitEvent(stream, event, flag), hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipEventDestroy(event))
 
   if (streamType == StreamTestType::CreatedStream) {
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 
@@ -57,35 +57,35 @@ HIP_TEST_CASE(Unit_hipStreamWaitEvent_Default) {
   hipStream_t stream{nullptr};
   hipEvent_t waitEvent{nullptr};
 
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipEventCreate(&waitEvent));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipEventCreate(&waitEvent))
 
   REQUIRE(stream != nullptr);
   REQUIRE(waitEvent != nullptr);
 
   LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 2000), stream);
 
-  HIP_CHECK(hipEventRecord(waitEvent, stream));
+  HIP_CHECK(hipEventRecord(waitEvent, stream))
 
   // Make sure stream is waiting for data to be set
   HIP_CHECK_ERROR(hipEventQuery(waitEvent), hipErrorNotReady);
 
-  HIP_CHECK(hipStreamWaitEvent(stream, waitEvent, 0));
+  HIP_CHECK(hipStreamWaitEvent(stream, waitEvent, 0))
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipEventDestroy(waitEvent));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipEventDestroy(waitEvent))
 }
 
 HIP_TEST_CASE(Unit_hipStreamWaitEvent_DifferentStreams) {
   hipStream_t blockedStreamA{nullptr}, streamBlockedOnStreamA{nullptr}, unblockingStream{nullptr};
   hipEvent_t waitEvent{nullptr};
 
-  HIP_CHECK(hipStreamCreate(&blockedStreamA));
-  HIP_CHECK(hipStreamCreate(&streamBlockedOnStreamA));
-  HIP_CHECK(hipStreamCreate(&unblockingStream));
-  HIP_CHECK(hipEventCreate(&waitEvent));
+  HIP_CHECK(hipStreamCreate(&blockedStreamA))
+  HIP_CHECK(hipStreamCreate(&streamBlockedOnStreamA))
+  HIP_CHECK(hipStreamCreate(&unblockingStream))
+  HIP_CHECK(hipEventCreate(&waitEvent))
 
   REQUIRE(blockedStreamA != nullptr);
   REQUIRE(streamBlockedOnStreamA != nullptr);
@@ -93,29 +93,29 @@ HIP_TEST_CASE(Unit_hipStreamWaitEvent_DifferentStreams) {
 
   LaunchDelayKernel(std::chrono::milliseconds(3000), blockedStreamA);
 
-  HIP_CHECK(hipEventRecord(waitEvent, blockedStreamA));
+  HIP_CHECK(hipEventRecord(waitEvent, blockedStreamA))
 
   // Make sure stream is waiting for data to be set
   HIP_CHECK_ERROR(hipEventQuery(waitEvent), hipErrorNotReady);
 
-  HIP_CHECK(hipStreamWaitEvent(streamBlockedOnStreamA, waitEvent, 0));
+  HIP_CHECK(hipStreamWaitEvent(streamBlockedOnStreamA, waitEvent, 0))
 
   LaunchDelayKernel(std::chrono::milliseconds(2000), streamBlockedOnStreamA);
 
-  HIP_CHECK(hipStreamSynchronize(unblockingStream));
+  HIP_CHECK(hipStreamSynchronize(unblockingStream))
 
-  HIP_CHECK(hipStreamSynchronize(blockedStreamA));
+  HIP_CHECK(hipStreamSynchronize(blockedStreamA))
 
   // Make sure streamBlockedOnStreamA waited for event on blockedStreamA
   HIP_CHECK_ERROR(hipStreamQuery(streamBlockedOnStreamA), hipErrorNotReady);
-  HIP_CHECK(hipStreamSynchronize(streamBlockedOnStreamA));
+  HIP_CHECK(hipStreamSynchronize(streamBlockedOnStreamA))
 
   // Check that both streams have finished
-  HIP_CHECK(hipStreamQuery(blockedStreamA));
-  HIP_CHECK(hipStreamQuery(streamBlockedOnStreamA));
+  HIP_CHECK(hipStreamQuery(blockedStreamA))
+  HIP_CHECK(hipStreamQuery(streamBlockedOnStreamA))
 
-  HIP_CHECK(hipStreamDestroy(blockedStreamA));
-  HIP_CHECK(hipStreamDestroy(streamBlockedOnStreamA));
-  HIP_CHECK(hipStreamDestroy(unblockingStream));
-  HIP_CHECK(hipEventDestroy(waitEvent));
+  HIP_CHECK(hipStreamDestroy(blockedStreamA))
+  HIP_CHECK(hipStreamDestroy(streamBlockedOnStreamA))
+  HIP_CHECK(hipStreamDestroy(unblockingStream))
+  HIP_CHECK(hipEventDestroy(waitEvent))
 }

@@ -40,7 +40,7 @@ HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Basic) {
 HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior) {
   constexpr bool async = true;
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   SECTION("Host to Device") { Memcpy3DHtoDSyncBehavior(Memcpy3DWrapper<async>, false); }
 
@@ -110,7 +110,7 @@ HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Negative_Parameters) {
 
     SECTION("dst_ptr.pitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       hipPitchedPtr invalid_ptr = dst_ptr;
       invalid_ptr.pitch = attr;
       HIP_CHECK_ERROR(Memcpy3DWrapper<async>(invalid_ptr, dst_pos, src_ptr, src_pos, extent, kind),
@@ -119,7 +119,7 @@ HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Negative_Parameters) {
 
     SECTION("src_ptr.pitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       hipPitchedPtr invalid_ptr = src_ptr;
       invalid_ptr.pitch = attr;
       HIP_CHECK_ERROR(Memcpy3DWrapper<async>(dst_ptr, dst_pos, invalid_ptr, src_pos, extent, kind),
@@ -231,12 +231,12 @@ HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Capture) {
                        make_hipPos(0, 0, 0), dst_alloc.extent(), hipMemcpyDeviceToDevice);
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemcpy3DAsync(&memcpy_params, stream));
+  HIP_CHECK(hipMemcpy3DAsync(&memcpy_params, stream))
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }

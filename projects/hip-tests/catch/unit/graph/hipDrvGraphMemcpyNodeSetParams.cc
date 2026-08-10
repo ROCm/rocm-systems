@@ -37,11 +37,11 @@ HIP_TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Basic) {
   using namespace std::placeholders;
 
   constexpr bool async = false;
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
   hipDevice_t device;
   hipCtx_t context;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  HIP_CHECK(hipCtxCreate(&context, 0, device));
+  HIP_CHECK(hipDeviceGet(&device, 0))
+  HIP_CHECK(hipCtxCreate(&context, 0, device))
 
   SECTION("Device to host") {
     Memcpy3DDeviceToHostShell<async>(
@@ -71,11 +71,11 @@ HIP_TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Basic) {
      * Setting back the old context, since in the Memcpy3DDeviceToDeviceShell
      * function the current context is getting modified with hipSetDevice calls
      */
-    HIP_CHECK(hipCtxSetCurrent(context));
+    HIP_CHECK(hipCtxSetCurrent(context))
   }
 
-  HIP_CHECK(hipCtxPopCurrent(&context));
-  HIP_CHECK(hipCtxDestroy(context));
+  HIP_CHECK(hipCtxPopCurrent(&context))
+  HIP_CHECK(hipCtxDestroy(context))
 }
 
 HIP_TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array) {
@@ -84,11 +84,11 @@ HIP_TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array) {
   using namespace std::placeholders;
 
   constexpr bool async = false;
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
   hipDevice_t device;
   hipCtx_t context;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  HIP_CHECK(hipCtxCreate(&context, 0, device));
+  HIP_CHECK(hipDeviceGet(&device, 0))
+  HIP_CHECK(hipCtxCreate(&context, 0, device))
 
   SECTION("Array from/to Host") {
     DrvMemcpy3DArrayHostShell<async>(
@@ -99,8 +99,8 @@ HIP_TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array) {
         std::bind(DrvMemcpy3DGraphWrapper<true>, _1, _2, _3, _4, _5, _6, context, _7));
   }
 
-  HIP_CHECK(hipCtxPopCurrent(&context));
-  HIP_CHECK(hipCtxDestroy(context));
+  HIP_CHECK(hipCtxPopCurrent(&context))
+  HIP_CHECK(hipCtxDestroy(context))
 }
 
 
@@ -131,11 +131,11 @@ HIP_TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array) {
 HIP_TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters) {
   using namespace std::placeholders;
 
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
   hipDevice_t device;
   hipCtx_t context;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  HIP_CHECK(hipCtxCreate(&context, 0, device));
+  HIP_CHECK(hipDeviceGet(&device, 0))
+  HIP_CHECK(hipCtxCreate(&context, 0, device))
 
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};
 
@@ -143,11 +143,11 @@ HIP_TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters) {
                                     hipPos src_pos, hipExtent extent, hipMemcpyKind kind,
                                     hipCtx_t context) {
     hipGraph_t graph = nullptr;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
     hipGraphNode_t node = nullptr;
 
     auto params = GetDrvMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent, kind);
-    HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, graph, nullptr, 0, &params, context));
+    HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, graph, nullptr, 0, &params, context))
 
     SECTION("node == nullptr") {
       HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeSetParams(nullptr, &params), hipErrorInvalidValue);
@@ -187,7 +187,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters) {
 
     SECTION("dstPitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       hipPitchedPtr invalid_ptr = dst_ptr;
       invalid_ptr.pitch = attr;
       auto invalid_params =
@@ -197,7 +197,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters) {
 
     SECTION("srcPitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       hipPitchedPtr invalid_ptr = src_ptr;
       invalid_ptr.pitch = attr;
       auto invalid_params =
@@ -253,7 +253,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters) {
       HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeSetParams(node, &invalid_params), hipErrorInvalidValue);
     }
 
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphDestroy(graph))
   };
 
   SECTION("Host to Device") {
@@ -296,8 +296,8 @@ HIP_TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters) {
                   make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice, context);
   }
 
-  HIP_CHECK(hipCtxPopCurrent(&context));
-  HIP_CHECK(hipCtxDestroy(context));
+  HIP_CHECK(hipCtxPopCurrent(&context))
+  HIP_CHECK(hipCtxDestroy(context))
 }
 
 /**

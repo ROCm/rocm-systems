@@ -57,7 +57,7 @@ bool TryMalloc3D(hipPitchedPtr* device_ptr, hipExtent extent) {
   if (status == hipErrorOutOfMemory || status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return false;
 }
 }  // namespace
@@ -75,7 +75,7 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_HipMemcpy3DAsync_HostDeviceRoundTripsExtent_V
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
   cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   hipMemcpy3DParms h2d{};
@@ -83,15 +83,15 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_HipMemcpy3DAsync_HostDeviceRoundTripsExtent_V
   h2d.dstPtr = device;
   h2d.extent = extent;
   h2d.kind = hipMemcpyHostToDevice;
-  HIP_CHECK(hipMemcpy3DAsync(&h2d, stream));
+  HIP_CHECK(hipMemcpy3DAsync(&h2d, stream))
 
   hipMemcpy3DParms d2h{};
   d2h.srcPtr = device;
   d2h.dstPtr = HostPitchedPtr(dst.data(), kWidth, kHeight);
   d2h.extent = extent;
   d2h.kind = hipMemcpyDeviceToHost;
-  HIP_CHECK(hipMemcpy3DAsync(&d2h, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpy3DAsync(&d2h, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(dst == src);
 }
@@ -109,14 +109,14 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_HipMemset3D_FillsExtent_VisibleAfterCopyBack)
   }
   cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
 
-  HIP_CHECK(hipMemset3D(device, pattern, extent));
+  HIP_CHECK(hipMemset3D(device, pattern, extent))
 
   hipMemcpy3DParms d2h{};
   d2h.srcPtr = device;
   d2h.dstPtr = HostPitchedPtr(dst.data(), kWidth, kHeight);
   d2h.extent = extent;
   d2h.kind = hipMemcpyDeviceToHost;
-  HIP_CHECK(hipMemcpy3D(&d2h));
+  HIP_CHECK(hipMemcpy3D(&d2h))
 
   RequireAllEqual(dst, pattern);
 }
@@ -126,15 +126,15 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_HipMemcpy3DAsync_NullParams_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t status = hipMemcpy3DAsync(nullptr, stream);
 
   REQUIRE(status != hipSuccess);
   HIP_CHECK_ERROR(hipGetLastError(), status);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 }
 
 // @asserts: hipMemcpyWithStream - a linear buffer round-trips host->device->host intact once the stream is synchronized
@@ -145,14 +145,14 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_HipMemcpyWithStream_RoundTripsBytes_VisibleAf
   void* device_ptr = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
-  HIP_CHECK(hipMemcpyWithStream(device_ptr, src.data(), src.size(), hipMemcpyHostToDevice, stream));
-  HIP_CHECK(hipMemcpyWithStream(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpyWithStream(device_ptr, src.data(), src.size(), hipMemcpyHostToDevice, stream))
+  HIP_CHECK(hipMemcpyWithStream(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(dst == src);
 }
@@ -164,10 +164,10 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_HipMemcpyWithStream_InvalidKind_IsRejected) {
   void* device_ptr = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t status = hipMemcpyWithStream(device_ptr, src.data(), src.size(),
@@ -175,7 +175,7 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_HipMemcpyWithStream_InvalidKind_IsRejected) {
 
   REQUIRE(status != hipSuccess);
   HIP_CHECK_ERROR(hipGetLastError(), status);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 }
 
 // @asserts: hipMemset3D - rejects a null (zero-initialized) pitched pointer and surfaces the failure via hipGetLastError
@@ -183,10 +183,10 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_HipMemset3D_NullPitchedPtr_IsRejected) {
   hipPitchedPtr null_ptr{};
   const auto extent = ByteExtent(kWidth, kHeight, kDepth);
 
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   const hipError_t status = hipMemset3D(null_ptr, 0x5a, extent);
 
   REQUIRE(status != hipSuccess);
   HIP_CHECK_ERROR(hipGetLastError(), status);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 }

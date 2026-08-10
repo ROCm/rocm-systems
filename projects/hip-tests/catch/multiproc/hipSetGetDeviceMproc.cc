@@ -54,7 +54,7 @@ static void getDeviceCount(int* pdevCnt) {
     // writing only, no need for read-descriptor
     close(fd[0]);
 
-    HIP_CHECK(hipGetDeviceCount(&devCnt));
+    HIP_CHECK(hipGetDeviceCount(&devCnt))
 
     // send the value on the write-descriptor:
     write(fd[1], &devCnt, sizeof(devCnt));
@@ -270,10 +270,10 @@ static void testMaxRvdMinHvd(int numDevices, int* deviceList, int count) {
     unsetenv("HIP_VISIBLE_DEVICES");
     setenv("ROCR_VISIBLE_DEVICES", max_visibleDeviceString.c_str(), 1);
     setenv("HIP_VISIBLE_DEVICES", min_visibleDeviceString.c_str(), 1);
-    HIP_CHECK(hipGetDeviceCount(&numDevices));
+    HIP_CHECK(hipGetDeviceCount(&numDevices))
     for (int i = 0; i < numDevices; i++) {
-      HIP_CHECK(hipSetDevice(i));
-      HIP_CHECK(hipGetDevice(&device));
+      HIP_CHECK(hipSetDevice(i))
+      HIP_CHECK(hipGetDevice(&device))
       if (device == i) {
         validateCount += 1;
       }
@@ -311,10 +311,10 @@ static void testRvdCvd(int numDevices, int* deviceList, int count) {
     unsetenv("HIP_VISIBLE_DEVICES");
     setenv("ROCR_VISIBLE_DEVICES", max_visibleDeviceString.c_str(), 1);
     setenv("CUDA_VISIBLE_DEVICES", min_visibleDeviceString.c_str(), 1);
-    HIP_CHECK(hipGetDeviceCount(&numDevices));
+    HIP_CHECK(hipGetDeviceCount(&numDevices))
     for (int i = 0; i < numDevices; i++) {
-      HIP_CHECK(hipSetDevice(i));
-      HIP_CHECK(hipGetDevice(&device));
+      HIP_CHECK(hipSetDevice(i))
+      HIP_CHECK(hipGetDevice(&device))
       if (device == i) {
         validateCount += 1;
       }
@@ -351,10 +351,10 @@ static void testMinRvdMaxHvd(int numDevices, int* deviceList, int count) {
     unsetenv("HIP_VISIBLE_DEVICES");
     setenv("ROCR_VISIBLE_DEVICES", min_visibleDeviceString.c_str(), 1);
     setenv("HIP_VISIBLE_DEVICES", max_visibleDeviceString.c_str(), 1);
-    HIP_CHECK(hipGetDeviceCount(&numDevices));
+    HIP_CHECK(hipGetDeviceCount(&numDevices))
     for (int i = 0; i < numDevices; i++) {
-      HIP_CHECK(hipSetDevice(i));
-      HIP_CHECK(hipGetDevice(&device));
+      HIP_CHECK(hipSetDevice(i))
+      HIP_CHECK(hipGetDevice(&device))
       if (device == i) {
         validateCount += 1;
       }

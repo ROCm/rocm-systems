@@ -365,22 +365,22 @@ HIP_TEST_CASE(Unit_TestDevice_DoublePrecisionMathFunc) {
   srcPtr = new bool;
   srcPtr[0] = true;
   // Device pointers
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&devicePtr), sizeof(bool)));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Afd), sizeof(float) * N));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), sizeof(double) * N));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&devicePtr), sizeof(bool)))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Afd), sizeof(float) * N))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), sizeof(double) * N))
   // MemCpy
-  HIP_CHECK(hipMemcpy(devicePtr, srcPtr, sizeof(bool), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Afd, Af, sizeof(float) * N, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Ad, A, sizeof(double) * N, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(devicePtr, srcPtr, sizeof(bool), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Afd, Af, sizeof(float) * N, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Ad, A, sizeof(double) * N, hipMemcpyHostToDevice))
   // Kernel Launch
   hipLaunchKernelGGL(testFunctions, dim3(1), dim3(1), 0, 0, devicePtr, Afd, Ad);
-  HIP_CHECK(hipMemcpy(srcPtr, devicePtr, sizeof(bool), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(srcPtr, devicePtr, sizeof(bool), hipMemcpyDeviceToHost))
   // Validation
   REQUIRE(srcPtr[0] == true);
 
-  HIP_CHECK(hipFree(devicePtr));
-  HIP_CHECK(hipFree(Afd));
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(devicePtr))
+  HIP_CHECK(hipFree(Afd))
+  HIP_CHECK(hipFree(Ad))
   delete srcPtr;
   delete[] Af;
   delete[] A;

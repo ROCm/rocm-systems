@@ -18,7 +18,7 @@ class MemcpyParam2DBenchmark : public Benchmark<MemcpyParam2DBenchmark> {
                   size_t height, hipMemcpyKind kind, const hipStream_t& stream) {
     hip_Memcpy2D params = CreateMemcpy2DParam(dst, dst_pitch, src, src_pitch, width, height, kind);
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemcpyParam2DAsync(&params, stream)); }
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 };
 
@@ -55,9 +55,9 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
 
     LinearAllocGuard2D<int> src_allocation(width, height);
-    HIP_CHECK(hipSetDevice(dst_device));
+    HIP_CHECK(hipSetDevice(dst_device))
     LinearAllocGuard2D<int> dst_allocation(width, height);
-    HIP_CHECK(hipSetDevice(src_device));
+    HIP_CHECK(hipSetDevice(src_device))
     benchmark.Run(dst_allocation.ptr(), dst_allocation.pitch(), src_allocation.ptr(),
                   src_allocation.pitch(), dst_allocation.width(), dst_allocation.height(), kind,
                   stream);

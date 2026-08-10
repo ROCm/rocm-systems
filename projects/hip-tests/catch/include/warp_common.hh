@@ -350,7 +350,7 @@ void genRandomMasks(LinearAllocGuard<T>& d_buf,
     buf.ptr()[i] = mask;
   }
 
-  HIP_CHECK(hipMemcpy(d_buf.ptr(), buf.ptr(), numBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_buf.ptr(), buf.ptr(), numBytes, hipMemcpyHostToDevice))
 }
 
 // generates a random __half (instead of using uniform_real_distribution<float> casting to __half
@@ -399,7 +399,7 @@ void genRandomBuffers(LinearAllocGuard<T>& d_buf,
       buf.ptr()[i] = dist(gen);
     }
   }
-  HIP_CHECK(hipMemcpy(d_buf.ptr(), buf.ptr(), numBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_buf.ptr(), buf.ptr(), numBytes, hipMemcpyHostToDevice))
 }
 
 enum class AggregationType { Reduce,
@@ -721,8 +721,8 @@ void runTestReduce(int iteration, Reduce reduce)
   genRandomBuffers(d_input, input, dist, gen, kNumReduces * wavefrontSize);
   genRandomMasks(d_masks, masks, gen, kNumReduces);
   reduce(d_output.ptr(), d_input.ptr(), d_masks.ptr(), kNumReduces, op);
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost))
 
   while (numReduce < kNumReduces) {
     T expectedByLane[64];

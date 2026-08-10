@@ -35,7 +35,7 @@ static constexpr auto ARRAY_LOOP{100};
  *
  */
 static void Malloc3DArray_DiffSizes(int gpu) {
-  HIP_CHECK_THREAD(hipSetDevice(gpu));
+  HIP_CHECK_THREAD(hipSetDevice(gpu))
   // Use of GENERATE in thead function causes random failures with multithread condition.
   std::vector<size_t> runs{ARRAY_SIZE, BIG_ARRAY_SIZE};
   for (const auto& size : runs) {
@@ -48,7 +48,7 @@ static void Malloc3DArray_DiffSizes(int gpu) {
                                         hipArrayDefault));
     }
     for (int i = 0; i < ARRAY_LOOP; i++) {
-      HIP_CHECK_THREAD(hipFreeArray(arr[i]));
+      HIP_CHECK_THREAD(hipFreeArray(arr[i]))
     }
   }
 }
@@ -136,9 +136,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_happy, char, uchar2, uint2, int4, s
   for (const auto extent : extents) {
     CAPTURE(flags, extent.width, extent.height, extent.depth);
 
-    HIP_CHECK(hipMalloc3DArray(&array, &desc, extent, flags));
+    HIP_CHECK(hipMalloc3DArray(&array, &desc, extent, flags))
     checkArrayIsExpected(array, desc, extent, flags);
-    HIP_CHECK(hipFreeArray(array));
+    HIP_CHECK(hipFreeArray(array))
   }
 }
 
@@ -182,9 +182,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_MaxTexture, int, uint4, short, usho
     auto maxArrayCreateError = hipMalloc3DArray(&array, &desc, extent, flag);
     // this can try to alloc many GB of memory, so out of memory is acceptable
     if (maxArrayCreateError == hipErrorOutOfMemory) return;
-    HIP_CHECK(maxArrayCreateError);
+    HIP_CHECK(maxArrayCreateError)
     checkArrayIsExpected(array, desc, extent, flag);
-    HIP_CHECK(hipFreeArray(array));
+    HIP_CHECK(hipFreeArray(array))
   }
   SECTION("Negative") {
     std::vector<hipExtent> extentsToTest{

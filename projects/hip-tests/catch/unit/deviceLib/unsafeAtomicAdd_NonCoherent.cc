@@ -61,11 +61,11 @@ static void runUnsafeAtomicAddNonCoherentNoUnsafeFlagTest() {
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType),
                           hipHostMallocNonCoherent));
   result[0] = INITIAL_VAL;
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0))
   hipLaunchKernelGGL(AtomicCheck<TestType>, dim3(1), dim3(1), 0, 0, A_d, result_d);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
   bool testResult;
   REQUIRE(A_h[0] == INITIAL_VAL + INC_VAL);
   REQUIRE(result[0] == INITIAL_VAL);
@@ -78,8 +78,8 @@ static void runUnsafeAtomicAddNonCoherentNoUnsafeFlagTest() {
         "unsafeAtomicAdd_NonCoherent_withnounsafeflag-hip-amdgcn(.*)\\.s", "global_atomic_add_f64");
     REQUIRE(testResult == true);
   }
-  HIP_CHECK(hipHostFree(A_h));
-  HIP_CHECK(hipHostFree(result));
+  HIP_CHECK(hipHostFree(A_h))
+  HIP_CHECK(hipHostFree(result))
 }
 
 // Helper function for "without any flag" test
@@ -93,11 +93,11 @@ static void runUnsafeAtomicAddNonCoherentWithoutFlagTest() {
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType),
                           hipHostMallocNonCoherent));
   result[0] = INITIAL_VAL;
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0))
   hipLaunchKernelGGL(AtomicCheck<TestType>, dim3(1), dim3(1), 0, 0, A_d, result_d);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
   bool testResult;
   REQUIRE(A_h[0] == INITIAL_VAL + INC_VAL);
   REQUIRE(result[0] == INITIAL_VAL);
@@ -110,8 +110,8 @@ static void runUnsafeAtomicAddNonCoherentWithoutFlagTest() {
         "unsafeAtomicAdd_NonCoherent_withoutflag-hip-amdgcn(.*)\\.s", "global_atomic_add_f64");
     REQUIRE(testResult == true);
   }
-  HIP_CHECK(hipHostFree(A_h));
-  HIP_CHECK(hipHostFree(result));
+  HIP_CHECK(hipHostFree(A_h))
+  HIP_CHECK(hipHostFree(result))
 }
 
 // Helper function for "with -munsafe-fp-atomics flag" test
@@ -125,11 +125,11 @@ static void runUnsafeAtomicAddNonCoherentUnsafeFlagTest() {
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType),
                           hipHostMallocNonCoherent));
   result[0] = INITIAL_VAL;
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0))
   hipLaunchKernelGGL(AtomicCheck<TestType>, dim3(1), dim3(1), 0, 0, A_d, result_d);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
   bool testResult;
   REQUIRE(A_h[0] == INITIAL_VAL + INC_VAL);
   REQUIRE(result[0] == INITIAL_VAL);
@@ -142,15 +142,15 @@ static void runUnsafeAtomicAddNonCoherentUnsafeFlagTest() {
         "unsafeAtomicAdd_NonCoherent_withunsafeflag-hip-amdgcn(.*)\\.s", "global_atomic_add_f64");
     REQUIRE(testResult == true);
   }
-  HIP_CHECK(hipHostFree(A_h));
-  HIP_CHECK(hipHostFree(result));
+  HIP_CHECK(hipHostFree(A_h))
+  HIP_CHECK(hipHostFree(result))
 }
 
 TEST_CASE(Unit_unsafeAtomicAdd_NonCoherent) {
   hipDeviceProp_t prop;
   int device;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&prop, device))
   std::string gfxName(prop.gcnArchName);
 
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {

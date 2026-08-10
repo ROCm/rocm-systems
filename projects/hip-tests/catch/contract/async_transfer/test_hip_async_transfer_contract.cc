@@ -32,14 +32,14 @@ HIP_TEST_CASE(Contract_AsyncTransfer_HipMemcpyAsync_HostToDeviceToHost_RoundTrip
   void* device_ptr = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
-  HIP_CHECK(hipMemcpyAsync(device_ptr, src.data(), src.size(), hipMemcpyHostToDevice, stream));
-  HIP_CHECK(hipMemcpyAsync(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpyAsync(device_ptr, src.data(), src.size(), hipMemcpyHostToDevice, stream))
+  HIP_CHECK(hipMemcpyAsync(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(dst == src);
 }
@@ -53,18 +53,18 @@ HIP_TEST_CASE(Contract_AsyncTransfer_HipMemcpyAsync_DeviceToDevice_CopiesAfterSt
   void* dst_device_ptr = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&src_device_ptr, src.size()));
+  HIP_CHECK(hipMalloc(&src_device_ptr, src.size()))
   cleanup.Add([src_device_ptr] { (void)hipFree(src_device_ptr); });
-  HIP_CHECK(hipMalloc(&dst_device_ptr, dst.size()));
+  HIP_CHECK(hipMalloc(&dst_device_ptr, dst.size()))
   cleanup.Add([dst_device_ptr] { (void)hipFree(dst_device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
-  HIP_CHECK(hipMemcpyAsync(src_device_ptr, src.data(), src.size(), hipMemcpyHostToDevice, stream));
+  HIP_CHECK(hipMemcpyAsync(src_device_ptr, src.data(), src.size(), hipMemcpyHostToDevice, stream))
   HIP_CHECK(hipMemcpyAsync(dst_device_ptr, src_device_ptr, src.size(), hipMemcpyDeviceToDevice,
                            stream));
-  HIP_CHECK(hipMemcpyAsync(dst.data(), dst_device_ptr, dst.size(), hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpyAsync(dst.data(), dst_device_ptr, dst.size(), hipMemcpyDeviceToHost, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(dst == src);
 }
@@ -76,10 +76,10 @@ HIP_TEST_CASE(Contract_AsyncTransfer_HipMemcpyAsync_ZeroBytes_Succeeds) {
   uint8_t dst = 0x2;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipMemcpyAsync(&dst, &src, 0, hipMemcpyHostToHost, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpyAsync(&dst, &src, 0, hipMemcpyHostToHost, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(dst == 0x2);
 }
@@ -91,10 +91,10 @@ HIP_TEST_CASE(Contract_AsyncTransfer_HipMemcpyAsync_InvalidDirection_ReturnsCons
   void* device_ptr = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t error =
@@ -102,5 +102,5 @@ HIP_TEST_CASE(Contract_AsyncTransfer_HipMemcpyAsync_InvalidDirection_ReturnsCons
 
   REQUIRE(error != hipSuccess);
   HIP_CHECK_ERROR(hipGetLastError(), error);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 }

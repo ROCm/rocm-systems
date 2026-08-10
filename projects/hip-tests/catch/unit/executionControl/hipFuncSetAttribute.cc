@@ -34,7 +34,7 @@ HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize) {
                                 hipFuncAttributeMaxDynamicSharedMemorySize, 1024));
 
   hipFuncAttributes attributes;
-  HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<void*>(kernel)));
+  HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<void*>(kernel)))
 
   REQUIRE(attributes.maxDynamicSharedSizeBytes == 1024);
 }
@@ -56,7 +56,7 @@ HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout) {
                                 hipFuncAttributePreferredSharedMemoryCarveout, 50));
 
   hipFuncAttributes attributes;
-  HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<void*>(kernel)));
+  HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<void*>(kernel)))
 
   REQUIRE(attributes.preferredShmemCarveout == 50);
 }
@@ -94,10 +94,10 @@ HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_Parameters) {
     // The sum of this value and the function attribute sharedSizeBytes cannot exceed the device
     // attribute cudaDevAttrMaxSharedMemoryPerBlockOptin
     int max_shared;
-    HIP_CHECK(hipDeviceGetAttribute(&max_shared, hipDeviceAttributeMaxSharedMemoryPerBlock, 0));
+    HIP_CHECK(hipDeviceGetAttribute(&max_shared, hipDeviceAttributeMaxSharedMemoryPerBlock, 0))
 
     hipFuncAttributes attributes;
-    HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<void*>(kernel)));
+    HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<void*>(kernel)))
 
     HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<void*>(kernel),
                                   hipFuncAttributeMaxDynamicSharedMemorySize,
@@ -167,10 +167,10 @@ HIP_TEST_CASE(Unit_hipFuncSetAttribute_Negative_Parameters) {
     // The sum of this value and the function attribute sharedSizeBytes cannot exceed the device
     // attribute cudaDevAttrMaxSharedMemoryPerBlockOptin
     int max_shared;
-    HIP_CHECK(hipDeviceGetAttribute(&max_shared, hipDeviceAttributeSharedMemPerBlockOptin, 0));
+    HIP_CHECK(hipDeviceGetAttribute(&max_shared, hipDeviceAttributeSharedMemPerBlockOptin, 0))
 
     hipFuncAttributes attributes;
-    HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<void*>(kernel)));
+    HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<void*>(kernel)))
 
     HIP_CHECK_ERROR(hipFuncSetAttribute(reinterpret_cast<void*>(kernel),
                                         hipFuncAttributeMaxDynamicSharedMemorySize,
@@ -210,14 +210,14 @@ HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize_Not_S
 #endif
 
   hipFuncAttributes old_attributes;
-  HIP_CHECK(hipFuncGetAttributes(&old_attributes, reinterpret_cast<void*>(kernel)));
+  HIP_CHECK(hipFuncGetAttributes(&old_attributes, reinterpret_cast<void*>(kernel)))
 
   HIP_CHECK_ERROR(hipFuncSetAttribute(reinterpret_cast<void*>(kernel),
                                       hipFuncAttributeMaxDynamicSharedMemorySize, 1024),
                   hipErrorNotSupported);
 
   hipFuncAttributes new_attributes;
-  HIP_CHECK(hipFuncGetAttributes(&new_attributes, reinterpret_cast<void*>(kernel)));
+  HIP_CHECK(hipFuncGetAttributes(&new_attributes, reinterpret_cast<void*>(kernel)))
 
   REQUIRE(old_attributes.maxDynamicSharedSizeBytes == new_attributes.maxDynamicSharedSizeBytes);
 }
@@ -241,14 +241,14 @@ HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout_No
 #endif
 
   hipFuncAttributes old_attributes;
-  HIP_CHECK(hipFuncGetAttributes(&old_attributes, reinterpret_cast<void*>(kernel)));
+  HIP_CHECK(hipFuncGetAttributes(&old_attributes, reinterpret_cast<void*>(kernel)))
 
   HIP_CHECK_ERROR(hipFuncSetAttribute(reinterpret_cast<void*>(kernel),
                                       hipFuncAttributePreferredSharedMemoryCarveout, 50),
                   hipErrorNotSupported);
 
   hipFuncAttributes new_attributes;
-  HIP_CHECK(hipFuncGetAttributes(&new_attributes, reinterpret_cast<void*>(kernel)));
+  HIP_CHECK(hipFuncGetAttributes(&new_attributes, reinterpret_cast<void*>(kernel)))
 
   REQUIRE(old_attributes.preferredShmemCarveout == new_attributes.preferredShmemCarveout);
 }

@@ -46,7 +46,7 @@ static inline void JitLink(hipModule_t *Module, hipFunction_t *Kernel, hipLinkSt
    const void* lopts[] = {(void*)isaopts, (void*)(isaoptssize)};
 
 
-   HIP_CHECK(hipLinkCreate(jit_options.size(), jit_options.data(), (void **)lopts, LinkState));
+   HIP_CHECK(hipLinkCreate(jit_options.size(), jit_options.data(), (void **)lopts, LinkState))
 
    if (!from_file) {
       std::vector<char> co_source;
@@ -54,22 +54,22 @@ static inline void JitLink(hipModule_t *Module, hipFunction_t *Kernel, hipLinkSt
       HIP_CHECK(hipLinkAddData(*LinkState, input_type, (void*)co_source.data(), co_source.size(),
                                "LinkSPIRV1", 0, nullptr, nullptr));
    } else {
-      HIP_CHECK(hipLinkAddFile(*LinkState,input_type, filename, 0, nullptr, nullptr));
+      HIP_CHECK(hipLinkAddFile(*LinkState,input_type, filename, 0, nullptr, nullptr))
    }
 
    void *linkOut;
    size_t linkSize = 0;
    // Complete Linker Step
-   HIP_CHECK(hipLinkComplete(*LinkState, &linkOut, &linkSize));
+   HIP_CHECK(hipLinkComplete(*LinkState, &linkOut, &linkSize))
 
    // Load codeobject into module
-   HIP_CHECK(hipModuleLoadData(Module, linkOut));
+   HIP_CHECK(hipModuleLoadData(Module, linkOut))
 
    // Locate Kernel Entry Point
-   HIP_CHECK(hipModuleGetFunction(Kernel, *Module, "addKernel"));
+   HIP_CHECK(hipModuleGetFunction(Kernel, *Module, "addKernel"))
 
    // Destroy Linker invocation
-   HIP_CHECK(hipLinkDestroy(*LinkState));
+   HIP_CHECK(hipLinkDestroy(*LinkState))
 
 }
 
@@ -97,7 +97,7 @@ HIP_TEST_CASE(Unit_hip_linker_spirv_input) {
     for ( int i = 0; i < N; i++) {
         A_h[i] = REF_VALUE + i;
     }
-    HIP_CHECK(hipMemcpy(A_d, A_h, sizeBytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(A_d, A_h, sizeBytes, hipMemcpyHostToDevice))
 
     hipModule_t Module;
     hipFunction_t Kernel;
@@ -129,11 +129,11 @@ HIP_TEST_CASE(Unit_hip_linker_spirv_input) {
 
     JitLink(&Module, &Kernel, &Linkstate, input_type, from_file,filename);
     void *args[2] = {&A_d, &N};
-    HIP_CHECK(hipModuleLaunchKernel(Kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, args, nullptr));
-    HIP_CHECK(hipModuleUnload(Module));
-    HIP_CHECK(hipMemcpy(A_h, A_d, sizeBytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipModuleLaunchKernel(Kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, args, nullptr))
+    HIP_CHECK(hipModuleUnload(Module))
+    HIP_CHECK(hipMemcpy(A_h, A_d, sizeBytes, hipMemcpyDeviceToHost))
     REQUIRE(A_h[0] == REF_VALUE + 2);
-    HIP_CHECK(hipFree(A_d));
+    HIP_CHECK(hipFree(A_d))
     delete[] A_h;
 }
 
@@ -241,7 +241,7 @@ HIP_TEST_CASE(Unit_hipLinkCreate_AddLinker_CUDA_only_options) {
  */
 HIP_TEST_CASE(Unit_hipLinkAddFile_Negative) {
     hipLinkState_t linkstate;
-    HIP_CHECK(hipLinkCreate(0, nullptr, nullptr, &linkstate));
+    HIP_CHECK(hipLinkCreate(0, nullptr, nullptr, &linkstate))
 
     SECTION("linkstate == nullptr") {
         HIP_CHECK_ERROR(hipLinkAddFile(nullptr, hipJitInputSpirv, SPIRV_FILE, 0, nullptr, nullptr),
@@ -261,6 +261,6 @@ HIP_TEST_CASE(Unit_hipLinkAddFile_Negative) {
                 hipLinkAddFile(linkstate, hipJitInputSpirv, "unknown_file", 0, nullptr, nullptr),
                                                                     hipErrorInvalidConfiguration);
     }
-    HIP_CHECK(hipLinkDestroy(linkstate));
+    HIP_CHECK(hipLinkDestroy(linkstate))
 }
 #endif

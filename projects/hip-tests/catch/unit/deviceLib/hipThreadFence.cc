@@ -33,19 +33,19 @@ HIP_TEST_CASE(Unit_hipThreadFence) {
   }
 
   float *In1d, *In2d, *In3d, *In4d, *Outd;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&In1d), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&In2d), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&In3d), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&In4d), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Outd), SIZE));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&In1d), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&In2d), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&In3d), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&In4d), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Outd), SIZE))
 
-  HIP_CHECK(hipMemcpy(In1d, In1, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(In2d, In2, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(In3d, In3, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(In4d, In4, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(In1d, In1, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(In2d, In2, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(In3d, In3, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(In4d, In4, SIZE, hipMemcpyHostToDevice))
 
   hipLaunchKernelGGL(vAdd, dim3(32, 1, 1), dim3(32, 1, 1), 0, 0, In1d, In2d, In3d, In4d, Outd);
-  HIP_CHECK(hipMemcpy(Out, Outd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(Out, Outd, SIZE, hipMemcpyDeviceToHost))
   for (uint32_t i = 0; i < NUM; i++) {
     REQUIRE(Out[i] == 2 * In1[i] + 2 * In2[i] + In3[i]);
   }
@@ -54,9 +54,9 @@ HIP_TEST_CASE(Unit_hipThreadFence) {
   delete[] In3;
   delete[] In4;
   delete[] Out;
-  HIP_CHECK(hipFree(In1d));
-  HIP_CHECK(hipFree(In2d));
-  HIP_CHECK(hipFree(In3d));
-  HIP_CHECK(hipFree(In4d));
-  HIP_CHECK(hipFree(Outd));
+  HIP_CHECK(hipFree(In1d))
+  HIP_CHECK(hipFree(In2d))
+  HIP_CHECK(hipFree(In3d))
+  HIP_CHECK(hipFree(In4d))
+  HIP_CHECK(hipFree(Outd))
 }

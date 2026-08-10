@@ -72,38 +72,38 @@ HIP_TEST_CASE(Unit_hipStreamAddCallback_StrmSyncTiming) {
   size_t Nbytes = N_elmts * sizeof(float);
 
   A_h = (float*)malloc(Nbytes);
-  HIPCHECK(A_h == 0 ? hipErrorOutOfMemory : hipSuccess);
+  HIPCHECK(A_h == 0 ? hipErrorOutOfMemory : hipSuccess)
   C_h = (float*)malloc(Nbytes);
-  HIPCHECK(C_h == 0 ? hipErrorOutOfMemory : hipSuccess);
+  HIPCHECK(C_h == 0 ? hipErrorOutOfMemory : hipSuccess)
 
   // Fill with Phi + i
   for (size_t i = 0; i < N_elmts; i++) {
     A_h[i] = 1.618f + i;
   }
 
-  HIPCHECK(hipMalloc(&A_d, Nbytes));
-  HIPCHECK(hipMalloc(&C_d, Nbytes));
+  HIPCHECK(hipMalloc(&A_d, Nbytes))
+  HIPCHECK(hipMalloc(&C_d, Nbytes))
 
-  HIPCHECK(hipStreamCreateWithFlags(&mystream, hipStreamNonBlocking));
+  HIPCHECK(hipStreamCreateWithFlags(&mystream, hipStreamNonBlocking))
 
-  HIPCHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mystream));
+  HIPCHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mystream))
 
   const unsigned threadsPerBlock = 256;
   const unsigned blocks = (N_elmts + 255) / threadsPerBlock;
 
   hipLaunchKernelGGL((vector_square), dim3(blocks), dim3(threadsPerBlock), 0, mystream, C_d, A_d,
                      N_elmts);
-  HIPCHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream));
-  HIPCHECK(hipStreamAddCallback(mystream, Callback1, NULL, 0));
+  HIPCHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream))
+  HIPCHECK(hipStreamAddCallback(mystream, Callback1, NULL, 0))
 
   // Wait untill Callback() function changes the cbDone value to true
   while (!cbDone) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  HIPCHECK(hipStreamQuery(mystream));
-  HIPCHECK(hipStreamDestroy(mystream));
-  HIPCHECK(hipFree(A_d));
-  HIPCHECK(hipFree(C_d));
+  HIPCHECK(hipStreamQuery(mystream))
+  HIPCHECK(hipStreamDestroy(mystream))
+  HIPCHECK(hipFree(A_d))
+  HIPCHECK(hipFree(C_d))
   free(A_h);
   free(C_h);
 

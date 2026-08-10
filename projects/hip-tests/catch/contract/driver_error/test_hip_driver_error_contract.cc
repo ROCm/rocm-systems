@@ -22,7 +22,7 @@ void RequireNonEmptyString(const char* value) {
 HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorName_KnownCode_ReturnsNonEmptyString) {
   for (hipError_t error : kKnownErrors) {
     const char* name = nullptr;
-    HIP_CHECK(hipDrvGetErrorName(error, &name));
+    HIP_CHECK(hipDrvGetErrorName(error, &name))
     RequireNonEmptyString(name);
   }
 }
@@ -31,7 +31,7 @@ HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorName_KnownCode_ReturnsNonEmptyS
 HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorString_KnownCode_ReturnsNonEmptyString) {
   for (hipError_t error : kKnownErrors) {
     const char* message = nullptr;
-    HIP_CHECK(hipDrvGetErrorString(error, &message));
+    HIP_CHECK(hipDrvGetErrorString(error, &message))
     RequireNonEmptyString(message);
   }
 }
@@ -41,8 +41,8 @@ HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorName_Default_RepeatedQueryIsSta
   for (hipError_t error : kKnownErrors) {
     const char* first_name = nullptr;
     const char* second_name = nullptr;
-    HIP_CHECK(hipDrvGetErrorName(error, &first_name));
-    HIP_CHECK(hipDrvGetErrorName(error, &second_name));
+    HIP_CHECK(hipDrvGetErrorName(error, &first_name))
+    HIP_CHECK(hipDrvGetErrorName(error, &second_name))
 
     RequireNonEmptyString(first_name);
     RequireNonEmptyString(second_name);
@@ -55,8 +55,8 @@ HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorString_Default_RepeatedQueryIsS
   for (hipError_t error : kKnownErrors) {
     const char* first_message = nullptr;
     const char* second_message = nullptr;
-    HIP_CHECK(hipDrvGetErrorString(error, &first_message));
-    HIP_CHECK(hipDrvGetErrorString(error, &second_message));
+    HIP_CHECK(hipDrvGetErrorString(error, &first_message))
+    HIP_CHECK(hipDrvGetErrorString(error, &second_message))
 
     RequireNonEmptyString(first_message);
     RequireNonEmptyString(second_message);

@@ -68,13 +68,13 @@ class ScopedDevice {
 
 bool IsDiscreteDevice(int device) {
   hipDeviceProp_t props{};
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   return props.integrated == 0;
 }
 
 bool CooperativeMultiDeviceLaunchSupported(int device) {
   int value = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeCooperativeMultiDeviceLaunch, device));
+  HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeCooperativeMultiDeviceLaunch, device))
   return value != 0;
 }
 
@@ -85,10 +85,10 @@ bool CooperativeMultiDeviceLaunchSupported(int device) {
 // multi-device launch. Callers skip when the participating devices differ.
 bool ParticipatingDevicesShareArch() {
   hipDeviceProp_t first{};
-  HIP_CHECK(hipGetDeviceProperties(&first, 0));
+  HIP_CHECK(hipGetDeviceProperties(&first, 0))
   for (int device = 1; device < kNumDevices; ++device) {
     hipDeviceProp_t props{};
-    HIP_CHECK(hipGetDeviceProperties(&props, device));
+    HIP_CHECK(hipGetDeviceProperties(&props, device))
     if (std::strcmp(props.gcnArchName, first.gcnArchName) != 0) {
       return false;
     }
@@ -102,7 +102,7 @@ bool ParticipatingDevicesShareArch() {
 // runtimes where a stack launch-parameter array is not a meaningful submission.
 void RequireCooperativeMultiDeviceLaunch() {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count < kNumDevices) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
@@ -128,10 +128,10 @@ class DeviceLaunchTarget {
   void Allocate(int device) {
     device_ = device;
     expected_value_ = 100 + device;
-    HIP_CHECK(hipSetDevice(device_));
-    HIP_CHECK(hipMalloc(&device_ptr_, sizeof(int)));
-    HIP_CHECK(hipMemset(device_ptr_, 0, sizeof(int)));
-    HIP_CHECK(hipStreamCreate(&stream_));
+    HIP_CHECK(hipSetDevice(device_))
+    HIP_CHECK(hipMalloc(&device_ptr_, sizeof(int)))
+    HIP_CHECK(hipMemset(device_ptr_, 0, sizeof(int)))
+    HIP_CHECK(hipStreamCreate(&stream_))
   }
 
   ~DeviceLaunchTarget() {
@@ -180,8 +180,8 @@ void AllocateTargets(std::vector<std::unique_ptr<DeviceLaunchTarget>>& targets) 
 // allocation and stream as the vector unwinds.
 void VerifyTargets(std::vector<std::unique_ptr<DeviceLaunchTarget>>& targets) {
   for (auto& target : targets) {
-    HIP_CHECK(hipSetDevice(target->device()));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipSetDevice(target->device()))
+    HIP_CHECK(hipDeviceSynchronize())
     int observed = -1;
     HIP_CHECK(hipMemcpy(&observed, target->device_ptr(), sizeof(int),
                         hipMemcpyDeviceToHost));
@@ -233,9 +233,9 @@ bool CompileModuleSource(std::vector<char>& code) {
 
 #if HT_AMD
   int current_device = 0;
-  HIP_CHECK(hipGetDevice(&current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, current_device));
+  HIP_CHECK(hipGetDeviceProperties(&properties, current_device))
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
   const char* options[] = {offload_arch.c_str()};
   const int num_options = 1;
@@ -293,8 +293,8 @@ HIP_TEST_CASE(Contract_MultiDeviceLaunch_HipLaunchCooperativeKernelMultiDevice_C
     launch_params[device].args = kernel_args[device].data();
   }
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipLaunchCooperativeKernelMultiDevice(launch_params.data(), kNumDevices, 0));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipLaunchCooperativeKernelMultiDevice(launch_params.data(), kNumDevices, 0))
 
   VerifyTargets(targets);
 }
@@ -324,8 +324,8 @@ HIP_TEST_CASE(Contract_MultiDeviceLaunch_HipExtLaunchMultiKernelMultiDevice_ExtM
     launch_params[device].args = kernel_args[device].data();
   }
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipExtLaunchMultiKernelMultiDevice(launch_params.data(), kNumDevices, 0));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipExtLaunchMultiKernelMultiDevice(launch_params.data(), kNumDevices, 0))
 
   VerifyTargets(targets);
 }
@@ -362,13 +362,13 @@ HIP_TEST_CASE(Contract_MultiDeviceLaunch_HipModuleLaunchCooperativeKernelMultiDe
   std::memset(launch_params.data(), 0, launch_params.size() * sizeof(hipFunctionLaunchParams));
   std::vector<std::array<void*, 2>> kernel_args(kNumDevices);
   for (int device = 0; device < kNumDevices; ++device) {
-    HIP_CHECK(hipSetDevice(device));
+    HIP_CHECK(hipSetDevice(device))
     hipModule_t module = nullptr;
-    HIP_CHECK(hipModuleLoadData(&module, code.data()));
+    HIP_CHECK(hipModuleLoadData(&module, code.data()))
     modules.emplace_back(module, device);
     REQUIRE(module != nullptr);
     hipFunction_t function = nullptr;
-    HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
+    HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"))
     REQUIRE(function != nullptr);
 
     kernel_args[device] = {targets[device]->device_ptr_address(),
@@ -385,8 +385,8 @@ HIP_TEST_CASE(Contract_MultiDeviceLaunch_HipModuleLaunchCooperativeKernelMultiDe
     launch_params[device].kernelParams = kernel_args[device].data();
   }
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipModuleLaunchCooperativeKernelMultiDevice(launch_params.data(), kNumDevices, 0));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipModuleLaunchCooperativeKernelMultiDevice(launch_params.data(), kNumDevices, 0))
 
   VerifyTargets(targets);
 }

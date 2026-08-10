@@ -100,7 +100,7 @@ HIP_TEST_CASE(Unit_hipEventCreate_IncompatibleFlags) {
 #else
   /* Works on Non-AMD because hipEventReleaseToDevice / hipEventReleaseToSystem have no meaning in
    * that case */
-  HIP_CHECK(hipEventCreateWithFlags(&event, allFlags));
+  HIP_CHECK(hipEventCreateWithFlags(&event, allFlags))
 #endif
 
   unsigned invalidFlag{0x08000000};

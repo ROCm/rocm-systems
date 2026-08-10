@@ -37,12 +37,12 @@ HIP_TEST_CASE(Contract_DriverMemcpy_HipMemcpyHtoD_HtoDtoH_RoundTripsBytes) {
   std::array<uint8_t, kElementCount> dst{};
   void* device_ptr = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(
       hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(device_ptr), HtoDSrc(src.data()), src.size()));
-  HIP_CHECK(hipMemcpyDtoH(dst.data(), reinterpret_cast<hipDeviceptr_t>(device_ptr), dst.size()));
+  HIP_CHECK(hipMemcpyDtoH(dst.data(), reinterpret_cast<hipDeviceptr_t>(device_ptr), dst.size()))
 
   REQUIRE(dst == src);
 }
@@ -55,9 +55,9 @@ HIP_TEST_CASE(Contract_DriverMemcpy_HipMemcpyDtoD_DtoDSingleDevice_CopiesBytes) 
   void* src_device_ptr = nullptr;
   void* dst_device_ptr = nullptr;
 
-  HIP_CHECK(hipMalloc(&src_device_ptr, src.size()));
+  HIP_CHECK(hipMalloc(&src_device_ptr, src.size()))
   cleanup.Add([src_device_ptr] { (void)hipFree(src_device_ptr); });
-  HIP_CHECK(hipMalloc(&dst_device_ptr, dst.size()));
+  HIP_CHECK(hipMalloc(&dst_device_ptr, dst.size()))
   cleanup.Add([dst_device_ptr] { (void)hipFree(dst_device_ptr); });
 
   HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(src_device_ptr), HtoDSrc(src.data()),
@@ -78,13 +78,13 @@ HIP_TEST_CASE(Contract_DriverMemcpy_HipMemcpyHtoD_ZeroBytes_Succeeds) {
   void* src_device_ptr = nullptr;
   void* dst_device_ptr = nullptr;
 
-  HIP_CHECK(hipMalloc(&src_device_ptr, sizeof(host_src)));
+  HIP_CHECK(hipMalloc(&src_device_ptr, sizeof(host_src)))
   cleanup.Add([src_device_ptr] { (void)hipFree(src_device_ptr); });
-  HIP_CHECK(hipMalloc(&dst_device_ptr, sizeof(host_dst)));
+  HIP_CHECK(hipMalloc(&dst_device_ptr, sizeof(host_dst)))
   cleanup.Add([dst_device_ptr] { (void)hipFree(dst_device_ptr); });
 
-  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(src_device_ptr), &host_src, 0));
-  HIP_CHECK(hipMemcpyDtoH(&host_dst, reinterpret_cast<hipDeviceptr_t>(src_device_ptr), 0));
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(src_device_ptr), &host_src, 0))
+  HIP_CHECK(hipMemcpyDtoH(&host_dst, reinterpret_cast<hipDeviceptr_t>(src_device_ptr), 0))
   HIP_CHECK(hipMemcpyDtoD(reinterpret_cast<hipDeviceptr_t>(dst_device_ptr),
                           reinterpret_cast<hipDeviceptr_t>(src_device_ptr), 0));
 
@@ -100,11 +100,11 @@ HIP_TEST_CASE(Contract_DriverMemcpy_HipMemcpyHtoDAsync_AsyncOnStream_RoundTripsB
   void* dst_device_ptr = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&src_device_ptr, src.size()));
+  HIP_CHECK(hipMalloc(&src_device_ptr, src.size()))
   cleanup.Add([src_device_ptr] { (void)hipFree(src_device_ptr); });
-  HIP_CHECK(hipMalloc(&dst_device_ptr, dst.size()));
+  HIP_CHECK(hipMalloc(&dst_device_ptr, dst.size()))
   cleanup.Add([dst_device_ptr] { (void)hipFree(dst_device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(src_device_ptr), HtoDSrc(src.data()),
@@ -113,7 +113,7 @@ HIP_TEST_CASE(Contract_DriverMemcpy_HipMemcpyHtoDAsync_AsyncOnStream_RoundTripsB
                                reinterpret_cast<hipDeviceptr_t>(src_device_ptr), src.size(), stream));
   HIP_CHECK(hipMemcpyDtoHAsync(dst.data(), reinterpret_cast<hipDeviceptr_t>(dst_device_ptr),
                                dst.size(), stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(dst == src);
 }
@@ -125,9 +125,9 @@ HIP_TEST_CASE(Contract_DriverMemcpy_HipMemcpyHtoD_NullPointers_AreRejected) {
   void* src_device_ptr = nullptr;
   void* dst_device_ptr = nullptr;
 
-  HIP_CHECK(hipMalloc(&src_device_ptr, kElementCount));
+  HIP_CHECK(hipMalloc(&src_device_ptr, kElementCount))
   cleanup.Add([src_device_ptr] { (void)hipFree(src_device_ptr); });
-  HIP_CHECK(hipMalloc(&dst_device_ptr, kElementCount));
+  HIP_CHECK(hipMalloc(&dst_device_ptr, kElementCount))
   cleanup.Add([dst_device_ptr] { (void)hipFree(dst_device_ptr); });
 
   REQUIRE(hipMemcpyHtoD(hipDeviceptr_t(nullptr), host, kElementCount) != hipSuccess);
@@ -150,11 +150,11 @@ HIP_TEST_CASE(Contract_DriverMemcpy_HipMemcpyHtoDAsync_AsyncNullPointers_AreReje
   void* dst_device_ptr = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&src_device_ptr, kElementCount));
+  HIP_CHECK(hipMalloc(&src_device_ptr, kElementCount))
   cleanup.Add([src_device_ptr] { (void)hipFree(src_device_ptr); });
-  HIP_CHECK(hipMalloc(&dst_device_ptr, kElementCount));
+  HIP_CHECK(hipMalloc(&dst_device_ptr, kElementCount))
   cleanup.Add([dst_device_ptr] { (void)hipFree(dst_device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   REQUIRE(hipMemcpyHtoDAsync(hipDeviceptr_t(nullptr), host, kElementCount, stream) != hipSuccess);

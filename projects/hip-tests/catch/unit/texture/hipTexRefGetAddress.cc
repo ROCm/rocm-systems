@@ -18,17 +18,17 @@ HIP_TEST_CASE(Unit_hipTexRefGetAddress_Positive) {
   float* tex_buffer = nullptr;
   size_t offset = 0, tex_size = sizeof(float);
 
-  HIP_CHECK(hipFree(nullptr));
-  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"));
-  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"));
-  HIP_CHECK(hipMalloc(&tex_buffer, sizeof(float)));
+  HIP_CHECK(hipFree(nullptr))
+  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"))
+  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"))
+  HIP_CHECK(hipMalloc(&tex_buffer, sizeof(float)))
   HIP_CHECK(hipTexRefSetAddress(&offset, tex_ref, reinterpret_cast<hipDeviceptr_t>(tex_buffer),
                                 tex_size));
-  HIP_CHECK(hipTexRefGetAddress(&device_ptr, tex_ref));
+  HIP_CHECK(hipTexRefGetAddress(&device_ptr, tex_ref))
 
   REQUIRE(reinterpret_cast<void*>(device_ptr) != nullptr);
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipFree(tex_buffer));
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipFree(tex_buffer))
 }
 
 HIP_TEST_CASE(Unit_hipTexRefGetAddress_Negative) {
@@ -39,10 +39,10 @@ HIP_TEST_CASE(Unit_hipTexRefGetAddress_Negative) {
   float* tex_buffer = nullptr;
   size_t offset = 0, tex_size = sizeof(float);
 
-  HIP_CHECK(hipFree(nullptr));
-  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"));
-  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"));
-  HIP_CHECK(hipMalloc(&tex_buffer, sizeof(float)));
+  HIP_CHECK(hipFree(nullptr))
+  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"))
+  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"))
+  HIP_CHECK(hipMalloc(&tex_buffer, sizeof(float)))
   HIP_CHECK(hipTexRefSetAddress(&offset, tex_ref, reinterpret_cast<hipDeviceptr_t>(tex_buffer),
                                 tex_size));
 
@@ -54,8 +54,8 @@ HIP_TEST_CASE(Unit_hipTexRefGetAddress_Negative) {
 #endif
   }
 
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipFree(tex_buffer));
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipFree(tex_buffer))
 }
 
 HIP_TEST_CASE(Unit_hipTexRefGetAddress_AdressNotSet) {
@@ -65,14 +65,14 @@ HIP_TEST_CASE(Unit_hipTexRefGetAddress_AdressNotSet) {
   hipTexRef tex_ref = nullptr;
   float* tex_buffer = nullptr;
 
-  HIP_CHECK(hipFree(nullptr));
-  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"));
-  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"));
-  HIP_CHECK(hipMalloc(&tex_buffer, sizeof(float)));
+  HIP_CHECK(hipFree(nullptr))
+  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"))
+  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"))
+  HIP_CHECK(hipMalloc(&tex_buffer, sizeof(float)))
   HIP_CHECK_ERROR(hipTexRefGetAddress(&device_ptr, tex_ref), hipErrorInvalidValue);
 
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipFree(tex_buffer));
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipFree(tex_buffer))
 }
 
 #endif

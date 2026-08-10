@@ -15,7 +15,7 @@ namespace {
 // proc-address contracts are only exercised against a provisioned runtime.
 void RequireDevice() {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -30,8 +30,8 @@ void RequireDevice() {
 class ScopedDevice {
  public:
   explicit ScopedDevice(int next) {
-    HIP_CHECK(hipGetDevice(&previous_));
-    HIP_CHECK(hipSetDevice(next));
+    HIP_CHECK(hipGetDevice(&previous_))
+    HIP_CHECK(hipSetDevice(next))
   }
   ~ScopedDevice() { static_cast<void>(hipSetDevice(previous_)); }
 
@@ -47,7 +47,7 @@ class ScopedDevice {
 // proc-address contracts track whatever runtime the test is linked against.
 int RuntimeQueryVersion() {
   int runtime_version = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&runtime_version));
+  HIP_CHECK(hipRuntimeGetVersion(&runtime_version))
   REQUIRE(runtime_version > 0);
 
   const int major = runtime_version / 10000000;
@@ -89,10 +89,10 @@ HIP_TEST_CASE(Contract_Extension_HipGetProcAddress_Default_ResolvesKnownSymbol) 
   // report the same current device the runtime reports directly.
   auto resolved = reinterpret_cast<hipError_t (*)(int*)>(pfn);
   int resolved_device = -1;
-  HIP_CHECK(resolved(&resolved_device));
+  HIP_CHECK(resolved(&resolved_device))
 
   int direct_device = -1;
-  HIP_CHECK(hipGetDevice(&direct_device));
+  HIP_CHECK(hipGetDevice(&direct_device))
   REQUIRE(resolved_device == direct_device);
 #else
   // On the NVIDIA backend hipGetProcAddress forwards to cuGetProcAddress, which
@@ -200,7 +200,7 @@ HIP_TEST_CASE(Contract_Extension_HipGetStreamDeviceId_Default_MatchesCurrentDevi
   const ScopedDevice scoped_device(0);
 
   int current_device = -1;
-  HIP_CHECK(hipGetDevice(&current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
 
   // The null (default) stream belongs to the current device, so its reported
   // device id must match the active ordinal.
@@ -226,6 +226,6 @@ HIP_TEST_CASE(Contract_Extension_HipExtGetLastError_Default_TracksErrorState) {
   // hipExtGetLastError must report the stored error and then reset the thread
   // error state to hipSuccess, mirroring hipGetLastError semantics.
   HIP_CHECK_ERROR(hipExtGetLastError(), error);
-  HIP_CHECK(hipExtGetLastError());
+  HIP_CHECK(hipExtGetLastError())
 }
 #endif  // HT_AMD

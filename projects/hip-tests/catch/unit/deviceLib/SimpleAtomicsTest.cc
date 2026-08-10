@@ -224,22 +224,22 @@ template <typename T> static void runTest() {
 
   // allocate device memory for result
   T* dOData;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dOData), memSize));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dOData), memSize))
   // copy host memory to device to initialize to zero
-  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice))
 
   // execute the kernel
   hipLaunchKernelGGL(testKernel, dim3(numBlocks), dim3(numThreads), 0, 0, dOData);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult == verifyData(hOData, numThreads * numBlocks));
 
   // Cleanup memory
   free(hOData);
-  HIP_CHECK(hipFree(dOData));
+  HIP_CHECK(hipFree(dOData))
 }
 
 HIP_TEST_CASE(Unit_SimpleAtomicsTest) {

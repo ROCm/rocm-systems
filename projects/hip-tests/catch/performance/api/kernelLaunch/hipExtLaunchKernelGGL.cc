@@ -67,15 +67,15 @@ static bool query_gpu_frequency(void (*kernel)(uint64_t* out, size_t maxIter, ui
   uint64_t* clockCount;
   uint64_t* wallClockCount;
 
-  HIP_CHECK(hipHostMalloc(&out, totalBytesSize));
-  HIP_CHECK(hipMemset(out, 0, totalBytesSize));
-  HIP_CHECK(hipMalloc(&clockCount, totalBytesSize));
-  HIP_CHECK(hipMemset(clockCount, 0, totalBytesSize));
-  HIP_CHECK(hipMalloc(&wallClockCount, totalBytesSize));
-  HIP_CHECK(hipMemset(wallClockCount, 0, totalBytesSize));
-  HIP_CHECK(hipEventCreate(&start_event));
-  HIP_CHECK(hipEventCreate(&end_event));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipHostMalloc(&out, totalBytesSize))
+  HIP_CHECK(hipMemset(out, 0, totalBytesSize))
+  HIP_CHECK(hipMalloc(&clockCount, totalBytesSize))
+  HIP_CHECK(hipMemset(clockCount, 0, totalBytesSize))
+  HIP_CHECK(hipMalloc(&wallClockCount, totalBytesSize))
+  HIP_CHECK(hipMemset(wallClockCount, 0, totalBytesSize))
+  HIP_CHECK(hipEventCreate(&start_event))
+  HIP_CHECK(hipEventCreate(&end_event))
+  HIP_CHECK(hipStreamCreate(&stream))
   std::vector<uint64_t> hostClockCount(totalThreadsSize, 0);
   std::vector<uint64_t> hostWallClockCount(totalThreadsSize, 0);
   bool verified = true;
@@ -87,13 +87,13 @@ static bool query_gpu_frequency(void (*kernel)(uint64_t* out, size_t maxIter, ui
     for (uint32_t blockSize = THREADS_PER_BLOCK; blockSize <= blockSizeMax; blockSize *= 2) {
       hipExtLaunchKernelGGL(kernel, dim3(blocks), dim3(blockSize), 0, stream, start_event,
                             end_event, 0, out, maxIter, clockCount, wallClockCount);
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
       float totalGpuTime = 0;  // Total GPU time
-      HIP_CHECK(hipEventElapsedTime(&totalGpuTime, start_event, end_event));
+      HIP_CHECK(hipEventElapsedTime(&totalGpuTime, start_event, end_event))
 
       const size_t curThreadsSize = static_cast<size_t>(blockSize) * blocks;
       const size_t curBytesSize = curThreadsSize * sizeof(uint64_t);
-      HIP_CHECK(hipMemcpy(hostClockCount.data(), clockCount, curBytesSize, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(hostClockCount.data(), clockCount, curBytesSize, hipMemcpyDeviceToHost))
       HIP_CHECK(hipMemcpy(hostWallClockCount.data(), wallClockCount, curBytesSize,
                           hipMemcpyDeviceToHost));
 
@@ -126,7 +126,7 @@ static bool query_gpu_frequency(void (*kernel)(uint64_t* out, size_t maxIter, ui
       cout << endl;
 
 #ifdef VERIFY
-      HIP_CHECK(hipMemcpy(hostOut.data(), out, curBytesSize, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(hostOut.data(), out, curBytesSize, hipMemcpyDeviceToHost))
       host1(hostOutExpected.data(), maxIter, curThreadsSize);
       verified = verify(hostOutExpected.data(), hostOut.data(), curThreadsSize);
 #endif
@@ -137,12 +137,12 @@ static bool query_gpu_frequency(void (*kernel)(uint64_t* out, size_t maxIter, ui
     }
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipEventDestroy(start_event));
-  HIP_CHECK(hipEventDestroy(end_event));
-  HIP_CHECK(hipFree(out));
-  HIP_CHECK(hipFree(clockCount));
-  HIP_CHECK(hipFree(wallClockCount));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipEventDestroy(start_event))
+  HIP_CHECK(hipEventDestroy(end_event))
+  HIP_CHECK(hipFree(out))
+  HIP_CHECK(hipFree(clockCount))
+  HIP_CHECK(hipFree(wallClockCount))
   return verified;
 }
 
@@ -158,15 +158,15 @@ static bool query_gpu_frequency(void (*kernel)(uint64_t* out, size_t maxIter, ui
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipExtLaunchKernelGGL_QueryGPUFrequency) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   int clock_rate = 0;       // in kHz
   int wall_clock_rate = 0;  // in kHz
   int occupancyBlocks = 0;
   int occupancyBlockSize = 0;
   hipDeviceProp_t props{};
-  HIP_CHECK(hipDeviceGetAttribute(&wall_clock_rate, hipDeviceAttributeWallClockRate, 0));
-  HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&occupancyBlocks, &occupancyBlockSize, kernel1));
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&wall_clock_rate, hipDeviceAttributeWallClockRate, 0))
+  HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&occupancyBlocks, &occupancyBlockSize, kernel1))
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
   clock_rate = props.clockRate;
 
   cout << left;

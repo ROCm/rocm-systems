@@ -37,31 +37,31 @@ HIP_TEST_CASE(Unit_hipModuleGetGlobal_Functional) {
   hipDeviceptr_t x;
   size_t xSize;
   int data;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   for (int i = 0; i < numDevices; i++) {
     CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(i)
   }
   for (int i = 0; i < numDevices; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     hipDevice_t device;
     hipCtx_t context;
-    HIP_CHECK(hipDeviceGet(&device, i));
-    HIP_CHECK(hipCtxCreate(&context, 0, device));
+    HIP_CHECK(hipDeviceGet(&device, i))
+    HIP_CHECK(hipCtxCreate(&context, 0, device))
     hipModule_t Module;
-    HIP_CHECK(hipModuleLoad(&Module, fileName));
+    HIP_CHECK(hipModuleLoad(&Module, fileName))
     hipFunction_t Function;
-    HIP_CHECK(hipModuleGetFunction(&Function, Module, "GPU_func"));
-    HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, 1, 1, 1, 0, 0, NULL, NULL));
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipModuleGetGlobal(reinterpret_cast<hipDeviceptr_t*>(&x), &xSize, Module, "x"));
-    HIP_CHECK(hipMemcpyDtoH(&data, hipDeviceptr_t(x), xSize));
+    HIP_CHECK(hipModuleGetFunction(&Function, Module, "GPU_func"))
+    HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, 1, 1, 1, 0, 0, NULL, NULL))
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipModuleGetGlobal(reinterpret_cast<hipDeviceptr_t*>(&x), &xSize, Module, "x"))
+    HIP_CHECK(hipMemcpyDtoH(&data, hipDeviceptr_t(x), xSize))
     if (data != (1 + MANAGED_VAR_INIT_VALUE)) {
-      HIP_CHECK(hipModuleUnload(Module));
-      HIP_CHECK(hipCtxDestroy(context));
+      HIP_CHECK(hipModuleUnload(Module))
+      HIP_CHECK(hipCtxDestroy(context))
       testStatus = false;
     }
-    HIP_CHECK(hipModuleUnload(Module));
-    HIP_CHECK(hipCtxDestroy(context));
+    HIP_CHECK(hipModuleUnload(Module))
+    HIP_CHECK(hipCtxDestroy(context))
   }
   REQUIRE(testStatus == true);
 }

@@ -58,7 +58,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex2D_Positive_ReadModeElementType, char, unsigned c
   tex2DKernel<vec4<TestType>><<<dim_grid, dim_block>>>(
       fixture.out_alloc_d.ptr(), params.NumItersX(), params.NumItersY(), fixture.tex.object(),
       params.Width(), params.Height(), params.num_subdivisions, params.tex_desc.normalizedCoords);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   fixture.LoadOutput();
 
@@ -125,7 +125,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex2D_Positive_ReadModeNormalizedFloat, char, unsign
   tex2DKernel<vec4<float>><<<dim_grid, dim_block>>>(
       fixture.out_alloc_d.ptr(), params.NumItersX(), params.NumItersY(), fixture.tex.object(),
       params.Width(), params.Height(), params.num_subdivisions, params.tex_desc.normalizedCoords);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   fixture.LoadOutput();
 

@@ -125,16 +125,16 @@ static bool testDeviceAllocMulProc(bool testmalloc) {
   if (childpid > 0) {  // Parent
     close(fd[1]);
     int* result_d{nullptr};
-    HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
+    HIP_CHECK(hipMalloc(&result_d, sizeof(int)))
     // Allocate in parent
     if (testmalloc) {
       kerTestDeviceMalloc<<<1, 1>>>(SIZE);
     } else {
       kerTestDeviceNew<<<1, 1>>>(SIZE);
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     // Check allocated memory size
-    HIP_CHECK(hipMemGetInfo(&avail, &tot));
+    HIP_CHECK(hipMemGetInfo(&avail, &tot))
     if ((tot - avail) < SIZE) {
       // Clean up memory before return
       if (testmalloc) {
@@ -142,8 +142,8 @@ static bool testDeviceAllocMulProc(bool testmalloc) {
       } else {
         kerTestDeviceDelete<<<1, 1>>>(result_d);
       }
-      HIP_CHECK(hipDeviceSynchronize());
-      HIP_CHECK(hipFree(result_d));
+      HIP_CHECK(hipDeviceSynchronize())
+      HIP_CHECK(hipFree(result_d))
       close(fd[0]);
       wait(NULL);
       return false;
@@ -156,7 +156,7 @@ static bool testDeviceAllocMulProc(bool testmalloc) {
     wait(NULL);
     // At this point the child process exits.
     // Ensure that device memory allocated from child is freed.
-    HIP_CHECK(hipMemGetInfo(&avail, &tot));
+    HIP_CHECK(hipMemGetInfo(&avail, &tot))
     if ((tot - avail) < SIZE) {
       testResult = false;
     }
@@ -165,12 +165,12 @@ static bool testDeviceAllocMulProc(bool testmalloc) {
     } else {
       kerTestDeviceDelete<<<1, 1>>>(result_d);
     }
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipFree(result_d));
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipFree(result_d))
   } else if (!childpid) {  // Child
     // Wait for hipDeviceSetLimit() completion in parent.
     int* result_d{nullptr};
-    HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
+    HIP_CHECK(hipMalloc(&result_d, sizeof(int)))
     close(fd[0]);
     // Allocate in child
     if (testmalloc) {
@@ -178,9 +178,9 @@ static bool testDeviceAllocMulProc(bool testmalloc) {
     } else {
       kerTestDeviceNew<<<1, 1>>>(SIZE);
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     // Check allocated memory size
-    HIP_CHECK(hipMemGetInfo(&avail, &tot));
+    HIP_CHECK(hipMemGetInfo(&avail, &tot))
     if ((tot - avail) < SIZE) {
       testResult = false;
     } else {
@@ -195,8 +195,8 @@ static bool testDeviceAllocMulProc(bool testmalloc) {
     } else {
       kerTestDeviceDelete<<<1, 1>>>(result_d);
     }
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipFree(result_d));
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipFree(result_d))
     exit(0);
   }
   return testResult;
@@ -222,7 +222,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
   if (childpid > 0) {  // Parent
     close(fd[1]);
     int *result_d{nullptr}, *result_h{nullptr};
-    HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
+    HIP_CHECK(hipMalloc(&result_d, sizeof(int)))
     result_h = reinterpret_cast<int*>(malloc(sizeof(int)));
     REQUIRE(result_h != nullptr);
     // Allocate in parent
@@ -239,9 +239,9 @@ static bool testDeviceMemMulProc(bool testmalloc) {
     } else {
       kerTestDeviceDelete<<<1, 1>>>(result_d);
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     *result_h = 0;
-    HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int), hipMemcpyDefault))
     if (*result_h == 0) {
       testResult = false;
     } else {
@@ -256,7 +256,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
     }
     // close the read-descriptor
     close(fd[0]);
-    HIP_CHECK(hipFree(result_d));
+    HIP_CHECK(hipFree(result_d))
     free(result_h);
     // wait for child exit
     wait(NULL);
@@ -264,7 +264,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
     // Wait for hipDeviceSetLimit() completion in parent.
     close(fd[0]);
     int *result_d{nullptr}, *result_h{nullptr};
-    HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
+    HIP_CHECK(hipMalloc(&result_d, sizeof(int)))
     result_h = reinterpret_cast<int*>(malloc(sizeof(int)));
     REQUIRE(result_h != nullptr);
     // Allocate in child
@@ -281,14 +281,14 @@ static bool testDeviceMemMulProc(bool testmalloc) {
     } else {
       kerTestDeviceDelete<<<1, 1>>>(result_d);
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     *result_h = 0;
-    HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int), hipMemcpyDefault))
     // send the value on the write-descriptor:
     write(fd[1], result_h, sizeof(int));
     // close the write descriptor:
     close(fd[1]);
-    HIP_CHECK(hipFree(result_d));
+    HIP_CHECK(hipFree(result_d))
     free(result_h);
     exit(0);
   }

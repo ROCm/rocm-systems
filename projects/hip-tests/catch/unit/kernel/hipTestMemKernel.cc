@@ -94,14 +94,14 @@ HIP_TEST_CASE(Unit_kernel_MemoryOperationsViaKernels) {
     B[i] = 0;
     C[i] = 0;
   }
-  HIP_CHECK(hipMalloc(&Ad, LEN8));
-  HIP_CHECK(hipMalloc(&Bd, LEN8));
-  HIP_CHECK(hipMalloc(&Cd, LEN8));
-  HIP_CHECK(hipMemcpy(Ad, A, LEN8, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&Ad, LEN8))
+  HIP_CHECK(hipMalloc(&Bd, LEN8))
+  HIP_CHECK(hipMalloc(&Cd, LEN8))
+  HIP_CHECK(hipMemcpy(Ad, A, LEN8, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(MemCpy8, dim3(2, 1, 1), dim3(2, 1, 1), 0, 0, Ad, Bd);
   hipLaunchKernelGGL(MemSet8, dim3(2, 1, 1), dim3(2, 1, 1), 0, 0, Cd);
-  HIP_CHECK(hipMemcpy(B, Bd, LEN8, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(C, Cd, LEN8, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B, Bd, LEN8, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(C, Cd, LEN8, hipMemcpyDeviceToHost))
   for (uint32_t i = 0; i < LEN8; i++) {
     REQUIRE(A[i] == B[i]);
     REQUIRE(C[i] == 1);
@@ -110,9 +110,9 @@ HIP_TEST_CASE(Unit_kernel_MemoryOperationsViaKernels) {
   delete[] A;
   delete[] B;
   delete[] C;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
-  HIP_CHECK(hipFree(Cd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
+  HIP_CHECK(hipFree(Cd))
 
   SECTION("MemCpySet1") {
     A = new uint8_t[LEN9];
@@ -123,14 +123,14 @@ HIP_TEST_CASE(Unit_kernel_MemoryOperationsViaKernels) {
       B[i] = 0;
       C[i] = 0;
     }
-    HIP_CHECK(hipMalloc(&Ad, LEN9));
-    HIP_CHECK(hipMalloc(&Bd, LEN9));
-    HIP_CHECK(hipMalloc(&Cd, LEN9));
-    HIP_CHECK(hipMemcpy(Ad, A, LEN9, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&Ad, LEN9))
+    HIP_CHECK(hipMalloc(&Bd, LEN9))
+    HIP_CHECK(hipMalloc(&Cd, LEN9))
+    HIP_CHECK(hipMemcpy(Ad, A, LEN9, hipMemcpyHostToDevice))
     hipLaunchKernelGGL(MemCpy9, dim3(2, 1, 1), dim3(2, 1, 1), 0, 0, Ad, Bd);
     hipLaunchKernelGGL(MemSet9, dim3(2, 1, 1), dim3(2, 1, 1), 0, 0, Cd);
-    HIP_CHECK(hipMemcpy(B, Bd, LEN9, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(C, Cd, LEN9, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(B, Bd, LEN9, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipMemcpy(C, Cd, LEN9, hipMemcpyDeviceToHost))
     for (uint32_t i = 0; i < LEN9; i++) {
       REQUIRE(A[i] == B[i]);
       REQUIRE(C[i] == 1);
@@ -139,9 +139,9 @@ HIP_TEST_CASE(Unit_kernel_MemoryOperationsViaKernels) {
     delete[] A;
     delete[] B;
     delete[] C;
-    HIP_CHECK(hipFree(Ad));
-    HIP_CHECK(hipFree(Bd));
-    HIP_CHECK(hipFree(Cd));
+    HIP_CHECK(hipFree(Ad))
+    HIP_CHECK(hipFree(Bd))
+    HIP_CHECK(hipFree(Cd))
   }
 
   SECTION("MemCpySet2") {
@@ -153,14 +153,14 @@ HIP_TEST_CASE(Unit_kernel_MemoryOperationsViaKernels) {
       B[i] = 0;
       C[i] = 0;
     }
-    HIP_CHECK(hipMalloc(&Ad, LEN10));
-    HIP_CHECK(hipMalloc(&Bd, LEN10));
-    HIP_CHECK(hipMalloc(&Cd, LEN10));
-    HIP_CHECK(hipMemcpy(Ad, A, LEN10, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&Ad, LEN10))
+    HIP_CHECK(hipMalloc(&Bd, LEN10))
+    HIP_CHECK(hipMalloc(&Cd, LEN10))
+    HIP_CHECK(hipMemcpy(Ad, A, LEN10, hipMemcpyHostToDevice))
     hipLaunchKernelGGL(MemCpy10, dim3(2, 1, 1), dim3(2, 1, 1), 0, 0, Ad, Bd);
     hipLaunchKernelGGL(MemSet10, dim3(2, 1, 1), dim3(2, 1, 1), 0, 0, Cd);
-    HIP_CHECK(hipMemcpy(B, Bd, LEN10, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(C, Cd, LEN10, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(B, Bd, LEN10, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipMemcpy(C, Cd, LEN10, hipMemcpyDeviceToHost))
     for (uint32_t i = 0; i < LEN10; i++) {
       REQUIRE(A[i] == B[i]);
       REQUIRE(C[i] == 1);
@@ -169,9 +169,9 @@ HIP_TEST_CASE(Unit_kernel_MemoryOperationsViaKernels) {
     delete[] A;
     delete[] B;
     delete[] C;
-    HIP_CHECK(hipFree(Ad));
-    HIP_CHECK(hipFree(Bd));
-    HIP_CHECK(hipFree(Cd));
+    HIP_CHECK(hipFree(Ad))
+    HIP_CHECK(hipFree(Bd))
+    HIP_CHECK(hipFree(Cd))
   }
 
   SECTION("MemCpySet3") {
@@ -183,14 +183,14 @@ HIP_TEST_CASE(Unit_kernel_MemoryOperationsViaKernels) {
       B[i] = 0;
       C[i] = 0;
     }
-    HIP_CHECK(hipMalloc(&Ad, LEN11));
-    HIP_CHECK(hipMalloc(&Bd, LEN11));
-    HIP_CHECK(hipMalloc(&Cd, LEN11));
-    HIP_CHECK(hipMemcpy(Ad, A, LEN11, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&Ad, LEN11))
+    HIP_CHECK(hipMalloc(&Bd, LEN11))
+    HIP_CHECK(hipMalloc(&Cd, LEN11))
+    HIP_CHECK(hipMemcpy(Ad, A, LEN11, hipMemcpyHostToDevice))
     hipLaunchKernelGGL(MemCpy11, dim3(2, 1, 1), dim3(2, 1, 1), 0, 0, Ad, Bd);
     hipLaunchKernelGGL(MemSet11, dim3(2, 1, 1), dim3(2, 1, 1), 0, 0, Cd);
-    HIP_CHECK(hipMemcpy(B, Bd, LEN11, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(C, Cd, LEN11, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(B, Bd, LEN11, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipMemcpy(C, Cd, LEN11, hipMemcpyDeviceToHost))
     for (uint32_t i = 0; i < LEN11; i++) {
       REQUIRE(A[i] == B[i]);
       REQUIRE(C[i] == 1);
@@ -199,9 +199,9 @@ HIP_TEST_CASE(Unit_kernel_MemoryOperationsViaKernels) {
     delete[] A;
     delete[] B;
     delete[] C;
-    HIP_CHECK(hipFree(Ad));
-    HIP_CHECK(hipFree(Bd));
-    HIP_CHECK(hipFree(Cd));
+    HIP_CHECK(hipFree(Ad))
+    HIP_CHECK(hipFree(Bd))
+    HIP_CHECK(hipFree(Cd))
   }
 
   SECTION("MemCpySet4") {
@@ -213,14 +213,14 @@ HIP_TEST_CASE(Unit_kernel_MemoryOperationsViaKernels) {
       B[i] = 0;
       C[i] = 0;
     }
-    HIP_CHECK(hipMalloc(&Ad, LEN12));
-    HIP_CHECK(hipMalloc(&Bd, LEN12));
-    HIP_CHECK(hipMalloc(&Cd, LEN12));
-    HIP_CHECK(hipMemcpy(Ad, A, LEN12, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&Ad, LEN12))
+    HIP_CHECK(hipMalloc(&Bd, LEN12))
+    HIP_CHECK(hipMalloc(&Cd, LEN12))
+    HIP_CHECK(hipMemcpy(Ad, A, LEN12, hipMemcpyHostToDevice))
     hipLaunchKernelGGL(MemCpy12, dim3(2, 1, 1), dim3(2, 1, 1), 0, 0, Ad, Bd);
     hipLaunchKernelGGL(MemSet12, dim3(2, 1, 1), dim3(2, 1, 1), 0, 0, Cd);
-    HIP_CHECK(hipMemcpy(B, Bd, LEN12, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(C, Cd, LEN12, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(B, Bd, LEN12, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipMemcpy(C, Cd, LEN12, hipMemcpyDeviceToHost))
     for (uint32_t i = 0; i < LEN12; i++) {
       REQUIRE(A[i] == B[i]);
       REQUIRE(C[i] == 1);
@@ -229,9 +229,9 @@ HIP_TEST_CASE(Unit_kernel_MemoryOperationsViaKernels) {
     delete[] A;
     delete[] B;
     delete[] C;
-    HIP_CHECK(hipFree(Ad));
-    HIP_CHECK(hipFree(Bd));
-    HIP_CHECK(hipFree(Cd));
+    HIP_CHECK(hipFree(Ad))
+    HIP_CHECK(hipFree(Bd))
+    HIP_CHECK(hipFree(Cd))
   }
 }
 

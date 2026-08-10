@@ -63,7 +63,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex3D_Positive_ReadModeElementType, char, unsigned c
       fixture.out_alloc_d.ptr(), params.NumItersX(), params.NumItersY(), params.NumItersZ(),
       fixture.tex.object(), params.Width(), params.Height(), params.Depth(),
       params.num_subdivisions, params.tex_desc.normalizedCoords);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   fixture.LoadOutput();
 
@@ -140,7 +140,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex3D_Positive_ReadModeNormalizedFloat, char, unsign
       fixture.out_alloc_d.ptr(), params.NumItersX(), params.NumItersY(), params.NumItersZ(),
       fixture.tex.object(), params.Width(), params.Height(), params.Depth(),
       params.num_subdivisions, params.tex_desc.normalizedCoords);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   fixture.LoadOutput();
 

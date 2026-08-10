@@ -92,12 +92,12 @@ HIP_TEST_CASE(Unit_Thread_Block_Getters_Positive_Basic) {
                                             grid.thread_count_ * sizeof(unsigned int));
 
     thread_block_size_getter<<<blocks, threads>>>(uint_arr_dev.ptr());
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
     HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                         grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     thread_block_thread_rank_getter<<<blocks, threads>>>(uint_arr_dev.ptr());
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
 
     // Validate thread_block.size() values
     ArrayAllOf(uint_arr.ptr(), grid.thread_count_,
@@ -105,10 +105,10 @@ HIP_TEST_CASE(Unit_Thread_Block_Getters_Positive_Basic) {
 
     HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                         grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 #if HT_AMD
     thread_block_block_rank_getter<<<blocks, threads>>>(uint_arr_dev.ptr());
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
 #endif
 
     // Validate thread_block.thread_rank() values
@@ -117,7 +117,7 @@ HIP_TEST_CASE(Unit_Thread_Block_Getters_Positive_Basic) {
 
     HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                         grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     // Validate thread_block.block_rank() values
     ArrayAllOf(uint_arr.ptr(), grid.thread_count_,
@@ -129,12 +129,12 @@ HIP_TEST_CASE(Unit_Thread_Block_Getters_Positive_Basic) {
     LinearAllocGuard<dim3> dim3_arr(LinearAllocs::hipHostMalloc, grid.thread_count_ * sizeof(dim3));
 
     thread_block_group_indices_getter<<<blocks, threads>>>(dim3_arr_dev.ptr());
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
     HIP_CHECK(hipMemcpy(dim3_arr.ptr(), dim3_arr_dev.ptr(),
                         grid.thread_count_ * sizeof(*dim3_arr.ptr()), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     thread_block_thread_indices_getter<<<blocks, threads>>>(dim3_arr_dev.ptr());
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
 
     // Validate thread_block.group_index() values
     ArrayAllOf(dim3_arr.ptr(), grid.thread_count_,
@@ -142,7 +142,7 @@ HIP_TEST_CASE(Unit_Thread_Block_Getters_Positive_Basic) {
 
     HIP_CHECK(hipMemcpy(dim3_arr.ptr(), dim3_arr_dev.ptr(),
                         grid.thread_count_ * sizeof(*dim3_arr.ptr()), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     // Validate thread_block.thread_index() values
     ArrayAllOf(dim3_arr.ptr(), grid.thread_count_,
@@ -182,12 +182,12 @@ HIP_TEST_CASE(Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic) {
                                           grid.thread_count_ * sizeof(unsigned int));
 
   thread_block_size_getter<cg::thread_group><<<blocks, threads>>>(uint_arr_dev.ptr());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   thread_block_thread_rank_getter<cg::thread_group><<<blocks, threads>>>(uint_arr_dev.ptr());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   // Validate thread_block.size() values
   ArrayAllOf(uint_arr.ptr(), grid.thread_count_,
@@ -195,7 +195,7 @@ HIP_TEST_CASE(Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic) {
 
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Validate thread_block.thread_rank() values
   ArrayAllOf(uint_arr.ptr(), grid.thread_count_,
@@ -233,12 +233,12 @@ HIP_TEST_CASE(Unit_Thread_Block_Getters_Via_Non_Member_Functions_Positive_Basic)
                                           grid.thread_count_ * sizeof(unsigned int));
 
   thread_block_non_member_size_getter<<<blocks, threads>>>(uint_arr_dev.ptr());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   thread_block_non_member_thread_rank_getter<<<blocks, threads>>>(uint_arr_dev.ptr());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   // Validate thread_block.size() values
   ArrayAllOf(uint_arr.ptr(), grid.thread_count_,
@@ -246,7 +246,7 @@ HIP_TEST_CASE(Unit_Thread_Block_Getters_Via_Non_Member_Functions_Positive_Basic)
 
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Validate thread_block.thread_rank() values
   ArrayAllOf(uint_arr.ptr(), grid.thread_count_,
@@ -337,10 +337,10 @@ template <bool global_memory, typename T> void ThreadBlockSyncTest() {
 
   thread_block_sync_check<global_memory><<<blocks, threads, shared_memory_size>>>(
       arr_dev.ptr(), wait_modifiers_dev.ptr(), read_offsets_dev.ptr());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
-  HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(std::all_of(arr.ptr(), arr.ptr() + grid.thread_count_, [](unsigned int e) { return e; }));
 }

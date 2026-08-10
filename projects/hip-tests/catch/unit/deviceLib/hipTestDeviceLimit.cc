@@ -7,6 +7,6 @@
 #include <hip_test_common.hh>
 HIP_TEST_CASE(Unit_hipTestDeviceLimit_Basic) {
   size_t heap;
-  HIP_CHECK(hipDeviceGetLimit(&heap, hipLimitMallocHeapSize));
+  HIP_CHECK(hipDeviceGetLimit(&heap, hipLimitMallocHeapSize))
   REQUIRE(heap != 0);
 }

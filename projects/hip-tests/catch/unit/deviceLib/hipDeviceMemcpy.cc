@@ -27,25 +27,25 @@ HIP_TEST_CASE(Unit_ToAndFroMemCpyToDevice) {
     A[i] = i;
     B[i] = 0;
   }
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
 
   hipLaunchKernelGGL(cpy, dim3(1), dim3(LEN), 0, 0, Bd, Ad);
 
-  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost))
   for (int i = LEN - 16; i < LEN; i++) {
     REQUIRE(A[i] == B[i]);
   }
   hipLaunchKernelGGL(set, dim3(1), dim3(LEN), 0, 0, Bd, 0x1);
 
-  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost))
   for (int i = LEN - 16; i < LEN; i++) {
     REQUIRE(0x01010101 == B[i]);
   }
 
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
   delete[] A;
   delete[] B;
 }

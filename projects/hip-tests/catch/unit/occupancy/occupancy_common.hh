@@ -13,7 +13,7 @@ template <typename F> void MaxPotentialBlockSize(F func, int maxThreadsPerBlock)
   int blockSize = 0;
 
   // Get potential blocksize
-  HIP_CHECK(func(&gridSize, &blockSize));
+  HIP_CHECK(func(&gridSize, &blockSize))
 
   // Check if blockSize doesn't exceed maxThreadsPerBlock
   REQUIRE(gridSize > 0);
@@ -40,7 +40,7 @@ void MaxActiveBlocksPerMultiprocessor(F func, int blockSize, int maxThreadsPerMu
   int numBlocks = 0;
 
   // Validate maximum active block pre multiprocessor
-  HIP_CHECK(func(&numBlocks));
+  HIP_CHECK(func(&numBlocks))
 
   // Check if numBlocks and blockSize are within limits
   REQUIRE(numBlocks > 0);

@@ -57,9 +57,9 @@ HIP_TEST_CASE(Unit_hipMemFaultStackAllocation_Check) {
   const unsigned threadsPerBlock = 256;
   const unsigned blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
 
-  HIP_CHECK(hipMallocManaged(&A_d, Nbytes));
+  HIP_CHECK(hipMallocManaged(&A_d, Nbytes))
   REQUIRE(A_d != nullptr);
-  HIP_CHECK(hipMallocManaged(&C_d, Nbytes));
+  HIP_CHECK(hipMallocManaged(&C_d, Nbytes))
   REQUIRE(C_d != nullptr);
 
   for (size_t i = 0; i < N; i++) {
@@ -70,17 +70,17 @@ HIP_TEST_CASE(Unit_hipMemFaultStackAllocation_Check) {
     hipLaunchKernelGGL(MyKernelConstSize, dim3(blocks), dim3(threadsPerBlock), 0, 0, C_d, A_d);
     ret = hipGetLastError();
     REQUIRE(hipSuccess == ret);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(true == verify(C_d, A_d));
   }
   SECTION("Calling Kernel which allocate VariableSize to local array") {
     hipLaunchKernelGGL(MyKernelVariableSize, dim3(blocks), dim3(threadsPerBlock), 0, 0, C_d, A_d);
     ret = hipGetLastError();
     REQUIRE(hipSuccess == ret);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(true == verify(C_d, A_d));
   }
 
-  HIP_CHECK(hipFree(C_d));
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(C_d))
+  HIP_CHECK(hipFree(A_d))
 }

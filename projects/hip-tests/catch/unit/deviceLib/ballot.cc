@@ -27,7 +27,7 @@ __global__ void gpu_ballot(unsigned int* device_ballot, unsigned Num_Warps_per_B
 HIP_TEST_CASE(Unit_ballot) {
   unsigned warpSize, pshift;
   hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
 
   warpSize = devProp.warpSize;
 
@@ -41,7 +41,7 @@ HIP_TEST_CASE(Unit_ballot) {
   unsigned int Num_Warps_per_Grid = (Num_Threads_per_Block * Num_Blocks_per_Grid) / warpSize;
   unsigned int* host_ballot = (unsigned int*)malloc(Num_Warps_per_Grid * sizeof(unsigned int));
   unsigned int* device_ballot;
-  HIP_CHECK(hipMalloc((void**)&device_ballot, Num_Warps_per_Grid * sizeof(unsigned int)));
+  HIP_CHECK(hipMalloc((void**)&device_ballot, Num_Warps_per_Grid * sizeof(unsigned int)))
   int divergent_count = 0;
   for (unsigned i = 0; i < Num_Warps_per_Grid; i++) host_ballot[i] = 0;
 
@@ -51,7 +51,7 @@ HIP_TEST_CASE(Unit_ballot) {
   hipLaunchKernelGGL(gpu_ballot, dim3(Num_Blocks_per_Grid), dim3(Num_Threads_per_Block), 0, 0,
                      device_ballot, Num_Warps_per_Block, pshift);
 
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   HIP_CHECK(hipMemcpy(host_ballot, device_ballot, Num_Warps_per_Grid * sizeof(unsigned int),
                       hipMemcpyDeviceToHost));
 
@@ -66,7 +66,7 @@ HIP_TEST_CASE(Unit_ballot) {
     }
   }
 
-  HIP_CHECK(hipFree(device_ballot));
+  HIP_CHECK(hipFree(device_ballot))
   free(host_ballot);
   REQUIRE(divergent_count == 1);
 }

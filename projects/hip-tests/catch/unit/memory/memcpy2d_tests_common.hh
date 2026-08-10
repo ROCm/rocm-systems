@@ -31,13 +31,13 @@ void Memcpy2DDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = 
   const dim3 blocks(cols / threads_per_block.x + 1, rows / threads_per_block.y + 1);
   Iota<<<blocks, threads_per_block>>>(device_alloc.ptr(), device_alloc.pitch(),
                                       device_alloc.width_logical(), device_alloc.height(), 1);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   HIP_CHECK(memcpy_func(host_alloc.ptr(), host_pitch, device_alloc.ptr(), device_alloc.pitch(),
                         device_alloc.width(), device_alloc.height(), kind));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   constexpr auto f = [](size_t x, size_t y, size_t z) { return z * cols * rows + y * cols + x; };
@@ -61,24 +61,24 @@ void Memcpy2DDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream 
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
   if (device_count > 1) {
     int can_access_peer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
+    HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device))
     if (!can_access_peer) {
       HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   }
 
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
   if constexpr (enable_peer_access) {
     if (src_device == dst_device) {
       return;
     }
-    HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0));
+    HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0))
   }
 
   LinearAllocGuard2D<int, unaligned> src_alloc(cols * src_cols_mult, rows);
-  HIP_CHECK(hipSetDevice(dst_device));
+  HIP_CHECK(hipSetDevice(dst_device))
   LinearAllocGuard2D<int, unaligned> dst_alloc(cols, rows);
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, dst_alloc.width() * rows);
 
   const dim3 threads_per_block(32, 32);
@@ -87,13 +87,13 @@ void Memcpy2DDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream 
   // dst_alloc
   Iota<<<blocks, threads_per_block>>>(src_alloc.ptr(), src_alloc.pitch(), dst_alloc.width_logical(),
                                       dst_alloc.height(), 1);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   HIP_CHECK(memcpy_func(dst_alloc.ptr(), dst_alloc.pitch(), src_alloc.ptr(), src_alloc.pitch(),
                         dst_alloc.width(), dst_alloc.height(), kind));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   HIP_CHECK(hipMemcpy2D(host_alloc.ptr(), dst_alloc.width(), dst_alloc.ptr(), dst_alloc.pitch(),
@@ -127,7 +127,7 @@ void Memcpy2DHostToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = 
   HIP_CHECK(memcpy_func(device_alloc.ptr(), device_alloc.pitch(), src_host_alloc.ptr(), host_pitch,
                         device_alloc.width(), device_alloc.height(), kind));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   HIP_CHECK(hipMemcpy2D(dst_host_alloc.ptr(), device_alloc.width(), device_alloc.ptr(),
@@ -157,7 +157,7 @@ void Memcpy2DHostToHostShell(F memcpy_func, const hipStream_t kernel_stream = nu
   HIP_CHECK(memcpy_func(dst_host.ptr(), cols * sizeof(int), src_host.ptr(), src_pitch,
                         cols * sizeof(int), rows, kind));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   PitchedMemoryVerify(dst_host.ptr(), cols * sizeof(int), cols, rows, 1, f);
@@ -168,10 +168,10 @@ template <typename F>
 void MemcpySyncBehaviorCheck(F memcpy_func, const bool should_sync,
                              const hipStream_t kernel_stream) {
   LaunchDelayKernel(std::chrono::milliseconds{300}, kernel_stream);
-  HIP_CHECK(memcpy_func());
+  HIP_CHECK(memcpy_func())
   if (should_sync) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
-    HIP_CHECK(hipStreamQuery(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
+    HIP_CHECK(hipStreamQuery(kernel_stream))
   } else {
     HIP_CHECK_ERROR(hipStreamQuery(kernel_stream), hipErrorNotReady);
   }
@@ -255,7 +255,7 @@ void Memcpy2DZeroWidthHeight(F memcpy_func, const hipStream_t stream = nullptr) 
                           device_alloc.pitch(), device_alloc.width() * width_mult,
                           device_alloc.height() * height_mult, hipMemcpyDeviceToHost));
     if constexpr (should_synchronize) {
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     ArrayFindIfNot(host_alloc.ptr(), static_cast<uint8_t>(42),
                    device_alloc.width_logical() * device_alloc.height());
@@ -273,7 +273,7 @@ void Memcpy2DZeroWidthHeight(F memcpy_func, const hipStream_t stream = nullptr) 
                           dst_alloc.width() * width_mult, dst_alloc.height() * height_mult,
                           hipMemcpyDeviceToDevice));
     if constexpr (should_synchronize) {
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     HIP_CHECK(hipMemcpy2D(host_alloc.ptr(), dst_alloc.width(), dst_alloc.ptr(), dst_alloc.pitch(),
                           dst_alloc.width(), dst_alloc.height(), hipMemcpyDeviceToHost));
@@ -294,7 +294,7 @@ void Memcpy2DZeroWidthHeight(F memcpy_func, const hipStream_t stream = nullptr) 
                           device_alloc.width(), device_alloc.width() * width_mult,
                           device_alloc.height() * height_mult, hipMemcpyHostToDevice));
     if constexpr (should_synchronize) {
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     HIP_CHECK(hipMemcpy2D(dst_host_alloc.ptr(), device_alloc.width(), device_alloc.ptr(),
                           device_alloc.pitch(), device_alloc.width(), device_alloc.height(),
@@ -312,7 +312,7 @@ void Memcpy2DZeroWidthHeight(F memcpy_func, const hipStream_t stream = nullptr) 
     HIP_CHECK(memcpy_func(dst_alloc.ptr(), cols, src_alloc.ptr(), cols, cols * width_mult,
                           rows * height_mult, hipMemcpyHostToHost));
     if constexpr (should_synchronize) {
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     ArrayFindIfNot(dst_alloc.ptr(), static_cast<uint8_t>(42), alloc_size);
   }
@@ -456,21 +456,21 @@ void MemcpyParam2DArrayHostShell(F memcpy_func, const hipStream_t kernel_stream 
   HIP_CHECK(memcpy_func(src_array.ptr(), 0, src_host.ptr(), extent.width, extent.width,
                         extent.height, hipMemcpyHostToDevice, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   // Array -> Array
   HIP_CHECK(memcpy_func(dst_array.ptr(), 0, src_array.ptr(), 0, extent.width, extent.height,
                         hipMemcpyDeviceToDevice, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   // Array -> Host
   HIP_CHECK(memcpy_func(dst_host.ptr(), extent.width, dst_array.ptr(), 0, extent.width,
                         extent.height, hipMemcpyDeviceToHost, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   PitchedMemoryVerify(dst_host.ptr(), extent.width, extent.width / sizeof(int), extent.height,
@@ -496,34 +496,34 @@ void MemcpyParam2DArrayDeviceShell(F memcpy_func, const hipStream_t kernel_strea
   Iota<<<blocks, threads_per_block>>>(src_device.ptr(), src_device.pitch(),
                                       src_device.width_logical(), src_device.height(),
                                       src_device.depth());
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Device -> Array
   HIP_CHECK(memcpy_func(src_array.ptr(), 0, src_device.ptr(), src_device.pitch(), extent.width,
                         extent.height, hipMemcpyDeviceToDevice, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   // Array -> Array
   HIP_CHECK(memcpy_func(dst_array.ptr(), 0, src_array.ptr(), 0, extent.width, extent.height,
                         hipMemcpyDeviceToDevice, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   // Array -> Device
   HIP_CHECK(memcpy_func(dst_device.ptr(), dst_device.pitch(), dst_array.ptr(), 0, extent.width,
                         extent.height, hipMemcpyDeviceToDevice, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   HIP_CHECK(memcpy_func(host_alloc.ptr(), extent.width, dst_device.ptr(), dst_device.pitch(),
                         extent.width, extent.height, hipMemcpyDeviceToHost, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   const auto f = [extent](size_t x, size_t y, size_t z) {

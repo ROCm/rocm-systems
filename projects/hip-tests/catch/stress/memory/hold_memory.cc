@@ -20,7 +20,7 @@
 
 int main() {
   size_t freeMem = 0, totalMem = 0;
-  HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem));
+  HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem))
 
   void* ptr;
   HIP_CHECK(hipMalloc(&ptr, 0.4 * totalMem));  // hold 40% of total gpu memory
@@ -28,5 +28,5 @@ int main() {
   std::this_thread::sleep_for(
       std::chrono::seconds(4));  //  sleep for few seconds till test complete
   std::cout << "Waking up..." << std::endl;
-  HIP_CHECK(hipFree(ptr));
+  HIP_CHECK(hipFree(ptr))
 }

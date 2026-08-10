@@ -29,7 +29,7 @@ void checkArrayContent(hipArray_t array, size_t width, size_t height,
   copyParms.kind = hipMemcpyDeviceToHost;
   copyParms.srcPos = make_hipPos(0, 0, 0);
   copyParms.dstPos = make_hipPos(0, 0, 0);
-  HIP_CHECK(hipMemcpy3D(&copyParms));
+  HIP_CHECK(hipMemcpy3D(&copyParms))
   for (size_t i = 0; i < width * height * depth; ++i) {
     INFO("Array FAILURE at Index: " << i << "\nval : " << hostBuf[i]
                                     << " expected:" << expected);
@@ -76,7 +76,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps, char, int,
   constexpr int numH = 16;
   constexpr int depth = 10;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   hipExtent extent = make_hipExtent(numW * sizeof(TestType), numH, depth);
   size_t elements_3d = numW * numH * depth;
 
@@ -87,8 +87,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps, char, int,
 
   // Device Pointers
   void *dstPtr1, *dstPtr2;
-  HIP_CHECK(hipMalloc(&dstPtr1, elements_3d * sizeof(TestType)));
-  HIP_CHECK(hipMalloc(&dstPtr2, elements_3d * sizeof(TestType)));
+  HIP_CHECK(hipMalloc(&dstPtr1, elements_3d * sizeof(TestType)))
+  HIP_CHECK(hipMalloc(&dstPtr2, elements_3d * sizeof(TestType)))
 
   // Prepare batch ops array
   hipMemcpy3DBatchOp ops[numOps];
@@ -164,8 +164,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps, char, int,
   // Launch the batch
   size_t failIdx;
   unsigned long long flags = 0;
-  HIP_CHECK(hipMemcpy3DBatchAsync(numOps, ops, &failIdx, flags, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpy3DBatchAsync(numOps, ops, &failIdx, flags, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Validation
   for (size_t i = 0; i < elements_3d; ++i) {
@@ -174,9 +174,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps, char, int,
   }
 
   // Cleanup
-  HIP_CHECK(hipFree(dstPtr1));
-  HIP_CHECK(hipFree(dstPtr2));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(dstPtr1))
+  HIP_CHECK(hipFree(dstPtr2))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 /**
  * Test Description
@@ -215,7 +215,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps, char,
   constexpr int numH = 16;
   constexpr int depth = 10;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   hipExtent extent = make_hipExtent(numW, numH, depth);
   size_t elements_3d = extent.width * extent.height * extent.depth;
 
@@ -225,14 +225,14 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps, char,
 
   // Device Pointer
   void *dstPtr;
-  HIP_CHECK(hipMalloc(&dstPtr, elements_3d * sizeof(TestType)));
+  HIP_CHECK(hipMalloc(&dstPtr, elements_3d * sizeof(TestType)))
 
   // Dev Arrays
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<TestType>();
   hipArray_t array1, array2, array3;
-  HIP_CHECK(hipMalloc3DArray(&array1, &channelDesc, extent, 0));
-  HIP_CHECK(hipMalloc3DArray(&array2, &channelDesc, extent, 0));
-  HIP_CHECK(hipMalloc3DArray(&array3, &channelDesc, extent, 0));
+  HIP_CHECK(hipMalloc3DArray(&array1, &channelDesc, extent, 0))
+  HIP_CHECK(hipMalloc3DArray(&array2, &channelDesc, extent, 0))
+  HIP_CHECK(hipMalloc3DArray(&array3, &channelDesc, extent, 0))
 
   // Fill dev Array with val2
   std::vector<TestType> tmpHost(elements_3d, val2);
@@ -243,7 +243,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps, char,
   fillParms.dstArray = array1;
   fillParms.extent = extent;
   fillParms.kind = hipMemcpyHostToDevice;
-  HIP_CHECK(hipMemcpy3D(&fillParms));
+  HIP_CHECK(hipMemcpy3D(&fillParms))
 
   // Prepare batch ops array
   hipMemcpy3DBatchOp ops[numOps];
@@ -318,8 +318,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps, char,
   // Launch the batch
   size_t failIdx;
   unsigned long long flags = 0;
-  HIP_CHECK(hipMemcpy3DBatchAsync(numOps, ops, &failIdx, flags, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpy3DBatchAsync(numOps, ops, &failIdx, flags, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Check Random Array data
   checkArrayContent<TestType>(array2, extent.width, extent.height, extent.depth,
@@ -331,11 +331,11 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps, char,
   }
 
   // Cleanup
-  HIP_CHECK(hipFree(dstPtr));
-  HIP_CHECK(hipFreeArray(array1));
-  HIP_CHECK(hipFreeArray(array2));
-  HIP_CHECK(hipFreeArray(array3));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(dstPtr))
+  HIP_CHECK(hipFreeArray(array1))
+  HIP_CHECK(hipFreeArray(array2))
+  HIP_CHECK(hipFreeArray(array3))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 /**
  * Test Description
@@ -354,7 +354,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps, char,
 HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_NegativeTests) {
   const int numOps = 2;
   hipStream_t stream = NULL;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   size_t failIdx;
   unsigned long long flags = 0;
   hipMemcpy3DBatchOp ops[numOps];
@@ -372,7 +372,7 @@ HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_NegativeTests) {
         hipErrorInvalidValue);
   }
   // Cleanup
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 /**
  * End doxygen group MemoryTest.

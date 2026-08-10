@@ -58,8 +58,8 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeGetParams_Negative) {
   hipGraph_t graph;
   hipError_t ret;
   hipGraphNode_t memcpyNode;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, NULL, 0, &myparms));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, NULL, 0, &myparms))
 
   SECTION("Pass node as nullptr") {
     ret = hipGraphMemcpyNodeGetParams(nullptr, &myparms);
@@ -74,9 +74,9 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeGetParams_Negative) {
     ret = hipGraphMemcpyNodeGetParams(memcpyNode, nullptr);
     REQUIRE(hipErrorInvalidValue == ret);
   }
-  HIP_CHECK(hipFreeArray(devArray));
+  HIP_CHECK(hipFreeArray(devArray))
   free(hData);
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /* Test verifies hipGraphMemcpyNodeGetParams API Functional scenarios.
@@ -153,8 +153,8 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeGetParams_Functional) {
 
   hipGraph_t graph;
   hipGraphNode_t memcpyNode;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, NULL, 0, &myparms));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, NULL, 0, &myparms))
 
   SECTION("Get Memcpy Param and verify.") {
     hipMemcpy3DParms m3DGetParams;
@@ -195,10 +195,10 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeGetParams_Functional) {
     REQUIRE(hipSuccess == hipGraphMemcpyNodeGetParams(memcpyNode, &m3DGetParams1));
     REQUIRE(true == memcpyNodeCompare(&myparms1, &m3DGetParams1));
 
-    HIP_CHECK(hipFreeArray(devArray1));
+    HIP_CHECK(hipFreeArray(devArray1))
     free(hData1);
   }
-  HIP_CHECK(hipFreeArray(devArray));
+  HIP_CHECK(hipFreeArray(devArray))
   free(hData);
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }

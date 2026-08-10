@@ -23,7 +23,7 @@ __global__ void warpvote(int* device_any, int* device_all, int pshift) {
 HIP_TEST_CASE(Unit_AnyAll_CompileTest) {
   int warpSize, pshift;
   hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
   warpSize = devProp.warpSize;
 
   int w = warpSize;
@@ -43,19 +43,19 @@ HIP_TEST_CASE(Unit_AnyAll_CompileTest) {
   int* host_all = (int*)malloc(Num_Warps_per_Grid * sizeof(int));
   int* device_any;
   int* device_all;
-  HIP_CHECK(hipMalloc((void**)&device_any, Num_Warps_per_Grid * sizeof(int)));
-  HIP_CHECK(hipMalloc((void**)&device_all, Num_Warps_per_Grid * sizeof(int)));
+  HIP_CHECK(hipMalloc((void**)&device_any, Num_Warps_per_Grid * sizeof(int)))
+  HIP_CHECK(hipMalloc((void**)&device_all, Num_Warps_per_Grid * sizeof(int)))
   for (int i = 0; i < Num_Warps_per_Grid; i++) {
     host_any[i] = 0;
     host_all[i] = 0;
   }
-  HIP_CHECK(hipMemcpy(device_any, host_any, sizeof(int), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(device_all, host_all, sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(device_any, host_any, sizeof(int), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(device_all, host_all, sizeof(int), hipMemcpyHostToDevice))
 
   hipLaunchKernelGGL(warpvote, dim3(Num_Blocks_per_Grid), dim3(Num_Threads_per_Block), 0, 0,
                      device_any, device_all, pshift);
 
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   HIP_CHECK(
       hipMemcpy(host_any, device_any, Num_Warps_per_Grid * sizeof(int), hipMemcpyDeviceToHost));
   HIP_CHECK(
@@ -67,8 +67,8 @@ HIP_TEST_CASE(Unit_AnyAll_CompileTest) {
     if (host_any[i] != 1) ++anycount;
   }
 
-  HIP_CHECK(hipFree(device_any));
-  HIP_CHECK(hipFree(device_all));
+  HIP_CHECK(hipFree(device_any))
+  HIP_CHECK(hipFree(device_all))
   free(host_any);
   free(host_all);
   REQUIRE(anycount == 0);

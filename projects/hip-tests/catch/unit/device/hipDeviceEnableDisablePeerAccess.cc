@@ -41,21 +41,21 @@ HIP_TEST_CASE(Unit_hipDeviceEnableDisablePeerAccess_positive) {
   int peerDev = GENERATE(range(0, HipTest::getGeviceCount()));
 
   if (dev != peerDev) {
-    HIP_CHECK(hipSetDevice(dev));
+    HIP_CHECK(hipSetDevice(dev))
 
     GENERATE_CAPTURE();
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     BEGIN_CAPTURE(stream);
-    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, dev, peerDev));
+    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, dev, peerDev))
     END_CAPTURE(stream);
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
 
     if (canAccessPeer == 0) {
       HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
-    HIP_CHECK(hipDeviceEnablePeerAccess(peerDev, 0));
-    HIP_CHECK(hipDeviceDisablePeerAccess(peerDev));
+    HIP_CHECK(hipDeviceEnablePeerAccess(peerDev, 0))
+    HIP_CHECK(hipDeviceDisablePeerAccess(peerDev))
   }
 }
 
@@ -88,20 +88,20 @@ HIP_TEST_CASE(Unit_hipDeviceEnablePeerAccess_negative) {
     HIP_CHECK_ERROR(hipDeviceEnablePeerAccess(deviceCount, 0), hipErrorInvalidDevice);
   }
   SECTION("Flag is invalid") {
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
     HIP_CHECK_ERROR(hipDeviceEnablePeerAccess(0, -1), hipErrorInvalidValue);
   }
   SECTION("Peer Access already enabled") {
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
     int canAccessPeer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 1, 0));
+    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 1, 0))
     if (canAccessPeer == 0) {
       WARN("Skipping section: " << HipTest::SkipReason::kPeerAccessUnavailable);
       return;
     }
-    HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
+    HIP_CHECK(hipDeviceEnablePeerAccess(1, 0))
     HIP_CHECK_ERROR(hipDeviceEnablePeerAccess(1, 0), hipErrorPeerAccessAlreadyEnabled);
-    HIP_CHECK(hipDeviceDisablePeerAccess(1));
+    HIP_CHECK(hipDeviceDisablePeerAccess(1))
   }
 }
 
@@ -151,24 +151,24 @@ HIP_TEST_CASE(Unit_hipDeviceDisablePeerAccess_negative) {
     HIP_CHECK_ERROR(hipDeviceDisablePeerAccess(deviceCount), hipErrorInvalidDevice);
   }
   SECTION("Peer Access not enabled") {
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
     int canAccessPeer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
+    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1))
     if (canAccessPeer == 0) {
       HIP_SKIP_TEST("Skipping because no P2P support between device 0 and 1");
     }
     HIP_CHECK_ERROR(hipDeviceDisablePeerAccess(1), hipErrorPeerAccessNotEnabled);
   }
   SECTION("Peer Access disabled twice") {
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
     int canAccessPeer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 1, 0));
+    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 1, 0))
     if (canAccessPeer == 0) {
       WARN("Skipping section: " << HipTest::SkipReason::kPeerAccessUnavailable);
       return;
     }
-    HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
-    HIP_CHECK(hipDeviceDisablePeerAccess(1));
+    HIP_CHECK(hipDeviceEnablePeerAccess(1, 0))
+    HIP_CHECK(hipDeviceDisablePeerAccess(1))
     HIP_CHECK_ERROR(hipDeviceDisablePeerAccess(1), hipErrorPeerAccessNotEnabled);
   }
 }

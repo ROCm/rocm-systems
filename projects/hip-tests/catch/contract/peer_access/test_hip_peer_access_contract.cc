@@ -9,7 +9,7 @@
 
 namespace {
 void DeviceCount(int* count) {
-  HIP_CHECK(hipGetDeviceCount(count));
+  HIP_CHECK(hipGetDeviceCount(count))
   if (*count <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -28,7 +28,7 @@ HIP_TEST_CASE(Contract_PeerAccess_HipDeviceEnablePeerAccess_EnableInvalidPeerId_
 // @asserts: hipDeviceEnablePeerAccess - rejects a non-zero (reserved) flags value
 HIP_TEST_CASE(Contract_PeerAccess_HipDeviceEnablePeerAccess_EnableInvalidFlag_IsRejected) {
   int current_device = 0;
-  HIP_CHECK(hipGetDevice(&current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
 
   REQUIRE(hipDeviceEnablePeerAccess(current_device, ~0u) != hipSuccess);
 }
@@ -45,7 +45,7 @@ HIP_TEST_CASE(Contract_PeerAccess_HipDeviceDisablePeerAccess_DisableInvalidPeerI
 // @asserts: hipDeviceDisablePeerAccess - rejects disabling peer access that was never enabled
 HIP_TEST_CASE(Contract_PeerAccess_HipDeviceDisablePeerAccess_DisableNotEnabled_IsRejected) {
   int current_device = 0;
-  HIP_CHECK(hipGetDevice(&current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
 
   REQUIRE(hipDeviceDisablePeerAccess(current_device) != hipSuccess);
 }
@@ -53,7 +53,7 @@ HIP_TEST_CASE(Contract_PeerAccess_HipDeviceDisablePeerAccess_DisableNotEnabled_I
 // @asserts: hipDeviceEnablePeerAccess - rejects enabling peer access from a device to itself
 HIP_TEST_CASE(Contract_PeerAccess_HipDeviceEnablePeerAccess_EnableSelf_IsRejected) {
   int current_device = 0;
-  HIP_CHECK(hipGetDevice(&current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
 
   REQUIRE(hipDeviceEnablePeerAccess(current_device, 0) != hipSuccess);
 }
@@ -67,18 +67,18 @@ HIP_TEST_CASE(Contract_PeerAccess_HipDeviceEnablePeerAccess_EnableTwiceThenDisab
   }
 
   int current_device = 0;
-  HIP_CHECK(hipGetDevice(&current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
   const int peer_device = (current_device == 0) ? 1 : 0;
 
   int can_access_peer = 0;
-  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, current_device, peer_device));
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, current_device, peer_device))
   if (can_access_peer == 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
 
-  HIP_CHECK(hipDeviceEnablePeerAccess(peer_device, 0));
+  HIP_CHECK(hipDeviceEnablePeerAccess(peer_device, 0))
   const hipError_t second_enable = hipDeviceEnablePeerAccess(peer_device, 0);
-  HIP_CHECK(hipDeviceDisablePeerAccess(peer_device));
+  HIP_CHECK(hipDeviceDisablePeerAccess(peer_device))
   const hipError_t second_disable = hipDeviceDisablePeerAccess(peer_device);
 
   REQUIRE(second_enable != hipSuccess);

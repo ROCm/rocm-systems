@@ -76,29 +76,29 @@ hipError_t Memcpy3DWrapper(PtrVariant dst_ptr, hipPos dst_pos, PtrVariant src_pt
 
   if constexpr (graph) {
     hipGraph_t g = nullptr;
-    HIP_CHECK(hipGraphCreate(&g, 0));
+    HIP_CHECK(hipGraphCreate(&g, 0))
     hipGraphNode_t node = nullptr;
 
     if constexpr (set_params) {
       auto reversed_parms = GetMemcpy3DParms(src_ptr, src_pos, dst_ptr, dst_pos, extent,
                                              ReverseMemcpyDirection(kind));
-      HIP_CHECK(hipGraphAddMemcpyNode(&node, g, nullptr, 0, &reversed_parms));
-      HIP_CHECK(hipGraphMemcpyNodeSetParams(node, &parms));
+      HIP_CHECK(hipGraphAddMemcpyNode(&node, g, nullptr, 0, &reversed_parms))
+      HIP_CHECK(hipGraphMemcpyNodeSetParams(node, &parms))
     } else {
-      HIP_CHECK(hipGraphAddMemcpyNode(&node, g, nullptr, 0, &parms));
+      HIP_CHECK(hipGraphAddMemcpyNode(&node, g, nullptr, 0, &parms))
     }
 
     hipMemcpy3DParms retrieved_params = {0};
-    HIP_CHECK(hipGraphMemcpyNodeGetParams(node, &retrieved_params));
+    HIP_CHECK(hipGraphMemcpyNodeGetParams(node, &retrieved_params))
     REQUIRE(parms == retrieved_params);
 
     hipGraphExec_t graph_exec = nullptr;
-    HIP_CHECK(hipGraphInstantiate(&graph_exec, g, nullptr, nullptr, 0));
-    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, g, nullptr, nullptr, 0))
+    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread))
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
 
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(g));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec))
+    HIP_CHECK(hipGraphDestroy(g))
 
     return hipSuccess;
   }
@@ -128,15 +128,15 @@ void Memcpy3DDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = 
   Iota<<<blocks, threads_per_block>>>(device_alloc.ptr(), device_alloc.pitch(),
                                       device_alloc.width_logical(), device_alloc.height(),
                                       device_alloc.depth());
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   HIP_CHECK(memcpy_func(
       make_hipPitchedPtr(host_alloc.ptr(), host_pitch, device_alloc.width(), device_alloc.height()),
       make_hipPos(0, 0, 0), device_alloc.pitched_ptr(), make_hipPos(0, 0, 0), device_alloc.extent(),
       kind, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   const auto f = [extent](size_t x, size_t y, size_t z) {
@@ -159,32 +159,32 @@ void Memcpy3DDeviceToDeviceShell(F memcpy_func, hipStream_t kernel_stream = null
 
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
 
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
   if (device_count > 0 && kernel_stream != nullptr && kernel_stream != hipStreamPerThread) {
-    HIP_CHECK(hipStreamCreate(&kernel_stream));
+    HIP_CHECK(hipStreamCreate(&kernel_stream))
   }
   if constexpr (enable_peer_access) {
     if (src_device == dst_device) {
       if (device_count > 0 && kernel_stream != nullptr && kernel_stream != hipStreamPerThread) {
-        HIP_CHECK(hipStreamDestroy(kernel_stream));
+        HIP_CHECK(hipStreamDestroy(kernel_stream))
       }
       return;
     }
     int can_access_peer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
+    HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device))
     if (!can_access_peer) {
       if (device_count > 0 && kernel_stream != nullptr && kernel_stream != hipStreamPerThread) {
-          HIP_CHECK(hipStreamDestroy(kernel_stream));
+          HIP_CHECK(hipStreamDestroy(kernel_stream))
       }
       HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
-    HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0));
+    HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0))
   }
 
   LinearAllocGuard3D<int> src_alloc(extent);
-  HIP_CHECK(hipSetDevice(dst_device));
+  HIP_CHECK(hipSetDevice(dst_device))
   LinearAllocGuard3D<int> dst_alloc(extent);
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc,
                                    dst_alloc.width() * dst_alloc.height() * dst_alloc.depth());
 
@@ -196,16 +196,16 @@ void Memcpy3DDeviceToDeviceShell(F memcpy_func, hipStream_t kernel_stream = null
   Iota<<<blocks, threads_per_block>>>(src_alloc.ptr(), src_alloc.pitch(),
                                       dst_alloc.width_logical(),
                                       dst_alloc.height(), dst_alloc.depth());
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   HIP_CHECK(memcpy_func(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
                         make_hipPos(0, 0, 0), dst_alloc.extent(), kind, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
   if (device_count > 0 && kernel_stream != nullptr && kernel_stream != hipStreamPerThread) {
-    HIP_CHECK(hipStreamDestroy(kernel_stream));
+    HIP_CHECK(hipStreamDestroy(kernel_stream))
   }
   HIP_CHECK(Memcpy3DWrapper(make_hipPitchedPtr(host_alloc.ptr(), dst_alloc.width(),
                                                dst_alloc.width(), dst_alloc.height()),
@@ -251,7 +251,7 @@ void Memcpy3DHostToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = 
                                            device_alloc.height()),
                         make_hipPos(0, 0, 0), device_alloc.extent(), kind, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   HIP_CHECK(Memcpy3DWrapper(make_hipPitchedPtr(dst_host_alloc.ptr(), device_alloc.width(),
@@ -290,7 +290,7 @@ void Memcpy3DHostToHostShell(F memcpy_func, const hipStream_t kernel_stream = nu
                   make_hipPitchedPtr(src_host.ptr(), src_pitch, extent.width, extent.height),
                   make_hipPos(0, 0, 0), extent, kind, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   PitchedMemoryVerify(dst_host.ptr(), extent.width, extent.width / sizeof(int), extent.height,
@@ -321,14 +321,14 @@ void Memcpy3DArrayHostShell(F memcpy_func, const hipStream_t kernel_stream = nul
                                            extent.width * sizeof(int), extent.height),
                         make_hipPos(0, 0, 0), extent, hipMemcpyHostToDevice, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   // Array -> Array
   HIP_CHECK(memcpy_func(dst_array.ptr(), make_hipPos(0, 0, 0), src_array.ptr(),
                         make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   // Array -> Host
@@ -337,7 +337,7 @@ void Memcpy3DArrayHostShell(F memcpy_func, const hipStream_t kernel_stream = nul
                         make_hipPos(0, 0, 0), dst_array.ptr(), make_hipPos(0, 0, 0), extent,
                         hipMemcpyDeviceToHost, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   PitchedMemoryVerify(dst_host.ptr(), extent.width * sizeof(int), extent.width, extent.height,
@@ -363,28 +363,28 @@ void Memcpy3DArrayDeviceShell(F memcpy_func, const hipStream_t kernel_stream = n
   Iota<<<blocks, threads_per_block>>>(src_device.ptr(), src_device.pitch(),
                                       src_device.width_logical(), src_device.height(),
                                       src_device.depth());
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Device -> Array
   HIP_CHECK(memcpy_func(src_array.ptr(), make_hipPos(0, 0, 0), src_device.pitched_ptr(),
                         make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   // Array -> Array
   HIP_CHECK(memcpy_func(dst_array.ptr(), make_hipPos(0, 0, 0), src_array.ptr(),
                         make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   // Array -> Device
   HIP_CHECK(memcpy_func(dst_device.pitched_ptr(), make_hipPos(0, 0, 0), dst_array.ptr(),
                         make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   // Device -> Host
@@ -393,7 +393,7 @@ void Memcpy3DArrayDeviceShell(F memcpy_func, const hipStream_t kernel_stream = n
                         make_hipPos(0, 0, 0), dst_device.pitched_ptr(), make_hipPos(0, 0, 0),
                         dst_device.extent(), hipMemcpyDeviceToHost, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   const auto f = [extent](size_t x, size_t y, size_t z) {
@@ -493,7 +493,7 @@ void Memcpy3DZeroWidthHeightDepth(F memcpy_func, const hipStream_t stream = null
         device_alloc.width() * device_alloc.height() * device_alloc.depth());
     std::fill_n(host_alloc.ptr(),
                 device_alloc.width_logical() * device_alloc.height() * device_alloc.depth(), 42);
-    HIP_CHECK(hipMemset3D(device_alloc.pitched_ptr(), 1, device_alloc.extent()));
+    HIP_CHECK(hipMemset3D(device_alloc.pitched_ptr(), 1, device_alloc.extent()))
     HIP_CHECK(memcpy_func(
         make_hipPitchedPtr(host_alloc.ptr(), device_alloc.width(), device_alloc.width(),
                            device_alloc.height()),
@@ -502,7 +502,7 @@ void Memcpy3DZeroWidthHeightDepth(F memcpy_func, const hipStream_t stream = null
                        device_alloc.depth() * depth_mult),
         hipMemcpyDeviceToHost, stream));
     if constexpr (should_synchronize) {
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     ArrayFindIfNot(host_alloc.ptr(), static_cast<uint8_t>(42),
                    device_alloc.width_logical() * device_alloc.height() * device_alloc.depth());
@@ -513,8 +513,8 @@ void Memcpy3DZeroWidthHeightDepth(F memcpy_func, const hipStream_t stream = null
     LinearAllocGuard3D<uint8_t> dst_alloc(extent);
     LinearAllocGuard<uint8_t> host_alloc(
         LinearAllocs::hipHostMalloc, dst_alloc.width() * dst_alloc.height() * dst_alloc.depth());
-    HIP_CHECK(hipMemset3D(src_alloc.pitched_ptr(), 1, src_alloc.extent()));
-    HIP_CHECK(hipMemset3D(dst_alloc.pitched_ptr(), 42, dst_alloc.extent()));
+    HIP_CHECK(hipMemset3D(src_alloc.pitched_ptr(), 1, src_alloc.extent()))
+    HIP_CHECK(hipMemset3D(dst_alloc.pitched_ptr(), 42, dst_alloc.extent()))
     HIP_CHECK(
         memcpy_func(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
                     make_hipPos(0, 0, 0),
@@ -522,7 +522,7 @@ void Memcpy3DZeroWidthHeightDepth(F memcpy_func, const hipStream_t stream = null
                                    dst_alloc.depth() * depth_mult),
                     hipMemcpyDeviceToDevice, stream));
     if constexpr (should_synchronize) {
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     HIP_CHECK(Memcpy3DWrapper(make_hipPitchedPtr(host_alloc.ptr(), dst_alloc.width(),
                                                  dst_alloc.width(), dst_alloc.height()),
@@ -542,7 +542,7 @@ void Memcpy3DZeroWidthHeightDepth(F memcpy_func, const hipStream_t stream = null
         device_alloc.width() * device_alloc.height() * device_alloc.depth());
     std::fill_n(src_host_alloc.ptr(),
                 device_alloc.width_logical() * device_alloc.height() * device_alloc.depth(), 1);
-    HIP_CHECK(hipMemset3D(device_alloc.pitched_ptr(), 42, device_alloc.extent()));
+    HIP_CHECK(hipMemset3D(device_alloc.pitched_ptr(), 42, device_alloc.extent()))
     HIP_CHECK(memcpy_func(
         device_alloc.pitched_ptr(), make_hipPos(0, 0, 0),
         make_hipPitchedPtr(src_host_alloc.ptr(), device_alloc.width(), device_alloc.width(),
@@ -552,7 +552,7 @@ void Memcpy3DZeroWidthHeightDepth(F memcpy_func, const hipStream_t stream = null
                        device_alloc.depth() * depth_mult),
         hipMemcpyHostToDevice, stream));
     if constexpr (should_synchronize) {
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     HIP_CHECK(Memcpy3DWrapper(make_hipPitchedPtr(dst_host_alloc.ptr(), device_alloc.width(),
                                                  device_alloc.width(), device_alloc.height()),
@@ -577,7 +577,7 @@ void Memcpy3DZeroWidthHeightDepth(F memcpy_func, const hipStream_t stream = null
                                    extent.depth * depth_mult),
                     hipMemcpyHostToHost, stream));
     if constexpr (should_synchronize) {
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     ArrayFindIfNot(dst_alloc.ptr(), static_cast<uint8_t>(42), alloc_size);
   }
@@ -727,28 +727,28 @@ hipError_t DrvMemcpy3DGraphWrapper(DrvPtrVariant dst_ptr, hipPos dst_pos, DrvPtr
   auto parms = GetDrvMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent, kind);
 
   hipGraph_t g = nullptr;
-  HIP_CHECK(hipGraphCreate(&g, 0));
+  HIP_CHECK(hipGraphCreate(&g, 0))
   hipGraphNode_t node = nullptr;
   if constexpr (set_params) {
     auto reversed_parms = GetDrvMemcpy3DParms(src_ptr, src_pos, dst_ptr, dst_pos, extent,
                                               ReverseMemcpyDirection(kind));
-    HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, g, nullptr, 0, &reversed_parms, context));
-    HIP_CHECK(hipDrvGraphMemcpyNodeSetParams(node, &parms));
+    HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, g, nullptr, 0, &reversed_parms, context))
+    HIP_CHECK(hipDrvGraphMemcpyNodeSetParams(node, &parms))
   } else {
-    HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, g, nullptr, 0, &parms, context));
+    HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, g, nullptr, 0, &parms, context))
   }
 
   HIP_MEMCPY3D retrieved_params = {0};
-  HIP_CHECK(hipDrvGraphMemcpyNodeGetParams(node, &retrieved_params));
+  HIP_CHECK(hipDrvGraphMemcpyNodeGetParams(node, &retrieved_params))
   REQUIRE(parms == retrieved_params);
 
   hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, g, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread));
-  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, g, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread))
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(g));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
+  HIP_CHECK(hipGraphDestroy(g))
 
   return hipSuccess;
 }
@@ -791,14 +791,14 @@ void DrvMemcpy3DArrayHostShell(F memcpy_func, const hipStream_t kernel_stream = 
                   make_hipPitchedPtr(src_host.ptr(), extent.width, extent.width, extent.height),
                   make_hipPos(0, 0, 0), extent, hipMemcpyHostToDevice, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   // Array -> Array
   HIP_CHECK(memcpy_func(dst_array.ptr(), make_hipPos(0, 0, 0), src_array.ptr(),
                         make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   // Array -> Host
@@ -807,7 +807,7 @@ void DrvMemcpy3DArrayHostShell(F memcpy_func, const hipStream_t kernel_stream = 
                   make_hipPos(0, 0, 0), dst_array.ptr(), make_hipPos(0, 0, 0), extent,
                   hipMemcpyDeviceToHost, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   PitchedMemoryVerify(dst_host.ptr(), extent.width, extent.width / sizeof(int), extent.height,
@@ -833,28 +833,28 @@ void DrvMemcpy3DArrayDeviceShell(F memcpy_func, const hipStream_t kernel_stream 
   Iota<<<blocks, threads_per_block>>>(src_device.ptr(), src_device.pitch(),
                                       src_device.width_logical(), src_device.height(),
                                       src_device.depth());
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Device -> Array
   HIP_CHECK(memcpy_func(src_array.ptr(), make_hipPos(0, 0, 0), src_device.pitched_ptr(),
                         make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   // Array -> Array
   HIP_CHECK(memcpy_func(dst_array.ptr(), make_hipPos(0, 0, 0), src_array.ptr(),
                         make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   // Array -> Device
   HIP_CHECK(memcpy_func(dst_device.pitched_ptr(), make_hipPos(0, 0, 0), dst_array.ptr(),
                         make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   HIP_CHECK(
@@ -862,7 +862,7 @@ void DrvMemcpy3DArrayDeviceShell(F memcpy_func, const hipStream_t kernel_stream 
                   make_hipPos(0, 0, 0), dst_device.pitched_ptr(), make_hipPos(0, 0, 0),
                   dst_device.extent(), hipMemcpyDeviceToHost, kernel_stream));
   if constexpr (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   const auto f = [extent](size_t x, size_t y, size_t z) {

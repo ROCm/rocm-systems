@@ -15,7 +15,7 @@ constexpr size_t kRangeBytes = 4096;
 
 int CurrentDevice() {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   return device;
 }
 
@@ -30,13 +30,13 @@ bool ManagedMemorySupported() {
   void* ptr = nullptr;
   const hipError_t status = hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal);
   if (status == hipSuccess) {
-    HIP_CHECK(hipFree(ptr));
+    HIP_CHECK(hipFree(ptr))
     return true;
   }
   if (status == hipErrorNotSupported || status == hipErrorOutOfMemory) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return false;
 }
 
@@ -53,7 +53,7 @@ HIP_TEST_CASE(Contract_MemAdviseV2_HipMemAdviseV2_SetReadMostly_IsAcceptedOrUnsu
   hip::contract::ContractCleanup cleanup;
 
   void* ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal))
   cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   // The location-based advise must either accept the read-mostly hint or report
@@ -68,7 +68,7 @@ HIP_TEST_CASE(Contract_MemAdviseV2_HipMemAdviseV2_SetReadMostly_IsAcceptedOrUnsu
       && status != hipErrorInvalidValue
 #endif
   ) {
-    HIP_CHECK(status);
+    HIP_CHECK(status)
   }
 }
 
@@ -78,7 +78,7 @@ HIP_TEST_CASE(Contract_MemAdviseV2_HipMemAdviseV2_SetAndUnsetPreferredLocation_I
   hip::contract::ContractCleanup cleanup;
 
   void* ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal))
   cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   const hipMemLocation location = CurrentDeviceLocation();
@@ -92,7 +92,7 @@ HIP_TEST_CASE(Contract_MemAdviseV2_HipMemAdviseV2_SetAndUnsetPreferredLocation_I
       && set_status != hipErrorInvalidValue
 #endif
   ) {
-    HIP_CHECK(set_status);
+    HIP_CHECK(set_status)
   }
 
   const hipError_t unset_status =
@@ -102,7 +102,7 @@ HIP_TEST_CASE(Contract_MemAdviseV2_HipMemAdviseV2_SetAndUnsetPreferredLocation_I
       && unset_status != hipErrorInvalidValue
 #endif
   ) {
-    HIP_CHECK(unset_status);
+    HIP_CHECK(unset_status)
   }
 }
 
@@ -113,9 +113,9 @@ HIP_TEST_CASE(Contract_MemAdviseV2_HipMemPrefetchAsyncV2_PrefetchAsync_IsAccepte
 
   void* ptr = nullptr;
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal))
   cleanup.Add([ptr] { (void)hipFree(ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // The location-based prefetch must either succeed (and complete after the
@@ -125,8 +125,8 @@ HIP_TEST_CASE(Contract_MemAdviseV2_HipMemPrefetchAsyncV2_PrefetchAsync_IsAccepte
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Location-based prefetch is not supported by this device/runtime path.");
   }
-  HIP_CHECK(status);
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(status)
+  HIP_CHECK(hipStreamSynchronize(stream))
 }
 
 // @asserts: hipMemAdvise_v2 - advising a null range does not silently succeed and returns a non-success status

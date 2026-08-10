@@ -57,7 +57,7 @@ struct Sizes {
 
   Sizes(unsigned int flag) {
     int device;
-    HIP_CHECK(hipGetDevice(&device));
+    HIP_CHECK(hipGetDevice(&device))
     static_assert(
         hipArrayDefault == 0,
         "hipArrayDefault is assumed to be equivalent to 0 for the following switch statment");
@@ -69,7 +69,7 @@ struct Sizes {
     switch (flag) {
       case hipArrayDefault: {  // 0
         hipDeviceProp_t prop;
-        HIP_CHECK(hipGetDeviceProperties(&prop, device));
+        HIP_CHECK(hipGetDeviceProperties(&prop, device))
         max1D = prop.maxTexture1D;
         max2D = {prop.maxTexture2D[0], prop.maxTexture2D[1]};
         max3D = {prop.maxTexture3D[0], prop.maxTexture3D[1], prop.maxTexture3D[2]};
@@ -77,11 +77,11 @@ struct Sizes {
       }
       case hipArraySurfaceLoadStore: {  // CUDA_ARRAY3D_SURFACE_LDST
         int value;
-        HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeMaxSurface1D, device));
+        HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeMaxSurface1D, device))
         max1D = value;
-        HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeMaxSurface2D, device));
+        HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeMaxSurface2D, device))
         max2D = {value, value};
-        HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeMaxSurface3D, device));
+        HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeMaxSurface3D, device))
         max3D = {value, value, value};
         return;
       }

@@ -61,7 +61,7 @@ class MemcpySequentialAsync : public Benchmark<MemcpySequentialAsync> {
                   hipStream_t stream) {
     TIMED_SECTION_STREAM(kTimerTypeCpu, stream) {
       for (size_t i = 0; i < count; ++i) {
-        HIP_CHECK(hipMemcpyAsync(dsts[i], srcs[i], sizes[i], kind, stream));
+        HIP_CHECK(hipMemcpyAsync(dsts[i], srcs[i], sizes[i], kind, stream))
       }
     }
   }
@@ -106,7 +106,7 @@ void RunDeviceToDeviceBenchmark(size_t copy_size, size_t batch_copy_count,
 
   LinearAllocGuard<unsigned char> src_allocation(LinearAllocs::hipMalloc, allocation_size);
   LinearAllocGuard<unsigned char> dst_allocation(LinearAllocs::hipMalloc, allocation_size);
-  HIP_CHECK(hipMemset(src_allocation.ptr(), kPattern, allocation_size));
+  HIP_CHECK(hipMemset(src_allocation.ptr(), kPattern, allocation_size))
 
   std::vector<void*> srcs(batch_copy_count);
   std::vector<void*> dsts(batch_copy_count);
@@ -125,14 +125,14 @@ void RunDeviceToDeviceBenchmark(size_t copy_size, size_t batch_copy_count,
 void RunPeerToPeerBenchmark(size_t copy_size, size_t batch_copy_count,
                             PointerPattern pointer_pattern) {
   const size_t allocation_size = copy_size * batch_copy_count;
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   auto [src_device, dst_device] = GetDeviceIds(true);
 
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
   LinearAllocGuard<unsigned char> src_allocation(LinearAllocs::hipMalloc, allocation_size);
-  HIP_CHECK(hipMemset(src_allocation.ptr(), kPattern, allocation_size));
+  HIP_CHECK(hipMemset(src_allocation.ptr(), kPattern, allocation_size))
 
-  HIP_CHECK(hipSetDevice(dst_device));
+  HIP_CHECK(hipSetDevice(dst_device))
   LinearAllocGuard<unsigned char> dst_allocation(LinearAllocs::hipMalloc, allocation_size);
 
   std::vector<void*> srcs(batch_copy_count);
@@ -145,7 +145,7 @@ void RunPeerToPeerBenchmark(size_t copy_size, size_t batch_copy_count,
     dsts[i] = dst_allocation.ptr() + (i * copy_size);
   }
 
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
   RunComparison(dsts.data(), srcs.data(), sizes.data(), sizes.size(), copy_size, batch_copy_count,
                 pointer_pattern, hipMemcpyDeviceToDevice);
 }
@@ -158,7 +158,7 @@ void RunHostDeviceBenchmark(size_t copy_size, size_t batch_copy_count,
   LinearAllocGuard<unsigned char> src_allocation(src_allocation_type, allocation_size);
   LinearAllocGuard<unsigned char> dst_allocation(dst_allocation_type, allocation_size);
   if (src_allocation_type == LinearAllocs::hipMalloc) {
-    HIP_CHECK(hipMemset(src_allocation.ptr(), kPattern, allocation_size));
+    HIP_CHECK(hipMemset(src_allocation.ptr(), kPattern, allocation_size))
   } else {
     std::memset(src_allocation.host_ptr(), kPattern, allocation_size);
   }

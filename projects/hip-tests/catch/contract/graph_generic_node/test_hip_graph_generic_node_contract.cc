@@ -50,16 +50,16 @@ hipGraphNodeParams MakeMemsetNodeParams(void* device_ptr, unsigned int value) {
 uint8_t LaunchAndReadFirstByte(hipGraph_t graph, void* device_ptr) {
   hipGraphExec_t exec = nullptr;
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipGraphLaunch(exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipGraphLaunch(exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   uint8_t host = 0;
-  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost))
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipGraphExecDestroy(exec))
   return host;
 }
 }  // namespace
@@ -71,20 +71,20 @@ HIP_TEST_CASE(Contract_GraphGenericNode_HipGraphAddNode_AddMemsetNode_LaunchesEx
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
+  HIP_CHECK(hipMalloc(&device_ptr, kByteCount))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   // A memset node added through the generic hipGraphAddNode entry point must
   // behave exactly like one added through the typed hipGraphAddMemsetNode
   // entry point: launching the graph writes the requested byte value.
   hipGraphNodeParams params = MakeMemsetNodeParams(device_ptr, 0x5A);
-  HIP_CHECK(hipGraphAddNode(&node, graph, nullptr, 0, &params));
+  HIP_CHECK(hipGraphAddNode(&node, graph, nullptr, 0, &params))
 
   // The added node reports the generic memset type it was created with.
   hipGraphNodeType type{};
-  HIP_CHECK(hipGraphNodeGetType(node, &type));
+  HIP_CHECK(hipGraphNodeGetType(node, &type))
   REQUIRE(type == hipGraphNodeTypeMemset);
 
   REQUIRE(LaunchAndReadFirstByte(graph, device_ptr) == 0x5A);
@@ -97,18 +97,18 @@ HIP_TEST_CASE(Contract_GraphGenericNode_HipGraphNodeSetParams_Default_UpdatesVal
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
+  HIP_CHECK(hipMalloc(&device_ptr, kByteCount))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   // Create the node with one value, then re-parameterize it through the generic
   // pre-instantiation setter. The launched graph must reflect the updated value.
   hipGraphNodeParams initial = MakeMemsetNodeParams(device_ptr, 0x11);
-  HIP_CHECK(hipGraphAddNode(&node, graph, nullptr, 0, &initial));
+  HIP_CHECK(hipGraphAddNode(&node, graph, nullptr, 0, &initial))
 
   hipGraphNodeParams updated = MakeMemsetNodeParams(device_ptr, 0x22);
-  HIP_CHECK(hipGraphNodeSetParams(node, &updated));
+  HIP_CHECK(hipGraphNodeSetParams(node, &updated))
 
   REQUIRE(LaunchAndReadFirstByte(graph, device_ptr) == 0x22);
 }
@@ -120,31 +120,31 @@ HIP_TEST_CASE(Contract_GraphGenericNode_HipGraphExecNodeSetParams_Default_Update
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
+  HIP_CHECK(hipMalloc(&device_ptr, kByteCount))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   hipGraphNodeParams initial = MakeMemsetNodeParams(device_ptr, 0x33);
-  HIP_CHECK(hipGraphAddNode(&node, graph, nullptr, 0, &initial));
+  HIP_CHECK(hipGraphAddNode(&node, graph, nullptr, 0, &initial))
 
   hipGraphExec_t exec = nullptr;
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0))
   cleanup.Add([exec] { (void)hipGraphExecDestroy(exec); });
 
   // Re-parameterize the already-instantiated node through the generic
   // executable-graph setter. The next launch must use the updated value, so the
   // update takes effect without re-instantiating the graph.
   hipGraphNodeParams updated = MakeMemsetNodeParams(device_ptr, 0x44);
-  HIP_CHECK(hipGraphExecNodeSetParams(exec, node, &updated));
+  HIP_CHECK(hipGraphExecNodeSetParams(exec, node, &updated))
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipGraphLaunch(exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   uint8_t host = 0;
-  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost))
   REQUIRE(host == 0x44);
 }

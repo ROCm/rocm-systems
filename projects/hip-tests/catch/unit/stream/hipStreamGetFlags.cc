@@ -23,10 +23,10 @@ HIP_TEST_CASE(Unit_hipStreamGetFlags_Basic) {
   unsigned int returnedFlags;
   hipStream_t stream;
 
-  HIP_CHECK(hipStreamCreateWithFlags(&stream, expectedFlag));
-  HIP_CHECK(hipStreamGetFlags(stream, &returnedFlags));
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, expectedFlag))
+  HIP_CHECK(hipStreamGetFlags(stream, &returnedFlags))
   REQUIRE((returnedFlags & expectedFlag) == expectedFlag);
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -37,13 +37,13 @@ HIP_TEST_CASE(Unit_hipStreamGetFlags_Negative) {
   hipStream_t validStream;
   unsigned int flags;
 
-  HIP_CHECK(hipStreamCreate(&validStream));
+  HIP_CHECK(hipStreamCreate(&validStream))
 
   SECTION("Nullptr Stream && Valid Flags") { /* EXSWCPHIPT-17 */
 #if HT_AMD
     HIP_CHECK_ERROR(hipStreamGetFlags(nullptr, &flags), hipErrorInvalidValue);
 #elif HT_NVIDIA
-    HIP_CHECK(hipStreamGetFlags(nullptr, &flags));
+    HIP_CHECK(hipStreamGetFlags(nullptr, &flags))
 #endif
   }
 
@@ -51,7 +51,7 @@ HIP_TEST_CASE(Unit_hipStreamGetFlags_Negative) {
     HIP_CHECK_ERROR(hipStreamGetFlags(validStream, nullptr), hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipStreamDestroy(validStream));
+  HIP_CHECK(hipStreamDestroy(validStream))
 }
 
 #if HT_AMD
@@ -62,9 +62,9 @@ HIP_TEST_CASE(Unit_hipStreamGetFlags_StreamsCreatedWithCUMask) {
   hipStream_t stream;
   unsigned int flags;
   const uint32_t cuMask = 0xffffffff;
-  HIP_CHECK(hipExtStreamCreateWithCUMask(&stream, 1, &cuMask));
-  HIP_CHECK(hipStreamGetFlags(stream, &flags));
+  HIP_CHECK(hipExtStreamCreateWithCUMask(&stream, 1, &cuMask))
+  HIP_CHECK(hipStreamGetFlags(stream, &flags))
   REQUIRE(flags == hipStreamDefault);
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 #endif

@@ -91,7 +91,7 @@ void ExpectFileLoadRejected(const std::vector<uint8_t>& bundle) {
 }  // namespace
 
 HIP_TEST_CASE(Unit_hipModuleLoad_Negative_MalformedFatBinaryBounds) {
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
 
   // hipModuleLoadData is not checked here: it has no length parameter, so a
   // malformed image on that path is undefined behavior.

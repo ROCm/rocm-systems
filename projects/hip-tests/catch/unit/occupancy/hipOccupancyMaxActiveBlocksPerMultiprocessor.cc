@@ -26,7 +26,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Paramet
   int gridSize = 0;
 
   // Get potential blocksize
-  HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, f1, 0, 0));
+  HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, f1, 0, 0))
 
   // Common negative tests
   MaxActiveBlocksPerMultiprocessorNegative(
@@ -53,11 +53,11 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Positive_RangeVa
   int blockSize = 0;
   int gridSize = 0;
 
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
 
   SECTION("dynSharedMemPerBlk = 0") {
     // Get potential blocksize
-    HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, f1, 0, 0));
+    HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, f1, 0, 0))
 
     MaxActiveBlocksPerMultiprocessor(
         [blockSize](int* numBlocks) {
@@ -84,11 +84,11 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Positive_Templat
   int blockSize = 0;
   int gridSize = 0;
 
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
 
   SECTION("dynSharedMemPerBlk = 0") {
     // Get potential blocksize
-    HIP_CHECK(hipOccupancyMaxPotentialBlockSize<void (*)(int*)>(&gridSize, &blockSize, f2, 0, 0));
+    HIP_CHECK(hipOccupancyMaxPotentialBlockSize<void (*)(int*)>(&gridSize, &blockSize, f2, 0, 0))
 
     MaxActiveBlocksPerMultiprocessor(
         [blockSize](int* numBlocks) {

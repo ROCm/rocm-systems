@@ -12,13 +12,13 @@
 namespace {
 int CurrentDevice() {
   int device = -1;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   return device;
 }
 
 hipDeviceProp_t CurrentDeviceProperties() {
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, CurrentDevice()));
+  HIP_CHECK(hipGetDeviceProperties(&properties, CurrentDevice()))
   return properties;
 }
 }
@@ -27,7 +27,7 @@ hipDeviceProp_t CurrentDeviceProperties() {
 HIP_TEST_CASE(Contract_Device_HipGetDeviceProperties_GetProperties_SucceedsForCurrentDevice) {
   hipDeviceProp_t properties{};
 
-  HIP_CHECK(hipGetDeviceProperties(&properties, CurrentDevice()));
+  HIP_CHECK(hipGetDeviceProperties(&properties, CurrentDevice()))
 }
 
 // @asserts: hipGetDeviceProperties - the device name string is non-empty
@@ -63,7 +63,7 @@ HIP_TEST_CASE(Contract_Device_HipDeviceGetAttribute_WarpSize_MatchesProperties) 
   const auto properties = CurrentDeviceProperties();
   int attribute_warp_size = 0;
 
-  HIP_CHECK(hipDeviceGetAttribute(&attribute_warp_size, hipDeviceAttributeWarpSize, CurrentDevice()));
+  HIP_CHECK(hipDeviceGetAttribute(&attribute_warp_size, hipDeviceAttributeWarpSize, CurrentDevice()))
 
   REQUIRE(attribute_warp_size == properties.warpSize);
 }
@@ -73,7 +73,7 @@ HIP_TEST_CASE(Contract_Device_HipGetDevice_CurrentOrdinal_IsWithinDeviceCount) {
   int device_count = 0;
   const int current_device = CurrentDevice();
 
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
 
   REQUIRE(device_count > 0);
   REQUIRE(current_device >= 0);

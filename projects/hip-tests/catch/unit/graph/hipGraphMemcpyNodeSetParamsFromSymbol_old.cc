@@ -47,7 +47,7 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative) {
   hipGraph_t graph;
   hipGraphNode_t memcpyToSymbolNode, memcpyFromSymbolNode, memcpyH2D_A;
   std::vector<hipGraphNode_t> dependencies;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   // Adding MemcpyNode
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
@@ -107,5 +107,5 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative) {
     REQUIRE(hipErrorInvalidValue == ret);
   }
   HipTest::freeArrays<int>(A_d, B_d, nullptr, A_h, B_h, nullptr, false);
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }

@@ -28,22 +28,22 @@ constexpr size_t kByteCount = 64;
 
 void EndCaptureAndDestroyGraph(hipStream_t stream) {
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 }  // namespace
 
 // @asserts: hipThreadExchangeStreamCaptureMode - exchanging the capture mode returns the thread's previous mode
 HIP_TEST_CASE(Contract_StreamCaptureMode_HipThreadExchangeStreamCaptureMode_Exchange_RoundTripsPreviousMode) {
   hipStreamCaptureMode mode = hipStreamCaptureModeThreadLocal;
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&mode));
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&mode))
   hipStreamCaptureMode previous_mode = mode;
 
   mode = hipStreamCaptureModeRelaxed;
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&mode));
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&mode))
   const hipStreamCaptureMode observed_previous_mode = mode;
 
-  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&previous_mode));
+  HIP_CHECK(hipThreadExchangeStreamCaptureMode(&previous_mode))
 
   REQUIRE(observed_previous_mode == hipStreamCaptureModeThreadLocal);
 }
@@ -68,10 +68,10 @@ HIP_TEST_CASE(Contract_StreamCaptureMode_HipStreamGetCaptureInfoV2_Default_Repor
   unsigned long long capture_id = 0;
   hipGraph_t graph = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipStreamGetCaptureInfo_v2(stream, &status, &capture_id, &graph, nullptr, nullptr));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipStreamGetCaptureInfo_v2(stream, &status, &capture_id, &graph, nullptr, nullptr))
 
   REQUIRE(status == hipStreamCaptureStatusActive);
   REQUIRE(capture_id > 0);
@@ -85,9 +85,9 @@ HIP_TEST_CASE(Contract_StreamCaptureMode_HipStreamGetCaptureInfoV2_Default_Repor
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   hipStreamCaptureStatus status = hipStreamCaptureStatusActive;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipStreamGetCaptureInfo_v2(stream, &status));
+  HIP_CHECK(hipStreamGetCaptureInfo_v2(stream, &status))
 
   REQUIRE(status == hipStreamCaptureStatusNone);
 }
@@ -102,19 +102,19 @@ HIP_TEST_CASE(Contract_StreamCaptureMode_HipStreamGetCaptureInfoV2_Default_Retur
   size_t dependency_count = 0;
   hipGraphNodeType node_type{};
 
-  HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
+  HIP_CHECK(hipMalloc(&device_ptr, kByteCount))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemsetAsync(device_ptr, 0x5a, kByteCount, stream));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipMemsetAsync(device_ptr, 0x5a, kByteCount, stream))
   HIP_CHECK(hipStreamGetCaptureInfo_v2(stream, &status, nullptr, nullptr, &dependencies,
                                        &dependency_count));
 
   REQUIRE(status == hipStreamCaptureStatusActive);
   REQUIRE(dependency_count == 1);
   REQUIRE(dependencies != nullptr);
-  HIP_CHECK(hipGraphNodeGetType(dependencies[0], &node_type));
+  HIP_CHECK(hipGraphNodeGetType(dependencies[0], &node_type))
   REQUIRE(node_type == hipGraphNodeTypeMemset);
 
   EndCaptureAndDestroyGraph(stream);
@@ -126,7 +126,7 @@ HIP_TEST_CASE(Contract_StreamCaptureMode_HipStreamGetCaptureInfoV2_NullStatus_Is
   hipStream_t stream = nullptr;
   unsigned long long capture_id = 0;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   REQUIRE(hipStreamGetCaptureInfo_v2(stream, nullptr, &capture_id, nullptr, nullptr, nullptr) !=
           hipSuccess);

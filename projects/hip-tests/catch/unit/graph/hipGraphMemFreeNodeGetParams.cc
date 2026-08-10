@@ -33,8 +33,8 @@ HIP_TEST_CASE(Unit_hipGraphMemFreeNodeGetParams_ValidArgs) {
   hipStream_t stream;
   void* out_dev_ptr;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&stream))
 
   memset(&allocParam, 0, sizeof(allocParam));
   allocParam.bytesize = 256;
@@ -42,21 +42,21 @@ HIP_TEST_CASE(Unit_hipGraphMemFreeNodeGetParams_ValidArgs) {
   allocParam.poolProps.location.id = 0;
   allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode, graph, nullptr, 0, &allocParam));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode, graph, nullptr, 0, &allocParam))
 
-  HIP_CHECK(hipGraphAddMemFreeNode(&freeNode, graph, &allocNode, 1, allocParam.dptr));
+  HIP_CHECK(hipGraphAddMemFreeNode(&freeNode, graph, &allocNode, 1, allocParam.dptr))
 
-  HIP_CHECK(hipGraphMemFreeNodeGetParams(freeNode, &out_dev_ptr));
+  HIP_CHECK(hipGraphMemFreeNodeGetParams(freeNode, &out_dev_ptr))
 
   HIP_CHECK(
       hipGraphInstantiateWithFlags(&graphExec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
 
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipStreamDestroy(stream))
 
   REQUIRE(out_dev_ptr == allocParam.dptr);
 }
@@ -79,8 +79,8 @@ HIP_TEST_CASE(Unit_hipGraphMemFreeNodeGetParams_InvalidArgs) {
   hipGraphExec_t graphExec;
   hipStream_t stream;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&stream))
 
   memset(&allocParam, 0, sizeof(allocParam));
   allocParam.bytesize = 256;
@@ -88,9 +88,9 @@ HIP_TEST_CASE(Unit_hipGraphMemFreeNodeGetParams_InvalidArgs) {
   allocParam.poolProps.location.id = 0;
   allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode, graph, nullptr, 0, &allocParam));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode, graph, nullptr, 0, &allocParam))
 
-  HIP_CHECK(hipGraphAddMemFreeNode(&freeNode, graph, &allocNode, 1, allocParam.dptr));
+  HIP_CHECK(hipGraphAddMemFreeNode(&freeNode, graph, &allocNode, 1, allocParam.dptr))
 
   SECTION("Null graph node") {
     void* out_dev_ptr;
@@ -111,10 +111,10 @@ HIP_TEST_CASE(Unit_hipGraphMemFreeNodeGetParams_InvalidArgs) {
   HIP_CHECK(
       hipGraphInstantiateWithFlags(&graphExec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
 
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipStreamDestroy(stream))
 }

@@ -27,7 +27,7 @@ void GraphExecMemcpyToSymbolSetParamsShell(const void* symbol, const void* alt_s
                                                               size_t count, size_t offset,
                                                               hipMemcpyKind direction) {
     hipGraph_t graph = nullptr;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
 
     hipGraphNode_t node = nullptr;
     HIP_CHECK(hipGraphAddMemcpyNodeToSymbol(
@@ -35,16 +35,16 @@ void GraphExecMemcpyToSymbolSetParamsShell(const void* symbol, const void* alt_s
         count - is_arr * sizeof(T), offset + is_arr * sizeof(T), direction));
 
     hipGraphExec_t graph_exec = nullptr;
-    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
     HIP_CHECK(hipGraphExecMemcpyNodeSetParamsToSymbol(graph_exec, node, symbol, src, count, offset,
                                                       direction));
 
-    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread))
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
 
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec))
+    HIP_CHECK(hipGraphDestroy(graph))
 
     return hipSuccess;
   };
@@ -130,7 +130,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Positive_Basic) {
 HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   LinearAllocGuard<int> var(LinearAllocs::hipMalloc, sizeof(int));
   hipGraphNode_t node = nullptr;
@@ -138,7 +138,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters) 
                                           var.ptr(), sizeof(*var.ptr()), 0, hipMemcpyDefault));
 
   hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
   SECTION("hGraphExec == nullptr") {
     HIP_CHECK_ERROR(
@@ -169,7 +169,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters) 
     if (HipTest::getDeviceCount() < 2) {
       WARN("Skipping section: fewer than two GPUs (second device required for this negative case).");
     } else {
-      HIP_CHECK(hipSetDevice(1));
+      HIP_CHECK(hipSetDevice(1))
       LinearAllocGuard<int> new_var(LinearAllocs::hipMalloc, sizeof(int));
       HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParamsToSymbol(
                           graph_exec, node, SYMBOL(int_device_var), new_var.ptr(),
@@ -178,8 +178,8 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters) 
     }
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**

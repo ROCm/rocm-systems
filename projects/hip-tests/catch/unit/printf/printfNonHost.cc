@@ -60,22 +60,22 @@ __global__ void kernel_printf_duplicate_format_string(int* count) {
 
 HIP_TEST_CASE(Unit_NonHost_Printf_basic) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   int *count{nullptr}, *count_d{nullptr};
 
   count = reinterpret_cast<int*>(malloc(sizeof(int)));
-  HIP_CHECK(hipMalloc(&count_d, sizeof(int)));
+  HIP_CHECK(hipMalloc(&count_d, sizeof(int)))
 
   hipLaunchKernelGGL(run_printf_basic, dim3(1), dim3(1), 0, 0, count_d);
-  HIP_CHECK(hipMemcpy(count, count_d, sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(count, count_d, sizeof(int), hipMemcpyDeviceToHost))
 
   REQUIRE(*count == 0);
 
   free(count);
-  HIP_CHECK(hipFree(count_d));
+  HIP_CHECK(hipFree(count_d))
 }
 
 /**
@@ -126,17 +126,17 @@ HIP_TEST_CASE(Unit_NonHost_Printf_Positive_DuplicateFormatStringMetadata) {
 
 HIP_TEST_CASE(Unit_NonHost_Printf_loop) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   int *count{nullptr}, *count_d{nullptr};
   count = reinterpret_cast<int*>(malloc(ITER_COUNT * sizeof(int)));
-  HIP_CHECK(hipMalloc(&count_d, ITER_COUNT * sizeof(int)));
+  HIP_CHECK(hipMalloc(&count_d, ITER_COUNT * sizeof(int)))
 
   hipLaunchKernelGGL(kernel_printf_loop, dim3(1), dim3(1), 0, 0, ITER_COUNT, count_d);
 
-  HIP_CHECK(hipMemcpy(count, count_d, ITER_COUNT * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(count, count_d, ITER_COUNT * sizeof(int), hipMemcpyDeviceToHost))
   int test = 0;
   for (int i = 0; i < ITER_COUNT; i++) {
     if (count[i] == -1) {
@@ -149,7 +149,7 @@ HIP_TEST_CASE(Unit_NonHost_Printf_loop) {
     REQUIRE(false);
   }
   free(count);
-  HIP_CHECK(hipFree(count_d));
+  HIP_CHECK(hipFree(count_d))
 }
 /**
  * Test Description
@@ -167,19 +167,19 @@ HIP_TEST_CASE(Unit_NonHost_Printf_loop) {
 
 HIP_TEST_CASE(Unit_NonHost_Printf_multiple_Threads) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   int *count{nullptr}, *count_d{nullptr};
   fprintf(stderr, "VALID_COUNT=%d, ITER_COUNT_FOR_THREAD=%d\n", VALID_COUNT, ITER_COUNT_FOR_THREAD);
   count = reinterpret_cast<int*>(malloc(ITER_COUNT_FOR_THREAD * sizeof(int)));
-  HIP_CHECK(hipMalloc(&count_d, ITER_COUNT_FOR_THREAD * sizeof(int)));
+  HIP_CHECK(hipMalloc(&count_d, ITER_COUNT_FOR_THREAD * sizeof(int)))
 
   hipLaunchKernelGGL(kernel_printf_thread, dim3(BLOCK_SIZE), dim3(THREADS_PER_BLOCK), 0, 0,
                      count_d);
 
-  HIP_CHECK(hipMemcpy(count, count_d, ITER_COUNT_FOR_THREAD * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(count, count_d, ITER_COUNT_FOR_THREAD * sizeof(int), hipMemcpyDeviceToHost))
 
   int check = 0;
   for (int i = 0; i < ITER_COUNT_FOR_THREAD; i++) {
@@ -193,7 +193,7 @@ HIP_TEST_CASE(Unit_NonHost_Printf_multiple_Threads) {
     REQUIRE(check == 0);
   }
   free(count);
-  HIP_CHECK(hipFree(count_d));
+  HIP_CHECK(hipFree(count_d))
 }
 /**
  * Test Description
@@ -211,20 +211,20 @@ HIP_TEST_CASE(Unit_NonHost_Printf_multiple_Threads) {
 
 HIP_TEST_CASE(Unit_NonHost_Printf_BufferAvailability) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   int *count{nullptr}, *count_d{nullptr};
 
   count = reinterpret_cast<int*>(malloc((ITER_COUNT - 1) * sizeof(int)));
-  HIP_CHECK(hipMalloc(&count_d, (ITER_COUNT - 1) * sizeof(int)));
+  HIP_CHECK(hipMalloc(&count_d, (ITER_COUNT - 1) * sizeof(int)))
   int check = 0;
   for (int i = 0; i < KERNEL_ITERATIONS; i++) {
     hipLaunchKernelGGL(kernel_printf_loop, dim3(1), dim3(1), 0, 0, ITER_COUNT - 1, count_d);
 
-    HIP_CHECK(hipMemcpy(count, count_d, (ITER_COUNT - 1) * sizeof(int), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemcpy(count, count_d, (ITER_COUNT - 1) * sizeof(int), hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
 
     int test = 0;
     for (int i = 0; i < ITER_COUNT - 1; i++) {
@@ -243,7 +243,7 @@ HIP_TEST_CASE(Unit_NonHost_Printf_BufferAvailability) {
   }
 
   free(count);
-  HIP_CHECK(hipFree(count_d));
+  HIP_CHECK(hipFree(count_d))
 }
 
 

@@ -35,16 +35,16 @@ __global__ void run_printf() { printf("Hello World"); }
  */
 HIP_TEST_CASE(Unit_kernel_ChkPrintf) {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   CaptureStream capture;
   std::string check = "Hello World";
   for (int i = 0; i < device_count; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     if (!HipTest::isPcieAtomicSupported()) continue;
 
     capture.beginCapture();
     hipLaunchKernelGGL(run_printf, dim3(1), dim3(1), 0, 0);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     capture.endCapture();
 
     auto CapturedData = capture.getCapturedData();

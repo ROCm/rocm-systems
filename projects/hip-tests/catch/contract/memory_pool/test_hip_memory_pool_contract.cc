@@ -14,8 +14,8 @@ namespace {
 bool MemoryPoolsSupported() {
   int device = 0;
   int supported = 0;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeMemoryPoolsSupported, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeMemoryPoolsSupported, device))
   return supported != 0;
 }
 
@@ -28,8 +28,8 @@ void SkipIfMemoryPoolsUnsupported() {
 hipMemPool_t CurrentDefaultPool() {
   int device = 0;
   hipMemPool_t pool = nullptr;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipDeviceGetDefaultMemPool(&pool, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipDeviceGetDefaultMemPool(&pool, device))
   return pool;
 }
 }
@@ -48,8 +48,8 @@ HIP_TEST_CASE(Contract_MemoryPool_HipDeviceGetMemPool_Default_ReturnsCurrentPool
   int device = 0;
   hipMemPool_t pool = nullptr;
 
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipDeviceGetMemPool(&pool, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipDeviceGetMemPool(&pool, device))
 
   REQUIRE(pool != nullptr);
 }
@@ -61,10 +61,10 @@ HIP_TEST_CASE(Contract_MemoryPool_HipDeviceSetMemPool_SetCurrentMemPool_RoundTri
   hipMemPool_t default_pool = nullptr;
   hipMemPool_t current_pool = nullptr;
 
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   default_pool = CurrentDefaultPool();
-  HIP_CHECK(hipDeviceSetMemPool(device, default_pool));
-  HIP_CHECK(hipDeviceGetMemPool(&current_pool, device));
+  HIP_CHECK(hipDeviceSetMemPool(device, default_pool))
+  HIP_CHECK(hipDeviceGetMemPool(&current_pool, device))
 
   REQUIRE(current_pool == default_pool);
 }
@@ -77,13 +77,13 @@ HIP_TEST_CASE(Contract_MemoryPool_HipMemPoolSetAttribute_GetSetReleaseThreshold_
   uint64_t requested_threshold = 4096;
   uint64_t readback_threshold = 0;
 
-  HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrReleaseThreshold, &original_threshold));
-  HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &requested_threshold));
-  HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrReleaseThreshold, &readback_threshold));
+  HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrReleaseThreshold, &original_threshold))
+  HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &requested_threshold))
+  HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrReleaseThreshold, &readback_threshold))
 
   REQUIRE(readback_threshold == requested_threshold);
 
-  HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &original_threshold));
+  HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &original_threshold))
 }
 
 // @asserts: hipMallocAsync - stream-ordered allocate then hipFreeAsync succeeds when pools supported, or skips otherwise
@@ -97,9 +97,9 @@ HIP_TEST_CASE(Contract_MemoryPool_HipMallocAsync_FreeAsync_SucceedsWhenSupported
   hipStream_t stream = nullptr;
   hip::contract::ContractCleanup cleanup;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipMallocAsync(&ptr, 128, stream));
+  HIP_CHECK(hipMallocAsync(&ptr, 128, stream))
   // Register the free immediately so a failing REQUIRE or a throwing hipFreeAsync
   // below cannot leak the allocation. The guard frees only if the explicit free
   // has not already run (tracked by nulling ptr), avoiding a double free, and
@@ -112,9 +112,9 @@ HIP_TEST_CASE(Contract_MemoryPool_HipMallocAsync_FreeAsync_SucceedsWhenSupported
     }
   });
   REQUIRE(ptr != nullptr);
-  HIP_CHECK(hipFreeAsync(ptr, stream));
+  HIP_CHECK(hipFreeAsync(ptr, stream))
   ptr = nullptr;
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 }
 
 // @asserts: hipMallocAsync - memory from an async allocation is device-usable (memset round-trips) after stream synchronize
@@ -125,9 +125,9 @@ HIP_TEST_CASE(Contract_MemoryPool_HipMallocAsync_Default_MemoryUsableAfterStream
   hipStream_t stream = nullptr;
   uint8_t value = 0;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipMallocAsync(&ptr, sizeof(value), stream));
+  HIP_CHECK(hipMallocAsync(&ptr, sizeof(value), stream))
   // Free-and-drain on teardown: enqueue the async free, then synchronize the
   // stream so the free completes before the stream-destroy action (registered
   // earlier, so it runs after this one) tears the stream down.
@@ -135,9 +135,9 @@ HIP_TEST_CASE(Contract_MemoryPool_HipMallocAsync_Default_MemoryUsableAfterStream
     (void)hipFreeAsync(ptr, stream);
     (void)hipStreamSynchronize(stream);
   });
-  HIP_CHECK(hipMemsetAsync(ptr, 0x5a, sizeof(value), stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipMemcpy(&value, ptr, sizeof(value), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemsetAsync(ptr, 0x5a, sizeof(value), stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipMemcpy(&value, ptr, sizeof(value), hipMemcpyDeviceToHost))
 
   REQUIRE(value == 0x5a);
 }

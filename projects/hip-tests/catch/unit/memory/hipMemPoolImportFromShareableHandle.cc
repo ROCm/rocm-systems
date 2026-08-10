@@ -46,7 +46,7 @@ HIP_TEST_CASE(Unit_hipMemPoolImportFromShareableHandle_Negative) {
   pool_props.location.id = 0;
   pool_props.location.type = hipMemLocationTypeDevice;
   pool_props.handleTypes = handleType;
-  HIP_CHECK(hipMemPoolCreate(&mempoolPfd, &pool_props));
+  HIP_CHECK(hipMemPoolCreate(&mempoolPfd, &pool_props))
 
   HIP_CHECK(hipMemPoolExportToShareableHandle(&sharedHandle, mempoolPfd,
                                               handleType, 0));
@@ -66,7 +66,7 @@ HIP_TEST_CASE(Unit_hipMemPoolImportFromShareableHandle_Negative) {
                                                         hipMemHandleTypeNone, 0),
                     hipErrorInvalidValue);
   }
-  HIP_CHECK(hipMemPoolDestroy(mempoolPfd));
+  HIP_CHECK(hipMemPoolDestroy(mempoolPfd))
 }
 
 /**

@@ -62,21 +62,21 @@ HIP_TEST_CASE(Unit_tiled_groups_metagrp_basic) {
   mgrpRank_h = new int[total_elem];
   REQUIRE(mgrpRank_h != nullptr);
 
-  HIP_CHECK(hipMalloc(&mgrpSize_d, total_elem * sizeof(int)));
-  HIP_CHECK(hipMalloc(&mgrpRank_d, total_elem * sizeof(int)));
+  HIP_CHECK(hipMalloc(&mgrpSize_d, total_elem * sizeof(int)))
+  HIP_CHECK(hipMalloc(&mgrpRank_d, total_elem * sizeof(int)))
   SECTION("Parent Group = thread block group") {
     hipLaunchKernelGGL(kernel_tiledgrp_threadblk, total_elem / block_size, block_size, 0, 0,
                        mgrpSize_d, mgrpRank_d);
-    HIP_CHECK(hipMemcpy(mgrpRank_h, mgrpRank_d, total_elem * sizeof(int), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(mgrpSize_h, mgrpSize_d, total_elem * sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(mgrpRank_h, mgrpRank_d, total_elem * sizeof(int), hipMemcpyDeviceToHost))
+    HIP_CHECK(hipMemcpy(mgrpSize_h, mgrpSize_d, total_elem * sizeof(int), hipMemcpyDeviceToHost))
     for (int i = 0; i < total_elem; i++) {
       REQUIRE(mgrpRank_h[i] >= 0);
       REQUIRE(mgrpRank_h[i] < (block_size / test_size));
       REQUIRE(mgrpSize_h[i] == (block_size / test_size));
     }
   }
-  HIP_CHECK(hipFree(mgrpSize_d));
-  HIP_CHECK(hipFree(mgrpRank_d));
+  HIP_CHECK(hipFree(mgrpSize_d))
+  HIP_CHECK(hipFree(mgrpRank_d))
   delete[] mgrpSize_h;
   delete[] mgrpRank_h;
 }
@@ -100,19 +100,19 @@ HIP_TEST_CASE(Unit_coalesced_groups_metagrp_basic) {
   mgrpRank_h = new int[total_elem];
   REQUIRE(mgrpRank_h != nullptr);
 
-  HIP_CHECK(hipMalloc(&mgrpSize_d, total_elem * sizeof(int)));
-  HIP_CHECK(hipMalloc(&mgrpRank_d, total_elem * sizeof(int)));
+  HIP_CHECK(hipMalloc(&mgrpSize_d, total_elem * sizeof(int)))
+  HIP_CHECK(hipMalloc(&mgrpRank_d, total_elem * sizeof(int)))
 
   hipLaunchKernelGGL(kernel_coalesced_grp, total_elem / block_size, block_size, 0, 0, mgrpSize_d,
                      mgrpRank_d);
-  HIP_CHECK(hipMemcpy(mgrpRank_h, mgrpRank_d, total_elem * sizeof(int), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(mgrpSize_h, mgrpSize_d, total_elem * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(mgrpRank_h, mgrpRank_d, total_elem * sizeof(int), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(mgrpSize_h, mgrpSize_d, total_elem * sizeof(int), hipMemcpyDeviceToHost))
   for (int i = 0; i < total_elem; i++) {
     REQUIRE(mgrpRank_h[i] == 0);
     REQUIRE(mgrpSize_h[i] == 1);
   }
-  HIP_CHECK(hipFree(mgrpSize_d));
-  HIP_CHECK(hipFree(mgrpRank_d));
+  HIP_CHECK(hipFree(mgrpSize_d))
+  HIP_CHECK(hipFree(mgrpRank_d))
   delete[] mgrpSize_h;
   delete[] mgrpRank_h;
 }

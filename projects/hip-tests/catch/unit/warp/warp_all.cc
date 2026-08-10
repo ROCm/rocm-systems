@@ -104,8 +104,8 @@ class WarpAll : public WarpVoteTest<WarpAll, uint64_t> {
 HIP_TEST_CASE(Unit_Warp_Vote_All_Positive_Basic) {
   int device;
   hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&device_properties, device))
 
   if (!device_properties.arch.hasWarpVote) {
     HIP_SKIP_TEST(HipTest::SkipReason::kWarpVoteUnsupported);

@@ -17,13 +17,13 @@
 
 void DeviceSetLimitTest(hipLimit_t limit) {
   size_t old_val;
-  HIP_CHECK(hipDeviceGetLimit(&old_val, limit));
+  HIP_CHECK(hipDeviceGetLimit(&old_val, limit))
   REQUIRE(old_val != 0);
 
-  HIP_CHECK(hipDeviceSetLimit(limit, old_val + 8));
+  HIP_CHECK(hipDeviceSetLimit(limit, old_val + 8))
 
   size_t new_val;
-  HIP_CHECK(hipDeviceGetLimit(&new_val, limit));
+  HIP_CHECK(hipDeviceGetLimit(&new_val, limit))
   REQUIRE(new_val >= old_val + 8);
 }
 
@@ -79,7 +79,7 @@ HIP_TEST_CASE(Unit_hipDeviceSetLimit_Negative_PrintfFifoSize) {
   PrintfKernel<<<1, 1>>>();
   HIP_CHECK_ERROR(hipDeviceSetLimit(hipLimitPrintfFifoSize, 1024), hipErrorInvalidValue);
   stop = true;
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   stop = false;
 }
 
@@ -118,7 +118,7 @@ HIP_TEST_CASE(Unit_hipDeviceSetLimit_Negative_MallocHeapSize) {
   MallocKernel<<<1, 1>>>();
   HIP_CHECK_ERROR(hipDeviceSetLimit(hipLimitMallocHeapSize, 1024), hipErrorInvalidValue);
   stop = true;
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   stop = false;
 }
 
@@ -186,9 +186,9 @@ HIP_TEST_CASE(Unit_hipDeviceGetLimit_Negative_Parameters) {
 bool isSetScratchLimitSupported() {
 #if __linux__
   int deviceId;
-  HIP_CHECK(hipGetDevice(&deviceId));
+  HIP_CHECK(hipGetDevice(&deviceId))
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+  HIP_CHECK(hipGetDeviceProperties(&props, deviceId))
   std::cout << "Device Id = " << deviceId << " props.major = " << props.major
             << " props.minor = " << props.minor << std::endl;
   return ((props.major == 9 && props.minor >= 4) || (props.major == 12 && props.minor >= 5))
@@ -252,21 +252,21 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetMinAndMaxAsCurrent) {
   }
 
   size_t scratchLimitCurrent = 0;
-  HIP_CHECK(hipDeviceGetLimit(&scratchLimitCurrent, hipExtLimitScratchCurrent));
+  HIP_CHECK(hipDeviceGetLimit(&scratchLimitCurrent, hipExtLimitScratchCurrent))
 
   SECTION("Set the hipExtLimitScratchCurrent to hipExtLimitScratchMin") {
     size_t scratchLimitMin = 0;
-    HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, scratchLimitMin));
+    HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, scratchLimitMin))
   }
 
   SECTION("Set the hipExtLimitScratchCurrent to hipExtLimitScratchMax") {
     size_t scratchLimitMax = 0;
-    HIP_CHECK(hipDeviceGetLimit(&scratchLimitMax, hipExtLimitScratchMax));
-    HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, scratchLimitMax));
+    HIP_CHECK(hipDeviceGetLimit(&scratchLimitMax, hipExtLimitScratchMax))
+    HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, scratchLimitMax))
   }
 
   // Set back the original value
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, scratchLimitCurrent));
+  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, scratchLimitCurrent))
 }
 
 /**
@@ -292,16 +292,16 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_DecreaseIncrease) {
 
   // Get the current scratch
   size_t orgValue = 0;
-  HIP_CHECK(hipDeviceGetLimit(&orgValue, hipExtLimitScratchCurrent));
+  HIP_CHECK(hipDeviceGetLimit(&orgValue, hipExtLimitScratchCurrent))
 
   SECTION("Decrease from the current value") {
     size_t setValue = orgValue - 1024;
     setValue = (setValue < 0) ? 0 : setValue;
 
-    HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, setValue));
+    HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, setValue))
 
     size_t getValue = 0;
-    HIP_CHECK(hipDeviceGetLimit(&getValue, hipExtLimitScratchCurrent));
+    HIP_CHECK(hipDeviceGetLimit(&getValue, hipExtLimitScratchCurrent))
     REQUIRE(getValue == setValue);
   }
 
@@ -309,18 +309,18 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_DecreaseIncrease) {
     size_t setValue = orgValue + 1024;
 
     size_t max = 0;
-    HIP_CHECK(hipDeviceGetLimit(&max, hipExtLimitScratchMax));
+    HIP_CHECK(hipDeviceGetLimit(&max, hipExtLimitScratchMax))
     setValue = (setValue > max) ? (max * 0.9) : setValue;
 
-    HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, setValue));
+    HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, setValue))
 
     size_t getValue = 0;
-    HIP_CHECK(hipDeviceGetLimit(&getValue, hipExtLimitScratchCurrent));
+    HIP_CHECK(hipDeviceGetLimit(&getValue, hipExtLimitScratchCurrent))
     REQUIRE(getValue == setValue);
   }
 
   // Set back original value
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, orgValue));
+  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, orgValue))
 }
 
 static constexpr size_t kBufferSize = 4 * 1024;
@@ -369,33 +369,33 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetBeforeKernelLaunch) {
   }
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   int* devMem = nullptr;
-  HIP_CHECK(hipMalloc(&devMem, sizeof(int)));
+  HIP_CHECK(hipMalloc(&devMem, sizeof(int)))
   REQUIRE(devMem != nullptr);
 
   size_t orgValue = 0;
-  HIP_CHECK(hipDeviceGetLimit(&orgValue, hipExtLimitScratchCurrent));
+  HIP_CHECK(hipDeviceGetLimit(&orgValue, hipExtLimitScratchCurrent))
 
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, kBufferSizeBytes));
+  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, kBufferSizeBytes))
 
   size_t getValue = 0;
-  HIP_CHECK(hipDeviceGetLimit(&getValue, hipExtLimitScratchCurrent));
+  HIP_CHECK(hipDeviceGetLimit(&getValue, hipExtLimitScratchCurrent))
   REQUIRE(getValue == kBufferSizeBytes);
 
   addOneKernelUseScratch<<<1, 1, 0, stream>>>(devMem);
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   int hostMem = 0, expectedValue = ((kBufferSize - 1) * (kBufferSize)) / 2;
-  HIP_CHECK(hipMemcpy(&hostMem, devMem, N_BYTES, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&hostMem, devMem, N_BYTES, hipMemcpyDeviceToHost))
   REQUIRE(hostMem == expectedValue);
 
   // Set back original value
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, orgValue));
+  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, orgValue))
 
-  HIP_CHECK(hipFree(devMem));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(devMem))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /*
@@ -445,7 +445,7 @@ void getMinMaxCurrentAndSetCurrent(bool threadSafe = false) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_MultiDevice) {
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   if (deviceCount < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
@@ -457,10 +457,10 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_MultiDevice) {
   }
 
   for (int deviceId = 0; deviceId < deviceCount; deviceId++) {
-    HIP_CHECK(hipSetDevice(deviceId));
+    HIP_CHECK(hipSetDevice(deviceId))
     getMinMaxCurrentAndSetCurrent();
   }
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 }
 
 /**
@@ -557,10 +557,10 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetGetThreads) {
 
   size_t max = 0, orgCurrent = 0;
 
-  HIP_CHECK(hipDeviceGetLimit(&max, hipExtLimitScratchMax));
+  HIP_CHECK(hipDeviceGetLimit(&max, hipExtLimitScratchMax))
   REQUIRE(max > 0);
 
-  HIP_CHECK(hipDeviceGetLimit(&orgCurrent, hipExtLimitScratchCurrent));
+  HIP_CHECK(hipDeviceGetLimit(&orgCurrent, hipExtLimitScratchCurrent))
   REQUIRE(orgCurrent >= 0);
 
   std::thread setThread1(setScratchCurrent, max * 0.5);

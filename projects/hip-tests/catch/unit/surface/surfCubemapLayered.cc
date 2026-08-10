@@ -70,7 +70,7 @@ template <typename T> static void runTestR(const int width, const int height) {
 
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<T>();
   hipArray_t hipArray = nullptr;
-  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height, hipArraySurfaceLoadStore));
+  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height, hipArraySurfaceLoadStore))
 
   // Need set source pitch, but we don't have any padding here
   const size_t spitch = width * sizeof(T);
@@ -84,17 +84,17 @@ template <typename T> static void runTestR(const int width, const int height) {
 
   // Create surface object
   hipSurfaceObject_t surfaceObject = 0;
-  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc));
+  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc))
 
   T* hOutputData = nullptr;
-  HIP_CHECK(hipHostMalloc((void**)&hOutputData, size));
+  HIP_CHECK(hipHostMalloc((void**)&hOutputData, size))
   memset(hOutputData, 0, size);
 
   dim3 dimBlock(16, 16, 1);
   dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y, 1);
   surfCubemapLayeredKernelR<T><<<dimGrid, dimBlock>>>(surfaceObject, hOutputData, width, height);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int i = 0; i < height; i++) {
     for (int j = 0; j < width; j++) {
@@ -107,21 +107,21 @@ template <typename T> static void runTestR(const int width, const int height) {
     }
   }
 
-  HIP_CHECK(hipDestroySurfaceObject(surfaceObject));
-  HIP_CHECK(hipFreeArray(hipArray));
+  HIP_CHECK(hipDestroySurfaceObject(surfaceObject))
+  HIP_CHECK(hipFreeArray(hipArray))
   free(hData);
-  HIP_CHECK(hipHostFree(hOutputData));
+  HIP_CHECK(hipHostFree(hOutputData))
 }
 
 template <typename T> static void runTestW(const int width, const int height) {
   unsigned int size = width * height * sizeof(T);
   T* hData = nullptr;
-  HIP_CHECK(hipHostMalloc((void**)&hData, size));
+  HIP_CHECK(hipHostMalloc((void**)&hData, size))
   memset(hData, 0, size);
 
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<T>();
   hipArray_t hipArray = nullptr;
-  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height, hipArraySurfaceLoadStore));
+  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height, hipArraySurfaceLoadStore))
 
   // Need set source pitch, but we don't have any padding here
   const size_t spitch = width * sizeof(T);
@@ -135,7 +135,7 @@ template <typename T> static void runTestW(const int width, const int height) {
 
   // Create surface object
   hipSurfaceObject_t surfaceObject = 0;
-  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc));
+  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc))
 
   for (int i = 0; i < height; i++) {
     for (int j = 0; j < width; j++) {
@@ -146,8 +146,8 @@ template <typename T> static void runTestW(const int width, const int height) {
   dim3 dimBlock(16, 16, 1);
   dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y, 1);
   surfCubemapLayeredKernelW<T><<<dimGrid, dimBlock>>>(surfaceObject, hData, width, height);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   T* hOutputData = (T*)malloc(size);
 
@@ -166,9 +166,9 @@ template <typename T> static void runTestW(const int width, const int height) {
     }
   }
 
-  HIP_CHECK(hipDestroySurfaceObject(surfaceObject));
-  HIP_CHECK(hipFreeArray(hipArray));
-  HIP_CHECK(hipHostFree(hData));
+  HIP_CHECK(hipDestroySurfaceObject(surfaceObject))
+  HIP_CHECK(hipFreeArray(hipArray))
+  HIP_CHECK(hipHostFree(hData))
   free(hOutputData);
 }
 
@@ -191,7 +191,7 @@ template <typename T> static void runTestRW(const int width, const int height) {
 
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<T>();
   hipArray_t hipArray = nullptr, hipOutArray = nullptr;
-  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height, hipArraySurfaceLoadStore));
+  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height, hipArraySurfaceLoadStore))
 
   // Need set source pitch, but we don't have any padding here
   const size_t spitch = width * sizeof(T);
@@ -205,9 +205,9 @@ template <typename T> static void runTestRW(const int width, const int height) {
 
   // Create surface object
   hipSurfaceObject_t surfaceObject = 0;
-  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc));
+  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc))
 
-  HIP_CHECK(hipMallocArray(&hipOutArray, &channelDesc, width, height, hipArraySurfaceLoadStore));
+  HIP_CHECK(hipMallocArray(&hipOutArray, &channelDesc, width, height, hipArraySurfaceLoadStore))
 
   hipResourceDesc resOutDesc;
   memset(&resOutDesc, 0, sizeof(resOutDesc));
@@ -215,14 +215,14 @@ template <typename T> static void runTestRW(const int width, const int height) {
   resOutDesc.res.array.array = hipOutArray;
 
   hipSurfaceObject_t outSurfaceObject = 0;
-  HIP_CHECK(hipCreateSurfaceObject(&outSurfaceObject, &resOutDesc));
+  HIP_CHECK(hipCreateSurfaceObject(&outSurfaceObject, &resOutDesc))
 
   dim3 dimBlock(16, 16, 1);
   dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y, 1);
   surfCubemapLayeredKernelRW<T>
       <<<dimGrid, dimBlock>>>(surfaceObject, outSurfaceObject, width, height);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   T* hOutputData = (T*)malloc(size);
 
@@ -249,10 +249,10 @@ template <typename T> static void runTestRW(const int width, const int height) {
     }
   }
 
-  HIP_CHECK(hipDestroySurfaceObject(surfaceObject));
-  HIP_CHECK(hipDestroySurfaceObject(outSurfaceObject));
-  HIP_CHECK(hipFreeArray(hipArray));
-  HIP_CHECK(hipFreeArray(hipOutArray));
+  HIP_CHECK(hipDestroySurfaceObject(surfaceObject))
+  HIP_CHECK(hipDestroySurfaceObject(outSurfaceObject))
+  HIP_CHECK(hipFreeArray(hipArray))
+  HIP_CHECK(hipFreeArray(hipOutArray))
   free(hData);
   free(hOutputData);
 }

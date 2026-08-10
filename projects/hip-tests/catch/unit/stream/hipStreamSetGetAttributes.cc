@@ -38,11 +38,11 @@ HIP_TEST_CASE(Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic) {
   }
 
   int *devMem = nullptr;
-  HIP_CHECK(hipMalloc(&devMem, N * sizeof(int)));
+  HIP_CHECK(hipMalloc(&devMem, N * sizeof(int)))
   REQUIRE(devMem != nullptr);
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   hipStreamAttrID attr = hipStreamAttributeSynchronizationPolicy;
   hipStreamAttrValue valueToSet;
@@ -52,10 +52,10 @@ HIP_TEST_CASE(Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic) {
                hipSynchronizationPolicy::hipSyncPolicyYield,
                hipSynchronizationPolicy::hipSyncPolicyBlockingSync);
   valueToSet.syncPolicy = syncPolicy;
-  HIP_CHECK(hipStreamSetAttribute(stream, attr, &valueToSet));
+  HIP_CHECK(hipStreamSetAttribute(stream, attr, &valueToSet))
 
   hipStreamAttrValue valueOut;
-  HIP_CHECK(hipStreamGetAttribute(stream, attr, &valueOut));
+  HIP_CHECK(hipStreamGetAttribute(stream, attr, &valueOut))
   REQUIRE(valueOut.syncPolicy == syncPolicy);
 
   HIP_CHECK(hipMemcpyAsync(devMem, hostMem, N * sizeof(int),
@@ -63,7 +63,7 @@ HIP_TEST_CASE(Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic) {
   doubleKernel<<<1, N, 0, stream>>>(devMem);
   HIP_CHECK(hipMemcpyAsync(hostMem, devMem, N * sizeof(int),
                            hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   for (int i = 0; i < N; i++) {
     INFO("At index " << i << " Expected value = 10 "
@@ -71,8 +71,8 @@ HIP_TEST_CASE(Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic) {
     REQUIRE(hostMem[i] == 10);
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(devMem));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(devMem))
 }
 
 /**
@@ -92,7 +92,7 @@ HIP_TEST_CASE(Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic) {
  */
 HIP_TEST_CASE(Unit_hipStreamGetAttribute_Negative) {
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   hipStreamAttrID attr = hipStreamAttributeSynchronizationPolicy;
   hipStreamAttrValue valueOut;
@@ -115,7 +115,7 @@ HIP_TEST_CASE(Unit_hipStreamGetAttribute_Negative) {
                     hipErrorInvalidValue);
   }
 #endif
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -136,7 +136,7 @@ HIP_TEST_CASE(Unit_hipStreamGetAttribute_Negative) {
  */
 HIP_TEST_CASE(Unit_hipStreamSetAttribute_Negative) {
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   hipStreamAttrID attr = hipStreamAttributeSynchronizationPolicy;
   hipStreamAttrValue valueToSet;
@@ -166,5 +166,5 @@ HIP_TEST_CASE(Unit_hipStreamSetAttribute_Negative) {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }

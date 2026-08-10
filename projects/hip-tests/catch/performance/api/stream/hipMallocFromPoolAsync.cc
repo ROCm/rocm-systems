@@ -20,19 +20,19 @@ class MallocFromPoolAsyncBenchmark : public Benchmark<MallocFromPoolAsyncBenchma
 
     hipMemPool_t mem_pool{nullptr};
     hipMemPoolProps pool_props = CreateMemPoolProps(0, hipMemHandleTypeNone);
-    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
 
     float* array_ptr{nullptr};
 
     TIMED_SECTION_STREAM(kTimerTypeEvent, stream) {
-      HIP_CHECK(hipMallocFromPoolAsync(&array_ptr, array_size * sizeof(float), mem_pool, stream));
+      HIP_CHECK(hipMallocFromPoolAsync(&array_ptr, array_size * sizeof(float), mem_pool, stream))
     }
 
     REQUIRE(array_ptr != nullptr);
 
-    HIP_CHECK(hipFreeAsync(array_ptr, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+    HIP_CHECK(hipFreeAsync(array_ptr, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
+    HIP_CHECK(hipMemPoolDestroy(mem_pool))
   }
 };
 

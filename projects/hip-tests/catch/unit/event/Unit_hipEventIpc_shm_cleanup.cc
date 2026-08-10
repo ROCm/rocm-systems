@@ -57,9 +57,9 @@ HIP_TEST_CASE(Unit_hipEventIpc_shm_cleanup) {
     HIP_CHECK(hipEventCreateWithFlags(&probe,
                                       hipEventInterprocess | hipEventDisableTiming));
     hipIpcEventHandle_t h;
-    HIP_CHECK(hipIpcGetEventHandle(&h, probe));
+    HIP_CHECK(hipIpcGetEventHandle(&h, probe))
     auto shm_after = get_hip_ipc_shm_files();
-    HIP_CHECK(hipEventDestroy(probe));
+    HIP_CHECK(hipEventDestroy(probe))
     if (shm_after.size() <= shm_before.size()) {
       HIP_SKIP_TEST("Device uses native IPC signals; /dev/shm cleanup not applicable");
     }

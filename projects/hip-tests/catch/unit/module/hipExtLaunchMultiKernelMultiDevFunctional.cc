@@ -49,7 +49,7 @@ HIP_TEST_CASE(Unit_hipExtLaunchMultiKernelMultiDevice_Functional) {
   size_t Nbytes = N * sizeof(float);
 
   int nGpu = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpu));
+  HIP_CHECK(hipGetDeviceCount(&nGpu))
   if (nGpu < 1) {
     INFO("info: didn't find any GPU!\n");
     REQUIRE(false);
@@ -58,9 +58,9 @@ HIP_TEST_CASE(Unit_hipExtLaunchMultiKernelMultiDevice_Functional) {
     nGpu = MAX_GPUS;
   }
   A_h = reinterpret_cast<float*>(malloc(Nbytes));
-  HIP_CHECK(A_h == 0 ? hipErrorOutOfMemory : hipSuccess);
+  HIP_CHECK(A_h == 0 ? hipErrorOutOfMemory : hipSuccess)
   C_h = reinterpret_cast<float*>(malloc(Nbytes));
-  HIP_CHECK(C_h == 0 ? hipErrorOutOfMemory : hipSuccess);
+  HIP_CHECK(C_h == 0 ? hipErrorOutOfMemory : hipSuccess)
   // Fill with Phi + i
   for (size_t i = 0; i < N; i++) {
     A_h[i] = 1.618f + i;
@@ -71,17 +71,17 @@ HIP_TEST_CASE(Unit_hipExtLaunchMultiKernelMultiDevice_Functional) {
 
   hipStream_t stream[MAX_GPUS];
   for (int i = 0; i < nGpu; i++) {
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipStreamCreateWithFlags(&stream[i], hipStreamNonBlocking));
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipStreamCreateWithFlags(&stream[i], hipStreamNonBlocking))
 
     hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, i));
-    HIP_CHECK(hipMalloc(&A_d[i], Nbytes));
-    HIP_CHECK(hipMalloc(&C_d[i], Nbytes));
+    HIP_CHECK(hipGetDeviceProperties(&props, i))
+    HIP_CHECK(hipMalloc(&A_d[i], Nbytes))
+    HIP_CHECK(hipMalloc(&C_d[i], Nbytes))
 
 
     INFO("info: copy Host2Device\n");
-    HIP_CHECK(hipMemcpy(A_d[i], A_h, Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(A_d[i], A_h, Nbytes, hipMemcpyHostToDevice))
   }
 
   hipLaunchParams* launchParamsList =
@@ -103,25 +103,25 @@ HIP_TEST_CASE(Unit_hipExtLaunchMultiKernelMultiDevice_Functional) {
 
   INFO("info: launch vector_square kernel with");
   INFO("hipExtLaunchMultiKernelMultiDevice API\n");
-  HIP_CHECK(hipExtLaunchMultiKernelMultiDevice(launchParamsList, nGpu, 0));
+  HIP_CHECK(hipExtLaunchMultiKernelMultiDevice(launchParamsList, nGpu, 0))
 
   for (int j = 0; j < nGpu; j++) {
-    HIP_CHECK(hipStreamSynchronize(stream[j]));
-    HIP_CHECK(hipStreamDestroy(stream[j]));
+    HIP_CHECK(hipStreamSynchronize(stream[j]))
+    HIP_CHECK(hipStreamDestroy(stream[j]))
 
     hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, j));
+    HIP_CHECK(hipGetDeviceProperties(&props, j))
     INFO("info: copy Device2Host\n");
-    HIP_CHECK(hipSetDevice(j));
-    HIP_CHECK(hipMemcpy(C_h, C_d[j], Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipSetDevice(j))
+    HIP_CHECK(hipMemcpy(C_h, C_d[j], Nbytes, hipMemcpyDeviceToHost))
 
     INFO("info: check result\n");
     for (size_t i = 0; i < N; i++) {
       REQUIRE(fabs(C_h[i] - (A_h[i] * A_h[i])) < 0.00000000001);
     }
 
-    HIP_CHECK(hipFree(A_d[j]));
-    HIP_CHECK(hipFree(C_d[j]));
+    HIP_CHECK(hipFree(A_d[j]))
+    HIP_CHECK(hipFree(C_d[j]))
   }
 
   free(A_h);

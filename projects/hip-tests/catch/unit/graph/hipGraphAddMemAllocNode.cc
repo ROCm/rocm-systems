@@ -62,10 +62,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Params) {
   hipGraphNode_t alloc_node;
   std::vector<hipGraphNode_t> dependencies;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   int num_dev = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_dev));
+  HIP_CHECK(hipGetDeviceCount(&num_dev))
 
   hipMemAccessDesc desc;
   memset(&desc, 0, sizeof(hipMemAccessDesc));
@@ -139,7 +139,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Params) {
   }
 #endif
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -162,7 +162,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_NotSupported) {
   hipGraph_t graph;
   hipGraphNode_t alloc_node;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipMemAllocNodeParams alloc_param;
   memset(&alloc_param, 0, sizeof(alloc_param));
@@ -171,14 +171,14 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_NotSupported) {
   alloc_param.poolProps.location.id = 0;
   alloc_param.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&alloc_node, graph, nullptr, 0, &alloc_param));
+  HIP_CHECK(hipGraphAddMemAllocNode(&alloc_node, graph, nullptr, 0, &alloc_param))
 
   SECTION("More than one instantation of the graph exists") {
     hipGraphExec_t graph_exec1, graph_exec2;
-    HIP_CHECK(hipGraphInstantiate(&graph_exec1, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec1, graph, nullptr, nullptr, 0))
     HIP_CHECK_ERROR(hipGraphInstantiate(&graph_exec2, graph, nullptr, nullptr, 0),
                     hipErrorNotSupported);
-    HIP_CHECK(hipGraphExecDestroy(graph_exec1));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec1))
   }
 
 #if HT_NVIDIA  // EXSWHTEC-353
@@ -189,22 +189,22 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_NotSupported) {
 
   SECTION("Use graph in a child node") {
     hipGraph_t parent_graph;
-    HIP_CHECK(hipGraphCreate(&parent_graph, 0));
+    HIP_CHECK(hipGraphCreate(&parent_graph, 0))
     hipGraphNode_t child_graph_node;
     HIP_CHECK_ERROR(hipGraphAddChildGraphNode(&child_graph_node, parent_graph, nullptr, 0, graph),
                     hipErrorNotSupported);
-    HIP_CHECK(hipGraphDestroy(parent_graph));
+    HIP_CHECK(hipGraphDestroy(parent_graph))
   }
 
   SECTION("Delete edge of the graph") {
     hipGraphNode_t empty_node;
-    HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, &alloc_node, 1));
+    HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, &alloc_node, 1))
     HIP_CHECK_ERROR(hipGraphRemoveDependencies(graph, &alloc_node, &empty_node, 1),
                     hipErrorNotSupported);
   }
 #endif
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /* Create graph with memory nodes that copies memset data to host array */
@@ -213,7 +213,7 @@ static void createGraph(hipGraphExec_t* graph_exec, int* A_h, int fill_value,
   constexpr size_t num_bytes = element_count * sizeof(int);
 
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t alloc_node;
   hipMemAllocNodeParams alloc_param;
@@ -223,7 +223,7 @@ static void createGraph(hipGraphExec_t* graph_exec, int* A_h, int fill_value,
   alloc_param.poolProps.location.id = 0;
   alloc_param.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&alloc_node, graph, nullptr, 0, &alloc_param));
+  HIP_CHECK(hipGraphAddMemAllocNode(&alloc_node, graph, nullptr, 0, &alloc_param))
   REQUIRE(alloc_param.dptr != nullptr);
   int* A_d = reinterpret_cast<int*>(alloc_param.dptr);
 
@@ -236,7 +236,7 @@ static void createGraph(hipGraphExec_t* graph_exec, int* A_h, int fill_value,
   memset_params.elementSize = sizeof(int);
   memset_params.width = element_count;
   memset_params.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memset_node, graph, &alloc_node, 1, &memset_params));
+  HIP_CHECK(hipGraphAddMemsetNode(&memset_node, graph, &alloc_node, 1, &memset_params))
 
   hipGraphNode_t memcpy_node;
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_node, graph, &memset_node, 1, A_h, A_d, num_bytes,
@@ -244,34 +244,34 @@ static void createGraph(hipGraphExec_t* graph_exec, int* A_h, int fill_value,
 
   if (device_alloc == nullptr) {
     hipGraphNode_t free_node;
-    HIP_CHECK(hipGraphAddMemFreeNode(&free_node, graph, &memcpy_node, 1, (void*)A_d));
+    HIP_CHECK(hipGraphAddMemFreeNode(&free_node, graph, &memcpy_node, 1, (void*)A_d))
   } else {
     *device_alloc = A_d;
   }
 
   // Instantiate graph
-  HIP_CHECK(hipGraphInstantiate(graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(graph_exec, graph, nullptr, nullptr, 0))
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 static void createFreeGraph(hipGraphExec_t* graph_exec, int* device_alloc) {
   hipGraph_t graph;
   hipGraphNode_t free_node;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
-  HIP_CHECK(hipGraphAddMemFreeNode(&free_node, graph, nullptr, 0, (void*)device_alloc));
+  HIP_CHECK(hipGraphAddMemFreeNode(&free_node, graph, nullptr, 0, (void*)device_alloc))
 
   // Instantiate graph
-  HIP_CHECK(hipGraphInstantiate(graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(graph_exec, graph, nullptr, nullptr, 0))
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 static size_t oversizedGraphAllocBytes() {
   size_t free_mem = 0;
   size_t total_mem = 0;
-  HIP_CHECK(hipMemGetInfo(&free_mem, &total_mem));
+  HIP_CHECK(hipMemGetInfo(&free_mem, &total_mem))
   (void)free_mem;
   return (total_mem > std::numeric_limits<size_t>::max() - kOneGiB)
              ? std::numeric_limits<size_t>::max()
@@ -286,18 +286,18 @@ static void createOversizedMemAllocGraph(hipGraph_t* graph, hipGraphExec_t* grap
   alloc_param.poolProps.location.id = 0;
   alloc_param.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphCreate(graph, 0));
+  HIP_CHECK(hipGraphCreate(graph, 0))
   hipError_t ret = hipGraphAddMemAllocNode(&alloc_node, *graph, nullptr, 0, &alloc_param);
   if (ret == hipErrorOutOfMemory) {
-    HIP_CHECK(hipGraphDestroy(*graph));
+    HIP_CHECK(hipGraphDestroy(*graph))
     HIP_SKIP_TEST("Oversized graph mem-alloc node failed before launch-time allocation.");
   }
-  HIP_CHECK(ret);
+  HIP_CHECK(ret)
   if (alloc_param.dptr == nullptr) {
-    HIP_CHECK(hipGraphDestroy(*graph));
+    HIP_CHECK(hipGraphDestroy(*graph))
     FAIL("hipGraphAddMemAllocNode succeeded but returned a null device pointer.");
   }
-  HIP_CHECK(hipGraphInstantiate(graph_exec, *graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(graph_exec, *graph, nullptr, nullptr, 0))
 }
 
 static hipError_t queryUntilComplete(hipStream_t stream) {
@@ -327,11 +327,11 @@ static hipError_t queryUntilComplete(hipStream_t stream) {
  */
 HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;
@@ -343,9 +343,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
     hipStream_t stream = stream_guard.stream();
     hipError_t launch_ret = hipGraphLaunch(graph_exec, stream);
     hipError_t sync_ret = hipStreamSynchronize(stream);
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipDeviceGraphMemTrim(0));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec))
+    HIP_CHECK(hipGraphDestroy(graph))
+    HIP_CHECK(hipDeviceGraphMemTrim(0))
     REQUIRE((launch_ret == hipSuccess || launch_ret == hipErrorOutOfMemory));
     REQUIRE(sync_ret == hipErrorOutOfMemory);
   }
@@ -353,9 +353,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
   SECTION("hipStreamSynchronize nullptr") {
     hipError_t launch_ret = hipGraphLaunch(graph_exec, nullptr);
     hipError_t sync_ret = hipStreamSynchronize(nullptr);
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipDeviceGraphMemTrim(0));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec))
+    HIP_CHECK(hipGraphDestroy(graph))
+    HIP_CHECK(hipDeviceGraphMemTrim(0))
     REQUIRE((launch_ret == hipSuccess || launch_ret == hipErrorOutOfMemory));
     REQUIRE(sync_ret == hipErrorOutOfMemory);
   }
@@ -365,9 +365,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
     hipStream_t stream = stream_guard.stream();
     hipError_t launch_ret = hipGraphLaunch(graph_exec, stream);
     hipError_t sync_ret = hipStreamSynchronize(nullptr);
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipDeviceGraphMemTrim(0));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec))
+    HIP_CHECK(hipGraphDestroy(graph))
+    HIP_CHECK(hipDeviceGraphMemTrim(0))
     REQUIRE((launch_ret == hipSuccess || launch_ret == hipErrorOutOfMemory));
     REQUIRE(sync_ret == hipErrorOutOfMemory);
   }
@@ -380,15 +380,15 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
     if (ret == hipSuccess) {
       ret = queryUntilComplete(stream);
       if (ret == hipErrorNotReady) {
-        HIP_CHECK(hipGraphExecDestroy(graph_exec));
-        HIP_CHECK(hipGraphDestroy(graph));
+        HIP_CHECK(hipGraphExecDestroy(graph_exec))
+        HIP_CHECK(hipGraphDestroy(graph))
         FAIL("Timed out waiting for graph launch to complete.");
       }
       second_query = hipStreamQuery(stream);
     }
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipDeviceGraphMemTrim(0));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec))
+    HIP_CHECK(hipGraphDestroy(graph))
+    HIP_CHECK(hipDeviceGraphMemTrim(0))
     REQUIRE(ret == hipErrorOutOfMemory);
     REQUIRE(second_query == hipSuccess);
   }
@@ -409,11 +409,11 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
     // Work on both streams is complete after the sync, so neither query waits.
     hipError_t query_a = hipStreamQuery(stream_a);
     hipError_t query_b = hipStreamQuery(stream_b);
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipGraphExecDestroy(graph_exec_b));
-    HIP_CHECK(hipGraphDestroy(graph_b));
-    HIP_CHECK(hipDeviceGraphMemTrim(0));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec))
+    HIP_CHECK(hipGraphDestroy(graph))
+    HIP_CHECK(hipGraphExecDestroy(graph_exec_b))
+    HIP_CHECK(hipGraphDestroy(graph_b))
+    HIP_CHECK(hipDeviceGraphMemTrim(0))
     REQUIRE((launch_ret_a == hipSuccess || launch_ret_a == hipErrorOutOfMemory));
     REQUIRE((launch_ret_b == hipSuccess || launch_ret_b == hipErrorOutOfMemory));
     REQUIRE(sync_ret == hipErrorOutOfMemory);
@@ -433,25 +433,25 @@ static void createOversizedMemAllocChildGraph(hipGraph_t* parent_graph,
   alloc_param.poolProps.location.type = hipMemLocationTypeDevice;
 
   hipGraph_t child_graph;
-  HIP_CHECK(hipGraphCreate(&child_graph, 0));
+  HIP_CHECK(hipGraphCreate(&child_graph, 0))
   hipError_t ret = hipGraphAddMemAllocNode(&alloc_node, child_graph, nullptr, 0, &alloc_param);
   if (ret == hipErrorOutOfMemory) {
-    HIP_CHECK(hipGraphDestroy(child_graph));
+    HIP_CHECK(hipGraphDestroy(child_graph))
     HIP_SKIP_TEST("Oversized graph mem-alloc node failed before launch-time allocation.");
   }
-  HIP_CHECK(ret);
+  HIP_CHECK(ret)
   if (alloc_param.dptr == nullptr) {
-    HIP_CHECK(hipGraphDestroy(child_graph));
+    HIP_CHECK(hipGraphDestroy(child_graph))
     FAIL("hipGraphAddMemAllocNode succeeded but returned a null device pointer.");
   }
 
-  HIP_CHECK(hipGraphCreate(parent_graph, 0));
+  HIP_CHECK(hipGraphCreate(parent_graph, 0))
   hipGraphNode_t child_node;
   // The child graph is cloned into the parent, so its handle can be freed immediately.
-  HIP_CHECK(hipGraphAddChildGraphNode(&child_node, *parent_graph, nullptr, 0, child_graph));
-  HIP_CHECK(hipGraphDestroy(child_graph));
+  HIP_CHECK(hipGraphAddChildGraphNode(&child_node, *parent_graph, nullptr, 0, child_graph))
+  HIP_CHECK(hipGraphDestroy(child_graph))
 
-  HIP_CHECK(hipGraphInstantiate(graph_exec, *parent_graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(graph_exec, *parent_graph, nullptr, nullptr, 0))
 }
 
 /**
@@ -469,11 +469,11 @@ static void createOversizedMemAllocChildGraph(hipGraph_t* parent_graph,
  */
 HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory_ChildGraph) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;
@@ -483,9 +483,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory_ChildGraph
   hipStream_t stream = stream_guard.stream();
   hipError_t launch_ret = hipGraphLaunch(graph_exec, stream);
   hipError_t sync_ret = hipStreamSynchronize(stream);
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipDeviceGraphMemTrim(0));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipDeviceGraphMemTrim(0))
   REQUIRE((launch_ret == hipSuccess || launch_ret == hipErrorOutOfMemory));
   REQUIRE(sync_ret == hipErrorOutOfMemory);
 }
@@ -513,12 +513,12 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeInGraph) {
 
   constexpr int fill_value = 11;
   createGraph(&graph_exec, host_alloc.ptr(), fill_value);
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   ArrayFindIfNot(host_alloc.host_ptr(), fill_value, element_count);
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
 }
 
 /**
@@ -542,7 +542,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideStream) {
       LinearAllocGuard<unsigned int>(LinearAllocs::malloc, sizeof(unsigned int));
   LinearAllocGuard<unsigned int> mismatch_count_d =
       LinearAllocGuard<unsigned int>(LinearAllocs::hipMalloc, sizeof(unsigned int));
-  HIP_CHECK(hipMemset(mismatch_count_d.ptr(), 0, sizeof(unsigned int)));
+  HIP_CHECK(hipMemset(mismatch_count_d.ptr(), 0, sizeof(unsigned int)))
   int* dev_p;
 
   StreamGuard stream_guard(Streams::created);
@@ -553,19 +553,19 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideStream) {
   constexpr int fill_value = 12;
 
   createGraph(&graph_exec, host_alloc.ptr(), fill_value, &dev_p);
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream))
   validateGPU<<<block_count, thread_count, 0, stream>>>(dev_p, fill_value, element_count,
                                                         mismatch_count_d.ptr());
   // Since hipFree is synchronous, the stream must synchronize before freeing dev_p
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipFree(dev_p));
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipFree(dev_p))
 
   HIP_CHECK(hipMemcpy(mismatch_count_h.host_ptr(), mismatch_count_d.ptr(), sizeof(unsigned int),
                       hipMemcpyDeviceToHost));
   REQUIRE(mismatch_count_h.host_ptr()[0] == 0);
   ArrayFindIfNot(host_alloc.host_ptr(), fill_value, element_count);
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
 }
 
 /**
@@ -588,7 +588,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideGraph) {
       LinearAllocGuard<unsigned int>(LinearAllocs::malloc, sizeof(unsigned int));
   LinearAllocGuard<unsigned int> mismatch_count_d =
       LinearAllocGuard<unsigned int>(LinearAllocs::hipMalloc, sizeof(unsigned int));
-  HIP_CHECK(hipMemset(mismatch_count_d.ptr(), 0, sizeof(unsigned int)));
+  HIP_CHECK(hipMemset(mismatch_count_d.ptr(), 0, sizeof(unsigned int)))
   int* dev_p;
 
   StreamGuard stream_guard(Streams::created);
@@ -599,18 +599,18 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideGraph) {
   constexpr int fill_value = 13;
 
   createGraph(&graph_exec, host_alloc.ptr(), fill_value, &dev_p);
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream))
   validateGPU<<<block_count, thread_count, 0, stream>>>(dev_p, fill_value, element_count,
                                                         mismatch_count_d.ptr());
-  HIP_CHECK(hipFreeAsync(dev_p, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipFreeAsync(dev_p, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   HIP_CHECK(hipMemcpy(mismatch_count_h.host_ptr(), mismatch_count_d.ptr(), sizeof(unsigned int),
                       hipMemcpyDeviceToHost));
   REQUIRE(mismatch_count_h.host_ptr()[0] == 0);
   ArrayFindIfNot(host_alloc.host_ptr(), fill_value, element_count);
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
 }
 
 /**
@@ -634,7 +634,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeSeparateGraph) {
       LinearAllocGuard<unsigned int>(LinearAllocs::malloc, sizeof(unsigned int));
   LinearAllocGuard<unsigned int> mismatch_count_d =
       LinearAllocGuard<unsigned int>(LinearAllocs::hipMalloc, sizeof(unsigned int));
-  HIP_CHECK(hipMemset(mismatch_count_d.ptr(), 0, sizeof(unsigned int)));
+  HIP_CHECK(hipMemset(mismatch_count_d.ptr(), 0, sizeof(unsigned int)))
   int* dev_p;
 
   StreamGuard stream_guard(Streams::created);
@@ -646,19 +646,19 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeSeparateGraph) {
 
   createGraph(&graph_exec1, host_alloc.ptr(), fill_value, &dev_p);
   createFreeGraph(&graph_exec2, dev_p);
-  HIP_CHECK(hipGraphLaunch(graph_exec1, stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec1, stream))
   validateGPU<<<block_count, thread_count, 0, stream>>>(dev_p, fill_value, element_count,
                                                         mismatch_count_d.ptr());
-  HIP_CHECK(hipGraphLaunch(graph_exec2, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec2, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   HIP_CHECK(hipMemcpy(mismatch_count_h.host_ptr(), mismatch_count_d.ptr(), sizeof(unsigned int),
                       hipMemcpyDeviceToHost));
   REQUIRE(mismatch_count_h.host_ptr()[0] == 0);
   ArrayFindIfNot(host_alloc.host_ptr(), fill_value, element_count);
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec1));
-  HIP_CHECK(hipGraphExecDestroy(graph_exec2));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec1))
+  HIP_CHECK(hipGraphExecDestroy(graph_exec2))
 }
 
 /**
@@ -678,7 +678,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeSeparateGraph) {
 
 HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_1) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
@@ -704,8 +704,8 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_1) {
   int *A_h, *B_h, *C_h;
   HipTest::initArrays<int>(nullptr, nullptr, nullptr, &A_h, &B_h, &C_h, N, false);
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&stream))
 
   memset(&allocParam, 0, sizeof(allocParam));
   allocParam.bytesize = Nbytes;
@@ -713,13 +713,13 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_1) {
   allocParam.poolProps.location.id = 0;
   allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam))
   REQUIRE(allocParam.dptr != nullptr);
   A_d = reinterpret_cast<int*>(allocParam.dptr);
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeB, graph, &allocNodeA, 1, &allocParam));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeB, graph, &allocNodeA, 1, &allocParam))
   REQUIRE(allocParam.dptr != nullptr);
   B_d = reinterpret_cast<int*>(allocParam.dptr);
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeC, graph, &allocNodeB, 1, &allocParam));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeC, graph, &allocNodeB, 1, &allocParam))
   REQUIRE(allocParam.dptr != nullptr);
   C_d = reinterpret_cast<int*>(allocParam.dptr);
 
@@ -740,11 +740,11 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_1) {
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kernelNodeParams))
 
   // Create dependencies
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &kernel_vecAdd, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_B, &kernel_vecAdd, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &kernel_vecAdd, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_B, &kernel_vecAdd, 1))
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, &kernel_vecAdd, 1, C_h, C_d, Nbytes,
                                     hipMemcpyDeviceToHost));
@@ -756,18 +756,18 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_1) {
   HIP_CHECK(
       hipGraphAddMemFreeNode(&freeNodeC, graph, &memcpyD2H_C, 1, reinterpret_cast<void*>(C_d)));
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Verify graph execution result
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
 
   HipTest::freeArrays<int>(nullptr, nullptr, nullptr, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipDeviceGraphMemTrim(0));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipDeviceGraphMemTrim(0))
 }
 
 /**
@@ -785,7 +785,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_1) {
 */
 HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_2) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
@@ -798,10 +798,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_2) {
   hipMemAllocNodeParams allocParam;
 
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   for (int i = 0; i < numDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
 
     size_t before = 0, after = 0;
     HIP_CHECK(hipDeviceGraphMemTrim(i));
@@ -816,12 +816,12 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_2) {
     allocParam.poolProps.location.id = i;
     allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-    HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, NULL, 0, &allocParam));
+    HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, NULL, 0, &allocParam))
     REQUIRE(allocParam.dptr != nullptr);
     HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graph, &allocNodeA, 1,
                                      reinterpret_cast<void*>(allocParam.dptr)));
 
-    HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
     HIP_CHECK(hipGraphLaunch(graphExec, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
@@ -848,7 +848,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_2) {
  */
 HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_3) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
@@ -861,10 +861,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_3) {
   hipMemAllocNodeParams allocParam;
 
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   for (int i = 0; i < numDevices; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
 
     size_t before = 0, after = 0;
     HIP_CHECK(hipDeviceGraphMemTrim(i));
@@ -880,26 +880,26 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_3) {
     allocParam.poolProps.location.id = i;
     allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-    HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph1, nullptr, 0, &allocParam));
+    HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph1, nullptr, 0, &allocParam))
     REQUIRE(allocParam.dptr != nullptr);
     HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graph2, nullptr, 0,
                                      reinterpret_cast<void*>(allocParam.dptr)));
 
-    HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0));
-    HIP_CHECK(hipGraphInstantiate(&graphExec2, graph2, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0))
+    HIP_CHECK(hipGraphInstantiate(&graphExec2, graph2, nullptr, nullptr, 0))
 
     HIP_CHECK(hipGraphLaunch(graphExec1, stream));
     HIP_CHECK(hipGraphLaunch(graphExec2, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
-    HIP_CHECK(hipDeviceGraphMemTrim(i));
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(i, hipGraphMemAttrUsedMemCurrent, &after));
+    HIP_CHECK(hipDeviceGraphMemTrim(i))
+    HIP_CHECK(hipDeviceGetGraphMemAttribute(i, hipGraphMemAttrUsedMemCurrent, &after))
 
-    HIP_CHECK(hipGraphDestroy(graph1));
-    HIP_CHECK(hipGraphDestroy(graph2));
-    HIP_CHECK(hipGraphExecDestroy(graphExec1));
-    HIP_CHECK(hipGraphExecDestroy(graphExec2));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipGraphDestroy(graph1))
+    HIP_CHECK(hipGraphDestroy(graph2))
+    HIP_CHECK(hipGraphExecDestroy(graphExec1))
+    HIP_CHECK(hipGraphExecDestroy(graphExec2))
+    HIP_CHECK(hipStreamDestroy(stream))
 
     REQUIRE(before == after);
   }
@@ -919,7 +919,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_3) {
  */
 HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_4) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
@@ -933,10 +933,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_4) {
 
   void* temp;
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   for (int i = 0; i < numDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
 
     size_t before = 0, after = 0;
     HIP_CHECK(hipDeviceGraphMemTrim(i));
@@ -951,23 +951,23 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_4) {
     allocParam.poolProps.location.id = i;
     allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-    HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam));
+    HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam))
     temp = allocParam.dptr;
     REQUIRE(temp != nullptr);
 
-    HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
     HIP_CHECK(hipGraphLaunch(graphExec, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipGraphExecDestroy(graphExec));
-    HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK(hipDeviceGraphMemTrim(i));
+    HIP_CHECK(hipGraphDestroy(graph))
+    HIP_CHECK(hipGraphExecDestroy(graphExec))
+    HIP_CHECK(hipStreamDestroy(stream))
+    HIP_CHECK(hipDeviceGraphMemTrim(i))
 
-    HIP_CHECK(hipFree(temp));
-    HIP_CHECK(hipDeviceGraphMemTrim(i));
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(i, hipGraphMemAttrUsedMemCurrent, &after));
+    HIP_CHECK(hipFree(temp))
+    HIP_CHECK(hipDeviceGraphMemTrim(i))
+    HIP_CHECK(hipDeviceGetGraphMemAttribute(i, hipGraphMemAttrUsedMemCurrent, &after))
 
     REQUIRE(before == after);
   }
@@ -1005,7 +1005,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_4) {
 */
 HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Argument_Check) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
@@ -1016,8 +1016,8 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Argument_Check) {
   hipMemAllocNodeParams allocParam;
   hipError_t ret;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, nullptr, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, nullptr, 0))
 
   memset(&allocParam, 0, sizeof(allocParam));
   allocParam.bytesize = Nbytes;
@@ -1025,7 +1025,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Argument_Check) {
   allocParam.poolProps.location.id = 0;
   allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam))
   REQUIRE(allocParam.dptr != nullptr);
 
   SECTION("Pass allocNode as nullptr.") {
@@ -1203,8 +1203,8 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Argument_Check) {
     REQUIRE(allocParam.dptr == nullptr);
   }
 #endif
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipDeviceGraphMemTrim(0));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipDeviceGraphMemTrim(0))
 }
 
 /**
@@ -1222,7 +1222,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Argument_Check) {
  */
 HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Instanciate_Graph_Again) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
@@ -1235,9 +1235,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Instanciate_Graph_Again) {
   hipMemAllocNodeParams allocParam;
   hipError_t ret;
 
-  HIP_CHECK(hipDeviceGraphMemTrim(0));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipDeviceGraphMemTrim(0))
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&stream))
 
   memset(&allocParam, 0, sizeof(allocParam));
   allocParam.bytesize = Nbytes;
@@ -1245,25 +1245,25 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Instanciate_Graph_Again) {
   allocParam.poolProps.location.id = 0;
   allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam))
   REQUIRE(allocParam.dptr != nullptr);
   void* temp = allocParam.dptr;
 
-  HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graph, &allocNodeA, 1, temp));
+  HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graph, &allocNodeA, 1, temp))
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   // Instanciate 2nd time with same graph, it should give error
   ret = hipGraphInstantiate(&graphExec1, graph, nullptr, nullptr, 0);
   REQUIRE(ret == hipErrorNotSupported);
 
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipDeviceGraphMemTrim(0));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipDeviceGraphMemTrim(0))
 }
 
 /**
@@ -1281,7 +1281,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Instanciate_Graph_Again) {
 */
 HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
@@ -1294,9 +1294,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again) {
   hipMemAllocNodeParams allocParam;
   hipError_t ret;
 
-  HIP_CHECK(hipDeviceGraphMemTrim(0));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipDeviceGraphMemTrim(0))
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&stream))
 
   memset(&allocParam, 0, sizeof(allocParam));
   allocParam.bytesize = Nbytes;
@@ -1304,25 +1304,25 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again) {
   allocParam.poolProps.location.id = 0;
   allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam))
   REQUIRE(allocParam.dptr != nullptr);
   void* temp = allocParam.dptr;
 
-  HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graph, &allocNodeA, 1, temp));
+  HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graph, &allocNodeA, 1, temp))
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Free alloc pointer manually again, it should give error
   ret = hipFree(temp);
   REQUIRE(ret == hipErrorInvalidValue);
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipDeviceGraphMemTrim(0));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipDeviceGraphMemTrim(0))
 }
 
 /**
@@ -1343,7 +1343,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again) {
 */
 HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
@@ -1357,9 +1357,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph) {
   hipMemAllocNodeParams allocParam;
   hipError_t ret;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipGraphCreate(&graph_2, 0));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipGraphCreate(&graph_2, 0))
+  HIP_CHECK(hipStreamCreate(&stream))
 
   memset(&allocParam, 0, sizeof(allocParam));
   allocParam.bytesize = Nbytes;
@@ -1367,11 +1367,11 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph) {
   allocParam.poolProps.location.id = 0;
   allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam))
   REQUIRE(allocParam.dptr != nullptr);
   void* temp = allocParam.dptr;
 
-  HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graph_2, nullptr, 0, temp));
+  HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graph_2, nullptr, 0, temp))
 
   SECTION("Once free node added in any graph then we can't added it again") {
     hipError_t ret1 = hipGraphAddMemFreeNode(&freeNodeB, graph, nullptr, 0, temp);
@@ -1396,17 +1396,17 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph) {
   }
 #endif
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipGraphInstantiate(&graphExec_2, graph_2, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec_2, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipGraphInstantiate(&graphExec_2, graph_2, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec_2, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphDestroy(graph_2));
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphExecDestroy(graphExec_2));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipGraphDestroy(graph_2))
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphExecDestroy(graphExec_2))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 /**
  * End doxygen group GraphTest.

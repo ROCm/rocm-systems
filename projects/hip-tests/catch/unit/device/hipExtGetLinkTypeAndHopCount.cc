@@ -38,7 +38,7 @@ HIP_TEST_CASE(Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic) {
   }
 
   int can_access_peer = 0;
-  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, device1, device2));
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, device1, device2))
   if (!can_access_peer) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
@@ -46,8 +46,8 @@ HIP_TEST_CASE(Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic) {
   uint32_t link_type1 = -1, hop_count1 = -1;
   uint32_t link_type2 = -1, hop_count2 = -1;
 
-  HIP_CHECK(hipExtGetLinkTypeAndHopCount(device1, device2, &link_type1, &hop_count1));
-  HIP_CHECK(hipExtGetLinkTypeAndHopCount(device2, device1, &link_type2, &hop_count2));
+  HIP_CHECK(hipExtGetLinkTypeAndHopCount(device1, device2, &link_type1, &hop_count1))
+  HIP_CHECK(hipExtGetLinkTypeAndHopCount(device2, device1, &link_type2, &hop_count2))
 
   REQUIRE(hop_count1 > 0);
 

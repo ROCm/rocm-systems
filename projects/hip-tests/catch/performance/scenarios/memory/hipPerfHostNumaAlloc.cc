@@ -36,7 +36,7 @@ bool test(int cpuId, int gpuId, int numaMode, unsigned int hostMallocflags) {
   CONSOLE_PRINT("set cpu %d, gpu %d, numaMode %d, hostMallocflags %u\n", cpuId, gpuId, numaMode,
                 hostMallocflags);
   if (gpuId >= 0) {
-    HIP_CHECK(hipSetDevice(gpuId));
+    HIP_CHECK(hipSetDevice(gpuId))
   }
 
   if (cpuId >= 0) {
@@ -51,8 +51,8 @@ bool test(int cpuId, int gpuId, int numaMode, unsigned int hostMallocflags) {
   }
 
   posix_memalign(reinterpret_cast<void**>(&m), page_size, page_size * NUM_PAGES);
-  HIP_CHECK(hipHostRegister(m, page_size * NUM_PAGES, hipHostRegisterMapped));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&d_m), m, 0));
+  HIP_CHECK(hipHostRegister(m, page_size * NUM_PAGES, hipHostRegisterMapped))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&d_m), m, 0))
 
   status[0] = -1;
   pages[0] = m;
@@ -67,7 +67,7 @@ bool test(int cpuId, int gpuId, int numaMode, unsigned int hostMallocflags) {
   }
   CONSOLE_PRINT("\n");
 
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), page_size * NUM_PAGES, hostMallocflags));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), page_size * NUM_PAGES, hostMallocflags))
   pages[0] = h;
   for (int i = 1; i < NUM_PAGES; i++) {
     pages[i] = reinterpret_cast<char*>(pages[0]) + page_size;
@@ -75,7 +75,7 @@ bool test(int cpuId, int gpuId, int numaMode, unsigned int hostMallocflags) {
   ret_code = move_pages(0, NUM_PAGES, pages, NULL, status, 0);
   d_h = nullptr;
   if (hostMallocflags & hipHostMallocMapped) {
-    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&d_h), h, 0));
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&d_h), h, 0))
     CONSOLE_PRINT("Memory (hipHostMalloc) ret %d at %p (dev %p) is at node: ", ret_code, h, d_h);
   } else {
     CONSOLE_PRINT("Memory (hipHostMalloc) ret %d at %p is at node: ", ret_code, h);
@@ -85,8 +85,8 @@ bool test(int cpuId, int gpuId, int numaMode, unsigned int hostMallocflags) {
   }
   CONSOLE_PRINT("\n");
 
-  HIP_CHECK(hipHostFree(reinterpret_cast<void*>(h)));
-  HIP_CHECK(hipHostUnregister(m));
+  HIP_CHECK(hipHostFree(reinterpret_cast<void*>(h)))
+  HIP_CHECK(hipHostUnregister(m))
   free(m);
 
   if (cpuId >= 0 && (numaMode == MPOL_BIND || numaMode == MPOL_PREFERRED)) {
@@ -132,7 +132,7 @@ bool runTest(const int& cpuCount, const int& gpuCount, unsigned int hostMallocfl
 
 HIP_TEST_CASE(Performance_hipPerfHostNumaAlloc_test) {
   int gpuCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&gpuCount));
+  HIP_CHECK(hipGetDeviceCount(&gpuCount))
   int cpuCount = numa_max_node() + 1; // number of numa nodes
   page_size = getpagesize();
   CONSOLE_PRINT("Cpu count %d, Gpu count %d, page_size %d\n", cpuCount, gpuCount, page_size);

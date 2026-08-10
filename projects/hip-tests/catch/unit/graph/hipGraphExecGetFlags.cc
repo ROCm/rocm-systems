@@ -35,21 +35,21 @@ HIP_TEST_CASE(Unit_hipGraphExecGetFlags_Negative) {
   hipMemAllocNodeParams allocParam;
 
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   memset(&allocParam, 0, sizeof(allocParam));
   allocParam.bytesize = Nbytes;
   allocParam.poolProps.allocType = hipMemAllocationTypePinned;
   allocParam.poolProps.location.id = 0;
   allocParam.poolProps.location.type = hipMemLocationTypeDevice;
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam))
   REQUIRE(allocParam.dptr != nullptr);
 
   HIP_CHECK(
       hipGraphInstantiateWithFlags(&graphExec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
   HIP_CHECK_ERROR(hipGraphExecGetFlags(nullptr, &flags), hipErrorInvalidValue);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -74,7 +74,7 @@ HIP_TEST_CASE(Unit_hipGraphExecGetFlags_Positive) {
   hipGraphNode_t allocNodeA;
   hipMemAllocNodeParams allocParam;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   memset(&allocParam, 0, sizeof(allocParam));
   allocParam.bytesize = Nbytes;
@@ -82,20 +82,20 @@ HIP_TEST_CASE(Unit_hipGraphExecGetFlags_Positive) {
   allocParam.poolProps.location.id = 0;
   allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam))
   REQUIRE(allocParam.dptr != nullptr);
 
   SECTION("flag is 0") {
-    HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph, 0));
+    HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph, 0))
 
-    HIP_CHECK(hipGraphExecGetFlags(graphExec, &flags));
+    HIP_CHECK(hipGraphExecGetFlags(graphExec, &flags))
     REQUIRE(flags == 0);
   }
   SECTION("flag is hipGraphInstantiateFlagAutoFreeOnLaunch") {
     HIP_CHECK(
         hipGraphInstantiateWithFlags(&graphExec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
 
-    HIP_CHECK(hipGraphExecGetFlags(graphExec, &flags));
+    HIP_CHECK(hipGraphExecGetFlags(graphExec, &flags))
     REQUIRE(flags == hipGraphInstantiateFlagAutoFreeOnLaunch);
   }
 
@@ -108,25 +108,25 @@ HIP_TEST_CASE(Unit_hipGraphExecGetFlags_Positive) {
     HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph,
                   hipGraphInstantiateFlagUpload));
 
-    HIP_CHECK(hipGraphExecGetFlags(graphExec, &flags));
+    HIP_CHECK(hipGraphExecGetFlags(graphExec, &flags))
     REQUIRE(flags == hipGraphInstantiateFlagUpload);
   }
 
   SECTION("flag is hipGraphInstantiateFlagDeviceLaunch") {
     HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph,
                   hipGraphInstantiateFlagDeviceLaunch));
-    HIP_CHECK(hipGraphLaunch(graphExec, 0));
+    HIP_CHECK(hipGraphLaunch(graphExec, 0))
     REQUIRE(flags == hipGraphInstantiateFlagDeviceLaunch);
   }
   SECTION("flag is hipGraphInstantiateFlagUseNodePriority") {
     HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph,
                   hipGraphInstantiateFlagUseNodePriority));
-    HIP_CHECK(hipGraphExecGetFlags(graphExec, &flags));
+    HIP_CHECK(hipGraphExecGetFlags(graphExec, &flags))
     REQUIRE(flags == hipGraphInstantiateFlagUseNodePriority);
   }
 #endif
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 /**
  * End doxygen group GraphTest.

@@ -45,7 +45,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeLinear) {
   HIP_TEXTURE_DESC tex_desc{};
   size_t array_size = N * sizeof(float);
 
-  HIP_CHECK(hipMalloc(&tex_buffer, array_size));
+  HIP_CHECK(hipMalloc(&tex_buffer, array_size))
 
   res_desc.resType = HIP_RESOURCE_TYPE_LINEAR;
 
@@ -60,16 +60,16 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeLinear) {
   res_desc.res.linear.sizeInBytes = array_size;
 
   SECTION("regular setup") {
-    HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr));
+    HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr))
   }
 
   SECTION("size_in_bytes set to 0") {
     res_desc.res.linear.sizeInBytes = 0;
-    HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr));
+    HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr))
   }
 
-  HIP_CHECK(hipTexObjectDestroy(tex_object));
-  HIP_CHECK(hipFree(tex_buffer));
+  HIP_CHECK(hipTexObjectDestroy(tex_object))
+  HIP_CHECK(hipFree(tex_buffer))
   CTX_DESTROY();
 }
 
@@ -85,7 +85,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeLinear_IncompleteInit) {
 
   res_desc.resType = HIP_RESOURCE_TYPE_LINEAR;
 
-  HIP_CHECK(hipMalloc(&tex_buffer, array_size));
+  HIP_CHECK(hipMalloc(&tex_buffer, array_size))
 
   auto formats =
       GENERATE(HIP_AD_FORMAT_UNSIGNED_INT8, HIP_AD_FORMAT_UNSIGNED_INT16,
@@ -142,7 +142,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeLinear_IncompleteInit) {
                     hipErrorInvalidChannelDescriptor);
   }
 
-  HIP_CHECK(hipFree(tex_buffer));
+  HIP_CHECK(hipFree(tex_buffer))
   CTX_DESTROY();
 }
 
@@ -156,7 +156,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeLinear_EdgeCases) {
   HIP_TEXTURE_DESC tex_desc{};
   size_t array_size = N * sizeof(float);
 
-  HIP_CHECK(hipMalloc(&tex_buffer, array_size));
+  HIP_CHECK(hipMalloc(&tex_buffer, array_size))
 
   res_desc.resType = HIP_RESOURCE_TYPE_LINEAR;
 
@@ -183,7 +183,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeLinear_EdgeCases) {
                     hipErrorInvalidChannelDescriptor);
   }
 
-  HIP_CHECK(hipFree(tex_buffer));
+  HIP_CHECK(hipFree(tex_buffer))
   CTX_DESTROY();
 }
 
@@ -204,13 +204,13 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeArray) {
 
   channel_desc = hipCreateChannelDesc(width, 0, 0, 0, channel_types);
 
-  HIP_CHECK(hipMallocArray(&array, &channel_desc, width));
+  HIP_CHECK(hipMallocArray(&array, &channel_desc, width))
 
   res_desc.res.array.hArray = array;
 
-  HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr));
-  HIP_CHECK(hipTexObjectDestroy(tex_object));
-  HIP_CHECK(hipFreeArray(array));
+  HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr))
+  HIP_CHECK(hipTexObjectDestroy(tex_object))
+  HIP_CHECK(hipFreeArray(array))
   CTX_DESTROY();
 }
 
@@ -248,15 +248,15 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeMipmapped) {
   channel_desc = hipCreateChannelDesc<float>();
   extent = make_hipExtent(s, s, s);
 
-  HIP_CHECK(hipMallocMipmappedArray(&mipmapped_array, &channel_desc, extent, 1, hipArrayDefault));
+  HIP_CHECK(hipMallocMipmappedArray(&mipmapped_array, &channel_desc, extent, 1, hipArrayDefault))
 
   res_desc.res.mipmap.hMipmappedArray = mipmapped_array;
   tex_desc.flags = HIP_TRSF_NORMALIZED_COORDINATES;
 
-  HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr));
+  HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr))
 
-  HIP_CHECK(hipTexObjectDestroy(tex_object));
-  HIP_CHECK(hipFreeMipmappedArray(mipmapped_array));
+  HIP_CHECK(hipTexObjectDestroy(tex_object))
+  HIP_CHECK(hipFreeMipmappedArray(mipmapped_array))
 }
 
 HIP_TEST_CASE(Unit_TexObjectCreate_TypeMipmaped_IncompleteInit) {
@@ -288,7 +288,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeMipmaped_IncompleteInit) {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipFreeMipmappedArray(mipmapped_array));
+  HIP_CHECK(hipFreeMipmappedArray(mipmapped_array))
   CTX_DESTROY();
 }
 #endif
@@ -304,7 +304,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D) {
   int width = 16;
   int height = 16;
 
-  HIP_CHECK(hipMalloc(&tex_buffer, width * height * sizeof(float)));
+  HIP_CHECK(hipMalloc(&tex_buffer, width * height * sizeof(float)))
 
   res_desc.resType = HIP_RESOURCE_TYPE_PITCH2D;
 
@@ -318,21 +318,21 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D) {
   res_desc.res.pitch2D.height = height;
 
   SECTION("regular setup") {
-    HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr));
+    HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr))
   }
 
   SECTION("width set to 0") {
     res_desc.res.pitch2D.width = 0;
-    HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr));
+    HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr))
   }
 
   SECTION("height set to 0") {
     res_desc.res.pitch2D.height = 0;
-    HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr));
+    HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr))
   }
 
-  HIP_CHECK(hipTexObjectDestroy(tex_object));
-  HIP_CHECK(hipFree(tex_buffer));
+  HIP_CHECK(hipTexObjectDestroy(tex_object))
+  HIP_CHECK(hipFree(tex_buffer))
   CTX_DESTROY();
 }
 
@@ -347,7 +347,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D_IncompleteInit) {
   int width = 16;
   int height = 16;
 
-  HIP_CHECK(hipMalloc(&tex_buffer, width * height * sizeof(float)));
+  HIP_CHECK(hipMalloc(&tex_buffer, width * height * sizeof(float)))
 
   res_desc.resType = HIP_RESOURCE_TYPE_PITCH2D;
 
@@ -394,11 +394,11 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D_IncompleteInit) {
     res_desc.res.pitch2D.numChannels = num_channels;
     res_desc.res.pitch2D.width = width;
     res_desc.res.pitch2D.height = height;
-    HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr));
-    HIP_CHECK(hipTexObjectDestroy(tex_object));
+    HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr))
+    HIP_CHECK(hipTexObjectDestroy(tex_object))
   }
 
-  HIP_CHECK(hipFree(tex_buffer));
+  HIP_CHECK(hipFree(tex_buffer))
   CTX_DESTROY();
 }
 
@@ -413,7 +413,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D_EdgeCases) {
   int width = 16;
   int height = 16;
 
-  HIP_CHECK(hipMalloc(&tex_buffer, width * height * sizeof(float)));
+  HIP_CHECK(hipMalloc(&tex_buffer, width * height * sizeof(float)))
 
   res_desc.resType = HIP_RESOURCE_TYPE_PITCH2D;
 
@@ -451,6 +451,6 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D_EdgeCases) {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipFree(tex_buffer));
+  HIP_CHECK(hipFree(tex_buffer))
   CTX_DESTROY();
 }

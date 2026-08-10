@@ -148,8 +148,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device, unsi
   TestType* d_f_vals;
   __hip_fp6_storage_t* d_res;
 
-  HIP_CHECK(hipMalloc(&d_f_vals, sizeof(TestType) * f_vals.size()));
-  HIP_CHECK(hipMalloc(&d_res, sizeof(__hip_fp6_storage_t) * f_vals.size()));
+  HIP_CHECK(hipMalloc(&d_f_vals, sizeof(TestType) * f_vals.size()))
+  HIP_CHECK(hipMalloc(&d_res, sizeof(__hip_fp6_storage_t) * f_vals.size()))
 
   HIP_CHECK(
       hipMemcpy(d_f_vals, f_vals.data(), sizeof(TestType) * f_vals.size(), hipMemcpyHostToDevice));
@@ -191,8 +191,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device, unsi
     REQUIRE(cpu_cvt_res == gpu_cvt_res);
   }
 
-  HIP_CHECK(hipFree(d_f_vals));
-  HIP_CHECK(hipFree(d_res));
+  HIP_CHECK(hipFree(d_f_vals))
+  HIP_CHECK(hipFree(d_res))
 }
 
 /**
@@ -257,8 +257,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_interger_data_device, int, lo
   TestType* d_f_vals;
   __hip_fp6_storage_t* d_res;
 
-  HIP_CHECK(hipMalloc(&d_f_vals, sizeof(TestType) * f_vals.size()));
-  HIP_CHECK(hipMalloc(&d_res, sizeof(__hip_fp6_storage_t) * f_vals.size()));
+  HIP_CHECK(hipMalloc(&d_f_vals, sizeof(TestType) * f_vals.size()))
+  HIP_CHECK(hipMalloc(&d_res, sizeof(__hip_fp6_storage_t) * f_vals.size()))
 
   HIP_CHECK(
       hipMemcpy(d_f_vals, f_vals.data(), sizeof(TestType) * f_vals.size(), hipMemcpyHostToDevice));
@@ -301,6 +301,6 @@ HIP_TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_interger_data_device, int, lo
     REQUIRE(cpu_cvt_res == gpu_cvt_res);
   }
 
-  HIP_CHECK(hipFree(d_f_vals));
-  HIP_CHECK(hipFree(d_res));
+  HIP_CHECK(hipFree(d_f_vals))
+  HIP_CHECK(hipFree(d_res))
 }

@@ -40,30 +40,30 @@ HIP_TEST_CASE(Unit_hipTextureRef2D_Check) {
 
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
   hipArray_t hipArray;
-  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height));
-  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height))
+  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size, hipMemcpyHostToDevice))
 
   tex.addressMode[0] = hipAddressModeWrap;
   tex.addressMode[1] = hipAddressModeWrap;
   tex.filterMode = hipFilterModePoint;
   tex.normalized = 0;
 
-  HIP_CHECK(hipBindTextureToArray(tex, hipArray, channelDesc));
+  HIP_CHECK(hipBindTextureToArray(tex, hipArray, channelDesc))
 
   float* dData = nullptr;
-  HIP_CHECK(hipMalloc(&dData, size));
+  HIP_CHECK(hipMalloc(&dData, size))
   REQUIRE(dData != nullptr);
 
   dim3 dimBlock(16, 16, 1);
   dim3 dimGrid(width / dimBlock.x, height / dimBlock.y, 1);
   hipLaunchKernelGGL(tex2DKernel, dim3(dimGrid), dim3(dimBlock), 0, 0, dData, width);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   float* hOutputData = reinterpret_cast<float*>(malloc(size));
   REQUIRE(hOutputData != nullptr);
   memset(hOutputData, 0, size);
-  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost))
 
   for (i = 0; i < height; i++) {
     for (j = 0; j < width; j++) {
@@ -74,9 +74,9 @@ HIP_TEST_CASE(Unit_hipTextureRef2D_Check) {
       }
     }
   }
-  HIP_CHECK(hipUnbindTexture(tex));
-  HIP_CHECK(hipFree(dData));
-  HIP_CHECK(hipFreeArray(hipArray));
+  HIP_CHECK(hipUnbindTexture(tex))
+  HIP_CHECK(hipFree(dData))
+  HIP_CHECK(hipFreeArray(hipArray))
 }
 
 

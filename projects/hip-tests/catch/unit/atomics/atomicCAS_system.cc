@@ -48,7 +48,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_atomicCAS_system_Positive_Peer_GPUs,
                    int, unsigned int, unsigned long long,
                    unsigned short int TYPES) {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   SECTION("Same address") {
@@ -92,7 +92,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_atomicCAS_system_Positive_Host_And_GPU,
                    int, unsigned int, unsigned long long,
                    unsigned short int TYPES) {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   SECTION("Same address") {
@@ -141,7 +141,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_atomicCAS_system_Positive_Host_And_Peer_GPUs,
                    int, unsigned int, unsigned long long,
                    unsigned short int TYPES) {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   SECTION("Same address") {

@@ -35,14 +35,14 @@ HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Shared) {
   LinearAllocGuard<int> out_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
 
   for (int i = 0; i < cmd_options.iterations; ++i) {
-    HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[0])), kInitVal1, 1));
-    HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[1])), kInitVal2, 1));
+    HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[0])), kInitVal1, 1))
+    HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[1])), kInitVal2, 1))
 
     HipTest::launchKernel(ThreadfenceTestKernel<ThreadfenceScope::kBlock, true>, 1, 2,
                           4 * sizeof(int), nullptr, out_dev.ptr(), in_dev.ptr());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
-    HIP_CHECK(hipMemcpy(out_host.host_ptr(), out_dev.ptr(), 2 * sizeof(int), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(out_host.host_ptr(), out_dev.ptr(), 2 * sizeof(int), hipMemcpyDefault))
 
     REQUIRE(!(out_host.ptr()[0] == kInitVal1 && out_host.ptr()[1] == kSetVal2));
   }
@@ -67,14 +67,14 @@ HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Global) {
   LinearAllocGuard<int> out_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
 
   for (int i = 0; i < cmd_options.iterations; ++i) {
-    HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[0])), kInitVal1, 1));
-    HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[1])), kInitVal2, 1));
+    HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[0])), kInitVal1, 1))
+    HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[1])), kInitVal2, 1))
 
     HipTest::launchKernel(ThreadfenceTestKernel<ThreadfenceScope::kBlock, false>, 2, 1, 0, nullptr,
                           out_dev.ptr(), in_dev.ptr());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
-    HIP_CHECK(hipMemcpy(out_host.host_ptr(), out_dev.ptr(), 2 * sizeof(int), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(out_host.host_ptr(), out_dev.ptr(), 2 * sizeof(int), hipMemcpyDefault))
 
     REQUIRE(!(out_host.ptr()[0] == kInitVal1 && out_host.ptr()[1] == kSetVal2));
   }
@@ -102,7 +102,7 @@ HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Pinned) {
 
     HipTest::launchKernel(ThreadfenceTestKernel<ThreadfenceScope::kBlock, false>, 2, 1, 0, nullptr,
                           out_host.host_ptr(), in_host.host_ptr());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     REQUIRE(!(out_host.host_ptr()[0] == kInitVal1 && out_host.ptr()[1] == kSetVal2));
   }
@@ -130,7 +130,7 @@ HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Managed) {
 
     HipTest::launchKernel(ThreadfenceTestKernel<ThreadfenceScope::kBlock, false>, 2, 1, 0, nullptr,
                           out_host.ptr(), in_host.ptr());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     REQUIRE(!(out_host.host_ptr()[0] == kInitVal1 && out_host.ptr()[1] == kSetVal2));
   }
@@ -155,12 +155,12 @@ HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Peer) {
   }
 
   int can_access_peer = 0;
-  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1))
   if (!can_access_peer) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   LinearAllocGuard<int> in_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
@@ -168,18 +168,18 @@ HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Peer) {
   LinearAllocGuard<int> out_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
 
   for (int i = 0; i < cmd_options.iterations; ++i) {
-    HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[0])), kInitVal1, 1));
-    HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[1])), kInitVal2, 1));
+    HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[0])), kInitVal1, 1))
+    HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[1])), kInitVal2, 1))
 
-    HIP_CHECK(hipSetDevice(1));
-    HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
+    HIP_CHECK(hipSetDevice(1))
+    HIP_CHECK(hipDeviceEnablePeerAccess(0, 0))
     HipTest::launchKernel(ThreadfenceTestKernel<ThreadfenceScope::kBlock, false>, 2, 1, 0, nullptr,
                           out_dev.ptr(), in_dev.ptr());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
 
-    HIP_CHECK(hipMemcpy(out_host.host_ptr(), out_dev.ptr(), 2 * sizeof(int), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(out_host.host_ptr(), out_dev.ptr(), 2 * sizeof(int), hipMemcpyDefault))
 
     REQUIRE(!(out_host.ptr()[0] == kInitVal1 && out_host.ptr()[1] == kSetVal2));
   }

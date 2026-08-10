@@ -24,7 +24,7 @@ static void createGraph(hipGraphExec_t* graph_exec, int** device_alloc = nullptr
   constexpr size_t num_bytes = element_count * sizeof(int);
 
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t alloc_node;
   hipMemAllocNodeParams alloc_param;
@@ -34,40 +34,40 @@ static void createGraph(hipGraphExec_t* graph_exec, int** device_alloc = nullptr
   alloc_param.poolProps.location.id = 0;
   alloc_param.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&alloc_node, graph, nullptr, 0, &alloc_param));
+  HIP_CHECK(hipGraphAddMemAllocNode(&alloc_node, graph, nullptr, 0, &alloc_param))
   REQUIRE(alloc_param.dptr != nullptr);
   int* A_d = reinterpret_cast<int*>(alloc_param.dptr);
 
   if (device_alloc == nullptr) {
     hipGraphNode_t free_node;
-    HIP_CHECK(hipGraphAddMemFreeNode(&free_node, graph, &alloc_node, 1, (void*)A_d));
+    HIP_CHECK(hipGraphAddMemFreeNode(&free_node, graph, &alloc_node, 1, (void*)A_d))
   } else {
     *device_alloc = A_d;
   }
 
   // Instantiate graph
-  HIP_CHECK(hipGraphInstantiate(graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(graph_exec, graph, nullptr, nullptr, 0))
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /* check if memory attributes for graphs contain expected values */
 static void checkGraphMemAttribute(size_t used_mem, size_t high_mem) {
   size_t read_mem;
   hipGraphMemAttributeType attr = hipGraphMemAttrUsedMemCurrent;
-  HIP_CHECK(hipDeviceGetGraphMemAttribute(0, attr, reinterpret_cast<void*>(&read_mem)));
+  HIP_CHECK(hipDeviceGetGraphMemAttribute(0, attr, reinterpret_cast<void*>(&read_mem)))
   REQUIRE(read_mem == used_mem);
 
   attr = hipGraphMemAttrReservedMemCurrent;
-  HIP_CHECK(hipDeviceGetGraphMemAttribute(0, attr, reinterpret_cast<void*>(&read_mem)));
+  HIP_CHECK(hipDeviceGetGraphMemAttribute(0, attr, reinterpret_cast<void*>(&read_mem)))
   REQUIRE(read_mem == used_mem);
 
   attr = hipGraphMemAttrUsedMemHigh;
-  HIP_CHECK(hipDeviceGetGraphMemAttribute(0, attr, reinterpret_cast<void*>(&read_mem)));
+  HIP_CHECK(hipDeviceGetGraphMemAttribute(0, attr, reinterpret_cast<void*>(&read_mem)))
   REQUIRE(read_mem == high_mem);
 
   attr = hipGraphMemAttrReservedMemHigh;
-  HIP_CHECK(hipDeviceGetGraphMemAttribute(0, attr, reinterpret_cast<void*>(&read_mem)));
+  HIP_CHECK(hipDeviceGetGraphMemAttribute(0, attr, reinterpret_cast<void*>(&read_mem)))
   REQUIRE(read_mem == high_mem);
 }
 
@@ -75,9 +75,9 @@ static void checkGraphMemAttribute(size_t used_mem, size_t high_mem) {
 static void ResetGraphMemAttribute(unsigned deviceId = 0) {
   size_t mem_size = 0;
   hipGraphMemAttributeType attr = hipGraphMemAttrUsedMemHigh;
-  HIP_CHECK(hipDeviceSetGraphMemAttribute(deviceId, attr, &mem_size));
+  HIP_CHECK(hipDeviceSetGraphMemAttribute(deviceId, attr, &mem_size))
   attr = hipGraphMemAttrReservedMemHigh;
-  HIP_CHECK(hipDeviceSetGraphMemAttribute(deviceId, attr, &mem_size));
+  HIP_CHECK(hipDeviceSetGraphMemAttribute(deviceId, attr, &mem_size))
 }
 
 /**
@@ -100,25 +100,25 @@ HIP_TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Positive_DoubleMemory) {
   hipStream_t stream = stream_guard.stream();
 
   createGraph(&graph_exec1, &dev_p1);
-  HIP_CHECK(hipGraphLaunch(graph_exec1, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec1, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   checkGraphMemAttribute(element_count * sizeof(int), element_count * sizeof(int));
 
   createGraph(&graph_exec2, &dev_p2);
-  HIP_CHECK(hipGraphLaunch(graph_exec2, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec2, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   checkGraphMemAttribute(2 * element_count * sizeof(int), 2 * element_count * sizeof(int));
 
-  HIP_CHECK(hipFree(dev_p1));
-  HIP_CHECK(hipFree(dev_p2));
+  HIP_CHECK(hipFree(dev_p1))
+  HIP_CHECK(hipFree(dev_p2))
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec1));
-  HIP_CHECK(hipGraphExecDestroy(graph_exec2));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec1))
+  HIP_CHECK(hipGraphExecDestroy(graph_exec2))
 
-  HIP_CHECK(hipDeviceGraphMemTrim(0));
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipDeviceGraphMemTrim(0))
+  HIP_CHECK(hipStreamSynchronize(0))
 
   checkGraphMemAttribute(0, 2 * element_count * sizeof(int));
   ResetGraphMemAttribute();
@@ -140,10 +140,10 @@ HIP_TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Positive_DoubleMemory) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Negative_Parameters) {
   int device_id = 0;
-  HIP_CHECK(hipSetDevice(device_id));
+  HIP_CHECK(hipSetDevice(device_id))
 
   int num_dev = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_dev));
+  HIP_CHECK(hipGetDeviceCount(&num_dev))
 
   hipGraphMemAttributeType attr = hipGraphMemAttrUsedMemHigh;
   size_t get_value = 0;
@@ -204,7 +204,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Negative_Parameters) {
 
 static void hipDeviceGetGraphMemAttribute_Functional_Test(unsigned deviceId = 0) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
@@ -216,12 +216,12 @@ static void hipDeviceGetGraphMemAttribute_Functional_Test(unsigned deviceId = 0)
   hipGraphNode_t allocNodeA, freeNodeA;
   hipMemAllocNodeParams allocParams;
 
-  HIP_CHECK(hipSetDevice(deviceId));
+  HIP_CHECK(hipSetDevice(deviceId))
 
-  HIP_CHECK(hipDeviceGraphMemTrim(deviceId));
+  HIP_CHECK(hipDeviceGraphMemTrim(deviceId))
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipStreamCreate(&stream))
 
   memset(&allocParams, 0, sizeof(allocParams));
   allocParams.bytesize = Nbytes;
@@ -229,58 +229,58 @@ static void hipDeviceGetGraphMemAttribute_Functional_Test(unsigned deviceId = 0)
   allocParams.poolProps.location.id = deviceId;
   allocParams.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParams));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParams))
   REQUIRE(allocParams.dptr != nullptr);
   HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graph, &allocNodeA, 1,
                                    reinterpret_cast<void*>(allocParams.dptr)));
 
   size_t value = -1;
   SECTION("Memory footprint check before launching graph") {
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrUsedMemCurrent, &value));
+    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrUsedMemCurrent, &value))
     REQUIRE(value == 0);
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrUsedMemHigh, &value));
+    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrUsedMemHigh, &value))
     REQUIRE(value == 0);
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrReservedMemCurrent, &value));
+    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrReservedMemCurrent, &value))
     REQUIRE(value == 0);
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrReservedMemHigh, &value));
+    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrReservedMemHigh, &value))
     REQUIRE(value == 0);
   }
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipStreamDestroy(stream))
 
-  HIP_CHECK(hipDeviceGraphMemTrim(deviceId));
+  HIP_CHECK(hipDeviceGraphMemTrim(deviceId))
 
   value = -1;
   SECTION("Memory footprint check after destroying graph & Trim api call") {
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrUsedMemCurrent, &value));
+    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrUsedMemCurrent, &value))
     REQUIRE(value == 0);
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrUsedMemHigh, &value));
+    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrUsedMemHigh, &value))
     REQUIRE(value == Nbytes);
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrReservedMemCurrent, &value));
+    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrReservedMemCurrent, &value))
     REQUIRE(value == 0);
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrReservedMemHigh, &value));
+    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrReservedMemHigh, &value))
     REQUIRE(value == Nbytes);
   }
 
   value = 0;
-  HIP_CHECK(hipDeviceSetGraphMemAttribute(deviceId, hipGraphMemAttrUsedMemHigh, &value));
-  HIP_CHECK(hipDeviceSetGraphMemAttribute(deviceId, hipGraphMemAttrReservedMemHigh, &value));
+  HIP_CHECK(hipDeviceSetGraphMemAttribute(deviceId, hipGraphMemAttrUsedMemHigh, &value))
+  HIP_CHECK(hipDeviceSetGraphMemAttribute(deviceId, hipGraphMemAttrReservedMemHigh, &value))
 
   value = -1;
   SECTION(
       "Memory footprint check after destroying graph and"
       " after Trim api call and reset to 0") {
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrUsedMemCurrent, &value));
+    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrUsedMemCurrent, &value))
     REQUIRE(value == 0);
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrUsedMemHigh, &value));
+    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrUsedMemHigh, &value))
     REQUIRE(value == 0);
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrReservedMemCurrent, &value));
+    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrReservedMemCurrent, &value))
     REQUIRE(value == 0);
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrReservedMemHigh, &value));
+    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId, hipGraphMemAttrReservedMemHigh, &value))
     REQUIRE(value == 0);
   }
   ResetGraphMemAttribute(deviceId);
@@ -292,7 +292,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Functional) {
 
 HIP_TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   if (numDevices > 0) {
     for (int i = 0; i < numDevices; ++i) {

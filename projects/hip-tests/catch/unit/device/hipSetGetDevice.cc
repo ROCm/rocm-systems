@@ -32,17 +32,17 @@
 HIP_TEST_CASE(Unit_hipSetDevice_BasicSetGet) {
   int numDevices = 0;
   int device{};
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   REQUIRE(numDevices != 0);
 
   for (int i = 0; i < numDevices; i++) {
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipGetDevice(&device));
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipGetDevice(&device))
     REQUIRE(device == i);
 
     // Check for hipDevice_t as well
     hipDevice_t device;
-    HIP_CHECK(hipDeviceGet(&device, i));
+    HIP_CHECK(hipDeviceGet(&device, i))
   }
 }
 
@@ -64,24 +64,24 @@ HIP_TEST_CASE(Unit_hipGetSetDevice_MultiThreaded) {
 
   auto thread = [&]() {
     for (int i = 0; i < deviceCount; i++) {
-      HIP_CHECK_THREAD(hipSetDevice(i));
+      HIP_CHECK_THREAD(hipSetDevice(i))
       int get = -1;
-      HIP_CHECK_THREAD(hipGetDevice(&get));
+      HIP_CHECK_THREAD(hipGetDevice(&get))
       REQUIRE_THREAD(get == i);
 
       // check hipDeviceGet
       hipDevice_t device;
-      HIP_CHECK_THREAD(hipDeviceGet(&device, i));
+      HIP_CHECK_THREAD(hipDeviceGet(&device, i))
 
       // Alloc some memory and set it
       unsigned int* ptr{nullptr};
-      HIP_CHECK_THREAD(hipMalloc(&ptr, sizeof(unsigned int)));
+      HIP_CHECK_THREAD(hipMalloc(&ptr, sizeof(unsigned int)))
       REQUIRE_THREAD(ptr != nullptr);
-      HIP_CHECK_THREAD(hipMemset(ptr, 0x0A, sizeof(unsigned int)));
+      HIP_CHECK_THREAD(hipMemset(ptr, 0x0A, sizeof(unsigned int)))
       int res{0};
-      HIP_CHECK_THREAD(hipMemcpy(&res, ptr, sizeof(unsigned int), hipMemcpyDeviceToHost));
+      HIP_CHECK_THREAD(hipMemcpy(&res, ptr, sizeof(unsigned int), hipMemcpyDeviceToHost))
       REQUIRE_THREAD(res == 0x0A0A0A0A);
-      HIP_CHECK_THREAD(hipFree(ptr));
+      HIP_CHECK_THREAD(hipFree(ptr))
     }
   };
 
@@ -116,12 +116,12 @@ HIP_TEST_CASE(Unit_hipSetGetDevice_Positive_Threaded_Basic) {
    public:
     void TestPart1() { HIP_CHECK(hipSetDevice(0)); }
     void TestPart2() {
-      HIP_CHECK_THREAD(hipSetDevice(1));
-      HIP_CHECK_THREAD(hipMalloc(&ptr, 2 * 1024 * 1024));
+      HIP_CHECK_THREAD(hipSetDevice(1))
+      HIP_CHECK_THREAD(hipMalloc(&ptr, 2 * 1024 * 1024))
     }
     void TestPart3() {
       int device = -1;
-      HIP_CHECK_THREAD(hipGetDevice(&device));
+      HIP_CHECK_THREAD(hipGetDevice(&device))
       REQUIRE_THREAD(device == 0);
       device = -1;
       // To check if set device worked properly, outside of hipGetDevice
@@ -131,9 +131,9 @@ HIP_TEST_CASE(Unit_hipSetGetDevice_Positive_Threaded_Basic) {
     }
     void TestPart4() {
       int device = -1;
-      HIP_CHECK_THREAD(hipGetDevice(&device));
+      HIP_CHECK_THREAD(hipGetDevice(&device))
       REQUIRE_THREAD(device == 1);
-      HIP_CHECK_THREAD(hipFree(ptr));
+      HIP_CHECK_THREAD(hipFree(ptr))
     }
 
    private:
@@ -230,7 +230,7 @@ HIP_TEST_CASE(Unit_hipSetGetDevice_Negative) {
 HIP_TEST_CASE(Unit_hipDeviceGet_Negative) {
   // TODO enable after EXSWCPHIPT-104 is fixed
 #if HT_NVIDIA
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
   SECTION("Nullptr as handle") { HIP_CHECK_ERROR(hipDeviceGet(nullptr, 0), hipErrorInvalidValue); }
 #endif
 

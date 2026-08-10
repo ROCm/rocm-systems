@@ -29,7 +29,7 @@ HIP_TEST_CASE(Unit_hipCreateSurfaceObject_Negative_Parameters) {
   hipArray_t array;
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
 
-  HIP_CHECK(hipMallocArray(&array, &desc, 64, 0, hipArraySurfaceLoadStore));
+  HIP_CHECK(hipMallocArray(&array, &desc, 64, 0, hipArraySurfaceLoadStore))
 
   hipSurfaceObject_t surf;
 
@@ -63,7 +63,7 @@ HIP_TEST_CASE(Unit_hipCreateSurfaceObject_Negative_Parameters) {
 #endif
   }
 
-  HIP_CHECK(hipFreeArray(array));
+  HIP_CHECK(hipFreeArray(array))
 }
 
 /**

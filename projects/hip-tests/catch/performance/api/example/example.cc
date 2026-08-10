@@ -15,13 +15,13 @@ class ExampleBenchmark : public Benchmark<ExampleBenchmark> {
     const size_t kSize = 4_MB;
 
     TIMED_SECTION(kTimerTypeEvent) {  // event based timing
-      HIP_CHECK(hipMemset(dst, value, kSize));
+      HIP_CHECK(hipMemset(dst, value, kSize))
     }
 
     HIP_CHECK(hipMemset(dst, 0, kSize));  // not timed
 
     TIMED_SECTION(kTimerTypeCpu) {  // cpu based timing
-      HIP_CHECK(hipMemset(dst, value, kSize));
+      HIP_CHECK(hipMemset(dst, value, kSize))
     }
 
     // accessing properties

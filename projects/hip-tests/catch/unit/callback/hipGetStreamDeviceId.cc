@@ -29,7 +29,7 @@
  */
 HIP_TEST_CASE(Unit_hipGetStreamDeviceId_Positive_Threaded_Basic) {
   int id = GENERATE(range(0, HipTest::getDeviceCount()));
-  HIP_CHECK(hipSetDevice(id));
+  HIP_CHECK(hipSetDevice(id))
 
   StreamGuard stream_guard{Streams::created};
   REQUIRE(hipGetStreamDeviceId(stream_guard.stream()) == id);
@@ -55,7 +55,7 @@ HIP_TEST_CASE(Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic) {
 
   auto thread_function = [&]() {
     for (int id = 0; id < device_count; ++id) {
-      HIP_CHECK_THREAD(hipSetDevice(id));
+      HIP_CHECK_THREAD(hipSetDevice(id))
 
       StreamGuard stream_guard{Streams::perThread};
       REQUIRE_THREAD(hipGetStreamDeviceId(stream_guard.stream()) == id);
@@ -88,7 +88,7 @@ HIP_TEST_CASE(Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic) {
  */
 HIP_TEST_CASE(Unit_hipGetStreamDeviceId_Negative_Parameters) {
   int id = GENERATE(range(0, HipTest::getDeviceCount()));
-  HIP_CHECK(hipSetDevice(id));
+  HIP_CHECK(hipSetDevice(id))
 
   StreamGuard stream_guard{Streams::nullstream};
   REQUIRE(hipGetStreamDeviceId(stream_guard.stream()) == id);

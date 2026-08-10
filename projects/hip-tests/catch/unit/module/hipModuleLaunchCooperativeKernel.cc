@@ -41,22 +41,22 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernel_Positive_Basic) {
 
   SECTION("Cooperative kernel with no arguments") {
     hipFunction_t f = GetKernel(mg.module(), "CoopKernel");
-    HIP_CHECK(hipModuleLaunchCooperativeKernel(f, 2, 2, 1, 1, 1, 1, 0, nullptr, nullptr));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipModuleLaunchCooperativeKernel(f, 2, 2, 1, 1, 1, 1, 0, nullptr, nullptr))
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   SECTION("Kernel with arguments using kernelParams") {
     hipFunction_t f = GetKernel(mg.module(), "Kernel42");
 
     LinearAllocGuard<int> result_dev(LinearAllocs::hipMalloc, sizeof(int));
-    HIP_CHECK(hipMemset(result_dev.ptr(), 0, sizeof(*result_dev.ptr())));
+    HIP_CHECK(hipMemset(result_dev.ptr(), 0, sizeof(*result_dev.ptr())))
 
     int* result_ptr = result_dev.ptr();
     void* kernel_args[1] = {&result_ptr};
-    HIP_CHECK(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args));
+    HIP_CHECK(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args))
 
     int result = 0;
-    HIP_CHECK(hipMemcpy(&result, result_dev.ptr(), sizeof(result), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(&result, result_dev.ptr(), sizeof(result), hipMemcpyDefault))
     REQUIRE(result == 42);
   }
 }
@@ -82,17 +82,17 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernel_Positive_Parameters) {
 
   SECTION("blockDim.x == maxBlockDimX") {
     const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX, 0);
-    HIP_CHECK(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, x, 1, 1, 0, nullptr, nullptr));
+    HIP_CHECK(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, x, 1, 1, 0, nullptr, nullptr))
   }
 
   SECTION("blockDim.y == maxBlockDimY") {
     const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimY, 0);
-    HIP_CHECK(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, y, 1, 1, 0, nullptr, nullptr));
+    HIP_CHECK(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, y, 1, 1, 0, nullptr, nullptr))
   }
 
   SECTION("blockDim.z == maxBlockDimZ") {
     const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimZ, 0);
-    HIP_CHECK(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, z, 1, 1, 0, nullptr, nullptr));
+    HIP_CHECK(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, z, 1, 1, 0, nullptr, nullptr))
   }
 }
 
@@ -186,8 +186,8 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernel_Negative_Parameters) {
 
   SECTION("Invalid stream") {
     hipStream_t stream = nullptr;
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamCreate(&stream))
+    HIP_CHECK(hipStreamDestroy(stream))
     HIP_CHECK_ERROR(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, 1, 1, 1, 0, stream, nullptr),
                     hipErrorContextIsDestroyed);
   }
@@ -213,17 +213,17 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernel_Verify_Capture) {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
 
   hipFunction_t f = GetKernel(mg.module(), "CoopKernel");
-  HIP_CHECK(hipModuleLaunchCooperativeKernel(f, 2, 2, 1, 1, 1, 1, 0, stream, nullptr));
+  HIP_CHECK(hipModuleLaunchCooperativeKernel(f, 2, 2, 1, 1, 1, 1, 0, stream, nullptr))
 
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**

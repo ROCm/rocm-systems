@@ -24,8 +24,8 @@ class MallocAsyncBenchmark : public Benchmark<MallocAsyncBenchmark> {
       HIP_CHECK(
           hipMallocAsync(reinterpret_cast<void**>(&dev_ptr), array_size * sizeof(float), stream));
     }
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipFree(dev_ptr));
+    HIP_CHECK(hipStreamSynchronize(stream))
+    HIP_CHECK(hipFree(dev_ptr))
   }
 };
 

@@ -42,13 +42,13 @@ class hipPerfStreamCreateCopyDestroy {
 
 bool hipPerfStreamCreateCopyDestroy::open(int deviceId) {
   int nGpu = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpu));
+  HIP_CHECK(hipGetDeviceCount(&nGpu))
   if (nGpu < 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
-  HIP_CHECK(hipSetDevice(deviceId));
+  HIP_CHECK(hipSetDevice(deviceId))
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+  HIP_CHECK(hipGetDeviceProperties(&props, deviceId))
 
   CONSOLE_PRINT("info: running on bus 0x%x %s with %d CUs and device id: %d\n", props.pciBusID,
                 props.name, props.multiProcessorCount, deviceId);
@@ -66,12 +66,12 @@ bool hipPerfStreamCreateCopyDestroy::run(unsigned int testNumber) {
   size_t nBytes = BufSize * sizeof(float);
 
   for (size_t b = 0; b < numBuffers_; ++b) {
-    HIP_CHECK(hipMalloc(&dSrc[b], nBytes));
+    HIP_CHECK(hipMalloc(&dSrc[b], nBytes))
   }
 
   float* hSrc;
   hSrc = new float[nBytes];
-  HIP_CHECK(hSrc == 0 ? hipErrorOutOfMemory : hipSuccess);
+  HIP_CHECK(hSrc == 0 ? hipErrorOutOfMemory : hipSuccess)
   for (size_t i = 0; i < BufSize; i++) {
     hSrc[i] = 1.618f + i;
   }
@@ -80,17 +80,17 @@ bool hipPerfStreamCreateCopyDestroy::run(unsigned int testNumber) {
 
   for (size_t i = 0; i < iter; ++i) {
     for (size_t s = 0; s < numStreams_; ++s) {
-      HIP_CHECK(hipStreamCreate(&streams[s]));
+      HIP_CHECK(hipStreamCreate(&streams[s]))
     }
 
     for (size_t s = 0; s < numStreams_; ++s) {
       for (size_t b = 0; b < numBuffers_; ++b) {
-        HIP_CHECK(hipMemcpyWithStream(dSrc[b], hSrc, nBytes, hipMemcpyHostToDevice, streams[s]));
+        HIP_CHECK(hipMemcpyWithStream(dSrc[b], hSrc, nBytes, hipMemcpyHostToDevice, streams[s]))
       }
     }
 
     for (size_t s = 0; s < numStreams_; ++s) {
-      HIP_CHECK(hipStreamDestroy(streams[s]));
+      HIP_CHECK(hipStreamDestroy(streams[s]))
     }
   }
 
@@ -105,7 +105,7 @@ bool hipPerfStreamCreateCopyDestroy::run(unsigned int testNumber) {
 
   delete[] hSrc;
   for (size_t b = 0; b < numBuffers_; ++b) {
-    HIP_CHECK(hipFree(dSrc[b]));
+    HIP_CHECK(hipFree(dSrc[b]))
   }
 
   delete[] streams;

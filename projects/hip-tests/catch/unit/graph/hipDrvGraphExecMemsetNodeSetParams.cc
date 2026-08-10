@@ -35,15 +35,15 @@ const int value = 120;
  * - catch/unit/memory/hipDrvGraphExecMemsetNodeSetParams.cc
  */
 HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive) {
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
   hipDevice_t device;
   hipCtx_t context;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  HIP_CHECK(hipCtxCreate(&context, 0, device));
+  HIP_CHECK(hipDeviceGet(&device, 0))
+  HIP_CHECK(hipCtxCreate(&context, 0, device))
 
   size_t pitch;
   hipDeviceptr_t devMemSrc;
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc), &pitch, width, height));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc), &pitch, width, height))
 
   char* hostMemDst = new char[N];
   REQUIRE(hostMemDst != nullptr);
@@ -52,7 +52,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive) {
   }
 
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t memsetNode, memcpyNode;
 
@@ -93,9 +93,9 @@ HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive) {
                                      memcpyNodeDependencies.size(), &memcpyParams, context));
 
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, nullptr));
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
+  HIP_CHECK(hipStreamSynchronize(0))
 
   for (int i = 0; i < N; i++) {
     REQUIRE(hostMemDst[i] == value);
@@ -110,24 +110,24 @@ HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive) {
   newMemsetParams.value = value + 1;
 
   // Update with new memset node params
-  HIP_CHECK(hipDrvGraphExecMemsetNodeSetParams(graphExec, memsetNode, &newMemsetParams, context));
+  HIP_CHECK(hipDrvGraphExecMemsetNodeSetParams(graphExec, memsetNode, &newMemsetParams, context))
 
   for (int i = 0; i < N; i++) {
     hostMemDst[i] = 0;
   }
 
-  HIP_CHECK(hipGraphLaunch(graphExec, nullptr));
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
+  HIP_CHECK(hipStreamSynchronize(0))
 
   for (int i = 0; i < N; i++) {
     REQUIRE(hostMemDst[i] == (value + 1));
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(devMemSrc)));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(devMemSrc)))
   delete[] hostMemDst;
-  HIP_CHECK(hipCtxDestroy(context));
+  HIP_CHECK(hipCtxDestroy(context))
 }
 
 /**
@@ -142,18 +142,18 @@ HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive) {
  * - catch/unit/memory/hipDrvGraphExecMemsetNodeSetParams.cc
  */
 HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_Negative) {
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
   hipDevice_t device;
   hipCtx_t context;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  HIP_CHECK(hipCtxCreate(&context, 0, device));
+  HIP_CHECK(hipDeviceGet(&device, 0))
+  HIP_CHECK(hipCtxCreate(&context, 0, device))
 
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   size_t pitch;
   hipDeviceptr_t devMemSrc;
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc), &pitch, width, height));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc), &pitch, width, height))
 
   // Prepare memset node
   hipMemsetParams memsetParams{};
@@ -165,10 +165,10 @@ HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_Negative) {
   memsetParams.value = value;
 
   hipGraphNode_t memsetNode;
-  HIP_CHECK(hipDrvGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams, context));
+  HIP_CHECK(hipDrvGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams, context))
 
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   SECTION("Invalid Graph Exec") {
     HIP_CHECK_ERROR(hipDrvGraphExecMemsetNodeSetParams(nullptr, memsetNode, &memsetParams, context),
@@ -195,8 +195,8 @@ HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_Negative) {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(devMemSrc)));
-  HIP_CHECK(hipCtxDestroy(context));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(devMemSrc)))
+  HIP_CHECK(hipCtxDestroy(context))
 }

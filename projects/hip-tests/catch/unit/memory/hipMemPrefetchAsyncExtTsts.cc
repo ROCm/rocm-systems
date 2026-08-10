@@ -38,7 +38,7 @@ __global__ void MemPrftchAsyncKernel1(int* Hmm, size_t N) {
 HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
   CHECK_MANAGED_MEMORY_SUPPORT
   int NGpus = 0;
-  HIP_CHECK(hipGetDeviceCount(&NGpus));
+  HIP_CHECK(hipGetDeviceCount(&NGpus))
   if (NGpus < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
@@ -46,15 +46,15 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
   int Outpt = 9999, NumElms = MemSz / 4;
   bool IfTestPassed = true;
   hipStream_t strm;
-  HIP_CHECK(hipStreamCreate(&strm));
-  HIP_CHECK(hipMallocManaged(&Hmm, MemSz));
+  HIP_CHECK(hipStreamCreate(&strm))
+  HIP_CHECK(hipMallocManaged(&Hmm, MemSz))
   // Initializing the memory
   for (int i = 0; i < NumElms; ++i) {
     Hmm[i] = InitVal;
   }
-  HIP_CHECK(hipMemPrefetchAsync(Hmm, MemSz, 0, strm));
-  HIP_CHECK(hipStreamSynchronize(strm));
-  HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetReadMostly, 1));
+  HIP_CHECK(hipMemPrefetchAsync(Hmm, MemSz, 0, strm))
+  HIP_CHECK(hipStreamSynchronize(strm))
+  HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetReadMostly, 1))
   HIP_CHECK(
       hipMemRangeGetAttribute(&Outpt, sizeof(int), hipMemRangeAttributeReadMostly, Hmm, MemSz));
   if (Outpt != 1) {
@@ -63,7 +63,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
         " as expected!!");
     IfTestPassed = false;
   }
-  HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetAccessedBy, 1));
+  HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetAccessedBy, 1))
   HIP_CHECK(
       hipMemRangeGetAttribute(&Outpt, sizeof(int), hipMemRangeAttributeAccessedBy, Hmm, MemSz));
   if (Outpt != 1) {
@@ -72,7 +72,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
         " as expected!!");
     IfTestPassed = false;
   }
-  HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetPreferredLocation, 1));
+  HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetPreferredLocation, 1))
   HIP_CHECK(hipMemRangeGetAttribute(&Outpt, sizeof(int), hipMemRangeAttributePreferredLocation,
                                     Hmm, MemSz));
   if (Outpt != 1) {
@@ -81,8 +81,8 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
         " as expected!!");
     IfTestPassed = false;
   }
-  HIP_CHECK(hipStreamDestroy(strm));
-  HIP_CHECK(hipFree(Hmm));
+  HIP_CHECK(hipStreamDestroy(strm))
+  HIP_CHECK(hipFree(Hmm))
   REQUIRE(IfTestPassed);
 }
 
@@ -94,7 +94,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
 HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
   CHECK_MANAGED_MEMORY_SUPPORT
   int NGpus = 0;
-  HIP_CHECK(hipGetDeviceCount(&NGpus));
+  HIP_CHECK(hipGetDeviceCount(&NGpus))
   if (NGpus < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
@@ -102,16 +102,16 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
   int Outpt = 9999;
   bool IfTestPassed = true;
   hipStream_t strm;
-  HIP_CHECK(hipStreamCreate(&strm));
-  HIP_CHECK(hipMallocManaged(&Hmm, MemSz));
+  HIP_CHECK(hipStreamCreate(&strm))
+  HIP_CHECK(hipMallocManaged(&Hmm, MemSz))
   // Initializing the memory
   for (int i = 0; i < NumElms; ++i) {
     Hmm[i] = InitVal;
   }
   SECTION("Test AccessedBy with Prefetch") {
-    HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetAccessedBy, 1));
-    HIP_CHECK(hipMemPrefetchAsync(Hmm, MemSz, 0, strm));
-    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetAccessedBy, 1))
+    HIP_CHECK(hipMemPrefetchAsync(Hmm, MemSz, 0, strm))
+    HIP_CHECK(hipStreamSynchronize(strm))
     HIP_CHECK(hipMemRangeGetAttribute(&Outpt, sizeof(int), hipMemRangeAttributeAccessedBy, Hmm,
                                       MemSz));
     if (Outpt != 1) {
@@ -122,11 +122,11 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
     }
   }
   SECTION("Test ReadMostly with Prefetch") {
-    HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetReadMostly, 1));
-    HIP_CHECK(hipMemPrefetchAsync(Hmm, MemSz, 0, strm));
-    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetReadMostly, 1))
+    HIP_CHECK(hipMemPrefetchAsync(Hmm, MemSz, 0, strm))
+    HIP_CHECK(hipStreamSynchronize(strm))
     MemPrftchAsyncKernel1<<<(NumElms / 32), 32, 0, strm>>>(Hmm, NumElms);
-    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipStreamSynchronize(strm))
     HIP_CHECK(hipMemRangeGetAttribute(&Outpt, sizeof(int), hipMemRangeAttributeReadMostly, Hmm,
                                       MemSz));
     if (Outpt != 1) {
@@ -145,11 +145,11 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
     }
   }
   SECTION("Test PreferredLocation with Prefetch") {
-    HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetPreferredLocation, 1));
-    HIP_CHECK(hipMemPrefetchAsync(Hmm, MemSz, 0, strm));
-    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetPreferredLocation, 1))
+    HIP_CHECK(hipMemPrefetchAsync(Hmm, MemSz, 0, strm))
+    HIP_CHECK(hipStreamSynchronize(strm))
     MemPrftchAsyncKernel1<<<(NumElms / 32), 32, 0, strm>>>(Hmm, NumElms);
-    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipStreamSynchronize(strm))
     HIP_CHECK(hipMemRangeGetAttribute(&Outpt, sizeof(int),
                                       hipMemRangeAttributePreferredLocation, Hmm, MemSz));
     if (Outpt != 1) {
@@ -167,8 +167,8 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
       }
     }
   }
-  HIP_CHECK(hipFree(Hmm));
-  HIP_CHECK(hipStreamDestroy(strm));
+  HIP_CHECK(hipFree(Hmm))
+  HIP_CHECK(hipStreamDestroy(strm))
   REQUIRE(IfTestPassed);
 }
 
@@ -177,13 +177,13 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
   CHECK_MANAGED_MEMORY_SUPPORT
   int *Hmm = nullptr, MemSz = 4096 * 4, NumElms = MemSz / 4, InitVal = 123;
   bool IfTestPassed = true;
-  HIP_CHECK(hipMallocManaged(&Hmm, MemSz));
+  HIP_CHECK(hipMallocManaged(&Hmm, MemSz))
   for (int i = 0; i < NumElms; ++i) {
     Hmm[i] = InitVal;
   }
   hipError_t err;
   hipStream_t strm;
-  HIP_CHECK(hipStreamCreate(&strm));
+  HIP_CHECK(hipStreamCreate(&strm))
   SECTION("Passing null for dev ptr") {
     err = hipMemPrefetchAsync(NULL, MemSz, 0, strm);
     if (err == hipSuccess) {
@@ -243,11 +243,11 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
     // Passing stream object belong to destination device
     // expectation: No issue should be observed
     int NGpus = 0;
-    HIP_CHECK(hipGetDeviceCount(&NGpus));
+    HIP_CHECK(hipGetDeviceCount(&NGpus))
     if (NGpus > 1) {
       hipStream_t strm1;
-      HIP_CHECK(hipSetDevice(1));
-      HIP_CHECK(hipStreamCreate(&strm1));
+      HIP_CHECK(hipSetDevice(1))
+      HIP_CHECK(hipStreamCreate(&strm1))
       err = hipMemPrefetchAsync(Hmm, MemSz, 1, strm1);
       if (err != hipSuccess) {
         WARN(
@@ -255,11 +255,11 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
             " created in the context of destination gpu is passed!!");
         IfTestPassed = false;
       }
-      HIP_CHECK(hipStreamDestroy(strm1));
+      HIP_CHECK(hipStreamDestroy(strm1))
     }
   }
-  HIP_CHECK(hipFree(Hmm));
-  HIP_CHECK(hipStreamDestroy(strm));
+  HIP_CHECK(hipFree(Hmm))
+  HIP_CHECK(hipStreamDestroy(strm))
   REQUIRE(IfTestPassed);
 }
 
@@ -271,16 +271,16 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_NonPageSz) {
   int *Hmm = nullptr, NumElms = 4096 * 2, InitVal = 123;
   hipStream_t strm;
   bool IfTestPassed = true;
-  HIP_CHECK(hipStreamCreate(&strm));
+  HIP_CHECK(hipStreamCreate(&strm))
   // Allocating memory = 2*Page Size + 8 bytes
-  HIP_CHECK(hipMallocManaged(&Hmm, (NumElms * sizeof(int) + 8)));
+  HIP_CHECK(hipMallocManaged(&Hmm, (NumElms * sizeof(int) + 8)))
   for (int i = 0; i < (NumElms + 2); ++i) {
     Hmm[i] = InitVal;
   }
-  HIP_CHECK(hipMemPrefetchAsync(Hmm, (NumElms * sizeof(int) + 8), 0, strm));
-  HIP_CHECK(hipStreamSynchronize(strm));
+  HIP_CHECK(hipMemPrefetchAsync(Hmm, (NumElms * sizeof(int) + 8), 0, strm))
+  HIP_CHECK(hipStreamSynchronize(strm))
   MemPrftchAsyncKernel1<<<((NumElms + 2) / 32 + 1), 32, 0, strm>>>(Hmm, (NumElms + 2));
-  HIP_CHECK(hipStreamSynchronize(strm));
+  HIP_CHECK(hipStreamSynchronize(strm))
   for (int i = 0; i < (NumElms + 2); ++i) {
     if (Hmm[i] != (InitVal * InitVal)) {
       WARN("Didnt receive expected output after kernel launch!!");
@@ -288,7 +288,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_NonPageSz) {
       break;
     }
   }
-  HIP_CHECK(hipFree(Hmm));
-  HIP_CHECK(hipStreamDestroy(strm));
+  HIP_CHECK(hipFree(Hmm))
+  HIP_CHECK(hipStreamDestroy(strm))
   REQUIRE(IfTestPassed);
 }

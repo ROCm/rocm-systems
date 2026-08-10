@@ -23,11 +23,11 @@ __global__ void kernel_touch_hostcall(int magic) {
 void stress_hostcall_lifecycle(unsigned iterations) {
   for (unsigned i = 0; i < iterations; ++i) {
     hipStream_t stream = nullptr;
-    HIP_CHECK_THREAD(hipStreamCreate(&stream));
+    HIP_CHECK_THREAD(hipStreamCreate(&stream))
     kernel_touch_hostcall<<<1, 1, 0, stream>>>(0);
-    HIP_CHECK_THREAD(hipGetLastError());
-    HIP_CHECK_THREAD(hipStreamSynchronize(stream));
-    HIP_CHECK_THREAD(hipStreamDestroy(stream));
+    HIP_CHECK_THREAD(hipGetLastError())
+    HIP_CHECK_THREAD(hipStreamSynchronize(stream))
+    HIP_CHECK_THREAD(hipStreamDestroy(stream))
   }
 }
 

@@ -24,7 +24,7 @@ constexpr size_t kQuickAllGpuMinAllocBytes = 4096u;
 
 HIP_TEST_CASE(Stress_hipHostMalloc_MaxAllocation) {
   size_t devMemAvail{0}, devMemFree{0};
-  HIP_CHECK(hipMemGetInfo(&devMemFree, &devMemAvail));
+  HIP_CHECK(hipMemGetInfo(&devMemFree, &devMemAvail))
   auto hostMemFree = HipTest::getAvailableSystemMemoryInMB() * 1024 * 1024;  // In bytes
   REQUIRE(devMemFree > 0);
   REQUIRE(devMemAvail > 0);
@@ -51,10 +51,10 @@ HIP_TEST_CASE(Stress_hipHostMalloc_MaxAllocation) {
     // 1/4th of max memory
   }
 
-  HIP_CHECK(hipMemset(d_ptr, 1, memFree));
+  HIP_CHECK(hipMemset(d_ptr, 1, memFree))
   HIP_CHECK(hipDeviceSynchronize());  // Flush caches
   REQUIRE(std::all_of(d_ptr, d_ptr + memFree, [](unsigned char n) { return n == 1; }));
-  HIP_CHECK(hipHostFree(d_ptr));
+  HIP_CHECK(hipHostFree(d_ptr))
 }
 
 // Allocate more memory than total GPU memory in each available GPU.
@@ -65,11 +65,11 @@ HIP_TEST_CASE(Stress_hipHostMalloc_MaxAllocation_AllGpu) {
   char* A = nullptr;
   size_t maxGpuMem = 0, availableMem = 0;
   int count = 0;
-  HIP_CHECK(hipGetDeviceCount(&count));
+  HIP_CHECK(hipGetDeviceCount(&count))
   for (int dev = 0; dev < count; dev++) {
     // Get available GPU memory and total GPU memory
-    HIP_CHECK(hipSetDevice(dev));
-    HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
+    HIP_CHECK(hipSetDevice(dev))
+    HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem))
     size_t allocsize = maxGpuMem + ((maxGpuMem * ADDITIONAL_MEMORY_PERCENT) / 100);
     if (isQuickLevel()) {
       allocsize = std::min(allocsize, kQuickAllocCapBytes);
@@ -81,15 +81,15 @@ HIP_TEST_CASE(Stress_hipHostMalloc_MaxAllocation_AllGpu) {
     // Get free host In bytes
     size_t hostMemFree = HipTest::getAvailableSystemMemoryInMB() * 1024 * 1024;
     if (allocsize < hostMemFree) {
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), allocsize));
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), allocsize))
       // Check accessibility of memory
       constexpr size_t samplesize = 1024;
       constexpr int val = 32;
       // Write at beginning of memory chunk for a size of samplesize
-      HIP_CHECK(hipMemset(A, val, samplesize));
+      HIP_CHECK(hipMemset(A, val, samplesize))
       // Write at end of memory chunk for a size of samplesize
-      HIP_CHECK(hipMemset((A + allocsize - 1 - samplesize), val, samplesize));
-      HIP_CHECK(hipHostFree(A));
+      HIP_CHECK(hipMemset((A + allocsize - 1 - samplesize), val, samplesize))
+      HIP_CHECK(hipHostFree(A))
     } else {
       HIP_SKIP_TEST(HipTest::SkipReason::kNotEnoughFreeHostMemory);
     }

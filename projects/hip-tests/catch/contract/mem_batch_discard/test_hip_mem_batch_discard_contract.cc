@@ -33,7 +33,7 @@ constexpr size_t kRangeBytes = 4096;
 
 int CurrentDevice() {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   return device;
 }
 
@@ -41,13 +41,13 @@ bool ManagedMemorySupported() {
   void* ptr = nullptr;
   const hipError_t status = hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal);
   if (status == hipSuccess) {
-    HIP_CHECK(hipFree(ptr));
+    HIP_CHECK(hipFree(ptr))
     return true;
   }
   if (status == hipErrorNotSupported || status == hipErrorOutOfMemory) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return false;
 }
 
@@ -72,7 +72,7 @@ hipMemLocation CurrentDeviceLocation() {
 // lack the capability report it as unsupported and skip below.
 bool IsDiscreteDevice() {
   hipDeviceProp_t props{};
-  HIP_CHECK(hipGetDeviceProperties(&props, CurrentDevice()));
+  HIP_CHECK(hipGetDeviceProperties(&props, CurrentDevice()))
   return props.integrated == 0;
 }
 
@@ -80,9 +80,9 @@ bool IsDiscreteDevice() {
 // caller owns the returned pointer and must free it.
 void* AllocResidentManagedRange(hipStream_t stream) {
   void* ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal));
-  HIP_CHECK(hipMemsetAsync(ptr, 0, kRangeBytes, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMallocManaged(&ptr, kRangeBytes, hipMemAttachGlobal))
+  HIP_CHECK(hipMemsetAsync(ptr, 0, kRangeBytes, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
   return ptr;
 }
 
@@ -103,7 +103,7 @@ void RequireAcceptedOrUnsupported(hipError_t status) {
   ) {
     return;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 }
 }  // namespace
 
@@ -114,7 +114,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_HipMemDiscardBatchAsync_DiscardBatch_IsAc
   hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   void* ptr = AllocResidentManagedRange(stream);
   cleanup.Add([ptr] { (void)hipFree(ptr); });
@@ -126,7 +126,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_HipMemDiscardBatchAsync_DiscardBatch_IsAc
   const hipError_t status = hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream);
   RequireAcceptedOrUnsupported(status);
   if (status == hipSuccess) {
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 }
 
@@ -136,7 +136,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_HipMemDiscardAndPrefetchBatchAsync_Discar
   hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   void* ptr = AllocResidentManagedRange(stream);
   cleanup.Add([ptr] { (void)hipFree(ptr); });
@@ -151,7 +151,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_HipMemDiscardAndPrefetchBatchAsync_Discar
                                                               location_indices, 1, 0, stream);
   RequireAcceptedOrUnsupported(status);
   if (status == hipSuccess) {
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 }
 
@@ -161,7 +161,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_HipDrvMemDiscardBatchAsync_DrvDiscardBatc
   hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   void* ptr = AllocResidentManagedRange(stream);
   cleanup.Add([ptr] { (void)hipFree(ptr); });
@@ -173,7 +173,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_HipDrvMemDiscardBatchAsync_DrvDiscardBatc
   const hipError_t status = hipDrvMemDiscardBatchAsync(dptrs, sizes, 1, 0, stream);
   RequireAcceptedOrUnsupported(status);
   if (status == hipSuccess) {
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 }
 
@@ -183,7 +183,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_HipDrvMemDiscardAndPrefetchBatchAsync_Drv
   hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   void* ptr = AllocResidentManagedRange(stream);
   cleanup.Add([ptr] { (void)hipFree(ptr); });
@@ -198,7 +198,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_HipDrvMemDiscardAndPrefetchBatchAsync_Drv
       dptrs, sizes, 1, locations, location_indices, 1, 0, stream);
   RequireAcceptedOrUnsupported(status);
   if (status == hipSuccess) {
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 }
 
@@ -208,7 +208,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_HipMemDiscardBatchAsync_NullPointer_IsRej
   hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // A batch with a null range must not silently succeed. On a runtime that
@@ -235,7 +235,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_PrefetchBatch_Is
   hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   void* ptr = AllocResidentManagedRange(stream);
   cleanup.Add([ptr] { (void)hipFree(ptr); });
@@ -250,7 +250,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_PrefetchBatch_Is
       hipMemPrefetchBatchAsync(ptrs, sizes, 1, locations, location_indices, 1, 0, stream);
   RequireAcceptedOrUnsupported(status);
   if (status == hipSuccess) {
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 }
 #else

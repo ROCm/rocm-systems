@@ -35,24 +35,24 @@ template <typename T> class MemSetKernelTest {
 
     A_h = reinterpret_cast<T*>(malloc(Nbytes));
     HIP_ASSERT(A_h != nullptr);
-    HIP_CHECK(hipMalloc(&B_d, Nbytes));
+    HIP_CHECK(hipMalloc(&B_d, Nbytes))
     B_h = reinterpret_cast<T*>(malloc(Nbytes));
     HIP_ASSERT(B_h != nullptr);
-    HIP_CHECK(hipMalloc(&C_d, Nbytes));
+    HIP_CHECK(hipMalloc(&C_d, Nbytes))
 
     for (int i = 0; i < N; i++) {
       B_h[i] = i;
     }
-    HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
+    HIP_CHECK(hipStreamCreate(&stream))
   }
 
   void memDeallocate() {
-    HIP_CHECK(hipFree(B_d));
-    HIP_CHECK(hipFree(C_d));
+    HIP_CHECK(hipFree(B_d))
+    HIP_CHECK(hipFree(C_d))
     free(B_h);
     free(A_h);
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 
   void validateExecutionOrder() {
@@ -79,17 +79,17 @@ static bool testhipMemsetAsyncWithKernel(bool UseStrmPerThrd) {
     if (UseStrmPerThrd) {  // will use hipStreamPerThread stream object
       hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0,
                          hipStreamPerThread, obj.B_d, obj.C_d, N);
-      HIP_CHECK(hipGetLastError());
-      HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
-      HIP_CHECK(hipMemsetAsync(obj.C_d, obj.memSetVal, N, hipStreamPerThread));
-      HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+      HIP_CHECK(hipGetLastError())
+      HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
+      HIP_CHECK(hipMemsetAsync(obj.C_d, obj.memSetVal, N, hipStreamPerThread))
+      HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
     } else {
       hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, obj.stream,
                          obj.B_d, obj.C_d, N);
-      HIP_CHECK(hipMemsetAsync(obj.C_d, obj.memSetVal, N, obj.stream));
-      HIP_CHECK(hipStreamSynchronize(obj.stream));
+      HIP_CHECK(hipMemsetAsync(obj.C_d, obj.memSetVal, N, obj.stream))
+      HIP_CHECK(hipStreamSynchronize(obj.stream))
     }
-    HIP_CHECK(hipMemcpy(obj.A_h, obj.C_d, obj.Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(obj.A_h, obj.C_d, obj.Nbytes, hipMemcpyDeviceToHost))
 
     obj.validateExecutionOrder();
   }
@@ -104,10 +104,10 @@ static bool testhipMemsetD32AsyncWithKernel() {
   for (int k = 0; k < ITER; k++) {
     hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, obj.stream,
                        obj.B_d, obj.C_d, N);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)obj.C_d, obj.memSetVal, N, obj.stream));
-    HIP_CHECK(hipStreamSynchronize(obj.stream));
-    HIP_CHECK(hipMemcpy(obj.A_h, obj.C_d, obj.Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)obj.C_d, obj.memSetVal, N, obj.stream))
+    HIP_CHECK(hipStreamSynchronize(obj.stream))
+    HIP_CHECK(hipMemcpy(obj.A_h, obj.C_d, obj.Nbytes, hipMemcpyDeviceToHost))
 
     obj.validateExecutionOrder();
   }
@@ -122,10 +122,10 @@ static bool testhipMemsetD16AsyncWithKernel() {
   for (int k = 0; k < ITER; k++) {
     hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, obj.stream,
                        obj.B_d, obj.C_d, N);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemsetD16Async((hipDeviceptr_t)obj.C_d, obj.memSetVal, N, obj.stream));
-    HIP_CHECK(hipStreamSynchronize(obj.stream));
-    HIP_CHECK(hipMemcpy(obj.A_h, obj.C_d, obj.Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipMemsetD16Async((hipDeviceptr_t)obj.C_d, obj.memSetVal, N, obj.stream))
+    HIP_CHECK(hipStreamSynchronize(obj.stream))
+    HIP_CHECK(hipMemcpy(obj.A_h, obj.C_d, obj.Nbytes, hipMemcpyDeviceToHost))
 
     obj.validateExecutionOrder();
   }
@@ -140,10 +140,10 @@ static bool testhipMemsetD8AsyncWithKernel() {
   for (int k = 0; k < ITER; k++) {
     hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, obj.stream,
                        obj.B_d, obj.C_d, N);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemsetD8Async((hipDeviceptr_t)obj.C_d, obj.memSetVal, N, obj.stream));
-    HIP_CHECK(hipStreamSynchronize(obj.stream));
-    HIP_CHECK(hipMemcpy(obj.A_h, obj.C_d, obj.Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipMemsetD8Async((hipDeviceptr_t)obj.C_d, obj.memSetVal, N, obj.stream))
+    HIP_CHECK(hipStreamSynchronize(obj.stream))
+    HIP_CHECK(hipMemcpy(obj.A_h, obj.C_d, obj.Nbytes, hipMemcpyDeviceToHost))
 
     obj.validateExecutionOrder();
   }
@@ -161,11 +161,11 @@ HIP_TEST_CASE(Unit_hipMemsetAsync_VerifyExecutionWithKernel) {
 
   blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   REQUIRE(numDevices > 0);
 
   auto devNum = isQuickLevel() ? 0 : GENERATE_COPY(range(0, numDevices));
-  HIP_CHECK(hipSetDevice(devNum));
+  HIP_CHECK(hipSetDevice(devNum))
 
   SECTION("hipMemsetAsync With Kernel") {
     UseStrmPerThrd = false;
@@ -176,7 +176,7 @@ HIP_TEST_CASE(Unit_hipMemsetAsync_VerifyExecutionWithKernel) {
     UseStrmPerThrd = true;
     ret = testhipMemsetAsyncWithKernel(UseStrmPerThrd);
     REQUIRE(ret == true);
-    HIP_CHECK(hipDeviceReset());
+    HIP_CHECK(hipDeviceReset())
   }
 
   SECTION("hipMemsetD32Async With Kernel") {

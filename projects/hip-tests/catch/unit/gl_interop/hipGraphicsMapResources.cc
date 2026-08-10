@@ -20,7 +20,7 @@ HIP_TEST_CASE(Unit_hipGraphicsMapResources_Positive_Basic) {
   std::vector<int> gl_devices(device_count, -1);
 
   // Initialize GL interop
-  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll));
+  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll))
   REQUIRE(gl_device_count == 1);
   REQUIRE(gl_devices.at(0) == 0);
 
@@ -29,21 +29,21 @@ HIP_TEST_CASE(Unit_hipGraphicsMapResources_Positive_Basic) {
 
   std::array<hipGraphicsResource_t, 2> resources;
 
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resources.at(0), vbo, hipGraphicsRegisterFlagsNone));
+  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resources.at(0), vbo, hipGraphicsRegisterFlagsNone))
   HIP_CHECK(hipGraphicsGLRegisterImage(&resources.at(1), tex, GL_TEXTURE_2D,
                                        hipGraphicsRegisterFlagsNone));
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
-  HIP_CHECK(hipGraphicsMapResources(resources.size(), resources.data(), stream));
+  HIP_CHECK(hipGraphicsMapResources(resources.size(), resources.data(), stream))
 
-  HIP_CHECK(hipGraphicsUnmapResources(resources.size(), resources.data(), stream));
+  HIP_CHECK(hipGraphicsUnmapResources(resources.size(), resources.data(), stream))
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 
-  HIP_CHECK(hipGraphicsUnregisterResource(resources.at(0)));
-  HIP_CHECK(hipGraphicsUnregisterResource(resources.at(1)));
+  HIP_CHECK(hipGraphicsUnregisterResource(resources.at(0)))
+  HIP_CHECK(hipGraphicsUnregisterResource(resources.at(1)))
 }
 
 HIP_TEST_CASE(Unit_hipGraphicsMapResources_Negative_Parameters) {
@@ -56,7 +56,7 @@ HIP_TEST_CASE(Unit_hipGraphicsMapResources_Negative_Parameters) {
   std::vector<int> gl_devices(device_count, -1);
 
   // Initialize GL interop
-  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll));
+  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll))
   REQUIRE(gl_device_count == 1);
   REQUIRE(gl_devices.at(0) == 0);
 
@@ -64,7 +64,7 @@ HIP_TEST_CASE(Unit_hipGraphicsMapResources_Negative_Parameters) {
 
   hipGraphicsResource* vbo_resource;
 
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&vbo_resource, vbo, hipGraphicsRegisterFlagsNone));
+  HIP_CHECK(hipGraphicsGLRegisterBuffer(&vbo_resource, vbo, hipGraphicsRegisterFlagsNone))
 
   SECTION("count == 0") {
     HIP_CHECK_ERROR(hipGraphicsMapResources(0, &vbo_resource, 0), hipErrorInvalidValue);
@@ -78,22 +78,22 @@ HIP_TEST_CASE(Unit_hipGraphicsMapResources_Negative_Parameters) {
     hipGraphicsResource* unregistered_resource;
     HIP_CHECK(
         hipGraphicsGLRegisterBuffer(&unregistered_resource, vbo, hipGraphicsRegisterFlagsNone));
-    HIP_CHECK(hipGraphicsUnregisterResource(unregistered_resource));
+    HIP_CHECK(hipGraphicsUnregisterResource(unregistered_resource))
     HIP_CHECK_ERROR(hipGraphicsMapResources(1, &unregistered_resource, 0), hipErrorInvalidHandle);
   }
 
   SECTION("already mapped resource") {
-    HIP_CHECK(hipGraphicsMapResources(1, &vbo_resource, 0));
+    HIP_CHECK(hipGraphicsMapResources(1, &vbo_resource, 0))
     HIP_CHECK_ERROR(hipGraphicsMapResources(1, &vbo_resource, 0), hipErrorAlreadyMapped);
-    HIP_CHECK(hipGraphicsUnmapResources(1, &vbo_resource, 0));
+    HIP_CHECK(hipGraphicsUnmapResources(1, &vbo_resource, 0))
   }
 
   SECTION("invalid stream") {
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamCreate(&stream))
+    HIP_CHECK(hipStreamDestroy(stream))
     HIP_CHECK_ERROR(hipGraphicsMapResources(1, &vbo_resource, stream), hipErrorContextIsDestroyed);
   }
 
-  HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource));
+  HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource))
 }

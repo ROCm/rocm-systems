@@ -82,7 +82,7 @@ template <typename T, hipTextureFilterMode fMode = hipFilterModePoint>
 static void textureTest(texture<T, hipTextureType1D, hipReadModeNormalizedFloat>* tex) {
   hipChannelFormatDesc desc = hipCreateChannelDesc<T>();
   hipArray_t dData;
-  HIP_CHECK(hipMallocArray(&dData, &desc, SIZE, 1, hipArrayDefault));
+  HIP_CHECK(hipMallocArray(&dData, &desc, SIZE, 1, hipArrayDefault))
 
   T hData[] = {65, 66, 67, 68, 69, 70, 71, 72, 73, 74};
   HIP_CHECK(hipMemcpy2DToArray(dData, 0, 0, hData, sizeof(T) * SIZE, sizeof(T) * SIZE, 1,
@@ -91,19 +91,19 @@ static void textureTest(texture<T, hipTextureType1D, hipReadModeNormalizedFloat>
   tex->normalized = true;
   tex->channelDesc = desc;
   tex->filterMode = fMode;
-  HIP_CHECK(hipBindTextureToArray(tex, dData, &desc));
+  HIP_CHECK(hipBindTextureToArray(tex, dData, &desc))
 
   float* dOutputData = NULL;
-  HIP_CHECK(hipMalloc(&dOutputData, sizeof(float) * SIZE));
+  HIP_CHECK(hipMalloc(&dOutputData, sizeof(float) * SIZE))
   REQUIRE(dOutputData != nullptr);
 
   hipLaunchKernelGGL(normalizedValTextureTest<T>, dim3(1, 1, 1), dim3(SIZE, 1, 1), 0, 0, SIZE,
                      dOutputData);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   float* hOutputData = new float[SIZE];
   REQUIRE(hOutputData != nullptr);
-  HIP_CHECK(hipMemcpy(hOutputData, dOutputData, (sizeof(float) * SIZE), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOutputData, dOutputData, (sizeof(float) * SIZE), hipMemcpyDeviceToHost))
 
   float expected[SIZE];
   for (int i = 0; i < SIZE; i++) {
@@ -111,8 +111,8 @@ static void textureTest(texture<T, hipTextureType1D, hipReadModeNormalizedFloat>
   }
   textureVerify<fMode>(hOutputData, expected, SIZE);
 
-  HIP_CHECK(hipFreeArray(dData));
-  HIP_CHECK(hipFree(dOutputData));
+  HIP_CHECK(hipFreeArray(dData))
+  HIP_CHECK(hipFree(dOutputData))
   delete[] hOutputData;
 }
 
@@ -127,7 +127,7 @@ HIP_TEST_CASE(Unit_hipNormalizedFloatValueTex_CheckModes) {
 
 #if HT_AMD
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
   INFO("Device :: " << props.name);
 #endif
 

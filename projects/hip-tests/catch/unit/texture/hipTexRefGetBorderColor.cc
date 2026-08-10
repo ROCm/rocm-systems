@@ -20,17 +20,17 @@ HIP_TEST_CASE(Unit_hipTexRefGetBorderColor_Positive) {
   hipModule_t module = nullptr;
   hipTexRef tex_ref = nullptr;
 
-  HIP_CHECK(hipFree(nullptr));
-  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"));
-  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"));
+  HIP_CHECK(hipFree(nullptr))
+  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"))
+  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"))
 
-  HIP_CHECK(hipTexRefSetBorderColor(tex_ref, set_border_color));
-  HIP_CHECK(hipTexRefGetBorderColor(get_border_color, tex_ref));
+  HIP_CHECK(hipTexRefSetBorderColor(tex_ref, set_border_color))
+  HIP_CHECK(hipTexRefGetBorderColor(get_border_color, tex_ref))
 
   for (int i = 0; i < 3; i++) {
     REQUIRE(set_border_color[i] == get_border_color[i]);
   }
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
 }
 #endif
 
@@ -40,9 +40,9 @@ HIP_TEST_CASE(Unit_hipTexRefGetBorderColor_Negative) {
   hipModule_t module = nullptr;
   hipTexRef tex_ref = nullptr;
 
-  HIP_CHECK(hipFree(nullptr));
-  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"));
-  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"));
+  HIP_CHECK(hipFree(nullptr))
+  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"))
+  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"))
 
   SECTION("border_color is null") {
     HIP_CHECK_ERROR(hipTexRefGetBorderColor(nullptr, tex_ref), hipErrorInvalidValue);
@@ -56,7 +56,7 @@ HIP_TEST_CASE(Unit_hipTexRefGetBorderColor_Negative) {
 #endif
   }
 
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
 }
 
 #endif

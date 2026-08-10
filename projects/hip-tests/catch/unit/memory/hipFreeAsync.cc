@@ -34,21 +34,21 @@
  */
 HIP_TEST_CASE(Unit_hipFreeAsync_Negative_Parameters) {
   int device_id = 0;
-  HIP_CHECK(hipSetDevice(device_id));
+  HIP_CHECK(hipSetDevice(device_id))
 
   int* p = nullptr;
   size_t alloc_size = 1024;
   StreamGuard stream(Streams::created);
 
   SECTION("dev_ptr is nullptr") {
-    HIP_CHECK(hipFreeAsync(nullptr, stream.stream()));
+    HIP_CHECK(hipFreeAsync(nullptr, stream.stream()))
   }
 
   SECTION("Double free") {
-    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&p), alloc_size, stream.stream()));
-    HIP_CHECK(hipStreamSynchronize(stream.stream()));
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(p), stream.stream()));
-    HIP_CHECK(hipStreamSynchronize(stream.stream()));
+    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&p), alloc_size, stream.stream()))
+    HIP_CHECK(hipStreamSynchronize(stream.stream()))
+    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(p), stream.stream()))
+    HIP_CHECK(hipStreamSynchronize(stream.stream()))
     HIP_CHECK_ERROR(hipFreeAsync(reinterpret_cast<void*>(p), stream.stream()),
                     hipErrorInvalidValue);
   }
@@ -71,7 +71,7 @@ HIP_TEST_CASE(Unit_hipFreeAsync_Negative_Parameters) {
  *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipFreeAsync_capturehipFreeAsync) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   hipStream_t stream;
@@ -79,24 +79,24 @@ HIP_TEST_CASE(Unit_hipFreeAsync_capturehipFreeAsync) {
   int rows, cols;
   rows = GENERATE(3, 4, 1024);
   cols = GENERATE(3, 4, 1024);
-  HIP_CHECK(hipDeviceGetDefaultMemPool(&memPool, 0));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipDeviceGetDefaultMemPool(&memPool, 0))
+  HIP_CHECK(hipStreamCreate(&stream))
   int* devMem;
 
   // Start Capturing
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&devMem), sizeof(int) * rows * cols,
                                    memPool, stream));
-  HIP_CHECK(hipFreeAsync(devMem, stream));
+  HIP_CHECK(hipFreeAsync(devMem, stream))
   // End Capture
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
 
   // Create and Launch Executable Graphs
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 }

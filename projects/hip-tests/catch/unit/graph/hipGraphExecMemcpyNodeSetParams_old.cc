@@ -61,11 +61,11 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative) {
   hipGraph_t graph;
   hipGraphNode_t memcpyNode;
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, NULL, 0, &myparms));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, NULL, 0, &myparms))
 
   // Instantiate the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
   SECTION("Pass hGraphExec as nullptr") {
     ret = hipGraphExecMemcpyNodeSetParams(nullptr, memcpyNode, &myparms);
     REQUIRE(hipErrorInvalidValue == ret);
@@ -123,16 +123,16 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative) {
   SECTION("Check with other graph node") {
     hipGraph_t graph1;
     hipGraphNode_t memcpyNode1;
-    HIP_CHECK(hipGraphCreate(&graph1, 0));
-    HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode1, graph1, NULL, 0, &myparms));
+    HIP_CHECK(hipGraphCreate(&graph1, 0))
+    HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode1, graph1, NULL, 0, &myparms))
     ret = hipGraphExecMemcpyNodeSetParams(graphExec, memcpyNode1, &myparms);
     REQUIRE(hipErrorInvalidValue == ret);
-    HIP_CHECK(hipGraphDestroy(graph1));
+    HIP_CHECK(hipGraphDestroy(graph1))
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFreeArray(devArray));
-  HIP_CHECK(hipFreeArray(devArray2));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipFreeArray(devArray))
+  HIP_CHECK(hipFreeArray(devArray2))
   free(hData);
 }
 
@@ -154,7 +154,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Functional) {
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
 
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   // Initialize 1D object
   for (int i = 0; i < XSIZE; i++) {
     harray1D[i] = i + 1;
@@ -166,7 +166,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Functional) {
       hipMalloc3DArray(&devArray1, &channelDesc, make_hipExtent(width, 0, 0), hipArrayDefault));
   HIP_CHECK(
       hipMalloc3DArray(&devArray2, &channelDesc, make_hipExtent(width, 0, 0), hipArrayDefault));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   // Host to Device
   memset(&myparams, 0x0, sizeof(hipMemcpy3DParms));
@@ -177,7 +177,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Functional) {
   myparams.dstArray = devArray1;
   myparams.kind = hipMemcpyHostToDevice;
 
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, nullptr, 0, &myparams));
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, nullptr, 0, &myparams))
   dependencies.push_back(memcpyNode);
 
   // Device to Device
@@ -207,7 +207,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Functional) {
                                   &myparams));
 
   // Instantiate the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   int harray1Dupdate[XSIZE]{};
   hipArray_t devArray3;
@@ -223,10 +223,10 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Functional) {
   myparams.srcArray = devArray2;
   myparams.kind = hipMemcpyDeviceToHost;
 
-  HIP_CHECK(hipGraphExecMemcpyNodeSetParams(graphExec, memcpyNode, &myparams));
+  HIP_CHECK(hipGraphExecMemcpyNodeSetParams(graphExec, memcpyNode, &myparams))
 
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Validate result
   for (int i = 0; i < XSIZE; i++) {
@@ -236,9 +236,9 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Functional) {
       REQUIRE(false);
     }
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
-  HIP_CHECK(hipFreeArray(devArray1));
-  HIP_CHECK(hipFreeArray(devArray2));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
+  HIP_CHECK(hipFreeArray(devArray1))
+  HIP_CHECK(hipFreeArray(devArray2))
 }

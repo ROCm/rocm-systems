@@ -59,7 +59,7 @@ __global__ void VerifyDataKernel(const int* data, size_t num_elements, int base_
 // Helper function to verify data integrity on device
 static void VerifyDataOnDevice(int* data, hipStream_t stream) {
   bool* success_flag;
-  HIP_CHECK(hipMallocManaged(&success_flag, sizeof(bool)));
+  HIP_CHECK(hipMallocManaged(&success_flag, sizeof(bool)))
   *success_flag = true;
 
   constexpr int kBlockSize = 256;
@@ -68,9 +68,9 @@ static void VerifyDataOnDevice(int* data, hipStream_t stream) {
   VerifyDataKernel<<<num_blocks, kBlockSize, 0, stream>>>(data, kTestBufferElements, kTestValueBase,
                                                           success_flag);
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   REQUIRE(*success_flag == true);
-  HIP_CHECK(hipFree(success_flag));
+  HIP_CHECK(hipFree(success_flag))
 }
 
 /**
@@ -102,7 +102,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation) {
                                      locations.data(), location_indices.data(), locations.size(),
                                      flags, stream_guard.stream()));
 
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
   VerifyDataOnDevice(managed_memory.ptr(), stream_guard.stream());
 
@@ -137,7 +137,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_LocationDistribution) {
     std::vector<size_t> buffer_sizes(num_operations, kTestBufferBytes);
 
     for (size_t op = 0; op < num_operations; op++) {
-      HIP_CHECK(hipMallocManaged(&managed_ptrs[op], kTestBufferBytes));
+      HIP_CHECK(hipMallocManaged(&managed_ptrs[op], kTestBufferBytes))
       std::fill_n(static_cast<int*>(managed_ptrs[op]), kTestBufferElements, kTestValueBase);
     }
 
@@ -184,7 +184,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_LocationDistribution) {
                                        locations.data(), location_indices.data(), locations.size(),
                                        flags, stream_guard.stream()));
 
-    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
     for (size_t op = 0; op < num_operations; op++) {
       int last_prefetch_location = -1;
@@ -214,7 +214,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_LocationDistribution) {
     }
 
     for (auto ptr : managed_ptrs) {
-      HIP_CHECK(hipFree(ptr));
+      HIP_CHECK(hipFree(ptr))
     }
   }
 }
@@ -246,7 +246,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity) {
   HIP_CHECK(hipMemPrefetchBatchAsync(managed_ptrs.data(), buffer_sizes.data(), managed_ptrs.size(),
                                      device_location.data(), location_indices.data(),
                                      location_indices.size(), flags, stream_guard.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
   VerifyDataOnDevice(managed_memory.ptr(), stream_guard.stream());
 
   int last_prefetch_location = -1;
@@ -262,7 +262,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity) {
   HIP_CHECK(hipMemPrefetchBatchAsync(managed_ptrs.data(), buffer_sizes.data(), managed_ptrs.size(),
                                      host_location.data(), location_indices.data(),
                                      location_indices.size(), flags, stream_guard.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
   ArrayFindIfNot(managed_memory.ptr(), kTestValueBase, kTestBufferElements);
 
   HIP_CHECK(hipMemRangeGetAttribute(&last_prefetch_location, sizeof(int),
@@ -273,7 +273,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity) {
   HIP_CHECK(hipMemPrefetchBatchAsync(managed_ptrs.data(), buffer_sizes.data(), managed_ptrs.size(),
                                      device_location.data(), location_indices.data(),
                                      location_indices.size(), flags, stream_guard.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
   VerifyDataOnDevice(managed_memory.ptr(), stream_guard.stream());
 
   HIP_CHECK(hipMemRangeGetAttribute(&last_prefetch_location, sizeof(int),
@@ -359,7 +359,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_IndexArrayConstraints) {
   std::vector<size_t> buffer_sizes(num_operations, kTestBufferBytes);
 
   for (size_t op = 0; op < num_operations; op++) {
-    HIP_CHECK(hipMallocManaged(&managed_ptrs[op], kTestBufferBytes));
+    HIP_CHECK(hipMallocManaged(&managed_ptrs[op], kTestBufferBytes))
   }
 
   StreamGuard stream_guard(Streams::created);
@@ -418,7 +418,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_IndexArrayConstraints) {
   }
 
   for (auto ptr : managed_ptrs) {
-    HIP_CHECK(hipFree(ptr));
+    HIP_CHECK(hipFree(ptr))
   }
 }
 
@@ -430,7 +430,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_IndexArrayConstraints) {
  */
 HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_ParameterValidation) {
   constexpr int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   LinearAllocGuard<int> managed_memory(LinearAllocs::hipMallocManaged, kTestBufferBytes);
   StreamGuard stream_guard(Streams::created);
@@ -531,7 +531,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_ParameterValidation) {
  */
 HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_DeviceCapabilities) {
   int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   StreamGuard stream_guard(Streams::created);
 
@@ -570,7 +570,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_DeviceCapabilities) {
  */
 HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_MultiDevice) {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
 
   if (device_count < 2) {
     HIP_SKIP_TEST("Multi-device test requires at least 2 GPUs");
@@ -588,7 +588,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_MultiDevice) {
   }
 
   int device = supported_devices[0];
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   const size_t num_operations = supported_devices.size();
 
@@ -596,7 +596,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_MultiDevice) {
   std::vector<size_t> buffer_sizes(num_operations, kTestBufferBytes);
 
   for (size_t op = 0; op < num_operations; op++) {
-    HIP_CHECK(hipMallocManaged(&managed_ptrs[op], kTestBufferBytes));
+    HIP_CHECK(hipMallocManaged(&managed_ptrs[op], kTestBufferBytes))
     std::fill_n(static_cast<int*>(managed_ptrs[op]), kTestBufferElements, kTestValueBase);
   }
 
@@ -616,7 +616,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_MultiDevice) {
                                      locations.data(), location_indices.data(), num_operations,
                                      flags, stream_guard.stream()));
 
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
   for (size_t op = 0; op < num_operations; op++) {
     VerifyDataOnDevice(static_cast<int*>(managed_ptrs[op]), stream_guard.stream());
@@ -632,7 +632,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_MultiDevice) {
   }
 
   for (size_t op = 0; op < num_operations; op++) {
-    HIP_CHECK(hipFree(managed_ptrs[op]));
+    HIP_CHECK(hipFree(managed_ptrs[op]))
   }
 }
 
@@ -659,7 +659,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_ManagedGlobalVariable) {
   HIP_CHECK(hipMemPrefetchBatchAsync(&managed_ptr, &buffer_size, 1, &location, &location_index, 1,
                                      flags, stream_guard.stream()));
 
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
   int last_prefetch_location = -1;
   HIP_CHECK(hipMemRangeGetAttribute(&last_prefetch_location, sizeof(int),

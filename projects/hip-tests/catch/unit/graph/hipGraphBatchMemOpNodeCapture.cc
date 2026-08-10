@@ -31,7 +31,7 @@
  */
 HIP_TEST_CASE(Unit_hipGraphBatchMemOpNode_WriteAndWait) {
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
 
   // StreamWaitValue / SignalMemory not supported on all backends (e.g. Windows PAL)
   int waitValueSupport = 0;
@@ -46,7 +46,7 @@ HIP_TEST_CASE(Unit_hipGraphBatchMemOpNode_WriteAndWait) {
   HIP_SKIP_TEST("hipMallocSignalMemory is not supported on non-AMD backends.");
 #endif
   hipCtx_t ctx;
-  HIP_CHECK(hipCtxCreate(&ctx, 0, device));
+  HIP_CHECK(hipCtxCreate(&ctx, 0, device))
 
   // Allocate signal memory required for wait-value operations on AMD
   hipDeviceptr_t devPtr = 0;
@@ -54,7 +54,7 @@ HIP_TEST_CASE(Unit_hipGraphBatchMemOpNode_WriteAndWait) {
   HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtr), sizeof(uint64_t),
                                   hipMallocSignalMemory));
 #endif
-  HIP_CHECK(hipMemset(reinterpret_cast<void*>(devPtr), 0, sizeof(uint64_t)));
+  HIP_CHECK(hipMemset(reinterpret_cast<void*>(devPtr), 0, sizeof(uint64_t)))
 
   // Build batch: WriteValue32(1000) then WaitValue32(== 1000)
   hipStreamBatchMemOpParams params[2] = {};
@@ -76,34 +76,34 @@ HIP_TEST_CASE(Unit_hipGraphBatchMemOpNode_WriteAndWait) {
 
   // Build graph with single BatchMemOp node
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t node;
-  HIP_CHECK(hipGraphAddBatchMemOpNode(&node, graph, nullptr, 0, &nodeParams));
+  HIP_CHECK(hipGraphAddBatchMemOpNode(&node, graph, nullptr, 0, &nodeParams))
 
   // Instantiate — AQL packet for batchMemOp blit kernel pre-built here
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   // Launch and verify
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   uint32_t result = 0;
   HIP_CHECK(hipMemcpy(&result, reinterpret_cast<void*>(devPtr), sizeof(uint32_t),
                       hipMemcpyDeviceToHost));
   REQUIRE(result == 1000);
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 #if HT_AMD
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtr)));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtr)))
 #endif
-  HIP_CHECK(hipCtxPopCurrent(&ctx));
-  HIP_CHECK(hipCtxDestroy(ctx));
+  HIP_CHECK(hipCtxPopCurrent(&ctx))
+  HIP_CHECK(hipCtxDestroy(ctx))
 }
 
 /**

@@ -84,14 +84,14 @@ HIP_TEST_CASE(Contract_StreamCallbacks_HipStreamAddCallback_Default_InvokesExact
   void* device_ptr = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipMalloc(&device_ptr, kMemsetBytes));
+  HIP_CHECK(hipMalloc(&device_ptr, kMemsetBytes))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
-  HIP_CHECK(hipMemsetAsync(device_ptr, 0, kMemsetBytes, stream));
-  HIP_CHECK(hipStreamAddCallback(stream, CountingCallback, &state, 0));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemsetAsync(device_ptr, 0, kMemsetBytes, stream))
+  HIP_CHECK(hipStreamAddCallback(stream, CountingCallback, &state, 0))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(state.invocation_count == kExpectedInvocationCount);
 }
@@ -102,15 +102,15 @@ HIP_TEST_CASE(Contract_StreamCallbacks_HipStreamAddCallback_Default_RunsAfterPri
   OrderingState state{};
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // Enqueue a prior callback that flips a host-visible flag, then a second
   // callback that records whether it observed that flag already set. Stream
   // ordering guarantees the second callback runs after the first.
-  HIP_CHECK(hipStreamAddCallback(stream, MarkPriorRan, &state, 0));
-  HIP_CHECK(hipStreamAddCallback(stream, ObserveOrdering, &state, 0));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamAddCallback(stream, MarkPriorRan, &state, 0))
+  HIP_CHECK(hipStreamAddCallback(stream, ObserveOrdering, &state, 0))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(state.prior_ran);
   REQUIRE(state.callback_saw_prior_work);
@@ -122,11 +122,11 @@ HIP_TEST_CASE(Contract_StreamCallbacks_HipStreamAddCallback_Default_ReceivesSucc
   CallbackState state{};
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
-  HIP_CHECK(hipStreamAddCallback(stream, CountingCallback, &state, 0));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamAddCallback(stream, CountingCallback, &state, 0))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(state.invocation_count == kExpectedInvocationCount);
   REQUIRE(state.observed_status == hipSuccess);
@@ -138,15 +138,15 @@ HIP_TEST_CASE(Contract_StreamCallbacks_HipLaunchHostFunc_Default_InvokesExactlyO
   int32_t counter = kInitialValue;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t launch_result = hipLaunchHostFunc(stream, IncrementSequence, &counter);
   if (launch_result == hipErrorNotSupported) {
     HIP_SKIP_TEST("hipLaunchHostFunc is not supported on this device");
   }
-  HIP_CHECK(launch_result);
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(launch_result)
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(counter == kExpectedInvocationCount);
 }
@@ -157,7 +157,7 @@ HIP_TEST_CASE(Contract_StreamCallbacks_HipLaunchHostFunc_Default_OrdersBeforeLat
   HostFuncOrderingState state{};
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // Two host functions enqueued in stream order. Each records the sequence
@@ -167,9 +167,9 @@ HIP_TEST_CASE(Contract_StreamCallbacks_HipLaunchHostFunc_Default_OrdersBeforeLat
   if (launch_result == hipErrorNotSupported) {
     HIP_SKIP_TEST("hipLaunchHostFunc is not supported on this device");
   }
-  HIP_CHECK(launch_result);
-  HIP_CHECK(hipLaunchHostFunc(stream, RecordSecond, &state));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(launch_result)
+  HIP_CHECK(hipLaunchHostFunc(stream, RecordSecond, &state))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(state.first_seen_sequence == 1);
   REQUIRE(state.second_seen_sequence == 2);

@@ -48,7 +48,7 @@ TEST_CASE("Unit_hipOccupancyMaxActiveClusters_Positive_RangeValidation") {
   int totalSE;
   int maxInFlightClusterPerSPI;
 
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
 
   if (!props.clusterLaunch) {
     HIP_SKIP_TEST("cluster launches are not supported on this device");
@@ -113,7 +113,7 @@ TEST_CASE("Unit_hipOccupancyMaxActiveClusters_Negative_Zero_Cluster") {
   attribute[0].id = hipLaunchAttributeClusterDimension;
   config.numAttrs = 1;
   config.attrs = attribute;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
 
   // on Nvidia this will not produce an error, even if the device does not support cluster
   // launches numClusters could be zero; on AMD it will be an error as HSA does not support such
@@ -140,7 +140,7 @@ TEST_CASE("Unit_hipOccupancyMaxActiveClusters_Negative_Parameters") {
   attribute[0].val.clusterDim.z = 1;
   config.numAttrs = 1;
   config.attrs = attribute;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
 
   if (!props.clusterLaunch) {
     SUCCEED("cluster launches are not supported on this device");

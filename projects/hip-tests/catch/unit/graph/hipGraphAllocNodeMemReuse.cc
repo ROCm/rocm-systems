@@ -55,22 +55,22 @@ static hipGraphExec_t captureGraphWithAlloc(hipStream_t stream, size_t allocByte
   int64_t numElems = static_cast<int64_t>(allocBytes / sizeof(float));
   int gridSize = static_cast<int>((numElems + kBlockSize - 1) / kBlockSize);
 
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
 
   float* dTemp = nullptr;
-  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&dTemp), allocBytes, stream));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&dTemp), allocBytes, stream))
 
   fillKernel<<<gridSize, kBlockSize, 0, stream>>>(dTemp, fillValue, numElems);
 
-  HIP_CHECK(hipFreeAsync(dTemp, stream));
+  HIP_CHECK(hipFreeAsync(dTemp, stream))
 
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
 
   hipGraphExec_t exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0))
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 
   return exec;
 }
@@ -83,22 +83,22 @@ static hipGraphExec_t captureGraphWithBusyKernel(hipStream_t stream, size_t allo
   int64_t numElems = static_cast<int64_t>(allocBytes / sizeof(float));
   int gridSize = static_cast<int>((numElems + kBlockSize - 1) / kBlockSize);
 
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
 
   float* dTemp = nullptr;
-  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&dTemp), allocBytes, stream));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&dTemp), allocBytes, stream))
 
   busyKernel<<<gridSize, kBlockSize, 0, stream>>>(dTemp, fillValue, numElems, iters);
 
-  HIP_CHECK(hipFreeAsync(dTemp, stream));
+  HIP_CHECK(hipFreeAsync(dTemp, stream))
 
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
 
   hipGraphExec_t exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0))
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 
   return exec;
 }
@@ -106,8 +106,8 @@ static hipGraphExec_t captureGraphWithBusyKernel(hipStream_t stream, size_t allo
 // Helper to reset graph memory attributes
 static void resetGraphMemAttributes(int device) {
   uint64_t zero = 0;
-  HIP_CHECK(hipDeviceSetGraphMemAttribute(device, hipGraphMemAttrUsedMemHigh, &zero));
-  HIP_CHECK(hipDeviceSetGraphMemAttribute(device, hipGraphMemAttrReservedMemHigh, &zero));
+  HIP_CHECK(hipDeviceSetGraphMemAttribute(device, hipGraphMemAttrUsedMemHigh, &zero))
+  HIP_CHECK(hipDeviceSetGraphMemAttribute(device, hipGraphMemAttrReservedMemHigh, &zero))
 }
 
 // Helper to query graph memory attributes
@@ -122,7 +122,7 @@ static GraphMemStats queryGraphMem(int device) {
   GraphMemStats s{};
   HIP_CHECK(
       hipDeviceGetGraphMemAttribute(device, hipGraphMemAttrUsedMemCurrent, &s.usedCurrent));
-  HIP_CHECK(hipDeviceGetGraphMemAttribute(device, hipGraphMemAttrUsedMemHigh, &s.usedHigh));
+  HIP_CHECK(hipDeviceGetGraphMemAttribute(device, hipGraphMemAttrUsedMemHigh, &s.usedHigh))
   HIP_CHECK(hipDeviceGetGraphMemAttribute(device, hipGraphMemAttrReservedMemCurrent,
                                           &s.reservedCurrent));
   HIP_CHECK(
@@ -132,7 +132,7 @@ static GraphMemStats queryGraphMem(int device) {
 
 void printDeviceMem(const char* label) {
     size_t freeMem = 0, totalMem = 0;
-    HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem));
+    HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem))
     size_t usedMem = totalMem - freeMem;
     std::printf("[DevMem]   %-45s  used: %8.2f MB  free: %8.2f MB\n",
         label,
@@ -159,7 +159,7 @@ void printDeviceMem(const char* label) {
  */
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes) {
   const int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
@@ -174,14 +174,14 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes) {
   hipGraphExec_t execC = captureGraphWithAlloc(stream, kAllocSize, 3.0f);
 
   // Launch all three sequentially on the same stream
-  HIP_CHECK(hipGraphLaunch(execA, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(execA, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipGraphLaunch(execB, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(execB, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipGraphLaunch(execC, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(execC, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Check memory statistics after launch+sync
   auto stats = queryGraphMem(device);
@@ -194,9 +194,9 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes) {
   REQUIRE(stats.usedHigh == kAllocSize);
 
   // Destroy graph executables - memory should be released
-  HIP_CHECK(hipGraphExecDestroy(execA));
-  HIP_CHECK(hipGraphExecDestroy(execB));
-  HIP_CHECK(hipGraphExecDestroy(execC));
+  HIP_CHECK(hipGraphExecDestroy(execA))
+  HIP_CHECK(hipGraphExecDestroy(execB))
+  HIP_CHECK(hipGraphExecDestroy(execC))
 }
 
 /**
@@ -217,7 +217,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes) {
  */
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse) {
   const int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
@@ -234,14 +234,14 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse) 
   hipGraphExec_t execC = captureGraphWithAlloc(stream, kAllocC, 3.0f);
 
   // Launch all three sequentially on the same stream
-  HIP_CHECK(hipGraphLaunch(execA, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(execA, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipGraphLaunch(execB, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(execB, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipGraphLaunch(execC, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(execC, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Check memory statistics
   auto stats = queryGraphMem(device);
@@ -258,9 +258,9 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse) 
   REQUIRE(stats.usedHigh == kAllocA);
 
   // Destroy graph executables - memory should be released
-  HIP_CHECK(hipGraphExecDestroy(execA));
-  HIP_CHECK(hipGraphExecDestroy(execB));
-  HIP_CHECK(hipGraphExecDestroy(execC));
+  HIP_CHECK(hipGraphExecDestroy(execA))
+  HIP_CHECK(hipGraphExecDestroy(execB))
+  HIP_CHECK(hipGraphExecDestroy(execC))
 }
 
 /**
@@ -279,7 +279,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse) 
  */
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches) {
   const int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
@@ -294,8 +294,8 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches) {
   // Launch the same graph multiple times
   constexpr int numLaunches = 10;
   for (int i = 0; i < numLaunches; i++) {
-    HIP_CHECK(hipGraphLaunch(exec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(exec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 
   // Check memory statistics
@@ -309,7 +309,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches) {
   REQUIRE(stats.usedHigh == kAllocSize);
 
   // Destroy graph executable - memory should be released
-  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphExecDestroy(exec))
 }
 
 /**
@@ -328,7 +328,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches) {
  */
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemoryTrim) {
   const int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
@@ -339,8 +339,8 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemoryTrim) {
 
   // Capture and launch a graph
   hipGraphExec_t exec = captureGraphWithAlloc(stream, kAllocSize, 1.0f);
-  HIP_CHECK(hipGraphLaunch(exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Memory is retained in graph for reuse after launch+sync
   auto statsBefore = queryGraphMem(device);
@@ -348,7 +348,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemoryTrim) {
   REQUIRE(statsBefore.reservedCurrent > 0);  // Memory should be reserved for reuse
 
   // Trim graph memory
-  HIP_CHECK(hipDeviceGraphMemTrim(device));
+  HIP_CHECK(hipDeviceGraphMemTrim(device))
 
   // Check that reserved memory is released after trim
   auto statsAfter = queryGraphMem(device);
@@ -356,7 +356,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemoryTrim) {
   REQUIRE(statsAfter.reservedCurrent == 0);  // Reserved memory should be freed
 
   // Cleanup
-  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphExecDestroy(exec))
 }
 
 /**
@@ -375,7 +375,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemoryTrim) {
  */
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize) {
   const int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
@@ -386,7 +386,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize) {
 
   // Create first graph with explicit alloc/free nodes
   hipGraph_t graphA;
-  HIP_CHECK(hipGraphCreate(&graphA, 0));
+  HIP_CHECK(hipGraphCreate(&graphA, 0))
 
   hipGraphNode_t allocNodeA;
   hipMemAllocNodeParams allocParamA;
@@ -396,18 +396,18 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize) {
   allocParamA.poolProps.location.id = 0;
   allocParamA.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graphA, nullptr, 0, &allocParamA));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graphA, nullptr, 0, &allocParamA))
   REQUIRE(allocParamA.dptr != nullptr);
 
   hipGraphNode_t freeNodeA;
-  HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graphA, &allocNodeA, 1, allocParamA.dptr));
+  HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graphA, &allocNodeA, 1, allocParamA.dptr))
 
   hipGraphExec_t execA;
-  HIP_CHECK(hipGraphInstantiate(&execA, graphA, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&execA, graphA, nullptr, nullptr, 0))
 
   // Create second graph with explicit alloc/free nodes - SAME SIZE
   hipGraph_t graphB;
-  HIP_CHECK(hipGraphCreate(&graphB, 0));
+  HIP_CHECK(hipGraphCreate(&graphB, 0))
 
   hipGraphNode_t allocNodeB;
   hipMemAllocNodeParams allocParamB;
@@ -417,20 +417,20 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize) {
   allocParamB.poolProps.location.id = 0;
   allocParamB.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeB, graphB, nullptr, 0, &allocParamB));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeB, graphB, nullptr, 0, &allocParamB))
   REQUIRE(allocParamB.dptr != nullptr);
 
   hipGraphNode_t freeNodeB;
-  HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeB, graphB, &allocNodeB, 1, allocParamB.dptr));
+  HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeB, graphB, &allocNodeB, 1, allocParamB.dptr))
 
   hipGraphExec_t execB;
-  HIP_CHECK(hipGraphInstantiate(&execB, graphB, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&execB, graphB, nullptr, nullptr, 0))
 
   // Launch both graphs sequentially on same stream
-  HIP_CHECK(hipGraphLaunch(execA, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipGraphLaunch(execB, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(execA, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipGraphLaunch(execB, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Check memory statistics
   auto stats = queryGraphMem(device);
@@ -444,10 +444,10 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize) {
   REQUIRE(stats.usedHigh == kAllocSize);
 
   // Destroy graph executables and graphs - memory should be released
-  HIP_CHECK(hipGraphExecDestroy(execA));
-  HIP_CHECK(hipGraphExecDestroy(execB));
-  HIP_CHECK(hipGraphDestroy(graphA));
-  HIP_CHECK(hipGraphDestroy(graphB));
+  HIP_CHECK(hipGraphExecDestroy(execA))
+  HIP_CHECK(hipGraphExecDestroy(execB))
+  HIP_CHECK(hipGraphDestroy(graphA))
+  HIP_CHECK(hipGraphDestroy(graphB))
 }
 
 /**
@@ -465,7 +465,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize) {
  */
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSizes) {
   const int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
@@ -477,7 +477,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSiz
 
   // Create first graph with explicit alloc/free nodes
   hipGraph_t graphA;
-  HIP_CHECK(hipGraphCreate(&graphA, 0));
+  HIP_CHECK(hipGraphCreate(&graphA, 0))
 
   hipGraphNode_t allocNodeA;
   hipMemAllocNodeParams allocParamA;
@@ -487,18 +487,18 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSiz
   allocParamA.poolProps.location.id = 0;
   allocParamA.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graphA, nullptr, 0, &allocParamA));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graphA, nullptr, 0, &allocParamA))
   REQUIRE(allocParamA.dptr != nullptr);
 
   hipGraphNode_t freeNodeA;
-  HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graphA, &allocNodeA, 1, allocParamA.dptr));
+  HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graphA, &allocNodeA, 1, allocParamA.dptr))
 
   hipGraphExec_t execA;
-  HIP_CHECK(hipGraphInstantiate(&execA, graphA, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&execA, graphA, nullptr, nullptr, 0))
 
   // Create second graph with DIFFERENT size
   hipGraph_t graphB;
-  HIP_CHECK(hipGraphCreate(&graphB, 0));
+  HIP_CHECK(hipGraphCreate(&graphB, 0))
 
   hipGraphNode_t allocNodeB;
   hipMemAllocNodeParams allocParamB;
@@ -508,20 +508,20 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSiz
   allocParamB.poolProps.location.id = 0;
   allocParamB.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeB, graphB, nullptr, 0, &allocParamB));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeB, graphB, nullptr, 0, &allocParamB))
   REQUIRE(allocParamB.dptr != nullptr);
 
   hipGraphNode_t freeNodeB;
-  HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeB, graphB, &allocNodeB, 1, allocParamB.dptr));
+  HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeB, graphB, &allocNodeB, 1, allocParamB.dptr))
 
   hipGraphExec_t execB;
-  HIP_CHECK(hipGraphInstantiate(&execB, graphB, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&execB, graphB, nullptr, nullptr, 0))
 
   // Launch both graphs sequentially on same stream
-  HIP_CHECK(hipGraphLaunch(execA, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipGraphLaunch(execB, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(execA, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipGraphLaunch(execB, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Check memory statistics
   auto stats = queryGraphMem(device);
@@ -539,10 +539,10 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSiz
   REQUIRE(stats.usedHigh == kAllocA);
  
   // Destroy graph executables and graphs - memory should be released
-  HIP_CHECK(hipGraphExecDestroy(execA));
-  HIP_CHECK(hipGraphExecDestroy(execB));
-  HIP_CHECK(hipGraphDestroy(graphA));
-  HIP_CHECK(hipGraphDestroy(graphB));
+  HIP_CHECK(hipGraphExecDestroy(execA))
+  HIP_CHECK(hipGraphExecDestroy(execB))
+  HIP_CHECK(hipGraphDestroy(graphA))
+  HIP_CHECK(hipGraphDestroy(graphB))
 }
 
 /**
@@ -566,7 +566,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSiz
  */
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse) {
   const int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
@@ -578,7 +578,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse) {
   // Create a graph with 4 malloc nodes, but only 3 have free nodes.
   // The orphan malloc node is placed FIRST in the graph.
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   // Node 1: Orphan malloc WITHOUT corresponding free (placed first)
   hipGraphNode_t allocNode1;
@@ -589,7 +589,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse) {
   allocParam1.poolProps.location.id = 0;
   allocParam1.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode1, graph, nullptr, 0, &allocParam1));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode1, graph, nullptr, 0, &allocParam1))
   REQUIRE(allocParam1.dptr != nullptr);
   void* orphanPtr = allocParam1.dptr;  // Will free this outside the graph
 
@@ -602,11 +602,11 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse) {
   allocParam2.poolProps.location.id = 0;
   allocParam2.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode2, graph, &allocNode1, 1, &allocParam2));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode2, graph, &allocNode1, 1, &allocParam2))
   REQUIRE(allocParam2.dptr != nullptr);
 
   hipGraphNode_t freeNode2;
-  HIP_CHECK(hipGraphAddMemFreeNode(&freeNode2, graph, &allocNode2, 1, allocParam2.dptr));
+  HIP_CHECK(hipGraphAddMemFreeNode(&freeNode2, graph, &allocNode2, 1, allocParam2.dptr))
 
   // Node 3: Malloc with corresponding free (depends on freeNode2)
   hipGraphNode_t allocNode3;
@@ -617,11 +617,11 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse) {
   allocParam3.poolProps.location.id = 0;
   allocParam3.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode3, graph, &freeNode2, 1, &allocParam3));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode3, graph, &freeNode2, 1, &allocParam3))
   REQUIRE(allocParam3.dptr != nullptr);
 
   hipGraphNode_t freeNode3;
-  HIP_CHECK(hipGraphAddMemFreeNode(&freeNode3, graph, &allocNode3, 1, allocParam3.dptr));
+  HIP_CHECK(hipGraphAddMemFreeNode(&freeNode3, graph, &allocNode3, 1, allocParam3.dptr))
 
   // Node 4: Malloc with corresponding free (depends on freeNode3)
   hipGraphNode_t allocNode4;
@@ -632,18 +632,18 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse) {
   allocParam4.poolProps.location.id = 0;
   allocParam4.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode4, graph, &freeNode3, 1, &allocParam4));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode4, graph, &freeNode3, 1, &allocParam4))
   REQUIRE(allocParam4.dptr != nullptr);
 
   hipGraphNode_t freeNode4;
-  HIP_CHECK(hipGraphAddMemFreeNode(&freeNode4, graph, &allocNode4, 1, allocParam4.dptr));
+  HIP_CHECK(hipGraphAddMemFreeNode(&freeNode4, graph, &allocNode4, 1, allocParam4.dptr))
 
   // Instantiate and launch the graph
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Check memory statistics BEFORE freeing the orphan allocation
   auto statsBefore = queryGraphMem(device);
@@ -658,12 +658,12 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse) {
   REQUIRE(statsBefore.usedCurrent == kAllocSize * 2);
 
   // Free the orphan allocation outside the graph using hipFreeAsync
-  HIP_CHECK(hipFreeAsync(orphanPtr, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipFreeAsync(orphanPtr, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Destroy graph executable and graph - remaining retained memory should be released
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -683,7 +683,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse) {
  */
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse) {
   const int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   StreamGuard stream_guard1(Streams::created);
   hipStream_t stream1 = stream_guard1.stream();
@@ -702,11 +702,11 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse) {
   hipGraphExec_t execB = captureGraphWithAlloc(stream2, kAllocSize, 2.0f);
 
   // Launch graph A on stream1 and graph B on stream2
-  HIP_CHECK(hipGraphLaunch(execA, stream1));
-  HIP_CHECK(hipStreamSynchronize(stream1));
+  HIP_CHECK(hipGraphLaunch(execA, stream1))
+  HIP_CHECK(hipStreamSynchronize(stream1))
 
-  HIP_CHECK(hipGraphLaunch(execB, stream2));
-  HIP_CHECK(hipStreamSynchronize(stream2));
+  HIP_CHECK(hipGraphLaunch(execB, stream2))
+  HIP_CHECK(hipStreamSynchronize(stream2))
 
   // Check memory statistics
   auto stats = queryGraphMem(device);
@@ -716,8 +716,8 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse) {
   REQUIRE(stats.usedCurrent == kAllocSize);
 
   // Destroy graph executables - memory should be released
-  HIP_CHECK(hipGraphExecDestroy(execA));
-  HIP_CHECK(hipGraphExecDestroy(execB));
+  HIP_CHECK(hipGraphExecDestroy(execA))
+  HIP_CHECK(hipGraphExecDestroy(execB))
 }
 
 /**
@@ -744,7 +744,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse) {
  */
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap) {
   const int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   StreamGuard stream_guard1(Streams::created);
   hipStream_t stream1 = stream_guard1.stream();
@@ -764,8 +764,8 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap) {
 
   // Step 2: Launch graph A first and sync — its physical memory goes to the shared
   // graph pool's free_heap, available for opportunistic reuse by graph B.
-  HIP_CHECK(hipGraphLaunch(execA, stream1));
-  HIP_CHECK(hipStreamSynchronize(stream1));
+  HIP_CHECK(hipGraphLaunch(execA, stream1))
+  HIP_CHECK(hipStreamSynchronize(stream1))
 
   auto statsAfterFirstLaunch = queryGraphMem(device);
   REQUIRE(statsAfterFirstLaunch.usedCurrent == kAllocSize);
@@ -813,8 +813,8 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap) {
            statsAfterConcurrent.usedCurrent == kAllocSize * 2));
 
   // Cleanup
-  HIP_CHECK(hipGraphExecDestroy(execA));
-  HIP_CHECK(hipGraphExecDestroy(execB));
+  HIP_CHECK(hipGraphExecDestroy(execA))
+  HIP_CHECK(hipGraphExecDestroy(execB))
 }
 
 /**
@@ -838,7 +838,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap) {
  */
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch) {
   const int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
@@ -851,7 +851,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch) {
 
   // Create a graph with alloc -> kernel (no free node)
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t allocNode;
   hipMemAllocNodeParams allocParam;
@@ -861,7 +861,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch) {
   allocParam.poolProps.location.id = device;
   allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode, graph, nullptr, 0, &allocParam));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode, graph, nullptr, 0, &allocParam))
   REQUIRE(allocParam.dptr != nullptr);
 
   hipGraphNode_t kernelNode;
@@ -874,26 +874,26 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch) {
   kernelParam.blockDim = dim3(kBlockSize);
   kernelParam.kernelParams = kernelArgs;
 
-  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph, &allocNode, 1, &kernelParam));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph, &allocNode, 1, &kernelParam))
 
   // Without AutoFreeOnLaunch: second launch must fail because the alloc node's
   // memory is still live (no matching free node, memAllocNodeCount > 0).
   SECTION("Without AutoFreeOnLaunch") {
     hipGraphExec_t exec;
-    HIP_CHECK(hipGraphInstantiateWithFlags(&exec, graph, 0));
+    HIP_CHECK(hipGraphInstantiateWithFlags(&exec, graph, 0))
 
-    HIP_CHECK(hipGraphLaunch(exec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(exec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     // Second launch must return hipErrorInvalidValue
     hipError_t err = hipGraphLaunch(exec, stream);
     REQUIRE(err == hipErrorInvalidValue);
 
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
     // Free the still-live allocation from the alloc node so the pool can reap it
-    HIP_CHECK(hipFreeAsync(allocParam.dptr, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipFreeAsync(allocParam.dptr, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
+    HIP_CHECK(hipGraphExecDestroy(exec))
   }
 
   // With AutoFreeOnLaunch: the runtime frees all prior allocations before
@@ -904,13 +904,13 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch) {
                                            hipGraphInstantiateFlagAutoFreeOnLaunch));
 
     // First launch — alloc node acquires memory
-    HIP_CHECK(hipGraphLaunch(exec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(exec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     // Second launch — AutoFreeOnLaunch frees the previous allocation
     // (even though it was still mapped), then alloc node re-allocates.
-    HIP_CHECK(hipGraphLaunch(exec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(exec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
     
     auto statsAfterSecond = queryGraphMem(device);
     
@@ -924,14 +924,14 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch) {
     REQUIRE(statsAfterSecond.usedCurrent == kAllocSize * 2 );
 #endif
 
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
     // Free the still-live allocation from the alloc node so the pool can reap it
-    HIP_CHECK(hipFreeAsync(allocParam.dptr, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipFreeAsync(allocParam.dptr, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
+    HIP_CHECK(hipGraphExecDestroy(exec))
   }
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -954,7 +954,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch) {
  */
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_CaptureEscapedUseAfterDestroy) {
   const int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   // Consume any sticky last-error left by a previous test (some tests
   // deliberately provoke hipErrorInvalidValue), so our hipGetLastError()
@@ -970,48 +970,48 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_CaptureEscapedUseAfterDestroy) {
 
   // Delta-based accounting against a trimmed baseline keeps this test
   // independent of pool residue left by other tests (order-independent).
-  HIP_CHECK(hipDeviceGraphMemTrim(device));
+  HIP_CHECK(hipDeviceGraphMemTrim(device))
   const uint64_t baseline = queryGraphMem(device).usedCurrent;
 
   // Capture an allocation node with NO matching free node -> escaped allocation.
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
   float* dPtr = nullptr;
-  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&dPtr), bytes, stream));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&dPtr), bytes, stream))
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
 
   hipGraphExec_t graphExec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // While the allocation is alive it is usable.
   fillKernel<<<gridSize, kBlockSize, 0, stream>>>(dPtr, 42.0f, n);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipStreamSynchronize(stream))
   float host = 0.0f;
-  HIP_CHECK(hipMemcpy(&host, dPtr, sizeof(float), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&host, dPtr, sizeof(float), hipMemcpyDeviceToHost))
   REQUIRE(host == 42.0f);
 
   // Destroy the executable graph and the graph. This must NOT free dPtr.
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 
   // The escaped allocation is still owned by the pool after destruction.
   REQUIRE(queryGraphMem(device).usedCurrent >= baseline + bytes);
 
   // Use-after-destroy must still succeed (this faulted before the fix).
   fillKernel<<<gridSize, kBlockSize, 0, stream>>>(dPtr, 1337.0f, n);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipStreamSynchronize(stream))
   host = 0.0f;
-  HIP_CHECK(hipMemcpy(&host, dPtr, sizeof(float), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&host, dPtr, sizeof(float), hipMemcpyDeviceToHost))
   REQUIRE(host == 1337.0f);
 
   // The application frees it explicitly; the pool reclaims it back to baseline.
-  HIP_CHECK(hipFreeAsync(dPtr, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipDeviceGraphMemTrim(device));
+  HIP_CHECK(hipFreeAsync(dPtr, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipDeviceGraphMemTrim(device))
   REQUIRE(queryGraphMem(device).usedCurrent == baseline);
 }
 

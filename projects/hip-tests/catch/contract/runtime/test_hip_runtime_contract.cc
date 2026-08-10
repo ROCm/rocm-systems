@@ -11,14 +11,14 @@
 
 // @asserts: hipInit - initializing the runtime with flags 0 succeeds
 HIP_TEST_CASE(Contract_Runtime_HipInit_ZeroFlags_Succeeds) {
-  HIP_CHECK(hipInit(0));
+  HIP_CHECK(hipInit(0))
 }
 
 // @asserts: hipGetDeviceCount - reports at least one visible HIP device
 HIP_TEST_CASE(Contract_Runtime_HipGetDeviceCount_Default_ReturnsPositiveCount) {
   int device_count = 0;
 
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
 
   REQUIRE(device_count > 0);
 }
@@ -28,8 +28,8 @@ HIP_TEST_CASE(Contract_Runtime_HipGetDevice_Default_ReturnsValidOrdinal) {
   int device_count = 0;
   int device = -1;
 
-  HIP_CHECK(hipGetDeviceCount(&device_count));
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
+  HIP_CHECK(hipGetDevice(&device))
 
   REQUIRE(device_count > 0);
   REQUIRE(device >= 0);
@@ -41,9 +41,9 @@ HIP_TEST_CASE(Contract_Runtime_HipSetDevice_SetCurrentDevice_RoundTripsThroughGe
   int original_device = 0;
   int current_device = -1;
 
-  HIP_CHECK(hipGetDevice(&original_device));
-  HIP_CHECK(hipSetDevice(original_device));
-  HIP_CHECK(hipGetDevice(&current_device));
+  HIP_CHECK(hipGetDevice(&original_device))
+  HIP_CHECK(hipSetDevice(original_device))
+  HIP_CHECK(hipGetDevice(&current_device))
 
   REQUIRE(current_device == original_device);
 }
@@ -52,7 +52,7 @@ HIP_TEST_CASE(Contract_Runtime_HipSetDevice_SetCurrentDevice_RoundTripsThroughGe
 HIP_TEST_CASE(Contract_Runtime_HipRuntimeGetVersion_RuntimeVersion_ReturnsPositiveVersion) {
   int runtime_version = 0;
 
-  HIP_CHECK(hipRuntimeGetVersion(&runtime_version));
+  HIP_CHECK(hipRuntimeGetVersion(&runtime_version))
 
   REQUIRE(runtime_version > 0);
 }
@@ -61,7 +61,7 @@ HIP_TEST_CASE(Contract_Runtime_HipRuntimeGetVersion_RuntimeVersion_ReturnsPositi
 HIP_TEST_CASE(Contract_Runtime_HipDriverGetVersion_DriverVersion_ReturnsNonNegativeVersion) {
   int driver_version = -1;
 
-  HIP_CHECK(hipDriverGetVersion(&driver_version));
+  HIP_CHECK(hipDriverGetVersion(&driver_version))
 
   REQUIRE(driver_version >= 0);
 }
@@ -85,19 +85,19 @@ HIP_TEST_CASE(Contract_Runtime_HipGetErrorString_Success_ReturnsSuccessString) {
 
 // @asserts: hipGetLastError - returns then clears the last error so a subsequent call reads hipSuccess
 HIP_TEST_CASE(Contract_Runtime_HipGetLastError_Default_ClearsPreviousError) {
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   const hipError_t error = hipMalloc(nullptr, 1);
   REQUIRE(error != hipSuccess);
   HIP_CHECK_ERROR(hipGetLastError(), error);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 }
 
 // @asserts: hipPeekAtLastError - returns the last error without clearing it, unlike hipGetLastError
 HIP_TEST_CASE(Contract_Runtime_HipPeekAtLastError_Default_DoesNotClearPreviousError) {
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   const hipError_t error = hipMalloc(nullptr, 1);
   REQUIRE(error != hipSuccess);
   HIP_CHECK_ERROR(hipPeekAtLastError(), error);
   HIP_CHECK_ERROR(hipGetLastError(), error);
-  HIP_CHECK(hipPeekAtLastError());
+  HIP_CHECK(hipPeekAtLastError())
 }

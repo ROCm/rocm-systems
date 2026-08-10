@@ -34,14 +34,14 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAtoH_multiDevice_PeerDeviceContext, char, i
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices > 1) {
     int peerAccess = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 1, 0));
+    HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 1, 0))
     if (!peerAccess) {
       HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     } else {
-      HIP_CHECK(hipSetDevice(0));
+      HIP_CHECK(hipSetDevice(0))
       hipArray_t A_d;
       TestType *hData{nullptr}, *B_h{nullptr};
       size_t width{NUM_W * sizeof(TestType)};
@@ -50,12 +50,12 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAtoH_multiDevice_PeerDeviceContext, char, i
       HipTest::initArrays<TestType>(nullptr, nullptr, nullptr, &hData, &B_h, nullptr, NUM_W);
       HipTest::setDefaultData<TestType>(NUM_W, hData, B_h, nullptr);
       hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
-      HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
-      HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width, width, NUM_H, hipMemcpyHostToDevice));
+      HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault))
+      HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width, width, NUM_H, hipMemcpyHostToDevice))
 
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
       // Changing the device context
-      HIP_CHECK(hipSetDevice(1));
+      HIP_CHECK(hipSetDevice(1))
 
       // Performing API call
       REQUIRE(hipMemcpyAtoH(B_h, A_d, 0, copy_bytes * sizeof(TestType)) == hipSuccess);
@@ -63,7 +63,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAtoH_multiDevice_PeerDeviceContext, char, i
       REQUIRE(HipTest::checkArray(B_h, hData, copy_bytes, NUM_H) == true);
 
       // DeAllocating the memory
-      HIP_CHECK(hipFreeArray(A_d));
+      HIP_CHECK(hipFreeArray(A_d))
       REQUIRE(HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, hData, B_h, nullptr,
                                             false) == true);
     }

@@ -76,9 +76,9 @@ template <typename T> void DrvMemcpy3DAsync<T>::AllocateMemory() {
       }
     }
   }
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&D_m), &pitch_D, width * sizeof(T), height));
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&E_m), &pitch_E, width * sizeof(T), height));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&D_m), &pitch_D, width * sizeof(T), height))
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&E_m), &pitch_E, width * sizeof(T), height))
   HIP_ARRAY3D_DESCRIPTOR* desc;
   desc = reinterpret_cast<HIP_ARRAY3D_DESCRIPTOR*>(malloc(sizeof(HIP_ARRAY3D_DESCRIPTOR)));
   desc->Format = formatKind;
@@ -87,8 +87,8 @@ template <typename T> void DrvMemcpy3DAsync<T>::AllocateMemory() {
   desc->Height = height;
   desc->Depth = depth;
   desc->Flags = hipArrayDefault;
-  HIP_CHECK(hipArray3DCreate(&arr, desc));
-  HIP_CHECK(hipArray3DCreate(&arr1, desc));
+  HIP_CHECK(hipArray3DCreate(&arr, desc))
+  HIP_CHECK(hipArray3DCreate(&arr1, desc))
 }
 
 /* Setting the default data */
@@ -112,11 +112,11 @@ This function verifies the negative scenarios of
 hipDrvMemcpy3DAsync API
 */
 template <typename T> void DrvMemcpy3DAsync<T>::NegativeTests() {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   AllocateMemory();
   SetDefaultData();
   int deviceId;
-  HIP_CHECK(hipGetDevice(&deviceId));
+  HIP_CHECK(hipGetDevice(&deviceId))
   unsigned int MaxPitch;
   HIP_CHECK(hipDeviceGetAttribute(reinterpret_cast<int*>(&MaxPitch), hipDeviceAttributeMaxPitch,
                                   deviceId));
@@ -251,7 +251,7 @@ This function verifies the Extent validation scenarios of
 hipDrvMemcpy3DAsync API
 */
 template <typename T> void DrvMemcpy3DAsync<T>::Extent_Validation() {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   // Allocating the memory
   AllocateMemory();
 
@@ -268,20 +268,20 @@ template <typename T> void DrvMemcpy3DAsync<T>::Extent_Validation() {
 
   SECTION("WidthInBytes is 0") {
     myparms.WidthInBytes = 0;
-    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 
   SECTION("Height is 0") {
     myparms.Height = 0;
-    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 
   SECTION("Depth is 0") {
     myparms.Depth = 0;
-    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 
   DeAllocateMemory();
@@ -300,17 +300,17 @@ This functionality is verified in 2 scenarios
 */
 template <typename T>
 void DrvMemcpy3DAsync<T>::HostDevice_DrvMemcpy3DAsync(bool device_context_change) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   bool skip_test = false;
   int peerAccess = 0;
   AllocateMemory();
   if (device_context_change) {
-    HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
+    HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1))
     if (!peerAccess) {
       HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       skip_test = true;
     } else {
-      HIP_CHECK(hipSetDevice(1));
+      HIP_CHECK(hipSetDevice(1))
     }
   }
   if (!skip_test) {
@@ -323,8 +323,8 @@ void DrvMemcpy3DAsync<T>::HostDevice_DrvMemcpy3DAsync(bool device_context_change
     myparms.dstDevice = hipDeviceptr_t(D_m);
     myparms.dstPitch = pitch_D;
     myparms.dstHeight = height;
-    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     // Device to Device
     SetDefaultData();
@@ -336,8 +336,8 @@ void DrvMemcpy3DAsync<T>::HostDevice_DrvMemcpy3DAsync(bool device_context_change
     myparms.dstDevice = hipDeviceptr_t(E_m);
     myparms.dstPitch = pitch_E;
     myparms.dstHeight = height;
-    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
     T* hOutputData = reinterpret_cast<T*>(malloc(size));
     memset(hOutputData, 0, size);
 
@@ -351,8 +351,8 @@ void DrvMemcpy3DAsync<T>::HostDevice_DrvMemcpy3DAsync(bool device_context_change
     myparms.dstHost = hOutputData;
     myparms.dstPitch = width * sizeof(T);
     myparms.dstHeight = height;
-    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     HipTest::checkArray(hData, hOutputData, width, height, depth);
     free(hOutputData);
@@ -374,17 +374,17 @@ This functionality is verified in 2 scenarios
 */
 template <typename T>
 void DrvMemcpy3DAsync<T>::HostArray_DrvMemcpy3DAsync(bool device_context_change) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   bool skip_test = false;
   int peerAccess = 0;
   AllocateMemory();
   if (device_context_change) {
-    HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
+    HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1))
     if (!peerAccess) {
       HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       skip_test = true;
     } else {
-      HIP_CHECK(hipSetDevice(1));
+      HIP_CHECK(hipSetDevice(1))
     }
   }
   if (!skip_test) {
@@ -395,16 +395,16 @@ void DrvMemcpy3DAsync<T>::HostArray_DrvMemcpy3DAsync(bool device_context_change)
     myparms.srcPitch = width * sizeof(T);
     myparms.srcHeight = height;
     myparms.dstArray = arr;
-    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
     // Array to Array
     SetDefaultData();
     myparms.srcMemoryType = hipMemoryTypeArray;
     myparms.dstMemoryType = hipMemoryTypeArray;
     myparms.srcArray = arr;
     myparms.dstArray = arr1;
-    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
     T* hOutputData = reinterpret_cast<T*>(malloc(size));
     memset(hOutputData, 0, size);
     SetDefaultData();
@@ -415,8 +415,8 @@ void DrvMemcpy3DAsync<T>::HostArray_DrvMemcpy3DAsync(bool device_context_change)
     myparms.dstHost = hOutputData;
     myparms.dstPitch = width * sizeof(T);
     myparms.dstHeight = height;
-    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     HipTest::checkArray(hData, hOutputData, width, height, depth);
     free(hOutputData);
@@ -426,9 +426,9 @@ void DrvMemcpy3DAsync<T>::HostArray_DrvMemcpy3DAsync(bool device_context_change)
 
 /* DeAllocating the memory */
 template <typename T> void DrvMemcpy3DAsync<T>::DeAllocateMemory() {
-  HIP_CHECK(hipArrayDestroy(arr));
-  HIP_CHECK(hipArrayDestroy(arr1));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipArrayDestroy(arr))
+  HIP_CHECK(hipArrayDestroy(arr1))
+  HIP_CHECK(hipStreamDestroy(stream))
   free(hData);
 }
 
@@ -449,7 +449,7 @@ template <typename T> void DrvMemcpy3DAsync<T>::DeAllocateMemory() {
 HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices > 1) {
     DrvMemcpy3DAsync<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
     memcpy3d.HostDevice_DrvMemcpy3DAsync(true);
@@ -474,7 +474,7 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange) {
 HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices > 1) {
     DrvMemcpy3DAsync<float> memcpy3d(10, 10, 10, HIP_AD_FORMAT_FLOAT);
     memcpy3d.HostArray_DrvMemcpy3DAsync(true);
@@ -503,10 +503,10 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test) {
   CHECK_IMAGE_SUPPORT
   constexpr int size_128b = 128, size_256b = 256;
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   for (int i = 0; i < numDevices; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
 
     SECTION("Verify with 128 for all height, width & depth value") {
       DrvMemcpy3DAsync<int> memcpy3d(size_128b, size_128b, size_128b, HIP_AD_FORMAT_SIGNED_INT32);

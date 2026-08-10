@@ -13,12 +13,12 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeGetAttribute_Negative_Parameters) {
   constexpr int N = 1024;
 
   int *A_d, *B_d, *C_d;
-  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N));
+  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N))
 
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipKernelNodeParams node_params{};
   node_params.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
@@ -30,7 +30,7 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeGetAttribute_Negative_Parameters) {
   node_params.kernelParams = reinterpret_cast<void**>(kernel_params);
 
   hipGraphNode_t graph_node;
-  HIP_CHECK(hipGraphAddKernelNode(&graph_node, graph, nullptr, 0, &node_params));
+  HIP_CHECK(hipGraphAddKernelNode(&graph_node, graph, nullptr, 0, &node_params))
 
   hipKernelNodeAttrValue node_attribute;
 
@@ -42,7 +42,7 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeGetAttribute_Negative_Parameters) {
 
   SECTION("node is not a kernel node") {
     hipGraphNode_t empty_node;
-    HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, nullptr, 0));
+    HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, nullptr, 0))
     HIP_CHECK_ERROR(hipGraphKernelNodeGetAttribute(
                         empty_node, hipKernelNodeAttributeAccessPolicyWindow, &node_attribute),
                     hipErrorInvalidValue);
@@ -62,9 +62,9 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeGetAttribute_Negative_Parameters) {
   }
 #endif
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
-  HIP_CHECK(hipFree(C_d));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
+  HIP_CHECK(hipFree(C_d))
 }

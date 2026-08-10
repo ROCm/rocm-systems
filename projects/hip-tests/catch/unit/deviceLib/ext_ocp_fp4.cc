@@ -215,16 +215,16 @@ HIP_TEST_CASE(Unit_ext_ocp_fp4_device_matches_host) {
 
   float2* d_in = nullptr;
   float2* d_out = nullptr;
-  HIP_CHECK(hipMalloc(&d_in, sizeof(float2) * n));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float2) * n));
-  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float2) * n, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&d_in, sizeof(float2) * n))
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float2) * n))
+  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float2) * n, hipMemcpyHostToDevice))
 
   fp4_roundtrip_kernel<<<(n / 256) + 1, 256>>>(d_in, d_out, n);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   std::vector<float2> dev(n, float2(0.0f, 0.0f));
-  HIP_CHECK(hipMemcpy(dev.data(), d_out, sizeof(float2) * n, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(dev.data(), d_out, sizeof(float2) * n, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (size_t i = 0; i < n; ++i) {
     INFO("in (" << in[i].x << "," << in[i].y << ") dev (" << dev[i].x << "," << dev[i].y << ")");
@@ -232,6 +232,6 @@ HIP_TEST_CASE(Unit_ext_ocp_fp4_device_matches_host) {
     REQUIRE(dev[i].y == in[i].y);
   }
 
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipFree(d_in))
+  HIP_CHECK(hipFree(d_out))
 }

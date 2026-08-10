@@ -55,7 +55,7 @@ static void getDeviceCount(int* pdevCnt) {
     // writing only, no need for read-descriptor
     close(fd[0]);
 
-    HIP_CHECK(hipGetDeviceCount(&devCnt));
+    HIP_CHECK(hipGetDeviceCount(&devCnt))
     // send the value on the write-descriptor:
     write(fd[1], &devCnt, sizeof(devCnt));
 
@@ -88,7 +88,7 @@ static bool getTotalMemoryOfMaskedDevices(int actualNumGPUs) {
 #ifdef __HIP_PLATFORM_NVIDIA__
     unsetenv("CUDA_VISIBLE_DEVICES");
     setenv("CUDA_VISIBLE_DEVICES", visibleDeviceString, 1);
-    HIP_CHECK(hipInit(0));
+    HIP_CHECK(hipInit(0))
 #else
     unsetenv("ROCR_VISIBLE_DEVICES");
     unsetenv("HIP_VISIBLE_DEVICES");

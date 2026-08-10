@@ -200,7 +200,7 @@ void computeDotProduct(int n, const double* x, const double* y, double& result, 
   hipLaunchKernelGGL(dot_reduction<DOT_DIM>, dim3(1), threadsPerBlock, 0, 0, workspace);
 
   // Copy the final dot product result back from the device
-  HIP_CHECK(hipMemcpy(&result, workspace, sizeof(double), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&result, workspace, sizeof(double), hipMemcpyDeviceToHost))
 
   return;
 }
@@ -220,14 +220,14 @@ void computeDotProduct(int n, const double* x, const double* y, double& result, 
 HIP_TEST_CASE(Performance_hipPerfDotProduct) {
   int nGpu = 0;
   int p_gpuDevice = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpu));
+  HIP_CHECK(hipGetDeviceCount(&nGpu))
 
   if (nGpu < 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
   hipDeviceProp_t props;
-  HIP_CHECK(hipSetDevice(p_gpuDevice));
-  HIP_CHECK(hipGetDeviceProperties(&props, p_gpuDevice));
+  HIP_CHECK(hipSetDevice(p_gpuDevice))
+  HIP_CHECK(hipGetDeviceProperties(&props, p_gpuDevice))
   int nx, ny, nz;
 
   for (unsigned int testCase = 0; testCase < 3; testCase++) {
@@ -278,12 +278,12 @@ HIP_TEST_CASE(Performance_hipPerfDotProduct) {
     double* workspace;
     double dresult;
 
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dx), sizeof(double) * size));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dy), sizeof(double) * size));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&workspace), sizeof(double) * DOT_DIM));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dx), sizeof(double) * size))
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dy), sizeof(double) * size))
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&workspace), sizeof(double) * DOT_DIM))
 
-    HIP_CHECK(hipMemcpy(dx, hx.data(), sizeof(double) * size, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dy, hy.data(), sizeof(double) * size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dx, hx.data(), sizeof(double) * size, hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(dy, hy.data(), sizeof(double) * size, hipMemcpyHostToDevice))
 
     // Warm up
     computeDotProduct(size, dx, dy, dresult, workspace);
@@ -291,7 +291,7 @@ HIP_TEST_CASE(Performance_hipPerfDotProduct) {
     computeDotProduct(size, dx, dy, dresult, workspace);
 
     // Timed run for <x,y>
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     auto all_start = std::chrono::steady_clock::now();
 
     for (int i = 0; i < trials; ++i) {
@@ -320,7 +320,7 @@ HIP_TEST_CASE(Performance_hipPerfDotProduct) {
     computeDotProduct(size, dx, dx, dresult, workspace);
 
     // Timed run for <x,x>
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     all_start = std::chrono::steady_clock::now();
 
     for (int i = 0; i < trials; ++i) {
@@ -340,9 +340,9 @@ HIP_TEST_CASE(Performance_hipPerfDotProduct) {
     // Verify the device kernel results comparing it with the host results
     REQUIRE(abs(dresult - hresult_xx) < max(dresult * 1e-10, 1e-8));
 
-    HIP_CHECK(hipFree(dx));
-    HIP_CHECK(hipFree(dy));
-    HIP_CHECK(hipFree(workspace));
+    HIP_CHECK(hipFree(dx))
+    HIP_CHECK(hipFree(dy))
+    HIP_CHECK(hipFree(workspace))
   }
 }
 

@@ -180,7 +180,7 @@ static DWORD WINAPI workerThread(LPVOID lpParam) {
         node->nodeNumber);
       break;
     case MallocType::hiphostMallocType:
-      HIP_CHECK(hipHostMalloc(&pMem, allocSize, threadPara->flags));
+      HIP_CHECK(hipHostMalloc(&pMem, allocSize, threadPara->flags))
       break;
     default:
       return -1;
@@ -202,7 +202,7 @@ static DWORD WINAPI workerThread(LPVOID lpParam) {
       VirtualFree(pMem, 0, MEM_RELEASE);
       break;
     case MallocType::hiphostMallocType:
-      HIP_CHECK(hipHostFree(pMem));
+      HIP_CHECK(hipHostFree(pMem))
       break;
     default:
       return -1;
@@ -213,7 +213,7 @@ static DWORD WINAPI workerThread(LPVOID lpParam) {
 static void runTestPrefered(std::vector<NumaNodeInfo> &nodes, MallocType type, unsigned int flags,
     const char *description) {
   int gpuCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&gpuCount));
+  HIP_CHECK(hipGetDeviceCount(&gpuCount))
   std::cout << std::dec;
   std::vector<HANDLE> threadHandles;
   std::vector<ThreadPara> paras;
@@ -221,7 +221,7 @@ static void runTestPrefered(std::vector<NumaNodeInfo> &nodes, MallocType type, u
   int index = 0;
   for (int dev = 0; dev < gpuCount; dev++) {
     int numaNode = -1;
-    HIP_CHECK(hipDeviceGetAttribute(&numaNode, hipDeviceAttributeHostNumaId, dev));
+    HIP_CHECK(hipDeviceGetAttribute(&numaNode, hipDeviceAttributeHostNumaId, dev))
     if (numaNode == -1) {
       continue; // Impossible here
     }
@@ -290,11 +290,11 @@ HIP_TEST_CASE(Performance_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_
   std::cout << "logic processor count " << systemInfo.dwNumberOfProcessors
       << ", page size " << pageSize << "\n";
   int numaNode = -1;
-  HIP_CHECK(hipDeviceGetAttribute(&numaNode, hipDeviceAttributeHostNumaId, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&numaNode, hipDeviceAttributeHostNumaId, 0))
   if (numaNode == -1) {
     HIP_SKIP_TEST("host NUMA is not supported.");
   }
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   // In windows, it is the same with / without hipHostMallocNumaUser
   runTestPrefered(nodes,
       MallocType::hiphostMallocType, hipHostMallocDefault | hipHostMallocNumaUser,

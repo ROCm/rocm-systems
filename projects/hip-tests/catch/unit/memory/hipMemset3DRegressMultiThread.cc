@@ -108,13 +108,13 @@ bool loopRegression(bool bAsync) {
   myparms.kind = hipMemcpyDeviceToHost;
 #endif
 
-  HIP_CHECK(hipGetDeviceCount(&numGpu));
+  HIP_CHECK(hipGetDeviceCount(&numGpu))
   REQUIRE(numGpu > 0);
 
   // Alloc 3D arrays in all GPUs
   for (int j = 0; j < numGpu; j++) {
-    HIP_CHECK(hipSetDevice(j));
-    HIP_CHECK(hipMalloc3D(&pitchedPtr, extent));
+    HIP_CHECK(hipSetDevice(j))
+    HIP_CHECK(hipMalloc3D(&pitchedPtr, extent))
     devPitchedPtrlist.push_back(pitchedPtr);
   }
 
@@ -122,30 +122,30 @@ bool loopRegression(bool bAsync) {
     // Validate hipMemset3D data consistency in multiple iters
     for (int i = 0; i < numGpu; i++) {
       for (int j = 0; j < numGpu; j++) {
-        HIP_CHECK(hipDeviceCanAccessPeer(&hasPeerAccess, i, j));
+        HIP_CHECK(hipDeviceCanAccessPeer(&hasPeerAccess, i, j))
         if (!hasPeerAccess) {
           // Skip and continue if no peer access
           continue;
         }
 
-        HIP_CHECK(hipSetDevice(i));
+        HIP_CHECK(hipSetDevice(i))
         devpPtr = devPitchedPtrlist[j];
-        HIP_CHECK(hipDeviceEnablePeerAccess(j, 0));
-        HIP_CHECK(hipMemset3D(devpPtr, 0, extent));
+        HIP_CHECK(hipDeviceEnablePeerAccess(j, 0))
+        HIP_CHECK(hipMemset3D(devpPtr, 0, extent))
 
         if (bAsync) {
           hipStream_t stream;
-          HIP_CHECK(hipStreamCreate(&stream));
-          HIP_CHECK(hipMemset3DAsync(devpPtr, memsetval, extent, stream));
-          HIP_CHECK(hipStreamSynchronize(stream));
-          HIP_CHECK(hipStreamDestroy(stream));
+          HIP_CHECK(hipStreamCreate(&stream))
+          HIP_CHECK(hipMemset3DAsync(devpPtr, memsetval, extent, stream))
+          HIP_CHECK(hipStreamSynchronize(stream))
+          HIP_CHECK(hipStreamDestroy(stream))
         } else {
-          HIP_CHECK(hipMemset3D(devpPtr, memsetval, extent));
+          HIP_CHECK(hipMemset3D(devpPtr, memsetval, extent))
         }
 
         myparms.srcPtr = devpPtr;
         memset(A_h, 0, sizeElements);
-        HIP_CHECK(hipMemcpy3D(&myparms));
+        HIP_CHECK(hipMemcpy3D(&myparms))
 
         for (size_t indx = 0; indx < elements; indx++) {
           if (A_h[indx] != memsetval) {
@@ -162,7 +162,7 @@ bool loopRegression(bool bAsync) {
   }
 
   for (int j = 0; j < numGpu; j++) {
-    HIP_CHECK(hipFree(devPitchedPtrlist[j].ptr));
+    HIP_CHECK(hipFree(devPitchedPtrlist[j].ptr))
   }
 
   free(A_h);
@@ -208,8 +208,8 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_ConcurrencyMthread) {
   hipPitchedPtr devpPtr;
   hipStream_t stream;
 
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipMalloc3D(&devpPtr, extent));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipMalloc3D(&devpPtr, extent))
 
   A_h = reinterpret_cast<char*>(malloc(sizeElements));
   REQUIRE(A_h != nullptr);
@@ -252,7 +252,7 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_ConcurrencyMthread) {
     }
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
   free(A_h);
-  HIP_CHECK(hipFree(devpPtr.ptr));
+  HIP_CHECK(hipFree(devpPtr.ptr))
 }

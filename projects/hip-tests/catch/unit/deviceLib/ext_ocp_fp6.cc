@@ -179,16 +179,16 @@ HIP_TEST_CASE(Unit_ext_ocp_fp6_device_matches_host) {
 
   float* d_in = nullptr;
   float* d_out = nullptr;
-  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * 32));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * 32));
-  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * 32, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * 32))
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * 32))
+  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * 32, hipMemcpyHostToDevice))
 
   fp6_e2m3_roundtrip_kernel<<<1, 1>>>(d_in, d_out);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   std::vector<float> dev(32, 0.0f);
-  HIP_CHECK(hipMemcpy(dev.data(), d_out, sizeof(float) * 32, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(dev.data(), d_out, sizeof(float) * 32, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   __amd_floatx32_storage_t hv = tile32(kE2M3);
   __hipext_ocp_fp6x32_e2m3 h(hv, 0u /*round*/, 0 /*scale*/);
@@ -200,6 +200,6 @@ HIP_TEST_CASE(Unit_ext_ocp_fp6_device_matches_host) {
     REQUIRE(dev[i] == in[i]);
   }
 
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipFree(d_in))
+  HIP_CHECK(hipFree(d_out))
 }

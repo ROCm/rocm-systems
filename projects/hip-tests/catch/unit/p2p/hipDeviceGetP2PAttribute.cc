@@ -66,7 +66,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetP2PAttribute_Basic) {
     for (int dstDevice = 0; dstDevice < deviceCount; ++dstDevice) {
       if (srcDevice != dstDevice) {
         int value{-1};
-        HIP_CHECK(hipDeviceGetP2PAttribute(&value, attribute, srcDevice, dstDevice));
+        HIP_CHECK(hipDeviceGetP2PAttribute(&value, attribute, srcDevice, dstDevice))
         INFO("hipDeviceP2PAttr: " << attribute << "\nsrcDevice: " << srcDevice
                                   << "\ndstDevice: " << dstDevice << "\nValue: " << value);
         if (attribute == hipDevP2PAttrPerformanceRank) {
@@ -141,7 +141,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetP2PAttribute_Negative) {
 
   SECTION("Device is out of bounds") {
     int deviceCount = 0;
-    HIP_CHECK(hipGetDeviceCount(&deviceCount));
+    HIP_CHECK(hipGetDeviceCount(&deviceCount))
     REQUIRE_FALSE(deviceCount == 0);
 
     HIP_CHECK_ERROR(hipDeviceGetP2PAttribute(&value, validAttr, deviceCount, validDstDevice),

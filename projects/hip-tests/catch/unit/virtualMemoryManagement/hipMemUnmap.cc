@@ -38,7 +38,7 @@ HIP_TEST_CASE(Unit_hipMemUnmap_negative) {
   hipDevice_t device;
 
   CTX_CREATE();
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
   checkVMMSupported(device);
 
   hipMemAllocationProp prop{};
@@ -54,10 +54,10 @@ HIP_TEST_CASE(Unit_hipMemUnmap_negative) {
   hipMemGenericAllocationHandle_t handle;
   void* ptrA;
   // Allocate physical memory
-  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
-  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
 
   SECTION("nullptr to ptrA") { REQUIRE(hipMemUnmap(nullptr, size_mem) == hipErrorInvalidValue); }
 
@@ -68,27 +68,27 @@ HIP_TEST_CASE(Unit_hipMemUnmap_negative) {
   }
 
   SECTION("double unmap of mapped VA") {
-    HIP_CHECK(hipMemUnmap(ptrA, size_mem));
+    HIP_CHECK(hipMemUnmap(ptrA, size_mem))
     // Second call: the MemObjMap entry is gone, so the validator now
     // rejects the lookup. Must report hipErrorInvalidValue
     REQUIRE(hipMemUnmap(ptrA, size_mem) == hipErrorInvalidValue);
     // Re-map so the common-path cleanup at the end of the test still
     // finds a live mapping to tear down.
-    HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
+    HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   }
 
   SECTION("unmap of reserved-but-never-mapped VA") {
     void* unmappedVa = nullptr;
-    HIP_CHECK(hipMemAddressReserve(&unmappedVa, size_mem, 0, 0, 0));
+    HIP_CHECK(hipMemAddressReserve(&unmappedVa, size_mem, 0, 0, 0))
     // No hipMemMap has been issued against unmappedVa, so no entry
     // exists. Validation must reject with hipErrorInvalidValue
     REQUIRE(hipMemUnmap(unmappedVa, size_mem) == hipErrorInvalidValue);
-    HIP_CHECK(hipMemAddressFree(unmappedVa, size_mem));
+    HIP_CHECK(hipMemAddressFree(unmappedVa, size_mem))
   }
 
-  HIP_CHECK(hipMemUnmap(ptrA, size_mem));
-  HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
-  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemUnmap(ptrA, size_mem))
+  HIP_CHECK(hipMemAddressFree(ptrA, size_mem))
+  HIP_CHECK(hipMemRelease(handle))
   CTX_DESTROY();
 }
 
@@ -99,7 +99,7 @@ HIP_TEST_CASE(Unit_hipMemUnmap_Capture) {
   int device_id = 0;
   hipDevice_t device;
 
-  HIP_CHECK(hipDeviceGet(&device, device_id));
+  HIP_CHECK(hipDeviceGet(&device, device_id))
   checkVMMSupported(device);
 
   hipMemAllocationProp allocation_prop{};
@@ -114,21 +114,21 @@ HIP_TEST_CASE(Unit_hipMemUnmap_Capture) {
 
   hipMemGenericAllocationHandle_t allocation_handle;
   void* device_ptr = nullptr;
-  HIP_CHECK(hipMemCreate(&allocation_handle, mem_size, &allocation_prop, 0));
-  HIP_CHECK(hipMemAddressReserve(&device_ptr, mem_size, 0, nullptr, 0));
-  HIP_CHECK(hipMemMap(device_ptr, mem_size, 0, allocation_handle, 0));
-  HIP_CHECK(hipMemRelease(allocation_handle));
+  HIP_CHECK(hipMemCreate(&allocation_handle, mem_size, &allocation_prop, 0))
+  HIP_CHECK(hipMemAddressReserve(&device_ptr, mem_size, 0, nullptr, 0))
+  HIP_CHECK(hipMemMap(device_ptr, mem_size, 0, allocation_handle, 0))
+  HIP_CHECK(hipMemRelease(allocation_handle))
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemUnmap(device_ptr, mem_size));
+  HIP_CHECK(hipMemUnmap(device_ptr, mem_size))
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipMemAddressFree(device_ptr, mem_size));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipMemAddressFree(device_ptr, mem_size))
   CTX_DESTROY();
 }
 
@@ -145,12 +145,12 @@ HIP_TEST_CASE(Unit_hipMemUnmap_Capture) {
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemUnmap_CrossLinksTornDown) {
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
   int deviceId = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
@@ -163,25 +163,25 @@ HIP_TEST_CASE(Unit_hipMemUnmap_CrossLinksTornDown) {
 
   hipMemGenericAllocationHandle_t handle;
   void* ptr = nullptr;
-  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
-  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, 0, 0));
-  HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle, 0));
+  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle, 0))
 
   // Sanity: cross-link is wired pre-unmap.
   hipMemGenericAllocationHandle_t retrieved = 0;  // 0 instead of nullptr: handle is an integer type on CUDA
-  HIP_CHECK(hipMemRetainAllocationHandle(&retrieved, ptr));
+  HIP_CHECK(hipMemRetainAllocationHandle(&retrieved, ptr))
   REQUIRE(retrieved == handle);
-  HIP_CHECK(hipMemRelease(retrieved));
+  HIP_CHECK(hipMemRelease(retrieved))
 
-  HIP_CHECK(hipMemUnmap(ptr, size_mem));
+  HIP_CHECK(hipMemUnmap(ptr, size_mem))
 
   // After unmap: MemObjMap::RemoveMemObj must have run and the
   // cross-link must be torn down. retainAllocationHandle on the
   // still-reserved VA must now fail.
   REQUIRE(hipMemRetainAllocationHandle(&retrieved, ptr) == hipErrorInvalidValue);
 
-  HIP_CHECK(hipMemRelease(handle));
-  HIP_CHECK(hipMemAddressFree(ptr, size_mem));
+  HIP_CHECK(hipMemRelease(handle))
+  HIP_CHECK(hipMemAddressFree(ptr, size_mem))
 }
 
 /**
@@ -199,12 +199,12 @@ HIP_TEST_CASE(Unit_hipMemUnmap_CrossLinksTornDown) {
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemUnmap_RemapCrossLinks) {
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
   int deviceId = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
@@ -216,31 +216,31 @@ HIP_TEST_CASE(Unit_hipMemUnmap_RemapCrossLinks) {
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
 
   hipMemGenericAllocationHandle_t handle1, handle2;
-  HIP_CHECK(hipMemCreate(&handle1, size_mem, &prop, 0));
-  HIP_CHECK(hipMemCreate(&handle2, size_mem, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle1, size_mem, &prop, 0))
+  HIP_CHECK(hipMemCreate(&handle2, size_mem, &prop, 0))
 
   void* ptr = nullptr;
-  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, 0, 0));
+  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, 0, 0))
 
-  HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle1, 0));
+  HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle1, 0))
   hipMemGenericAllocationHandle_t retrieved = 0;  // 0 instead of nullptr: handle is an integer type on CUDA
-  HIP_CHECK(hipMemRetainAllocationHandle(&retrieved, ptr));
+  HIP_CHECK(hipMemRetainAllocationHandle(&retrieved, ptr))
   REQUIRE(retrieved == handle1);
-  HIP_CHECK(hipMemRelease(retrieved));
+  HIP_CHECK(hipMemRelease(retrieved))
 
-  HIP_CHECK(hipMemUnmap(ptr, size_mem));
+  HIP_CHECK(hipMemUnmap(ptr, size_mem))
 
   // Helper cleared the slot -- remap with different handle must succeed
   // and the cross-link must point at handle2 (not the stale handle1).
-  HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle2, 0));
-  HIP_CHECK(hipMemRetainAllocationHandle(&retrieved, ptr));
+  HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle2, 0))
+  HIP_CHECK(hipMemRetainAllocationHandle(&retrieved, ptr))
   REQUIRE(retrieved == handle2);
-  HIP_CHECK(hipMemRelease(retrieved));
+  HIP_CHECK(hipMemRelease(retrieved))
 
-  HIP_CHECK(hipMemUnmap(ptr, size_mem));
-  HIP_CHECK(hipMemRelease(handle1));
-  HIP_CHECK(hipMemRelease(handle2));
-  HIP_CHECK(hipMemAddressFree(ptr, size_mem));
+  HIP_CHECK(hipMemUnmap(ptr, size_mem))
+  HIP_CHECK(hipMemRelease(handle1))
+  HIP_CHECK(hipMemRelease(handle2))
+  HIP_CHECK(hipMemAddressFree(ptr, size_mem))
 }
 
 /**
@@ -277,12 +277,12 @@ static __global__ void unmap_slow_marker_kernel(int* buf, int iters, int marker)
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemUnmap_DirectPath_BasicRoundTrip) {
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
   int deviceId = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
@@ -301,8 +301,8 @@ HIP_TEST_CASE(Unit_hipMemUnmap_DirectPath_BasicRoundTrip) {
 
   hipMemGenericAllocationHandle_t handle;
   void* ptr = nullptr;
-  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
-  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, 0, 0));
+  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, 0, 0))
 
   hipMemAccessDesc accessDesc{};
   accessDesc.location.type = hipMemLocationTypeDevice;
@@ -310,32 +310,32 @@ HIP_TEST_CASE(Unit_hipMemUnmap_DirectPath_BasicRoundTrip) {
   accessDesc.flags = hipMemAccessFlagsProtReadWrite;
 
   // First cycle: map, write via kernel, unmap (the direct path under test).
-  HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle, 0));
-  HIP_CHECK(hipMemSetAccess(ptr, size_mem, &accessDesc, 1));
-  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptr), A_h.data(), buffer_size));
+  HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle, 0))
+  HIP_CHECK(hipMemSetAccess(ptr, size_mem, &accessDesc, 1))
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptr), A_h.data(), buffer_size))
   unmap_square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, 0>>>(
       reinterpret_cast<int*>(ptr));
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipStreamSynchronize(0))
   std::fill(B_h.begin(), B_h.end(), 0);
-  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptr), buffer_size));
+  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptr), buffer_size))
   REQUIRE(std::equal(B_h.begin(), B_h.end(), C_h.data()));
-  HIP_CHECK(hipMemUnmap(ptr, size_mem));
+  HIP_CHECK(hipMemUnmap(ptr, size_mem))
 
   // Second cycle: same VA + same handle must remap cleanly and read/write
   // through the new mapping must produce fresh data.
-  HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle, 0));
-  HIP_CHECK(hipMemSetAccess(ptr, size_mem, &accessDesc, 1));
-  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptr), A_h.data(), buffer_size));
+  HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle, 0))
+  HIP_CHECK(hipMemSetAccess(ptr, size_mem, &accessDesc, 1))
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptr), A_h.data(), buffer_size))
   unmap_square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, 0>>>(
       reinterpret_cast<int*>(ptr));
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipStreamSynchronize(0))
   std::fill(B_h.begin(), B_h.end(), 0);
-  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptr), buffer_size));
+  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptr), buffer_size))
   REQUIRE(std::equal(B_h.begin(), B_h.end(), C_h.data()));
-  HIP_CHECK(hipMemUnmap(ptr, size_mem));
+  HIP_CHECK(hipMemUnmap(ptr, size_mem))
 
-  HIP_CHECK(hipMemRelease(handle));
-  HIP_CHECK(hipMemAddressFree(ptr, size_mem));
+  HIP_CHECK(hipMemRelease(handle))
+  HIP_CHECK(hipMemAddressFree(ptr, size_mem))
 }
 
 /**
@@ -351,12 +351,12 @@ HIP_TEST_CASE(Unit_hipMemUnmap_DirectPath_BasicRoundTrip) {
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemUnmap_DirectPath_InFlightKernelDrained) {
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
   int deviceId = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, deviceId))
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
@@ -369,33 +369,33 @@ HIP_TEST_CASE(Unit_hipMemUnmap_DirectPath_InFlightKernelDrained) {
 
   hipMemGenericAllocationHandle_t handle;
   void* ptr = nullptr;
-  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
-  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, 0, 0));
-  HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle, 0));
+  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle, 0))
 
   hipMemAccessDesc accessDesc{};
   accessDesc.location.type = hipMemLocationTypeDevice;
   accessDesc.location.id = device;
   accessDesc.flags = hipMemAccessFlagsProtReadWrite;
-  HIP_CHECK(hipMemSetAccess(ptr, size_mem, &accessDesc, 1));
+  HIP_CHECK(hipMemSetAccess(ptr, size_mem, &accessDesc, 1))
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   constexpr int kSlowIters = 1 << 20;
   unmap_slow_marker_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, stream>>>(
       reinterpret_cast<int*>(ptr), kSlowIters, 7);
 
   // No explicit sync -- the direct hipMemUnmap path must drain the
   // access-device queues before tearing the mapping down.
-  HIP_CHECK(hipMemUnmap(ptr, size_mem));
+  HIP_CHECK(hipMemUnmap(ptr, size_mem))
 
   // If SyncAllStreams was called for the access device, the stream
   // has no pending work. Otherwise hipStreamQuery returns hipErrorNotReady.
   REQUIRE(hipStreamQuery(stream) == hipSuccess);
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipMemRelease(handle));
-  HIP_CHECK(hipMemAddressFree(ptr, size_mem));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipMemRelease(handle))
+  HIP_CHECK(hipMemAddressFree(ptr, size_mem))
 }
 
 /**

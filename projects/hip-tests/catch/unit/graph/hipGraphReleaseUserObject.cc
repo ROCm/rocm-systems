@@ -17,7 +17,7 @@
  */
 HIP_TEST_CASE(Unit_hipGraphReleaseUserObject_Negative) {
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   float* object = new float();
   REQUIRE(object != nullptr);
@@ -26,7 +26,7 @@ HIP_TEST_CASE(Unit_hipGraphReleaseUserObject_Negative) {
   HIP_CHECK(
       hipUserObjectCreate(&hObject, object, destroyFloatObj, 1, hipUserObjectNoDestructorSync));
   REQUIRE(hObject != nullptr);
-  HIP_CHECK(hipGraphRetainUserObject(graph, hObject, 1, hipGraphUserObjectMove));
+  HIP_CHECK(hipGraphRetainUserObject(graph, hObject, 1, hipGraphUserObjectMove))
 
   SECTION("Pass graph as nullptr") {
     HIP_CHECK_ERROR(hipGraphReleaseUserObject(nullptr, hObject, 1), hipErrorInvalidValue);
@@ -38,9 +38,9 @@ HIP_TEST_CASE(Unit_hipGraphReleaseUserObject_Negative) {
     HIP_CHECK_ERROR(hipGraphReleaseUserObject(graph, hObject, 0), hipErrorInvalidValue);
   }
   SECTION("Pass initialRefcount as INT_MAX") {
-    HIP_CHECK(hipGraphReleaseUserObject(graph, hObject, INT_MAX));
+    HIP_CHECK(hipGraphReleaseUserObject(graph, hObject, INT_MAX))
   }
 
-  HIP_CHECK(hipUserObjectRelease(hObject, 1));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipUserObjectRelease(hObject, 1))
+  HIP_CHECK(hipGraphDestroy(graph))
 }

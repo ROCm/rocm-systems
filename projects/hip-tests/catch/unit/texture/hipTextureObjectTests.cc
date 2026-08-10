@@ -35,7 +35,7 @@ class TextureObjectTestWrapper {
     }
 
     channel_desc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
-    HIP_CHECK(hipMallocArray(&array_member, &channel_desc, width));
+    HIP_CHECK(hipMallocArray(&array_member, &channel_desc, width))
 
     HIP_CHECK(
         hipMemcpy2DToArray(array_member, 0, 0, host_data_, size, size, 1, hipMemcpyHostToDevice));
@@ -69,9 +69,9 @@ class TextureObjectTestWrapper {
 
   ~TextureObjectTestWrapper() {
     if (!ommit_destroy_) {
-      HIP_CHECK(hipDestroyTextureObject(texture_object));
+      HIP_CHECK(hipDestroyTextureObject(texture_object))
     }
-    HIP_CHECK(hipFreeArray(array_member));
+    HIP_CHECK(hipFreeArray(array_member))
     free(host_data_);
   }
 };
@@ -107,7 +107,7 @@ HIP_TEST_CASE(Unit_hipGetTextureObjectResourceDesc_positive) {
   hipResourceDesc check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
 
-  HIP_CHECK(hipGetTextureObjectResourceDesc(&check_desc, tex_obj_wrapper.texture_object));
+  HIP_CHECK(hipGetTextureObjectResourceDesc(&check_desc, tex_obj_wrapper.texture_object))
 
   REQUIRE(check_desc.resType == tex_obj_wrapper.res_desc.resType);
   REQUIRE(check_desc.res.array.array == tex_obj_wrapper.res_desc.res.array.array);
@@ -187,7 +187,7 @@ HIP_TEST_CASE(Unit_hipGetTextureObjectResourceViewDesc_positive) {
   hipResourceViewDesc check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
 
-  HIP_CHECK(hipGetTextureObjectResourceViewDesc(&check_desc, tex_obj_wrapper.texture_object));
+  HIP_CHECK(hipGetTextureObjectResourceViewDesc(&check_desc, tex_obj_wrapper.texture_object))
 
   REQUIRE(check_desc.format == tex_obj_wrapper.res_vew_desc.format);
   REQUIRE(check_desc.width == tex_obj_wrapper.res_vew_desc.width);
@@ -271,7 +271,7 @@ HIP_TEST_CASE(Unit_hipGetTextureObjectTextureDesc_positive) {
   hipTextureDesc check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
 
-  HIP_CHECK(hipGetTextureObjectTextureDesc(&check_desc, tex_obj_wrapper.texture_object));
+  HIP_CHECK(hipGetTextureObjectTextureDesc(&check_desc, tex_obj_wrapper.texture_object))
 
   REQUIRE(check_desc.addressMode[0] == tex_obj_wrapper.tex_desc.addressMode[0]);
   REQUIRE(check_desc.filterMode == tex_obj_wrapper.tex_desc.filterMode);

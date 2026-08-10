@@ -27,7 +27,7 @@ HIP_TEST_CASE(Unit_hipGraphicsGLRegisterImage_Positive_Basic) {
   std::vector<int> gl_devices(device_count, -1);
 
   // Initialize GL interop
-  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll));
+  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll))
   REQUIRE(gl_device_count == 1);
   REQUIRE(gl_devices.at(0) == 0);
 
@@ -37,9 +37,9 @@ HIP_TEST_CASE(Unit_hipGraphicsGLRegisterImage_Positive_Basic) {
 
   hipGraphicsResource* tex_resource;
 
-  HIP_CHECK(hipGraphicsGLRegisterImage(&tex_resource, tex, GL_TEXTURE_2D, flags));
+  HIP_CHECK(hipGraphicsGLRegisterImage(&tex_resource, tex, GL_TEXTURE_2D, flags))
 
-  HIP_CHECK(hipGraphicsUnregisterResource(tex_resource));
+  HIP_CHECK(hipGraphicsUnregisterResource(tex_resource))
 }
 
 HIP_TEST_CASE(Unit_hipGraphicsGLRegisterImage_Positive_Register_Twice) {
@@ -51,7 +51,7 @@ HIP_TEST_CASE(Unit_hipGraphicsGLRegisterImage_Positive_Register_Twice) {
   std::vector<int> gl_devices(device_count, -1);
 
   // Initialize GL interop
-  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll));
+  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll))
   REQUIRE(gl_device_count == 1);
   REQUIRE(gl_devices.at(0) == 0);
 
@@ -64,8 +64,8 @@ HIP_TEST_CASE(Unit_hipGraphicsGLRegisterImage_Positive_Register_Twice) {
   HIP_CHECK(hipGraphicsGLRegisterImage(&tex_resource_2, tex, GL_TEXTURE_2D,
                                        hipGraphicsRegisterFlagsNone));
 
-  HIP_CHECK(hipGraphicsUnregisterResource(tex_resource_1));
-  HIP_CHECK(hipGraphicsUnregisterResource(tex_resource_2));
+  HIP_CHECK(hipGraphicsUnregisterResource(tex_resource_1))
+  HIP_CHECK(hipGraphicsUnregisterResource(tex_resource_2))
 }
 
 HIP_TEST_CASE(Unit_hipGraphicsGLRegisterImage_Negative_Parameters) {

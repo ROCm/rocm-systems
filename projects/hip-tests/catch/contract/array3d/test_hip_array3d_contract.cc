@@ -41,7 +41,7 @@ HIP_TEST_CASE(Contract_Array3D_HipMalloc3DArray_Default_ReturnsUsableArray) {
   hipArray_t array = nullptr;
   const auto desc = ByteChannelDesc();
 
-  HIP_CHECK(hipMalloc3DArray(&array, &desc, ArrayExtent(), 0));
+  HIP_CHECK(hipMalloc3DArray(&array, &desc, ArrayExtent(), 0))
   cleanup.Add([array] { (void)hipFreeArray(array); });
 
   REQUIRE(array != nullptr);
@@ -56,7 +56,7 @@ HIP_TEST_CASE(Contract_Array3D_HipMemcpy3D_ToArrayAndBack_RoundTripsBytes) {
   hipArray_t array = nullptr;
   const auto desc = ByteChannelDesc();
 
-  HIP_CHECK(hipMalloc3DArray(&array, &desc, ArrayExtent(), 0));
+  HIP_CHECK(hipMalloc3DArray(&array, &desc, ArrayExtent(), 0))
   cleanup.Add([array] { (void)hipFreeArray(array); });
 
   hipMemcpy3DParms h2a{};
@@ -64,14 +64,14 @@ HIP_TEST_CASE(Contract_Array3D_HipMemcpy3D_ToArrayAndBack_RoundTripsBytes) {
   h2a.dstArray = array;
   h2a.extent = ArrayExtent();
   h2a.kind = hipMemcpyHostToDevice;
-  HIP_CHECK(hipMemcpy3D(&h2a));
+  HIP_CHECK(hipMemcpy3D(&h2a))
 
   hipMemcpy3DParms a2h{};
   a2h.srcArray = array;
   a2h.dstPtr = HostPitchedPtr(dst.data());
   a2h.extent = ArrayExtent();
   a2h.kind = hipMemcpyDeviceToHost;
-  HIP_CHECK(hipMemcpy3D(&a2h));
+  HIP_CHECK(hipMemcpy3D(&a2h))
 
   REQUIRE(dst == src);
 }
@@ -82,6 +82,6 @@ HIP_TEST_CASE(Contract_Array3D_HipFreeArray_Default_Succeeds) {
   hipArray_t array = nullptr;
   const auto desc = ByteChannelDesc();
 
-  HIP_CHECK(hipMalloc3DArray(&array, &desc, ArrayExtent(), 0));
-  HIP_CHECK(hipFreeArray(array));
+  HIP_CHECK(hipMalloc3DArray(&array, &desc, ArrayExtent(), 0))
+  HIP_CHECK(hipFreeArray(array))
 }

@@ -118,23 +118,23 @@ TEST_CASE("Unit_HRR_FirstMalloc_Direct", "[.][hrr-direct]") {
   float* da = nullptr;
   HIP_CHECK(hipMalloc(&da, kSZ));  // intentionally the first HIP call
   float* dout = nullptr;
-  HIP_CHECK(hipMalloc(&dout, kSZ));
+  HIP_CHECK(hipMalloc(&dout, kSZ))
 
   float* ha = new float[kN];
   float* hout = new float[kN];
   for (int i = 0; i < kN; ++i) ha[i] = 1.0f;
 
-  HIP_CHECK(hipMemcpy(da, ha, kSZ, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(da, ha, kSZ, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(hrr_repro_scale, dim3(kGrid), dim3(kBlock), 0, nullptr,
                      da, dout, 2.0f, kN);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipMemcpy(hout, dout, kSZ, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hout, dout, kSZ, hipMemcpyDeviceToHost))
   for (int i = 0; i < kN; ++i) REQUIRE(hout[i] == 2.0f);
 
-  HIP_CHECK(hipFree(da));
-  HIP_CHECK(hipFree(dout));
+  HIP_CHECK(hipFree(da))
+  HIP_CHECK(hipFree(dout))
   delete[] ha;
   delete[] hout;
 }
@@ -149,32 +149,32 @@ TEST_CASE("Unit_HRR_FirstMalloc_Direct", "[.][hrr-direct]") {
 // a=1, b=1 -> c = a + b = 2  => c[i] == 2.0f
 // ===========================================================================
 TEST_CASE("Unit_HRR_EmbeddedPtrStruct_Direct", "[.][hrr-direct]") {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   float *da = nullptr, *db = nullptr, *dc = nullptr;
-  HIP_CHECK(hipMalloc(&da, kSZ));
-  HIP_CHECK(hipMalloc(&db, kSZ));
-  HIP_CHECK(hipMalloc(&dc, kSZ));
+  HIP_CHECK(hipMalloc(&da, kSZ))
+  HIP_CHECK(hipMalloc(&db, kSZ))
+  HIP_CHECK(hipMalloc(&dc, kSZ))
 
   float* ha = new float[kN];
   float* hc = new float[kN];
   for (int i = 0; i < kN; ++i) ha[i] = 1.0f;
 
-  HIP_CHECK(hipMemcpy(da, ha, kSZ, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(db, ha, kSZ, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(da, ha, kSZ, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(db, ha, kSZ, hipMemcpyHostToDevice))
 
   HrrAddArgs args{da, db, dc, kN};
   hipLaunchKernelGGL(hrr_repro_addStruct, dim3(kGrid), dim3(kBlock), 0, nullptr,
                      args);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipMemcpy(hc, dc, kSZ, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hc, dc, kSZ, hipMemcpyDeviceToHost))
   for (int i = 0; i < kN; ++i) REQUIRE(hc[i] == 2.0f);
 
-  HIP_CHECK(hipFree(da));
-  HIP_CHECK(hipFree(db));
-  HIP_CHECK(hipFree(dc));
+  HIP_CHECK(hipFree(da))
+  HIP_CHECK(hipFree(db))
+  HIP_CHECK(hipFree(dc))
   delete[] ha;
   delete[] hc;
 }
@@ -190,30 +190,30 @@ TEST_CASE("Unit_HRR_EmbeddedPtrStruct_Direct", "[.][hrr-direct]") {
 // guard test — no genuine GPU nondeterminism is involved.
 // ===========================================================================
 TEST_CASE("Unit_HRR_UncapturedHostWrite_Direct", "[.][hrr-direct]") {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   int* flag = nullptr;
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&flag), sizeof(int),
                           hipHostMallocMapped));
   int* flag_dev = nullptr;
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&flag_dev), flag, 0));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&flag_dev), flag, 0))
   flag[0] = kFlagSentinel;  // uncaptured CPU store
 
   int* dout = nullptr;
-  HIP_CHECK(hipMalloc(&dout, kN * sizeof(int)));
+  HIP_CHECK(hipMalloc(&dout, kN * sizeof(int)))
   int* hout = new int[kN];
 
   for (int it = 0; it < kDivergeIters; ++it) {
     hipLaunchKernelGGL(hrr_repro_writeFlag, dim3(kGrid), dim3(kBlock), 0, nullptr,
                        dout, flag_dev, kN);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipMemcpy(hout, dout, kN * sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipMemcpy(hout, dout, kN * sizeof(int), hipMemcpyDeviceToHost))
     for (int i = 0; i < kN; ++i) REQUIRE(hout[i] == kFlagSentinel);
   }
 
-  HIP_CHECK(hipFree(dout));
-  HIP_CHECK(hipHostFree(flag));
+  HIP_CHECK(hipFree(dout))
+  HIP_CHECK(hipHostFree(flag))
   delete[] hout;
 }
 
@@ -230,45 +230,45 @@ TEST_CASE("Unit_HRR_UncapturedHostWrite_Direct", "[.][hrr-direct]") {
 // clean; the optional_out argument is genuinely NULL (recorded as 0x0).
 // ===========================================================================
 TEST_CASE("Unit_HRR_NullOptionalPtr_Direct", "[.][hrr-direct]") {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   unsigned* flag = nullptr;
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&flag), sizeof(unsigned),
                           hipHostMallocMapped));
   unsigned* flag_dev = nullptr;
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&flag_dev), flag, 0));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&flag_dev), flag, 0))
   flag[0] = kSlotSentinel;  // uncaptured CPU store
 
   // Divergence source: many D2H readbacks whose value depends on the flag.
   int* dcount = nullptr;
-  HIP_CHECK(hipMalloc(&dcount, kN * sizeof(int)));
+  HIP_CHECK(hipMalloc(&dcount, kN * sizeof(int)))
   int* hcount = new int[kN];
   int* iflag_dev = reinterpret_cast<int*>(flag_dev);
   for (int it = 0; it < kDivergeIters; ++it) {
     hipLaunchKernelGGL(hrr_repro_writeFlag, dim3(kGrid), dim3(kBlock), 0, nullptr,
                        dcount, iflag_dev, kN);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipMemcpy(hcount, dcount, kN * sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipMemcpy(hcount, dcount, kN * sizeof(int), hipMemcpyDeviceToHost))
   }
 
   float* required_out = nullptr;
-  HIP_CHECK(hipMalloc(&required_out, kSZ));
+  HIP_CHECK(hipMalloc(&required_out, kSZ))
   float* optional_out = nullptr;  // genuinely NULL at capture (recorded as 0x0)
 
   hipLaunchKernelGGL(hrr_repro_slotmap, dim3(kGrid), dim3(kBlock), 0, nullptr,
                      required_out, flag_dev, optional_out, kN);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   // D2H readback of the always-valid output so capture records a blob.
   float* hreq = new float[kN];
-  HIP_CHECK(hipMemcpy(hreq, required_out, kSZ, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hreq, required_out, kSZ, hipMemcpyDeviceToHost))
   REQUIRE(hreq[1] == 1.0f);
 
-  HIP_CHECK(hipFree(dcount));
-  HIP_CHECK(hipFree(required_out));
-  HIP_CHECK(hipHostFree(flag));
+  HIP_CHECK(hipFree(dcount))
+  HIP_CHECK(hipFree(required_out))
+  HIP_CHECK(hipHostFree(flag))
   delete[] hcount;
   delete[] hreq;
 }
@@ -283,20 +283,20 @@ TEST_CASE("Unit_HRR_NullOptionalPtr_Direct", "[.][hrr-direct]") {
 // knob off, replay may reuse stale bytes and diverge.
 // ===========================================================================
 TEST_CASE("Unit_HRR_ZeroInitRead_Direct", "[.][hrr-direct]") {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   float* dsrc = nullptr;  // intentionally never written
-  HIP_CHECK(hipMalloc(&dsrc, kSZ));
+  HIP_CHECK(hipMalloc(&dsrc, kSZ))
   float* dout = nullptr;
-  HIP_CHECK(hipMalloc(&dout, kSZ));
+  HIP_CHECK(hipMalloc(&dout, kSZ))
 
   hipLaunchKernelGGL(hrr_repro_copy, dim3(kGrid), dim3(kBlock), 0, nullptr,
                      dsrc, dout, kN);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   float* hout = new float[kN];
-  HIP_CHECK(hipMemcpy(hout, dout, kSZ, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hout, dout, kSZ, hipMemcpyDeviceToHost))
   // Precondition: fresh device allocations are zeroed by the driver. This is
   // what replay zero-init reproduces; assert it so a non-zeroing platform fails
   // here (clearly) rather than flaking the roundtrip.
@@ -307,8 +307,8 @@ TEST_CASE("Unit_HRR_ZeroInitRead_Direct", "[.][hrr-direct]") {
   for (int i = 0; i < kN; ++i) REQUIRE(hout[i] == 0.0f);
 #endif
 
-  HIP_CHECK(hipFree(dsrc));
-  HIP_CHECK(hipFree(dout));
+  HIP_CHECK(hipFree(dsrc))
+  HIP_CHECK(hipFree(dout))
   delete[] hout;
 }
 

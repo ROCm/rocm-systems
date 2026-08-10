@@ -92,20 +92,20 @@ HIP_TEST_CASE(Unit_hiprtc_stdheaders) {
   // Do hip malloc first so that we dont need to do a cuInit manually before calling hipModule APIs
 
   bool* dResult;
-  HIP_CHECK(hipMalloc(&dResult, sizeof(bool)));
+  HIP_CHECK(hipMalloc(&dResult, sizeof(bool)))
 
   hipModule_t module;
   hipFunction_t kernel;
-  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()))
   const char* name;
   hiprtcGetLoweredName(prog, str.c_str(), &name);
-  HIP_CHECK(hipModuleGetFunction(&kernel, module, name));
+  HIP_CHECK(hipModuleGetFunction(&kernel, module, name))
 
   float a = 5.1f;
   unique_ptr<bool> hResult{new bool};
   *hResult = false;
 
-  HIP_CHECK(hipMemcpy(dResult, hResult.get(), sizeof(bool), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dResult, hResult.get(), sizeof(bool), hipMemcpyHostToDevice))
 
   struct {
     float a_;
@@ -115,13 +115,13 @@ HIP_TEST_CASE(Unit_hiprtc_stdheaders) {
   auto size = sizeof(args);
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
-  HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config));
+  HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config))
 
-  HIP_CHECK(hipMemcpy(hResult.get(), dResult, sizeof(bool), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hResult.get(), dResult, sizeof(bool), hipMemcpyDeviceToHost))
 
-  HIP_CHECK(hipFree(dResult));
+  HIP_CHECK(hipFree(dResult))
 
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   REQUIRE(*hResult == true);
 }

@@ -16,9 +16,9 @@ class MemcpyHtoDAsyncBenchmark : public Benchmark<MemcpyHtoDAsyncBenchmark> {
  public:
   void operator()(hipDeviceptr_t& dst, void* src, size_t size, const hipStream_t& stream) {
     TIMED_SECTION_STREAM(kTimerTypeEvent, stream) {
-      HIP_CHECK(hipMemcpyHtoDAsync(dst, src, size, stream));
+      HIP_CHECK(hipMemcpyHtoDAsync(dst, src, size, stream))
     }
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 };
 

@@ -54,12 +54,12 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Basic) {
 
   float *A, *B, *C;
 
-  HIP_CHECK(hipMallocManaged(&A, numElements * sizeof(float)));
-  HIP_CHECK(hipMallocManaged(&B, numElements * sizeof(float)));
-  HIP_CHECK(hipMallocManaged(&C, numElements * sizeof(float)));
-  HIP_CHECK(hipFree(A));
-  HIP_CHECK(hipFree(B));
-  HIP_CHECK(hipFree(C));
+  HIP_CHECK(hipMallocManaged(&A, numElements * sizeof(float)))
+  HIP_CHECK(hipMallocManaged(&B, numElements * sizeof(float)))
+  HIP_CHECK(hipMallocManaged(&C, numElements * sizeof(float)))
+  HIP_CHECK(hipFree(A))
+  HIP_CHECK(hipFree(B))
+  HIP_CHECK(hipFree(C))
 }
 
 /*
@@ -72,17 +72,17 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Advanced) {
   const size_t N = isQuickLevel() ? (512 * 1024 / sizeof(float)) : numElements;
   float *A, *B, *C;
 
-  HIP_CHECK(hipMallocManaged(&A, N * sizeof(float)));
-  HIP_CHECK(hipMallocManaged(&B, N * sizeof(float)));
-  HIP_CHECK(hipMallocManaged(&C, N * sizeof(float)));
+  HIP_CHECK(hipMallocManaged(&A, N * sizeof(float)))
+  HIP_CHECK(hipMallocManaged(&B, N * sizeof(float)))
+  HIP_CHECK(hipMallocManaged(&C, N * sizeof(float)))
   HipTest::setDefaultData(N, A, B, C);
 
   hipDevice_t device = hipCpuDeviceId;
 
-  HIP_CHECK(hipMemAdvise(A, N * sizeof(float), hipMemAdviseSetReadMostly, device));
-  HIP_CHECK(hipMemPrefetchAsync(A, N * sizeof(float), 0));
-  HIP_CHECK(hipMemPrefetchAsync(B, N * sizeof(float), 0));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemAdvise(A, N * sizeof(float), hipMemAdviseSetReadMostly, device))
+  HIP_CHECK(hipMemPrefetchAsync(A, N * sizeof(float), 0))
+  HIP_CHECK(hipMemPrefetchAsync(B, N * sizeof(float), 0))
+  HIP_CHECK(hipDeviceSynchronize())
   HIP_CHECK(hipMemRangeGetAttribute(&device, sizeof(device),
                                     hipMemRangeAttributeLastPrefetchLocation, A,
                                     N * sizeof(float)));
@@ -98,20 +98,20 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Advanced) {
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   hipEvent_t event0, event1;
-  HIP_CHECK(hipEventCreate(&event0));
-  HIP_CHECK(hipEventCreate(&event1));
-  HIP_CHECK(hipEventRecord(event0, 0));
+  HIP_CHECK(hipEventCreate(&event0))
+  HIP_CHECK(hipEventCreate(&event1))
+  HIP_CHECK(hipEventRecord(event0, 0))
   hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
                      static_cast<const float*>(A), static_cast<const float*>(B), C, N);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipEventRecord(event1, 0));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipEventRecord(event1, 0))
+  HIP_CHECK(hipDeviceSynchronize())
   float time = 0.0f;
-  HIP_CHECK(hipEventElapsedTime(&time, event0, event1));
+  HIP_CHECK(hipEventElapsedTime(&time, event0, event1))
   printf("Time %.3f ms\n", time);
   float maxError = 0.0f;
-  HIP_CHECK(hipMemPrefetchAsync(B, N * sizeof(float), hipCpuDeviceId));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemPrefetchAsync(B, N * sizeof(float), hipCpuDeviceId))
+  HIP_CHECK(hipDeviceSynchronize())
   device = 0;
   HIP_CHECK(hipMemRangeGetAttribute(&device, sizeof(device),
                                     hipMemRangeAttributeLastPrefetchLocation, A,
@@ -123,11 +123,11 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Advanced) {
   for (size_t i = 0; i < N; i++) {
     maxError = fmax(maxError, fabs(B[i] - 3.0f));
   }
-  HIP_CHECK(hipFree(A));
-  HIP_CHECK(hipFree(B));
-  HIP_CHECK(hipFree(C));
-  HIP_CHECK(hipEventDestroy(event0));
-  HIP_CHECK(hipEventDestroy(event1));
+  HIP_CHECK(hipFree(A))
+  HIP_CHECK(hipFree(B))
+  HIP_CHECK(hipFree(C))
+  HIP_CHECK(hipEventDestroy(event0))
+  HIP_CHECK(hipEventDestroy(event1))
   REQUIRE(maxError != 0.0f);
 }
 

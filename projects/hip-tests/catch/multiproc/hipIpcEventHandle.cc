@@ -54,7 +54,7 @@ void getDevices(ipcDevices_t* devices) {
     // HIP APIs are called in child process,
     // to avoid HIP Initialization in main process.
     int i, devCnt{};
-    HIP_CHECK(hipGetDeviceCount(&devCnt));
+    HIP_CHECK(hipGetDeviceCount(&devCnt))
 
     if (devCnt < 2) {
       devices->count = 0;
@@ -72,8 +72,8 @@ void getDevices(ipcDevices_t* devices) {
 
     int canPeerAccess_0i, canPeerAccess_i0;
     for (i = 1; i < devCnt; i++) {
-      HIP_CHECK(hipDeviceCanAccessPeer(&canPeerAccess_0i, 0, i));
-      HIP_CHECK(hipDeviceCanAccessPeer(&canPeerAccess_i0, i, 0));
+      HIP_CHECK(hipDeviceCanAccessPeer(&canPeerAccess_0i, 0, i))
+      HIP_CHECK(hipDeviceCanAccessPeer(&canPeerAccess_i0, i, 0))
 
       if (canPeerAccess_0i * canPeerAccess_i0) {
         devices->ordinals[i] = i;
@@ -140,22 +140,22 @@ void runMultiProcKernel(ipcEventInfo_t* shmEventInfo, int index) {
     hData[i] = rand_r(&seed);
   }
 
-  HIP_CHECK(hipSetDevice(shmEventInfo[index].device));
+  HIP_CHECK(hipSetDevice(shmEventInfo[index].device))
 
   if (index == 0) {
     int h_results[BUF_SIZE * MAX_DEVICES];
     hipEvent_t event[MAX_DEVICES];
 
-    HIP_CHECK(hipMalloc(&d_ptr, BUF_SIZE * g_processCnt * sizeof(int)));
-    HIP_CHECK(hipIpcGetMemHandle(&shmEventInfo[0].memHandle, d_ptr));
-    HIP_CHECK(hipMemcpy(d_ptr, hData, BUF_SIZE * sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&d_ptr, BUF_SIZE * g_processCnt * sizeof(int)))
+    HIP_CHECK(hipIpcGetMemHandle(&shmEventInfo[0].memHandle, d_ptr))
+    HIP_CHECK(hipMemcpy(d_ptr, hData, BUF_SIZE * sizeof(int), hipMemcpyHostToDevice))
 
     // Barrier 1: Process0 will wait for all processes to create event handles,
     // signals device memory creation.
     processBarrier();
 
     for (int i = 1; i < g_processCnt; i++) {
-      HIP_CHECK(hipIpcOpenEventHandle(&event[i], shmEventInfo[i].eventHandle));
+      HIP_CHECK(hipIpcOpenEventHandle(&event[i], shmEventInfo[i].eventHandle))
     }
 
     // Barrier 2: Process0 waits for kernels to be launched
@@ -163,7 +163,7 @@ void runMultiProcKernel(ipcEventInfo_t* shmEventInfo, int index) {
     processBarrier();
 
     for (int i = 1; i < g_processCnt; i++) {
-      HIP_CHECK(hipEventSynchronize(event[i]));
+      HIP_CHECK(hipEventSynchronize(event[i]))
     }
 
     HIP_CHECK(hipMemcpy(h_results, d_ptr + BUF_SIZE, BUF_SIZE * (g_processCnt - 1) * sizeof(int),
@@ -171,7 +171,7 @@ void runMultiProcKernel(ipcEventInfo_t* shmEventInfo, int index) {
 
     // Barrier 3: Process0 signals event usage is done.
     processBarrier();
-    HIP_CHECK(hipFree(d_ptr));
+    HIP_CHECK(hipFree(d_ptr))
     for (int n = 1; n < g_processCnt; n++) {
       for (int i = 0; i < BUF_SIZE; i++) {
         if (hData[i] / (n + 1) != h_results[(n - 1) * BUF_SIZE + i]) {
@@ -182,12 +182,12 @@ void runMultiProcKernel(ipcEventInfo_t* shmEventInfo, int index) {
       }
     }
     for (int i = 1; i < g_processCnt; i++) {
-      HIP_CHECK(hipEventDestroy(event[i]));
+      HIP_CHECK(hipEventDestroy(event[i]))
     }
   } else {
     hipEvent_t event;
-    HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming | hipEventInterprocess));
-    HIP_CHECK(hipIpcGetEventHandle(&shmEventInfo[index].eventHandle, event));
+    HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming | hipEventInterprocess))
+    HIP_CHECK(hipIpcGetEventHandle(&shmEventInfo[index].eventHandle, event))
 
     // Barrier 1 : wait until proc 0 initializes device memory,
     // signals event creation.
@@ -198,16 +198,16 @@ void runMultiProcKernel(ipcEventInfo_t* shmEventInfo, int index) {
     const dim3 blocks(BUF_SIZE / threads.x, 1);
     hipLaunchKernelGGL(computeKernel, dim3(blocks), dim3(threads), 0, 0, d_ptr + index * BUF_SIZE,
                        d_ptr, index + 1);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipEventRecord(event));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipEventRecord(event))
 
     // Barrier 2 : Signals that event is recorded
     processBarrier();
-    HIP_CHECK(hipIpcCloseMemHandle(d_ptr));
+    HIP_CHECK(hipIpcCloseMemHandle(d_ptr))
 
     // Barrier 3 : wait for all the events to be used up by processes
     processBarrier();
-    HIP_CHECK(hipEventDestroy(event));
+    HIP_CHECK(hipEventDestroy(event))
   }
 }
 
@@ -327,10 +327,10 @@ HIP_TEST_CASE(Unit_hipIpcEventHandle_ParameterValidation) {
 #if HT_AMD
   // Test disabled for nvidia due to segfault with cuda api
   SECTION("Get event handle with eventHandle(nullptr)") {
-    HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming | hipEventInterprocess));
+    HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming | hipEventInterprocess))
     ret = hipIpcGetEventHandle(nullptr, event);
     REQUIRE(ret == hipErrorInvalidValue);
-    HIP_CHECK(hipEventDestroy(event));
+    HIP_CHECK(hipEventDestroy(event))
   }
 #endif
 
@@ -350,14 +350,14 @@ HIP_TEST_CASE(Unit_hipIpcEventHandle_ParameterValidation) {
   }
 
   SECTION("Get event handle for event allocated without Interprocess flag") {
-    HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
+    HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming))
 
     ret = hipIpcGetEventHandle(&eventHandle, event);
     if ((ret != hipErrorInvalidResourceHandle) && (ret != hipErrorInvalidConfiguration)) {
       INFO("Error returned : " << ret);
       REQUIRE(false);
     }
-    HIP_CHECK(hipEventDestroy(event));
+    HIP_CHECK(hipEventDestroy(event))
   }
 
   SECTION("Open event handle with event(nullptr)") {
@@ -376,18 +376,18 @@ HIP_TEST_CASE(Unit_hipIpcEventHandle_ParameterValidation) {
 
   SECTION("Open handle in process that created it") {
     hipEvent_t event1, event2;
-    HIP_CHECK(hipEventCreateWithFlags(&event1, hipEventDisableTiming | hipEventInterprocess));
-    HIP_CHECK(hipIpcGetEventHandle(&eventHandle, event1));
+    HIP_CHECK(hipEventCreateWithFlags(&event1, hipEventDisableTiming | hipEventInterprocess))
+    HIP_CHECK(hipIpcGetEventHandle(&eventHandle, event1))
     HIP_CHECK_ERROR(hipIpcOpenEventHandle(&event2, eventHandle), hipErrorInvalidContext);
-    HIP_CHECK(hipEventDestroy(event1));
+    HIP_CHECK(hipEventDestroy(event1))
   }
 
 // Disabled on AMD because of return value mismatch - EXSWHTEC-41
 #if HT_NVIDIA
   SECTION("Event created with no flags") {
-    HIP_CHECK(hipEventCreate(&event));
+    HIP_CHECK(hipEventCreate(&event))
     HIP_CHECK_ERROR(hipIpcGetEventHandle(&eventHandle, event), hipErrorInvalidResourceHandle);
-    HIP_CHECK(hipEventDestroy(event));
+    HIP_CHECK(hipEventDestroy(event))
   }
 #endif
 }

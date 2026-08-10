@@ -26,19 +26,19 @@ HIP_TEST_CASE(Unit_hipMemPtrGetInfo_Basic) {
   float* fPtr;
   MemInfo* sPtr;
   size_t sSetSize = 1024, sGetSize;
-  HIP_CHECK(hipMalloc(&iPtr, sSetSize));
-  HIP_CHECK(hipMalloc(&fPtr, sSetSize));
-  HIP_CHECK(hipMalloc(&sPtr, sSetSize));
-  HIP_CHECK(hipMemPtrGetInfo(iPtr, &sGetSize));
+  HIP_CHECK(hipMalloc(&iPtr, sSetSize))
+  HIP_CHECK(hipMalloc(&fPtr, sSetSize))
+  HIP_CHECK(hipMalloc(&sPtr, sSetSize))
+  HIP_CHECK(hipMemPtrGetInfo(iPtr, &sGetSize))
   REQUIRE(sGetSize == sSetSize);
-  HIP_CHECK(hipMemPtrGetInfo(fPtr, &sGetSize));
+  HIP_CHECK(hipMemPtrGetInfo(fPtr, &sGetSize))
   REQUIRE(sGetSize == sSetSize);
-  HIP_CHECK(hipMemPtrGetInfo(sPtr, &sGetSize));
+  HIP_CHECK(hipMemPtrGetInfo(sPtr, &sGetSize))
   REQUIRE(sGetSize == sSetSize);
 
-  HIP_CHECK(hipFree(iPtr));
-  HIP_CHECK(hipFree(fPtr));
-  HIP_CHECK(hipFree(sPtr));
+  HIP_CHECK(hipFree(iPtr))
+  HIP_CHECK(hipFree(fPtr))
+  HIP_CHECK(hipFree(sPtr))
 }
 
 /*
@@ -48,9 +48,9 @@ hipMemPtrGetInfo API being called on a zero-sized allocation.
 HIP_TEST_CASE(Unit_hipMemPtrGetInfo_SizeZeroAllocation) {
   int* iPtr;
   size_t sSetSize = 0, sGetSize;
-  HIP_CHECK(hipMalloc(&iPtr, sSetSize));
-  HIP_CHECK(hipMemPtrGetInfo(iPtr, &sGetSize));
+  HIP_CHECK(hipMalloc(&iPtr, sSetSize))
+  HIP_CHECK(hipMemPtrGetInfo(iPtr, &sGetSize))
   REQUIRE(sGetSize == sSetSize);
 
-  HIP_CHECK(hipFree(iPtr));
+  HIP_CHECK(hipFree(iPtr))
 }

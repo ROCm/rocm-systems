@@ -32,9 +32,9 @@ void MemcpyAtoHShell(F memcpy_func, size_t width, const hipStream_t kernel_strea
                                sizeof(T) * width, sizeof(T) * width, 1, hipMemcpyHostToDevice));
   std::fill_n(host_allocation.host_ptr(), element_count, 0);
 
-  HIP_CHECK(memcpy_func(host_allocation.host_ptr(), array_allocation.ptr()));
+  HIP_CHECK(memcpy_func(host_allocation.host_ptr(), array_allocation.ptr()))
   if (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   ArrayFindIfNot(host_allocation.host_ptr(), fill_value, element_count);
@@ -59,9 +59,9 @@ void Memcpy2DHostFromAShell(F memcpy_func, size_t width, size_t height,
                                hipMemcpyHostToDevice));
   std::fill_n(host_allocation.host_ptr(), element_count, 0);
 
-  HIP_CHECK(memcpy_func(host_allocation.host_ptr(), sizeof(T) * width, array_allocation.ptr()));
+  HIP_CHECK(memcpy_func(host_allocation.host_ptr(), sizeof(T) * width, array_allocation.ptr()))
   if (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   ArrayFindIfNot(host_allocation.host_ptr(), fill_value, element_count);
@@ -79,26 +79,26 @@ void Memcpy2DDeviceFromAShell(F memcpy_func, size_t width, size_t height,
   const auto dst_device = GENERATE_COPY(range(0, device_count));
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
 
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
   if constexpr (enable_peer_access) {
     if (src_device == dst_device) {
       return;
     }
     int can_access_peer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
+    HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device))
     if (!can_access_peer) {
       INFO("Peer access cannot be enabled between devices " << src_device << " " << dst_device);
       REQUIRE(can_access_peer);
     }
-    HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0));
+    HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0))
   }
 
   LinearAllocGuard<T> host_allocation(LinearAllocs::hipHostMalloc, allocation_size);
   ArrayAllocGuard<T> array_allocation(make_hipExtent(width, height, 0), flag);
-  HIP_CHECK(hipSetDevice(dst_device));
+  HIP_CHECK(hipSetDevice(dst_device))
   LinearAllocGuard2D<T> device_allocation(width, height);
 
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
   const auto element_count = allocation_size / sizeof(T);
   constexpr int fill_value = 42;
   std::fill_n(host_allocation.host_ptr(), element_count, fill_value);
@@ -111,7 +111,7 @@ void Memcpy2DDeviceFromAShell(F memcpy_func, size_t width, size_t height,
   HIP_CHECK(
       memcpy_func(device_allocation.ptr(), device_allocation.pitch(), array_allocation.ptr()));
   if (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   HIP_CHECK(hipMemcpy2D(host_allocation.host_ptr(), sizeof(T) * width, device_allocation.ptr(),
@@ -121,7 +121,7 @@ void Memcpy2DDeviceFromAShell(F memcpy_func, size_t width, size_t height,
   if constexpr (enable_peer_access) {
     // If we've gotten this far, EnablePeerAccess must have succeeded, so we only need to check this
     // condition
-    HIP_CHECK(hipDeviceDisablePeerAccess(dst_device));
+    HIP_CHECK(hipDeviceDisablePeerAccess(dst_device))
   }
 
   ArrayFindIfNot(host_allocation.host_ptr(), fill_value, element_count);
@@ -141,9 +141,9 @@ void MemcpyHtoAShell(F memcpy_func, size_t width, const hipStream_t kernel_strea
   constexpr int fill_value = 41;
   std::fill_n(host_allocation.host_ptr(), element_count, fill_value);
 
-  HIP_CHECK(memcpy_func(array_allocation.ptr(), host_allocation.host_ptr()));
+  HIP_CHECK(memcpy_func(array_allocation.ptr(), host_allocation.host_ptr()))
   if (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   std::fill_n(host_allocation.host_ptr(), element_count, 0);
@@ -169,9 +169,9 @@ void Memcpy2DHosttoAShell(F memcpy_func, size_t width, size_t height,
   constexpr int fill_value = 41;
   std::fill_n(host_allocation.host_ptr(), element_count, fill_value);
 
-  HIP_CHECK(memcpy_func(array_allocation.ptr(), host_allocation.host_ptr(), sizeof(T) * width));
+  HIP_CHECK(memcpy_func(array_allocation.ptr(), host_allocation.host_ptr(), sizeof(T) * width))
   if (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   std::fill_n(host_allocation.host_ptr(), element_count, 0);
@@ -195,26 +195,26 @@ void Memcpy2DDevicetoAShell(F memcpy_func, size_t width, size_t height,
   const auto dst_device = GENERATE_COPY(range(0, device_count));
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
 
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
   if constexpr (enable_peer_access) {
     if (src_device == dst_device) {
       return;
     }
     int can_access_peer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
+    HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device))
     if (!can_access_peer) {
       INFO("Peer access cannot be enabled between devices " << src_device << " " << dst_device);
       REQUIRE(can_access_peer);
     }
-    HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0));
+    HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0))
   }
 
   LinearAllocGuard<T> host_allocation(LinearAllocs::hipHostMalloc, allocation_size);
   LinearAllocGuard2D<T> device_allocation(width, height);
-  HIP_CHECK(hipSetDevice(dst_device));
+  HIP_CHECK(hipSetDevice(dst_device))
   ArrayAllocGuard<T> array_allocation(make_hipExtent(width, height, 0), flag);
 
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
   const auto element_count = allocation_size / sizeof(T);
   constexpr int fill_value = 41;
   std::fill_n(host_allocation.host_ptr(), element_count, fill_value);
@@ -226,7 +226,7 @@ void Memcpy2DDevicetoAShell(F memcpy_func, size_t width, size_t height,
   HIP_CHECK(
       memcpy_func(array_allocation.ptr(), device_allocation.ptr(), device_allocation.pitch()));
   if (should_synchronize) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
+    HIP_CHECK(hipStreamSynchronize(kernel_stream))
   }
 
   std::fill_n(host_allocation.host_ptr(), element_count, 0);
@@ -238,7 +238,7 @@ void Memcpy2DDevicetoAShell(F memcpy_func, size_t width, size_t height,
   if constexpr (enable_peer_access) {
     // If we've gotten this far, EnablePeerAccess must have succeeded, so we only need to check this
     // condition
-    HIP_CHECK(hipDeviceDisablePeerAccess(dst_device));
+    HIP_CHECK(hipDeviceDisablePeerAccess(dst_device))
   }
 
   ArrayFindIfNot(host_allocation.host_ptr(), fill_value, element_count);
@@ -249,9 +249,9 @@ template <typename F>
 void MemcpyArraySyncBehaviorCheck(F memcpy_func, const bool should_sync,
                                   const hipStream_t kernel_stream) {
   LaunchDelayKernel(std::chrono::milliseconds{100}, kernel_stream);
-  HIP_CHECK(memcpy_func());
+  HIP_CHECK(memcpy_func())
   if (should_sync) {
-    HIP_CHECK(hipStreamQuery(kernel_stream));
+    HIP_CHECK(hipStreamQuery(kernel_stream))
   } else {
     HIP_CHECK_ERROR(hipStreamQuery(kernel_stream), hipErrorNotReady);
   }
@@ -346,9 +346,9 @@ void Memcpy2DFromArrayZeroWidthHeight(F memcpy_func, size_t width, size_t height
     fill_value = 41;
     std::fill_n(host_alloc.host_ptr(), width * height, fill_value);
 
-    HIP_CHECK(memcpy_func(host_alloc.host_ptr(), sizeof(int) * width, array_alloc.ptr()));
+    HIP_CHECK(memcpy_func(host_alloc.host_ptr(), sizeof(int) * width, array_alloc.ptr()))
     if (should_synchronize) {
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     ArrayFindIfNot(host_alloc.host_ptr(), fill_value, element_count);
   }
@@ -366,9 +366,9 @@ void Memcpy2DFromArrayZeroWidthHeight(F memcpy_func, size_t width, size_t height
     HIP_CHECK(hipMemcpy2D(device_alloc.ptr(), device_alloc.pitch(), host_alloc.host_ptr(),
                           sizeof(int) * width, sizeof(int) * width, height, hipMemcpyHostToDevice));
 
-    HIP_CHECK(memcpy_func(device_alloc.ptr(), device_alloc.pitch(), array_alloc.ptr()));
+    HIP_CHECK(memcpy_func(device_alloc.ptr(), device_alloc.pitch(), array_alloc.ptr()))
     if constexpr (should_synchronize) {
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     HIP_CHECK(hipMemcpy2D(host_alloc.host_ptr(), sizeof(int) * width, device_alloc.ptr(),
                           device_alloc.pitch(), sizeof(int) * width, height,
@@ -395,9 +395,9 @@ void Memcpy2DToArrayZeroWidthHeight(F memcpy_func, size_t width, size_t height,
     fill_value = 41;
     std::fill_n(host_alloc.host_ptr(), width * height, fill_value);
 
-    HIP_CHECK(memcpy_func(array_alloc.ptr(), host_alloc.host_ptr(), sizeof(int) * width));
+    HIP_CHECK(memcpy_func(array_alloc.ptr(), host_alloc.host_ptr(), sizeof(int) * width))
     if (should_synchronize) {
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     HIP_CHECK(hipMemcpy2DFromArray(host_alloc.host_ptr(), sizeof(int) * width, array_alloc.ptr(), 0,
                                    0, sizeof(int) * width, height, hipMemcpyDeviceToHost));
@@ -417,9 +417,9 @@ void Memcpy2DToArrayZeroWidthHeight(F memcpy_func, size_t width, size_t height,
     HIP_CHECK(hipMemcpy2D(device_alloc.ptr(), device_alloc.pitch(), host_alloc.host_ptr(),
                           sizeof(int) * width, sizeof(int) * width, height, hipMemcpyHostToDevice));
 
-    HIP_CHECK(memcpy_func(array_alloc.ptr(), device_alloc.ptr(), device_alloc.pitch()));
+    HIP_CHECK(memcpy_func(array_alloc.ptr(), device_alloc.ptr(), device_alloc.pitch()))
     if constexpr (should_synchronize) {
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     HIP_CHECK(hipMemcpy2DFromArray(host_alloc.host_ptr(), sizeof(int) * width, array_alloc.ptr(), 0,
                                    0, sizeof(int) * width, height, hipMemcpyDeviceToHost));

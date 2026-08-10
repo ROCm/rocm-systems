@@ -114,14 +114,14 @@ void AtomicExchSameAddress(const dim3 blocks, const dim3 threads, const LinearAl
   std::vector<TestType> old_vals(thread_count + 1);
 
 
-  HIP_CHECK(hipMemset(mem_dev.ptr(), 0, sizeof(TestType)));
+  HIP_CHECK(hipMemset(mem_dev.ptr(), 0, sizeof(TestType)))
   atomic_exch_kernel_compile_time<TestType, use_shared_mem, scope>
       <<<blocks, threads>>>(mem_dev.ptr(), old_vals_dev.ptr());
   HIP_CHECK(
       hipMemcpy(old_vals.data(), old_vals_dev.ptr(), old_vals_alloc_size, hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(old_vals.data() + thread_count, mem_dev.ptr(), sizeof(TestType),
                       hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Every thread will exchange its grid-wide linear id into a target location within mem_dev,
   // receiving back the value previously present therein. This previous value is written to
@@ -179,7 +179,7 @@ class AtomicExchCRTP {
     std::vector<LinearAllocGuard<T>> old_vals_devs;
     std::vector<StreamGuard> streams;
     for (auto i = 0; i < p.num_devices; ++i) {
-      HIP_CHECK(hipSetDevice(i));
+      HIP_CHECK(hipSetDevice(i))
       old_vals_devs.emplace_back(LinearAllocs::hipMalloc, old_vals_alloc_size);
       for (auto j = 0; j < p.kernel_count; ++j) {
         streams.emplace_back(Streams::created);
@@ -201,7 +201,7 @@ class AtomicExchCRTP {
 
     const auto shared_mem_size = use_shared_mem ? mem_alloc_size : 0u;
     for (auto i = 0u; i < p.num_devices; ++i) {
-      HIP_CHECK(hipSetDevice(i));
+      HIP_CHECK(hipSetDevice(i))
       const auto device_offset = i * p.kernel_count * thread_count;
       for (auto j = 0u; j < p.kernel_count; ++j) {
         const auto& stream = streams[i * p.kernel_count + j].stream();
@@ -215,8 +215,8 @@ class AtomicExchCRTP {
     PerformHostAtomicExchange(p.host_thread_count, host_iters_per_thread, mem_dev.host_ptr(),
                               old_vals.data(), p);
     for (auto i = 0; i < p.num_devices; ++i) {
-      HIP_CHECK(hipSetDevice(i));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipSetDevice(i))
+      HIP_CHECK(hipDeviceSynchronize())
     }
     for (auto i = 0u; i < p.num_devices; ++i) {
       const auto device_offset = i * p.kernel_count * thread_count;
@@ -302,7 +302,7 @@ void AtomicExchSingleDeviceSingleKernelTest(const unsigned int width, const unsi
   } else if constexpr (scope == AtomicScopes::builtin &&
                        memory_scope == __HIP_MEMORY_SCOPE_WAVEFRONT) {
     int warp_size = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
     params.threads = dim3(warp_size);
   } else {
     params.threads = GenerateAtomicExchThreadDimensions();
@@ -340,7 +340,7 @@ template <typename TestType, AtomicScopes scope>
 void AtomicExchSingleDeviceMultipleKernelTest(const unsigned int kernel_count,
                                               const unsigned int width, const unsigned int pitch) {
   int concurrent_kernels = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, 0))
   if (!concurrent_kernels) {
     HIP_SKIP_TEST(HipTest::SkipReason::kConcurrentKernelExecutionUnsupported);
   }

@@ -56,8 +56,8 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetDependentNodes_Positive_Functional) {
   hipGraphExec_t graphExec;
   size_t NElem{N};
 
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   HipTest::initArrays<int>(&A_d, &C_d, &Sum_d, &A_h, &C_h, &Sum_h, N);
   HipTest::initArrays<int>(&Res1_d, &Res2_d, &Res3_d, nullptr, nullptr, nullptr, N);
@@ -81,7 +81,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetDependentNodes_Positive_Functional) {
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgsVS);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecSqr, graph, &memcpyH2D_A, 1, &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecSqr, graph, &memcpyH2D_A, 1, &kernelNodeParams))
 
   // Create multiple nodes dependent on vecSqr node.
   // Dependent nodes takes vecSqr input and computes output independently.
@@ -95,7 +95,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetDependentNodes_Positive_Functional) {
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs1);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernelmod1, graph, &kernel_vecSqr, 1, &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelmod1, graph, &kernel_vecSqr, 1, &kernelNodeParams))
   nodelist.push_back(kernelmod1);
 
   int incValue2{2};
@@ -107,7 +107,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetDependentNodes_Positive_Functional) {
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs2);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernelmod2, graph, &kernel_vecSqr, 1, &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelmod2, graph, &kernel_vecSqr, 1, &kernelNodeParams))
   nodelist.push_back(kernelmod2);
 
   int incValue3{3};
@@ -119,10 +119,10 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetDependentNodes_Positive_Functional) {
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs3);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernelmod3, graph, &kernel_vecSqr, 1, &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelmod3, graph, &kernel_vecSqr, 1, &kernelNodeParams))
   nodelist.push_back(kernelmod3);
 
-  HIP_CHECK(hipGraphNodeGetDependentNodes(kernel_vecSqr, nullptr, &numDeps));
+  HIP_CHECK(hipGraphNodeGetDependentNodes(kernel_vecSqr, nullptr, &numDeps))
   REQUIRE(numDeps == nodelist.size());
 
   SECTION("Validate number of dependent nodes when numDeps = num of nodes") {
@@ -143,7 +143,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetDependentNodes_Positive_Functional) {
   SECTION("Validate number of dependent nodes when passed node is the last in graph") {
     hipGraphNode_t depnodes;
     numDeps = 1;
-    HIP_CHECK(hipGraphNodeGetDependentNodes(kernelmod3, &depnodes, &numDeps));
+    HIP_CHECK(hipGraphNodeGetDependentNodes(kernelmod3, &depnodes, &numDeps))
 
     // Api expected to return success and no dependent nodes.
     REQUIRE(numDeps == 0);
@@ -164,9 +164,9 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetDependentNodes_Positive_Functional) {
                                     hipMemcpyDeviceToHost));
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Validate the computation
   for (size_t i = 0; i < N; i++) {
@@ -178,9 +178,9 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetDependentNodes_Positive_Functional) {
 
   HipTest::freeArrays<int>(A_d, C_d, Sum_d, A_h, C_h, Sum_h, false);
   HipTest::freeArrays<int>(Res1_d, Res2_d, Res3_d, nullptr, nullptr, nullptr, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 }
 
 /**
@@ -204,8 +204,8 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetDependentNodes_Negative_Parameters) {
   hipGraphNode_t memsetNode{}, depnodes{};
   char* A_d;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipMalloc(&A_d, numBytes));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipMalloc(&A_d, numBytes))
   hipMemsetParams memsetParams{};
   memsetParams.dst = reinterpret_cast<void*>(A_d);
   memsetParams.value = 1;
@@ -213,7 +213,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetDependentNodes_Negative_Parameters) {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = numBytes * sizeof(char);
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
 
   SECTION("node as nullptr") {
     HIP_CHECK_ERROR(hipGraphNodeGetDependentNodes(nullptr, &depnodes, &numDeps),
@@ -231,8 +231,8 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetDependentNodes_Negative_Parameters) {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipFree(A_d))
 }
 
 /**

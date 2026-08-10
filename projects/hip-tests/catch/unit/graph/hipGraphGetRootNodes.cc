@@ -50,10 +50,10 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Positive_Functional) {
   int *A_h, *B_h, *C_h;
   hipGraphExec_t graphExec;
 
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   std::vector<hipGraphNode_t> from_nodes;
   std::vector<hipGraphNode_t> to_nodes;
@@ -61,7 +61,7 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Positive_Functional) {
   graphNodesCommon(graph, A_h, A_d, B_h, B_d, C_h, C_d, N, from_nodes, to_nodes, nodelist);
 
   // Create dependencies
-  HIP_CHECK(hipGraphAddDependencies(graph, &from_nodes[0], &to_nodes[0], 6));
+  HIP_CHECK(hipGraphAddDependencies(graph, &from_nodes[0], &to_nodes[0], 6))
 
   std::vector<hipGraphNode_t> rootnodelist = {nodelist[0], nodelist[1], nodelist[2]};
 
@@ -70,7 +70,7 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Positive_Functional) {
   // verify : numRootNodes is set to actual number of root nodes added
   // Scenario 1
   SECTION("Validate number of rootnodes") {
-    HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes));
+    HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes))
     INFO("Num of nodes returned by GetRootNodes : " << numRootNodes);
     REQUIRE(numRootNodes == rootnodelist.size());
   }
@@ -96,24 +96,24 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Positive_Functional) {
   // Scenario 5
   SECTION("Validate numRootNodes is 0 when no nodes in graph") {
     hipGraph_t emptyGraph{};
-    HIP_CHECK(hipGraphCreate(&emptyGraph, 0));
-    HIP_CHECK(hipGraphGetRootNodes(emptyGraph, nullptr, &numRootNodes));
+    HIP_CHECK(hipGraphCreate(&emptyGraph, 0))
+    HIP_CHECK(hipGraphGetRootNodes(emptyGraph, nullptr, &numRootNodes))
     REQUIRE(numRootNodes == 0);
-    HIP_CHECK(hipGraphDestroy(emptyGraph));
+    HIP_CHECK(hipGraphDestroy(emptyGraph))
   }
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Verify graph execution result
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 }
 
 /**
@@ -138,7 +138,7 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Positive_CapturedStream) {
   float *A_h, *B_h, *C_h;
 
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
 
   // Initialize input buffer
   for (size_t i = 0; i < N; ++i) {
@@ -156,7 +156,7 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Positive_CapturedStream) {
   REQUIRE(graph != nullptr);
 
   // Verify numof root nodes
-  HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes));
+  HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes))
   REQUIRE(numRootNodes == expectedRootNodes);
   INFO("Num of nodes returned by GetRootNodes : " << numRootNodes);
 
@@ -164,24 +164,24 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Positive_CapturedStream) {
   hipGraphNode_t* nodes = reinterpret_cast<hipGraphNode_t*>(malloc(numBytes));
   REQUIRE(nodes != nullptr);
 
-  HIP_CHECK(hipGraphGetRootNodes(graph, nodes, &numRootNodes));
+  HIP_CHECK(hipGraphGetRootNodes(graph, nodes, &numRootNodes))
   REQUIRE(numRootNodes == expectedRootNodes);
 
 #if HT_NVIDIA  // EXSWHTEC-225
   // Verify root nodes have correct type.
   hipGraphNodeType nodeType;
-  HIP_CHECK(hipGraphNodeGetType(nodes[0], &nodeType));
+  HIP_CHECK(hipGraphNodeGetType(nodes[0], &nodeType))
   REQUIRE(nodeType == hipGraphNodeTypeMemset);
-  HIP_CHECK(hipGraphNodeGetType(nodes[1], &nodeType));
+  HIP_CHECK(hipGraphNodeGetType(nodes[1], &nodeType))
   REQUIRE(nodeType == hipGraphNodeTypeMemset);
-  HIP_CHECK(hipGraphNodeGetType(nodes[2], &nodeType));
+  HIP_CHECK(hipGraphNodeGetType(nodes[2], &nodeType))
   REQUIRE(nodeType == hipGraphNodeTypeKernel);
 #endif
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Validate the computation
   for (size_t i = 0; i < N; i++) {
@@ -192,9 +192,9 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Positive_CapturedStream) {
     }
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
   free(nodes);
 }
@@ -217,18 +217,18 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Negative_Parameters) {
   hipGraph_t graph{nullptr};
   size_t numRootNodes{0};
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipEvent_t event_start, event_end;
-  HIP_CHECK(hipEventCreateWithFlags(&event_start, hipEventDisableTiming));
-  HIP_CHECK(hipEventCreateWithFlags(&event_end, hipEventDisableTiming));
+  HIP_CHECK(hipEventCreateWithFlags(&event_start, hipEventDisableTiming))
+  HIP_CHECK(hipEventCreateWithFlags(&event_end, hipEventDisableTiming))
 
   // create event record nodes
   hipGraphNode_t event_node_start, event_node_end;
-  HIP_CHECK(hipGraphAddEventRecordNode(&event_node_start, graph, nullptr, 0, event_start));
-  HIP_CHECK(hipGraphAddEventRecordNode(&event_node_end, graph, nullptr, 0, event_end));
+  HIP_CHECK(hipGraphAddEventRecordNode(&event_node_start, graph, nullptr, 0, event_start))
+  HIP_CHECK(hipGraphAddEventRecordNode(&event_node_end, graph, nullptr, 0, event_end))
 
-  HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes));
+  HIP_CHECK(hipGraphGetRootNodes(graph, nullptr, &numRootNodes))
   INFO("Num of nodes returned by GetRootNodes : " << numRootNodes);
   int numBytes = sizeof(hipGraphNode_t) * numRootNodes;
   hipGraphNode_t* nodes = reinterpret_cast<hipGraphNode_t*>(malloc(numBytes));
@@ -247,9 +247,9 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Negative_Parameters) {
     HIP_CHECK_ERROR(hipGraphGetRootNodes(graph, nodes, nullptr), hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipEventDestroy(event_end));
-  HIP_CHECK(hipEventDestroy(event_start));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipEventDestroy(event_end))
+  HIP_CHECK(hipEventDestroy(event_start))
   free(nodes);
 }
 

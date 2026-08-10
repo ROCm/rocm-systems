@@ -61,9 +61,9 @@ HIP_TEST_CASE(Contract_MemBatchCopy3D_HipMemcpy3DBatchAsync_HostDeviceHostRoundT
   void* dev_ptr = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&dev_ptr, kBytes));
+  HIP_CHECK(hipMalloc(&dev_ptr, kBytes))
   cleanup.Add([dev_ptr] { (void)hipFree(dev_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // Two pointer-to-pointer copies issued as one batch: host source to the device
@@ -88,8 +88,8 @@ HIP_TEST_CASE(Contract_MemBatchCopy3D_HipMemcpy3DBatchAsync_HostDeviceHostRoundT
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Batch 3D memcpy is not supported by this device/runtime path.");
   }
-  HIP_CHECK(status);
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(status)
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(host_out == src);
 }
@@ -98,7 +98,7 @@ HIP_TEST_CASE(Contract_MemBatchCopy3D_HipMemcpy3DBatchAsync_HostDeviceHostRoundT
 HIP_TEST_CASE(Contract_MemBatchCopy3D_HipMemcpy3DBatchAsync_ZeroOps_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // A batch with zero operations is invalid input and must be rejected rather
@@ -106,7 +106,7 @@ HIP_TEST_CASE(Contract_MemBatchCopy3D_HipMemcpy3DBatchAsync_ZeroOps_IsRejected) 
   // the sticky error left by the rejection is cleared afterward, so neither leaks
   // into later tests. The exact code is backend-specific, so only a non-success
   // status is required (the documented code is hipErrorInvalidValue).
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   hipMemcpy3DBatchOp ops[1] = {};
   size_t fail_index = 0;
   const hipError_t status = hipMemcpy3DBatchAsync(0, ops, &fail_index, 0, stream);
@@ -121,13 +121,13 @@ HIP_TEST_CASE(Contract_MemBatchCopy3D_HipMemcpy3DBatchAsync_ZeroOps_IsRejected) 
 HIP_TEST_CASE(Contract_MemBatchCopy3D_HipMemcpy3DBatchAsync_NullOpList_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // A non-zero operation count with a null operation list is invalid input and
   // must be rejected. The op count is positive so the null-list check is reached
   // rather than short-circuited by a zero count.
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   size_t fail_index = 0;
   const hipError_t status = hipMemcpy3DBatchAsync(1, nullptr, &fail_index, 0, stream);
   if (status == hipErrorNotSupported) {
@@ -144,16 +144,16 @@ HIP_TEST_CASE(Contract_MemBatchCopy3D_HipMemcpy3DBatchAsync_NonZeroFlags_IsRejec
 
   void* dev_ptr = nullptr;
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipMalloc(&dev_ptr, kBytes));
+  HIP_CHECK(hipMalloc(&dev_ptr, kBytes))
   cleanup.Add([dev_ptr] { (void)hipFree(dev_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // The flags parameter is reserved and must be zero. The op list itself is a
   // valid host-to-device copy (the same operand the positive test issues), so a
   // rejection here isolates the reserved-flag contract rather than conflating it
   // with an invalid operation.
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   const hipExtent extent = make_hipExtent(kBytes, 1, 1);
   hipMemcpy3DBatchOp ops[1] = {
       PointerCopyOp(dev_ptr, hipMemLocationTypeDevice, const_cast<uint8_t*>(src.data()),

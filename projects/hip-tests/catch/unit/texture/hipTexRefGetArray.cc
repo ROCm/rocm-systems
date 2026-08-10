@@ -23,15 +23,15 @@ HIP_TEST_CASE(Unit_hipTexRefGetArray_Positive) {
   array_desc.Width = 16;
   array_desc.Height = 16;
 
-  HIP_CHECK(hipFree(nullptr));
-  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"));
-  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"));
-  HIP_CHECK(hipArrayCreate(&array_set, &array_desc));
-  HIP_CHECK(hipTexRefSetArray(tex_ref, array_set, HIP_TRSA_OVERRIDE_FORMAT));
-  HIP_CHECK(hipTexRefGetArray(&array_get, tex_ref));
+  HIP_CHECK(hipFree(nullptr))
+  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"))
+  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"))
+  HIP_CHECK(hipArrayCreate(&array_set, &array_desc))
+  HIP_CHECK(hipTexRefSetArray(tex_ref, array_set, HIP_TRSA_OVERRIDE_FORMAT))
+  HIP_CHECK(hipTexRefGetArray(&array_get, tex_ref))
   REQUIRE(array_get == array_set);
-  HIP_CHECK(hipArrayDestroy(array_set));
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipArrayDestroy(array_set))
+  HIP_CHECK(hipModuleUnload(module))
 }
 
 HIP_TEST_CASE(Unit_hipTexRefGetArray_Negative) {
@@ -47,11 +47,11 @@ HIP_TEST_CASE(Unit_hipTexRefGetArray_Negative) {
   array_desc.Width = 16;
   array_desc.Height = 16;
 
-  HIP_CHECK(hipFree(nullptr));
-  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"));
-  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"));
-  HIP_CHECK(hipArrayCreate(&array_set, &array_desc));
-  HIP_CHECK(hipTexRefSetArray(tex_ref, array_set, HIP_TRSA_OVERRIDE_FORMAT));
+  HIP_CHECK(hipFree(nullptr))
+  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"))
+  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"))
+  HIP_CHECK(hipArrayCreate(&array_set, &array_desc))
+  HIP_CHECK(hipTexRefSetArray(tex_ref, array_set, HIP_TRSA_OVERRIDE_FORMAT))
 
 // Cuda crashes with SIGSEGV
 #if HT_AMD
@@ -68,8 +68,8 @@ HIP_TEST_CASE(Unit_hipTexRefGetArray_Negative) {
 #endif
   }
 
-  HIP_CHECK(hipArrayDestroy(array_set));
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipArrayDestroy(array_set))
+  HIP_CHECK(hipModuleUnload(module))
 }
 
 #endif

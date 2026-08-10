@@ -26,7 +26,7 @@
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_VMM) {
   int value = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeVirtualMemoryManagementSupported, 0))
   if (value == 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
   }
@@ -34,8 +34,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_VMM) {
   hipDeviceProp_t devProp;
   int device;
   bool xnackEnabled = false;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&devProp, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&devProp, device))
   std::string gfxName(devProp.gcnArchName);
 
   if (gfxName.find("xnack+") != std::string::npos) {
@@ -55,20 +55,20 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_VMM) {
   void* hipMemRetainAllocationHandle_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(hipGetProcAddress("hipMemGetAllocationGranularity", &hipMemGetAllocationGranularity_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemCreate", &hipMemCreate_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemCreate", &hipMemCreate_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(hipGetProcAddress("hipMemAddressReserve", &hipMemAddressReserve_ptr, currentHipVersion,
                               0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemMap", &hipMemMap_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemMap", &hipMemMap_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(
       hipGetProcAddress("hipMemSetAccess", &hipMemSetAccess_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemUnmap", &hipMemUnmap_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemUnmap", &hipMemUnmap_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(hipGetProcAddress("hipMemAddressFree", &hipMemAddressFree_ptr, currentHipVersion, 0,
                               nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemRelease", &hipMemRelease_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemRelease", &hipMemRelease_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(
       hipGetProcAddress("hipMemGetAccess", &hipMemGetAccess_ptr, currentHipVersion, 0, nullptr));
   HIP_CHECK(hipGetProcAddress("hipMemGetAllocationPropertiesFromHandle",
@@ -150,16 +150,16 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_VMM) {
 
   // Validating hipMemCreate API
   hipMemGenericAllocationHandle_t handle = nullptr;
-  HIP_CHECK(dyn_hipMemCreate_ptr(&handle, granularity, &prop, 0));
+  HIP_CHECK(dyn_hipMemCreate_ptr(&handle, granularity, &prop, 0))
   REQUIRE(handle != nullptr);
 
   // Validating hipMemAddressReserve API
   void* ptr = nullptr;
-  HIP_CHECK(dyn_hipMemAddressReserve_ptr(&ptr, granularity, 0, 0, 0));
+  HIP_CHECK(dyn_hipMemAddressReserve_ptr(&ptr, granularity, 0, 0, 0))
   REQUIRE(ptr != nullptr);
 
   // Validating hipMemMap API
-  HIP_CHECK(dyn_hipMemMap_ptr(ptr, granularity, 0, handle, 0));
+  HIP_CHECK(dyn_hipMemMap_ptr(ptr, granularity, 0, handle, 0))
   REQUIRE(ptr != nullptr);
 
   // Validating hipMemSetAccess API
@@ -167,24 +167,24 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_VMM) {
   desc.location.type = hipMemLocationTypeDevice;
   desc.location.id = 0;
   desc.flags = hipMemAccessFlagsProtReadWrite;
-  HIP_CHECK(dyn_hipMemSetAccess_ptr(ptr, granularity, &desc, 1));
+  HIP_CHECK(dyn_hipMemSetAccess_ptr(ptr, granularity, &desc, 1))
   REQUIRE(ptr != nullptr);
 
   // Performing some operations on ptr, to validate it
-  HIP_CHECK(hipMemcpy(ptr, hostMem, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(ptr, hostMem, Nbytes, hipMemcpyHostToDevice))
   addOneKernel<<<1, 1>>>(reinterpret_cast<int*>(ptr), N);
-  HIP_CHECK(hipMemcpy(hostMem, ptr, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostMem, ptr, Nbytes, hipMemcpyDeviceToHost))
   validateHostArray(hostMem, N, 11);
 
   // Validating hipMemGetAccess API
   uint64_t flags;
   hipMemLocation location = {hipMemLocationTypeDevice, 0};
-  HIP_CHECK(dyn_hipMemGetAccess_ptr(&flags, &location, ptr));
+  HIP_CHECK(dyn_hipMemGetAccess_ptr(&flags, &location, ptr))
   REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
 
   // Validating hipMemGetAllocationPropertiesFromHandle API
   hipMemAllocationProp requiredProp;
-  HIP_CHECK(dyn_hipMemGetAllocationPropertiesFromHandle_ptr(&requiredProp, handle));
+  HIP_CHECK(dyn_hipMemGetAllocationPropertiesFromHandle_ptr(&requiredProp, handle))
   REQUIRE(requiredProp.type == hipMemAllocationTypePinned);
   REQUIRE(requiredProp.requestedHandleTypes == hipMemHandleTypeNone);
   REQUIRE(requiredProp.location.type == hipMemLocationTypeDevice);
@@ -192,14 +192,14 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_VMM) {
 
   // Validating hipMemRetainAllocationHandle API
   hipMemGenericAllocationHandle_t requiredHandle = nullptr;
-  HIP_CHECK(dyn_hipMemRetainAllocationHandle_ptr(&requiredHandle, ptr));
+  HIP_CHECK(dyn_hipMemRetainAllocationHandle_ptr(&requiredHandle, ptr))
   REQUIRE(requiredHandle == handle);
 
   // Validating hipMemUnmap, hipMemAddressFree, hipMemRelease API's
-  HIP_CHECK(dyn_hipMemUnmap_ptr(ptr, granularity));
-  HIP_CHECK(dyn_hipMemAddressFree_ptr(ptr, granularity));
-  HIP_CHECK(dyn_hipMemRelease_ptr(requiredHandle));
-  HIP_CHECK(dyn_hipMemRelease_ptr(handle));
+  HIP_CHECK(dyn_hipMemUnmap_ptr(ptr, granularity))
+  HIP_CHECK(dyn_hipMemAddressFree_ptr(ptr, granularity))
+  HIP_CHECK(dyn_hipMemRelease_ptr(requiredHandle))
+  HIP_CHECK(dyn_hipMemRelease_ptr(handle))
 
   // Performing operation on ptr, to check it is invalidated or not
   if (!xnackEnabled) {

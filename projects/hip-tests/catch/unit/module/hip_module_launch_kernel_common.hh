@@ -20,26 +20,26 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelPositiveBasic()
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   SECTION("Kernel with no arguments") {
     hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
-    HIP_CHECK(func(f, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(func(f, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u))
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   SECTION("Kernel with arguments using kernelParams") {
     hipFunction_t f = GetKernel(mg.module(), "Kernel42");
     LinearAllocGuard<int> result_dev(LinearAllocs::hipMalloc, sizeof(int));
-    HIP_CHECK(hipMemset(result_dev.ptr(), 0, sizeof(*result_dev.ptr())));
+    HIP_CHECK(hipMemset(result_dev.ptr(), 0, sizeof(*result_dev.ptr())))
     int* result_ptr = result_dev.ptr();
     void* kernel_args[1] = {&result_ptr};
-    HIP_CHECK(func(f, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args, nullptr, nullptr, nullptr, 0u));
+    HIP_CHECK(func(f, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args, nullptr, nullptr, nullptr, 0u))
     int result = 0;
-    HIP_CHECK(hipMemcpy(&result, result_dev.ptr(), sizeof(result), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(&result, result_dev.ptr(), sizeof(result), hipMemcpyDefault))
     REQUIRE(result == 42);
   }
 
   SECTION("Kernel with arguments using extra") {
     hipFunction_t f = GetKernel(mg.module(), "Kernel42");
     LinearAllocGuard<int> result_dev(LinearAllocs::hipMalloc, sizeof(int));
-    HIP_CHECK(hipMemset(result_dev.ptr(), 0, sizeof(*result_dev.ptr())));
+    HIP_CHECK(hipMemset(result_dev.ptr(), 0, sizeof(*result_dev.ptr())))
     int* result_ptr = result_dev.ptr();
     size_t size = sizeof(result_ptr);
     // clang-format off
@@ -49,9 +49,9 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelPositiveBasic()
         HIP_LAUNCH_PARAM_END
     };
     // clang-format on
-    HIP_CHECK(func(f, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, extra, nullptr, nullptr, 0u));
+    HIP_CHECK(func(f, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, extra, nullptr, nullptr, 0u))
     int result = 0;
-    HIP_CHECK(hipMemcpy(&result, result_dev.ptr(), sizeof(result), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(&result, result_dev.ptr(), sizeof(result), hipMemcpyDefault))
     REQUIRE(result == 42);
   }
 }
@@ -64,7 +64,7 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelPositiveParamet
     hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
     HIP_CHECK(func(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, 0, nullptr,
                    nullptr, nullptr, nullptr, nullptr, 0u));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   };
 
   SECTION("gridDimX == maxGridDimX") {
@@ -211,19 +211,19 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
 
   SECTION("Stream not on the same device") {
     int numDevices = 0;
-    HIP_CHECK(hipGetDeviceCount(&numDevices));
+    HIP_CHECK(hipGetDeviceCount(&numDevices))
     if (numDevices < 2) {
       WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);
     } else {
-      HIP_CHECK(hipSetDevice(1));
+      HIP_CHECK(hipSetDevice(1))
       hipStream_t s1;
-      HIP_CHECK(hipStreamCreate(&s1));
-      HIP_CHECK(hipSetDevice(0));
+      HIP_CHECK(hipStreamCreate(&s1))
+      HIP_CHECK(hipSetDevice(0))
       hipFunction_t f = GetKernel(mg.module(), "Kernel42");
       void* extra[0] = {};
       HIP_CHECK_ERROR(func(f, 1, 1, 1, 1, 1, 1, 0, s1, nullptr, extra, nullptr, nullptr, 0u),
                       hipErrorInvalidResourceHandle);
-      HIP_CHECK(hipStreamDestroy(s1));
+      HIP_CHECK(hipStreamDestroy(s1))
     }
   }
 

@@ -25,7 +25,7 @@
 
 HIP_TEST_CASE(Unit_hipMemVmm_Basic) {
   int vmm = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, 0))
   INFO("hipDeviceAttributeVirtualMemoryManagementSupported: " << vmm);
 
   if (vmm == 0) {
@@ -44,15 +44,15 @@ HIP_TEST_CASE(Unit_hipMemVmm_Basic) {
 
   size_t size = granularity * 4;
   void* reservedAddress{nullptr};
-  HIP_CHECK(hipMemAddressReserve(&reservedAddress, size, 0, nullptr, 0));
+  HIP_CHECK(hipMemAddressReserve(&reservedAddress, size, 0, nullptr, 0))
 
   hipMemGenericAllocationHandle_t gaHandle{nullptr};
-  HIP_CHECK(hipMemCreate(&gaHandle, size, &memAllocationProp, 0));
+  HIP_CHECK(hipMemCreate(&gaHandle, size, &memAllocationProp, 0))
 
-  HIP_CHECK(hipMemMap(reservedAddress, size, 0, gaHandle, 0));
+  HIP_CHECK(hipMemMap(reservedAddress, size, 0, gaHandle, 0))
 
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   hipMemAccessDesc desc;
   desc.location.type = hipMemLocationTypeDevice;
   desc.location.id = device;
@@ -60,18 +60,18 @@ HIP_TEST_CASE(Unit_hipMemVmm_Basic) {
   std::vector<char> values(size);
   const char value = 1;
 
-  HIP_CHECK(hipMemSetAccess(reservedAddress, size, &desc, 1));
-  HIP_CHECK(hipMemset(reservedAddress, value, size));
-  HIP_CHECK(hipMemcpy(&values[0], reservedAddress, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemSetAccess(reservedAddress, size, &desc, 1))
+  HIP_CHECK(hipMemset(reservedAddress, value, size))
+  HIP_CHECK(hipMemcpy(&values[0], reservedAddress, size, hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < size; ++i) {
     REQUIRE(values[i] == value);
   }
 
-  HIP_CHECK(hipMemUnmap(reservedAddress, size));
+  HIP_CHECK(hipMemUnmap(reservedAddress, size))
 
-  HIP_CHECK(hipMemRelease(gaHandle));
-  HIP_CHECK(hipMemAddressFree(reservedAddress, size));
+  HIP_CHECK(hipMemRelease(gaHandle))
+  HIP_CHECK(hipMemAddressFree(reservedAddress, size))
 }
 
 /*
@@ -82,7 +82,7 @@ HIP_TEST_CASE(Unit_hipMemVmm_Basic) {
 #if HT_AMD
 HIP_TEST_CASE(Unit_hipMemVmm_Uncached) {
   int vmm = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, 0))
   INFO("hipDeviceAttributeVirtualMemoryManagementSupported: " << vmm);
 
   if (vmm == 0) {
@@ -101,15 +101,15 @@ HIP_TEST_CASE(Unit_hipMemVmm_Uncached) {
 
   size_t size = granularity;
   void* reservedAddress{nullptr};
-  HIP_CHECK(hipMemAddressReserve(&reservedAddress, size, 0, nullptr, 0));
+  HIP_CHECK(hipMemAddressReserve(&reservedAddress, size, 0, nullptr, 0))
 
   hipMemGenericAllocationHandle_t gaHandle{nullptr};
-  HIP_CHECK(hipMemCreate(&gaHandle, size, &memAllocationProp, 0));
+  HIP_CHECK(hipMemCreate(&gaHandle, size, &memAllocationProp, 0))
 
-  HIP_CHECK(hipMemMap(reservedAddress, size, 0, gaHandle, 0));
+  HIP_CHECK(hipMemMap(reservedAddress, size, 0, gaHandle, 0))
 
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   hipMemAccessDesc desc;
   desc.location.type = hipMemLocationTypeDevice;
   desc.location.id = device;
@@ -117,17 +117,17 @@ HIP_TEST_CASE(Unit_hipMemVmm_Uncached) {
   std::vector<char> values(size);
   const int value = 1;
 
-  HIP_CHECK(hipMemSetAccess(reservedAddress, size, &desc, 1));
-  HIP_CHECK(hipMemset(reservedAddress, value, size));
-  HIP_CHECK(hipMemcpy(values.data(), reservedAddress, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemSetAccess(reservedAddress, size, &desc, 1))
+  HIP_CHECK(hipMemset(reservedAddress, value, size))
+  HIP_CHECK(hipMemcpy(values.data(), reservedAddress, size, hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < size; ++i) {
     REQUIRE(values[i] == value);
   }
 
-  HIP_CHECK(hipMemUnmap(reservedAddress, size));
+  HIP_CHECK(hipMemUnmap(reservedAddress, size))
 
-  HIP_CHECK(hipMemRelease(gaHandle));
-  HIP_CHECK(hipMemAddressFree(reservedAddress, size));
+  HIP_CHECK(hipMemRelease(gaHandle))
+  HIP_CHECK(hipMemAddressFree(reservedAddress, size))
 }
 #endif

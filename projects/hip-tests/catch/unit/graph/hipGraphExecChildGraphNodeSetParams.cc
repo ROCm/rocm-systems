@@ -36,14 +36,14 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_Negative) {
   int *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
   int *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
   HipTest::initArrays<int>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   std::vector<hipGraphNode_t> childdependencies;
   hipStream_t streamForGraph;
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipGraphCreate(&childgraph1, 0));
-  HIP_CHECK(hipGraphCreate(&childgraph2, 0));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipGraphCreate(&childgraph1, 0))
+  HIP_CHECK(hipGraphCreate(&childgraph2, 0))
   hipGraphNode_t memcpyH2D_A, memcpyH2D_B, memcpyD2H_A, memcpyH2D_B_child, childGraphNode1;
-  HIP_CHECK(hipMemcpy(C_d, C_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(C_d, C_h, Nbytes, hipMemcpyHostToDevice))
 
   // Adding MemcpyNode to graph
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
@@ -54,13 +54,13 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_Negative) {
                                     hipMemcpyDeviceToDevice));
 
   // Adding childnode to graph
-  HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode1, graph, nullptr, 0, childgraph1));
+  HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode1, graph, nullptr, 0, childgraph1))
 
   // Adding memcpynode to graph
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_A, graph, nullptr, 0, B_h, B_d, Nbytes,
                                     hipMemcpyDeviceToHost));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &childGraphNode1, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &childGraphNode1, &memcpyD2H_A, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &childGraphNode1, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &childGraphNode1, &memcpyD2H_A, 1))
 
   // Adding memcpynode to new childgraph which is used to update the
   // childgraph node
@@ -68,7 +68,7 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_Negative) {
                                     hipMemcpyDeviceToDevice));
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   SECTION("Pass nullptr to graphExec") {
     REQUIRE(hipGraphExecChildGraphNodeSetParams(nullptr, childGraphNode1, childgraph2) ==
@@ -89,18 +89,18 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_Negative) {
     hipGraphNode_t newnode;
     HIP_CHECK(hipGraphAddMemcpyNode1D(&newnode, childgraph2, nullptr, 0, B_d, C_d, Nbytes,
                                       hipMemcpyDeviceToDevice));
-    HIP_CHECK(hipGraphAddDependencies(childgraph2, &memcpyH2D_B_child, &newnode, 1));
+    HIP_CHECK(hipGraphAddDependencies(childgraph2, &memcpyH2D_B_child, &newnode, 1))
 
     REQUIRE(hipGraphExecChildGraphNodeSetParams(graphExec, childGraphNode1, childgraph2) !=
             hipSuccess);
   }
 
   HipTest::freeArrays<int>(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(childgraph1));
-  HIP_CHECK(hipGraphDestroy(childgraph2));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(childgraph1))
+  HIP_CHECK(hipGraphDestroy(childgraph2))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 }
 
 /*
@@ -118,14 +118,14 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_BasicFunc) {
   int *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
   int *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
   HipTest::initArrays<int>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   std::vector<hipGraphNode_t> childdependencies;
   hipStream_t streamForGraph;
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipGraphCreate(&childgraph1, 0));
-  HIP_CHECK(hipGraphCreate(&childgraph2, 0));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipGraphCreate(&childgraph1, 0))
+  HIP_CHECK(hipGraphCreate(&childgraph2, 0))
   hipGraphNode_t memcpyH2D_A, memcpyH2D_B, memcpyD2H_A, memcpyH2D_B_child, childGraphNode1;
-  HIP_CHECK(hipMemcpy(C_d, C_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(C_d, C_h, Nbytes, hipMemcpyHostToDevice))
 
   // Adding MemcpyNode to graph
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
@@ -136,13 +136,13 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_BasicFunc) {
                                     hipMemcpyDeviceToDevice));
 
   // Adding childnode to graph
-  HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode1, graph, nullptr, 0, childgraph1));
+  HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode1, graph, nullptr, 0, childgraph1))
 
   // Adding memcpynode to graph
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_A, graph, nullptr, 0, B_h, B_d, Nbytes,
                                     hipMemcpyDeviceToHost));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &childGraphNode1, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &childGraphNode1, &memcpyD2H_A, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &childGraphNode1, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &childGraphNode1, &memcpyD2H_A, 1))
 
   // Adding memcpynode to new childgraph which is used to update the
   // childgraph node
@@ -150,13 +150,13 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_BasicFunc) {
                                     hipMemcpyDeviceToDevice));
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   // Update the childgraph node
-  HIP_CHECK(hipGraphExecChildGraphNodeSetParams(graphExec, childGraphNode1, childgraph2));
+  HIP_CHECK(hipGraphExecChildGraphNodeSetParams(graphExec, childGraphNode1, childgraph2))
 
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Verify graph execution result
   for (unsigned int i = 0; i < N; i++) {
@@ -167,11 +167,11 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_BasicFunc) {
   }
 
   HipTest::freeArrays<int>(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(childgraph1));
-  HIP_CHECK(hipGraphDestroy(childgraph2));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(childgraph1))
+  HIP_CHECK(hipGraphDestroy(childgraph2))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 }
 
 /*
@@ -198,12 +198,12 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_ChildTopology) {
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   std::vector<hipGraphNode_t> childdependencies, childdependencies1;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   hipGraphNode_t memcpyH2D_A, memcpyH2D_B, memcpyH2D_C, childGraphNode1, memcpyD2H_A, memcpyD2D_AB;
   hipStream_t streamForGraph;
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipGraphCreate(&childgraph1, 0));
-  HIP_CHECK(hipGraphCreate(&childgraph2, 0));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipGraphCreate(&childgraph1, 0))
+  HIP_CHECK(hipGraphCreate(&childgraph2, 0))
 
   // Adding memcpy node to graph
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
@@ -241,15 +241,15 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_ChildTopology) {
                                   childdependencies.size(), &kernelNodeParams));
 
   // Adding child node to graph
-  HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode1, graph, nullptr, 0, childgraph1));
+  HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode1, graph, nullptr, 0, childgraph1))
 
   // Adding memcpy node to graph
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_A, graph, nullptr, 0, A_h, A_d, Nbytes,
                                     hipMemcpyDeviceToHost));
 
 
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &childGraphNode1, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &childGraphNode1, &memcpyD2H_A, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &childGraphNode1, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &childGraphNode1, &memcpyD2H_A, 1))
 
   // Creating another child graph for updating parameters with the same topology
   // and passing the new child graph to hipGraphExecChildGraphNodeSetParams API
@@ -280,20 +280,20 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_ChildTopology) {
                                   childdependencies.size(), &kernelNodeParams));
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
-  HIP_CHECK(hipGraphExecChildGraphNodeSetParams(graphExec, childGraphNode1, childgraph2));
+  HIP_CHECK(hipGraphExecChildGraphNodeSetParams(graphExec, childGraphNode1, childgraph2))
 
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Verify child graph execution result
   HipTest::checkVectorADD(B_h, B_h, A_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(childgraph1));
-  HIP_CHECK(hipGraphDestroy(childgraph2));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(childgraph1))
+  HIP_CHECK(hipGraphDestroy(childgraph2))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
 }

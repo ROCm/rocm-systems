@@ -34,8 +34,8 @@ template <bool out_of_bounds> void LaunchBoundsWrapper(const int threads_per_blo
 
   A_h = static_cast<int*>(malloc(sizeof(int)));
   memset(A_h, 0, sizeof(int));
-  HIP_CHECK(hipMalloc(&A_d, sizeof(int)));
-  HIP_CHECK(hipMemcpy(A_d, A_h, sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&A_d, sizeof(int)))
+  HIP_CHECK(hipMemcpy(A_d, A_h, sizeof(int), hipMemcpyHostToDevice))
   SumKernel<<<block_size, threads_per_block>>>(A_d);
 
   if constexpr (out_of_bounds) {
@@ -52,10 +52,10 @@ template <bool out_of_bounds> void LaunchBoundsWrapper(const int threads_per_blo
 #endif
     }
   } else {
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
   }
 
-  HIP_CHECK(hipMemcpy(A_h, A_d, sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(A_h, A_d, sizeof(int), hipMemcpyDeviceToHost))
 
   if constexpr (!out_of_bounds) {
     for (int i = 0; i < threads_per_block * block_size; ++i) {
@@ -65,7 +65,7 @@ template <bool out_of_bounds> void LaunchBoundsWrapper(const int threads_per_blo
   }
 
   free(A_h);
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(A_d))
 }
 
 /**

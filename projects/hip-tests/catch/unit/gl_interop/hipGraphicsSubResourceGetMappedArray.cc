@@ -20,7 +20,7 @@ HIP_TEST_CASE(Unit_hipGraphicsSubResourceGetMappedArray_Positive_Basic) {
   std::vector<int> gl_devices(device_count, -1);
 
   // Initialize GL interop
-  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll));
+  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll))
   REQUIRE(gl_device_count == 1);
   REQUIRE(gl_devices.at(0) == 0);
 
@@ -31,16 +31,16 @@ HIP_TEST_CASE(Unit_hipGraphicsSubResourceGetMappedArray_Positive_Basic) {
   HIP_CHECK(
       hipGraphicsGLRegisterImage(&tex_resource, tex, GL_TEXTURE_2D, hipGraphicsRegisterFlagsNone));
 
-  HIP_CHECK(hipGraphicsMapResources(1, &tex_resource, 0));
+  HIP_CHECK(hipGraphicsMapResources(1, &tex_resource, 0))
 
   hipArray_t image_devptr = nullptr;
-  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&image_devptr, tex_resource, 0, 0));
+  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&image_devptr, tex_resource, 0, 0))
 
   REQUIRE(image_devptr != nullptr);
 
-  HIP_CHECK(hipGraphicsUnmapResources(1, &tex_resource, 0));
+  HIP_CHECK(hipGraphicsUnmapResources(1, &tex_resource, 0))
 
-  HIP_CHECK(hipGraphicsUnregisterResource(tex_resource));
+  HIP_CHECK(hipGraphicsUnregisterResource(tex_resource))
 }
 
 HIP_TEST_CASE(Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters) {
@@ -53,7 +53,7 @@ HIP_TEST_CASE(Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters) {
   std::vector<int> gl_devices(device_count, -1);
 
   // Initialize GL interop
-  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll));
+  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll))
   REQUIRE(gl_device_count == 1);
   REQUIRE(gl_devices.at(0) == 0);
 
@@ -64,7 +64,7 @@ HIP_TEST_CASE(Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters) {
   HIP_CHECK(
       hipGraphicsGLRegisterImage(&tex_resource, tex, GL_TEXTURE_2D, hipGraphicsRegisterFlagsNone));
 
-  HIP_CHECK(hipGraphicsMapResources(1, &tex_resource, 0));
+  HIP_CHECK(hipGraphicsMapResources(1, &tex_resource, 0))
 
   hipArray_t image_devptr = nullptr;
 
@@ -76,21 +76,21 @@ HIP_TEST_CASE(Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters) {
     GLBufferObject vbo;
     hipGraphicsResource* vbo_resource;
 
-    HIP_CHECK(hipGraphicsGLRegisterBuffer(&vbo_resource, vbo, hipGraphicsRegisterFlagsNone));
-    HIP_CHECK(hipGraphicsMapResources(1, &vbo_resource, 0));
+    HIP_CHECK(hipGraphicsGLRegisterBuffer(&vbo_resource, vbo, hipGraphicsRegisterFlagsNone))
+    HIP_CHECK(hipGraphicsMapResources(1, &vbo_resource, 0))
 
     HIP_CHECK_ERROR(hipGraphicsSubResourceGetMappedArray(&image_devptr, vbo_resource, 0, 0),
                     hipErrorNotMappedAsArray);
 
-    HIP_CHECK(hipGraphicsUnmapResources(1, &vbo_resource, 0));
-    HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource));
+    HIP_CHECK(hipGraphicsUnmapResources(1, &vbo_resource, 0))
+    HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource))
   }
 
   SECTION("unregistered resource") {
     hipGraphicsResource* unregistered_resource;
     HIP_CHECK(hipGraphicsGLRegisterImage(&unregistered_resource, tex, GL_TEXTURE_2D,
                                          hipGraphicsRegisterFlagsNone));
-    HIP_CHECK(hipGraphicsUnregisterResource(unregistered_resource));
+    HIP_CHECK(hipGraphicsUnregisterResource(unregistered_resource))
     HIP_CHECK_ERROR(
         hipGraphicsSubResourceGetMappedArray(&image_devptr, unregistered_resource, 0, 0),
         hipErrorInvalidHandle);
@@ -102,7 +102,7 @@ HIP_TEST_CASE(Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters) {
                                          hipGraphicsRegisterFlagsNone));
     HIP_CHECK_ERROR(hipGraphicsSubResourceGetMappedArray(&image_devptr, not_mapped_resource, 0, 0),
                     hipErrorNotMapped);
-    HIP_CHECK(hipGraphicsUnregisterResource(not_mapped_resource));
+    HIP_CHECK(hipGraphicsUnregisterResource(not_mapped_resource))
   }
 
   SECTION("unmapped resource") {
@@ -111,13 +111,13 @@ HIP_TEST_CASE(Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters) {
     HIP_CHECK(hipGraphicsGLRegisterImage(&unmapped_resource, tex, GL_TEXTURE_2D,
                                          hipGraphicsRegisterFlagsNone));
 
-    HIP_CHECK(hipGraphicsMapResources(1, &unmapped_resource, 0));
-    HIP_CHECK(hipGraphicsUnmapResources(1, &unmapped_resource, 0));
+    HIP_CHECK(hipGraphicsMapResources(1, &unmapped_resource, 0))
+    HIP_CHECK(hipGraphicsUnmapResources(1, &unmapped_resource, 0))
 
     HIP_CHECK_ERROR(hipGraphicsSubResourceGetMappedArray(&image_devptr, unmapped_resource, 0, 0),
                     hipErrorNotMapped);
 
-    HIP_CHECK(hipGraphicsUnregisterResource(unmapped_resource));
+    HIP_CHECK(hipGraphicsUnregisterResource(unmapped_resource))
   }
 
   SECTION("invalid arrayIndex") {
@@ -132,7 +132,7 @@ HIP_TEST_CASE(Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters) {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipGraphicsUnmapResources(1, &tex_resource, 0));
+  HIP_CHECK(hipGraphicsUnmapResources(1, &tex_resource, 0))
 
-  HIP_CHECK(hipGraphicsUnregisterResource(tex_resource));
+  HIP_CHECK(hipGraphicsUnregisterResource(tex_resource))
 }

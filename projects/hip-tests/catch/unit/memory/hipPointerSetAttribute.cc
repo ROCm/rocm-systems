@@ -33,7 +33,7 @@ HIP_TEST_CASE(Unit_hipPointerSetAttribute_Positive_SyncMemops) {
 
   StreamGuard stream(Streams::created);
   LaunchDelayKernel(std::chrono::milliseconds{100}, stream.stream());
-  HIP_CHECK(hipMemcpy(dst.ptr(), src.ptr(), 1024, hipMemcpyDeviceToDevice));
+  HIP_CHECK(hipMemcpy(dst.ptr(), src.ptr(), 1024, hipMemcpyDeviceToDevice))
   HIP_CHECK_ERROR(hipStreamQuery(stream.stream()), hipErrorNotReady);
 
   int value = 1;
@@ -43,8 +43,8 @@ HIP_TEST_CASE(Unit_hipPointerSetAttribute_Positive_SyncMemops) {
                                    reinterpret_cast<hipDeviceptr_t>(dst.ptr())));
 
   LaunchDelayKernel(std::chrono::milliseconds{100}, stream.stream());
-  HIP_CHECK(hipMemcpy(dst.ptr(), src.ptr(), 1024, hipMemcpyDeviceToDevice));
-  HIP_CHECK(hipStreamQuery(stream.stream()));
+  HIP_CHECK(hipMemcpy(dst.ptr(), src.ptr(), 1024, hipMemcpyDeviceToDevice))
+  HIP_CHECK(hipStreamQuery(stream.stream()))
 }
 
 /**
@@ -86,7 +86,7 @@ HIP_TEST_CASE(Unit_hipPointerSetAttribute_Negative_Parameters) {
 
 #if !defined(ENABLE_ADDRESS_SANITIZER)
   SECTION("freed pointer") {
-    HIP_CHECK(hipFree(mem.ptr()));
+    HIP_CHECK(hipFree(mem.ptr()))
     HIP_CHECK_ERROR(hipPointerSetAttribute(&value, HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS, mem.ptr()),
                     hipErrorInvalidDevicePointer);
   }

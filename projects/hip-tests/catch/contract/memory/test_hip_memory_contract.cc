@@ -20,7 +20,7 @@ HIP_TEST_CASE(Contract_Memory_HipMalloc_Basic_ReturnsAlignedPointer) {
   hip::contract::ContractCleanup cleanup;
   void* ptr = nullptr;
 
-  HIP_CHECK(hipMalloc(&ptr, kSmallAllocSize));
+  HIP_CHECK(hipMalloc(&ptr, kSmallAllocSize))
   cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   REQUIRE(ptr != nullptr);
@@ -31,7 +31,7 @@ HIP_TEST_CASE(Contract_Memory_HipMalloc_Basic_ReturnsAlignedPointer) {
 HIP_TEST_CASE(Contract_Memory_HipMalloc_ZeroSize_ReturnsNull) {
   void* ptr = reinterpret_cast<void*>(0x1);
 
-  HIP_CHECK(hipMalloc(&ptr, 0));
+  HIP_CHECK(hipMalloc(&ptr, 0))
 
   REQUIRE(ptr == nullptr);
 }
@@ -43,15 +43,15 @@ HIP_TEST_CASE(Contract_Memory_HipMalloc_NullOutPointer_ReturnsInvalidValue) {
 
 // @asserts: hipFree - freeing a null pointer is a no-op that succeeds
 HIP_TEST_CASE(Contract_Memory_HipFree_Null_Succeeds) {
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
 }
 
 // @asserts: hipFree - freeing a pointer returned by hipMalloc succeeds
 HIP_TEST_CASE(Contract_Memory_HipFree_AllocatedPointer_Succeeds) {
   void* ptr = nullptr;
 
-  HIP_CHECK(hipMalloc(&ptr, kSmallAllocSize));
+  HIP_CHECK(hipMalloc(&ptr, kSmallAllocSize))
   REQUIRE(ptr != nullptr);
 
-  HIP_CHECK(hipFree(ptr));
+  HIP_CHECK(hipFree(ptr))
 }

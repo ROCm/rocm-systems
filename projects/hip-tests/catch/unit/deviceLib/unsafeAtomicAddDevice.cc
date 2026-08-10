@@ -34,7 +34,7 @@ HIP_TEST_CASE(Unit_unsafeAtomicAdd) {
   using namespace std;
   int device = 0;
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   std::string gfxName(props.gcnArchName);
 
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
@@ -66,20 +66,20 @@ HIP_TEST_CASE(Unit_unsafeAtomicAdd) {
 
     float* fX;
     double* dX;
-    HIP_CHECK(hipMalloc(&fX, sizeof(float)));
-    HIP_CHECK(hipMalloc(&dX, sizeof(double)));
+    HIP_CHECK(hipMalloc(&fX, sizeof(float)))
+    HIP_CHECK(hipMalloc(&dX, sizeof(double)))
 
     hipModule_t module;
     hipFunction_t f_kernel, d_kernel;
-    HIP_CHECK(hipModuleLoadData(&module, code.data()));
-    HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "unsafeAdd_f"));
-    HIP_CHECK(hipModuleGetFunction(&d_kernel, module, "unsafeAdd_d"));
+    HIP_CHECK(hipModuleLoadData(&module, code.data()))
+    HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "unsafeAdd_f"))
+    HIP_CHECK(hipModuleGetFunction(&d_kernel, module, "unsafeAdd_d"))
 
     float f_val = 10.1f;
     double d_val = 10.1;
 
-    HIP_CHECK(hipMemcpy(fX, &f_val, sizeof(float), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dX, &d_val, sizeof(double), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(fX, &f_val, sizeof(float), hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(dX, &d_val, sizeof(double), hipMemcpyHostToDevice))
 
     struct {
       float* p;
@@ -99,18 +99,18 @@ HIP_TEST_CASE(Unit_unsafeAtomicAdd) {
     void* config_d[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args_d, HIP_LAUNCH_PARAM_BUFFER_SIZE,
                         &size_d, HIP_LAUNCH_PARAM_END};
 
-    HIP_CHECK(hipModuleLaunchKernel(f_kernel, 10, 1, 1, 100, 1, 1, 0, nullptr, nullptr, config_f));
-    HIP_CHECK(hipModuleLaunchKernel(d_kernel, 10, 1, 1, 100, 1, 1, 0, nullptr, nullptr, config_d));
+    HIP_CHECK(hipModuleLaunchKernel(f_kernel, 10, 1, 1, 100, 1, 1, 0, nullptr, nullptr, config_f))
+    HIP_CHECK(hipModuleLaunchKernel(d_kernel, 10, 1, 1, 100, 1, 1, 0, nullptr, nullptr, config_d))
 
     float res_f = 0.0f;
     double res_d = 0.0;
-    HIP_CHECK(hipMemcpy(&res_f, fX, sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(&res_d, dX, sizeof(double), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&res_f, fX, sizeof(float), hipMemcpyDeviceToHost))
+    HIP_CHECK(hipMemcpy(&res_d, dX, sizeof(double), hipMemcpyDeviceToHost))
 
-    HIP_CHECK(hipFree(dX));
-    HIP_CHECK(hipFree(fX));
+    HIP_CHECK(hipFree(dX))
+    HIP_CHECK(hipFree(fX))
 
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
 
     REQUIRE(fabs((res_f / 1000) - f_val) <= 0.2f);
     REQUIRE(fabs((res_d / 1000) - d_val) <= 0.2);

@@ -49,33 +49,33 @@ void test(unsigned testMask, int* C_d, int* C_h, int64_t numElements, hipStream_
 
   int count = 100;
   int init0 = 0;
-  HIP_CHECK(hipMemset(C_d, init0, sizeBytes));
+  HIP_CHECK(hipMemset(C_d, init0, sizeBytes))
   for (int i = 0; i < numElements; i++) {
     C_h[i] = -1;  // initialize
   }
 
   hipEvent_t neverCreated = 0, neverRecorded, timingDisabled;
-  HIP_CHECK(hipEventCreate(&neverRecorded));
-  HIP_CHECK(hipEventCreateWithFlags(&timingDisabled, hipEventDisableTiming));
+  HIP_CHECK(hipEventCreate(&neverRecorded))
+  HIP_CHECK(hipEventCreateWithFlags(&timingDisabled, hipEventDisableTiming))
 
   hipEvent_t start, stop;
-  HIP_CHECK(hipEventCreate(&start));
-  HIP_CHECK(hipEventCreate(&stop));
+  HIP_CHECK(hipEventCreate(&start))
+  HIP_CHECK(hipEventCreate(&stop))
   unsigned blocksPerCU = 6;
   unsigned threadsPerBlock = 256;
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, numElements);
 
-  HIP_CHECK(hipEventRecord(timingDisabled, stream));
+  HIP_CHECK(hipEventRecord(timingDisabled, stream))
   // sandwhich a kernel:
-  HIP_CHECK(hipEventRecord(start, stream));
+  HIP_CHECK(hipEventRecord(start, stream))
   hipLaunchKernelGGL(HipTest::addCountReverse, dim3(blocks), dim3(threadsPerBlock), 0, stream,
                      static_cast<const int*>(C_d), C_h, numElements, count);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipEventRecord(stop, stream));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipEventRecord(stop, stream))
 
   if (waitStart) {
-    HIP_CHECK(hipEventSynchronize(start));
+    HIP_CHECK(hipEventSynchronize(start))
   }
 
   hipError_t expectedStopError = hipSuccess;
@@ -89,7 +89,7 @@ void test(unsigned testMask, int* C_d, int* C_h, int64_t numElements, hipStream_
       HIP_CHECK(hipStreamSynchronize(stream));  // wait for recording to finish...
       break;
     case syncStopEvent:
-      HIP_CHECK(hipEventSynchronize(stop));
+      HIP_CHECK(hipEventSynchronize(stop))
       break;
     default:
       assert(0);
@@ -132,14 +132,14 @@ void test(unsigned testMask, int* C_d, int* C_h, int64_t numElements, hipStream_
     HIP_ASSERT(hipGetLastError() == hipErrorInvalidHandle);
   }
 
-  HIP_CHECK(hipEventDestroy(neverRecorded));
-  HIP_CHECK(hipEventDestroy(timingDisabled));
+  HIP_CHECK(hipEventDestroy(neverRecorded))
+  HIP_CHECK(hipEventDestroy(timingDisabled))
 
-  HIP_CHECK(hipEventDestroy(start));
-  HIP_CHECK(hipEventDestroy(stop));
+  HIP_CHECK(hipEventDestroy(start))
+  HIP_CHECK(hipEventDestroy(stop))
 
   // Clear out everything:
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   printf("test:   OK  \n");
 }
@@ -152,11 +152,11 @@ void runTests(int64_t numElements) {
 
 
   int *C_h, *C_d;
-  HIP_CHECK(hipMalloc(&C_d, sizeBytes));
-  HIP_CHECK(hipHostMalloc(&C_h, sizeBytes));
+  HIP_CHECK(hipMalloc(&C_d, sizeBytes))
+  HIP_CHECK(hipHostMalloc(&C_h, sizeBytes))
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreateWithFlags(&stream, 0x0));
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, 0x0))
 
   for (int waitStart = 1; waitStart >= 0; waitStart--) {
     unsigned W = waitStart ? 0x1000 : 0;
@@ -169,9 +169,9 @@ void runTests(int64_t numElements) {
   }
 
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(C_d));
-  HIP_CHECK(hipHostFree(C_h));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(C_d))
+  HIP_CHECK(hipHostFree(C_h))
 }
 
 /**

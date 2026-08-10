@@ -20,15 +20,15 @@ class StreamWaitEventBenchmark : public Benchmark<StreamWaitEventBenchmark> {
     const hipStream_t stream = stream_guard.stream();
     hipEvent_t wait_event{nullptr};
 
-    HIP_CHECK(hipEventCreate(&wait_event));
+    HIP_CHECK(hipEventCreate(&wait_event))
     REQUIRE(wait_event != nullptr);
-    HIP_CHECK(hipEventRecord(wait_event, stream));
+    HIP_CHECK(hipEventRecord(wait_event, stream))
 
     TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipStreamWaitEvent(stream, wait_event, 0));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamWaitEvent(stream, wait_event, 0))
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
-    HIP_CHECK(hipEventDestroy(wait_event));
+    HIP_CHECK(hipEventDestroy(wait_event))
   }
 };
 

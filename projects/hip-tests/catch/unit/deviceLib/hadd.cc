@@ -206,17 +206,17 @@ HIP_TEST_CASE(Unit_hadd_int_varaint) {
       9,           9,           10};
 
   int *d_a, *d_b, *d_res;
-  HIP_CHECK(hipMalloc(&d_a, sizeof(int) * size));
-  HIP_CHECK(hipMalloc(&d_b, sizeof(int) * size));
-  HIP_CHECK(hipMalloc(&d_res, sizeof(int) * size));
+  HIP_CHECK(hipMalloc(&d_a, sizeof(int) * size))
+  HIP_CHECK(hipMalloc(&d_b, sizeof(int) * size))
+  HIP_CHECK(hipMalloc(&d_res, sizeof(int) * size))
 
-  HIP_CHECK(hipMemcpy(d_a, a.data(), sizeof(int) * size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_b, b.data(), sizeof(int) * size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_a, a.data(), sizeof(int) * size, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(d_b, b.data(), sizeof(int) * size, hipMemcpyHostToDevice))
 
   hadd_kernel<<<1, size>>>(d_a, d_b, d_res, size);
   std::vector<int> gpu_res(size, 0);
 
-  HIP_CHECK(hipMemcpy(gpu_res.data(), d_res, sizeof(int) * size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(gpu_res.data(), d_res, sizeof(int) * size, hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < size; i++) {
     INFO("iter: " << i << " in: " << a[i] << ", " << b[i] << " expected: " << hadd_expected[i]
@@ -224,9 +224,9 @@ HIP_TEST_CASE(Unit_hadd_int_varaint) {
     CHECK(hadd_expected[i] == gpu_res[i]);
   }
 
-  HIP_CHECK(hipFree(d_a));
-  HIP_CHECK(hipFree(d_b));
-  HIP_CHECK(hipFree(d_res));
+  HIP_CHECK(hipFree(d_a))
+  HIP_CHECK(hipFree(d_b))
+  HIP_CHECK(hipFree(d_res))
 }
 
 HIP_TEST_CASE(Unit_rhadd_int_varaint) {
@@ -317,17 +317,17 @@ HIP_TEST_CASE(Unit_rhadd_int_varaint) {
       9,           10,          10};
 
   int *d_a, *d_b, *d_res;
-  HIP_CHECK(hipMalloc(&d_a, sizeof(int) * size));
-  HIP_CHECK(hipMalloc(&d_b, sizeof(int) * size));
-  HIP_CHECK(hipMalloc(&d_res, sizeof(int) * size));
+  HIP_CHECK(hipMalloc(&d_a, sizeof(int) * size))
+  HIP_CHECK(hipMalloc(&d_b, sizeof(int) * size))
+  HIP_CHECK(hipMalloc(&d_res, sizeof(int) * size))
 
-  HIP_CHECK(hipMemcpy(d_a, a.data(), sizeof(int) * size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_b, b.data(), sizeof(int) * size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_a, a.data(), sizeof(int) * size, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(d_b, b.data(), sizeof(int) * size, hipMemcpyHostToDevice))
 
   rhadd_kernel<<<1, size>>>(d_a, d_b, d_res, size);
   std::vector<int> gpu_res(size, 0);
 
-  HIP_CHECK(hipMemcpy(gpu_res.data(), d_res, sizeof(int) * size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(gpu_res.data(), d_res, sizeof(int) * size, hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < size; i++) {
     INFO("iter: " << i << " in: " << a[i] << ", " << b[i] << " expected: " << rhadd_expected[i]
@@ -335,9 +335,9 @@ HIP_TEST_CASE(Unit_rhadd_int_varaint) {
     CHECK(rhadd_expected[i] == gpu_res[i]);
   }
 
-  HIP_CHECK(hipFree(d_a));
-  HIP_CHECK(hipFree(d_b));
-  HIP_CHECK(hipFree(d_res));
+  HIP_CHECK(hipFree(d_a))
+  HIP_CHECK(hipFree(d_b))
+  HIP_CHECK(hipFree(d_res))
 }
 
 HIP_TEST_CASE(Unit_uhadd_int_varaint) {
@@ -477,17 +477,17 @@ HIP_TEST_CASE(Unit_uhadd_int_varaint) {
       4294967278, 4294967277, 4294967277, 4294967276, 4294967276, 4294967275, 4294967275};
 
   unsigned *d_a, *d_b, *d_res;
-  HIP_CHECK(hipMalloc(&d_a, sizeof(int) * size));
-  HIP_CHECK(hipMalloc(&d_b, sizeof(int) * size));
-  HIP_CHECK(hipMalloc(&d_res, sizeof(int) * size));
+  HIP_CHECK(hipMalloc(&d_a, sizeof(int) * size))
+  HIP_CHECK(hipMalloc(&d_b, sizeof(int) * size))
+  HIP_CHECK(hipMalloc(&d_res, sizeof(int) * size))
 
-  HIP_CHECK(hipMemcpy(d_a, a.data(), sizeof(int) * size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_b, b.data(), sizeof(int) * size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_a, a.data(), sizeof(int) * size, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(d_b, b.data(), sizeof(int) * size, hipMemcpyHostToDevice))
 
   uhadd_kernel<<<1, size>>>(d_a, d_b, d_res, size);
   std::vector<int> gpu_res(size, 0);
 
-  HIP_CHECK(hipMemcpy(gpu_res.data(), d_res, sizeof(int) * size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(gpu_res.data(), d_res, sizeof(int) * size, hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < size; i++) {
     INFO("iter: " << i << " in: " << a[i] << ", " << b[i] << " expected: " << uhadd_expected[i]
@@ -495,9 +495,9 @@ HIP_TEST_CASE(Unit_uhadd_int_varaint) {
     CHECK(uhadd_expected[i] == gpu_res[i]);
   }
 
-  HIP_CHECK(hipFree(d_a));
-  HIP_CHECK(hipFree(d_b));
-  HIP_CHECK(hipFree(d_res));
+  HIP_CHECK(hipFree(d_a))
+  HIP_CHECK(hipFree(d_b))
+  HIP_CHECK(hipFree(d_res))
 }
 
 HIP_TEST_CASE(Unit_urhadd_int_varaint) {
@@ -637,17 +637,17 @@ HIP_TEST_CASE(Unit_urhadd_int_varaint) {
       4294967278, 4294967278, 4294967277, 4294967277, 4294967276, 4294967276, 4294967275};
 
   unsigned *d_a, *d_b, *d_res;
-  HIP_CHECK(hipMalloc(&d_a, sizeof(int) * size));
-  HIP_CHECK(hipMalloc(&d_b, sizeof(int) * size));
-  HIP_CHECK(hipMalloc(&d_res, sizeof(int) * size));
+  HIP_CHECK(hipMalloc(&d_a, sizeof(int) * size))
+  HIP_CHECK(hipMalloc(&d_b, sizeof(int) * size))
+  HIP_CHECK(hipMalloc(&d_res, sizeof(int) * size))
 
-  HIP_CHECK(hipMemcpy(d_a, a.data(), sizeof(int) * size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_b, b.data(), sizeof(int) * size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_a, a.data(), sizeof(int) * size, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(d_b, b.data(), sizeof(int) * size, hipMemcpyHostToDevice))
 
   urhadd_kernel<<<1, size>>>(d_a, d_b, d_res, size);
   std::vector<int> gpu_res(size, 0);
 
-  HIP_CHECK(hipMemcpy(gpu_res.data(), d_res, sizeof(int) * size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(gpu_res.data(), d_res, sizeof(int) * size, hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < size; i++) {
     INFO("iter: " << i << " in: " << a[i] << ", " << b[i] << " expected: " << uhadd_expected[i]
@@ -655,7 +655,7 @@ HIP_TEST_CASE(Unit_urhadd_int_varaint) {
     CHECK(uhadd_expected[i] == gpu_res[i]);
   }
 
-  HIP_CHECK(hipFree(d_a));
-  HIP_CHECK(hipFree(d_b));
-  HIP_CHECK(hipFree(d_res));
+  HIP_CHECK(hipFree(d_a))
+  HIP_CHECK(hipFree(d_b))
+  HIP_CHECK(hipFree(d_res))
 }

@@ -23,18 +23,18 @@ class HipEventElapsedTimeBenchmark : public Benchmark<HipEventElapsedTimeBenchma
     hipEvent_t start, end;
     float time;
 
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&end));
+    HIP_CHECK(hipEventCreate(&start))
+    HIP_CHECK(hipEventCreate(&end))
 
-    HIP_CHECK(hipEventRecord(start));
+    HIP_CHECK(hipEventRecord(start))
     std::this_thread::sleep_for(std::chrono::milliseconds(5)); /* idle for 5 ms */
-    HIP_CHECK(hipEventRecord(end));
-    HIP_CHECK(hipEventSynchronize(end));
+    HIP_CHECK(hipEventRecord(end))
+    HIP_CHECK(hipEventSynchronize(end))
 
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipEventElapsedTime(&time, start, end)); }
 
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(end));
+    HIP_CHECK(hipEventDestroy(start))
+    HIP_CHECK(hipEventDestroy(end))
   }
 };
 

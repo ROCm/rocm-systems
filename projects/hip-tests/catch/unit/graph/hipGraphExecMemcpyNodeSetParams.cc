@@ -38,7 +38,7 @@
 HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Positive_Basic) {
   constexpr auto f = [](void* dst, void* src, size_t count, hipMemcpyKind direction) {
     hipGraph_t graph = nullptr;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
     hipGraphNode_t node = nullptr;
     const auto offset_src = reinterpret_cast<uint8_t*>(src) + 1;
     const auto offset_dst = reinterpret_cast<uint8_t*>(dst) + 1;
@@ -46,18 +46,18 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Positive_Basic) {
         make_hipPitchedPtr(offset_dst, count - 1, count - 1, 0), make_hipPos(0, 0, 0),
         make_hipPitchedPtr(offset_src, count - 1, count - 1, 0), make_hipPos(0, 0, 0),
         make_hipExtent(count - 1, 1, 1), direction);
-    HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params));
+    HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params))
     hipGraphExec_t graph_exec = nullptr;
-    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
     params = GetMemcpy3DParms(make_hipPitchedPtr(dst, count, count, 0), make_hipPos(0, 0, 0),
                               make_hipPitchedPtr(src, count, count, 0), make_hipPos(0, 0, 0),
                               make_hipExtent(count, 1, 1), direction);
-    HIP_CHECK(hipGraphExecMemcpyNodeSetParams(graph_exec, node, &params));
-    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread));
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    HIP_CHECK(hipGraphExecMemcpyNodeSetParams(graph_exec, node, &params))
+    HIP_CHECK(hipGraphLaunch(graph_exec, hipStreamPerThread))
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
 
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec))
+    HIP_CHECK(hipGraphDestroy(graph))
 
     return hipSuccess;
   };
@@ -145,7 +145,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Positive_Basic) {
 HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   int src[2] = {}, dst[2] = {};
 
@@ -155,10 +155,10 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative_Parameters) {
                        make_hipExtent(sizeof(dst), 1, 1), hipMemcpyDefault);
 
   hipGraphNode_t node = nullptr;
-  HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params));
+  HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params))
 
   hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
   SECTION("pGraphExec == nullptr") {
     HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams(nullptr, node, &params), hipErrorInvalidValue);
@@ -198,8 +198,8 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative_Parameters) {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -216,8 +216,8 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative_Parameters) {
  */
 HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Direction) {
   int *host, *dev, *src = nullptr, *dst = nullptr;
-  HIP_CHECK(hipHostMalloc(&host, sizeof(int)));
-  HIP_CHECK(hipMalloc(&dev, sizeof(int)));
+  HIP_CHECK(hipHostMalloc(&host, sizeof(int)))
+  HIP_CHECK(hipMalloc(&dev, sizeof(int)))
 
   const auto dir = GENERATE(hipMemcpyHostToHost, hipMemcpyHostToDevice,
                             hipMemcpyDeviceToHost, hipMemcpyDeviceToDevice);
@@ -245,7 +245,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Dire
   }
 
   hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   auto params =
       GetMemcpy3DParms(make_hipPitchedPtr(dst, sizeof(int), sizeof(int), 0), make_hipPos(0, 0, 0),
@@ -253,10 +253,10 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Dire
                        make_hipExtent(sizeof(int), 1, 1), dir);
 
   hipGraphNode_t node = nullptr;
-  HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params));
+  HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params))
 
   hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
 
   const auto set_dir = GENERATE(hipMemcpyHostToHost, hipMemcpyHostToDevice, hipMemcpyDeviceToHost,
                                 hipMemcpyDeviceToDevice, hipMemcpyDefault);
@@ -266,10 +266,10 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Dire
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipHostFree(host));
-  HIP_CHECK(hipFree(dev));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipHostFree(host))
+  HIP_CHECK(hipFree(dev))
 }
 
 /**

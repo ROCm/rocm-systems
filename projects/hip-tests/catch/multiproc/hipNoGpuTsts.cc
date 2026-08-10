@@ -28,7 +28,7 @@ static const char* visibility_env_var = "CUDA_VISIBLE_DEVICES";
 
 void Callback(hipStream_t stream, hipError_t status, void* userData) {
   UNUSED(stream);
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   REQUIRE(userData == NULL);
 }
 

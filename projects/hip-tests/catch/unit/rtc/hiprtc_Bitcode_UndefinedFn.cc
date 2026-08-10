@@ -39,7 +39,7 @@ HIP_TEST_CASE(Unit_hiprtc_bitcode_undefined_function) {
                       0, nullptr, nullptr);
   hipDeviceProp_t props;
   int device = 0;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
 
   std::string sarg = std::string("--gpu-architecture=") + props.gcnArchName;
   const char* options[] = {sarg.c_str(), "-fgpu-rdc"};

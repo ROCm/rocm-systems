@@ -39,7 +39,7 @@ void simpleVectorAdd(size_t numElements, int iters, hipStream_t stream, bool thr
   MemTraits<C>::Copy(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream);
   MemTraits<C>::Copy(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream);
   MemTraits<C>::Copy(C_d, C_h, Nbytes, hipMemcpyHostToDevice, stream);
-  HIPCHECK(hipDeviceSynchronize());
+  HIPCHECK(hipDeviceSynchronize())
 
   for (size_t i = 0; i < numElements; i++) {
     A_h[i] = 1.0f;
@@ -60,7 +60,7 @@ void simpleVectorAdd(size_t numElements, int iters, hipStream_t stream, bool thr
 
     MemTraits<C>::Copy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream);
 
-    HIPCHECK(hipDeviceSynchronize());
+    HIPCHECK(hipDeviceSynchronize())
 
     if (threadSafe) {
       HipTest::checkVectorADDT(A_h, B_h, C_h, numElements);
@@ -104,34 +104,34 @@ void test_multiThread_1(hipStream_t stream0, hipStream_t stream1, bool serialize
 
 HIP_TEST_CASE(Unit_hipMultiThreadStreams1_AsyncSync) {
   hipStream_t stream;
-  HIPCHECK(hipStreamCreate(&stream));
+  HIPCHECK(hipStreamCreate(&stream))
 
   simpleVectorAdd<float, HipTest::Pinned, HipTest::MemcpyAsync>(N /*mb*/, 10 /*iters*/, stream);
   simpleVectorAdd<float, HipTest::Pinned, HipTest::Memcpy>(N /*mb*/, 10 /*iters*/, stream);
 
-  HIPCHECK(hipStreamDestroy(stream));
+  HIPCHECK(hipStreamDestroy(stream))
 }
 
 HIP_TEST_CASE(Unit_hipMultiThreadStreams1_AsyncAsync) {
   hipStream_t stream0, stream1;
-  HIPCHECK(hipStreamCreate(&stream0));
-  HIPCHECK(hipStreamCreate(&stream1));
+  HIPCHECK(hipStreamCreate(&stream0))
+  HIPCHECK(hipStreamCreate(&stream1))
 
   // Easy tests to verify the test works - these don't allow overlap between the threads:
   test_multiThread_1<float, HipTest::MemcpyAsync>(NULL, NULL, true);
   test_multiThread_1<float, HipTest::MemcpyAsync>(stream0, stream1, true);
 
-  HIPCHECK(hipStreamDestroy(stream0));
-  HIPCHECK(hipStreamDestroy(stream1));
+  HIPCHECK(hipStreamDestroy(stream0))
+  HIPCHECK(hipStreamDestroy(stream1))
 }
 HIP_TEST_CASE(Unit_hipMultiThreadStreams1_AsyncSame) {
   hipStream_t stream;
-  HIPCHECK(hipStreamCreate(&stream));
+  HIPCHECK(hipStreamCreate(&stream))
 
   // test_multiThread_1<float, HipTest::MemcpyAsync> ("Multithread with NULL stream", NULL,
   // NULL, false); test_multiThread_1<float, HipTest::MemcpyAsync> ("Multithread with two
   // streams", stream0, stream1, false);
   test_multiThread_1<float, HipTest::MemcpyAsync>(stream, stream, false);
 
-  HIPCHECK(hipStreamDestroy(stream));
+  HIPCHECK(hipStreamDestroy(stream))
 }

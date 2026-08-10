@@ -43,9 +43,9 @@ static bool hipPerfDevMemReadSpeed_test() {
   uint nBytes = N * sizeof(d_uint16);
 
   int deviceId = 0;
-  HIP_CHECK(hipSetDevice(deviceId));
+  HIP_CHECK(hipSetDevice(deviceId))
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+  HIP_CHECK(hipGetDeviceProperties(&props, deviceId))
 
   CONSOLE_PRINT("info: running on bus 0x%x %s with %d CUs\n", props.pciBusID, props.name,
                 props.multiProcessorCount);
@@ -68,18 +68,18 @@ static bool hipPerfDevMemReadSpeed_test() {
     }
   }
 
-  HIP_CHECK(hipMalloc(&dSrc, nBytes));
-  HIP_CHECK(hipMalloc(&dDst, sizeof(uint)));
+  HIP_CHECK(hipMalloc(&dSrc, nBytes))
+  HIP_CHECK(hipMalloc(&dDst, sizeof(uint)))
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
-  HIP_CHECK(hipMemcpy(dSrc, hSrc, nBytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dDst, hDst, sizeof(uint), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dSrc, hSrc, nBytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(dDst, hDst, sizeof(uint), hipMemcpyHostToDevice))
 
   hipLaunchKernelGGL(read_kernel, dim3(blocks), dim3(threadsPerBlock), 0, stream, dSrc, N, dDst);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpy(hDst, dDst, sizeof(uint), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMemcpy(hDst, dDst, sizeof(uint), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   if (hDst[0] != (nBytes / sizeof(uint))) {
     DEBUG_PRINT(
@@ -93,9 +93,9 @@ static bool hipPerfDevMemReadSpeed_test() {
 
   for (int i = 0; i < nIter; i++) {
     hipLaunchKernelGGL(read_kernel, dim3(blocks), dim3(threadsPerBlock), 0, stream, dSrc, N, dDst);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
   }
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   auto all_end = std::chrono::steady_clock::now();
   std::chrono::duration<double> all_kernel_time = all_end - all_start;
@@ -110,9 +110,9 @@ static bool hipPerfDevMemReadSpeed_test() {
 
   delete[] hSrc;
   delete hDst;
-  HIP_CHECK(hipFree(dSrc));
-  HIP_CHECK(hipFree(dDst));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(dSrc))
+  HIP_CHECK(hipFree(dDst))
+  HIP_CHECK(hipStreamDestroy(stream))
   return true;
 }
 
@@ -130,7 +130,7 @@ static bool hipPerfDevMemReadSpeed_test() {
 
 HIP_TEST_CASE(Performance_hipPerfDevMemReadSpeed_test) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   if (numDevices <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);

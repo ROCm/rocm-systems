@@ -15,9 +15,9 @@ namespace hipStreamSynchronizeTest {
  */
 HIP_TEST_CASE(Unit_hipStreamSynchronize_EmptyStream) {
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 #if HT_AMD /* Disabled because frequency based wait is timing out on nvidia platforms */
@@ -33,15 +33,15 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_FinishWork) {
 
   const bool isExplicitStream = stream == explicitStream;
   if (isExplicitStream) {
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
   }
 
   LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 50 : 500), stream);
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipStreamQuery(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipStreamQuery(stream))
 
   if (isExplicitStream) {
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 
@@ -55,7 +55,7 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_NullStreamSynchronization) {
 
   for (int i = 0; i < totalStreams; ++i) {
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     streams.push_back(stream);
   }
 
@@ -69,15 +69,15 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_NullStreamSynchronization) {
     HIP_CHECK_ERROR(hipStreamQuery(streams[i]), hipErrorNotReady);
   }
 
-  HIP_CHECK(hipStreamSynchronize(hip::nullStream));
-  HIP_CHECK(hipStreamQuery(hip::nullStream));
+  HIP_CHECK(hipStreamSynchronize(hip::nullStream))
+  HIP_CHECK(hipStreamQuery(hip::nullStream))
 
   for (int i = 0; i < totalStreams; ++i) {
-    HIP_CHECK(hipStreamQuery(streams[i]));
+    HIP_CHECK(hipStreamQuery(streams[i]))
   }
 
   for (int i = 0; i < totalStreams; ++i) {
-    HIP_CHECK(hipStreamDestroy(streams[i]));
+    HIP_CHECK(hipStreamDestroy(streams[i]))
   }
 }
 
@@ -94,8 +94,8 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
   hipStream_t stream1;
   hipStream_t stream2;
 
-  HIP_CHECK(hipStreamCreate(&stream1));
-  HIP_CHECK(hipStreamCreate(&stream2));
+  HIP_CHECK(hipStreamCreate(&stream1))
+  HIP_CHECK(hipStreamCreate(&stream2))
 
   LaunchDelayKernel(std::chrono::milliseconds(500), stream1);
   LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 2000), stream2);
@@ -112,16 +112,16 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
   HIP_CHECK_ERROR(hipStreamQuery(stream2), hipErrorNotReady);
 
 
-  HIP_CHECK(hipStreamSynchronize(stream1));
-  HIP_CHECK(hipStreamQuery(stream1));
+  HIP_CHECK(hipStreamSynchronize(stream1))
+  HIP_CHECK(hipStreamQuery(stream1))
   HIP_CHECK_ERROR(hipStreamQuery(stream2), hipErrorNotReady);
   HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
 
-  HIP_CHECK(hipStreamSynchronize(stream2));
-  HIP_CHECK(hipStreamQuery(stream2));
+  HIP_CHECK(hipStreamSynchronize(stream2))
+  HIP_CHECK(hipStreamQuery(stream2))
 
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipStreamDestroy(stream2))
 #endif
 }
 

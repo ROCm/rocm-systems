@@ -13,25 +13,25 @@
 #include <vector>
 
 HIP_TEST_CASE(Unit_hipModuleLoadData_Positive_Basic) {
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
   hipModule_t module = nullptr;
 
   SECTION("Load compiled module from file") {
     const auto loaded_module = LoadModuleIntoBuffer("empty_module.code");
-    HIP_CHECK(hipModuleLoadData(&module, loaded_module.data()));
+    HIP_CHECK(hipModuleLoadData(&module, loaded_module.data()))
     REQUIRE(module != nullptr);
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   }
 
 #if HT_AMD
   SECTION("Load compiled module from file with regular target in compressed fatbin") {
     const auto loaded_module = LoadModuleIntoBuffer("copyKernelCompressed.code");
-    HIP_CHECK(hipModuleLoadData(&module, loaded_module.data()));
+    HIP_CHECK(hipModuleLoadData(&module, loaded_module.data()))
     REQUIRE(module != nullptr);
     hipFunction_t kernel = nullptr;
-    HIP_CHECK(hipModuleGetFunction(&kernel, module, "copy_ker"));
+    HIP_CHECK(hipModuleGetFunction(&kernel, module, "copy_ker"))
     REQUIRE(kernel != nullptr);
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   }
 
   SECTION("Load compiled module from file with generic target in regular fatbin") {
@@ -40,12 +40,12 @@ HIP_TEST_CASE(Unit_hipModuleLoadData_Positive_Basic) {
       return;
     }
     const auto loaded_module = LoadModuleIntoBuffer("copyKernelGenericTarget.code");
-    HIP_CHECK(hipModuleLoadData(&module, loaded_module.data()));
+    HIP_CHECK(hipModuleLoadData(&module, loaded_module.data()))
     REQUIRE(module != nullptr);
     hipFunction_t kernel = nullptr;
-    HIP_CHECK(hipModuleGetFunction(&kernel, module, "copy_ker"));
+    HIP_CHECK(hipModuleGetFunction(&kernel, module, "copy_ker"))
     REQUIRE(kernel != nullptr);
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   }
 
   SECTION("Load compiled module from file with generic target in compressed fatbin") {
@@ -54,25 +54,25 @@ HIP_TEST_CASE(Unit_hipModuleLoadData_Positive_Basic) {
       return;
     }
     const auto loaded_module = LoadModuleIntoBuffer("copyKernelGenericTargetCompressed.code");
-    HIP_CHECK(hipModuleLoadData(&module, loaded_module.data()));
+    HIP_CHECK(hipModuleLoadData(&module, loaded_module.data()))
     REQUIRE(module != nullptr);
     hipFunction_t kernel = nullptr;
-    HIP_CHECK(hipModuleGetFunction(&kernel, module, "copy_ker"));
+    HIP_CHECK(hipModuleGetFunction(&kernel, module, "copy_ker"))
     REQUIRE(kernel != nullptr);
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   }
 #endif
 
   SECTION("Load RTCd module") {
     const auto rtc = CreateRTCCharArray(R"(extern "C" __global__ void kernel() {})");
-    HIP_CHECK(hipModuleLoadData(&module, rtc.data()));
+    HIP_CHECK(hipModuleLoadData(&module, rtc.data()))
     REQUIRE(module != nullptr);
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   }
 }
 
 HIP_TEST_CASE(Unit_hipModuleLoadData_Negative_Parameters) {
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
   hipModule_t module;
 
   SECTION("module == nullptr") {
@@ -124,11 +124,11 @@ HIP_TEST_CASE(Unit_hipModuleLoadData_Functional) {
     B[i] = 0.0f;
   }
 
-  HIP_CHECK(hipMalloc(&Ad, SIZE));
-  HIP_CHECK(hipMalloc(&Bd, SIZE));
+  HIP_CHECK(hipMalloc(&Ad, SIZE))
+  HIP_CHECK(hipMalloc(&Bd, SIZE))
 
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice))
 
   hipModule_t Module;
   hipFunction_t Function = nullptr;
@@ -138,11 +138,11 @@ HIP_TEST_CASE(Unit_hipModuleLoadData_Functional) {
 
   std::vector<char> buffer(fsize);
   if (file.read(buffer.data(), fsize)) {
-    HIP_CHECK(hipModuleLoadData(&Module, &buffer[0]));
-    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
+    HIP_CHECK(hipModuleLoadData(&Module, &buffer[0]))
+    HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name))
   }
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   struct {
     void* _Ad;
@@ -157,17 +157,17 @@ HIP_TEST_CASE(Unit_hipModuleLoadData_Functional) {
   HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, stream, NULL,
                                   reinterpret_cast<void**>(&config)));
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 
-  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost))
 
   for (uint32_t i = 0; i < LEN; i++) {
     REQUIRE(A[i] == B[i]);
   }
   delete[] A;
   delete[] B;
-  HIP_CHECK(hipModuleUnload(Module));
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
+  HIP_CHECK(hipModuleUnload(Module))
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
 }
 #endif

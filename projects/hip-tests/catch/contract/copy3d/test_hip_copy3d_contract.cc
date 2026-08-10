@@ -41,7 +41,7 @@ bool TryMalloc3D(hipPitchedPtr* device_ptr, hipExtent extent) {
   if (status == hipErrorOutOfMemory || status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return false;
 }
 }  // namespace
@@ -81,14 +81,14 @@ HIP_TEST_CASE(Contract_Copy3D_HipMemcpy3D_Default_HostDeviceRoundTripsExtent) {
   h2d.dstPtr = device;
   h2d.extent = extent;
   h2d.kind = hipMemcpyHostToDevice;
-  HIP_CHECK(hipMemcpy3D(&h2d));
+  HIP_CHECK(hipMemcpy3D(&h2d))
 
   hipMemcpy3DParms d2h{};
   d2h.srcPtr = device;
   d2h.dstPtr = HostPitchedPtr(dst.data(), kWidth, kHeight);
   d2h.extent = extent;
   d2h.kind = hipMemcpyDeviceToHost;
-  HIP_CHECK(hipMemcpy3D(&d2h));
+  HIP_CHECK(hipMemcpy3D(&d2h))
 
   REQUIRE(dst == src);
 }
@@ -111,14 +111,14 @@ HIP_TEST_CASE(Contract_Copy3D_HipMemcpy3D_Default_SingleSliceRoundTripsBytes) {
   h2d.dstPtr = device;
   h2d.extent = extent;
   h2d.kind = hipMemcpyHostToDevice;
-  HIP_CHECK(hipMemcpy3D(&h2d));
+  HIP_CHECK(hipMemcpy3D(&h2d))
 
   hipMemcpy3DParms d2h{};
   d2h.srcPtr = device;
   d2h.dstPtr = HostPitchedPtr(dst.data(), kWidth, kHeight);
   d2h.extent = extent;
   d2h.kind = hipMemcpyDeviceToHost;
-  HIP_CHECK(hipMemcpy3D(&d2h));
+  HIP_CHECK(hipMemcpy3D(&d2h))
 
   for (size_t i = 0; i < kWidth * kHeight; ++i) {
     REQUIRE(dst[i] == src[i]);
@@ -134,5 +134,5 @@ HIP_TEST_CASE(Contract_Copy3D_HipFree_3DAllocation_Succeeds) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
 
-  HIP_CHECK(hipFree(device.ptr));
+  HIP_CHECK(hipFree(device.ptr))
 }

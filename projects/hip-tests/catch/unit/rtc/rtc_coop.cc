@@ -85,7 +85,7 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
   T b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() : 1023;
   distribution dist(a, b);
 
-  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice))
   genRandomBuffers(d_input, input, dist, gen, wavefrontSize);
   std::vector<const void*> args = { d_output.ptr(), d_input.ptr(), d_aggType.ptr() };
   std::size_t sizeBytes = args.size() * sizeof(void*);
@@ -107,14 +107,14 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
   HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
   code.resize(codeSize);
   HIPRTC_CHECK(hiprtcGetCode(prog, code.data()));
-  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()))
   HIPRTC_CHECK(hiprtcGetLoweredName(prog, expression.c_str(), &loweredName));
-  HIP_CHECK(hipModuleGetFunction(&kernel, module, loweredName));
+  HIP_CHECK(hipModuleGetFunction(&kernel, module, loweredName))
   HIP_CHECK(hipModuleLaunchKernel(kernel, grdDim.x, grdDim.y, grdDim.z, blkDim.x, blkDim.y,
                                   blkDim.z, 0, 0, nullptr, config));
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost))
 
   INFO("Type: " << typeToString<T>());
   for (auto tileSize : tileSizes) {

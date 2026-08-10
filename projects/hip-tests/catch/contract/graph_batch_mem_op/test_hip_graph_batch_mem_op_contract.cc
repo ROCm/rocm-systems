@@ -19,9 +19,9 @@ constexpr uint32_t kWriteValue = 0xABCD1234u;
 // rather than reporting a contract violation.
 void RequireStreamWaitValueSupport() {
   int device = -1;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   int can_use = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&can_use, hipDeviceAttributeCanUseStreamWaitValue, device));
+  HIP_CHECK(hipDeviceGetAttribute(&can_use, hipDeviceAttributeCanUseStreamWaitValue, device))
   if (can_use == 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
   }
@@ -29,7 +29,7 @@ void RequireStreamWaitValueSupport() {
 
 hipCtx_t CurrentContext() {
   hipCtx_t ctx = nullptr;
-  HIP_CHECK(hipCtxGetCurrent(&ctx));
+  HIP_CHECK(hipCtxGetCurrent(&ctx))
   REQUIRE(ctx != nullptr);
   return ctx;
 }
@@ -64,9 +64,9 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphAddBatchMemOpNode_AddNode_Launche
   hip::contract::ContractCleanup cleanup;
 
   uint32_t* device_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&device_ptr, sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc(&device_ptr, sizeof(uint32_t)))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipMemset(device_ptr, 0, sizeof(uint32_t)));
+  HIP_CHECK(hipMemset(device_ptr, 0, sizeof(uint32_t)))
 
   hipStreamBatchMemOpParams op =
       WriteValueOp(reinterpret_cast<hipDeviceptr_t>(device_ptr), kWriteValue);
@@ -74,7 +74,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphAddBatchMemOpNode_AddNode_Launche
 
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   // A batch-mem-op node containing a single write-value-32 operation must, when
@@ -83,19 +83,19 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphAddBatchMemOpNode_AddNode_Launche
   if (add_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Batch memory operation graph nodes are not supported by this runtime path.");
   }
-  HIP_CHECK(add_status);
+  HIP_CHECK(add_status)
 
   hipGraphExec_t exec = nullptr;
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0))
   cleanup.Add([exec] { (void)hipGraphExecDestroy(exec); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipGraphLaunch(exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   uint32_t host = 0;
-  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost))
   REQUIRE(host == kWriteValue);
 #endif  // _WIN32
 }
@@ -106,7 +106,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphBatchMemOpNodeGetParams_Default_R
   hip::contract::ContractCleanup cleanup;
 
   uint32_t* device_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&device_ptr, sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc(&device_ptr, sizeof(uint32_t)))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   hipStreamBatchMemOpParams op =
@@ -115,18 +115,18 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphBatchMemOpNodeGetParams_Default_R
 
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   const hipError_t add_status = hipGraphAddBatchMemOpNode(&node, graph, nullptr, 0, &node_params);
   if (add_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Batch memory operation graph nodes are not supported by this runtime path.");
   }
-  HIP_CHECK(add_status);
+  HIP_CHECK(add_status)
 
   // The node getter reports the operation count the node was created with.
   hipBatchMemOpNodeParams retrieved{};
-  HIP_CHECK(hipGraphBatchMemOpNodeGetParams(node, &retrieved));
+  HIP_CHECK(hipGraphBatchMemOpNodeGetParams(node, &retrieved))
   REQUIRE(retrieved.count == 1);
 }
 
@@ -139,9 +139,9 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphBatchMemOpNodeSetParams_Default_U
   hip::contract::ContractCleanup cleanup;
 
   uint32_t* device_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&device_ptr, sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc(&device_ptr, sizeof(uint32_t)))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipMemset(device_ptr, 0, sizeof(uint32_t)));
+  HIP_CHECK(hipMemset(device_ptr, 0, sizeof(uint32_t)))
 
   hipStreamBatchMemOpParams initial_op =
       WriteValueOp(reinterpret_cast<hipDeviceptr_t>(device_ptr), 0x22222222u);
@@ -149,7 +149,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphBatchMemOpNodeSetParams_Default_U
 
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   const hipError_t add_status =
@@ -157,7 +157,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphBatchMemOpNodeSetParams_Default_U
   if (add_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Batch memory operation graph nodes are not supported by this runtime path.");
   }
-  HIP_CHECK(add_status);
+  HIP_CHECK(add_status)
 
   // Re-parameterize the node with a different write value through the
   // pre-instantiation graph-node setter. The launched graph must reflect the
@@ -166,19 +166,19 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphBatchMemOpNodeSetParams_Default_U
   hipStreamBatchMemOpParams updated_op =
       WriteValueOp(reinterpret_cast<hipDeviceptr_t>(device_ptr), kWriteValue);
   hipBatchMemOpNodeParams updated_params = MakeNodeParams(&updated_op, 1);
-  HIP_CHECK(hipGraphBatchMemOpNodeSetParams(node, &updated_params));
+  HIP_CHECK(hipGraphBatchMemOpNodeSetParams(node, &updated_params))
 
   hipGraphExec_t exec = nullptr;
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0))
   cleanup.Add([exec] { (void)hipGraphExecDestroy(exec); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipGraphLaunch(exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   uint32_t host = 0;
-  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost))
   REQUIRE(host == kWriteValue);
 #endif  // _WIN32
 }
@@ -192,9 +192,9 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphExecBatchMemOpNodeSetParams_ExecS
   hip::contract::ContractCleanup cleanup;
 
   uint32_t* device_ptr = nullptr;
-  HIP_CHECK(hipMalloc(&device_ptr, sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc(&device_ptr, sizeof(uint32_t)))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipMemset(device_ptr, 0, sizeof(uint32_t)));
+  HIP_CHECK(hipMemset(device_ptr, 0, sizeof(uint32_t)))
 
   constexpr uint32_t kInitialValue = 0x11111111u;
   hipStreamBatchMemOpParams initial_op =
@@ -203,7 +203,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphExecBatchMemOpNodeSetParams_ExecS
 
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   const hipError_t add_status =
@@ -211,11 +211,11 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphExecBatchMemOpNodeSetParams_ExecS
   if (add_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Batch memory operation graph nodes are not supported by this runtime path.");
   }
-  HIP_CHECK(add_status);
+  HIP_CHECK(add_status)
 
   hipGraphExec_t exec = nullptr;
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0))
   cleanup.Add([exec] { (void)hipGraphExecDestroy(exec); });
 
   // Re-parameterize the instantiated node with a new write value through the
@@ -224,15 +224,15 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphExecBatchMemOpNodeSetParams_ExecS
   hipStreamBatchMemOpParams updated_op =
       WriteValueOp(reinterpret_cast<hipDeviceptr_t>(device_ptr), kWriteValue);
   hipBatchMemOpNodeParams updated_params = MakeNodeParams(&updated_op, 1);
-  HIP_CHECK(hipGraphExecBatchMemOpNodeSetParams(exec, node, &updated_params));
+  HIP_CHECK(hipGraphExecBatchMemOpNodeSetParams(exec, node, &updated_params))
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipGraphLaunch(exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   uint32_t host = 0;
-  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost))
   if (host == kInitialValue) {
     HIP_SKIP_TEST("hipGraphExecBatchMemOpNodeSetParams is accepted but does not update the "
                   "executable batch-mem-op node on this runtime path.");

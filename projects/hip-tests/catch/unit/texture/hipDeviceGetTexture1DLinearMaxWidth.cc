@@ -23,16 +23,16 @@ HIP_TEST_CASE(Unit_hipDeviceGetTexture1DLinearMaxWidth_Positive) {
   CHECK_IMAGE_SUPPORT
 
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   REQUIRE(deviceCount > 0);
 
   int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   size_t maxWidth = 0;
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
 
-  HIP_CHECK(hipDeviceGetTexture1DLinearMaxWidth(&maxWidth, &desc, device));
+  HIP_CHECK(hipDeviceGetTexture1DLinearMaxWidth(&maxWidth, &desc, device))
   REQUIRE(maxWidth > 0);
 }
 
@@ -57,11 +57,11 @@ HIP_TEST_CASE(Unit_hipDeviceGetTexture1DLinearMaxWidth_Negative) {
   CHECK_IMAGE_SUPPORT
 
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   REQUIRE(deviceCount > 0);
 
   int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
 
   size_t maxWidth = 0;
   hipChannelFormatDesc validDesc = hipCreateChannelDesc<float>();

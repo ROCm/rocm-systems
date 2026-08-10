@@ -47,7 +47,7 @@ HIP_TEST_CASE(Unit_Validate_User_Sgpr_Count) {
     int h_result = 0;
     int* d_result = nullptr;
 
-    HIP_CHECK(hipMalloc(&d_result, sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_result, sizeof(int)))
 
     hipLaunchKernelGGL(kernel_validate_args,
                        dim3(1),
@@ -63,11 +63,11 @@ HIP_TEST_CASE(Unit_Validate_User_Sgpr_Count) {
                        21, 22, 23, 24,
                        25, 26, 27, 28,
                        29, 30, 31, 32);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
-    HIP_CHECK(hipMemcpy(&h_result, d_result, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&h_result, d_result, sizeof(int), hipMemcpyDeviceToHost))
     REQUIRE(h_result == expected);
     std::cout << "Kernel computed sum = " << h_result
               << ", expected sum = " << expected << std::endl;
-    HIP_CHECK(hipFree(d_result));
+    HIP_CHECK(hipFree(d_result))
 }

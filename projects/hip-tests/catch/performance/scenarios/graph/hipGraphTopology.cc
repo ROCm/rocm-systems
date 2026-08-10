@@ -58,12 +58,12 @@ struct TestOptions {
 static hipGraphNode_t add_kernel_node(hipGraph_t graph, hipGraphNode_t* deps, size_t numDeps, uint32_t kernel_duration_us) {
   hipDevice_t device;
   int clock_rate = 0;  // in kHz
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 #if HT_AMD
-  HIPCHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeWallClockRate, device));
+  HIPCHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeWallClockRate, device))
 #endif
 #if HT_NVIDIA
-  HIPCHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeClockRate, device));
+  HIPCHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeClockRate, device))
 #endif
   uint64_t timer_freq_in_hz = clock_rate * 1000;;
   hipKernelNodeParams p{};
@@ -76,7 +76,7 @@ static hipGraphNode_t add_kernel_node(hipGraph_t graph, hipGraphNode_t* deps, si
   p.kernelParams = (void**)args;
   p.extra = nullptr;
   hipGraphNode_t node{};
-  HIP_CHECK(hipGraphAddKernelNode(&node, graph, deps, (int)numDeps, &p));
+  HIP_CHECK(hipGraphAddKernelNode(&node, graph, deps, (int)numDeps, &p))
   return node;
 }
 
@@ -88,7 +88,7 @@ static hipGraphNode_t add_memcpy_node(hipGraph_t graph, hipGraphNode_t* deps, si
   p.extent = make_hipExtent(size, 1, 1);
   p.kind = hipMemcpyDeviceToDevice;
   hipGraphNode_t node{};
-  HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, deps, (int)numDeps, &p));
+  HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, deps, (int)numDeps, &p))
   return node;
 }
 
@@ -102,47 +102,47 @@ static hipGraphNode_t add_memset_node(hipGraph_t graph, hipGraphNode_t* deps, si
   p.width = size;
   p.height = 1;
   hipGraphNode_t node{};
-  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, deps, (int)numDeps, &p));
+  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, deps, (int)numDeps, &p))
   return node;
 }
 
 static hipGraphNode_t add_empty_node(hipGraph_t graph, hipGraphNode_t* deps, size_t numDeps) {
   hipGraphNode_t node{};
-  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, deps, (int)numDeps));
+  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, deps, (int)numDeps))
   return node;
 }
 
 static void run_graph_topology_test(const TestOptions& opt) {
   CONSOLE_PRINT("\n=== Running Graph Topology Test ===");
   hipDeviceProp_t prop{};
-  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0))
 
   hipStream_t stream{};
 
   if (opt.pre_graph_warmup) {
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     hipEvent_t warmup_event1{}, warmup_event2{};
-    HIP_CHECK(hipEventCreate(&warmup_event1));
-    HIP_CHECK(hipEventCreate(&warmup_event2));
+    HIP_CHECK(hipEventCreate(&warmup_event1))
+    HIP_CHECK(hipEventCreate(&warmup_event2))
 
-    HIP_CHECK(hipEventRecord(warmup_event1, nullptr));
-    HIP_CHECK(hipEventRecord(warmup_event2, stream));
+    HIP_CHECK(hipEventRecord(warmup_event1, nullptr))
+    HIP_CHECK(hipEventRecord(warmup_event2, stream))
 
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
-    HIP_CHECK(hipEventDestroy(warmup_event1));
-    HIP_CHECK(hipEventDestroy(warmup_event2));
+    HIP_CHECK(hipEventDestroy(warmup_event1))
+    HIP_CHECK(hipEventDestroy(warmup_event2))
   }
 
   hipGraph_t graph{};
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   void* d_mem1 = nullptr;
   void* d_mem2 = nullptr;
   size_t mem_size = 1024;
   if (opt.topology == "mixed") {
-    HIP_CHECK(hipMalloc(&d_mem1, mem_size));
-    HIP_CHECK(hipMalloc(&d_mem2, mem_size));
+    HIP_CHECK(hipMalloc(&d_mem1, mem_size))
+    HIP_CHECK(hipMalloc(&d_mem2, mem_size))
   }
 
   int width = (opt.topology == "straight" || opt.topology == "hexagon") ? 1 : opt.width;
@@ -320,26 +320,26 @@ static void run_graph_topology_test(const TestOptions& opt) {
   // Instantiate
   hipGraphExec_t gexec{};
   auto t_inst_begin = std::chrono::steady_clock::now();
-  HIP_CHECK(hipGraphInstantiate(&gexec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&gexec, graph, nullptr, nullptr, 0))
   auto t_inst_end = std::chrono::steady_clock::now();
   double instantiation_us = std::chrono::duration<double, std::micro>(t_inst_end - t_inst_begin).count();
 
   if (opt.preupload) {
-    HIP_CHECK(hipGraphUpload(gexec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphUpload(gexec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
 
   // Warmup
   for (int i = 0; i < opt.warmup; ++i) {
-    HIP_CHECK(hipGraphLaunch(gexec, stream));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGraphLaunch(gexec, stream))
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   // First launch timing
   auto t_first_begin = std::chrono::steady_clock::now();
-  HIP_CHECK(hipGraphLaunch(gexec, stream));
+  HIP_CHECK(hipGraphLaunch(gexec, stream))
   auto t_first_end = std::chrono::steady_clock::now();
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   auto t_e2e_end = std::chrono::steady_clock::now();
   double first_launch_cpu_us = std::chrono::duration<double, std::micro>(t_first_end - t_first_begin).count();
   double first_e2e_us = std::chrono::duration<double, std::micro>(t_e2e_end - t_first_begin).count();
@@ -349,24 +349,24 @@ static void run_graph_topology_test(const TestOptions& opt) {
   cpu_over_us.reserve(opt.repeats);
   double device_us_sum = 0.0;
   hipEvent_t evt_start{}, evt_stop{};
-  HIP_CHECK(hipEventCreate(&evt_start));
-  HIP_CHECK(hipEventCreate(&evt_stop));
+  HIP_CHECK(hipEventCreate(&evt_start))
+  HIP_CHECK(hipEventCreate(&evt_stop))
 
   for (int r = 0; r < opt.repeats; ++r) {
-    HIP_CHECK(hipEventRecord(evt_start, stream));
+    HIP_CHECK(hipEventRecord(evt_start, stream))
     auto t0 = std::chrono::steady_clock::now();
-    HIP_CHECK(hipGraphLaunch(gexec, stream));
+    HIP_CHECK(hipGraphLaunch(gexec, stream))
     auto t1 = std::chrono::steady_clock::now();
-    HIP_CHECK(hipEventRecord(evt_stop, stream));
-    HIP_CHECK(hipEventSynchronize(evt_stop));
+    HIP_CHECK(hipEventRecord(evt_stop, stream))
+    HIP_CHECK(hipEventSynchronize(evt_stop))
     float ms = 0.0f;
-    HIP_CHECK(hipEventElapsedTime(&ms, evt_start, evt_stop));
+    HIP_CHECK(hipEventElapsedTime(&ms, evt_start, evt_stop))
     device_us_sum += (double)ms * 1000.0;
     cpu_over_us.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
   }
 
-  HIP_CHECK(hipEventDestroy(evt_start));
-  HIP_CHECK(hipEventDestroy(evt_stop));
+  HIP_CHECK(hipEventDestroy(evt_start))
+  HIP_CHECK(hipEventDestroy(evt_stop))
 
   // Calculate statistics
   double repeat_cpu_avg_us = 0.0;
@@ -410,9 +410,9 @@ static void run_graph_topology_test(const TestOptions& opt) {
     if (d_mem2) HIP_CHECK(hipFree(d_mem2));
   }
 
-  HIP_CHECK(hipGraphExecDestroy(gexec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(gexec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**

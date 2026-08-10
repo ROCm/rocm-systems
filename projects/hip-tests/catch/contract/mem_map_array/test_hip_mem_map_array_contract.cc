@@ -20,7 +20,7 @@
 namespace {
 void RequireDevice() {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -33,14 +33,14 @@ HIP_TEST_CASE(Contract_MemMapArray_HipMemMapArrayAsync_NullMapList_IsRejected) {
   hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // A null map-info list is invalid input and must be rejected rather than
   // silently succeeding. Any pre-existing sticky error is cleared first, and the
   // sticky error left by the rejection is cleared afterward, so neither leaks
   // into later tests.
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   const hipError_t status = hipMemMapArrayAsync(nullptr, 1, stream);
   REQUIRE(status != hipSuccess);
   (void)hipGetLastError();
@@ -52,13 +52,13 @@ HIP_TEST_CASE(Contract_MemMapArray_HipMemMapArrayAsync_ZeroCount_IsRejected) {
   hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   // A zero operation count is invalid input and must be rejected. A
   // zero-initialized map-info entry is supplied so the rejection is attributable
   // to the count rather than a null list.
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
   hipArrayMapInfo map_info{};
   const hipError_t status = hipMemMapArrayAsync(&map_info, 0, stream);
   REQUIRE(status != hipSuccess);

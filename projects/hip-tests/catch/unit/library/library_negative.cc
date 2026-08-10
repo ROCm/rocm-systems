@@ -24,9 +24,9 @@ HIP_TEST_CASE(Unit_library_negative) {
     hipLibrary_t lib;
     hipKernel_t kernel;
     // Default behavior is lazy load, so if we pass anything to it, it should pass
-    HIP_CHECK(hipLibraryLoadData(&lib, code, nullptr, nullptr, 0, nullptr, nullptr, 0));
+    HIP_CHECK(hipLibraryLoadData(&lib, code, nullptr, nullptr, 0, nullptr, nullptr, 0))
     // But this check will fail
     HIP_CHECK_ERROR(hipLibraryGetKernel(&kernel, lib, "moby"), hipErrorInvalidImage);
-    HIP_CHECK(hipLibraryUnload(lib));
+    HIP_CHECK(hipLibraryUnload(lib))
   }
 }

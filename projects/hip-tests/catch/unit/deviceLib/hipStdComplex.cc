@@ -80,23 +80,23 @@ template <typename FloatT> void test() {
   B = new ComplexT[LEN];
   C = new ComplexT[LEN];
   D = new ComplexT[LEN];
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), sizeof(ComplexT) * LEN));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), sizeof(ComplexT) * LEN));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), sizeof(ComplexT) * LEN));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), sizeof(ComplexT) * LEN))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), sizeof(ComplexT) * LEN))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), sizeof(ComplexT) * LEN))
 
   for (uint32_t i = 0; i < LEN; i++) {
     A[i] = ComplexT((i + 1) * 1.0f, (i + 2) * 1.0f);
     B[i] = A[i];
     C[i] = A[i];
   }
-  HIP_CHECK(hipMemcpy(Ad, A, sizeof(ComplexT) * LEN, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, B, sizeof(ComplexT) * LEN, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Ad, A, sizeof(ComplexT) * LEN, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Bd, B, sizeof(ComplexT) * LEN, hipMemcpyHostToDevice))
 
   // Run kernel for a calculation kind and verify by comparing with host
   // calculation result. Returns false if fails.
   auto test_fun = [&](enum CalcKind CK) {
     hipLaunchKernelGGL(kernel<FloatT>, dim3(1), dim3(LEN), 0, 0, Ad, Bd, Cd, CK);
-    HIP_CHECK(hipMemcpy(C, Cd, sizeof(ComplexT) * LEN, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(C, Cd, sizeof(ComplexT) * LEN, hipMemcpyDeviceToHost))
     bool pass = true;
     for (int i = 0; i < LEN; i++) {
       ComplexT Expected = calc(A[i], B[i], CK);
@@ -111,9 +111,9 @@ template <typename FloatT> void test() {
   ALL_FUN
 #undef OP
 
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
-  HIP_CHECK(hipFree(Cd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
+  HIP_CHECK(hipFree(Cd))
   delete[] A;
   delete[] B;
   delete[] C;

@@ -170,7 +170,7 @@ template <class T, template <typename> class Op> class AtomicBenchmark
     dim3 gridDim = {static_cast<uint32_t>(std::ceil(numItems / static_cast<float>(blockDim.x)))};
 
     hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, 0));
+    HIP_CHECK(hipGetDeviceProperties(&props, 0))
     int warpSize = props.warpSize;
     int numWarpsPerBlock = kBlockDim / warpSize;
     size_t sharedSize = numWarpsPerBlock * sizeof(T);
@@ -192,7 +192,7 @@ template <class T, template <typename> class Op> class AtomicBenchmark
         static_assert(std::is_void<T>::value, "Unsupported operator");
       }
 
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
     }
   }
 };
@@ -206,7 +206,7 @@ template <class T, template <typename> class Op> class ReduceSyncBenchmark
 
     TIMED_SECTION(kTimerTypeEvent) {
       reduceOpSync<T, Op><<<gridDim, blockDim>>>(output, input, mask);
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
     }
   }
 };
@@ -223,8 +223,8 @@ void checkResults(T* d_lhs, T* d_rhs,
   std::string opName = opToString<T, Op<T>>();
 
   assert(numBytes % sizeof(T) == 0 && "numBytes needs to be a multiple of sizeof(T)");
-  HIP_CHECK(hipMemcpy(h_lhs.ptr(), d_lhs, numBytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(h_rhs.ptr(), d_rhs, numBytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(h_lhs.ptr(), d_lhs, numBytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(h_rhs.ptr(), d_rhs, numBytes, hipMemcpyDeviceToHost))
   memcmpResult = std::memcmp(h_lhs.ptr(), h_rhs.ptr(), numBytes);
 
   if (memcmpResult) {
@@ -266,7 +266,7 @@ public:
     dim3 gridDim = {static_cast<uint32_t>(std::ceil(numItems / static_cast<float>(blockDim.x)))};
 
     hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, 0));
+    HIP_CHECK(hipGetDeviceProperties(&props, 0))
 
     TIMED_SECTION(kTimerTypeEvent) {
       if constexpr (std::is_same<Op<T>, std::plus<T>>::value) {
@@ -285,7 +285,7 @@ public:
         static_assert(std::is_void<T>::value, "Unsupported operator");
       }
 
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
     }
   }
 };
@@ -422,7 +422,7 @@ template <class T, template <typename> class Op> struct ReduceBenchmark {
       buffer = LinearAllocGuard<T>(LinearAllocs::hipMalloc, outputNumBytes);
     }
 
-    HIP_CHECK(hipMemcpy(d_input.ptr(), input.ptr(), inputSize, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_input.ptr(), input.ptr(), inputSize, hipMemcpyHostToDevice))
 
     if constexpr (HasAtomicOps<T>::value) {
       AtomicBenchmark<T, Op> benchmarkAtomics;

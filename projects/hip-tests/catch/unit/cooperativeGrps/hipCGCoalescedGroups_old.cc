@@ -210,7 +210,7 @@ static void test_active_threads_grouping() {
 
   // Launch Kernel
   hipLaunchKernelGGL(kernel_coalesced_active_groups, blockSize, threadsPerBlock, 0, 0);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   err = hipDeviceSynchronize();
   if (err != hipSuccess) {
@@ -267,22 +267,22 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
     }
 
     int* dResult = NULL;
-    HIP_CHECK(hipMalloc(&dResult, sizeof(int) * numTiles));
+    HIP_CHECK(hipMalloc(&dResult, sizeof(int) * numTiles))
 
     int* globalMem = NULL;
     if (useGlobalMem) {
-      HIP_CHECK(hipMalloc((void**)&globalMem, threadsPerBlock * sizeof(int)));
+      HIP_CHECK(hipMalloc((void**)&globalMem, threadsPerBlock * sizeof(int)))
     }
 
     int* hResult = NULL;
-    HIP_CHECK(hipHostMalloc(&hResult, numTiles * sizeof(int), hipHostMallocDefault));
+    HIP_CHECK(hipHostMalloc(&hResult, numTiles * sizeof(int), hipHostMallocDefault))
     memset(hResult, 0, numTiles * sizeof(int));
 
     // Launch Kernel
     if (useGlobalMem) {
       hipLaunchKernelGGL(kernel_cg_coalesced_group_partition, blockSize, threadsPerBlock, 0, 0,
                          tileSz, dResult, useGlobalMem, globalMem, i);
-      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipGetLastError())
 
       err = hipDeviceSynchronize();
       if (err != hipSuccess) {
@@ -292,7 +292,7 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
       hipLaunchKernelGGL(kernel_cg_coalesced_group_partition, blockSize, threadsPerBlock,
                          threadsPerBlock * sizeof(int), 0, tileSz, dResult, useGlobalMem, globalMem,
                          i);
-      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipGetLastError())
 
       err = hipDeviceSynchronize();
       if (err != hipSuccess) {
@@ -300,13 +300,13 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
       }
     }
 
-    HIP_CHECK(hipMemcpy(hResult, dResult, numTiles * sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hResult, dResult, numTiles * sizeof(int), hipMemcpyDeviceToHost))
     verifyResultsSimpleCoalescedGroups(expectedSum, hResult, numTiles);
     // Free all allocated memory on host and device
-    HIP_CHECK(hipFree(dResult));
-    HIP_CHECK(hipHostFree(hResult));
+    HIP_CHECK(hipFree(dResult))
+    HIP_CHECK(hipHostFree(hResult))
     if (useGlobalMem) {
-      HIP_CHECK(hipFree(globalMem));
+      HIP_CHECK(hipFree(globalMem))
     }
     delete[] expectedSum;
 
@@ -335,7 +335,7 @@ static void test_shfl_any_to_any() {
 
     int arrSize = blockSize * threadsPerBlock * sizeof(int);
 
-    HIPCHECK(hipHostMalloc(&hPtr, arrSize));
+    HIPCHECK(hipHostMalloc(&hPtr, arrSize))
     // Fill up the array
     for (int i = 0; i < WAVE_SIZE; i++) {
       hPtr[i] = rand() % 1000;
@@ -355,18 +355,18 @@ static void test_shfl_any_to_any() {
 
     // printf("Array passed to GPU for computation\n");
     // printResultsSimpleCoalescedGroups(hPtr, WAVE_SIZE);
-    HIPCHECK(hipMalloc(&dPtr, group_size_in_bytes));
-    HIPCHECK(hipMalloc(&dResults, group_size_in_bytes));
+    HIPCHECK(hipMalloc(&dPtr, group_size_in_bytes))
+    HIPCHECK(hipMalloc(&dResults, group_size_in_bytes))
 
-    HIPCHECK(hipMalloc(&dsrcArr, group_size_in_bytes));
-    HIPCHECK(hipMemcpy(dsrcArr, srcArr, group_size_in_bytes, hipMemcpyHostToDevice));
+    HIPCHECK(hipMalloc(&dsrcArr, group_size_in_bytes))
+    HIPCHECK(hipMemcpy(dsrcArr, srcArr, group_size_in_bytes, hipMemcpyHostToDevice))
 
-    HIPCHECK(hipMemcpy(dPtr, hPtr, group_size_in_bytes, hipMemcpyHostToDevice));
+    HIPCHECK(hipMemcpy(dPtr, hPtr, group_size_in_bytes, hipMemcpyHostToDevice))
     // Launch Kernel
     hipLaunchKernelGGL(kernel_shfl_any_to_any, blockSize, threadsPerBlock,
                        threadsPerBlock * sizeof(int), 0, dPtr, dsrcArr, dResults, i);
-    HIP_CHECK(hipGetLastError());
-    HIPCHECK(hipMemcpy(hPtr, dResults, group_size_in_bytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGetLastError())
+    HIPCHECK(hipMemcpy(hPtr, dResults, group_size_in_bytes, hipMemcpyDeviceToHost))
     err = hipDeviceSynchronize();
     if (err != hipSuccess) {
       fprintf(stderr, "Failed to launch kernel (error code %s)!\n", hipGetErrorString(err));
@@ -382,10 +382,10 @@ static void test_shfl_any_to_any() {
     compareResultsSimpleCoalescedGroups(hPtr, cpuResultsArr, group_size_in_bytes);
     std::cout << "Results verified!\n";
 
-    HIPCHECK(hipHostFree(hPtr));
-    HIPCHECK(hipFree(dPtr));
-    HIPCHECK(hipFree(dResults));
-    HIPCHECK(hipFree(dsrcArr));
+    HIPCHECK(hipHostFree(hPtr))
+    HIPCHECK(hipFree(dPtr))
+    HIPCHECK(hipFree(dResults))
+    HIPCHECK(hipFree(dsrcArr))
     free(srcArr);
     free(srcArrCpu);
     free(cpuResultsArr);
@@ -412,7 +412,7 @@ static void test_shfl_broadcast() {
 
     int arrSize = blockSize * threadsPerBlock * sizeof(int);
 
-    HIPCHECK(hipHostMalloc(&hPtr, arrSize));
+    HIPCHECK(hipHostMalloc(&hPtr, arrSize))
     // Fill up the array
     for (int i = 0; i < WAVE_SIZE; i++) {
       hPtr[i] = rand() % 1000;
@@ -428,15 +428,15 @@ static void test_shfl_broadcast() {
     }
     printf("Array passed to GPU for computation\n");
     printResultsSimpleCoalescedGroups(hPtr, WAVE_SIZE);
-    HIPCHECK(hipMalloc(&dPtr, group_size_in_bytes));
-    HIPCHECK(hipMalloc(&dResults, group_size_in_bytes));
+    HIPCHECK(hipMalloc(&dPtr, group_size_in_bytes))
+    HIPCHECK(hipMalloc(&dResults, group_size_in_bytes))
 
-    HIPCHECK(hipMemcpy(dPtr, hPtr, group_size_in_bytes, hipMemcpyHostToDevice));
+    HIPCHECK(hipMemcpy(dPtr, hPtr, group_size_in_bytes, hipMemcpyHostToDevice))
     // Launch Kernel
     hipLaunchKernelGGL(kernel_shfl, blockSize, threadsPerBlock, threadsPerBlock * sizeof(int), 0,
                        dPtr, dResults, srcLane, i);
-    HIP_CHECK(hipGetLastError());
-    HIPCHECK(hipMemcpy(hPtr, dResults, group_size_in_bytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGetLastError())
+    HIPCHECK(hipMemcpy(hPtr, dResults, group_size_in_bytes, hipMemcpyDeviceToHost))
     err = hipDeviceSynchronize();
     if (err != hipSuccess) {
       fprintf(stderr, "Failed to launch kernel (error code %s)!\n", hipGetErrorString(err));
@@ -449,9 +449,9 @@ static void test_shfl_broadcast() {
     compareResultsSimpleCoalescedGroups(hPtr, cpuResultsArr, group_size_in_bytes);
     std::cout << "Results verified!\n";
 
-    HIPCHECK(hipHostFree(hPtr));
-    HIPCHECK(hipFree(dPtr));
-    HIPCHECK(hipFree(dResults));
+    HIPCHECK(hipHostFree(hPtr))
+    HIPCHECK(hipFree(dPtr))
+    HIPCHECK(hipFree(dResults))
     free(cpuResultsArr);
   }
 }
@@ -459,9 +459,9 @@ static void test_shfl_broadcast() {
 HIP_TEST_CASE(Unit_coalesced_groups) {
   // Use default device for validating the test
   int deviceId;
-  HIP_CHECK(hipGetDevice(&deviceId));
+  HIP_CHECK(hipGetDevice(&deviceId))
   hipDeviceProp_t deviceProperties;
-  HIP_CHECK(hipGetDeviceProperties(&deviceProperties, deviceId));
+  HIP_CHECK(hipGetDeviceProperties(&deviceProperties, deviceId))
 
   int *data_to_filter, *filtered_data, nres = 0;
   int *d_data_to_filter, *d_filtered_data, *d_nres;
@@ -476,13 +476,13 @@ HIP_TEST_CASE(Unit_coalesced_groups) {
   }
 
 
-  HIP_CHECK(hipMalloc(&d_data_to_filter, sizeof(int) * NUM_ELEMS));
-  HIP_CHECK(hipMalloc(&d_filtered_data, sizeof(int) * NUM_ELEMS));
-  HIP_CHECK(hipMalloc(&d_nres, sizeof(int)));
+  HIP_CHECK(hipMalloc(&d_data_to_filter, sizeof(int) * NUM_ELEMS))
+  HIP_CHECK(hipMalloc(&d_filtered_data, sizeof(int) * NUM_ELEMS))
+  HIP_CHECK(hipMalloc(&d_nres, sizeof(int)))
 
   HIP_CHECK(
       hipMemcpy(d_data_to_filter, data_to_filter, sizeof(int) * NUM_ELEMS, hipMemcpyHostToDevice));
-  HIPCHECK(hipMemset(d_nres, 0, sizeof(int)));
+  HIPCHECK(hipMemset(d_nres, 0, sizeof(int)))
 
   dim3 dimBlock(NUM_THREADS_PER_BLOCK, 1, 1);
   dim3 dimGrid((NUM_ELEMS / NUM_THREADS_PER_BLOCK) + 1, 1, 1);
@@ -490,11 +490,11 @@ HIP_TEST_CASE(Unit_coalesced_groups) {
   filter_arr<<<dimGrid, dimBlock>>>(d_filtered_data, d_nres, d_data_to_filter, NUM_ELEMS);
 
 
-  HIP_CHECK(hipMemcpy(&nres, d_nres, sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&nres, d_nres, sizeof(int), hipMemcpyDeviceToHost))
 
   filtered_data = reinterpret_cast<int*>(malloc(sizeof(int) * nres));
 
-  HIP_CHECK(hipMemcpy(filtered_data, d_filtered_data, sizeof(int) * nres, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(filtered_data, d_filtered_data, sizeof(int) * nres, hipMemcpyDeviceToHost))
 
   int* host_filtered_data = reinterpret_cast<int*>(malloc(sizeof(int) * NUM_ELEMS));
 
@@ -540,9 +540,9 @@ HIP_TEST_CASE(Unit_coalesced_groups) {
   std::cout << "Now grouping active threads based on branch divergence" << '\n' << std::endl;
   test_active_threads_grouping();
 
-  HIPCHECK(hipFree(d_data_to_filter));
-  HIPCHECK(hipFree(d_filtered_data));
-  HIPCHECK(hipFree(d_nres));
+  HIPCHECK(hipFree(d_data_to_filter))
+  HIPCHECK(hipFree(d_filtered_data))
+  HIPCHECK(hipFree(d_nres))
   free(data_to_filter);
   free(filtered_data);
   free(host_filtered_data);

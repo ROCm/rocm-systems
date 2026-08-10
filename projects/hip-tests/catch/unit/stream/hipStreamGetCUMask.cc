@@ -30,13 +30,13 @@ HIP_TEST_CASE(Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask) {
   std::vector<uint32_t> defaultCUMask;
 
   int nGpu = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpu));
+  HIP_CHECK(hipGetDeviceCount(&nGpu))
   if (nGpu < 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
   INFO("info: running on bus " << "0x" << props.pciBusID << " " << props.name << " with "
                                << props.multiProcessorCount << " CUs");
 
@@ -74,7 +74,7 @@ HIP_TEST_CASE(Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask) {
     // this default mask is expected to be returned when there is no
     // custom or global CU mask defined
 
-    HIP_CHECK(hipExtStreamGetCUMask(0, cuMask.size(), &cuMask[0]));
+    HIP_CHECK(hipExtStreamGetCUMask(0, cuMask.size(), &cuMask[0]))
 
     ss << std::hex;
     for (int i = cuMask.size() - 1; i >= 0; i--) {
@@ -109,8 +109,8 @@ HIP_TEST_CASE(Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask) {
     hipStream_t stream;
     int deviceId;
 
-    HIP_CHECK(hipGetDevice(&deviceId));
-    HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+    HIP_CHECK(hipGetDevice(&deviceId))
+    HIP_CHECK(hipGetDeviceProperties(&props, deviceId))
 
     if (props.major >= 10) {
       // For gfx >= 10, one work group processor encompasses 2 CUs &
@@ -120,14 +120,14 @@ HIP_TEST_CASE(Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask) {
       customMask[0] = 0xe;
     }
 
-    HIP_CHECK(hipExtStreamCreateWithCUMask(&stream, customMask.size(), customMask.data()));
+    HIP_CHECK(hipExtStreamCreateWithCUMask(&stream, customMask.size(), customMask.data()))
     ss.str("");
     for (int i = customMask.size() - 1; i >= 0; i--) {
       ss << customMask[i];
     }
     INFO("info: setting a custom CU mask 0x" << ss.str());
 
-    HIP_CHECK(hipExtStreamGetCUMask(stream, cuMask.size(), &cuMask[0]));
+    HIP_CHECK(hipExtStreamGetCUMask(stream, cuMask.size(), &cuMask[0]))
     ss.str("");
     for (int i = cuMask.size() - 1; i >= 0; i--) {
       ss << cuMask[i];
@@ -149,7 +149,7 @@ HIP_TEST_CASE(Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask) {
       }
     }
 
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 

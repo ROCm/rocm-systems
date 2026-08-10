@@ -37,7 +37,7 @@ __global__ void print_things() {
  */
 HIP_TEST_CASE(Unit_Printf_ManyDevicesTest) {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0))
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
@@ -45,12 +45,12 @@ HIP_TEST_CASE(Unit_Printf_ManyDevicesTest) {
   uint threads_per_block = 250;
   uint threads_per_device = num_blocks * threads_per_block;
   int num_devices = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
   CaptureStream captured(stdout);
   for (int i = 0; i != num_devices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     hipLaunchKernelGGL(print_things, dim3(num_blocks), dim3(threads_per_block), 0, 0);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   }
   auto CapturedData = captured.getCapturedData();
   std::map<std::string, int> linecount;

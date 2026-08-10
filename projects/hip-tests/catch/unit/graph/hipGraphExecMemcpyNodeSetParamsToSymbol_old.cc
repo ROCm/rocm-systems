@@ -59,7 +59,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative) {
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyToSymbolNode, memcpyH2D;
   std::vector<hipGraphNode_t> dependencies;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   // Adding MemcpyNode
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D, graph, nullptr, 0, A_d, A_h, Nbytes,
@@ -76,7 +76,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative) {
                                                 Nbytes, 0, hipMemcpyDeviceToDevice));
 
   // Instantiate the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   SECTION("Pass hGraphExec as nullptr") {
     ret = hipGraphExecMemcpyNodeSetParamsToSymbol(nullptr, memcpyToSymbolNode, HIP_SYMBOL(globalIn),
@@ -130,7 +130,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative) {
   SECTION("Check with other graph node but pass same graphExec") {
     hipGraph_t graph1;
     hipGraphNode_t memcpyToSymbolNode1{};
-    HIP_CHECK(hipGraphCreate(&graph1, 0));
+    HIP_CHECK(hipGraphCreate(&graph1, 0))
     HIP_CHECK(hipGraphAddMemcpyNodeToSymbol(&memcpyToSymbolNode1, graph1, nullptr, 0,
                                             HIP_SYMBOL(globalOut), A_d, Nbytes, 0,
                                             hipMemcpyDeviceToDevice));
@@ -138,12 +138,12 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative) {
                                                   HIP_SYMBOL(globalOut), HIP_SYMBOL(globalIn),
                                                   Nbytes, 0, hipMemcpyDeviceToDevice);
     REQUIRE(hipErrorInvalidValue == ret);
-    HIP_CHECK(hipGraphDestroy(graph1));
+    HIP_CHECK(hipGraphDestroy(graph1))
   }
 
   HipTest::freeArrays<int>(A_d, B_d, C_d, A_h, B_h, nullptr, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 static void hipGraphExecMemcpyNodeSetParamsToSymbol_GlobalMem(bool useConstVar) {
@@ -161,7 +161,7 @@ static void hipGraphExecMemcpyNodeSetParamsToSymbol_GlobalMem(bool useConstVar) 
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyToSymbolNode, memcpyH2D_A;
   std::vector<hipGraphNode_t> dependencies;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   // Adding MemcpyNode
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
@@ -202,7 +202,7 @@ static void hipGraphExecMemcpyNodeSetParamsToSymbol_GlobalMem(bool useConstVar) 
                                     B_h, B_d, Nbytes, hipMemcpyDeviceToHost));
 
   // Instantiate the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   // Update the node with source pointer from C_d to A_d
   if (useConstVar) {
@@ -215,7 +215,7 @@ static void hipGraphExecMemcpyNodeSetParamsToSymbol_GlobalMem(bool useConstVar) 
                                                       hipMemcpyDeviceToDevice));
   }
 
-  HIP_CHECK(hipGraphLaunch(graphExec, 0));
+  HIP_CHECK(hipGraphLaunch(graphExec, 0))
 
   // Validating the result
   for (int i = 0; i < SIZE; i++) {
@@ -226,8 +226,8 @@ static void hipGraphExecMemcpyNodeSetParamsToSymbol_GlobalMem(bool useConstVar) 
   }
 
   HipTest::freeArrays<int>(A_d, B_d, C_d, A_h, B_h, nullptr, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /* Test verifies hipGraphExecMemcpyNodeSetParamsToSymbol Functional scenario.

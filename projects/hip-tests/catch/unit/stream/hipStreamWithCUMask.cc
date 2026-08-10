@@ -83,7 +83,7 @@ void createDisabledCUMask(std::vector<uint32_t>* pdisabledCUMask, int numOfCUs) 
 
 void Callback(hipStream_t, hipError_t status, void* userData) {
   isPassed = true;
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   REQUIRE(userData == nullptr);
   for (size_t i = 0; i < N; i++) {
     if (C_h[i] != A_h[i] * A_h[i]) {
@@ -123,31 +123,31 @@ HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_ValidateCallbackFunc) {
     A_h[i] = CONSTANT + i;
   }
 
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipMalloc(&C_d, Nbytes));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipMalloc(&C_d, Nbytes))
 
   hipStream_t mystream;
   std::vector<uint32_t> defaultCUMask;
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
   createDefaultCUMask(&defaultCUMask, props.multiProcessorCount);
 
-  HIP_CHECK(hipExtStreamCreateWithCUMask(&mystream, defaultCUMask.size(), defaultCUMask.data()));
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mystream));
+  HIP_CHECK(hipExtStreamCreateWithCUMask(&mystream, defaultCUMask.size(), defaultCUMask.data()))
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mystream))
   const unsigned threadsPerBlock = 1024;
   const int blocks =
       (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, mystream,
                      A_d, C_d, N);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream));
-  HIP_CHECK(hipStreamAddCallback(mystream, Callback, nullptr, 0));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream))
+  HIP_CHECK(hipStreamAddCallback(mystream, Callback, nullptr, 0))
   while (!cbDone)
     std::this_thread::sleep_for(std::chrono::microseconds(100000));  // Sleep for 100 ms
-  HIP_CHECK(hipStreamDestroy(mystream));
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(C_d)));
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)));
+  HIP_CHECK(hipStreamDestroy(mystream))
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(C_d)))
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)))
   free(C_h);
   free(A_h);
   REQUIRE(isPassed == true);
@@ -167,15 +167,15 @@ HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_Functionality) {
   std::stringstream ss[KNumPartition];
 
   int nGpu = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpu));
+  HIP_CHECK(hipGetDeviceCount(&nGpu))
   if (nGpu < 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 
   static int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   INFO("info: running on bus " << "0x" << props.pciBusID << " " << props.name << " with "
                                << props.multiProcessorCount << " CUs");
 
@@ -194,8 +194,8 @@ HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_Functionality) {
 
   unsigned long mask = pow(2, cuCountPerGroup) - 1;
   for (int np = 0; np < KNumPartition; np++) {
-    HIP_CHECK(hipMalloc(&dA[np], Nbytes));
-    HIP_CHECK(hipMalloc(&dC[np], Nbytes));
+    HIP_CHECK(hipMalloc(&dA[np], Nbytes))
+    HIP_CHECK(hipMalloc(&dC[np], Nbytes))
     // make unique CU masks in the multiple of dwords for each stream
     uint32_t temp = 0;
     uint32_t bit_index = cuCountPerGroup * np;
@@ -213,9 +213,9 @@ HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_Functionality) {
       cuMasks[np].push_back(temp);
     }
 
-    HIP_CHECK(hipExtStreamCreateWithCUMask(&streams[np], cuMasks[np].size(), cuMasks[np].data()));
+    HIP_CHECK(hipExtStreamCreateWithCUMask(&streams[np], cuMasks[np].size(), cuMasks[np].data()))
 
-    HIP_CHECK(hipMemcpy(dA[np], hA, Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dA[np], hA, Nbytes, hipMemcpyHostToDevice))
 
     ss[np] << std::hex << std::setfill('0');
     for (int i = cuMasks[np].size() - 1; i >= 0; i--) {
@@ -233,13 +233,13 @@ HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_Functionality) {
 
   hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, streams[0],
                      dA[0], dC[0], N);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   auto single_end = std::chrono::steady_clock::now();
   std::chrono::duration<double> single_kernel_time = single_end - single_start;
 
-  HIP_CHECK(hipMemcpy(hC, dC[0], Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hC, dC[0], Nbytes, hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < N; i++) {
     REQUIRE(hC[i] == (hA[i] * hA[i]));
@@ -252,15 +252,15 @@ HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_Functionality) {
                                                               << ss[np].str().c_str());
     hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, streams[np],
                        dA[np], dC[np], N);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
   }
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   auto all_end = std::chrono::steady_clock::now();
   std::chrono::duration<double> all_kernel_time = all_end - all_start;
 
   for (int np = 0; np < KNumPartition; np++) {
-    HIP_CHECK(hipMemcpy(hC, dC[np], Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hC, dC[np], Nbytes, hipMemcpyDeviceToHost))
     for (size_t i = 0; i < N; i++) {
       REQUIRE(hC[i] == (hA[i] * hA[i]));
     }
@@ -277,9 +277,9 @@ HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_Functionality) {
   delete[] hA;
   delete[] hC;
   for (int np = 0; np < KNumPartition; np++) {
-    HIP_CHECK(hipFree(dC[np]));
-    HIP_CHECK(hipFree(dA[np]));
-    HIP_CHECK(hipStreamDestroy(streams[np]));
+    HIP_CHECK(hipFree(dC[np]))
+    HIP_CHECK(hipFree(dA[np]))
+    HIP_CHECK(hipStreamDestroy(streams[np]))
   }
 }
 
@@ -288,24 +288,24 @@ HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_Functionality) {
  * Verify that default CU mask is set for the stream.
  */
 HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_AllCUsMasked) {
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
   // make a CU mask with all CUs disabled.
   std::vector<uint32_t> allCUDisabled;
   createDisabledCUMask(&allCUDisabled, props.multiProcessorCount);
   hipStream_t stream;
-  HIP_CHECK(hipExtStreamCreateWithCUMask(&stream, allCUDisabled.size(), allCUDisabled.data()));
+  HIP_CHECK(hipExtStreamCreateWithCUMask(&stream, allCUDisabled.size(), allCUDisabled.data()))
   // Verify whether default CU mask is set for the stream.
   uint32_t size = (props.multiProcessorCount / 32) + 1;
   std::vector<uint32_t> cuMask(size);
   std::vector<uint32_t> defaultCUMask;
   createDefaultCUMask(&defaultCUMask, props.multiProcessorCount);
-  HIP_CHECK(hipExtStreamGetCUMask(stream, cuMask.size(), &cuMask[0]));
+  HIP_CHECK(hipExtStreamGetCUMask(stream, cuMask.size(), &cuMask[0]))
   for (int i = 0; i < static_cast<int>(defaultCUMask.size()); i++) {
     REQUIRE(defaultCUMask[i] == cuMask[i]);
   }
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**

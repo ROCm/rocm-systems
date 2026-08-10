@@ -57,7 +57,7 @@ bool CompileLibrarySource(std::vector<char>& code) {
 
 #if HT_AMD
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, 0));
+  HIP_CHECK(hipGetDeviceProperties(&properties, 0))
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
   const char* options[] = {offload_arch.c_str()};
   const int num_options = 1;
@@ -102,11 +102,11 @@ void LoadContractLibrary(std::vector<char>& code, hipLibrary_t& library) {
   // run. On NVIDIA these map to the CUDA driver API (cuLibrary*), which requires a
   // bound primary context; hipFree(0) is the canonical no-op that forces
   // primary-context initialization and is a harmless success on AMD.
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
   if (!CompileLibrarySource(code)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
   }
-  HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+  HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0))
   REQUIRE(library != nullptr);
 }
 }  // namespace
@@ -122,7 +122,7 @@ HIP_TEST_CASE(Contract_Library_HipLibraryLoadData_FromRtc_Succeeds) {
   // unload again without error.
   hip::contract::ContractCleanup cleanup;
   hipLibrary_t library = nullptr;
-  HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+  HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0))
   cleanup.Add([library] { (void)hipLibraryUnload(library); });
   REQUIRE(library != nullptr);
 }
@@ -148,7 +148,7 @@ HIP_TEST_CASE(Contract_Library_HipLibraryGetKernel_LoadDataValidImage_CanResolve
 
   // A HIPRTC-produced code object must load and resolve a known kernel symbol.
   hipKernel_t kernel = nullptr;
-  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));
+  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName))
   REQUIRE(kernel != nullptr);
 }
 
@@ -163,7 +163,7 @@ HIP_TEST_CASE(Contract_Library_HipLibraryGetKernel_Default_ResolvesKnownSymbol) 
   // A symbol that exists in the loaded library must resolve to a non-null
   // kernel handle.
   hipKernel_t kernel = nullptr;
-  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));
+  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName))
   REQUIRE(kernel != nullptr);
 }
 
@@ -195,7 +195,7 @@ HIP_TEST_CASE(Contract_Library_HipLibraryGetKernelCount_Default_MatchesLowerBoun
   // The exact value is not pinned because the runtime may inject helper kernels
   // into the code object.
   unsigned int count = 0;
-  HIP_CHECK(hipLibraryGetKernelCount(&count, library));
+  HIP_CHECK(hipLibraryGetKernelCount(&count, library))
   REQUIRE(count >= 2);
 }
 
@@ -211,7 +211,7 @@ HIP_TEST_CASE(Contract_Library_HipLibraryEnumerateKernels_ZeroMax_LeavesBufferUn
   // A sentinel guard slot is used to detect an out-of-contract write.
   hipKernel_t guard = reinterpret_cast<hipKernel_t>(static_cast<uintptr_t>(0xDEADBEEF));
   hipKernel_t buffer[1] = {guard};
-  HIP_CHECK(hipLibraryEnumerateKernels(buffer, 0, library));
+  HIP_CHECK(hipLibraryEnumerateKernels(buffer, 0, library))
   REQUIRE(buffer[0] == guard);
 }
 
@@ -224,17 +224,17 @@ HIP_TEST_CASE(Contract_Library_HipLibraryEnumerateKernels_Default_HandlesResolve
   cleanup.Add([library] { (void)hipLibraryUnload(library); });
 
   unsigned int count = 0;
-  HIP_CHECK(hipLibraryGetKernelCount(&count, library));
+  HIP_CHECK(hipLibraryGetKernelCount(&count, library))
   REQUIRE(count >= 2);
 
   // Every enumerated kernel handle must be usable: it resolves to a non-null
   // launchable function through the public kernel-to-function accessor.
   std::vector<hipKernel_t> kernels(count, nullptr);
-  HIP_CHECK(hipLibraryEnumerateKernels(kernels.data(), count, library));
+  HIP_CHECK(hipLibraryEnumerateKernels(kernels.data(), count, library))
   for (unsigned int i = 0; i < count; ++i) {
     REQUIRE(kernels[i] != nullptr);
     hipFunction_t function = nullptr;
-    HIP_CHECK(hipKernelGetFunction(&function, kernels[i]));
+    HIP_CHECK(hipKernelGetFunction(&function, kernels[i]))
     REQUIRE(function != nullptr);
   }
 }
@@ -251,8 +251,8 @@ HIP_TEST_CASE(Contract_Library_HipLibraryGetKernel_Default_RepeatedLookupIsStabl
   // same stable kernel handle.
   hipKernel_t first = nullptr;
   hipKernel_t second = nullptr;
-  HIP_CHECK(hipLibraryGetKernel(&first, library, kWriteKernelName));
-  HIP_CHECK(hipLibraryGetKernel(&second, library, kWriteKernelName));
+  HIP_CHECK(hipLibraryGetKernel(&first, library, kWriteKernelName))
+  HIP_CHECK(hipLibraryGetKernel(&second, library, kWriteKernelName))
   REQUIRE(first != nullptr);
   REQUIRE(first == second);
 }
@@ -266,13 +266,13 @@ HIP_TEST_CASE(Contract_Library_HipKernelGetName_Default_ReturnsRequestedSymbol) 
   cleanup.Add([library] { (void)hipLibraryUnload(library); });
 
   hipKernel_t kernel = nullptr;
-  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));
+  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName))
   REQUIRE(kernel != nullptr);
 
   // The name reported for a resolved kernel must be non-null and match the
   // symbol that was requested.
   const char* name = nullptr;
-  HIP_CHECK(hipKernelGetName(&name, kernel));
+  HIP_CHECK(hipKernelGetName(&name, kernel))
   REQUIRE(name != nullptr);
   REQUIRE(std::strcmp(name, kWriteKernelName) == 0);
 }
@@ -286,28 +286,28 @@ HIP_TEST_CASE(Contract_Library_HipKernelGetFunction_Default_LaunchesAndWrites) {
   cleanup.Add([library] { (void)hipLibraryUnload(library); });
 
   hipKernel_t kernel = nullptr;
-  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));
+  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName))
   REQUIRE(kernel != nullptr);
 
   // The kernel object must expose a launchable driver-style function handle.
   hipFunction_t function = nullptr;
-  HIP_CHECK(hipKernelGetFunction(&function, kernel));
+  HIP_CHECK(hipKernelGetFunction(&function, kernel))
   REQUIRE(function != nullptr);
 
   int* device_value = nullptr;
-  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)))
   cleanup.Add([device_value] { (void)hipFree(device_value); });
-  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
+  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)))
 
   // Launch the resolved function through the driver-style module launch entry
   // point with a single-thread grid so the write is deterministic.
   int value = kExpectedValue;
   void* kernel_args[] = {&device_value, &value};
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args, nullptr));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args, nullptr))
+  HIP_CHECK(hipDeviceSynchronize())
 
   int result = 0;
-  HIP_CHECK(hipMemcpy(&result, device_value, sizeof(result), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&result, device_value, sizeof(result), hipMemcpyDeviceToHost))
   REQUIRE(result == kExpectedValue);
 }
 
@@ -324,7 +324,7 @@ HIP_TEST_CASE(Contract_Library_HipLibraryGetGlobal_Default_ReturnsAddressAndSize
   // asserted; only its structural validity is part of the contract.
   void* device_address = nullptr;
   size_t byte_count = 0;
-  HIP_CHECK(hipLibraryGetGlobal(&device_address, &byte_count, library, kGlobalName));
+  HIP_CHECK(hipLibraryGetGlobal(&device_address, &byte_count, library, kGlobalName))
   REQUIRE(device_address != nullptr);
   REQUIRE(byte_count >= sizeof(int));
 }
@@ -346,25 +346,25 @@ HIP_TEST_CASE(Contract_Library_HipLibraryGetGlobal_Default_MatchesModuleGetGloba
   // on NVIDIA, which needs an initialized context, and this can be the first HIP
   // call in the process under ctest isolation. hipFree(0) is a harmless no-op on
   // AMD.
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()))
   cleanup.Add([module] { (void)hipModuleUnload(module); });
   REQUIRE(module != nullptr);
 
   hipDeviceptr_t module_address = 0;
   size_t module_bytes = 0;
-  HIP_CHECK(hipModuleGetGlobal(&module_address, &module_bytes, module, kGlobalName));
+  HIP_CHECK(hipModuleGetGlobal(&module_address, &module_bytes, module, kGlobalName))
   REQUIRE(module_address != 0);
 
   hipLibrary_t library = nullptr;
-  HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+  HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0))
   cleanup.Add([library] { (void)hipLibraryUnload(library); });
   REQUIRE(library != nullptr);
 
   void* library_address = nullptr;
   size_t library_bytes = 0;
-  HIP_CHECK(hipLibraryGetGlobal(&library_address, &library_bytes, library, kGlobalName));
+  HIP_CHECK(hipLibraryGetGlobal(&library_address, &library_bytes, library, kGlobalName))
   REQUIRE(library_address != nullptr);
 
   REQUIRE(module_bytes == library_bytes);
@@ -379,12 +379,12 @@ HIP_TEST_CASE(Contract_Library_HipKernelGetLibrary_Default_RoundTrips) {
   cleanup.Add([library] { (void)hipLibraryUnload(library); });
 
   hipKernel_t kernel = nullptr;
-  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));
+  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName))
   REQUIRE(kernel != nullptr);
 
   // The library a kernel object was obtained from must round-trip back to the
   // originating library handle.
   hipLibrary_t resolved = nullptr;
-  HIP_CHECK(hipKernelGetLibrary(&resolved, kernel));
+  HIP_CHECK(hipKernelGetLibrary(&resolved, kernel))
   REQUIRE(resolved == library);
 }

@@ -20,11 +20,11 @@
  */
 HIP_TEST_CASE(Unit_hipSetDevice_CheckPrimaryCtxState) {
   int device_id = 0;
-  HIP_CHECK(hipSetDevice(device_id));
+  HIP_CHECK(hipSetDevice(device_id))
 
   unsigned flags;
   int is_active;
-  HIP_CHECK(hipDevicePrimaryCtxGetState(device_id, &flags, &is_active));
+  HIP_CHECK(hipDevicePrimaryCtxGetState(device_id, &flags, &is_active))
 
   REQUIRE(is_active == 1);
 }

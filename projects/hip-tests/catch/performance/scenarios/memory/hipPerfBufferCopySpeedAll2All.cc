@@ -51,11 +51,11 @@ static string getMemType(DEV_MEM_TYPE memType) {
 static void mallocDevBuf(void** pp, size_t size, DEV_MEM_TYPE memType) {
   switch (memType) {
     case COARSE_GRAINED:
-      HIP_CHECK(hipMalloc(pp, size));
+      HIP_CHECK(hipMalloc(pp, size))
       break;
     case FINE_GRAINED:
 #if HT_AMD
-      HIP_CHECK(hipExtMallocWithFlags(pp, size, hipDeviceMallocFinegrained));
+      HIP_CHECK(hipExtMallocWithFlags(pp, size, hipDeviceMallocFinegrained))
 #else
       fprintf(stderr, "Unsupported memType for nvidia hardware: %d\n", memType);
       REQUIRE(false);
@@ -65,7 +65,7 @@ static void mallocDevBuf(void** pp, size_t size, DEV_MEM_TYPE memType) {
       // Extended - Scope Fine Grained Memory: read is cached, write is not
       // Perf gain compared with cacheable write
 #if HT_AMD
-      HIP_CHECK(hipExtMallocWithFlags(pp, size, hipDeviceMallocUncached));
+      HIP_CHECK(hipExtMallocWithFlags(pp, size, hipDeviceMallocUncached))
 #else
       fprintf(stderr, "Unsupported memType for nvidia hardware: %d\n", memType);
       REQUIRE(false);
@@ -83,7 +83,7 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
   int nGpus = 0;
   unsigned int threadsPerBlock = 1024;
   unsigned int blocks = 16;  // DEBUG_CLR_LIMIT_BLIT_WG
-  HIP_CHECK(hipGetDeviceCount(&nGpus));
+  HIP_CHECK(hipGetDeviceCount(&nGpus))
   if (nGpus < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
@@ -91,7 +91,7 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
   if (kernelCopy) {
     int minGridSize = 0;
     int blockSize = 0;
-    HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, copy_kernel<T>));
+    HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, copy_kernel<T>))
     blocks = minGridSize / nGpus;
     threadsPerBlock = blockSize;
     fprintf(stderr, "minGridSize %d, threadsPerBlock %u, blocks %u, nGpus %d\n",
@@ -106,13 +106,13 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
   char** dstBuf = reinterpret_cast<char**>(malloc(nGpus * nGpus * sizeof(char*)));
   hipStream_t* streams = (hipStream_t*)malloc(nGpus * nGpus * sizeof(hipStream_t));
   for (int local = 0; local < nGpus; local++) {
-    HIP_CHECK(hipSetDevice(local));
+    HIP_CHECK(hipSetDevice(local))
     for (int remote = 0; remote < nGpus; remote++) {
       if (local == remote) continue;
       mallocDevBuf((void**)(srcBuf + local * nGpus + remote), dataBytes, srcType);
       mallocDevBuf((void**)(dstBuf + local * nGpus + remote), dataBytes, dstType);
-      HIP_CHECK(hipStreamCreateWithFlags(&streams[local * nGpus + remote], hipStreamNonBlocking));
-      HIP_CHECK(hipDeviceEnablePeerAccess(remote, 0));
+      HIP_CHECK(hipStreamCreateWithFlags(&streams[local * nGpus + remote], hipStreamNonBlocking))
+      HIP_CHECK(hipDeviceEnablePeerAccess(remote, 0))
 #ifdef VERIFY_DATA
       HIP_CHECK(hipMemcpy(srcBuf[local * nGpus + remote], hostMem0.data(), dataBytes,
                           hipMemcpyHostToDevice));
@@ -126,7 +126,7 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
   auto test = [&](int iters) {
     for (int it = 0; it < iters; it++) {
       for (int local = 0; local < nGpus; local++) {
-        HIP_CHECK(hipSetDevice(local));
+        HIP_CHECK(hipSetDevice(local))
         for (int i = 0; i < nGpus - 1; i++) {
           int remote = (local + i + 1) % nGpus;
           if (toRemote) {
@@ -137,7 +137,7 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
                                  reinterpret_cast<T*>(dstBuf[remote * nGpus + local]),
                                  reinterpret_cast<T*>(srcBuf[local * nGpus + remote]),
                                  static_cast<size_t>(N));
-              HIP_CHECK(hipGetLastError());
+              HIP_CHECK(hipGetLastError())
             } else {
               HIP_CHECK(hipMemcpyPeerAsync(dstBuf[remote * nGpus + local], remote,
                                            srcBuf[local * nGpus + remote], local, dataBytes,
@@ -151,7 +151,7 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
                                  reinterpret_cast<T*>(dstBuf[local * nGpus + remote]),
                                  reinterpret_cast<T*>(srcBuf[remote * nGpus + local]),
                                  static_cast<size_t>(N));
-              HIP_CHECK(hipGetLastError());
+              HIP_CHECK(hipGetLastError())
             } else {
               HIPCHECK(hipMemcpyPeerAsync(dstBuf[local * nGpus + remote], local,
                                           srcBuf[remote * nGpus + local], remote, dataBytes,
@@ -165,7 +165,7 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
       for (int local = 0; local < nGpus; local++) {
         for (int remote = 0; remote < nGpus; remote++) {
           if (local == remote) continue;
-          HIP_CHECK(hipStreamSynchronize(streams[local * nGpus + remote]));
+          HIP_CHECK(hipStreamSynchronize(streams[local * nGpus + remote]))
         }
       }
     }
@@ -188,8 +188,8 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
 
   // exit
   for (int local = 0; local < nGpus; local++) {
-    HIP_CHECK(hipSetDevice(local));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipSetDevice(local))
+    HIP_CHECK(hipDeviceSynchronize())
     for (int remote = 0; remote < nGpus; remote++) {
       if (local == remote) continue;
 #ifdef VERIFY_DATA
@@ -212,9 +212,9 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
         REQUIRE(hostMem1 == hostMem0);
       }
 #endif
-      HIP_CHECK(hipFree(srcBuf[local * nGpus + remote]));
-      HIP_CHECK(hipFree(dstBuf[local * nGpus + remote]));
-      HIP_CHECK(hipStreamDestroy(streams[local * nGpus + remote]));
+      HIP_CHECK(hipFree(srcBuf[local * nGpus + remote]))
+      HIP_CHECK(hipFree(dstBuf[local * nGpus + remote]))
+      HIP_CHECK(hipStreamDestroy(streams[local * nGpus + remote]))
     }
   }
   free(streams);

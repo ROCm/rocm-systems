@@ -61,7 +61,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
-  HIP_CHECK(hipSetDevice(supportedDevices[0]));
+  HIP_CHECK(hipSetDevice(supportedDevices[0]))
 
   constexpr int N = 1024;
   constexpr int Nbytes = N * sizeof(int);
@@ -69,7 +69,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
   int *memPtr = nullptr;
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   HIP_CHECK(hipMallocManaged(reinterpret_cast<void **>(&memPtr), Nbytes,
                              hipMemAttachGlobal));
@@ -80,24 +80,24 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
     std::fill_n(memPtr, N, value);
 
     for (int deviceId : supportedDevices) {
-      HIP_CHECK(hipSetDevice(deviceId));
+      HIP_CHECK(hipSetDevice(deviceId))
 
       hipMemLocation location;
       location.type = hipMemLocationTypeDevice;
       location.id = deviceId;
 
-      HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       int *devArr = nullptr;
-      HIP_CHECK(hipMalloc(&devArr, Nbytes));
+      HIP_CHECK(hipMalloc(&devArr, Nbytes))
       REQUIRE(devArr != nullptr);
 
       copyDataKernel<<<1, N>>>(devArr, memPtr);
 
       int hostArr[N];
-      HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost))
+      HIP_CHECK(hipDeviceSynchronize())
 
       for (int i = 0; i < N; i++) {
         INFO("For Device " << deviceId << " At index " << i
@@ -108,7 +108,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
 
       currentValue = currentValue + 1;
       fillDataKernel<<<1, N>>>(memPtr, currentValue);
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
 
       for (int i = 0; i < N; i++) {
         INFO("At index " << i << " Expected value = " << currentValue
@@ -116,19 +116,19 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
         REQUIRE(memPtr[i] == currentValue);
       }
 
-      HIP_CHECK(hipFree(devArr));
+      HIP_CHECK(hipFree(devArr))
     }
   }
 
   SECTION("With Host") {
     fillDataKernel<<<1, N>>>(memPtr, value);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     hipMemLocation location;
     location.type = hipMemLocationTypeHost;
 
-    HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     for (int i = 0; i < N; i++) {
       INFO("At index " << i << " Expected value = " << value
@@ -146,10 +146,10 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
     }
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(memPtr));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(memPtr))
   // Reset to default device
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 }
 
 /**
@@ -175,7 +175,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
     HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
   }
 
-  HIP_CHECK(hipSetDevice(supportedDevices[0]));
+  HIP_CHECK(hipSetDevice(supportedDevices[0]))
 
   int maxNode = numa_max_node();
   REQUIRE(maxNode >= 0);
@@ -186,13 +186,13 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
   int *memPtr = nullptr;
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   HIP_CHECK(hipMallocManaged(reinterpret_cast<void **>(&memPtr), Nbytes,
                              hipMemAttachGlobal));
   REQUIRE(memPtr != nullptr);
   fillDataKernel<<<1, N>>>(memPtr, value);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   SECTION("With Host NUMA") {
     hipMemLocation location;
@@ -201,8 +201,8 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
       location.type = hipMemLocationTypeHostNuma;
       location.id = node;
 
-      HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
 
       for (int i = 0; i < N; i++) {
         INFO("For Node " << node << " At index " << i << " Expected value = "
@@ -257,8 +257,8 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
     hipMemLocation location;
     location.type = hipMemLocationTypeHostNumaCurrent;
 
-    HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     for (int i = 0; i < N; i++) {
       INFO("At index " << i << " Expected value = " << value
@@ -283,10 +283,10 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
     REQUIRE(status == cur_node);
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(memPtr));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(memPtr))
   // Reset to default device
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 }
 #endif
 
@@ -311,16 +311,16 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Negative) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
-  HIP_CHECK(hipSetDevice(supportedDevices[0]));
+  HIP_CHECK(hipSetDevice(supportedDevices[0]))
 
   constexpr int N = 16;
   constexpr int Nbytes = N * sizeof(int);
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void *memPtr = nullptr;
-  HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal))
 
   hipMemLocation location;
   location.type = hipMemLocationTypeDevice;
@@ -346,15 +346,15 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Negative) {
     hipMemLocation dstLocation;
     dstLocation.type = hipMemLocationTypeDevice;
     int deviceCount = 0;
-    HIP_CHECK(hipGetDeviceCount(&deviceCount));
+    HIP_CHECK(hipGetDeviceCount(&deviceCount))
     dstLocation.id = deviceCount;
     HIP_CHECK_ERROR(
         hipMemPrefetchAsync_v2(memPtr, Nbytes, dstLocation, 0, stream),
         hipErrorInvalidDevice);
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(memPtr));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(memPtr))
   // Reset to default device
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 }

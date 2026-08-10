@@ -27,13 +27,13 @@
  */
 HIP_TEST_CASE(Unit_hipEventCreate_Positive) {
   int id = GENERATE(range(0, HipTest::getDeviceCount()));
-  HIP_CHECK(hipSetDevice(id));
+  HIP_CHECK(hipSetDevice(id))
 
   hipEvent_t event;
-  HIP_CHECK(hipEventCreate(&event));
+  HIP_CHECK(hipEventCreate(&event))
   REQUIRE(event != nullptr);
 
-  HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipEventDestroy(event))
 }
 
 /**
@@ -49,20 +49,20 @@ HIP_TEST_CASE(Unit_hipEventCreate_Positive) {
  */
 HIP_TEST_CASE(Unit_hipEventCreate_Verify_Capture) {
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   hipStreamCaptureMode mode = GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
                                        hipStreamCaptureModeRelaxed);
-  HIP_CHECK(hipStreamBeginCapture(stream, mode));
+  HIP_CHECK(hipStreamBeginCapture(stream, mode))
   hipEvent_t event;
-  HIP_CHECK(hipEventCreate(&event));
+  HIP_CHECK(hipEventCreate(&event))
   REQUIRE(event != nullptr);
   hipGraph_t graph;
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipEventDestroy(event));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipEventDestroy(event))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**

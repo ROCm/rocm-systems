@@ -112,10 +112,10 @@ void launch_kernels_and_verify(std::vector<hipStream_t>& streams, unsigned int n
   BinNode* pNodes = nullptr;
   unsigned int* pNumNodes = nullptr;
   unsigned int total_items = num_pixels * (num_devices + 1);
-  HIP_CHECK(hipHostMalloc(&pInputImage, sizeof(unsigned int) * num_pixels, hipHostMallocCoherent));
+  HIP_CHECK(hipHostMalloc(&pInputImage, sizeof(unsigned int) * num_pixels, hipHostMallocCoherent))
   HIP_CHECK(
       hipHostMalloc(&pNodes, sizeof(BinNode) * (total_items + numBins), hipHostMallocCoherent));
-  HIP_CHECK(hipHostMalloc(&pNumNodes, sizeof(unsigned int), hipHostMallocCoherent));
+  HIP_CHECK(hipHostMalloc(&pNumNodes, sizeof(unsigned int), hipHostMallocCoherent))
 
   *pNumNodes = numBins;  // using the first numBins nodes to hold the list heads.
   for (unsigned int i = 0; i < numBins; i++) pNodes[i].pNext = nullptr;
@@ -124,10 +124,10 @@ void launch_kernels_and_verify(std::vector<hipStream_t>& streams, unsigned int n
   // Get all the devices going simultaneously, each device (and the host) will insert
   // all the pixels.
   for (unsigned int d = 0; d < num_devices; d++) {
-    HIP_CHECK(hipSetDevice(d));
+    HIP_CHECK(hipSetDevice(d))
     build_hash_table_on_device<<<(num_pixels + 255) / 256, 256, 0, streams[d]>>>(
         pInputImage, num_pixels, pNodes, pNumNodes, numBins, d);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
   }
 
   std::vector<std::thread> threads;
@@ -144,10 +144,10 @@ void launch_kernels_and_verify(std::vector<hipStream_t>& streams, unsigned int n
   HIP_CHECK_THREAD_FINALIZE();
 
   for (unsigned int d = 0; d < num_devices; d++) {
-    HIP_CHECK(hipSetDevice(d));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipSetDevice(d))
+    HIP_CHECK(hipDeviceSynchronize())
   }
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   unsigned int num_items = 0;
   // check correctness of each bin in the hash table.
   for (unsigned int i = 0; i < numBins; i++) {
@@ -184,9 +184,9 @@ void launch_kernels_and_verify(std::vector<hipStream_t>& streams, unsigned int n
               numBins, num_items_bin, total_num_items_bin);
     }
   }
-  HIP_CHECK(hipHostFree(pInputImage));
-  HIP_CHECK(hipHostFree(pNodes));
-  HIP_CHECK(hipHostFree(pNumNodes));
+  HIP_CHECK(hipHostFree(pInputImage))
+  HIP_CHECK(hipHostFree(pNodes))
+  HIP_CHECK(hipHostFree(pNumNodes))
 
   // each device and the host inserted all of the pixels, check that none are missing.
   if (num_items != total_items) {
@@ -230,11 +230,11 @@ void launch_kernels_and_verify(std::vector<hipStream_t>& streams, unsigned int n
 */
 HIP_TEST_CASE(Unit_svm_fine_grain_memory_consistency) {
   int num_devices = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
 
   for (int id = 0; id < num_devices; id++) {
     int pcieAtomic = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, id));
+    HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, id))
     if (!pcieAtomic) {
       HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
     }
@@ -243,10 +243,10 @@ HIP_TEST_CASE(Unit_svm_fine_grain_memory_consistency) {
   std::vector<hipStream_t> streams(num_devices);
 
   for (int d = 0; d < num_devices; d++) {
-    HIP_CHECK(hipSetDevice(d));
-    HIP_CHECK(hipStreamCreate(&streams[d]));
+    HIP_CHECK(hipSetDevice(d))
+    HIP_CHECK(hipStreamCreate(&streams[d]))
   }
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   // all work groups in all devices and the host code will hammer on this one lock.
   unsigned int numBins = 1;
@@ -259,6 +259,6 @@ HIP_TEST_CASE(Unit_svm_fine_grain_memory_consistency) {
   launch_kernels_and_verify(streams, num_devices, numBins, num_elements);
 
   for (unsigned int i = 0; i < num_devices; i++) {
-    HIP_CHECK(hipStreamDestroy(streams[i]));
+    HIP_CHECK(hipStreamDestroy(streams[i]))
   }
 }

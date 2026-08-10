@@ -36,10 +36,10 @@ constexpr std::array<hipSharedMemConfig, 3> kMemConfigs{
 HIP_TEST_CASE(Unit_hipDeviceSetSharedMemConfig_Positive_Basic) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   const auto mem_config = GENERATE(from_range(std::begin(kMemConfigs), std::end(kMemConfigs)));
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
   INFO("Current device is " << device);
 
-  HIP_CHECK(hipDeviceSetSharedMemConfig(mem_config));
+  HIP_CHECK(hipDeviceSetSharedMemConfig(mem_config))
 }
 
 /**
@@ -87,11 +87,11 @@ HIP_TEST_CASE(Unit_hipDeviceSetSharedMemConfig_Negative_Parameters) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetSharedMemConfig_Positive_Default) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
   INFO("Current device is " << device);
 
   hipSharedMemConfig mem_config;
-  HIP_CHECK(hipDeviceGetSharedMemConfig(&mem_config));
+  HIP_CHECK(hipDeviceGetSharedMemConfig(&mem_config))
   REQUIRE(mem_config == hipSharedMemBankSizeFourByte);
 }
 
@@ -110,16 +110,16 @@ HIP_TEST_CASE(Unit_hipDeviceGetSharedMemConfig_Positive_Default) {
 HIP_TEST_CASE(Unit_hipDeviceGetSharedMemConfig_Positive_Basic) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   const auto mem_config = GENERATE(from_range(std::begin(kMemConfigs), std::end(kMemConfigs)));
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
   INFO("Current device is " << device);
 
-  HIP_CHECK(hipDeviceSetSharedMemConfig(mem_config));
+  HIP_CHECK(hipDeviceSetSharedMemConfig(mem_config))
 
   hipSharedMemConfig returned_mem_config;
-  HIP_CHECK(hipDeviceGetSharedMemConfig(&returned_mem_config));
+  HIP_CHECK(hipDeviceGetSharedMemConfig(&returned_mem_config))
 
   int major = -1, minor = -1;
-  HIP_CHECK(hipDeviceComputeCapability(&major, &minor, device));
+  HIP_CHECK(hipDeviceComputeCapability(&major, &minor, device))
   REQUIRE(major > 0);
   if (major == 3 /*Kepler*/) {
     REQUIRE(returned_mem_config == mem_config);
@@ -152,10 +152,10 @@ HIP_TEST_CASE(Unit_hipDeviceGetSharedMemConfig_Positive_Threaded) {
 
     void TestPart3() {
       hipSharedMemConfig returned_mem_config;
-      HIP_CHECK(hipDeviceGetSharedMemConfig(&returned_mem_config));
+      HIP_CHECK(hipDeviceGetSharedMemConfig(&returned_mem_config))
 
       int major = -1, minor = -1;
-      HIP_CHECK(hipDeviceComputeCapability(&major, &minor, 0));
+      HIP_CHECK(hipDeviceComputeCapability(&major, &minor, 0))
       REQUIRE(major > 0);
       if (major == 3 /*Kepler*/) {
         REQUIRE(returned_mem_config == mem_config_);

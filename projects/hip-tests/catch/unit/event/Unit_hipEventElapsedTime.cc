@@ -42,8 +42,8 @@
  */
 HIP_TEST_CASE(Unit_hipEventElapsedTime_NullCheck) {
   hipEvent_t start, end;
-  HIP_CHECK(hipEventCreate(&start));
-  HIP_CHECK(hipEventCreate(&end));
+  HIP_CHECK(hipEventCreate(&start))
+  HIP_CHECK(hipEventCreate(&end))
 
   float tms = 1.0f;
   HIP_ASSERT(hipEventElapsedTime(nullptr, start, end) == hipErrorInvalidValue);
@@ -52,8 +52,8 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_NullCheck) {
   HIP_ASSERT(hipEventElapsedTime(&tms, nullptr, end) == hipErrorInvalidHandle);
   HIP_ASSERT(hipEventElapsedTime(&tms, start, nullptr) == hipErrorInvalidHandle);
 #endif
-  HIP_CHECK(hipEventDestroy(start));
-  HIP_CHECK(hipEventDestroy(end));
+  HIP_CHECK(hipEventDestroy(start))
+  HIP_CHECK(hipEventDestroy(end))
 }
 
 /**
@@ -72,11 +72,11 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_NullCheck) {
 HIP_TEST_CASE(Unit_hipEventElapsedTime_DisableTiming) {
   float timeElapsed = 1.0f;
   hipEvent_t start, stop;
-  HIP_CHECK(hipEventCreateWithFlags(&start, hipEventDisableTiming));
-  HIP_CHECK(hipEventCreateWithFlags(&stop, hipEventDisableTiming));
+  HIP_CHECK(hipEventCreateWithFlags(&start, hipEventDisableTiming))
+  HIP_CHECK(hipEventCreateWithFlags(&stop, hipEventDisableTiming))
   HIP_ASSERT(hipEventElapsedTime(&timeElapsed, start, stop) == hipErrorInvalidHandle);
-  HIP_CHECK(hipEventDestroy(start));
-  HIP_CHECK(hipEventDestroy(stop));
+  HIP_CHECK(hipEventDestroy(start))
+  HIP_CHECK(hipEventDestroy(stop))
 }
 
 /**
@@ -99,27 +99,27 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_DifferentDevices) {
   }
 
   // create event on dev=0
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   hipEvent_t start;
-  HIP_CHECK(hipEventCreate(&start));
+  HIP_CHECK(hipEventCreate(&start))
 
-  HIP_CHECK(hipEventRecord(start, nullptr));
-  HIP_CHECK(hipEventSynchronize(start));
+  HIP_CHECK(hipEventRecord(start, nullptr))
+  HIP_CHECK(hipEventSynchronize(start))
 
   // create event on dev=1
-  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipSetDevice(1))
   hipEvent_t stop;
-  HIP_CHECK(hipEventCreate(&stop));
+  HIP_CHECK(hipEventCreate(&stop))
 
-  HIP_CHECK(hipEventRecord(stop, nullptr));
-  HIP_CHECK(hipEventSynchronize(stop));
+  HIP_CHECK(hipEventRecord(stop, nullptr))
+  HIP_CHECK(hipEventSynchronize(stop))
 
   float tElapsed = 1.0f;
   // start on device 0 but stop on device 1
   HIP_ASSERT(hipEventElapsedTime(&tElapsed, start, stop) == hipErrorInvalidHandle);
 
-  HIP_CHECK(hipEventDestroy(start));
-  HIP_CHECK(hipEventDestroy(stop));
+  HIP_CHECK(hipEventDestroy(start))
+  HIP_CHECK(hipEventDestroy(stop))
 }
 
 
@@ -140,26 +140,26 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_DifferentDevices) {
  */
 HIP_TEST_CASE(Unit_hipEventElapsedTime_NotReady_Negative) {
   hipEvent_t start;
-  HIP_CHECK(hipEventCreate(&start));
+  HIP_CHECK(hipEventCreate(&start))
 
   hipEvent_t stop;
-  HIP_CHECK(hipEventCreate(&stop));
+  HIP_CHECK(hipEventCreate(&stop))
 
   // Record start event
-  HIP_CHECK(hipEventRecord(start, nullptr));
+  HIP_CHECK(hipEventRecord(start, nullptr))
 
   LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 1000));
   // Record stop event
-  HIP_CHECK(hipEventRecord(stop, nullptr));
+  HIP_CHECK(hipEventRecord(stop, nullptr))
 
   // stop event has not been completed
   float tElapsed = 1.0f;
   HIP_CHECK_ERROR(hipEventQuery(stop), hipErrorNotReady);
   HIP_ASSERT(hipEventElapsedTime(&tElapsed, start, stop) == hipErrorNotReady);
 
-  HIP_CHECK(hipStreamSynchronize(nullptr));
-  HIP_CHECK(hipEventDestroy(start));
-  HIP_CHECK(hipEventDestroy(stop));
+  HIP_CHECK(hipStreamSynchronize(nullptr))
+  HIP_CHECK(hipEventDestroy(start))
+  HIP_CHECK(hipEventDestroy(stop))
 }
 #endif  // HT_AMD
 
@@ -176,48 +176,48 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_NotReady_Negative) {
  */
 HIP_TEST_CASE(Unit_hipEventElapsedTime) {
   hipEvent_t start;
-  HIP_CHECK(hipEventCreate(&start));
+  HIP_CHECK(hipEventCreate(&start))
 
   hipEvent_t stop;
-  HIP_CHECK(hipEventCreate(&stop));
+  HIP_CHECK(hipEventCreate(&stop))
 
-  HIP_CHECK(hipEventRecord(start, nullptr));
-  HIP_CHECK(hipEventSynchronize(start));
+  HIP_CHECK(hipEventRecord(start, nullptr))
+  HIP_CHECK(hipEventSynchronize(start))
 
-  HIP_CHECK(hipEventRecord(stop, nullptr));
-  HIP_CHECK(hipEventSynchronize(stop));
+  HIP_CHECK(hipEventRecord(stop, nullptr))
+  HIP_CHECK(hipEventSynchronize(stop))
 
   float tElapsed = 1.0f;
-  HIP_CHECK(hipEventElapsedTime(&tElapsed, start, stop));
+  HIP_CHECK(hipEventElapsedTime(&tElapsed, start, stop))
 
-  HIP_CHECK(hipEventDestroy(start));
-  HIP_CHECK(hipEventDestroy(stop));
+  HIP_CHECK(hipEventDestroy(start))
+  HIP_CHECK(hipEventDestroy(stop))
 }
 
 HIP_TEST_CASE(Unit_hipEventElapsedTime_Verify_Capture) {
   hipEvent_t start, stop;
 
-  HIP_CHECK(hipEventCreate(&start));
-  HIP_CHECK(hipEventCreate(&stop));
-  HIP_CHECK(hipEventRecord(start, nullptr));
-  HIP_CHECK(hipEventSynchronize(start));
-  HIP_CHECK(hipEventRecord(stop, nullptr));
-  HIP_CHECK(hipEventSynchronize(stop));
+  HIP_CHECK(hipEventCreate(&start))
+  HIP_CHECK(hipEventCreate(&stop))
+  HIP_CHECK(hipEventRecord(start, nullptr))
+  HIP_CHECK(hipEventSynchronize(start))
+  HIP_CHECK(hipEventRecord(stop, nullptr))
+  HIP_CHECK(hipEventSynchronize(stop))
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   hipStreamCaptureMode mode = GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
                                        hipStreamCaptureModeRelaxed);
-  HIP_CHECK(hipStreamBeginCapture(stream, mode));
+  HIP_CHECK(hipStreamBeginCapture(stream, mode))
   float tElapsed = 1.0f;
-  HIP_CHECK(hipEventElapsedTime(&tElapsed, start, stop));
+  HIP_CHECK(hipEventElapsedTime(&tElapsed, start, stop))
   hipGraph_t graph;
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipEventDestroy(start));
-  HIP_CHECK(hipEventDestroy(stop));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipEventDestroy(start))
+  HIP_CHECK(hipEventDestroy(stop))
 }
 
 /**

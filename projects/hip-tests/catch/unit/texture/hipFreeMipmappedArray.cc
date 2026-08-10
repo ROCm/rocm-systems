@@ -38,9 +38,9 @@ HIP_TEST_CASE(Unit_hipFreeMipmappedArray_Negative_Parameters) {
     hipExtent extent = make_hipExtent(4, 4, 6);
     unsigned int levels = 4;
 
-    HIP_CHECK(hipMallocMipmappedArray(&array, &desc, extent, levels, 0));
+    HIP_CHECK(hipMallocMipmappedArray(&array, &desc, extent, levels, 0))
 
-    HIP_CHECK(hipFreeMipmappedArray(array));
+    HIP_CHECK(hipFreeMipmappedArray(array))
     HIP_CHECK_ERROR(hipFreeMipmappedArray(array), hipErrorContextIsDestroyed);
   }
 }

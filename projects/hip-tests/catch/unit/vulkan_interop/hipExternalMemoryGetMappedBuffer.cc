@@ -22,7 +22,7 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write) 
   }
   const auto hip_ext_mem_desc = vkt.BuildMemoryDescriptor(vk_storage.memory, vk_storage.size);
   hipExternalMemory_t hip_ext_memory;
-  HIP_CHECK(hipImportExternalMemory(&hip_ext_memory, &hip_ext_mem_desc));
+  HIP_CHECK(hipImportExternalMemory(&hip_ext_memory, &hip_ext_mem_desc))
 
   hipExternalMemoryBufferDesc external_mem_buffer_desc = {};
   external_mem_buffer_desc.size = vk_storage.size;
@@ -44,13 +44,13 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write) 
   REQUIRE(43 == read_buffer[2]);
 
   Set<<<1, 1>>>(hip_dev_ptr + 1, static_cast<type>(42));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   REQUIRE(41 == vk_storage.host_ptr[0]);
   REQUIRE(42 == vk_storage.host_ptr[1]);
   REQUIRE(43 == vk_storage.host_ptr[2]);
 
-  HIP_CHECK(hipFree(hip_dev_ptr));
-  HIP_CHECK(hipDestroyExternalMemory(hip_ext_memory));
+  HIP_CHECK(hipFree(hip_dev_ptr))
+  HIP_CHECK(hipDestroyExternalMemory(hip_ext_memory))
 }
 
 // Disabled on AMD due to defect - EXSWHTEC-175
@@ -67,7 +67,7 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_W
 
   const auto hip_ext_mem_desc = vkt.BuildMemoryDescriptor(vk_storage.memory, vk_storage.size);
   hipExternalMemory_t hip_ext_memory;
-  HIP_CHECK(hipImportExternalMemory(&hip_ext_memory, &hip_ext_mem_desc));
+  HIP_CHECK(hipImportExternalMemory(&hip_ext_memory, &hip_ext_mem_desc))
 
   hipExternalMemoryBufferDesc external_mem_buffer_desc = {};
   constexpr auto offset = (count - 1) * sizeof(type);
@@ -81,12 +81,12 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_W
   vk_storage.host_ptr[0] = 41;
   vk_storage.host_ptr[1] = 42;
   type read_val = 0;
-  HIP_CHECK(hipMemcpy(&read_val, hip_dev_ptr, 1, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&read_val, hip_dev_ptr, 1, hipMemcpyDeviceToHost))
   REQUIRE(42 == read_val);
 
   // Defect - EXSWHTEC-181
-  HIP_CHECK(hipFree(hip_dev_ptr));
-  HIP_CHECK(hipDestroyExternalMemory(hip_ext_memory));
+  HIP_CHECK(hipFree(hip_dev_ptr))
+  HIP_CHECK(hipDestroyExternalMemory(hip_ext_memory))
 }
 
 HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Negative_Parameters) {
@@ -97,7 +97,7 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Negative_Parameters) 
   }
   const auto hip_ext_mem_desc = vkt.BuildMemoryDescriptor(vk_storage.memory, vk_storage.size);
   hipExternalMemory_t hip_ext_memory;
-  HIP_CHECK(hipImportExternalMemory(&hip_ext_memory, &hip_ext_mem_desc));
+  HIP_CHECK(hipImportExternalMemory(&hip_ext_memory, &hip_ext_mem_desc))
 
   hipExternalMemoryBufferDesc external_mem_buffer_desc = {};
   external_mem_buffer_desc.size = vk_storage.size;
@@ -166,7 +166,7 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Capture) {
   }
   const auto hip_ext_mem_desc = vkt.BuildMemoryDescriptor(vk_storage.memory, vk_storage.size);
   hipExternalMemory_t hip_ext_memory;
-  HIP_CHECK(hipImportExternalMemory(&hip_ext_memory, &hip_ext_mem_desc));
+  HIP_CHECK(hipImportExternalMemory(&hip_ext_memory, &hip_ext_mem_desc))
 
   hipExternalMemoryBufferDesc external_mem_buffer_desc = {};
   external_mem_buffer_desc.size = vk_storage.size;
@@ -219,7 +219,7 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_D
               reinterpret_cast<void**>(&dst_data));
 
   hipExternalMemory_t hip_ext_memory;
-  HIP_CHECK(hipImportExternalMemory(&hip_ext_memory, &hip_ext_mem_desc));
+  HIP_CHECK(hipImportExternalMemory(&hip_ext_memory, &hip_ext_mem_desc))
 
   hipExternalMemoryBufferDesc external_mem_buffer_desc = {};
   external_mem_buffer_desc.size = size;
@@ -243,7 +243,7 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_D
   REQUIRE(43 == read_buffer[2]);
 
   Set<<<1, 1>>>(hip_dev_ptr + 1, static_cast<type>(42));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   vkt.CopyBuffer(buffer, dst_staging_buffer, size);
 
@@ -251,8 +251,8 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_D
   REQUIRE(42 == dst_data[1]);
   REQUIRE(43 == dst_data[2]);
 
-  HIP_CHECK(hipFree(hip_dev_ptr));
-  HIP_CHECK(hipDestroyExternalMemory(hip_ext_memory));
+  HIP_CHECK(hipFree(hip_dev_ptr))
+  HIP_CHECK(hipDestroyExternalMemory(hip_ext_memory))
 
   vkDestroyBuffer(vkt.GetDevice(), buffer, nullptr);
   vkFreeMemory(vkt.GetDevice(), memory, nullptr);
@@ -285,7 +285,7 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_W
   const auto hip_ext_mem_desc = vkt.BuildMemoryDescriptor(memory, size);
 
   hipExternalMemory_t hip_ext_memory;
-  HIP_CHECK(hipImportExternalMemory(&hip_ext_memory, &hip_ext_mem_desc));
+  HIP_CHECK(hipImportExternalMemory(&hip_ext_memory, &hip_ext_mem_desc))
 
   hipExternalMemoryBufferDesc external_mem_buffer_desc = {};
   constexpr auto offset = (count - 1) * sizeof(type);
@@ -297,14 +297,14 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_W
                                              &external_mem_buffer_desc));
 
   Set<<<1, 1>>>(hip_dev_ptr, static_cast<type>(42));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   type read_val = 0;
-  HIP_CHECK(hipMemcpy(&read_val, hip_dev_ptr, 1, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&read_val, hip_dev_ptr, 1, hipMemcpyDeviceToHost))
   REQUIRE(42 == read_val);
 
-  HIP_CHECK(hipFree(hip_dev_ptr));
-  HIP_CHECK(hipDestroyExternalMemory(hip_ext_memory));
+  HIP_CHECK(hipFree(hip_dev_ptr))
+  HIP_CHECK(hipDestroyExternalMemory(hip_ext_memory))
 
   vkDestroyBuffer(vkt.GetDevice(), buffer, nullptr);
   vkFreeMemory(vkt.GetDevice(), memory, nullptr);

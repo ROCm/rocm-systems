@@ -31,7 +31,7 @@ HIP_TEST_CASE(Unit_hipArray3DGetDescriptor_Positive_Basic) {
   DrvArrayAllocGuard<float> array(make_hipExtent(1024, 4, 2));
 
   HIP_ARRAY3D_DESCRIPTOR desc;
-  HIP_CHECK(hipArray3DGetDescriptor(&desc, array.ptr()));
+  HIP_CHECK(hipArray3DGetDescriptor(&desc, array.ptr()))
 
   using vec_info = vector_info<float>;
   REQUIRE(desc.Format == vec_info::format);
@@ -68,7 +68,7 @@ HIP_TEST_CASE(Unit_hipArray3DGetDescriptor_Negative_Parameters) {
   }
 
   SECTION("array is freed") {
-    HIP_CHECK(hipArrayDestroy(array.ptr()));
+    HIP_CHECK(hipArrayDestroy(array.ptr()))
     HIP_CHECK_ERROR(hipArray3DGetDescriptor(&desc, array.ptr()), hipErrorInvalidHandle);
   }
 }

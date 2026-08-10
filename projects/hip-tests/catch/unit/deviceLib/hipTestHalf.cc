@@ -81,14 +81,14 @@ void check_hisnan(int NUM_INPUTS, __half* inputCPU, __half* inputGPU) {
   // allocate memory
   auto memsize = NUM_INPUTS * sizeof(int);
   int* outputGPU = nullptr;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&outputGPU), memsize));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&outputGPU), memsize))
 
   // launch the kernel
   hipLaunchKernelGGL(kernel_hisnan, dim3(1), dim3(NUM_INPUTS), 0, 0, inputGPU, outputGPU);
 
   // copy output from device
   int* outputCPU = reinterpret_cast<int*>(malloc(memsize));
-  HIP_CHECK(hipMemcpy(outputCPU, outputGPU, memsize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(outputCPU, outputGPU, memsize, hipMemcpyDeviceToHost))
 
   // check output
   for (int i = 0; i < NUM_INPUTS; i++) {
@@ -101,7 +101,7 @@ void check_hisnan(int NUM_INPUTS, __half* inputCPU, __half* inputGPU) {
 
   // free memory
   free(outputCPU);
-  HIP_CHECK(hipFree(outputGPU));
+  HIP_CHECK(hipFree(outputGPU))
 }
 
 
@@ -109,14 +109,14 @@ void check_hisinf(int NUM_INPUTS, __half* inputCPU, __half* inputGPU) {
   // allocate memory
   auto memsize = NUM_INPUTS * sizeof(int);
   int* outputGPU = nullptr;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&outputGPU), memsize));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&outputGPU), memsize))
 
   // launch the kernel
   hipLaunchKernelGGL(kernel_hisinf, dim3(1), dim3(NUM_INPUTS), 0, 0, inputGPU, outputGPU);
 
   // copy output from device
   int* outputCPU = reinterpret_cast<int*>(malloc(memsize));
-  HIP_CHECK(hipMemcpy(outputCPU, outputGPU, memsize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(outputCPU, outputGPU, memsize, hipMemcpyDeviceToHost))
 
   // check output
   for (int i = 0; i < NUM_INPUTS; i++) {
@@ -128,7 +128,7 @@ void check_hisinf(int NUM_INPUTS, __half* inputCPU, __half* inputGPU) {
   }
   // free memory
   free(outputCPU);
-  HIP_CHECK(hipFree(outputGPU));
+  HIP_CHECK(hipFree(outputGPU))
 }
 
 
@@ -158,39 +158,39 @@ void checkFunctional() {
 
   // copy inputs to the GPU
   __half* inputGPU = nullptr;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&inputGPU), memsize));
-  HIP_CHECK(hipMemcpy(inputGPU, inputCPU, memsize, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&inputGPU), memsize))
+  HIP_CHECK(hipMemcpy(inputGPU, inputCPU, memsize, hipMemcpyHostToDevice))
 
   // run checks
   check_hisnan(NUM_INPUTS, inputCPU, inputGPU);
   check_hisinf(NUM_INPUTS, inputCPU, inputGPU);
 
   // free memory
-  HIP_CHECK(hipFree(inputGPU));
+  HIP_CHECK(hipFree(inputGPU))
   free(inputCPU);
 }
 
 void checkHalfAbs() {
   SECTION("Half Abs") {
     float* p;
-    HIP_CHECK(hipMalloc(&p, sizeof(float)));
+    HIP_CHECK(hipMalloc(&p, sizeof(float)))
     float pp = -2.1f;
-    HIP_CHECK(hipMemcpy(p, &pp, sizeof(float), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(p, &pp, sizeof(float), hipMemcpyDefault))
     hipLaunchKernelGGL(testHalfAbs, 1, 1, 0, 0, p);
-    HIP_CHECK(hipMemcpy(&pp, p, sizeof(float), hipMemcpyDefault));
-    HIP_CHECK(hipFree(p));
+    HIP_CHECK(hipMemcpy(&pp, p, sizeof(float), hipMemcpyDefault))
+    HIP_CHECK(hipFree(p))
     REQUIRE(pp >= 0.0f);
   }
   SECTION("Half2 Abs") {
     float2* p;
-    HIP_CHECK(hipMalloc(&p, sizeof(float2)));
+    HIP_CHECK(hipMalloc(&p, sizeof(float2)))
     float2 pp;
     pp.x = -2.1f;
     pp.y = -1.1f;
-    HIP_CHECK(hipMemcpy(p, &pp, sizeof(float2), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(p, &pp, sizeof(float2), hipMemcpyDefault))
     hipLaunchKernelGGL(testHalf2Abs, 1, 1, 0, 0, p);
-    HIP_CHECK(hipMemcpy(&pp, p, sizeof(float2), hipMemcpyDefault));
-    HIP_CHECK(hipFree(p));
+    HIP_CHECK(hipMemcpy(&pp, p, sizeof(float2), hipMemcpyDefault))
+    HIP_CHECK(hipFree(p))
     bool result = true;
     if (pp.x < 0.0f || pp.y < 0.0f) {
       result = false;
@@ -201,23 +201,23 @@ void checkHalfAbs() {
 
 HIP_TEST_CASE(Unit_hipTestHalf) {
   bool* result{nullptr};
-  HIP_CHECK(hipHostMalloc(&result, sizeof(result)));
+  HIP_CHECK(hipHostMalloc(&result, sizeof(result)))
 
   SECTION("Test half math") {
     result[0] = false;
     hipLaunchKernelGGL(__halfMath, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, result, __half{1});
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(result[0] == true);
   }
   SECTION("Test half math") {
     result[0] = false;
     hipLaunchKernelGGL(__half2Math, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, result, __half2{1, 1});
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     REQUIRE(result[0] == true);
   }
   SECTION("Functional checks") {
     checkFunctional();
     checkHalfAbs();
   }
-  HIP_CHECK(hipHostFree(result));
+  HIP_CHECK(hipHostFree(result))
 }

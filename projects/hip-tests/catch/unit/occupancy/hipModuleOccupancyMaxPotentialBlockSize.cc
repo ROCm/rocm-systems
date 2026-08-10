@@ -17,17 +17,17 @@ HIP_TEST_CASE(Unit_hipModuleOccupancyMaxPotentialBlockSize_Negative_Parameters) 
   hipModule_t module;
   hipFunction_t function;
 
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
 
-  HIP_CHECK(hipModuleLoad(&module, "simple_kernel.code"));
-  HIPCHECK(hipModuleGetFunction(&function, module, "SimpleKernel"));
+  HIP_CHECK(hipModuleLoad(&module, "simple_kernel.code"))
+  HIPCHECK(hipModuleGetFunction(&function, module, "SimpleKernel"))
 
   // Common negative tests
   MaxPotentialBlockSizeNegative([&function](int* gridSize, int* blockSize) {
     return hipModuleOccupancyMaxPotentialBlockSize(gridSize, blockSize, function, 0, 0);
   });
 
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
 }
 
 HIP_TEST_CASE(Unit_hipModuleOccupancyMaxPotentialBlockSize_Positive_RangeValidation) {
@@ -35,12 +35,12 @@ HIP_TEST_CASE(Unit_hipModuleOccupancyMaxPotentialBlockSize_Positive_RangeValidat
   hipModule_t module;
   hipFunction_t function;
 
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
 
-  HIP_CHECK(hipModuleLoad(&module, "simple_kernel.code"));
-  HIPCHECK(hipModuleGetFunction(&function, module, "SimpleKernel"));
+  HIP_CHECK(hipModuleLoad(&module, "simple_kernel.code"))
+  HIPCHECK(hipModuleGetFunction(&function, module, "SimpleKernel"))
 
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
 
   SECTION("dynSharedMemPerBlk = 0, blockSizeLimit = 0") {
     MaxPotentialBlockSize(
@@ -59,5 +59,5 @@ HIP_TEST_CASE(Unit_hipModuleOccupancyMaxPotentialBlockSize_Positive_RangeValidat
         devProp.maxThreadsPerBlock);
   }
 
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
 }

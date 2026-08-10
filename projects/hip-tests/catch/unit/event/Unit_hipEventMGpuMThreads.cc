@@ -207,7 +207,7 @@ HIP_TEST_CASE(Unit_hipEventMGpuMThreads_1) { testEventMGpuMThreads(1); }
  */
 HIP_TEST_CASE(Unit_hipEventMGpuMThreads_2) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices > 1) {
     testEventMGpuMThreads(numDevices);
   } else {
@@ -228,7 +228,7 @@ HIP_TEST_CASE(Unit_hipEventMGpuMThreads_2) {
  */
 HIP_TEST_CASE(Unit_hipEventMGpuMThreads_3) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices > 1) {
     fprintf(stderr, "First round\n");
     testEventMGpuMThreads(numDevices);

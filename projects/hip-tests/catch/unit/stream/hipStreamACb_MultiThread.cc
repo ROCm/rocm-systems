@@ -36,7 +36,7 @@ static __global__ void device_function(float* C_d, float* A_d, size_t Num) {
 static void HIPRT_CB Thread1_Callback(hipStream_t stream, hipError_t status, void* userData) {
   HIPASSERT(stream == mystream);
   HIPASSERT(userData == nullptr);
-  HIPCHECK(status);
+  HIPCHECK(status)
 
   for (size_t i = 0; i < N; i++) {
     // Validate the data and update Data_mismatch
@@ -52,7 +52,7 @@ static void HIPRT_CB Thread1_Callback(hipStream_t stream, hipError_t status, voi
 static void HIPRT_CB Thread2_Callback(hipStream_t stream, hipError_t status, void* userData) {
   HIPASSERT(stream == mystream);
   HIPASSERT(userData == nullptr);
-  HIPCHECK(status);
+  HIPCHECK(status)
 
   for (size_t i = 0; i < N; i++) {
     // Validate the data and update Data_mismatch
@@ -88,12 +88,12 @@ HIP_TEST_CASE(Unit_hipStreamAddCallback_MultipleThreads) {
     A1_h[i] = Phi + i;
   }
 
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipMalloc(&C_d, Nbytes));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipMalloc(&C_d, Nbytes))
 
-  HIP_CHECK(hipStreamCreateWithFlags(&mystream, hipStreamNonBlocking));
+  HIP_CHECK(hipStreamCreateWithFlags(&mystream, hipStreamNonBlocking))
 
-  HIP_CHECK(hipMemcpyAsync(A_d, A1_h, Nbytes, hipMemcpyHostToDevice, mystream));
+  HIP_CHECK(hipMemcpyAsync(A_d, A1_h, Nbytes, hipMemcpyHostToDevice, mystream))
 
   constexpr unsigned threadsPerBlock = 256;
   constexpr int blocks =
@@ -102,8 +102,8 @@ HIP_TEST_CASE(Unit_hipStreamAddCallback_MultipleThreads) {
   hipLaunchKernelGGL((device_function), dim3(blocks), dim3(threadsPerBlock), 0, mystream, C_d, A_d,
                      N);
   LaunchDelayKernel(std::chrono::milliseconds(2000), mystream);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpyAsync(C1_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMemcpyAsync(C1_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream))
 
   std::thread* T = new std::thread[numThreads];
   for (int i = 0; i < numThreads; i++) {
@@ -120,11 +120,11 @@ HIP_TEST_CASE(Unit_hipStreamAddCallback_MultipleThreads) {
     T[i].join();
   }
 
-  HIP_CHECK(hipStreamSynchronize(mystream));
-  HIP_CHECK(hipStreamDestroy(mystream));
+  HIP_CHECK(hipStreamSynchronize(mystream))
+  HIP_CHECK(hipStreamDestroy(mystream))
 
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(C_d));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(C_d))
 
   free(A1_h);
   free(C1_h);

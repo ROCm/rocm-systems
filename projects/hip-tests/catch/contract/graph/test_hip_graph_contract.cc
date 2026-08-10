@@ -29,7 +29,7 @@ HIP_TEST_CASE(Contract_Graph_HipGraphCreate_Destroy_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   REQUIRE(graph != nullptr);
@@ -41,9 +41,9 @@ HIP_TEST_CASE(Contract_Graph_HipGraphAddEmptyNode_Default_Succeeds) {
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
-  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0))
 
   REQUIRE(node != nullptr);
 }
@@ -60,20 +60,20 @@ HIP_TEST_CASE(Contract_Graph_HipGraphAddMemcpyNode1D_Default_RoundTripsBytes) {
   hipGraphNode_t h2d_node = nullptr;
   hipGraphNode_t d2h_node = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddMemcpyNode1D(&h2d_node, graph, nullptr, 0, device_ptr, src.data(), src.size(),
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&d2h_node, graph, &h2d_node, 1, dst.data(), device_ptr,
                                     dst.size(), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
   cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(dst == src);
 }
@@ -90,11 +90,11 @@ HIP_TEST_CASE(Contract_Graph_HipGraphAddMemsetNode_Default_FillsDeviceBuffer) {
   hipStream_t stream = nullptr;
   hipGraphNode_t memset_node = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, dst.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, dst.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   params.dst = device_ptr;
@@ -104,12 +104,12 @@ HIP_TEST_CASE(Contract_Graph_HipGraphAddMemsetNode_Default_FillsDeviceBuffer) {
   params.width = dst.size();
   params.height = 1;
 
-  HIP_CHECK(hipGraphAddMemsetNode(&memset_node, graph, nullptr, 0, &params));
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphAddMemsetNode(&memset_node, graph, nullptr, 0, &params))
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
   cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipMemcpy(dst.data(), device_ptr, dst.size(), hipMemcpyDeviceToHost))
 
   for (const auto value : dst) {
     REQUIRE(value == pattern);
@@ -124,13 +124,13 @@ HIP_TEST_CASE(Contract_Graph_HipGraphInstantiate_LaunchSynchronize_Succeeds) {
   hipStream_t stream = nullptr;
   hipGraphNode_t node = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
-  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0))
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
   cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 }

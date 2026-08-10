@@ -9,9 +9,9 @@
 
 static bool streamWaitValueSupported() {
   int device_num = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_num));
+  HIP_CHECK(hipGetDeviceCount(&device_num))
   for (int device_id = 0; device_id < device_num; ++device_id) {
-    HIP_CHECK(hipSetDevice(device_id));
+    HIP_CHECK(hipSetDevice(device_id))
     int waitValueSupport = 0;
     auto getAttributeError = hipDeviceGetAttribute(
         &waitValueSupport, hipDeviceAttributeCanUseStreamWaitValue, device_id);
@@ -42,12 +42,12 @@ static bool streamWaitValueSupported() {
  */
 HIP_TEST_CASE(Unit_hipStreamBatchMemOp_Negative_Tests) {
   hipStream_t stream{nullptr};
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   REQUIRE(stream != nullptr);
   int totalOps = 2;
   static hipStreamBatchMemOpParams paramArray[2], invalidParamArray[2];
   std::vector<hipDeviceptr_t> opsArray(1);
-  HIP_CHECK(hipMalloc((void**)&opsArray[0], sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc((void**)&opsArray[0], sizeof(uint32_t)))
 
   paramArray[0].operation = hipStreamMemOpWriteValue32;
   paramArray[0].writeValue.address = opsArray[0];
@@ -102,8 +102,8 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_Negative_Tests) {
                     hipErrorInvalidValue);
   }
 #endif
-  HIP_CHECK(hipFree((void*)opsArray[0]));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree((void*)opsArray[0]))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 /**
  * Test Description
@@ -127,14 +127,14 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_SequentialOrdering) {
 
   hipCtx_t ctx;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  HIP_CHECK(hipCtxCreate(&ctx, 0, device));
+  HIP_CHECK(hipDeviceGet(&device, 0))
+  HIP_CHECK(hipCtxCreate(&ctx, 0, device))
 
   hipDeviceptr_t devPtr = 0;
   HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtr), sizeof(uint64_t),
                                   hipMallocSignalMemory));
   *reinterpret_cast<uint64_t*>(devPtr) = 0;
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Batch: Write(1), Wait(==1), Write(0)
   // If ops run in parallel, Write(0) can race ahead of Wait(==1) causing a deadlock.
@@ -159,13 +159,13 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_SequentialOrdering) {
   params[2].writeValue.flags   = hipStreamWriteValueDefault;
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   constexpr int kIterations = 100;
   for (int i = 0; i < kIterations; i++) {
     *reinterpret_cast<uint32_t*>(devPtr) = 0;
-    HIP_CHECK(hipStreamBatchMemOp(stream, 3, params, 0));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamBatchMemOp(stream, 3, params, 0))
+    HIP_CHECK(hipStreamSynchronize(stream))
 
     uint32_t result = 0;
     HIP_CHECK(hipMemcpy(&result, reinterpret_cast<void*>(devPtr), sizeof(uint32_t),
@@ -173,10 +173,10 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_SequentialOrdering) {
     REQUIRE(result == 0);
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtr)));
-  HIP_CHECK(hipCtxPopCurrent(&ctx));
-  HIP_CHECK(hipCtxDestroy(ctx));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtr)))
+  HIP_CHECK(hipCtxPopCurrent(&ctx))
+  HIP_CHECK(hipCtxDestroy(ctx))
 }
 
 /**
@@ -199,7 +199,7 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_SequentialOrdering_MultiGPU) {
   }
 
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   if (deviceCount < 2) {
     HIP_SKIP_TEST("Test requires at least 2 GPUs");
   }
@@ -213,20 +213,20 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_SequentialOrdering_MultiGPU) {
   std::vector<hipCtx_t> ctxs(deviceCount, nullptr);
 
   for (int d = 0; d < deviceCount; d++) {
-    HIP_CHECK(hipSetDevice(d));
+    HIP_CHECK(hipSetDevice(d))
     hipDevice_t device;
-    HIP_CHECK(hipDeviceGet(&device, d));
-    HIP_CHECK(hipCtxCreate(&ctxs[d], 0, device));
+    HIP_CHECK(hipDeviceGet(&device, d))
+    HIP_CHECK(hipCtxCreate(&ctxs[d], 0, device))
     HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtrs[d]), sizeof(uint64_t),
                                     hipMallocSignalMemory));
     *reinterpret_cast<uint64_t*>(devPtrs[d]) = 0;
-    HIP_CHECK(hipStreamCreate(&streams[d]));
+    HIP_CHECK(hipStreamCreate(&streams[d]))
   }
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int i = 0; i < kIterations; i++) {
     for (int d = 0; d < deviceCount; d++) {
-      HIP_CHECK(hipSetDevice(d));
+      HIP_CHECK(hipSetDevice(d))
       *reinterpret_cast<uint32_t*>(devPtrs[d]) = 0;
 
       hipStreamBatchMemOpParams params[3] = {};
@@ -245,12 +245,12 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_SequentialOrdering_MultiGPU) {
       params[2].writeValue.value   = 0;
       params[2].writeValue.flags   = hipStreamWriteValueDefault;
 
-      HIP_CHECK(hipStreamBatchMemOp(streams[d], 3, params, 0));
+      HIP_CHECK(hipStreamBatchMemOp(streams[d], 3, params, 0))
     }
 
     for (int d = 0; d < deviceCount; d++) {
-      HIP_CHECK(hipSetDevice(d));
-      HIP_CHECK(hipStreamSynchronize(streams[d]));
+      HIP_CHECK(hipSetDevice(d))
+      HIP_CHECK(hipStreamSynchronize(streams[d]))
       uint32_t result = 0;
       HIP_CHECK(hipMemcpy(&result, reinterpret_cast<void*>(devPtrs[d]), sizeof(uint32_t),
                           hipMemcpyDeviceToHost));
@@ -259,12 +259,12 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_SequentialOrdering_MultiGPU) {
   }
 
 for (int d = deviceCount - 1; d >= 0; d--) {
-    HIP_CHECK(hipSetDevice(d));
-    HIP_CHECK(hipStreamDestroy(streams[d]));
-    HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtrs[d])));
+    HIP_CHECK(hipSetDevice(d))
+    HIP_CHECK(hipStreamDestroy(streams[d]))
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtrs[d])))
     hipCtx_t popped = nullptr;
-    HIP_CHECK(hipCtxPopCurrent(&popped));
-    HIP_CHECK(hipCtxDestroy(popped));
+    HIP_CHECK(hipCtxPopCurrent(&popped))
+    HIP_CHECK(hipCtxDestroy(popped))
   }
 }
 

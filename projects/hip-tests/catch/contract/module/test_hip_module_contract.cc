@@ -42,7 +42,7 @@ bool CompileModuleSource(std::vector<char>& code) {
   // any allocation would otherwise fail with "invalid device context". hipFree(0)
   // is the canonical no-op that forces primary-context initialization, and is a
   // harmless success on AMD where the runtime already auto-initializes.
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
 
   hiprtcProgram program{};
   HIPRTC_CHECK(hiprtcCreateProgram(&program, kModuleSource, "module_contract.cu", 0, nullptr,
@@ -50,7 +50,7 @@ bool CompileModuleSource(std::vector<char>& code) {
 
 #if HT_AMD
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, 0));
+  HIP_CHECK(hipGetDeviceProperties(&properties, 0))
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
   const char* options[] = {offload_arch.c_str()};
   const int num_options = 1;
@@ -92,7 +92,7 @@ void LoadContractModule(hipModule_t& module) {
   if (!CompileModuleSource(code)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
   }
-  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()))
   REQUIRE(module != nullptr);
 }
 }  // namespace
@@ -108,7 +108,7 @@ HIP_TEST_CASE(Contract_Module_HipModuleLoadData_FromRtc_Succeeds) {
   // A HIPRTC-produced code object must load into a non-null module handle and
   // unload again without error.
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()))
   cleanup.Add([module] { (void)hipModuleUnload(module); });
   REQUIRE(module != nullptr);
 }
@@ -133,7 +133,7 @@ HIP_TEST_CASE(Contract_Module_HipModuleGetFunction_Default_ResolvesKnownSymbol) 
   // A symbol that exists in the loaded module must resolve to a non-null
   // function handle.
   hipFunction_t function = nullptr;
-  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
+  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"))
   REQUIRE(function != nullptr);
 }
 
@@ -160,23 +160,23 @@ HIP_TEST_CASE(Contract_Module_HipModuleLaunchKernel_Default_WritesExpectedValue)
   cleanup.Add([module] { (void)hipModuleUnload(module); });
 
   hipFunction_t function = nullptr;
-  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
+  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"))
   REQUIRE(function != nullptr);
 
   int* device_value = nullptr;
-  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)))
   cleanup.Add([device_value] { (void)hipFree(device_value); });
-  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
+  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)))
 
   // Launch the resolved function through the driver-style module launch entry
   // point with a single-thread grid so the write is deterministic.
   int value = kExpectedValue;
   void* kernel_args[] = {&device_value, &value};
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args, nullptr));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args, nullptr))
+  HIP_CHECK(hipDeviceSynchronize())
 
   int result = 0;
-  HIP_CHECK(hipMemcpy(&result, device_value, sizeof(result), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&result, device_value, sizeof(result), hipMemcpyDeviceToHost))
   REQUIRE(result == kExpectedValue);
 }
 
@@ -192,7 +192,7 @@ HIP_TEST_CASE(Contract_Module_HipModuleGetGlobal_Default_ReturnsAddressAndSize) 
   // asserted; only its structural validity is part of the contract.
   hipDeviceptr_t device_address = 0;
   size_t byte_count = 0;
-  HIP_CHECK(hipModuleGetGlobal(&device_address, &byte_count, module, "g_value"));
+  HIP_CHECK(hipModuleGetGlobal(&device_address, &byte_count, module, "g_value"))
   REQUIRE(device_address != 0);
   REQUIRE(byte_count >= sizeof(int));
 }
@@ -205,7 +205,7 @@ HIP_TEST_CASE(Contract_Module_HipFuncGetAttribute_Default_ReturnsSaneValues) {
   cleanup.Add([module] { (void)hipModuleUnload(module); });
 
   hipFunction_t function = nullptr;
-  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
+  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"))
   REQUIRE(function != nullptr);
 
   // The maximum thread count for a launchable function must be positive.
@@ -216,6 +216,6 @@ HIP_TEST_CASE(Contract_Module_HipFuncGetAttribute_Default_ReturnsSaneValues) {
 
   // The register count is a non-negative resource usage figure.
   int num_registers = 0;
-  HIP_CHECK(hipFuncGetAttribute(&num_registers, HIP_FUNC_ATTRIBUTE_NUM_REGS, function));
+  HIP_CHECK(hipFuncGetAttribute(&num_registers, HIP_FUNC_ATTRIBUTE_NUM_REGS, function))
   REQUIRE(num_registers >= 0);
 }

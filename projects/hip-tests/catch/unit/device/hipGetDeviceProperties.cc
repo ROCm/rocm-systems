@@ -137,26 +137,26 @@ HIP_TEST_CASE(Unit_hipGetDeviceProperties_ArchPropertiesTst) {
   archProp_h = new int[NUM_OF_ARCHPROP];
   hipDeviceProp_t prop;
   int deviceCount = 0, device;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   REQUIRE(deviceCount != 0);
   for (device = 0; device < deviceCount; device++) {
     // Inititalize archProp_h to 0
     for (int i = 0; i < NUM_OF_ARCHPROP; i++) {
       archProp_h[i] = 0;
     }
-    HIP_CHECK(hipGetDeviceProperties(&prop, device));
-    HIP_CHECK(hipSetDevice(device));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&archProp_d), NUM_OF_ARCHPROP * sizeof(int)));
+    HIP_CHECK(hipGetDeviceProperties(&prop, device))
+    HIP_CHECK(hipSetDevice(device))
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&archProp_d), NUM_OF_ARCHPROP * sizeof(int)))
     HIP_CHECK(
         hipMemcpy(archProp_d, archProp_h, NUM_OF_ARCHPROP * sizeof(int), hipMemcpyHostToDevice));
     hipLaunchKernelGGL(mykernel, dim3(1), dim3(1), 0, 0, archProp_d);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
     HIP_CHECK(
         hipMemcpy(archProp_h, archProp_d, NUM_OF_ARCHPROP * sizeof(int), hipMemcpyDeviceToHost));
     // Validate the host architecture property with device
     // architecture property.
     validateDeviceMacro(archProp_h, &prop);
-    HIP_CHECK(hipFree(archProp_d));
+    HIP_CHECK(hipFree(archProp_d))
   }
   delete[] archProp_h;
 }
@@ -184,7 +184,7 @@ HIP_TEST_CASE(Unit_hipGetDeviceProperties_NegTst) {
 
   SECTION("props is nullptr") {
     int device;
-    HIP_CHECK(hipGetDevice(&device));
+    HIP_CHECK(hipGetDevice(&device))
     REQUIRE_FALSE(hipSuccess == hipGetDeviceProperties(nullptr, device));
   }
 
@@ -192,7 +192,7 @@ HIP_TEST_CASE(Unit_hipGetDeviceProperties_NegTst) {
 
   SECTION("device is -1") {
     int deviceCount = 0;
-    HIP_CHECK(hipGetDeviceCount(&deviceCount));
+    HIP_CHECK(hipGetDeviceCount(&deviceCount))
     REQUIRE(deviceCount != 0);
     REQUIRE_FALSE(hipSuccess == hipGetDeviceProperties(&prop, deviceCount));
   }

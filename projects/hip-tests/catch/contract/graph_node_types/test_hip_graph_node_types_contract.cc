@@ -23,11 +23,11 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_HipGraphNodeGetType_Default_EmptyNodeRepor
   hipGraphNode_t node = nullptr;
   hipGraphNodeType node_type{};
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
-  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0))
 
-  HIP_CHECK(hipGraphNodeGetType(node, &node_type));
+  HIP_CHECK(hipGraphNodeGetType(node, &node_type))
   REQUIRE(node_type == hipGraphNodeTypeEmpty);
 }
 
@@ -40,14 +40,14 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_HipGraphNodeGetType_Default_MemcpyNodeRepo
   hipGraphNode_t node = nullptr;
   hipGraphNodeType node_type{};
 
-  HIP_CHECK(hipMalloc(&device_ptr, host.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, host.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddMemcpyNode1D(&node, graph, nullptr, 0, device_ptr, host.data(), host.size(),
                                     hipMemcpyHostToDevice));
 
-  HIP_CHECK(hipGraphNodeGetType(node, &node_type));
+  HIP_CHECK(hipGraphNodeGetType(node, &node_type))
   REQUIRE(node_type == hipGraphNodeTypeMemcpy);
 }
 
@@ -60,9 +60,9 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_HipGraphNodeGetType_Default_MemsetNodeRepo
   hipGraphNode_t node = nullptr;
   hipGraphNodeType node_type{};
 
-  HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
+  HIP_CHECK(hipMalloc(&device_ptr, kByteCount))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   params.dst = device_ptr;
@@ -72,9 +72,9 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_HipGraphNodeGetType_Default_MemsetNodeRepo
   params.width = kByteCount;
   params.height = 1;
 
-  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &params));
+  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &params))
 
-  HIP_CHECK(hipGraphNodeGetType(node, &node_type));
+  HIP_CHECK(hipGraphNodeGetType(node, &node_type))
   REQUIRE(node_type == hipGraphNodeTypeMemset);
 }
 
@@ -87,20 +87,20 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_HipGraphAddDependencies_Default_CreatesEdg
   size_t edge_count = 0;
   size_t dependency_count = 0;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
-  HIP_CHECK(hipGraphAddEmptyNode(&from, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&to, graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&from, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&to, graph, nullptr, 0))
 
-  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &edge_count));
+  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &edge_count))
   REQUIRE(edge_count == 0);
 
-  HIP_CHECK(hipGraphAddDependencies(graph, &from, &to, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &from, &to, 1))
 
-  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &edge_count));
+  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &edge_count))
   REQUIRE(edge_count == 1);
 
-  HIP_CHECK(hipGraphNodeGetDependencies(to, nullptr, &dependency_count));
+  HIP_CHECK(hipGraphNodeGetDependencies(to, nullptr, &dependency_count))
   REQUIRE(dependency_count == 1);
 }
 
@@ -112,17 +112,17 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_HipGraphRemoveDependencies_Default_ClearsE
   hipGraphNode_t to = nullptr;
   size_t edge_count = 0;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
-  HIP_CHECK(hipGraphAddEmptyNode(&from, graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&to, graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&from, graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&to, graph, nullptr, 0))
 
-  HIP_CHECK(hipGraphAddDependencies(graph, &from, &to, 1));
-  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &edge_count));
+  HIP_CHECK(hipGraphAddDependencies(graph, &from, &to, 1))
+  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &edge_count))
   REQUIRE(edge_count == 1);
 
-  HIP_CHECK(hipGraphRemoveDependencies(graph, &from, &to, 1));
+  HIP_CHECK(hipGraphRemoveDependencies(graph, &from, &to, 1))
 
-  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &edge_count));
+  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &edge_count))
   REQUIRE(edge_count == 0);
 }

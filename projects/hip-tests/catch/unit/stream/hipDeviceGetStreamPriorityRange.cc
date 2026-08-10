@@ -15,8 +15,8 @@ HIP_TEST_CASE(Unit_hipDeviceGetStreamPriorityRange_Default) {
   int priority_low = 0;
   int priority_high = 0;
   int devID = GENERATE(range(0, HipTest::getDeviceCount()));
-  HIP_CHECK(hipSetDevice(devID));
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high));
+  HIP_CHECK(hipSetDevice(devID))
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high))
 
   REQUIRE(priority_low >= priority_high);
 }

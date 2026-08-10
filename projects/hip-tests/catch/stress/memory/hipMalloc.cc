@@ -18,7 +18,7 @@
 // Level 0 (quick level): cap allocation and host staging; level 2 uses ~95% free VRAM.
 HIP_TEST_CASE(Stress_hipMalloc_HighSizeAlloc) {
   size_t devMemTotal{0}, devMemFree{0};
-  HIP_CHECK(hipMemGetInfo(&devMemFree, &devMemTotal));
+  HIP_CHECK(hipMemGetInfo(&devMemFree, &devMemTotal))
   REQUIRE(devMemFree > 0);
   REQUIRE(devMemTotal > 0);
 
@@ -53,10 +53,10 @@ HIP_TEST_CASE(Stress_hipMalloc_HighSizeAlloc) {
   std::cout << "[Stress_hipMalloc_HighSizeAlloc] Fill value for this run: " << static_cast<int>(fill_val)
             << std::endl;
 
-  HIP_CHECK(hipMemset(d_ptr, fill_val, alloc_size));
+  HIP_CHECK(hipMemset(d_ptr, fill_val, alloc_size))
   auto ptr = std::unique_ptr<unsigned char[]>{new unsigned char[alloc_size]};
-  HIP_CHECK(hipMemcpy(ptr.get(), d_ptr, alloc_size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipFree(d_ptr));
+  HIP_CHECK(hipMemcpy(ptr.get(), d_ptr, alloc_size, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipFree(d_ptr))
   REQUIRE(std::all_of(std::execution::par_unseq, ptr.get(), ptr.get() + alloc_size,
                        [fill_val](unsigned char n) { return n == fill_val; }));
 }

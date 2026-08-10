@@ -85,7 +85,7 @@ TEST_CASE("Unit_device_memcpy_async") {
   std::vector<std::string> supported_arch{"gfx1250"};
   hipDeviceProp_t prop;
 
-  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0))
   const std::string arch_name{prop.gcnArchName};
   std::cout << "cluster lauch: " << prop.clusterLaunch << std::endl;
 
@@ -100,9 +100,9 @@ TEST_CASE("Unit_device_memcpy_async") {
         const float x = 2.0f;
         float *d_out, *d_a, *d_b;
 
-        HIP_CHECK(hipMalloc(&d_out, alloc_size));
-        HIP_CHECK(hipMalloc(&d_a, alloc_size));
-        HIP_CHECK(hipMalloc(&d_b, alloc_size));
+        HIP_CHECK(hipMalloc(&d_out, alloc_size))
+        HIP_CHECK(hipMalloc(&d_a, alloc_size))
+        HIP_CHECK(hipMalloc(&d_b, alloc_size))
 
         std::vector<float> a(size, 0.0f), b(size, 0.0f), cpu_out(size, 0.0f), gpu_out(size, 0.0f);
         for (size_t i = 0; i < size; i++) {
@@ -111,17 +111,17 @@ TEST_CASE("Unit_device_memcpy_async") {
           cpu_out[i] = (a[i] * x) + b[i];
         }
 
-        HIP_CHECK(hipMemcpy(d_a, a.data(), alloc_size, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_b, b.data(), alloc_size, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemset(d_out, 0, alloc_size));
+        HIP_CHECK(hipMemcpy(d_a, a.data(), alloc_size, hipMemcpyHostToDevice))
+        HIP_CHECK(hipMemcpy(d_b, b.data(), alloc_size, hipMemcpyHostToDevice))
+        HIP_CHECK(hipMemset(d_out, 0, alloc_size))
 
         vector_add_mem<<<1, size, alloc_size, nullptr>>>(d_out, d_a, d_b, x, size);
 
-        HIP_CHECK(hipMemcpy(gpu_out.data(), d_out, alloc_size, hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(gpu_out.data(), d_out, alloc_size, hipMemcpyDeviceToHost))
 
-        HIP_CHECK(hipFree(d_out));
-        HIP_CHECK(hipFree(d_a));
-        HIP_CHECK(hipFree(d_b));
+        HIP_CHECK(hipFree(d_out))
+        HIP_CHECK(hipFree(d_a))
+        HIP_CHECK(hipFree(d_b))
 
         for (size_t i = 0; i < size; i++) {
           INFO("size: " << size << " index: " << i << " calc: " << a[i] << " * " << x << " + "
@@ -137,9 +137,9 @@ TEST_CASE("Unit_device_memcpy_async") {
         const float x = 2.0f;
         float *d_out, *d_a, *d_b;
 
-        HIP_CHECK(hipMalloc(&d_out, alloc_size));
-        HIP_CHECK(hipMalloc(&d_a, alloc_size));
-        HIP_CHECK(hipMalloc(&d_b, alloc_size));
+        HIP_CHECK(hipMalloc(&d_out, alloc_size))
+        HIP_CHECK(hipMalloc(&d_a, alloc_size))
+        HIP_CHECK(hipMalloc(&d_b, alloc_size))
 
         std::vector<float> a(size, 0.0f), b(size, 0.0f), cpu_out(size, 0.0f), gpu_out(size, 0.0f);
         for (size_t i = 0; i < size; i++) {
@@ -148,17 +148,17 @@ TEST_CASE("Unit_device_memcpy_async") {
           cpu_out[i] = (a[i] * x) + b[i];
         }
 
-        HIP_CHECK(hipMemcpy(d_a, a.data(), alloc_size, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_b, b.data(), alloc_size, hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemset(d_out, 0, alloc_size));
+        HIP_CHECK(hipMemcpy(d_a, a.data(), alloc_size, hipMemcpyHostToDevice))
+        HIP_CHECK(hipMemcpy(d_b, b.data(), alloc_size, hipMemcpyHostToDevice))
+        HIP_CHECK(hipMemset(d_out, 0, alloc_size))
 
         vector_add_mem_layout<<<1, size, alloc_size, nullptr>>>(d_out, d_a, d_b, x, size);
 
-        HIP_CHECK(hipMemcpy(gpu_out.data(), d_out, alloc_size, hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(gpu_out.data(), d_out, alloc_size, hipMemcpyDeviceToHost))
 
-        HIP_CHECK(hipFree(d_out));
-        HIP_CHECK(hipFree(d_a));
-        HIP_CHECK(hipFree(d_b));
+        HIP_CHECK(hipFree(d_out))
+        HIP_CHECK(hipFree(d_a))
+        HIP_CHECK(hipFree(d_b))
 
         for (size_t i = 0; i < size; i++) {
           INFO("size: " << size << " index: " << i << " calc: " << a[i] << " * " << x << " + "

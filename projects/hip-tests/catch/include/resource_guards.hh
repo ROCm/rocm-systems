@@ -50,18 +50,18 @@ template <typename T> class LinearAllocGuard {
         break;
       case LinearAllocs::mallocAndRegister:
         host_ptr_ = reinterpret_cast<T*>(malloc(size));
-        HIP_CHECK(hipHostRegister(host_ptr_, size, flags));
-        HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&ptr_), host_ptr_, 0u));
+        HIP_CHECK(hipHostRegister(host_ptr_, size, flags))
+        HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&ptr_), host_ptr_, 0u))
         break;
       case LinearAllocs::hipHostMalloc:
-        HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&ptr_), size, flags));
+        HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&ptr_), size, flags))
         host_ptr_ = ptr_;
         break;
       case LinearAllocs::hipMalloc:
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptr_), size));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptr_), size))
         break;
       case LinearAllocs::hipMallocManaged:
-        HIP_CHECK(hipMallocManaged(reinterpret_cast<void**>(&ptr_), size, flags ? flags : 1u));
+        HIP_CHECK(hipMallocManaged(reinterpret_cast<void**>(&ptr_), size, flags ? flags : 1u))
         host_ptr_ = ptr_;
         break;
       case LinearAllocs::noAlloc:
@@ -164,7 +164,7 @@ class LinearAllocGuard2D : public LinearAllocGuardMultiDim<T> {
       : LinearAllocGuardMultiDim<T>{make_hipExtent(width_logical * sizeof(T), height, 1)} {
     if (unaligned) {
       this->pitched_ptr_.pitch = width_logical * sizeof(T);
-      HIP_CHECK(hipMalloc(&this->pitched_ptr_.ptr, this->pitched_ptr_.pitch * height));
+      HIP_CHECK(hipMalloc(&this->pitched_ptr_.ptr, this->pitched_ptr_.pitch * height))
     } else {
       HIP_CHECK(hipMallocPitch(&this->pitched_ptr_.ptr, &this->pitched_ptr_.pitch,
                                this->extent_.width, this->extent_.height));
@@ -179,11 +179,11 @@ template <typename T> class LinearAllocGuard3D : public LinearAllocGuardMultiDim
  public:
   LinearAllocGuard3D(const size_t width_logical, const size_t height, const size_t depth)
       : LinearAllocGuardMultiDim<T>{make_hipExtent(width_logical * sizeof(T), height, depth)} {
-    HIP_CHECK(hipMalloc3D(&this->pitched_ptr_, this->extent_));
+    HIP_CHECK(hipMalloc3D(&this->pitched_ptr_, this->extent_))
   }
 
   LinearAllocGuard3D(const hipExtent extent) : LinearAllocGuardMultiDim<T>(extent) {
-    HIP_CHECK(hipMalloc3D(&this->pitched_ptr_, this->extent_));
+    HIP_CHECK(hipMalloc3D(&this->pitched_ptr_, this->extent_))
   }
 
   LinearAllocGuard3D(const LinearAllocGuard3D&) = delete;
@@ -197,7 +197,7 @@ template <typename T> class ArrayAllocGuard {
   // extent should contain logical width
   ArrayAllocGuard(const hipExtent extent, const unsigned int flags = 0u) : extent_{extent} {
     hipChannelFormatDesc desc = hipCreateChannelDesc<T>();
-    HIP_CHECK(hipMalloc3DArray(&ptr_, &desc, extent_, flags));
+    HIP_CHECK(hipMalloc3DArray(&ptr_, &desc, extent_, flags))
   }
 
   ~ArrayAllocGuard() { static_cast<void>(hipFreeArray(ptr_)); }
@@ -221,7 +221,7 @@ template <typename T> class MipmappedArrayAllocGuard {
                            const unsigned int flags)
       : extent_{extent}, levels_{levels} {
     hipChannelFormatDesc desc = hipCreateChannelDesc<T>();
-    HIP_CHECK(hipMallocMipmappedArray(&ptr_, &desc, extent_, levels_, flags));
+    HIP_CHECK(hipMallocMipmappedArray(&ptr_, &desc, extent_, levels_, flags))
   }
 
   MipmappedArrayAllocGuard(const hipExtent extent, const unsigned int flags = 0u)
@@ -236,7 +236,7 @@ template <typename T> class MipmappedArrayAllocGuard {
 
   hipArray_t GetLevel(unsigned int level) {
     hipArray_t ret;
-    HIP_CHECK(hipGetMipmappedArrayLevel(&ret, ptr_, level));
+    HIP_CHECK(hipGetMipmappedArrayLevel(&ret, ptr_, level))
     return ret;
   }
 
@@ -262,7 +262,7 @@ template <typename T> class DrvArrayAllocGuard {
     desc.Height = extent_.height;
     desc.Depth = extent_.depth;
     desc.Flags = flags;
-    HIP_CHECK(hipArray3DCreate(&ptr_, &desc));
+    HIP_CHECK(hipArray3DCreate(&ptr_, &desc))
   }
 
   ~DrvArrayAllocGuard() { static_cast<void>(hipArrayDestroy(ptr_)); }
@@ -295,13 +295,13 @@ class StreamGuard {
         stream_ = hipStreamPerThread;
         break;
       case Streams::created:
-        HIP_CHECK(hipStreamCreate(&stream_));
+        HIP_CHECK(hipStreamCreate(&stream_))
         break;
       case Streams::withFlags:
-        HIP_CHECK(hipStreamCreateWithFlags(&stream_, flags_));
+        HIP_CHECK(hipStreamCreateWithFlags(&stream_, flags_))
         break;
       case Streams::withPriority:
-        HIP_CHECK(hipStreamCreateWithPriority(&stream_, flags_, priority_));
+        HIP_CHECK(hipStreamCreateWithPriority(&stream_, flags_, priority_))
         break;
     }
   }
@@ -402,7 +402,7 @@ class MemPoolGuard {
       : mempool_type_{mempool_type}, device_{device}, handle_type_{handle_type} {
     switch (mempool_type_) {
       case MemPools::dev_default:
-        HIP_CHECK(hipDeviceGetDefaultMemPool(&mempool_, device_));
+        HIP_CHECK(hipDeviceGetDefaultMemPool(&mempool_, device_))
         break;
       case MemPools::created:
         hipMemPoolProps pool_props;
@@ -413,7 +413,7 @@ class MemPoolGuard {
         pool_props.location.id = device_;
         pool_props.win32SecurityAttributes = nullptr;
 
-        HIP_CHECK(hipMemPoolCreate(&mempool_, &pool_props));
+        HIP_CHECK(hipMemPoolCreate(&mempool_, &pool_props))
     }
   }
 
@@ -426,8 +426,8 @@ class MemPoolGuard {
     } else {
       // Reset max states for default mem pool, so subtests won't fail
       uint64_t value = 0;
-      HIP_CHECK(hipMemPoolSetAttribute(mempool_, hipMemPoolAttrUsedMemHigh, &value));
-      HIP_CHECK(hipMemPoolSetAttribute(mempool_, hipMemPoolAttrReservedMemHigh, &value));
+      HIP_CHECK(hipMemPoolSetAttribute(mempool_, hipMemPoolAttrUsedMemHigh, &value))
+      HIP_CHECK(hipMemPoolSetAttribute(mempool_, hipMemPoolAttrReservedMemHigh, &value))
     }
   }
 

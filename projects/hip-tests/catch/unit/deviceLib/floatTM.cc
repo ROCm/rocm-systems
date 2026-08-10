@@ -105,17 +105,17 @@ template <typename T, typename D> void testType(int msize) {
   dcopy(h_fb, fa, msize);
   for (int i = 0; i < msize; i++) testOperations<T, D>(h_fa[i], h_fb[i]);
 
-  HIP_CHECK(hipMalloc(&d_fa, sizeof(T) * msize));
-  HIP_CHECK(hipMalloc(&d_fb, sizeof(T) * msize));
+  HIP_CHECK(hipMalloc(&d_fa, sizeof(T) * msize))
+  HIP_CHECK(hipMalloc(&d_fb, sizeof(T) * msize))
 
-  HIP_CHECK(hipMemcpy(d_fa, fa, sizeof(T) * msize, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_fb, fb, sizeof(T) * msize, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_fa, fa, sizeof(T) * msize, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(d_fb, fb, sizeof(T) * msize, hipMemcpyHostToDevice))
 
   auto kernel = testOperationsGPU<T, D>;
   hipLaunchKernelGGL(kernel, 1, msize, 0, 0, d_fa, d_fb, msize);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
-  HIP_CHECK(hipMemcpy(fc, d_fa, sizeof(T) * msize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(fc, d_fa, sizeof(T) * msize, hipMemcpyDeviceToHost))
 
   bool pass = true;
   if (!isEqual<T>(h_fa, fc, msize)) {
@@ -127,8 +127,8 @@ template <typename T, typename D> void testType(int msize) {
   delete[] fc;
   delete[] h_fa;
   delete[] h_fb;
-  HIP_CHECK(hipFree(d_fa));
-  HIP_CHECK(hipFree(d_fb));
+  HIP_CHECK(hipFree(d_fa))
+  HIP_CHECK(hipFree(d_fb))
 
   REQUIRE(pass);
 }

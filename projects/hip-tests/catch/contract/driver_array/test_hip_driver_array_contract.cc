@@ -51,7 +51,7 @@ HIP_TEST_CASE(Contract_DriverArray_HipArrayCreate_2D_ReturnsUsableArray) {
   hipArray_t array = nullptr;
   auto desc = Array2DDesc();
 
-  HIP_CHECK(hipArrayCreate(&array, &desc));
+  HIP_CHECK(hipArrayCreate(&array, &desc))
   cleanup.Add([array] { (void)hipArrayDestroy(array); });
 
   REQUIRE(array != nullptr);
@@ -67,9 +67,9 @@ HIP_TEST_CASE(Contract_DriverArray_HipArrayGetDescriptor_Default_RoundTripsDimsA
   auto desc = Array2DDesc();
   HIP_ARRAY_DESCRIPTOR returned_desc{};
 
-  HIP_CHECK(hipArrayCreate(&array, &desc));
+  HIP_CHECK(hipArrayCreate(&array, &desc))
   cleanup.Add([array] { (void)hipArrayDestroy(array); });
-  HIP_CHECK(hipArrayGetDescriptor(&returned_desc, array));
+  HIP_CHECK(hipArrayGetDescriptor(&returned_desc, array))
 
   REQUIRE(returned_desc.Width == desc.Width);
   REQUIRE(returned_desc.Height == desc.Height);
@@ -99,7 +99,7 @@ HIP_TEST_CASE(Contract_DriverArray_HipArrayGetDescriptor_InvalidArgs_AreRejected
   auto desc = Array2DDesc();
   HIP_ARRAY_DESCRIPTOR returned_desc{};
 
-  HIP_CHECK(hipArrayCreate(&array, &desc));
+  HIP_CHECK(hipArrayCreate(&array, &desc))
   cleanup.Add([array] { (void)hipArrayDestroy(array); });
 
   REQUIRE(hipArrayGetDescriptor(nullptr, array) != hipSuccess);
@@ -115,7 +115,7 @@ HIP_TEST_CASE(Contract_DriverArray_HipArray3DCreate_Default_ReturnsUsableArray) 
   hipArray_t array = nullptr;
   auto desc = Array3DDesc();
 
-  HIP_CHECK(hipArray3DCreate(&array, &desc));
+  HIP_CHECK(hipArray3DCreate(&array, &desc))
   cleanup.Add([array] { (void)hipArrayDestroy(array); });
 
   REQUIRE(array != nullptr);
@@ -131,9 +131,9 @@ HIP_TEST_CASE(Contract_DriverArray_HipArray3DGetDescriptor_Default_RoundTripsDep
   auto desc = Array3DDesc();
   HIP_ARRAY3D_DESCRIPTOR returned_desc{};
 
-  HIP_CHECK(hipArray3DCreate(&array, &desc));
+  HIP_CHECK(hipArray3DCreate(&array, &desc))
   cleanup.Add([array] { (void)hipArrayDestroy(array); });
-  HIP_CHECK(hipArray3DGetDescriptor(&returned_desc, array));
+  HIP_CHECK(hipArray3DGetDescriptor(&returned_desc, array))
 
   REQUIRE(returned_desc.Width == desc.Width);
   REQUIRE(returned_desc.Height == desc.Height);

@@ -79,29 +79,29 @@ void TestwithTwoStream(void) {
 
   hipStream_t stream[NUM_STREAMS];
   for (int i = 0; i < NUM_STREAMS; ++i) {
-    HIP_CHECK(hipStreamCreate(&stream[i]));
+    HIP_CHECK(hipStreamCreate(&stream[i]))
   }
 
   for (int i = 0; i < NUM_STREAMS; ++i) {
-    HIP_CHECK(hipMemcpyWithStream(A_d[i], A_h[i], Nbytes, hipMemcpyHostToDevice, stream[i]));
-    HIP_CHECK(hipMemcpyWithStream(B_d[i], B_h[i], Nbytes, hipMemcpyHostToDevice, stream[i]));
+    HIP_CHECK(hipMemcpyWithStream(A_d[i], A_h[i], Nbytes, hipMemcpyHostToDevice, stream[i]))
+    HIP_CHECK(hipMemcpyWithStream(B_d[i], B_h[i], Nbytes, hipMemcpyHostToDevice, stream[i]))
   }
 
   for (int i = 0; i < NUM_STREAMS; ++i) {
     hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream[i],
                        static_cast<const int*>(A_d[i]), static_cast<const int*>(B_d[i]), C_d[i], N);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
   }
 
   for (int i = 0; i < NUM_STREAMS; ++i) {
-    HIP_CHECK(hipStreamSynchronize(stream[i]));
-    HIP_CHECK(hipMemcpy(C_h[i], C_d[i], Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipStreamSynchronize(stream[i]))
+    HIP_CHECK(hipMemcpy(C_h[i], C_d[i], Nbytes, hipMemcpyDeviceToHost))
     HipTest::checkVectorADD(A_h[i], B_h[i], C_h[i], N);
   }
 
   for (int i = 0; i < NUM_STREAMS; ++i) {
     HipTest::freeArrays(A_d[i], B_d[i], C_d[i], A_h[i], B_h[i], C_h[i], false);
-    HIP_CHECK(hipStreamDestroy(stream[i]));
+    HIP_CHECK(hipStreamDestroy(stream[i]))
   }
 }
 
@@ -118,35 +118,35 @@ void TestDtoDonSameDevice(void) {
 
   hipStream_t stream[NUM_STREAMS];
   for (int i = 0; i < NUM_STREAMS; ++i) {
-    HIP_CHECK(hipSetDevice(0));
-    HIP_CHECK(hipStreamCreate(&stream[i]));
+    HIP_CHECK(hipSetDevice(0))
+    HIP_CHECK(hipStreamCreate(&stream[i]))
   }
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipMalloc(&A_d[1], Nbytes));
-  HIP_CHECK(hipMalloc(&B_d[1], Nbytes));
-  HIP_CHECK(hipMalloc(&C_d[1], Nbytes));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipMalloc(&A_d[1], Nbytes))
+  HIP_CHECK(hipMalloc(&B_d[1], Nbytes))
+  HIP_CHECK(hipMalloc(&C_d[1], Nbytes))
   C_h[1] = reinterpret_cast<int*>(malloc(Nbytes));
   HIP_ASSERT(C_h[1] != NULL);
 
-  HIP_CHECK(hipMemcpyWithStream(A_d[0], A_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]));
-  HIP_CHECK(hipMemcpyWithStream(B_d[0], B_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]));
+  HIP_CHECK(hipMemcpyWithStream(A_d[0], A_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]))
+  HIP_CHECK(hipMemcpyWithStream(B_d[0], B_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]))
 
-  HIP_CHECK(hipMemcpyWithStream(A_d[1], A_d[0], Nbytes, hipMemcpyDeviceToDevice, stream[1]));
-  HIP_CHECK(hipMemcpyWithStream(B_d[1], B_d[0], Nbytes, hipMemcpyDeviceToDevice, stream[1]));
+  HIP_CHECK(hipMemcpyWithStream(A_d[1], A_d[0], Nbytes, hipMemcpyDeviceToDevice, stream[1]))
+  HIP_CHECK(hipMemcpyWithStream(B_d[1], B_d[0], Nbytes, hipMemcpyDeviceToDevice, stream[1]))
 
 
   for (int i = 0; i < NUM_STREAMS; ++i) {
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
     hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream[i],
                        static_cast<const int*>(A_d[i]), static_cast<const int*>(B_d[i]), C_d[i], N);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
   }
 
   for (int i = 0; i < NUM_STREAMS; ++i) {
-    HIP_CHECK(hipSetDevice(0));
-    HIP_CHECK(hipStreamSynchronize(stream[i]));
-    HIP_CHECK(hipMemcpy(C_h[i], C_d[i], Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipSetDevice(0))
+    HIP_CHECK(hipStreamSynchronize(stream[i]))
+    HIP_CHECK(hipMemcpy(C_h[i], C_d[i], Nbytes, hipMemcpyDeviceToHost))
     HipTest::checkVectorADD(A_h[0], B_h[0], C_h[i], N);
   }
 
@@ -154,13 +154,13 @@ void TestDtoDonSameDevice(void) {
   HipTest::freeArrays(A_d[0], B_d[0], C_d[0], A_h[0], B_h[0], C_h[0], false);
 
   if (A_d[1]) {
-    HIP_CHECK(hipFree(A_d[1]));
+    HIP_CHECK(hipFree(A_d[1]))
   }
   if (B_d[1]) {
-    HIP_CHECK(hipFree(B_d[1]));
+    HIP_CHECK(hipFree(B_d[1]))
   }
   if (C_d[1]) {
-    HIP_CHECK(hipFree(C_d[1]));
+    HIP_CHECK(hipFree(C_d[1]))
   }
   if (C_h[1]) {
     free(C_h[1]);
@@ -168,7 +168,7 @@ void TestDtoDonSameDevice(void) {
 
 
   for (int i = 0; i < NUM_STREAMS; ++i) {
-    HIP_CHECK(hipStreamDestroy(stream[i]));
+    HIP_CHECK(hipStreamDestroy(stream[i]))
   }
 }
 
@@ -176,7 +176,7 @@ void TestOnMultiGPUwithOneStream(void) {
   size_t Nbytes = N * sizeof(int);
   int NumDevices = 0;
 
-  HIP_CHECK(hipGetDeviceCount(&NumDevices));
+  HIP_CHECK(hipGetDeviceCount(&NumDevices))
   // If you have single GPU machine the return
   if (NumDevices <= 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
@@ -187,41 +187,41 @@ void TestOnMultiGPUwithOneStream(void) {
 
   hipStream_t stream[MaxGPUDevices];
   for (int i = 0; i < NumDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipStreamCreate(&stream[i]));
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipStreamCreate(&stream[i]))
   }
 
   for (int i = 0; i < NumDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     HipTest::initArrays(&A_d[i], &B_d[i], &C_d[i], &A_h[i], &B_h[i], &C_h[i], N, false);
   }
 
 
   for (int i = 0; i < NumDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipMemcpyWithStream(A_d[i], A_h[i], Nbytes, hipMemcpyHostToDevice, stream[i]));
-    HIP_CHECK(hipMemcpyWithStream(B_d[i], B_h[i], Nbytes, hipMemcpyHostToDevice, stream[i]));
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipMemcpyWithStream(A_d[i], A_h[i], Nbytes, hipMemcpyHostToDevice, stream[i]))
+    HIP_CHECK(hipMemcpyWithStream(B_d[i], B_h[i], Nbytes, hipMemcpyHostToDevice, stream[i]))
   }
 
   for (int i = 0; i < NumDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream[i],
                        static_cast<const int*>(A_d[i]), static_cast<const int*>(B_d[i]), C_d[i],
                        N);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
   }
 
   for (int i = 0; i < NumDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipStreamSynchronize(stream[i]));
-    HIP_CHECK(hipMemcpy(C_h[i], C_d[i], Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipStreamSynchronize(stream[i]))
+    HIP_CHECK(hipMemcpy(C_h[i], C_d[i], Nbytes, hipMemcpyDeviceToHost))
     HipTest::checkVectorADD(A_h[i], B_h[i], C_h[i], N);
   }
 
   for (int i = 0; i < NumDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     HipTest::freeArrays(A_d[i], B_d[i], C_d[i], A_h[i], B_h[i], C_h[i], false);
-    HIP_CHECK(hipStreamDestroy(stream[i]));
+    HIP_CHECK(hipStreamDestroy(stream[i]))
   }
 }
 
@@ -234,19 +234,19 @@ void TestkindDtoH(void) {
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
-  HIP_CHECK(hipMemcpyWithStream(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
-  HIP_CHECK(hipMemcpyWithStream(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
+  HIP_CHECK(hipMemcpyWithStream(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream))
+  HIP_CHECK(hipMemcpyWithStream(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream))
   hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream,
                      static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d, N);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipMemcpyWithStream(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipMemcpyWithStream(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream))
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 void TestkindDtoD(void) {
@@ -254,7 +254,7 @@ void TestkindDtoD(void) {
   int NumDevices = 0;
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
-  HIP_CHECK(hipGetDeviceCount(&NumDevices));
+  HIP_CHECK(hipGetDeviceCount(&NumDevices))
   // If you have single GPU machine the return
   if (NumDevices <= 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
@@ -264,70 +264,70 @@ void TestkindDtoD(void) {
 
   hipStream_t stream[MaxGPUDevices];
   for (int i = 0; i < NumDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipStreamCreate(&stream[i]));
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipStreamCreate(&stream[i]))
   }
 
   // Initialize and create the host and device elements for first device
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   HipTest::initArrays(&A_d[0], &B_d[0], &C_d[0], &A_h[0], &B_h[0], &C_h[0], N, false);
 
   for (int i = 1; i < NumDevices; ++i) {
     HIP_CHECK(hipSetDevice(i))
-    HIP_CHECK(hipMalloc(&A_d[i], Nbytes));
-    HIP_CHECK(hipMalloc(&B_d[i], Nbytes));
-    HIP_CHECK(hipMalloc(&C_d[i], Nbytes));
+    HIP_CHECK(hipMalloc(&A_d[i], Nbytes))
+    HIP_CHECK(hipMalloc(&B_d[i], Nbytes))
+    HIP_CHECK(hipMalloc(&C_d[i], Nbytes))
     C_h[i] = reinterpret_cast<int*>(malloc(Nbytes));
     HIP_ASSERT(C_h[i] != NULL);
   }
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipMemcpyWithStream(A_d[0], A_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]));
-  HIP_CHECK(hipMemcpyWithStream(B_d[0], B_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipMemcpyWithStream(A_d[0], A_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]))
+  HIP_CHECK(hipMemcpyWithStream(B_d[0], B_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]))
 
   // Copying device data from 1st GPU to the rest of the the GPUs that is
   // NumDevices in the setup. 1st GPU start numbering from 0,1,2..n etc.
   for (int i = 1; i < NumDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipMemcpyWithStream(A_d[i], A_d[0], Nbytes, hipMemcpyDeviceToDevice, stream[i]));
-    HIP_CHECK(hipMemcpyWithStream(B_d[i], B_d[0], Nbytes, hipMemcpyDeviceToDevice, stream[i]));
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipMemcpyWithStream(A_d[i], A_d[0], Nbytes, hipMemcpyDeviceToDevice, stream[i]))
+    HIP_CHECK(hipMemcpyWithStream(B_d[i], B_d[0], Nbytes, hipMemcpyDeviceToDevice, stream[i]))
   }
 
 
   // Launching the kernel including the 1st GPU to the no of GPUs present
   // in the setup. 1st GPU start numbering from 0,1,2..n etc.
   for (int i = 0; i < NumDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream[i],
                        static_cast<const int*>(A_d[i]), static_cast<const int*>(B_d[i]), C_d[i],
                        N);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
   }
 
   for (int i = 0; i < NumDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipStreamSynchronize(stream[i]));
-    HIP_CHECK(hipMemcpy(C_h[i], C_d[i], Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipStreamSynchronize(stream[i]))
+    HIP_CHECK(hipMemcpy(C_h[i], C_d[i], Nbytes, hipMemcpyDeviceToHost))
     HipTest::checkVectorADD(A_h[0], B_h[0], C_h[i], N);
   }
 
   HipTest::freeArrays(A_d[0], B_d[0], C_d[0], A_h[0], B_h[0], C_h[0], false);
-  HIP_CHECK(hipStreamDestroy(stream[0]));
+  HIP_CHECK(hipStreamDestroy(stream[0]))
 
   for (int i = 1; i < NumDevices; ++i) {
     if (A_d[i]) {
-      HIP_CHECK(hipFree(A_d[i]));
+      HIP_CHECK(hipFree(A_d[i]))
     }
     if (B_d[i]) {
-      HIP_CHECK(hipFree(B_d[i]));
+      HIP_CHECK(hipFree(B_d[i]))
     }
     if (C_d[i]) {
-      HIP_CHECK(hipFree(C_d[i]));
+      HIP_CHECK(hipFree(C_d[i]))
     }
     if (C_h[i]) {
       free(C_h[i]);
     }
-    HIP_CHECK(hipStreamDestroy(stream[i]));
+    HIP_CHECK(hipStreamDestroy(stream[i]))
   }
 }
 
@@ -340,19 +340,19 @@ void TestkindDefault(void) {
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
-  HIP_CHECK(hipMemcpyWithStream(A_d, A_h, Nbytes, hipMemcpyDefault, stream));
-  HIP_CHECK(hipMemcpyWithStream(B_d, B_h, Nbytes, hipMemcpyDefault, stream));
+  HIP_CHECK(hipMemcpyWithStream(A_d, A_h, Nbytes, hipMemcpyDefault, stream))
+  HIP_CHECK(hipMemcpyWithStream(B_d, B_h, Nbytes, hipMemcpyDefault, stream))
   hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream,
                      static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d, N);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipMemcpyWithStream(C_h, C_d, Nbytes, hipMemcpyDefault, stream));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipMemcpyWithStream(C_h, C_d, Nbytes, hipMemcpyDefault, stream))
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 void TestkindDefaultForDtoD(void) {
@@ -360,7 +360,7 @@ void TestkindDefaultForDtoD(void) {
   int NumDevices = 0;
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
-  HIP_CHECK(hipGetDeviceCount(&NumDevices));
+  HIP_CHECK(hipGetDeviceCount(&NumDevices))
   // Test case will not run on single GPU setup.
   if (NumDevices <= 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
@@ -369,68 +369,68 @@ void TestkindDefaultForDtoD(void) {
   int *A_h[MaxGPUDevices], *B_h[MaxGPUDevices], *C_h[MaxGPUDevices];
 
   // Initialize and create the host and device elements for first device
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   HipTest::initArrays(&A_d[0], &B_d[0], &C_d[0], &A_h[0], &B_h[0], &C_h[0], N, false);
 
   for (int i = 1; i < NumDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipMalloc(&A_d[i], Nbytes));
-    HIP_CHECK(hipMalloc(&B_d[i], Nbytes));
-    HIP_CHECK(hipMalloc(&C_d[i], Nbytes));
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipMalloc(&A_d[i], Nbytes))
+    HIP_CHECK(hipMalloc(&B_d[i], Nbytes))
+    HIP_CHECK(hipMalloc(&C_d[i], Nbytes))
     C_h[i] = reinterpret_cast<int*>(malloc(Nbytes));
     HIP_ASSERT(C_h[i] != NULL);
   }
 
   hipStream_t stream[MaxGPUDevices];
   for (int i = 0; i < NumDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipStreamCreate(&stream[i]));
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipStreamCreate(&stream[i]))
   }
 
-  HIP_CHECK(hipMemcpyWithStream(A_d[0], A_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]));
-  HIP_CHECK(hipMemcpyWithStream(B_d[0], B_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]));
+  HIP_CHECK(hipMemcpyWithStream(A_d[0], A_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]))
+  HIP_CHECK(hipMemcpyWithStream(B_d[0], B_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]))
 
   // Copying device data from 1st GPU to the rest of the the GPUs
   // using hipMemcpyDefault kind  that is NumDevices in the setup.
   // 1st GPU start numbering from 0,1,2..n etc.
   for (int i = 1; i < NumDevices; ++i) {
-    HIP_CHECK(hipMemcpyWithStream(A_d[i], A_d[0], Nbytes, hipMemcpyDefault, stream[i]));
-    HIP_CHECK(hipMemcpyWithStream(B_d[i], B_d[0], Nbytes, hipMemcpyDefault, stream[i]));
+    HIP_CHECK(hipMemcpyWithStream(A_d[i], A_d[0], Nbytes, hipMemcpyDefault, stream[i]))
+    HIP_CHECK(hipMemcpyWithStream(B_d[i], B_d[0], Nbytes, hipMemcpyDefault, stream[i]))
   }
 
   for (int i = 0; i < NumDevices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream[i],
                        static_cast<const int*>(A_d[i]), static_cast<const int*>(B_d[i]), C_d[i],
                        N);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
   }
 
   for (int i = 0; i < NumDevices; ++i) {
     HIP_CHECK(hipSetDevice(i));  // hipMemcpy will be on this device
-    HIP_CHECK(hipStreamSynchronize(stream[i]));
-    HIP_CHECK(hipMemcpy(C_h[i], C_d[i], Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipStreamSynchronize(stream[i]))
+    HIP_CHECK(hipMemcpy(C_h[i], C_d[i], Nbytes, hipMemcpyDeviceToHost))
     // Output of each GPU is getting validated with input of 1st GPU.
     HipTest::checkVectorADD(A_h[0], B_h[0], C_h[i], N);
   }
 
   HipTest::freeArrays(A_d[0], B_d[0], C_d[0], A_h[0], B_h[0], C_h[0], false);
-  HIP_CHECK(hipStreamDestroy(stream[0]));
+  HIP_CHECK(hipStreamDestroy(stream[0]))
 
   for (int i = 1; i < NumDevices; ++i) {
     if (A_d[i]) {
-      HIP_CHECK(hipFree(A_d[i]));
+      HIP_CHECK(hipFree(A_d[i]))
     }
     if (B_d[i]) {
-      HIP_CHECK(hipFree(B_d[i]));
+      HIP_CHECK(hipFree(B_d[i]))
     }
     if (C_d[i]) {
-      HIP_CHECK(hipFree(C_d[i]));
+      HIP_CHECK(hipFree(C_d[i]))
     }
     if (C_h[i]) {
       free(C_h[i]);
     }
-    HIP_CHECK(hipStreamDestroy(stream[i]));
+    HIP_CHECK(hipStreamDestroy(stream[i]))
   }
 }
 
@@ -452,10 +452,10 @@ void TestkindHtoH(void) {
   }
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
-  HIP_CHECK(hipMemcpyWithStream(B_h, A_h, Nbytes, hipMemcpyHostToHost, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpyWithStream(B_h, A_h, Nbytes, hipMemcpyHostToHost, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   for (size_t i = 0; i < N; i++) {
     HIP_ASSERT(A_h[i] == B_h[i]);
@@ -467,7 +467,7 @@ void TestkindHtoH(void) {
   if (B_h) {
     free(B_h);
   }
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 

@@ -15,7 +15,7 @@ constexpr size_t kAllocBytes = 4096;
 
 int CurrentDevice() {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   return device;
 }
 
@@ -41,7 +41,7 @@ bool TryTrimGraphMemory() {
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 
@@ -54,7 +54,7 @@ bool TryAddMemAllocNode(hipGraphNode_t* node, hipGraph_t graph,
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 
@@ -68,7 +68,7 @@ bool TryAddMemFreeNode(hipGraphNode_t* node, hipGraph_t graph,
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 
@@ -82,7 +82,7 @@ bool TryAddDrvMemFreeNode(hipGraphNode_t* node, hipGraph_t graph,
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 }  // namespace
@@ -102,7 +102,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_HipGraphAddMemAllocNode_Default_ReturnsDevi
   // destroyed; registering it first means it runs last (after hipGraphDestroy)
   // when the guard unwinds.
   cleanup.Add([&] { (void)TryTrimGraphMemory(); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
@@ -124,7 +124,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_HipGraphMemAllocNodeGetParams_Default_Round
   hipMemAllocNodeParams params = CurrentDeviceAllocParams();
 
   cleanup.Add([&] { (void)TryTrimGraphMemory(); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
@@ -132,7 +132,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_HipGraphMemAllocNodeGetParams_Default_Round
   }
 
   hipMemAllocNodeParams retrieved{};
-  HIP_CHECK(hipGraphMemAllocNodeGetParams(alloc_node, &retrieved));
+  HIP_CHECK(hipGraphMemAllocNodeGetParams(alloc_node, &retrieved))
 
   REQUIRE(retrieved.bytesize == kAllocBytes);
   REQUIRE(retrieved.poolProps.allocType == hipMemAllocationTypePinned);
@@ -153,7 +153,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_HipGraphMemFreeNodeGetParams_Default_RoundT
   hipMemAllocNodeParams params = CurrentDeviceAllocParams();
 
   cleanup.Add([&] { (void)TryTrimGraphMemory(); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
@@ -168,7 +168,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_HipGraphMemFreeNodeGetParams_Default_RoundT
   // The free node reports the device pointer it was created with. The getter
   // writes the pointer through its void* out-parameter.
   void* retrieved = nullptr;
-  HIP_CHECK(hipGraphMemFreeNodeGetParams(free_node, &retrieved));
+  HIP_CHECK(hipGraphMemFreeNodeGetParams(free_node, &retrieved))
   REQUIRE(retrieved == params.dptr);
 }
 
@@ -182,12 +182,12 @@ HIP_TEST_CASE(Contract_GraphMemNodes_HipDeviceGraphMemTrim_GraphMemAttribute_Tri
   if (query_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Graph memory attribute queries are not supported by this runtime path.");
   }
-  HIP_CHECK(query_status);
+  HIP_CHECK(query_status)
 
   // Trimming graph memory must not increase the amount of reserved graph
   // memory. Reserved memory is a non-negative size, so the trimmed value stays
   // within [0, reserved_before].
-  HIP_CHECK(hipDeviceGraphMemTrim(device));
+  HIP_CHECK(hipDeviceGraphMemTrim(device))
 
   uint64_t reserved_after = 0;
   HIP_CHECK(hipDeviceGetGraphMemAttribute(
@@ -206,7 +206,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_HipDeviceSetGraphMemAttribute_Default_Reset
   if (query_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Graph memory attribute queries are not supported by this runtime path.");
   }
-  HIP_CHECK(query_status);
+  HIP_CHECK(query_status)
 
   // The used-memory high watermark is resettable: writing zero must be accepted
   // (or reported unsupported), and a subsequent query must report the watermark
@@ -217,7 +217,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_HipDeviceSetGraphMemAttribute_Default_Reset
   if (set_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Setting graph memory attributes is not supported by this runtime path.");
   }
-  HIP_CHECK(set_status);
+  HIP_CHECK(set_status)
 
   uint64_t used_high_after = 1;
   HIP_CHECK(
@@ -260,7 +260,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_HipDrvGraphAddMemFreeNode_DrvFreeNode_AddsT
   hipMemAllocNodeParams params = CurrentDeviceAllocParams();
 
   cleanup.Add([&] { (void)TryTrimGraphMemory(); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
@@ -281,7 +281,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_HipDrvGraphAddMemFreeNode_DrvFreeNode_AddsT
 
   // The added node reports the memory-free node type.
   hipGraphNodeType type{};
-  HIP_CHECK(hipGraphNodeGetType(free_node, &type));
+  HIP_CHECK(hipGraphNodeGetType(free_node, &type))
   REQUIRE(type == hipGraphNodeTypeMemFree);
 }
 #endif  // HT_AMD

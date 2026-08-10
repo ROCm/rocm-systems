@@ -26,18 +26,18 @@ HIP_TEST_CASE(Unit_hipStreamCreateWithFlags_Negative_InvalidFlag) {
 HIP_TEST_CASE(Unit_hipStreamCreateWithFlags_Default) {
   const unsigned int flagUnderTest = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   hipStream_t stream{};
-  HIP_CHECK(hipStreamCreateWithFlags(&stream, flagUnderTest));
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, flagUnderTest))
 
   unsigned int flag{};
-  HIP_CHECK(hipStreamGetFlags(stream, &flag));
+  HIP_CHECK(hipStreamGetFlags(stream, &flag))
   REQUIRE(flag == flagUnderTest);
 
   int priority{};
-  HIP_CHECK(hipStreamGetPriority(stream, &priority));
+  HIP_CHECK(hipStreamGetPriority(stream, &priority))
   // zero is considered default priority
   REQUIRE(priority == 0);
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 // a stream will default to blocking the null stream, but will not block the null stream when
@@ -49,7 +49,7 @@ HIP_TEST_CASE(Unit_hipStreamCreateWithFlags_DefaultStreamInteraction) {
   CAPTURE(defaultStream, flagUnderTest);
 
   hipStream_t stream{};
-  HIP_CHECK(hipStreamCreateWithFlags(&stream, flagUnderTest));
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, flagUnderTest))
 
   const auto delay = std::chrono::milliseconds(isQuickLevel() ? 100 : 500);
 
@@ -65,8 +65,8 @@ HIP_TEST_CASE(Unit_hipStreamCreateWithFlags_DefaultStreamInteraction) {
     REQUIRE(hipStreamQuery(stream) == hipSuccess);
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 #endif
 

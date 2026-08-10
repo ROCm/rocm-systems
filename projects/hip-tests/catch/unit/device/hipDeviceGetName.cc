@@ -46,11 +46,11 @@ HIP_TEST_CASE(Unit_hipDeviceGetName_NegTst) {
   std::array<char, LEN> name;
 
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   std::vector<hipDevice_t> devices(numDevices);
   for (int i = 0; i < numDevices; i++) {
-    HIP_CHECK(hipDeviceGet(&devices[i], i));
+    HIP_CHECK(hipDeviceGet(&devices[i], i))
   }
 
   SECTION("Valid Device") {
@@ -106,11 +106,11 @@ HIP_TEST_CASE(Unit_hipDeviceGetName_CheckPropName) {
   std::array<char, LEN> name;
   hipDevice_t device;
   hipDeviceProp_t prop;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   for (int i = 0; i < numDevices; i++) {
-    HIP_CHECK(hipDeviceGet(&device, i));
-    HIP_CHECK(hipDeviceGetName(name.data(), name.size(), device));
-    HIP_CHECK(hipGetDeviceProperties(&prop, device));
+    HIP_CHECK(hipDeviceGet(&device, i))
+    HIP_CHECK(hipDeviceGetName(name.data(), name.size(), device))
+    HIP_CHECK(hipGetDeviceProperties(&prop, device))
 
     // Scenario1
     REQUIRE(strncmp(name.data(), prop.name, name.size()) == 0);
@@ -133,12 +133,12 @@ HIP_TEST_CASE(Unit_hipDeviceGetName_PartialFill) {
   std::array<char, LEN> name;
 
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   auto ordinal = GENERATE_COPY(range(0, numDevices));
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, ordinal));
-  HIP_CHECK(hipDeviceGetName(name.data(), name.size(), device));
+  HIP_CHECK(hipDeviceGet(&device, ordinal))
+  HIP_CHECK(hipDeviceGetName(name.data(), name.size(), device))
 
   auto start = std::begin(name);
   auto end = std::end(name);
@@ -150,7 +150,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetName_PartialFill) {
   std::fill(start, end, fillValue);
 
   // Scenario6
-  HIP_CHECK(hipDeviceGetName(name.data(), fillLen, device));
+  HIP_CHECK(hipDeviceGetName(name.data(), fillLen, device))
 
   const auto strEnd = start + fillLen - 1;
   REQUIRE(std::all_of(start, strEnd, [](char& c) { return c != 0; }));
@@ -195,7 +195,7 @@ static inline std::vector<int> parseVisibleDevices() {
  */
 HIP_TEST_CASE(Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator) {
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   if (deviceCount <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -239,11 +239,11 @@ HIP_TEST_CASE(Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator) {
       continue;
     }
     auto dev = i.first;
-    HIP_CHECK(hipSetDevice(dev));
+    HIP_CHECK(hipSetDevice(dev))
     hipDevice_t device;
     hipDeviceProp_t prop;
-    HIP_CHECK(hipDeviceGet(&device, dev));
-    HIP_CHECK(hipGetDeviceProperties(&prop, device));
+    HIP_CHECK(hipDeviceGet(&device, dev))
+    HIP_CHECK(hipGetDeviceProperties(&prop, device))
     REQUIRE(strncmp(i.second.data(), prop.gcnArchName, strlen(i.second.data())) == 0);
   }
 }

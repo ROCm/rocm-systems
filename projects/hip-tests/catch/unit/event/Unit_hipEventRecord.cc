@@ -74,33 +74,33 @@ HIP_TEST_CASE(Unit_hipEventRecord) {
   hipEvent_t start{}, stop{};
 
   if (flags == WithoutFlags) {
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
+    HIP_CHECK(hipEventCreate(&start))
+    HIP_CHECK(hipEventCreate(&stop))
   } else {
-    HIP_CHECK(hipEventCreateWithFlags(&start, flags));
-    HIP_CHECK(hipEventCreateWithFlags(&stop, flags));
+    HIP_CHECK(hipEventCreateWithFlags(&start, flags))
+    HIP_CHECK(hipEventCreateWithFlags(&stop, flags))
   }
 
-  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
 
   // Warmup
   HipTest::launchKernel<float>(HipTest::vectorADD<float>, blocks, 1, 0, 0,
                                static_cast<const float*>(A_d), static_cast<const float*>(B_d), C_d,
                                N);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   for (int i = 0; i < iterations; i++) {
     //--- START TIMED REGION
     long long hostStart = HipTest::get_time();
     // Record the start event
-    HIP_CHECK(hipEventRecord(start, NULL));
+    HIP_CHECK(hipEventRecord(start, NULL))
 
     HipTest::launchKernel<float>(HipTest::vectorADD<float>, blocks, 1, 0, 0,
                                  static_cast<const float*>(A_d), static_cast<const float*>(B_d),
                                  C_d, N);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipEventRecord(stop, NULL));
-    HIP_CHECK(hipEventSynchronize(stop));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipEventRecord(stop, NULL))
+    HIP_CHECK(hipEventSynchronize(stop))
     long long hostStop = HipTest::get_time();
     //--- STOP TIMED REGION
 
@@ -111,16 +111,16 @@ HIP_TEST_CASE(Unit_hipEventRecord) {
     // Make sure timer is timing something...
     if (flags != WithFlags_DisableTiming) {
       float eventMs = 1.0f;
-      HIP_CHECK(hipEventElapsedTime(&eventMs, start, stop));
+      HIP_CHECK(hipEventElapsedTime(&eventMs, start, stop))
       INFO("kernel_time (hipEventElapsedTime) = " << eventMs);
       REQUIRE(eventMs > 0.0f);
     }
   }
 
-  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
 
-  HIP_CHECK(hipEventDestroy(start));
-  HIP_CHECK(hipEventDestroy(stop));
+  HIP_CHECK(hipEventDestroy(start))
+  HIP_CHECK(hipEventDestroy(stop))
 
   HipTest::checkVectorADD(A_h, B_h, C_h, N, true);
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
@@ -149,18 +149,18 @@ HIP_TEST_CASE(Unit_hipEventRecord_Negative) {
 
   SECTION("Different devices") {
     int devCount = 0;
-    HIP_CHECK(hipGetDeviceCount(&devCount));
+    HIP_CHECK(hipGetDeviceCount(&devCount))
     if (devCount > 1) {
       // create event on dev=0
-      HIP_CHECK(hipSetDevice(0));
+      HIP_CHECK(hipSetDevice(0))
       hipEvent_t start;
-      HIP_CHECK(hipEventCreate(&start));
+      HIP_CHECK(hipEventCreate(&start))
 
       // start on device 0 but null stream on device 1
-      HIP_CHECK(hipSetDevice(1));
+      HIP_CHECK(hipSetDevice(1))
       HIP_CHECK_ERROR(hipEventRecord(start, nullptr), hipErrorInvalidHandle)
 
-      HIP_CHECK(hipEventDestroy(start));
+      HIP_CHECK(hipEventDestroy(start))
     }
   }
 }

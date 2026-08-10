@@ -40,43 +40,43 @@ HIP_TEST_CASE(Unit_hipModuleGetFunctionCount_Functional) {
   hipModule_t moduleSingleArch, moduleEmpty, doubleKernelModule, rtcModule;
   unsigned int count = 0;
   SECTION("Single arch, Single global function") {
-    HIP_CHECK(hipModuleLoad(&moduleSingleArch, "vcpy_kernel.code"));
-    HIP_CHECK(hipModuleGetFunctionCount(&count, moduleSingleArch));
+    HIP_CHECK(hipModuleLoad(&moduleSingleArch, "vcpy_kernel.code"))
+    HIP_CHECK(hipModuleGetFunctionCount(&count, moduleSingleArch))
     REQUIRE(count == 1);
-    HIP_CHECK(hipModuleUnload(moduleSingleArch));
+    HIP_CHECK(hipModuleUnload(moduleSingleArch))
   }
 #if HT_AMD
   SECTION("Multi arch, Single global function") {
     hipModule_t moduleMultiArch;
     const auto loaded_module =
         LoadModuleIntoBuffer("copyKernelCompressed.code");
-    HIP_CHECK(hipModuleLoadData(&moduleMultiArch, loaded_module.data()));
-    HIP_CHECK(hipModuleGetFunctionCount(&count, moduleMultiArch));
+    HIP_CHECK(hipModuleLoadData(&moduleMultiArch, loaded_module.data()))
+    HIP_CHECK(hipModuleGetFunctionCount(&count, moduleMultiArch))
     REQUIRE(count == 1);
-    HIP_CHECK(hipModuleUnload(moduleMultiArch));
+    HIP_CHECK(hipModuleUnload(moduleMultiArch))
   }
 #endif
   SECTION("Empty Module Count") {
-    HIP_CHECK(hipModuleLoad(&moduleEmpty, "emptyModuleCount.code"));
-    HIP_CHECK(hipModuleGetFunctionCount(&count, moduleEmpty));
+    HIP_CHECK(hipModuleLoad(&moduleEmpty, "emptyModuleCount.code"))
+    HIP_CHECK(hipModuleGetFunctionCount(&count, moduleEmpty))
     REQUIRE(count == 0);
-    HIP_CHECK(hipModuleUnload(moduleEmpty));
+    HIP_CHECK(hipModuleUnload(moduleEmpty))
   }
   SECTION("__global__, __device__ functions module") {
-    HIP_CHECK(hipModuleLoad(&doubleKernelModule, "kernel_count.code"));
-    HIP_CHECK(hipModuleGetFunctionCount(&count, doubleKernelModule));
+    HIP_CHECK(hipModuleLoad(&doubleKernelModule, "kernel_count.code"))
+    HIP_CHECK(hipModuleGetFunctionCount(&count, doubleKernelModule))
     REQUIRE(count == 1);
-    HIP_CHECK(hipModuleUnload(doubleKernelModule));
+    HIP_CHECK(hipModuleUnload(doubleKernelModule))
   }
 
   SECTION("Load RTCd module") {
     const auto rtc =
         CreateRTCCharArray(R"(extern "C" __global__ void kernel() {})");
-    HIP_CHECK(hipModuleLoadData(&rtcModule, rtc.data()));
+    HIP_CHECK(hipModuleLoadData(&rtcModule, rtc.data()))
     REQUIRE(rtcModule != nullptr);
-    HIP_CHECK(hipModuleGetFunctionCount(&count, rtcModule));
+    HIP_CHECK(hipModuleGetFunctionCount(&count, rtcModule))
     REQUIRE(count == 1);
-    HIP_CHECK(hipModuleUnload(rtcModule));
+    HIP_CHECK(hipModuleUnload(rtcModule))
   }
   CTX_DESTROY();
 }

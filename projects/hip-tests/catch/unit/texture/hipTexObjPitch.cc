@@ -85,12 +85,12 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipTexObjPitch_texture2D, char, unsigned char, short
   texDescr.readMode = hipReadModeElementType;
 
   hipTextureObject_t texObj;
-  HIP_CHECK(hipCreateTextureObject(&texObj, &texRes, &texDescr, NULL));
+  HIP_CHECK(hipCreateTextureObject(&texObj, &texRes, &texDescr, NULL))
 
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&devPtrB), SIZE_W * sizeof(TestType) * SIZE_H));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&devPtrB), SIZE_W * sizeof(TestType) * SIZE_H))
 
   hipLaunchKernelGGL(texture2dCopyKernel, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, texObj, devPtrB);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   HIP_CHECK(hipMemcpy2D(B, SIZE_W * sizeof(TestType), devPtrB, SIZE_W * sizeof(TestType),
                         SIZE_W * sizeof(TestType), SIZE_H, hipMemcpyDeviceToHost));
@@ -98,9 +98,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipTexObjPitch_texture2D, char, unsigned char, short
   HipTest::checkArray(A, B, SIZE_H, SIZE_W);
   delete[] A;
   delete[] B;
-  HIP_CHECK(hipFree(devPtrA));
-  HIP_CHECK(hipFree(devPtrB));
-  HIP_CHECK(hipDestroyTextureObject(texObj));
+  HIP_CHECK(hipFree(devPtrA))
+  HIP_CHECK(hipFree(devPtrB))
+  HIP_CHECK(hipDestroyTextureObject(texObj))
 }
 
 /**

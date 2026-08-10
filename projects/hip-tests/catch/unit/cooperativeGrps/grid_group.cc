@@ -103,8 +103,8 @@ static __global__ void sync_kernel(unsigned int* atomic_val, unsigned int* per_l
 HIP_TEST_CASE(Unit_Grid_Group_Getters_Positive_Basic) {
   int device;
   hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&device_properties, device))
 
   if (!device_properties.cooperativeLaunch) {
     HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
@@ -128,11 +128,11 @@ HIP_TEST_CASE(Unit_Grid_Group_Getters_Positive_Basic) {
   void* params[1];
   params[0] = &uint_arr_dev_ptr;
 
-  HIP_CHECK(hipLaunchCooperativeKernel(grid_group_size_getter, blocks, threads, params, 0, 0));
+  HIP_CHECK(hipLaunchCooperativeKernel(grid_group_size_getter, blocks, threads, params, 0, 0))
 
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   HIP_CHECK(
       hipLaunchCooperativeKernel(grid_group_thread_rank_getter, blocks, threads, params, 0, 0));
 
@@ -142,23 +142,23 @@ HIP_TEST_CASE(Unit_Grid_Group_Getters_Positive_Basic) {
 
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipLaunchCooperativeKernel(grid_group_is_valid_getter, blocks, threads, params, 0, 0));
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipLaunchCooperativeKernel(grid_group_is_valid_getter, blocks, threads, params, 0, 0))
 
   // Verify grid_group.thread_rank() values
   ArrayAllOf(uint_arr.ptr(), grid.thread_count_, [](uint32_t i) { return i; });
 
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipLaunchCooperativeKernel(grid_group_block_rank_getter, blocks, threads, params, 0, 0));
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipLaunchCooperativeKernel(grid_group_block_rank_getter, blocks, threads, params, 0, 0))
 
   // Verify grid_group.is_valid() values
   ArrayAllOf(uint_arr.ptr(), grid.thread_count_, [](uint32_t) { return 1; });
 
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Verify grid_group.block_rank() values
   ArrayAllOf(uint_arr.ptr(), grid.thread_count_, [threads](uint32_t i) {
@@ -182,8 +182,8 @@ HIP_TEST_CASE(Unit_Grid_Group_Getters_Positive_Basic) {
 HIP_TEST_CASE(Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic) {
   int device;
   hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&device_properties, device))
 
   if (!device_properties.cooperativeLaunch) {
     HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
@@ -212,7 +212,7 @@ HIP_TEST_CASE(Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic) {
 
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   HIP_CHECK(hipLaunchCooperativeKernel(grid_group_non_member_thread_rank_getter, blocks, threads,
                                        params, 0, 0));
 
@@ -222,7 +222,7 @@ HIP_TEST_CASE(Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic) {
 
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Verify grid_group.thread_rank() values
   ArrayAllOf(uint_arr.ptr(), grid.thread_count_, [](uint32_t i) { return i; });
@@ -250,8 +250,8 @@ HIP_TEST_CASE(Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic) {
 HIP_TEST_CASE(Unit_Grid_Group_Sync_Positive_Basic) {
   int device;
   hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&device_properties, device))
 
   if (!device_properties.cooperativeLaunch) {
     HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
@@ -277,13 +277,13 @@ HIP_TEST_CASE(Unit_Grid_Group_Sync_Positive_Basic) {
   unsigned int array_len = grid.block_count_ * loops;
 
   unsigned int *uint_arr_dev{}, *uint_arr{}, *atomic_val{}, *per_loop_atomic_val{};
-  HIP_CHECK(hipMalloc(&uint_arr_dev, array_len * sizeof(unsigned int)));
-  HIP_CHECK(hipHostMalloc(&uint_arr, array_len * sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc(&atomic_val, sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc(&per_loop_atomic_val, loops * sizeof(unsigned int)));
+  HIP_CHECK(hipMalloc(&uint_arr_dev, array_len * sizeof(unsigned int)))
+  HIP_CHECK(hipHostMalloc(&uint_arr, array_len * sizeof(unsigned int)))
+  HIP_CHECK(hipMalloc(&atomic_val, sizeof(unsigned int)))
+  HIP_CHECK(hipMalloc(&per_loop_atomic_val, loops * sizeof(unsigned int)))
 
-  HIP_CHECK(hipMemset(atomic_val, 0, sizeof(unsigned int)));
-  HIP_CHECK(hipMemset(per_loop_atomic_val, 0, loops * sizeof(unsigned int)));
+  HIP_CHECK(hipMemset(atomic_val, 0, sizeof(unsigned int)))
+  HIP_CHECK(hipMemset(per_loop_atomic_val, 0, loops * sizeof(unsigned int)))
 
   // Launch Kernel
   void* params[4];
@@ -292,12 +292,12 @@ HIP_TEST_CASE(Unit_Grid_Group_Sync_Positive_Basic) {
   params[2] = reinterpret_cast<void*>(&uint_arr_dev);
   params[3] = reinterpret_cast<void*>(&loops);
 
-  HIP_CHECK(hipLaunchCooperativeKernel(sync_kernel, blocks, threads, params, 0, 0));
+  HIP_CHECK(hipLaunchCooperativeKernel(sync_kernel, blocks, threads, params, 0, 0))
 
   HIP_CHECK(hipMemcpy(uint_arr, uint_arr_dev, array_len * sizeof(*uint_arr),
                       hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Verify host buffer values
   unsigned int max_in_this_loop = 0;
@@ -311,10 +311,10 @@ HIP_TEST_CASE(Unit_Grid_Group_Sync_Positive_Basic) {
     // REQUIRE(uint_arr[i * grid.block_count_ + j] == max_in_this_loop - 1);
   }
 
-  HIP_CHECK(hipFree(uint_arr_dev));
-  HIP_CHECK(hipHostFree(uint_arr));
-  HIP_CHECK(hipFree(atomic_val));
-  HIP_CHECK(hipFree(per_loop_atomic_val));
+  HIP_CHECK(hipFree(uint_arr_dev))
+  HIP_CHECK(hipHostFree(uint_arr))
+  HIP_CHECK(hipFree(atomic_val))
+  HIP_CHECK(hipFree(per_loop_atomic_val))
 }
 
 /**

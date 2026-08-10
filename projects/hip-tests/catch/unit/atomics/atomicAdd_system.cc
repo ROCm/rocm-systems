@@ -18,7 +18,7 @@
 template <typename TestType>
 static void runAtomicAddSystemPeerGPUsTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < 1; ++current) {
@@ -43,7 +43,7 @@ static void runAtomicAddSystemPeerGPUsTest() {
 template <typename TestType>
 static void runAtomicAddSystemHostAndGPUTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < 1; ++current) {
@@ -68,7 +68,7 @@ static void runAtomicAddSystemHostAndGPUTest() {
 template <typename TestType>
 static void runAtomicAddSystemHostAndPeerGPUsTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < 1; ++current) {

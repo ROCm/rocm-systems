@@ -84,8 +84,8 @@ HIP_TEST_CASE(Unit_hipBindTextureToArray_Negative_Parameters) {
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindSigned);
 
   hipArray_t hipArray;
-  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height));
-  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, data, size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height))
+  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, data, size, hipMemcpyHostToDevice))
 
   tex_2D.addressMode[0] = hipAddressModeWrap;
   tex_2D.addressMode[1] = hipAddressModeWrap;
@@ -128,7 +128,7 @@ HIP_TEST_CASE(Unit_hipBindTextureToArray_Negative_Parameters) {
 #endif
   }
 
-  HIP_CHECK(hipFreeArray(hipArray));
+  HIP_CHECK(hipFreeArray(hipArray))
   free(data);
 }
 
@@ -150,29 +150,29 @@ HIP_TEST_CASE(Unit_hipBindTextureToArray_Positive_1D) {
   hipChannelFormatDesc desc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindSigned);
 
   hipArray_t array;
-  HIP_CHECK(hipMallocArray(&array, &desc, width, height));
-  HIP_CHECK(hipMemcpyToArray(array, 0, 0, data, size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMallocArray(&array, &desc, width, height))
+  HIP_CHECK(hipMemcpyToArray(array, 0, 0, data, size, hipMemcpyHostToDevice))
 
   tex_1D.addressMode[0] = hipAddressModeWrap;
   tex_1D.filterMode = hipFilterModePoint;
   tex_1D.normalized = 0;
 
-  HIP_CHECK(hipBindTextureToArray(tex_1D, array, desc));
+  HIP_CHECK(hipBindTextureToArray(tex_1D, array, desc))
 
   int* d_array;
-  HIP_CHECK(hipMalloc(&d_array, size));
+  HIP_CHECK(hipMalloc(&d_array, size))
   validate_texture1D<<<width / 32, 32>>>(d_array, width);
 
   int* out_array = reinterpret_cast<int*>(malloc(size));
   REQUIRE(out_array != nullptr);
-  HIP_CHECK(hipMemcpy(out_array, d_array, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out_array, d_array, size, hipMemcpyDeviceToHost))
 
   bool valid = compare_array_elements(data, out_array, width);
   REQUIRE(valid == true);
 
-  HIP_CHECK(hipFree(d_array));
-  HIP_CHECK(hipUnbindTexture(tex_1D));
-  HIP_CHECK(hipFreeArray(array));
+  HIP_CHECK(hipFree(d_array))
+  HIP_CHECK(hipUnbindTexture(tex_1D))
+  HIP_CHECK(hipFreeArray(array))
   free(out_array);
   free(data);
 }
@@ -196,32 +196,32 @@ HIP_TEST_CASE(Unit_hipBindTextureToArray_Positive_2D) {
   hipChannelFormatDesc desc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindSigned);
 
   hipArray_t array;
-  HIP_CHECK(hipMallocArray(&array, &desc, width, height));
-  HIP_CHECK(hipMemcpyToArray(array, 0, 0, data, size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMallocArray(&array, &desc, width, height))
+  HIP_CHECK(hipMemcpyToArray(array, 0, 0, data, size, hipMemcpyHostToDevice))
 
   tex_2D.addressMode[0] = hipAddressModeWrap;
   tex_2D.addressMode[1] = hipAddressModeWrap;
   tex_2D.filterMode = hipFilterModePoint;
   tex_2D.normalized = 0;
 
-  HIP_CHECK(hipBindTextureToArray(tex_2D, array, desc));
+  HIP_CHECK(hipBindTextureToArray(tex_2D, array, desc))
 
   int* d_array;
-  HIP_CHECK(hipMalloc(&d_array, size));
+  HIP_CHECK(hipMalloc(&d_array, size))
   int thread_num = 32;
   int block_num = width * height / thread_num;
   validate_texture2D<<<block_num, thread_num>>>(d_array, width, height);
 
   int* out_array = reinterpret_cast<int*>(malloc(size));
   REQUIRE(out_array != nullptr);
-  HIP_CHECK(hipMemcpy(out_array, d_array, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out_array, d_array, size, hipMemcpyDeviceToHost))
 
   bool valid = compare_array_elements(data, out_array, width, height);
   REQUIRE(valid == true);
 
-  HIP_CHECK(hipFree(d_array));
-  HIP_CHECK(hipUnbindTexture(tex_2D));
-  HIP_CHECK(hipFreeArray(array));
+  HIP_CHECK(hipFree(d_array))
+  HIP_CHECK(hipUnbindTexture(tex_2D))
+  HIP_CHECK(hipFreeArray(array))
   free(out_array);
   free(data);
 }
@@ -248,7 +248,7 @@ HIP_TEST_CASE(Unit_hipBindTextureToArray_Positive_3D) {
   hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
 
   hipArray_t array;
-  HIP_CHECK(hipMalloc3DArray(&array, &desc, make_hipExtent(width, height, depth), hipArrayDefault));
+  HIP_CHECK(hipMalloc3DArray(&array, &desc, make_hipExtent(width, height, depth), hipArrayDefault))
   hipMemcpy3DParms copy_params{};
   copy_params.srcPos = make_hipPos(0, 0, 0);
   copy_params.dstPos = make_hipPos(0, 0, 0);
@@ -257,17 +257,17 @@ HIP_TEST_CASE(Unit_hipBindTextureToArray_Positive_3D) {
   copy_params.extent = make_hipExtent(width, height, depth);
   copy_params.kind = hipMemcpyHostToDevice;
 
-  HIP_CHECK(hipMemcpy3D(&copy_params));
+  HIP_CHECK(hipMemcpy3D(&copy_params))
 
   tex_3D.addressMode[0] = hipAddressModeWrap;
   tex_3D.addressMode[1] = hipAddressModeWrap;
   tex_3D.filterMode = hipFilterModePoint;
   tex_3D.normalized = 0;
 
-  HIP_CHECK(hipBindTextureToArray(tex_3D, array, desc));
+  HIP_CHECK(hipBindTextureToArray(tex_3D, array, desc))
 
   int* d_array;
-  HIP_CHECK(hipMalloc(&d_array, size));
+  HIP_CHECK(hipMalloc(&d_array, size))
   int thread_num = 32;
   int block_num = width * height * depth / thread_num;
   thread_num = 2;
@@ -278,14 +278,14 @@ HIP_TEST_CASE(Unit_hipBindTextureToArray_Positive_3D) {
 
   int* out_array = reinterpret_cast<int*>(malloc(size));
   REQUIRE(out_array != nullptr);
-  HIP_CHECK(hipMemcpy(out_array, d_array, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out_array, d_array, size, hipMemcpyDeviceToHost))
 
   bool valid = compare_array_elements(data, out_array, width, height, depth);
   REQUIRE(valid == true);
 
-  HIP_CHECK(hipFree(d_array));
-  HIP_CHECK(hipUnbindTexture(tex_3D));
-  HIP_CHECK(hipFreeArray(array));
+  HIP_CHECK(hipFree(d_array))
+  HIP_CHECK(hipUnbindTexture(tex_3D))
+  HIP_CHECK(hipFreeArray(array))
   free(out_array);
   free(data);
 }

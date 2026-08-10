@@ -42,21 +42,21 @@ HIP_TEST_CASE(Unit_coopgroups_ballot) {
   }
 
   int* data;
-  HIP_CHECK(hipMalloc(&data, sizeof(int) * input.size()));
-  HIP_CHECK(hipMemcpy(data, input.data(), sizeof(int) * input.size(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&data, sizeof(int) * input.size()))
+  HIP_CHECK(hipMemcpy(data, input.data(), sizeof(int) * input.size(), hipMemcpyHostToDevice))
 
   unsigned long long *d_even_mask, *d_odd_mask, even_mask = 0, odd_mask = 0l;
-  HIP_CHECK(hipMalloc(&d_even_mask, sizeof(unsigned long long)));
-  HIP_CHECK(hipMalloc(&d_odd_mask, sizeof(unsigned long long)));
+  HIP_CHECK(hipMalloc(&d_even_mask, sizeof(unsigned long long)))
+  HIP_CHECK(hipMalloc(&d_odd_mask, sizeof(unsigned long long)))
 
   coop_ballot_coal_alternate<<<1, warp_size>>>(data, d_even_mask, d_odd_mask);
-  HIP_CHECK(hipMemcpy(&even_mask, d_even_mask, sizeof(unsigned long long), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(&odd_mask, d_odd_mask, sizeof(unsigned long long), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(&even_mask, d_even_mask, sizeof(unsigned long long), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(&odd_mask, d_odd_mask, sizeof(unsigned long long), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipFree(data));
-  HIP_CHECK(hipFree(d_even_mask));
-  HIP_CHECK(hipFree(d_odd_mask));
+  HIP_CHECK(hipFree(data))
+  HIP_CHECK(hipFree(d_even_mask))
+  HIP_CHECK(hipFree(d_odd_mask))
 
   if (warp_size == 32) {
     REQUIRE(even_mask == 0x5555);
@@ -93,11 +93,11 @@ HIP_TEST_CASE(Unit_binary_part_ballot) {
   }
 
   int* data;
-  HIP_CHECK(hipMalloc(&data, sizeof(int) * input.size()));
-  HIP_CHECK(hipMemcpy(data, input.data(), sizeof(int) * input.size(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&data, sizeof(int) * input.size()))
+  HIP_CHECK(hipMemcpy(data, input.data(), sizeof(int) * input.size(), hipMemcpyHostToDevice))
 
   unsigned long long* d_res;
-  HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned long long) * warp_size));
+  HIP_CHECK(hipMalloc(&d_res, sizeof(unsigned long long) * warp_size))
 
   SECTION("Basic partition of 5th lane") {
     std::vector<unsigned long long> res(warp_size, 1);
@@ -144,6 +144,6 @@ HIP_TEST_CASE(Unit_binary_part_ballot) {
     }
   }
 
-  HIP_CHECK(hipFree(d_res));
-  HIP_CHECK(hipFree(data));
+  HIP_CHECK(hipFree(d_res))
+  HIP_CHECK(hipFree(data))
 }

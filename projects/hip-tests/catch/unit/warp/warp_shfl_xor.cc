@@ -96,8 +96,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_Warp_Shfl_XOR_Positive_Basic, int, unsigned int, lon
                    long long, unsigned long long, float, double, __half, __half2) {
   int device;
   hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&device_properties, device))
 
   if (!device_properties.arch.hasWarpShuffle) {
     HIP_SKIP_TEST(HipTest::SkipReason::kWarpShuffleUnsupported);

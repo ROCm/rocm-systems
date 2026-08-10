@@ -84,36 +84,36 @@ template <typename T> static void runTestShflUp() {
   T a[size];
   T cpuSum = sum(a);
   T* d_a;
-  HIP_CHECK(hipMalloc(&d_a, sizeof(T) * size));
-  HIP_CHECK(hipMemcpy(d_a, &a, sizeof(T) * size, hipMemcpyDefault));
+  HIP_CHECK(hipMalloc(&d_a, sizeof(T) * size))
+  HIP_CHECK(hipMemcpy(d_a, &a, sizeof(T) * size, hipMemcpyDefault))
   hipLaunchKernelGGL(shflUpSum<T>, 1, size, 0, 0, d_a, size);
-  HIP_CHECK(hipMemcpy(&a, d_a, sizeof(T) * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&a, d_a, sizeof(T) * size, hipMemcpyDefault))
   REQUIRE((compare(a[size - 1], cpuSum)) == 0);
-  HIP_CHECK(hipFree(d_a));
+  HIP_CHECK(hipFree(d_a))
 }
 
 template <typename T> static void runTestShflDown() {
   T a[size];
   T cpuSum = sum(a);
   T* d_a;
-  HIP_CHECK(hipMalloc(&d_a, sizeof(T) * size));
-  HIP_CHECK(hipMemcpy(d_a, &a, sizeof(T) * size, hipMemcpyDefault));
+  HIP_CHECK(hipMalloc(&d_a, sizeof(T) * size))
+  HIP_CHECK(hipMemcpy(d_a, &a, sizeof(T) * size, hipMemcpyDefault))
   hipLaunchKernelGGL(shflDownSum<T>, 1, size, 0, 0, d_a, size);
-  HIP_CHECK(hipMemcpy(&a, d_a, sizeof(T) * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&a, d_a, sizeof(T) * size, hipMemcpyDefault))
   REQUIRE((compare(a[0], cpuSum)) == 0);
-  HIP_CHECK(hipFree(d_a));
+  HIP_CHECK(hipFree(d_a))
 }
 
 template <typename T> static void runTestShflXor() {
   T a[size];
   T cpuSum = sum(a);
   T* d_a;
-  HIP_CHECK(hipMalloc(&d_a, sizeof(T) * size));
-  HIP_CHECK(hipMemcpy(d_a, &a, sizeof(T) * size, hipMemcpyDefault));
+  HIP_CHECK(hipMalloc(&d_a, sizeof(T) * size))
+  HIP_CHECK(hipMemcpy(d_a, &a, sizeof(T) * size, hipMemcpyDefault))
   hipLaunchKernelGGL(shflXorSum<T>, 1, size, 0, 0, d_a, size);
-  HIP_CHECK(hipMemcpy(&a, d_a, sizeof(T) * size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(&a, d_a, sizeof(T) * size, hipMemcpyDefault))
   REQUIRE((compare(a[0], cpuSum)) == 0);
-  HIP_CHECK(hipFree(d_a));
+  HIP_CHECK(hipFree(d_a))
 }
 
 /**

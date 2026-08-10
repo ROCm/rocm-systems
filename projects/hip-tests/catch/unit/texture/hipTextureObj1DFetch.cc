@@ -32,10 +32,10 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_tex1DfetchVerification) {
     output[i] = 0.0;
   }
 
-  HIP_CHECK(hipMalloc(&texBuf, N * sizeof(float)));
-  HIP_CHECK(hipMalloc(&texBufOut, N * sizeof(float)));
-  HIP_CHECK(hipMemcpy(texBuf, val, N * sizeof(float), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemset(texBufOut, 0, N * sizeof(float)));
+  HIP_CHECK(hipMalloc(&texBuf, N * sizeof(float)))
+  HIP_CHECK(hipMalloc(&texBufOut, N * sizeof(float)))
+  HIP_CHECK(hipMemcpy(texBuf, val, N * sizeof(float), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemset(texBufOut, 0, N * sizeof(float)))
   hipResourceDesc resDescLinear;
 
   memset(&resDescLinear, 0, sizeof(resDescLinear));
@@ -50,16 +50,16 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_tex1DfetchVerification) {
 
   // Creating texture object
   hipTextureObject_t texObj = 0;
-  HIP_CHECK(hipCreateTextureObject(&texObj, &resDescLinear, &texDesc, NULL));
+  HIP_CHECK(hipCreateTextureObject(&texObj, &resDescLinear, &texDesc, NULL))
 
   dim3 dimBlock(64, 1, 1);
   dim3 dimGrid(N / dimBlock.x, 1, 1);
 
   hipLaunchKernelGGL(tex1dKernel, dim3(dimGrid), dim3(dimBlock), 0, 0, texBufOut, texObj);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipMemcpy(output, texBufOut, N * sizeof(float), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(output, texBufOut, N * sizeof(float), hipMemcpyDeviceToHost))
 
   for (int i = 0; i < N; i++) {
     if (output[i] != val[i]) {
@@ -68,7 +68,7 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_tex1DfetchVerification) {
     }
   }
 
-  HIP_CHECK(hipDestroyTextureObject(texObj));
-  HIP_CHECK(hipFree(texBuf));
-  HIP_CHECK(hipFree(texBufOut));
+  HIP_CHECK(hipDestroyTextureObject(texObj))
+  HIP_CHECK(hipFree(texBuf))
+  HIP_CHECK(hipFree(texBufOut))
 }

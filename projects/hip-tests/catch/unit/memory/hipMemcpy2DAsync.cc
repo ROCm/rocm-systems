@@ -52,7 +52,7 @@ HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Basic) {
 HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior) {
   using namespace std::placeholders;
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   SECTION("Host to Device") {
     Memcpy2DHtoDSyncBehavior(std::bind(hipMemcpy2DAsync, _1, _2, _3, _4, _5, _6, _7, nullptr),
@@ -114,14 +114,14 @@ HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Negative_Parameters) {
     }
     SECTION("dpitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       HIP_CHECK_ERROR(hipMemcpy2DAsync(dst, static_cast<size_t>(attr) + 1, src, spitch, width,
                                        height, kind, nullptr),
                       hipErrorInvalidValue);
     }
     SECTION("spitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       HIP_CHECK_ERROR(hipMemcpy2DAsync(dst, dpitch, src, static_cast<size_t>(attr) + 1, width,
                                        height, kind, nullptr),
                       hipErrorInvalidValue);
@@ -191,7 +191,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Capture, int, float, double) {
   auto host_matrix_b = std::make_unique<ValueType[]>(num_rows * num_cols);
   ValueType* device_matrix_a = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   for (int row = 0; row < num_rows; ++row) {
     for (int col = 0; col < num_cols; ++col) {
@@ -205,16 +205,16 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Capture, int, float, double) {
                         sizeof(ValueType) * num_cols, sizeof(ValueType) * num_cols, num_rows,
                         hipMemcpyHostToDevice));
 
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
   HIP_CHECK(hipMemcpy2DAsync(host_matrix_a.get(), num_cols * sizeof(ValueType), device_matrix_a,
                              device_pitch, num_cols * sizeof(ValueType), num_rows,
                              hipMemcpyDeviceToHost, stream));
   END_CAPTURE(stream);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   for (int row = 0; row < num_rows; ++row) {
     for (int col = 0; col < num_cols; ++col) {
@@ -222,6 +222,6 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Capture, int, float, double) {
     }
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(device_matrix_a));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(device_matrix_a))
 }

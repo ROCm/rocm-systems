@@ -116,7 +116,7 @@ HIP_TEST_CASE(Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive) {
   HIP_CHECK(
       hipOccupancyAvailableDynamicSMemPerBlock(&dynamicSmemSize, dynamicReverse, numBlocks, SIZE));
   hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
   INFO("Available Dynamic shared memory size : "
        << dynamicSmemSize << ", Dynamic shared memory calculated from device properties : "
        << devProp.sharedMemPerBlock - SIZE * sizeof(int));
@@ -135,7 +135,7 @@ HIP_TEST_CASE(Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive) {
                                               << expectedOutput[i] << ")");
     REQUIRE(actualOutput[i] == expectedOutput[i]);
   }
-  HIP_CHECK(hipFree(deviceArray));
+  HIP_CHECK(hipFree(deviceArray))
 }
 
 /**

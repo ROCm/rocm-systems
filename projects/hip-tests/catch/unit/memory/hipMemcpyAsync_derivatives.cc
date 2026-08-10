@@ -24,7 +24,7 @@ HIP_TEST_CASE(Unit_hipMemcpyDtoHAsync_Positive_Basic) {
 }
 
 HIP_TEST_CASE(Unit_hipMemcpyDtoHAsync_Positive_Synchronization_Behavior) {
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   SECTION("Device memory to pageable host memory") {
     MemcpyDtoHPageableSyncBehavior(
@@ -147,12 +147,12 @@ HIP_TEST_CASE(Unit_hipMemcpyDtoDAsync_Negative_Parameters) {
  */
 HIP_TEST_CASE(Unit_hipMemcpyDtoHAsync_Capture) {
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   auto host_dst = std::make_unique<int[]>(kPageSize);
   auto host_src = std::make_unique<int[]>(kPageSize);
   int* device_src = nullptr;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_src), sizeof(int) * kPageSize));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_src), sizeof(int) * kPageSize))
 
   std::iota(host_src.get(), host_src.get() + kPageSize, 0);
 
@@ -165,14 +165,14 @@ HIP_TEST_CASE(Unit_hipMemcpyDtoHAsync_Capture) {
                                sizeof(int) * kPageSize, stream));
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   for (int i = 0; i < kPageSize; ++i) {
     REQUIRE(host_dst[i] == host_src[i]);
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(device_src));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(device_src))
 }
 
 /**
@@ -185,12 +185,12 @@ HIP_TEST_CASE(Unit_hipMemcpyDtoHAsync_Capture) {
  */
 HIP_TEST_CASE(Unit_hipMemcpyHtoDAsync_Capture) {
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   auto host_src = std::make_unique<int[]>(kPageSize);
   auto host_dst = std::make_unique<int[]>(kPageSize);
   int* device_ptr = nullptr;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_ptr), sizeof(int) * kPageSize));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_ptr), sizeof(int) * kPageSize))
 
   std::iota(host_src.get(), host_src.get() + kPageSize, 0);
 
@@ -200,7 +200,7 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoDAsync_Capture) {
                                sizeof(int) * kPageSize, stream));
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   HIP_CHECK(hipMemcpyDtoH(host_dst.get(), reinterpret_cast<hipDeviceptr_t>(device_ptr),
                           sizeof(int) * kPageSize));
@@ -208,6 +208,6 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoDAsync_Capture) {
     REQUIRE(host_dst[i] == host_src[i]);
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(device_ptr));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(device_ptr))
 }

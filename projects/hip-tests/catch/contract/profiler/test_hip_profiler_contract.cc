@@ -15,7 +15,7 @@ void RequireAcceptedOrUnsupported(hipError_t status) {
   if (status == hipSuccess || status == hipErrorNotSupported) {
     return;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 }
 }  // namespace
 

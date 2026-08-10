@@ -17,17 +17,17 @@ class ExtStreamGetCUMaskBenchmark : public Benchmark<ExtStreamGetCUMaskBenchmark
  public:
   void operator()() {
     hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, 0));
+    HIP_CHECK(hipGetDeviceProperties(&props, 0))
     std::vector<uint32_t> cu_mask(props.multiProcessorCount, 0);
     hipStream_t stream{};
-    HIP_CHECK(hipExtStreamCreateWithCUMask(&stream, cu_mask.size(), cu_mask.data()));
+    HIP_CHECK(hipExtStreamCreateWithCUMask(&stream, cu_mask.size(), cu_mask.data()))
     std::vector<uint32_t> new_cu_mask(cu_mask.size(), 0);
 
     TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipExtStreamGetCUMask(stream, new_cu_mask.size(), new_cu_mask.data()));
+      HIP_CHECK(hipExtStreamGetCUMask(stream, new_cu_mask.size(), new_cu_mask.data()))
     }
 
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 };
 

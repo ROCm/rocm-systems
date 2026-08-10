@@ -125,14 +125,14 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Basic) {
   constexpr uint num_kernel_args = 4;
 
   int device_num = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_num));
+  HIP_CHECK(hipGetDeviceCount(&device_num))
 
   std::vector<hipDeviceProp_t> device_properties(device_num);
   for (int i = 0; i < device_num; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
 
     // Calculate the device occupancy to know how many blocks can be run concurrently
-    HIP_CHECK(hipGetDeviceProperties(&device_properties[i], 0));
+    HIP_CHECK(hipGetDeviceProperties(&device_properties[i], 0))
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
       HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     }
@@ -152,17 +152,17 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Basic) {
   }
 
   for (int i = 0; i < device_num; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
 
-    HIP_CHECK(hipMalloc(&A_d[i], buffer_size));
-    HIP_CHECK(hipMemcpy(A_d[i], &A_h[i * kBufferLen], buffer_size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&A_d[i], buffer_size))
+    HIP_CHECK(hipMemcpy(A_d[i], &A_h[i * kBufferLen], buffer_size, hipMemcpyHostToDevice))
 
-    HIP_CHECK(hipStreamCreate(&stream[i]));
+    HIP_CHECK(hipStreamCreate(&stream[i]))
 
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
-  HIP_CHECK(hipHostMalloc(&C_d, (device_num + 1) * sizeof(unsigned long long)));
+  HIP_CHECK(hipHostMalloc(&C_d, (device_num + 1) * sizeof(unsigned long long)))
 
   uint workgroup = GENERATE(32, 64, 128, 256);
 
@@ -174,7 +174,7 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Basic) {
   std::vector<void*> args(device_num * num_kernel_args);
 
   for (int i = 0; i < device_num; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
 
     HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &num_blocks, test_gws, dimBlock.x * dimBlock.y * dimBlock.z,
@@ -185,7 +185,7 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Basic) {
 
     dimGrid.x = device_properties[i].multiProcessorCount * std::min(num_blocks, 32);
 
-    HIP_CHECK(hipMalloc(&B_d[i], dimGrid.x * sizeof(unsigned long long)));
+    HIP_CHECK(hipMalloc(&B_d[i], dimGrid.x * sizeof(unsigned long long)))
 
     args[i * num_kernel_args] = (void*)&A_d[i];
     args[i * num_kernel_args + 1] = (void*)&kBufferLen;
@@ -200,9 +200,9 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Basic) {
     launch_params_list[i].args = &args[i * num_kernel_args];
   }
 
-  HIP_CHECK(hipLaunchCooperativeKernelMultiDevice(launch_params_list, device_num, 0));
+  HIP_CHECK(hipLaunchCooperativeKernelMultiDevice(launch_params_list, device_num, 0))
   for (int i = 0; i < device_num; i++) {
-    HIP_CHECK(hipStreamSynchronize(stream[i]));
+    HIP_CHECK(hipStreamSynchronize(stream[i]))
   }
 
   size_t processed_Dwords = kBufferLen * device_num;
@@ -210,13 +210,13 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Basic) {
 
   delete[] launch_params_list;
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipHostFree(C_d));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipHostFree(C_d))
   for (int i = 0; i < device_num; i++) {
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipFree(A_d[i]));
-    HIP_CHECK(hipFree(B_d[i]));
-    HIP_CHECK(hipStreamDestroy(stream[i]));
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipFree(A_d[i]))
+    HIP_CHECK(hipFree(B_d[i]))
+    HIP_CHECK(hipStreamDestroy(stream[i]))
   }
 
   free(A_h);

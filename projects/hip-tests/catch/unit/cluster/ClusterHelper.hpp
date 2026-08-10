@@ -50,15 +50,15 @@ template <typename T> int* BasicMemoryAllocator<T>::CreateAndResetHostMemory() {
 
 template <typename T> int* BasicMemoryAllocator<T>::CreateAndResetDeviceMemory() {
   int* dptr = nullptr;
-  HIP_CHECK(hipMalloc(&dptr, num_size_));
-  HIP_CHECK(hipMemset(dptr, 0x00, num_size_));
+  HIP_CHECK(hipMalloc(&dptr, num_size_))
+  HIP_CHECK(hipMemset(dptr, 0x00, num_size_))
   return dptr;
 }
 
 template <typename T> void BasicMemoryAllocator<T>::DestroyHostMemory(T* hptr) { free(hptr); }
 
 template <typename T> void BasicMemoryAllocator<T>::DestroyDeviceMemory(T* dptr) {
-  HIP_CHECK(hipFree(dptr));
+  HIP_CHECK(hipFree(dptr))
 }
 
 template <typename T> bool BasicMemoryAllocator<T>::ValidateArrays(T* hptr_in, T* hptr_out) {
@@ -76,6 +76,6 @@ template <typename T> bool BasicMemoryAllocator<T>::ValidateArrays(T* hptr_in, T
 
 inline bool CheckTargetSupport() {
   hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
   return devProp.clusterLaunch != 0;
 }

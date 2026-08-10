@@ -13,12 +13,12 @@ HIP_TEST_CASE(Unit_hipMemAllocHost_Positive) {
   hipCtx_t ctx;
   hipDevice_t device;
 
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipCtxCreate(&ctx, 0, device));
-  HIP_CHECK(hipMemAllocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipCtxCreate(&ctx, 0, device))
+  HIP_CHECK(hipMemAllocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)))
   REQUIRE(host_memory != nullptr);
-  HIP_CHECK(hipHostFree(host_memory));
-  HIP_CHECK(hipCtxDestroy(ctx));
+  HIP_CHECK(hipHostFree(host_memory))
+  HIP_CHECK(hipCtxDestroy(ctx))
 }
 
 HIP_TEST_CASE(Unit_hipMemAllocHost_DataValidation) {
@@ -28,18 +28,18 @@ HIP_TEST_CASE(Unit_hipMemAllocHost_DataValidation) {
   hipCtx_t ctx;
   hipDevice_t device;
 
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipCtxCreate(&ctx, 0, 0));
-  HIP_CHECK(hipMemAllocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipCtxCreate(&ctx, 0, 0))
+  HIP_CHECK(hipMemAllocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)))
 
   write_integer<<<1, 1>>>(host_memory, validation_number);
 
   SECTION("device sync") { HIP_CHECK(hipDeviceSynchronize()); }
 
   SECTION("event sync") {
-    HIP_CHECK(hipEventCreateWithFlags(&event, 0));
-    HIP_CHECK(hipEventRecord(event, nullptr));
-    HIP_CHECK(hipEventSynchronize(event));
+    HIP_CHECK(hipEventCreateWithFlags(&event, 0))
+    HIP_CHECK(hipEventRecord(event, nullptr))
+    HIP_CHECK(hipEventSynchronize(event))
   }
 
   SECTION("stream sync") { HIP_CHECK(hipStreamSynchronize(nullptr)); }
@@ -47,11 +47,11 @@ HIP_TEST_CASE(Unit_hipMemAllocHost_DataValidation) {
   REQUIRE(*host_memory == validation_number);
 
   if (event != nullptr) {
-    HIP_CHECK(hipEventDestroy(event));
+    HIP_CHECK(hipEventDestroy(event))
   }
 
-  HIP_CHECK(hipHostFree(host_memory));
-  HIP_CHECK(hipCtxDestroy(ctx));
+  HIP_CHECK(hipHostFree(host_memory))
+  HIP_CHECK(hipCtxDestroy(ctx))
 }
 
 HIP_TEST_CASE(Unit_hipMemAllocHost_Negative) {
@@ -59,8 +59,8 @@ HIP_TEST_CASE(Unit_hipMemAllocHost_Negative) {
   hipCtx_t ctx;
   hipDevice_t device;
 
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipCtxCreate(&ctx, 0, 0));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipCtxCreate(&ctx, 0, 0))
 
   SECTION("host memory is nullptr") {
     HIP_CHECK_ERROR(hipMemAllocHost(nullptr, sizeof(int)), hipErrorInvalidValue);
@@ -71,7 +71,7 @@ HIP_TEST_CASE(Unit_hipMemAllocHost_Negative) {
                     hipErrorOutOfMemory);
   }
 
-  HIP_CHECK(hipCtxDestroy(ctx));
+  HIP_CHECK(hipCtxDestroy(ctx))
 }
 
 /*
@@ -79,14 +79,14 @@ HIP_TEST_CASE(Unit_hipMemAllocHost_Negative) {
  */
 HIP_TEST_CASE(Unit_hipMemAllocHost_VerifyAccess) {
   int devices_number = 0;
-  HIP_CHECK(hipGetDeviceCount(&devices_number));
+  HIP_CHECK(hipGetDeviceCount(&devices_number))
   std::vector<int*> devices_memories(devices_number);
   std::vector<hipCtx_t> devices_ctxs(devices_number);
 
   for (int device_index = 0; device_index < devices_number; device_index++) {
     int support_unified_adressing = 0;
 
-    HIP_CHECK(hipSetDevice(device_index));
+    HIP_CHECK(hipSetDevice(device_index))
     HIP_CHECK(hipDeviceGetAttribute(&support_unified_adressing, hipDeviceAttributeUnifiedAddressing,
                                     device_index));
 
@@ -96,27 +96,27 @@ HIP_TEST_CASE(Unit_hipMemAllocHost_VerifyAccess) {
   }
 
   for (int device_index = 0; device_index < devices_number; device_index++) {
-    HIP_CHECK(hipSetDevice(device_index));
+    HIP_CHECK(hipSetDevice(device_index))
 
-    HIP_CHECK(hipCtxCreate(&devices_ctxs[device_index], 0, device_index));
+    HIP_CHECK(hipCtxCreate(&devices_ctxs[device_index], 0, device_index))
     HIP_CHECK(
         hipMemAllocHost(reinterpret_cast<void**>(&devices_memories[device_index]), sizeof(int)));
   }
 
-  HIP_CHECK(hipSetDevice(devices_number - 1));
+  HIP_CHECK(hipSetDevice(devices_number - 1))
   write_integer<<<1, 1>>>(devices_memories[0], 0);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int device_index = 1; device_index < devices_number; device_index++) {
-    HIP_CHECK(hipSetDevice(device_index - 1));
+    HIP_CHECK(hipSetDevice(device_index - 1))
     write_integer<<<1, 1>>>(devices_memories[device_index], device_index);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   for (int device_index = 0; device_index < devices_number; device_index++) {
     REQUIRE(*devices_memories[device_index] == device_index);
-    HIP_CHECK(hipFree(devices_memories[device_index]));
-    HIP_CHECK(hipCtxDestroy(devices_ctxs[device_index]));
+    HIP_CHECK(hipFree(devices_memories[device_index]))
+    HIP_CHECK(hipCtxDestroy(devices_ctxs[device_index]))
   }
 }
 
@@ -132,6 +132,6 @@ HIP_TEST_CASE(Unit_hipMemAllocHost_Capture) {
 
   if (capture_error == hipSuccess) {
     REQUIRE(host_memory != nullptr);
-    HIP_CHECK(hipHostFree(host_memory));
+    HIP_CHECK(hipHostFree(host_memory))
   }
 }

@@ -58,18 +58,18 @@ __global__ void KernelMul_MngdMem(int* Hmm, int* Dptr, size_t n) {
 static void LaunchKrnl4(size_t NumElms, int InitVal) {
   int *Hmm = NULL, *Dptr = NULL, blockSize = 64, DataMismatch = 0;
   hipStream_t strm;
-  HIP_CHECK(hipStreamCreate(&strm));
-  HIP_CHECK(hipMallocManaged(&Hmm, (sizeof(int) * NumElms)));
-  HIP_CHECK(hipMalloc(&Dptr, (sizeof(int) * NumElms)));
+  HIP_CHECK(hipStreamCreate(&strm))
+  HIP_CHECK(hipMallocManaged(&Hmm, (sizeof(int) * NumElms)))
+  HIP_CHECK(hipMalloc(&Dptr, (sizeof(int) * NumElms)))
   int* Hstptr = reinterpret_cast<int*>(new int[NumElms]);
   for (size_t i = 0; i < NumElms; ++i) {
     Hstptr[i] = InitVal;
   }
-  HIP_CHECK(hipMemcpy(Dptr, Hstptr, (NumElms * sizeof(int)), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Dptr, Hstptr, (NumElms * sizeof(int)), hipMemcpyHostToDevice))
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
   KrnlWth2MemTypes<<<dimGrid, dimBlock, 0, strm>>>(Hmm, Dptr, NumElms);
-  HIP_CHECK(hipStreamSynchronize(strm));
+  HIP_CHECK(hipStreamSynchronize(strm))
   for (size_t i = 0; i < NumElms; ++i) {
     if (Hmm[i] != (InitVal + 10)) {
       DataMismatch++;
@@ -81,7 +81,7 @@ static void LaunchKrnl4(size_t NumElms, int InitVal) {
   }
   DataMismatch = 0;
   KernelMul_MngdMem<<<dimGrid, dimBlock, 0, strm>>>(Hmm, Dptr, NumElms);
-  HIP_CHECK(hipStreamSynchronize(strm));
+  HIP_CHECK(hipStreamSynchronize(strm))
   // Verifying the result
   for (size_t i = 0; i < NumElms; ++i) {
     if (Hmm[i] != (InitVal * 10)) {
@@ -94,7 +94,7 @@ static void LaunchKrnl4(size_t NumElms, int InitVal) {
   }
   DataMismatch = 0;
   KernelMulAdd_MngdMem<<<dimGrid, dimBlock, 0, strm>>>(Hmm, NumElms);
-  HIP_CHECK(hipStreamSynchronize(strm));
+  HIP_CHECK(hipStreamSynchronize(strm))
   // Verifying the result
 
   for (size_t i = 0; i < NumElms; ++i) {
@@ -106,9 +106,9 @@ static void LaunchKrnl4(size_t NumElms, int InitVal) {
     INFO("Data Mismatch observedafter the Kernel: KernelMul_MngdMem!!\n");
     REQUIRE(false);
   }
-  HIP_CHECK(hipFree(Hmm));
-  HIP_CHECK(hipFree(Dptr));
-  HIP_CHECK(hipStreamDestroy(strm));
+  HIP_CHECK(hipFree(Hmm))
+  HIP_CHECK(hipFree(Dptr))
+  HIP_CHECK(hipStreamDestroy(strm))
   delete[] Hstptr;
 }
 
@@ -121,17 +121,17 @@ HIP_TEST_CASE(Stress_hipMallocManaged_MultiSize) {
   unsigned char *Hmm1 = nullptr, *Hmm2 = nullptr;
   int InitVal = 100, blockSize = 64, DataMismatch = 0;
   hipStream_t strm;
-  HIP_CHECK(hipStreamCreate(&strm));
+  HIP_CHECK(hipStreamCreate(&strm))
   dim3 dimBlock(blockSize, 1, 1);
   for (int i = 1; i < (1024 * 100); ++i) {
-    HIP_CHECK(hipMallocManaged(&Hmm1, i));
-    HIP_CHECK(hipMallocManaged(&Hmm2, i));
+    HIP_CHECK(hipMallocManaged(&Hmm1, i))
+    HIP_CHECK(hipMallocManaged(&Hmm2, i))
     for (int j = 0; j < i; ++j) {
       Hmm1[j] = InitVal;
     }
     dim3 dimGrid((i + blockSize - 1) / blockSize, 1, 1);
     KrnlWth2MemTypesC<<<dimGrid, dimBlock, 0, strm>>>(Hmm2, Hmm1, i);
-    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipStreamSynchronize(strm))
     //  Verifying the results
     for (int k = 0; k < i; ++k) {
       if (Hmm2[k] != (InitVal + INCRMNT)) {
@@ -143,14 +143,14 @@ HIP_TEST_CASE(Stress_hipMallocManaged_MultiSize) {
       IfTestPassed = false;
     }
     DataMismatch = 0;
-    HIP_CHECK(hipFree(Hmm1));
-    HIP_CHECK(hipFree(Hmm2));
+    HIP_CHECK(hipFree(Hmm1))
+    HIP_CHECK(hipFree(Hmm2))
     if (IfTestPassed == false) {
-      HIP_CHECK(hipStreamDestroy(strm));
+      HIP_CHECK(hipStreamDestroy(strm))
       REQUIRE(false);
     }
   }
-  HIP_CHECK(hipStreamDestroy(strm));
+  HIP_CHECK(hipStreamDestroy(strm))
 }
 
 // The following test case tests the behavior of kernel with a HMM memory and
@@ -163,18 +163,18 @@ HIP_TEST_CASE(Stress_hipMallocManaged_KrnlWth2MemTypes) {
   size_t NumElms = (1024 * 1024);
   int *Hptr = new int[NumElms], blockSize = 64, DataMismatch = 0;
   hipStream_t strm;
-  HIP_CHECK(hipStreamCreate(&strm));
-  HIP_CHECK(hipMallocManaged(&Hmm, sizeof(int) * NumElms));
-  HIP_CHECK(hipMalloc(&Dptr, sizeof(int) * NumElms));
+  HIP_CHECK(hipStreamCreate(&strm))
+  HIP_CHECK(hipMallocManaged(&Hmm, sizeof(int) * NumElms))
+  HIP_CHECK(hipMalloc(&Dptr, sizeof(int) * NumElms))
   for (size_t i = 0; i < NumElms; ++i) {
     Hmm[i] = 0;
     Hptr[i] = InitVal;
   }
-  HIP_CHECK(hipMemcpy(Dptr, Hptr, sizeof(int) * NumElms, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Dptr, Hptr, sizeof(int) * NumElms, hipMemcpyHostToDevice))
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
   KrnlWth2MemTypes<<<dimGrid, dimBlock, 0, strm>>>(Hmm, Dptr, NumElms);
-  HIP_CHECK(hipStreamSynchronize(strm));
+  HIP_CHECK(hipStreamSynchronize(strm))
   // Verifying the results
   for (size_t k = 0; k < NumElms; ++k) {
     if (Hmm[k] != (InitVal + 10)) {
@@ -186,8 +186,8 @@ HIP_TEST_CASE(Stress_hipMallocManaged_KrnlWth2MemTypes) {
     IfTestPassed = false;
   }
 
-  HIP_CHECK(hipFree(Hmm));
-  HIP_CHECK(hipFree(Dptr));
+  HIP_CHECK(hipFree(Hmm))
+  HIP_CHECK(hipFree(Dptr))
   delete[] Hptr;
   REQUIRE(IfTestPassed);
 }
@@ -209,14 +209,14 @@ HIP_TEST_CASE(Stress_hipMallocManaged_ExtremeSizes) {
   void* Hmm = NULL;
   size_t totalDevMem = 0, freeDevMem = 0;
   int NumDevs = 0;
-  HIP_CHECK(hipGetDeviceCount(&NumDevs));
+  HIP_CHECK(hipGetDeviceCount(&NumDevs))
   // Testing allocation of extreme and unusual mem values
   for (int i = 0; i < NumDevs; i++) {
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipMemGetInfo(&freeDevMem, &totalDevMem));
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipMemGetInfo(&freeDevMem, &totalDevMem))
     err = hipMallocManaged(&Hmm, 1, hipMemAttachGlobal);
     if (hipSuccess == err) {
-      HIP_CHECK(hipFree(Hmm));
+      HIP_CHECK(hipFree(Hmm))
     } else {
       WARN("Observed error while allocating memory on GPU: " << i);
       WARN(" size 1 with");
@@ -226,7 +226,7 @@ HIP_TEST_CASE(Stress_hipMallocManaged_ExtremeSizes) {
     }
     err = hipMallocManaged(&Hmm, freeDevMem, hipMemAttachGlobal);
     if (hipSuccess == err) {
-      HIP_CHECK(hipFree(Hmm));
+      HIP_CHECK(hipFree(Hmm))
     } else {
       WARN("Observed error while allocating max free memory on GPU: " << i);
       WARN(" with hipMallocManaged() api with flag 'hipMemAttachGlobal'\n");
@@ -235,7 +235,7 @@ HIP_TEST_CASE(Stress_hipMallocManaged_ExtremeSizes) {
     }
     err = hipMallocManaged(&Hmm, (freeDevMem - 1), hipMemAttachGlobal);
     if (hipSuccess == err) {
-      HIP_CHECK(hipFree(Hmm));
+      HIP_CHECK(hipFree(Hmm))
     } else {
       WARN("Observed error while allocating max (free - 1) memory on ");
       WARN("GPU: " << i);
@@ -245,7 +245,7 @@ HIP_TEST_CASE(Stress_hipMallocManaged_ExtremeSizes) {
     }
     err = hipMallocManaged(&Hmm, 1, hipMemAttachHost);
     if (hipSuccess == err) {
-      HIP_CHECK(hipFree(Hmm));
+      HIP_CHECK(hipFree(Hmm))
     } else {
       WARN("Observed error while allocating memory size 1 on GPU: " << i);
       WARN(" with hipMallocManaged() api with flag 'hipMemAttachHost'\n");
@@ -254,7 +254,7 @@ HIP_TEST_CASE(Stress_hipMallocManaged_ExtremeSizes) {
     }
     err = hipMallocManaged(&Hmm, freeDevMem, hipMemAttachHost);
     if (hipSuccess == err) {
-      HIP_CHECK(hipFree(Hmm));
+      HIP_CHECK(hipFree(Hmm))
     } else {
       WARN("Observed error while allocating max free memory on GPU: " << i);
       WARN(" with hipMallocManaged() api with flag 'hipMemAttachHost'\n");
@@ -263,7 +263,7 @@ HIP_TEST_CASE(Stress_hipMallocManaged_ExtremeSizes) {
     }
     err = hipMallocManaged(&Hmm, (freeDevMem - 1), hipMemAttachHost);
     if (hipSuccess == err) {
-      HIP_CHECK(hipFree(Hmm));
+      HIP_CHECK(hipFree(Hmm))
     } else {
       WARN(
           "Observed error while allocating max (freeDevMem - 1) memory"

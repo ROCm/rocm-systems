@@ -30,12 +30,12 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Positive_AccessPolicyWindow) {
   const auto miss_prop = GENERATE(from_range(begin(kAccessProperties), end(kAccessProperties) - 1));
 
   int *A_d, *B_d, *C_d;
-  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N));
+  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N))
 
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipKernelNodeParams node_params{};
   node_params.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
@@ -47,7 +47,7 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Positive_AccessPolicyWindow) {
   node_params.kernelParams = reinterpret_cast<void**>(kernel_params);
 
   hipGraphNode_t graph_node;
-  HIP_CHECK(hipGraphAddKernelNode(&graph_node, graph, nullptr, 0, &node_params));
+  HIP_CHECK(hipGraphAddKernelNode(&graph_node, graph, nullptr, 0, &node_params))
 
   int max_window_size;
   HIP_CHECK(
@@ -70,23 +70,23 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Positive_AccessPolicyWindow) {
 
   REQUIRE(CompareAccessPolicyWindow(node_attribute_1, node_attribute_2));
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
-  HIP_CHECK(hipFree(C_d));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
+  HIP_CHECK(hipFree(C_d))
 }
 
 HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative) {
   constexpr int N = 1024;
 
   int *A_d, *B_d, *C_d;
-  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N));
+  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N))
 
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipKernelNodeParams node_params{};
   node_params.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
@@ -98,7 +98,7 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative) {
   node_params.kernelParams = reinterpret_cast<void**>(kernel_params);
 
   hipGraphNode_t graph_node;
-  HIP_CHECK(hipGraphAddKernelNode(&graph_node, graph, nullptr, 0, &node_params));
+  HIP_CHECK(hipGraphAddKernelNode(&graph_node, graph, nullptr, 0, &node_params))
 
   hipKernelNodeAttrValue node_attribute_1;
   node_attribute_1.cooperative = 2;
@@ -112,23 +112,23 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative) {
 
   REQUIRE(node_attribute_1.cooperative == node_attribute_2.cooperative);
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
-  HIP_CHECK(hipFree(C_d));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
+  HIP_CHECK(hipFree(C_d))
 }
 
 HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters) {
   constexpr int N = 1024;
 
   int *A_d, *B_d, *C_d;
-  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N));
+  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N))
 
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipKernelNodeParams node_params{};
   node_params.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
@@ -140,7 +140,7 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters) {
   node_params.kernelParams = reinterpret_cast<void**>(kernel_params);
 
   hipGraphNode_t graph_node;
-  HIP_CHECK(hipGraphAddKernelNode(&graph_node, graph, nullptr, 0, &node_params));
+  HIP_CHECK(hipGraphAddKernelNode(&graph_node, graph, nullptr, 0, &node_params))
 
   int max_window_size;
   HIP_CHECK(
@@ -162,7 +162,7 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters) {
 
   SECTION("node is not a kernel node") {
     hipGraphNode_t empty_node;
-    HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, nullptr, 0));
+    HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, nullptr, 0))
     HIP_CHECK_ERROR(hipGraphKernelNodeSetAttribute(
                         empty_node, hipKernelNodeAttributeAccessPolicyWindow, &node_attribute),
                     hipErrorInvalidValue);
@@ -210,9 +210,9 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters) {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
-  HIP_CHECK(hipFree(C_d));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
+  HIP_CHECK(hipFree(C_d))
 }

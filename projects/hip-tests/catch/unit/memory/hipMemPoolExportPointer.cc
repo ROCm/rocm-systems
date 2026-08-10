@@ -46,10 +46,10 @@ HIP_TEST_CASE(Unit_hipMemPoolExportPointer_Negative) {
   pool_props.location.id = 0;
   pool_props.location.type = hipMemLocationTypeDevice;
   pool_props.handleTypes = handleType;
-  HIP_CHECK(hipMemPoolCreate(&mempoolPfd, &pool_props));
+  HIP_CHECK(hipMemPoolCreate(&mempoolPfd, &pool_props))
   int* A_d;
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mempoolPfd, 0));
-  HIP_CHECK(hipStreamSynchronize(0));
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mempoolPfd, 0))
+  HIP_CHECK(hipStreamSynchronize(0))
   HIP_CHECK(hipMemPoolExportToShareableHandle(&sharedHandle, mempoolPfd,
                                               handleType, 0));
   SECTION("Passing nullptr as export data") {
@@ -58,8 +58,8 @@ HIP_TEST_CASE(Unit_hipMemPoolExportPointer_Negative) {
   SECTION("Passing nullptr as device memory ptr") {
     HIP_CHECK_ERROR(hipMemPoolExportPointer(&ptrExp, nullptr), hipErrorInvalidValue);
   }
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)));
-  HIP_CHECK(hipMemPoolDestroy(mempoolPfd));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)))
+  HIP_CHECK(hipMemPoolDestroy(mempoolPfd))
 }
 
 /**

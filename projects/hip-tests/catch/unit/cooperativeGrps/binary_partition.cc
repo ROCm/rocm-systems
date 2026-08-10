@@ -36,11 +36,11 @@ HIP_TEST_CASE(Unit_cg_binary_part) {
 
   int *data, *odd_res, *even_res;
 
-  HIP_CHECK(hipMalloc(&data, sizeof(int) * warp_size));
-  HIP_CHECK(hipMalloc(&odd_res, sizeof(int) * warp_size));
-  HIP_CHECK(hipMalloc(&even_res, sizeof(int) * warp_size));
+  HIP_CHECK(hipMalloc(&data, sizeof(int) * warp_size))
+  HIP_CHECK(hipMalloc(&odd_res, sizeof(int) * warp_size))
+  HIP_CHECK(hipMalloc(&even_res, sizeof(int) * warp_size))
 
-  HIP_CHECK(hipMemset(data, 0, sizeof(int) * warp_size));
+  HIP_CHECK(hipMemset(data, 0, sizeof(int) * warp_size))
 
   SECTION("odd_even part") {
     std::vector<int> input;
@@ -55,11 +55,11 @@ HIP_TEST_CASE(Unit_cg_binary_part) {
         input.push_back(11);
     }
 
-    HIP_CHECK(hipMemcpy(data, input.data(), sizeof(int) * input.size(), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(res, output.data(), sizeof(int) * output.size(), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(data, input.data(), sizeof(int) * input.size(), hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(res, output.data(), sizeof(int) * output.size(), hipMemcpyHostToDevice))
 
     binary_part_odd_even_val<<<1, warp_size>>>(data, res);
-    HIP_CHECK(hipMemcpy(output.data(), res, sizeof(int) * output.size(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(output.data(), res, sizeof(int) * output.size(), hipMemcpyDeviceToHost))
     for (size_t i = 0; i < warp_size; i++) {
       if (i < 16) {
         INFO("Output <16, index: " << i << " output: " << output[i]);
@@ -78,16 +78,16 @@ HIP_TEST_CASE(Unit_cg_binary_part) {
       input.push_back(i + 1);
     }
 
-    HIP_CHECK(hipMemcpy(data, input.data(), sizeof(int) * input.size(), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(data, input.data(), sizeof(int) * input.size(), hipMemcpyHostToDevice))
     binary_part_tiled_odd_even_val<<<1, warp_size>>>(data, odd_res, even_res);
     int odd_output, even_output;
-    HIP_CHECK(hipMemcpy(&odd_output, odd_res, sizeof(int), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(&even_output, even_res, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&odd_output, odd_res, sizeof(int), hipMemcpyDeviceToHost))
+    HIP_CHECK(hipMemcpy(&even_output, even_res, sizeof(int), hipMemcpyDeviceToHost))
     REQUIRE(odd_output == 1);
     REQUIRE(even_output == 1);
   }
 
-  HIP_CHECK(hipFree(data));
-  HIP_CHECK(hipFree(odd_res));
-  HIP_CHECK(hipFree(even_res));
+  HIP_CHECK(hipFree(data))
+  HIP_CHECK(hipFree(odd_res))
+  HIP_CHECK(hipFree(even_res))
 }
