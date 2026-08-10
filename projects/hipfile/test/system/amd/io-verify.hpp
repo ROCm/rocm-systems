@@ -15,7 +15,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cassert>
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
@@ -259,7 +258,7 @@ inline void
 launchAndVerify(int32_t *start, size_t alloc_n, int32_t *arr, size_t n, dim3 grid, dim3 workgroup,
                 size_t modify_stride = 1)
 {
-    assert(modify_stride != 0 && "modify_stride must be >= 1");
+    ASSERT_NE(0U, modify_stride) << "modify_stride must be >= 1";
     BadIdxFlag bad;
     BadIdxFlag bad_slack;
     ASSERT_TRUE(bad.allocated() && bad_slack.allocated()) << "kernel bad-index flag allocation failed";
@@ -295,7 +294,7 @@ inline void
 launchAndVerifyBytes(unsigned char *start, size_t alloc_bytes, unsigned char *arr, size_t n, dim3 grid,
                      dim3 workgroup, size_t modify_stride)
 {
-    assert(modify_stride != 0 && "modify_stride must be >= 1");
+    ASSERT_NE(0U, modify_stride) << "modify_stride must be >= 1";
     BadIdxFlag bad;
     BadIdxFlag bad_slack;
     ASSERT_TRUE(bad.allocated() && bad_slack.allocated()) << "kernel bad-index flag allocation failed";

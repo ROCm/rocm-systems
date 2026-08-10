@@ -5,7 +5,6 @@
 
 #pragma once
 
-#include <cassert>
 #include <cstddef>
 #include <gtest/gtest.h>
 
@@ -21,7 +20,7 @@ inline constexpr unsigned char kByteFileSlack = 0x55;
 inline void
 assertBytesModified(const unsigned char *arr, size_t n, size_t modify_stride)
 {
-    assert(modify_stride != 0 && "modify_stride must be >= 1");
+    ASSERT_NE(0U, modify_stride) << "modify_stride must be >= 1";
     for (size_t i = 0; i < n; ++i) {
         const unsigned char want = (i % modify_stride == 0) ? kByteModified : kByteEntry;
         ASSERT_EQ(want, arr[i]) << "byte modify-policy mismatch at index " << i;

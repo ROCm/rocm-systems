@@ -5,7 +5,6 @@
 
 #pragma once
 
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <gtest/gtest.h>
@@ -36,7 +35,7 @@ assertDoubledPattern(const int32_t *arr, size_t n)
 inline void
 assertModifiedPattern(const int32_t *arr, size_t n, size_t modify_stride)
 {
-    assert(modify_stride != 0 && "modify_stride must be >= 1");
+    ASSERT_NE(0U, modify_stride) << "modify_stride must be >= 1";
     for (size_t i = 0; i < n; ++i) {
         const int32_t seed = kPatternBase + static_cast<int32_t>(i);
         const int32_t want = (i % modify_stride == 0) ? 2 * seed : seed;
