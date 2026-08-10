@@ -403,8 +403,7 @@ stop_context(rocprofiler_context_id_t idx)
                 rocprofiler::spm::stop_context(const_cast<context*>(_expected));
 
             if(_expected->device_thread_trace) _expected->device_thread_trace->stop_context();
-            if(_expected->dispatch_thread_trace)
-                _expected->dispatch_thread_trace->stop_context();
+            if(_expected->dispatch_thread_trace) _expected->dispatch_thread_trace->stop_context();
 
             bool success = itr.compare_exchange_strong(_expected, nullptr);
 
