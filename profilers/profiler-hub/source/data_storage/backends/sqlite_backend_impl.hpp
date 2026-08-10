@@ -225,14 +225,20 @@ database_backend<SqlitePolicy>::initialize_schema(profiler_hub::version_t schema
 
     for(const char* schema_content : version_it->sql)
     {
+        // A missing schema here means a broken build, so stop instead of a partial DB.
+        if(schema_content == nullptr)
+        {
+            throw std::runtime_error("Missing compiled-in rocpd schema for version " +
+                                     resolved_version.to_string());
+        }
+
         const std::string query =
             get_schema_query(schema_content, m_uuid, resolved_version);
         if(query.empty())
         {
-            LOG_ERROR("Failed to get schema query for version {}",
-                      resolved_version.to_string());
             continue;
         }
+
         validate_sqlite3_result(SqlitePolicy::exec(m_sqlite3, query.c_str()),
                                 query.c_str(),
                                 std::string("Invalid schema, init database failed!"));

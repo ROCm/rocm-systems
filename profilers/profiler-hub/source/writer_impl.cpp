@@ -64,7 +64,7 @@ writer_t::impl::create_writer_context(const std::unique_ptr<storage_t>& storage)
 
     ctx->validator = std::make_shared<insert_validator>(ctx->registry);
 
-    ctx->backend->initialize_schema(storage->m_impl->get_storage_version());
+    ctx->backend->initialize_schema(storage->get_storage_version());
 
     return ctx;
 }
