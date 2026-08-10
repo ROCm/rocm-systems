@@ -34,9 +34,14 @@
     "llama_rms_norm::default"
   ],
   "llama": [
+    "llama.gfx942.backend_ops.FLASH_ATTN_EXT.09f30cac3778",
+    "llama.gfx942.backend_ops.FLASH_ATTN_EXT.2dce6045f861",
+    "llama.gfx942.backend_ops.FLASH_ATTN_EXT.b951a29db5dd",
     "llama.gfx942.backend_ops.LIGHTNING_INDEXER.28d7def07117",
     "llama.gfx942.backend_ops.MUL_MAT.017115bdd15b",
+    "llama.gfx942.backend_ops.MUL_MAT.12d6ef2eb102",
     "llama.gfx942.backend_ops.MUL_MAT.38225d8678d3",
+    "llama.gfx942.backend_ops.MUL_MAT.3f2054def40b",
     "llama.gfx942.backend_ops.MUL_MAT.462ccb738b08",
     "llama.gfx942.backend_ops.MUL_MAT.48f89386e558",
     "llama.gfx942.backend_ops.MUL_MAT.5a436936375c",

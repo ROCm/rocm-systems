@@ -61,6 +61,7 @@
     "llama.gfx1100.backend_ops.LIGHTNING_INDEXER.28d7def07117",
     "llama.gfx1100.backend_ops.MUL_MAT_ID.4c6f0c369254",
     "llama.gfx1100.backend_ops.MUL_MAT_ID.501e10751a9a",
+    "llama.gfx1100.backend_ops.MUL_MAT_ID.8e571d7d711d",
     "llama.gfx1100.backend_ops.MUL_MAT_ID.dbedbadd142a",
     "llama.gfx1100.backend_ops.MUL_MAT_ID_FUSION.b3d0befaa714",
     "llama.gfx1100.backend_ops.MUL_MAT_ID_FUSION.dfb1ed5ca4e9",

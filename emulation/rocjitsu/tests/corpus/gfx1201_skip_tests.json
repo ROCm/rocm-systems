@@ -66,6 +66,9 @@
     "rocblas_sgemm::square_8x8"
   ],
   "llama": [
+    "llama.gfx1201.backend_ops.CPY.2ddd8ded45d8",
+    "llama.gfx1201.backend_ops.FLASH_ATTN_EXT.1e9cab991d16",
+    "llama.gfx1201.backend_ops.FLASH_ATTN_EXT.6648724df58d",
     "llama.gfx1201.backend_ops.GATED_DELTA_NET.05b63a4322c6",
     "llama.gfx1201.backend_ops.GATED_DELTA_NET.5615f586b1ca",
     "llama.gfx1201.backend_ops.GATED_DELTA_NET.5a41ca1b14ff",
@@ -109,6 +112,7 @@
     "llama.gfx1201.backend_ops.MUL_MAT.965b6be4d678",
     "llama.gfx1201.backend_ops.MUL_MAT.9a612f547630",
     "llama.gfx1201.backend_ops.MUL_MAT.9c792f73463d",
+    "llama.gfx1201.backend_ops.MUL_MAT.9f4865116d4b",
     "llama.gfx1201.backend_ops.MUL_MAT.a78a57b1b164",
     "llama.gfx1201.backend_ops.MUL_MAT.adeb0e6159c1",
     "llama.gfx1201.backend_ops.MUL_MAT.af983043c5ee",
@@ -136,6 +140,7 @@
     "llama.gfx1201.backend_ops.MUL_MAT_ID.501e10751a9a",
     "llama.gfx1201.backend_ops.MUL_MAT_ID.5bba4e9ee5fa",
     "llama.gfx1201.backend_ops.MUL_MAT_ID.6c5a0824e9d0",
+    "llama.gfx1201.backend_ops.MUL_MAT_ID.8e571d7d711d",
     "llama.gfx1201.backend_ops.MUL_MAT_ID.ce7f91ceb634",
     "llama.gfx1201.backend_ops.MUL_MAT_ID.dbedbadd142a",
     "llama.gfx1201.backend_ops.MUL_MAT_ID.debb5fffb653",
