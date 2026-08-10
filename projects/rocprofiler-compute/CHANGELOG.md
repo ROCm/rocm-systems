@@ -23,6 +23,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) are no longer allowed with PC-sampling-only profiling; the run now fails with an error telling the user to drop the ML API tracing flag or add a counter block, since without counters there is nothing to correlate the markers against.
 
+* Changed the PC-sampling CSV output filename from `pc_sampling.csv` to `pc_sampling_summary.csv`.
+
 ### Removed
 
 * Removed the CSV profile output backend and the `--format-rocprof-output` profile mode option. Profiling now always uses the `rocpd` output format, which was already the default.
