@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -488,9 +489,22 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
         const uint64_t saved_pc = active->pc;
         active->set_ttmp(0, static_cast<uint32_t>(saved_pc));
         active->set_ttmp(1, static_cast<uint32_t>(saved_pc >> 32) | (trap_id << 16));
-        active->set_ttmp(8, active->wg_id());
-        active->set_ttmp(9, 0);
-        active->set_ttmp(10, 0);
+        // Dispatch identity. Which TTMPs carry it is architecture-specific and
+        // this must not disagree with what CWSR publishes for the same wave, or
+        // rocm-dbgapi correlates the stopped wave to the wrong workgroup.
+        //
+        // On the profiles where the SPI puts workgroup ids in TTMP6/7/9,
+        // init_wavefront_regs() already seeded them at dispatch and trap entry
+        // has nothing to add -- zeroing TTMP9 here destroyed one of them. The
+        // rest use the gfx9 layout, TTMP8/9/10 = workgroup id x/y/z, which is
+        // also what CWSR serializes (cwsr.cpp writes wg_coord into ttmp[8..10]).
+        // Writing the flat wg_id() into TTMP8 disagreed with that too.
+        if (!isa_properties(this->arch()).uses_ttmp_workgroup_ids) {
+          const auto &wg = active->wg_coord();
+          active->set_ttmp(8, wg[0]);
+          active->set_ttmp(9, wg[1]);
+          active->set_ttmp(10, wg[2]);
+        }
         active->set_ttmp(11, ((active->aql_packet_id() & 0x1FFFFFFu) << 6) |
                                  (active->wave_in_group() & 0x3Fu));
         active->set_ttmp(12, active->status_raw());

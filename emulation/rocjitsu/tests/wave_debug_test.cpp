@@ -326,6 +326,35 @@ TEST(WaveDebugTest, RuntimeAndDebuggerSuspensionDoNotClobberEachOther) {
   EXPECT_TRUE(wave->debug_paused());
 }
 
+// Trap entry and CWSR must agree on where a wave's dispatch identity lives, or
+// rocm-dbgapi correlates the stopped wave to the wrong workgroup. On the gfx9
+// layout that is TTMP8/9/10 = workgroup id x/y/z, which is exactly what
+// cwsr.cpp serializes; trap entry used to write the flat wg_id() into TTMP8 and
+// zero the other two.
+TEST(WaveDebugTest, TrapEntryPublishesTheWorkgroupCoordinateCwsrSerializes) {
+  WaveDebugFixture fx;
+  fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
+  fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
+  fx.gpu_mem.write32(kTrapHandlerAddr, kSEndpgm);
+  fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
+  });
+
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+  wf->set_wg_coord(3, 5, 7);
+
+  fx.cu->step();
+  ASSERT_TRUE(wf->in_trap_handler());
+
+  const auto &wg = wf->wg_coord();
+  EXPECT_EQ(wf->ttmp(8), wg[0]);
+  EXPECT_EQ(wf->ttmp(9), wg[1]);
+  EXPECT_EQ(wf->ttmp(10), wg[2]);
+  EXPECT_EQ(wf->ttmp(9), 5u) << "the y coordinate was zeroed on trap entry";
+  EXPECT_EQ(wf->ttmp(10), 7u) << "the z coordinate was zeroed on trap entry";
+}
+
 // TRAPSTS.EXCP is architecturally sticky, so "the bit changed" is not the same
 // question as "this instruction raised the cause". Delivering on the rising
 // edge went permanently quiet for any cause already latched -- including every
