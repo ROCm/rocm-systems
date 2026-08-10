@@ -86,8 +86,8 @@ void
 metadata_initialize_comm_data_pmc()
 {
     // find the proper values for a following definitions
-    [[maybe_unused]] size_t const          EVENT_CODE       = 0;
-    [[maybe_unused]] size_t const          INSTANCE_ID      = 0;
+    [[maybe_unused]] const size_t          EVENT_CODE       = 0;
+    [[maybe_unused]] const size_t          INSTANCE_ID      = 0;
     [[maybe_unused]] constexpr const char* LONG_DESCRIPTION = "";
     [[maybe_unused]] constexpr const char* COMPONENT        = "";
     [[maybe_unused]] constexpr const char* BLOCK            = "";

@@ -107,7 +107,7 @@ TEST_F(session_backend_policy_test, start_and_stop_sequence_is_mockable)
     auto* session_ptr = session.get();
 
     {
-        ::testing::InSequence const seq;
+        const ::testing::InSequence seq;
         EXPECT_CALL(*g_mock_session_backend, new_trace())
             .WillOnce(::testing::Return(::testing::ByMove(std::move(session))));
         EXPECT_CALL(*session_ptr, SetOnErrorCallback(::testing::_));
@@ -119,7 +119,7 @@ TEST_F(session_backend_policy_test, start_and_stop_sequence_is_mockable)
         rocprofsys::core::start_tracing_session(backend, trace_cfg, 17, [](auto) {});
 
     {
-        ::testing::InSequence const seq;
+        const ::testing::InSequence seq;
         EXPECT_CALL(*g_mock_session_backend, flush_track_events());
         EXPECT_CALL(*session_ptr, FlushBlocking());
         EXPECT_CALL(*session_ptr, StopBlocking());
@@ -216,7 +216,7 @@ TEST_F(perfetto_engine_backend_policy_test,
     rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
 
     {
-        ::testing::InSequence const seq;
+        const ::testing::InSequence seq;
         EXPECT_CALL(*g_mock_perfetto_backend, start_cached_session(::testing::_))
             .WillOnce(::testing::Return(&m_session));
         EXPECT_CALL(*g_mock_perfetto_backend, flush_and_stop(&m_session));
