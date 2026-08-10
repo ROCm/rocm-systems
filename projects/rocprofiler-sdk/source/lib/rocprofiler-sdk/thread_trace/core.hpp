@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
@@ -38,13 +37,11 @@
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <atomic>
-#include <condition_variable>
 #include <cstdint>
 #include <future>
 #include <map>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <tuple>
@@ -186,14 +183,8 @@ private:
     std::unordered_map<hsa_agent_t, std::unique_ptr<ThreadTracerAgent>>     agents{};
     std::unordered_map<rocprofiler_agent_id_t, thread_trace_parameter_pack> params{};
 
-    std::shared_mutex                            agents_map_mut{};
-    std::atomic<int>                             post_move_data{0};
-    bool                                         accepting_dispatches{false};
-    common::Synchronized<std::optional<int64_t>> client        = {};
-    std::mutex                                   lifecycle_mut = {};
-    std::shared_mutex                            admission_mut = {};
-    std::mutex                                   post_move_mut = {};
-    std::condition_variable                      post_move_cv  = {};
+    std::shared_mutex agents_map_mut{};
+    std::atomic<int>  post_move_data{0};
 };
 
 class DeviceThreadTracer

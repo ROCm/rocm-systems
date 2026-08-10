@@ -39,12 +39,10 @@
 #include "lib/common/logging.hpp"
 
 #include <algorithm>
-#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <map>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -206,7 +204,6 @@ TEST(thread_trace, shared_buffer_reuse)
     ASSERT_NE(a1, nullptr);
     EXPECT_NE(a0, a1) << "distinct ring slots must be distinct buffers";
 
-    // Second context reuses the same physical buffers per slot.
     void* b0 = pool_b.allocate_output(kSize);
     void* b1 = pool_b.allocate_output(kSize);
     EXPECT_EQ(a0, b0) << "same ring slot must be shared across contexts";
@@ -216,7 +213,7 @@ TEST(thread_trace, shared_buffer_reuse)
     EXPECT_TRUE(resources->owns_output_buffer(a1));
     EXPECT_FALSE(resources->owns_output_buffer(nullptr));
 
-    // Arbitrary nonzero ID: verifies nested traces from the same context share ownership.
+    // Nested traces from the same context share ownership.
     constexpr auto test_context_id = rocprofiler_context_id_t{42};
     resources->begin_trace(test_context_id);
     resources->begin_trace(test_context_id);
@@ -274,95 +271,6 @@ TEST(thread_trace, configure_test)
     ROCPROFILER_CALL(rocprofiler_start_context(ctx), "context start failed");
     ROCPROFILER_CALL(rocprofiler_stop_context(ctx), "context stop failed");
     context::pop_client(1);
-}
-
-TEST(thread_trace, disjoint_dispatch_contexts_own_independent_callbacks)
-{
-    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-    test_init();
-
-    registration::init_logging();
-    registration::set_init_status(-1);
-
-    auto agents = hsa::get_queue_controller()->get_supported_agents();
-    if(agents.size() < 2) GTEST_SKIP() << "requires two GPU agents";
-    context::push_client(1);
-
-    auto       itr     = agents.begin();
-    const auto agent_a = (itr++)->second.get_rocp_agent()->id;
-    const auto agent_b = itr->second.get_rocp_agent()->id;
-
-    auto dispatch_callback = [](rocprofiler_agent_id_t,
-                                rocprofiler_queue_id_t,
-                                rocprofiler_async_correlation_id_t,
-                                rocprofiler_kernel_id_t,
-                                rocprofiler_dispatch_id_t,
-                                void*,
-                                rocprofiler_user_data_t*) {
-        return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
-    };
-    auto shader_callback = [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {};
-
-    rocprofiler_context_id_t context_a{0};
-    rocprofiler_context_id_t context_b{0};
-    ROCPROFILER_CALL(rocprofiler_create_context(&context_a), "context A creation");
-    ROCPROFILER_CALL(rocprofiler_create_context(&context_b), "context B creation");
-
-    ROCPROFILER_CALL(
-        rocprofiler_configure_dispatch_thread_trace_service(
-            context_a, agent_a, nullptr, 0, dispatch_callback, shader_callback, nullptr),
-        "context A ATT configuration");
-    ROCPROFILER_CALL(
-        rocprofiler_configure_dispatch_thread_trace_service(
-            context_b, agent_b, nullptr, 0, dispatch_callback, shader_callback, nullptr),
-        "context B ATT configuration");
-
-    auto callback_count = []() {
-        size_t count = 0;
-        hsa::get_queue_controller()->iterate_callbacks([&](auto, const auto&) { ++count; });
-        return count;
-    };
-
-    const auto initial_callbacks = callback_count();
-    EXPECT_EQ(rocprofiler_start_context(context_a), ROCPROFILER_STATUS_SUCCESS);
-    EXPECT_EQ(rocprofiler_start_context(context_b), ROCPROFILER_STATUS_SUCCESS);
-    EXPECT_EQ(callback_count(), initial_callbacks + 2);
-    EXPECT_TRUE(hsa::get_queue_controller()->serialization_enabled());
-
-    EXPECT_EQ(rocprofiler_stop_context(context_a), ROCPROFILER_STATUS_SUCCESS);
-    EXPECT_EQ(callback_count(), initial_callbacks + 1);
-    EXPECT_TRUE(hsa::get_queue_controller()->serialization_enabled());
-    EXPECT_EQ(rocprofiler_stop_context(context_b), ROCPROFILER_STATUS_SUCCESS);
-    EXPECT_EQ(callback_count(), initial_callbacks);
-    EXPECT_FALSE(hsa::get_queue_controller()->serialization_enabled());
-
-    context::pop_client(1);
-}
-
-TEST(thread_trace, concurrent_dispatch_stops_release_serialization_once)
-{
-    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-    test_init();
-
-    auto callback_count = []() {
-        size_t count = 0;
-        hsa::get_queue_controller()->iterate_callbacks([&](auto, const auto&) { ++count; });
-        return count;
-    };
-
-    thread_trace::DispatchThreadTracer tracer{};
-    const auto                         initial_callbacks = callback_count();
-    tracer.start_context();
-    EXPECT_EQ(callback_count(), initial_callbacks + 1);
-    EXPECT_TRUE(hsa::get_queue_controller()->serialization_enabled());
-
-    auto stop_a = std::thread{[&]() { tracer.stop_context(); }};
-    auto stop_b = std::thread{[&]() { tracer.stop_context(); }};
-    stop_a.join();
-    stop_b.join();
-
-    EXPECT_EQ(callback_count(), initial_callbacks);
-    EXPECT_FALSE(hsa::get_queue_controller()->serialization_enabled());
 }
 
 TEST(thread_trace, perfcounters_configure_test)

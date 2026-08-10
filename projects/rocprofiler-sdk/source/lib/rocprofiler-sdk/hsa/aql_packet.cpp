@@ -167,9 +167,7 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
         return status;
     }
 
-    // Device (SQTT output) buffer: the per-agent resource handle is the single source.
-    // The pool owns the packet-local slot cursor, so every context maps its slot i to
-    // the same shared per-agent allocation.
+    // Device (SQTT output) buffer: borrowed from the per-agent resource handle.
     void* shared = pool.allocate_output(size);
     if(shared == nullptr) return HSA_STATUS_ERROR;
 
