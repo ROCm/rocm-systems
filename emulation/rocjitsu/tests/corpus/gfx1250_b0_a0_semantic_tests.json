@@ -12,6 +12,7 @@
     "wmma_scale_regular_test",
     "wmma_scale16_m16_test",
     "wmma_scale16_m32_test",
+    "wmma_split_f16_test",
     "wmma_split_f32_test",
     "wmma_split_fp4_test"
   ]

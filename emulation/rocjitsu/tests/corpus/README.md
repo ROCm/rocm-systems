@@ -9,17 +9,16 @@ deliberate copy-path fix through runtime comparison.
 These source-coverage programs are intentionally outside this qualification
 until their translations or semantic fixtures are ready:
 
-- `barrier_id_minus1_scc_test` (expected offline rewrites: 1)
-- `barrier_id_minus2_scc_test` (expected offline rewrites: 1)
-- `flat_scratch_scalar_hi_test` (expected offline rewrites: 2)
-- `flat_scratch_scalar_lo_test` (expected offline rewrites: 2)
-- `flat_scratch_vector_hi_test` (expected offline rewrites: 1)
-- `flat_scratch_vector_lo_test` (expected offline rewrites: 1)
-- `fp8_e5m3_pack_test` (expected offline rewrites: 4)
-- `monitor_sleep_bounded_test` (expected offline rewrites: 0)
-- `monitor_sleep_unbounded_test` (expected offline rewrites: 1)
-- `permute_pk16_test` (expected offline rewrites: 3)
-- `wmma_split_f16_test` (expected offline rewrites: 4)
+- `barrier_id_minus1_scc_test`
+- `barrier_id_minus2_scc_test`
+- `flat_scratch_scalar_hi_test`
+- `flat_scratch_scalar_lo_test`
+- `flat_scratch_vector_hi_test`
+- `flat_scratch_vector_lo_test`
+- `fp8_e5m3_pack_test`
+- `monitor_sleep_bounded_test`
+- `monitor_sleep_unbounded_test`
+- `permute_pk16_test`
 
 The offline translator currently rejects those forms as unsupported. They are
 not silently accepted or treated as passing translations.

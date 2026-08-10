@@ -37,6 +37,9 @@
     "wmma_scale_regular_test": {
       "instructions_requiring_rewrite": 11
     },
+    "wmma_split_f16_test": {
+      "instructions_requiring_rewrite": 6
+    },
     "wmma_split_f32_test": {
       "instructions_requiring_rewrite": 7
     },
