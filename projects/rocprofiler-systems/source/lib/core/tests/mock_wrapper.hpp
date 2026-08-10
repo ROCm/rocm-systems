@@ -36,9 +36,11 @@ enum kind_callback_tracing
     CALLBACK_TRACING_ROCDECODE_API          = 18,
     CALLBACK_TRACING_ROCJPEG_API            = 19,
     CALLBACK_TRACING_HIP_STREAM             = 20,
-    CALLBACK_TRACING_LAST                   = 22,
-    CALLBACK_TRACING_ROCSHMEM_API           = 23,
-    CALLBACK_TRACING_HIPFILE_API            = 24,
+    CALLBACK_TRACING_ROCSHMEM_API           = 21,
+    CALLBACK_TRACING_HIPFILE_API            = 22,
+    // One-past-the-max sentinel; mirrors ROCPROFILER_CALLBACK_TRACING_LAST's role as an
+    // exclusive upper bound (see metadata_registry.cpp resize/loop usage).
+    CALLBACK_TRACING_LAST = 23,
 };
 
 enum kind_buffer_tracing

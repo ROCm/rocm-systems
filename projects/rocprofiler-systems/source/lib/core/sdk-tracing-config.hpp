@@ -49,11 +49,13 @@ struct version_info
     // compile-time and runtime version gates can share the same comparison style.
     [[nodiscard]] static constexpr version_info from_formatted(std::uint32_t formatted)
     {
-        constexpr auto major_multiplier = 10000u;
-        constexpr auto minor_multiplier = 100u;
-        return version_info{ formatted / major_multiplier,
-                             (formatted / minor_multiplier) % 100u,
-                             formatted % minor_multiplier };
+        constexpr auto major_multiplier          = 10000u;
+        constexpr auto minor_multiplier          = 100u;
+        constexpr auto version_component_modulus = 100u;  // keep 2 digits
+        return version_info{ .major = formatted / major_multiplier,
+                             .minor = (formatted / minor_multiplier) %
+                                      version_component_modulus,
+                             .patch = formatted % version_component_modulus };
     }
 
     constexpr auto operator<=>(const version_info&) const = default;
@@ -152,7 +154,7 @@ private:
         std::optional<TracingNameTable>& cached_tracing_names,
         LoadTracingNamesFn&&             load_tracing_names);
 
-    static void finalize_and_throw(std::string_view message_for_exception);
+    [[noreturn]] static void finalize_and_throw(std::string_view exception_message);
 
     struct operation_options
     {
@@ -205,12 +207,12 @@ sdk_tracing_config<SdkApi, Externals>::get_setting_name(const std::string& value
     constexpr auto prefix             = std::string_view{ "rocprofsys_" };
     const auto     lower_setting_name = to_lower(value);
 
-    if(value.starts_with(prefix))
+    if(lower_setting_name.starts_with(prefix))
     {
-        return value.substr(prefix.length());
+        return lower_setting_name.substr(prefix.length());
     }
 
-    return value;
+    return lower_setting_name;
 }
 
 // ─── Static data members ─────────────────────────────────────────────────────
@@ -243,7 +245,7 @@ version_info sdk_tracing_config<SdkApi, Externals>::s_version{};
 
 template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-void
+[[noreturn]] void
 sdk_tracing_config<SdkApi, Externals>::finalize_and_throw(
     std::string_view exception_message)
 {
@@ -358,11 +360,9 @@ sdk_tracing_config<SdkApi, Externals>::filter_operations(
     const std::unordered_set<std::int32_t>& to_include,
     const std::unordered_set<std::int32_t>& to_exclude)
 {
-    auto convert_to_vector = [](const std::unordered_set<std::int32_t> set_to_convert) {
-        auto result_vector = std::vector<std::int32_t>{};
-        result_vector.reserve(set_to_convert.size());
-        result_vector.insert(result_vector.end(), set_to_convert.begin(),
-                             set_to_convert.end());
+    auto convert_to_vector = [](const std::unordered_set<std::int32_t>& set_to_convert) {
+        auto result_vector =
+            std::vector<std::int32_t>(set_to_convert.begin(), set_to_convert.end());
         std::ranges::sort(result_vector);
         return result_vector;
     };
@@ -520,8 +520,7 @@ sdk_tracing_config<SdkApi, Externals>::config_settings(
         }
     };
 
-    domain_choices.reserve(buffered_tracing_info.size());
-    domain_choices.reserve(callback_tracing_info.size());
+    domain_choices.reserve(buffered_tracing_info.size() + callback_tracing_info.size());
 
     add_domain_f("hip_api");
     add_domain_f("hsa_api");
@@ -728,7 +727,7 @@ sdk_tracing_config<SdkApi, Externals>::get_callback_domains()
             {
                 const auto& ditr = callback_info[idx];
                 auto        dval = static_cast<kind_t>(idx);
-                if(itr == to_lower(ditr.name) && supported.count(dval) > 0)
+                if(itr == to_lower(ditr.name) && supported.contains(dval))
                 {
                     callback_domains.emplace(dval);
                     break;
@@ -913,7 +912,7 @@ sdk_tracing_config<SdkApi, Externals>::get_buffered_domains()
             {
                 const auto& ditr = buffer_info[idx];
                 auto        dval = static_cast<kind_t>(idx);
-                if(itr == to_lower(ditr.name) && supported.count(dval) > 0)
+                if(itr == to_lower(ditr.name) && supported.contains(dval))
                 {
                     data.emplace(dval);
                     break;
@@ -995,7 +994,7 @@ std::vector<std::int32_t>
 sdk_tracing_config<SdkApi, Externals>::get_operations(
     typename SdkApi::buffer_tracing_kind kind)
 {
-    if(s_buffered_operation_option_names.count(kind) == 0)
+    if(!s_buffered_operation_option_names.contains(kind))
     {
         finalize_and_throw(
             fmt::format("sdk_tracing_config::get_operations: no options registered for "
@@ -1023,7 +1022,7 @@ std::unordered_set<std::int32_t>
 sdk_tracing_config<SdkApi, Externals>::get_backtrace_operations(
     typename SdkApi::callback_tracing_kind kind)
 {
-    if(s_callback_operation_option_names.count(kind) == 0)
+    if(!s_callback_operation_option_names.contains(kind))
     {
         finalize_and_throw(fmt::format(
             "sdk_tracing_config::get_backtrace_operations: no options registered for "
@@ -1048,7 +1047,7 @@ std::unordered_set<std::int32_t>
 sdk_tracing_config<SdkApi, Externals>::get_backtrace_operations(
     typename SdkApi::buffer_tracing_kind kind)
 {
-    if(s_buffered_operation_option_names.count(kind) == 0)
+    if(!s_buffered_operation_option_names.contains(kind))
     {
         finalize_and_throw(fmt::format(
             "sdk_tracing_config::get_backtrace_operations: no options registered for "
