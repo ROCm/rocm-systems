@@ -389,11 +389,6 @@ if(NOT ${INSTALL_SOURCE} EQUAL 0)
         install(DIRECTORY ${HIPNV_DIR}/include/hip/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip/)
     endif()
     install(DIRECTORY ${HIP_COMMON_INCLUDE_DIR}/hip/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip/)
-    if(WIN32)
-      install(DIRECTORY ${HIP_COMMON_DIR}/cmake DESTINATION .)
-    else()
-      install(DIRECTORY ${HIP_COMMON_DIR}/cmake/ DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR})
-    endif()
 endif()
 
 # Install generated headers
