@@ -84,6 +84,7 @@ def test_parse_captures_symbol_virtual_address():
 
 
 def test_parse_captures_virtual_address_instruction_and_source():
+    """Parse an instruction's virtual address, opcode, and source text."""
     data = make_code_obj_info([
         make_code_object(
             7,

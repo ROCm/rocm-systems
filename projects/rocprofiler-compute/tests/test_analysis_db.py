@@ -1775,6 +1775,7 @@ def test_run_analysis_uses_workload_specific_source_ancestors(
     workload_specs,
     expected_sources,
 ):
+    """Normalize sampled sources against each workload's own snapshot."""
     tool_data_per_workload = {}
     for workload_name, workload_spec in workload_specs.items():
         workload_path = tmp_path / workload_name
@@ -1821,6 +1822,7 @@ def test_run_analysis_stores_sampled_sources_relative_to_snapshot_ancestor(
     create_snapshot,
     expected_sampled_source,
 ):
+    """Relativize sampled sources only when a snapshot ancestor exists."""
     sampled_source = "/home/u/project/src/a.cpp:10"
     if create_snapshot:
         for source_path in (

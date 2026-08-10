@@ -68,6 +68,7 @@ def _make_source_frame_path_relative(
     source_frame: str,
     source_files_common_ancestor: Path,
 ) -> str:
+    """Make a source-frame path relative when it descends from the ancestor."""
     source_path_text, line_token_suffix = _split_source_frame(source_frame)
     source_path = Path(source_path_text)
     if not source_path.is_absolute() or not source_path.is_relative_to(
@@ -80,6 +81,7 @@ def _make_source_frame_path_relative(
 
 
 def _split_source_frame(source_frame: str) -> tuple[str, str]:
+    """Split a source frame into its path and recognized line-token suffix."""
     source_path, separator, line_token = source_frame.rpartition(":")
     if not separator or not _is_source_line_token(line_token):
         return source_frame, ""
@@ -87,4 +89,5 @@ def _split_source_frame(source_frame: str) -> tuple[str, str]:
 
 
 def _is_source_line_token(token: str) -> bool:
+    """Return whether a token represents a source line or an unknown line."""
     return token == "?" or (token.isascii() and token.isdigit())

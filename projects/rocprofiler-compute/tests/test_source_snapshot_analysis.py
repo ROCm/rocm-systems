@@ -134,6 +134,7 @@ def test_make_source_relative_to_common_ancestor(
     common_ancestor,
     expected,
 ):
+    """Normalize representative source frames against a common ancestor."""
     transformed_source = (
         source_snapshot_analysis.make_source_relative_to_common_ancestor(
             source,
