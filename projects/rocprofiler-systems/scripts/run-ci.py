@@ -64,7 +64,7 @@ def log(msg, level="info"):
             print(f"[INFO] {msg}", flush=True)
 
 
-def _escape_workflow_data(text):
+def _escape_workflow_data(text: str) -> str:
     """Percent-encode the characters that would end a "::command::" line.
 
     GitHub Actions parses workflow commands one line at a time, so a CR or LF
@@ -74,7 +74,7 @@ def _escape_workflow_data(text):
     return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
-def log_group_start(title):
+def log_group_start(title: str) -> None:
     if IS_GITHUB_ACTIONS:
         print(f"::group::{_escape_workflow_data(title)}", flush=True)
     else:

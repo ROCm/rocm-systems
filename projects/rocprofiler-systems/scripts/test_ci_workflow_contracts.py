@@ -1090,12 +1090,12 @@ def write_fake_build_success_log(bin_dir: Path, binary_dir: Path) -> None:
 
 
 def _ctest_measurement(text: str) -> str:
-    """Encode *text* as gzip+base64, the container real CTest uses for a test's
-    captured output once it holds the ESC bytes of colored output."""
-    payload = base64.b64encode(gzip.compress(text.encode("utf-8"))).decode("ascii")
+    """Wrap *text* as a CTest <Measurement>, gzip+base64-encoded the way real
+    CTest stores a test's captured output once it holds the ESC bytes of
+    colored output."""
     return (
         '<Measurement><Value encoding="base64" compression="gzip">'
-        f"{payload}</Value></Measurement>"
+        f"{_gzip_base64_value(text)}</Value></Measurement>"
     )
 
 
