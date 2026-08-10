@@ -14,6 +14,7 @@
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "debug.h"
+#include "device.h"
 #include "graph/topo.h"
 #include "net.h"
 #include "rccl_common.h"
@@ -1651,6 +1652,124 @@ TEST(RcclCeGraphLatch, NeverLatchedAllowsCeAllReduceByDefault)
     comm.ceColl.graphModeSeen = false;
 
     EXPECT_TRUE(rcclCeAllReduceAllowed(&comm));
+}
+
+// ---------------------------------------------------------------------------
+// commSetUnrollFactor() (rccl_wrap.cc)
+//
+// ncclDevFuncUnrollGenerated[] is emitted build-wide by generate.py: in a
+// normal (non local-arch-restricted) build it reports unroll 8/16/32 as
+// "generated" as soon as gfx1250 is one of the build's targets, regardless of
+// which architecture a given communicator actually runs on. The device
+// function tables for those unroll factors are only compiled under
+// `defined(__gfx1250__)`, so without an explicit per-arch check,
+// RCCL_UNROLL_FACTOR=3/4/5 on any other architecture passes the table check
+// and then dispatches through an absent function-table slot -> crash/hang.
+//
+// These tests exercise commSetUnrollFactor()'s user-override path directly on
+// plain (non-topology) mock communicators; no GPU/topology is required since
+// the function only reads comm->archName / nNodes / cuCount. Each case is
+// process-isolated (RUN_ISOLATED_TEST_WITH_ENV) because rcclParamUnrollFactor()
+// caches RCCL_UNROLL_FACTOR in a static on first read.
+// ---------------------------------------------------------------------------
+
+TEST(CommSetUnrollFactor, RejectsUnroll8OnNonGfx1250Arch)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "RejectsUnroll8OnNonGfx1250Arch",
+        []()
+        {
+            ncclComm comm{};
+            comm.archName = const_cast<char*>("gfx942");
+            comm.nNodes   = 1;
+
+            EXPECT_EQ(commSetUnrollFactor(&comm), ncclInvalidArgument);
+        },
+        {{"RCCL_UNROLL_FACTOR", "3"}} // NCCL_UNROLL_8
+    );
+}
+
+TEST(CommSetUnrollFactor, RejectsUnroll16OnNonGfx1250Arch)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "RejectsUnroll16OnNonGfx1250Arch",
+        []()
+        {
+            ncclComm comm{};
+            comm.archName = const_cast<char*>("gfx950");
+            comm.nNodes   = 1;
+
+            EXPECT_EQ(commSetUnrollFactor(&comm), ncclInvalidArgument);
+        },
+        {{"RCCL_UNROLL_FACTOR", "4"}} // NCCL_UNROLL_16
+    );
+}
+
+// Mirrors the real-hardware reproduction: RCCL_UNROLL_FACTOR=5 on gfx942
+// previously passed this check (table says "generated") and then hung the
+// device on dispatch into a null function-table slot.
+TEST(CommSetUnrollFactor, RejectsUnroll32OnNonGfx1250Arch)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "RejectsUnroll32OnNonGfx1250Arch",
+        []()
+        {
+            ncclComm comm{};
+            comm.archName = const_cast<char*>("gfx942");
+            comm.nNodes   = 1;
+
+            EXPECT_EQ(commSetUnrollFactor(&comm), ncclInvalidArgument);
+        },
+        {{"RCCL_UNROLL_FACTOR", "5"}} // NCCL_UNROLL_32
+    );
+}
+
+// Control: unroll factors below 8 are compiled for every architecture, so the
+// new gfx1250-only check must not affect them. Proves the fix is precise
+// rather than blocking RCCL_UNROLL_FACTOR overrides outright.
+TEST(CommSetUnrollFactor, AllowsUnroll1OnNonGfx1250Arch)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AllowsUnroll1OnNonGfx1250Arch",
+        []()
+        {
+            ncclComm comm{};
+            comm.archName = const_cast<char*>("gfx942");
+            comm.nNodes   = 1;
+
+            ASSERT_EQ(commSetUnrollFactor(&comm), ncclSuccess);
+            EXPECT_EQ(comm.unroll, NCCL_UNROLL_1);
+        },
+        {{"RCCL_UNROLL_FACTOR", "0"}} // NCCL_UNROLL_1
+    );
+}
+
+// Positive control: on the architecture the fix targets, unroll 32 must still
+// be accepted whenever this build actually generated it. Skips (rather than
+// fails) if this particular build's table doesn't have it, since that table
+// is a build-time artifact this test cannot control.
+TEST(CommSetUnrollFactor, AllowsUnroll32OnGfx1250WhenGenerated)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AllowsUnroll32OnGfx1250WhenGenerated",
+        []()
+        {
+            if(!ncclDevFuncUnrollGenerated[NCCL_UNROLL_32])
+            {
+                GTEST_SKIP() << "This build did not generate unroll-32 device "
+                                "function tables (e.g. gfx1250 not in target "
+                                "arch list); nothing to verify.";
+            }
+
+            ncclComm comm{};
+            comm.archName = const_cast<char*>("gfx1250");
+            comm.nNodes   = 1;
+
+            ASSERT_EQ(commSetUnrollFactor(&comm), ncclSuccess);
+            EXPECT_EQ(comm.unroll, NCCL_UNROLL_32);
+        },
+        {{"RCCL_UNROLL_FACTOR", "5"}} // NCCL_UNROLL_32
+    );
 }
 
 #ifdef ENABLE_WARP_SPEED
