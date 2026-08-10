@@ -424,11 +424,11 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         return false;
     };
 
-    const bool _force      = false;
-    auto&      _only_funcs = _config.restrict_functions;
-    auto&      _incl_funcs = _config.include_functions;
-    auto&      _skip_funcs = _config.exclude_functions;
-    auto       _func       = py::cast<std::string>(get_frame_code(frame)->co_name);
+    bool  _force      = false;
+    auto& _only_funcs = _config.restrict_functions;
+    auto& _incl_funcs = _config.include_functions;
+    auto& _skip_funcs = _config.exclude_functions;
+    auto  _func       = py::cast<std::string>(get_frame_code(frame)->co_name);
 
     if(!_only_funcs.empty())
     {
@@ -504,14 +504,14 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     auto _label = _get_label(_func, _file, _full);
     if(_label.empty()) return;
 
-    static thread_local const strset_t _labels{};
-    const auto&                        _label_ref = *_labels.emplace(_label).first;
-    auto                               _annotate  = _config.annotate_trace;
+    static thread_local strset_t _labels{};
+    const auto&                  _label_ref = *_labels.emplace(_label).first;
+    auto                         _annotate  = _config.annotate_trace;
 
     // start function
     auto _profiler_call = [&]() {
-        const int _lineno = 0;
-        const int _lasti  = 0;
+        int _lineno = 0;
+        int _lasti  = 0;
         if(_annotate)
         {
             _lineno                         = get_frame_lineno(frame);

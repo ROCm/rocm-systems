@@ -483,43 +483,43 @@ TEST_F(sample_type_test, type_identifier_enum_values)
 
 TEST_F(sample_type_test, kernel_dispatch_sample_default_constructor)
 {
-    const kernel_dispatch_sample sample;
+    const kernel_dispatch_sample sample{};
     EXPECT_EQ(sample.type_identifier, type_identifier_t::kernel_dispatch);
 }
 
 TEST_F(sample_type_test, memory_copy_sample_default_constructor)
 {
-    const memory_copy_sample sample;
+    const memory_copy_sample sample{};
     EXPECT_EQ(sample.type_identifier, type_identifier_t::memory_copy);
 }
 
 TEST_F(sample_type_test, memory_allocate_sample_default_constructor)
 {
-    const memory_allocate_sample sample;
+    const memory_allocate_sample sample{};
     EXPECT_EQ(sample.type_identifier, type_identifier_t::memory_alloc);
 }
 
 TEST_F(sample_type_test, region_sample_default_constructor)
 {
-    const region_sample sample;
+    const region_sample sample{};
     EXPECT_EQ(sample.type_identifier, type_identifier_t::region);
 }
 
 TEST_F(sample_type_test, in_time_sample_default_constructor)
 {
-    const in_time_sample sample;
+    const in_time_sample sample{};
     EXPECT_EQ(sample.type_identifier, type_identifier_t::in_time_sample);
 }
 
 TEST_F(sample_type_test, pmc_event_with_sample_default_constructor)
 {
-    const pmc_event_with_sample sample;
+    const pmc_event_with_sample sample{};
     EXPECT_EQ(sample.type_identifier, type_identifier_t::pmc_event_with_sample);
 }
 
 TEST_F(sample_type_test, backtrace_region_sample_default_constructor)
 {
-    const backtrace_region_sample sample;
+    const backtrace_region_sample sample{};
     EXPECT_EQ(sample.type_identifier, type_identifier_t::backtrace_region_sample);
 }
 
@@ -544,7 +544,7 @@ TEST_F(sample_type_test, kernel_dispatch_sample_large_values)
 
 TEST_F(sample_type_test, kfd_sample_default_constructor)
 {
-    const kfd_sample sample;
+    const kfd_sample sample{};
     EXPECT_EQ(sample.type_identifier, type_identifier_t::kfd_sample);
 }
 
