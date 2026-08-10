@@ -79,8 +79,8 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     # Table 308: GL2 Cache (L2)
     ("GL2 Cache Utilization", 74.2),
     ("GL2 Cache Hit Rate", 82.5),
-    ("GL2 Cache Read BW", 64e9),
-    ("GL2 Cache Write BW", 24e9),
+    ("GL2-Fabric Read BW", 64e9),
+    ("GL2-Fabric Write BW", 24e9),
     # Table 309: Graphics Core Efficiency Arbiter (GCEA) to System Memory
     ("SARB Utilization", 52.3),
     ("SARB Stall Rate", 12.4),
@@ -274,8 +274,8 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
 
     m["gl2c_util"] = metric_dict.get("GL2 Cache Utilization")
     m["gl2c_hit"] = metric_dict.get("GL2 Cache Hit Rate")
-    m["gl2c_read_bw"] = metric_dict.get("GL2 Cache Read BW")
-    m["gl2c_write_bw"] = metric_dict.get("GL2 Cache Write BW")
+    m["gl2_fabric_read_bw"] = metric_dict.get("GL2-Fabric Read BW")
+    m["gl2_fabric_write_bw"] = metric_dict.get("GL2-Fabric Write BW")
 
     m["sarb_util"] = metric_dict.get("SARB Utilization")
     m["sarb_stall"] = metric_dict.get("SARB Stall Rate")
@@ -537,8 +537,8 @@ def _build_memory_columns(
     sa_l = std_arrows["left"]
     sa_r = std_arrows["right"]
 
-    gl2_rd = fmt_bw(m["gl2c_read_bw"], precision=1)
-    gl2_wr = fmt_bw(m["gl2c_write_bw"], precision=1)
+    gl2_rd = fmt_bw(m["gl2_fabric_read_bw"], precision=1)
+    gl2_wr = fmt_bw(m["gl2_fabric_write_bw"], precision=1)
     gl2_gcea_edges_lines = [
         "",
         "",

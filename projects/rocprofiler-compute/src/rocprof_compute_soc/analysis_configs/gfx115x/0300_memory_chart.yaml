@@ -216,13 +216,13 @@ Panel Config:
         GL2 Cache Hit Rate:
           value: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
           unit: Percent
-        GL2 Cache Read BW:
-          # 32/64/128 B read bins plus 96 B compressed reads; EA 96 B (GL2C_EA_RDREQ_96B) is fabric-side (see Speed-of-Light).
-          value: SUM(GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum * 128 + GL2C_COMPRESSED_READ_96_REQ_sum * 96) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+        GL2-Fabric Read BW:
+          value: SUM(GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_RDREQ_96B_sum * 96 + GL2C_EA_RDREQ_128B_sum * 128) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-        GL2 Cache Write BW:
-          # Note: GL2C write requests can be 32B or 64B (no 128B writes documented).
-          value: 64 * SUM(GL2C_WRITE_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+        GL2-Fabric Write BW:
+          # 64B writes plus the 32B remainder; NOISE_CLAMP guards multi-pass
+          # variance making the subset exceed the total (see gfx950 mem_bw).
+          value: SUM(GL2C_EA_WRREQ_64B_sum * 64 + NOISE_CLAMP(GL2C_MC_WRREQ_sum - GL2C_EA_WRREQ_64B_sum, GL2C_MC_WRREQ_sum) * 32) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
 
   # =========================================================================

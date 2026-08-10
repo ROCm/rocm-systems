@@ -317,7 +317,7 @@ class TestGetSampleMetrics:
         # Check for key bandwidth metrics
         assert "TCP-GL1 Read Bandwidth" in metrics
         assert "GL1-GL2 Read Bandwidth" in metrics
-        assert "GL2 Cache Read BW" in metrics
+        assert "GL2-Fabric Read BW" in metrics
         assert "DRAM Read Bandwidth" in metrics
 
         # Check for utilization metrics
@@ -619,7 +619,7 @@ class TestIntegrationGfx11:
         """Test chart with mixed bandwidth scales."""
         metrics = {
             "DRAM Read Bandwidth": 1.5e12,  # 1.5 TB/s
-            "GL2 Cache Read BW": 500e9,  # 500 GB/s
+            "GL2-Fabric Read BW": 500e9,  # 500 GB/s
             "GL1-GL2 Read Bandwidth": 100e6,  # 100 MB/s
             "TCP-GL1 Read Bandwidth": 50e3,  # 50 KB/s
         }
