@@ -347,7 +347,17 @@ private:
   /// the reaper runs after the inferior may already have exited, and clearing
   /// exception status, queue gates, wave stop bits and memory routing on an
   /// innocent process that inherited the number is worse than leaking them.
-  void release_debuggee_state(pid_t target_pid, const std::shared_ptr<KfdProcess> &target_proc);
+  /// Callers that resolved a std::shared_ptr must keep it alive across the
+  /// call; @p target_proc is borrowed, and may be nullptr when the debuggee has
+  /// already gone (only the queued events are then purged).
+  void release_debuggee_state(pid_t target_pid, KfdProcess *target_proc);
+
+  /// @brief Revoke a process's target-memory routing on every GPU.
+  void revoke_target_mem_routing(uint32_t process_id);
+
+  /// @brief Turn per-access debugger checks back off once no session wants them.
+  /// @note Takes debug_sessions_mutex_, so it must be called with that unlocked.
+  void release_debug_checks_if_last_session();
 
   /// @brief Duplicate the authorized target-memory fd for lock-free I/O.
   util::UniqueHandle duplicate_debug_target_mem(pid_t target_pid) const;

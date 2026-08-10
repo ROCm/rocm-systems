@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "util/except.h"
@@ -665,8 +666,11 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   bool fault_claimed = false;
   if (debug_memory_fault && !active->debug_halted()) {
     active->pc += inst_size;
+    // first_fault is already known to fault, so it is reported without a second
+    // range walk; only the lanes after it still have to be tested.
     for (auto it = first_fault; it != dbg_addrs.end(); ++it) {
-      if (access_faults(*it) && memory_violation_handler_(*active, *it, dbg_is_write)) {
+      if ((it == first_fault || access_faults(*it)) &&
+          memory_violation_handler_(*active, *it, dbg_is_write)) {
         fault_claimed = true;
         break;
       }
@@ -701,10 +705,12 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   // one hardware traps on -- was never reported. The same silence followed a
   // first occurrence the handler declined, which is every occurrence before a
   // debugger attaches.
-  constexpr uint32_t kAluExceptionTrapstsMask = 0x7fu;
-  constexpr uint32_t kAluExceptionModeShift = 12;
+  // Masks come from alu_exceptions.h, which is also what the classifiers and
+  // the generated call sites use. A local copy here would keep checking the
+  // old bits if the EXCP set ever widened.
   const uint32_t new_alu_causes = active->pending_alu_causes() & kAluExceptionTrapstsMask;
-  const uint32_t enabled_alu_causes = (active->mode_raw() >> kAluExceptionModeShift) & 0x7fu;
+  const uint32_t enabled_alu_causes =
+      (active->mode_raw() & kAluExceptionModeMask) >> kAluExceptionModeShift;
   if ((new_alu_causes & enabled_alu_causes) != 0 && alu_exception_handler_ &&
       alu_exception_handler_(*active))
     return;

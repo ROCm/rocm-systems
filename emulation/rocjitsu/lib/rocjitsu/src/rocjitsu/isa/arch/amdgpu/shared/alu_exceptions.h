@@ -12,7 +12,8 @@
 
 namespace rocjitsu::amdgpu {
 
-inline constexpr uint32_t kAluExceptionModeMask = 0x7fu << 12;
+inline constexpr uint32_t kAluExceptionModeShift = 12;
+inline constexpr uint32_t kAluExceptionModeMask = 0x7fu << kAluExceptionModeShift;
 inline constexpr uint32_t kAluExceptionTrapstsMask = 0x7fu;
 
 // Every classifier below reports what it found through wf.raise_alu_causes()

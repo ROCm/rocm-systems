@@ -977,13 +977,17 @@ TEST(WaveDebugTest, CwsrRoundTripPreservesAliasedSgprsAndFlatScratch) {
   EXPECT_EQ(out[0].flat_scratch, kFlatScratch) << "flat_scratch was not restored";
   EXPECT_EQ(out[0].vcc, in[0].vcc);
 
-  // Slots below the aliases are real registers and must survive untouched.
-  for (uint32_t s = 0; s < 102; ++s)
-    EXPECT_EQ(out[0].sgprs[s], in[0].sgprs[s]) << "sgpr " << s;
-  // The aliased slots decode as the registers they alias, so they must not come
-  // back carrying FLAT_SCRATCH's bytes dressed up as SGPRs.
-  for (uint32_t s = 102; s < kMaxAcceptedSgprs; ++s)
-    EXPECT_EQ(out[0].sgprs[s], 0u) << "aliased slot " << s << " decoded as an SGPR";
+  // FLAT_SCRATCH occupies s102/s103 in this geometry; VCC sits above
+  // num_sgprs. Only the slots an alias actually covers may be lost -- clamping
+  // at the gfx9.4 architected count instead would also drop s104/s105, which
+  // are real registers on an architecture with 106 of them.
+  for (uint32_t s = 0; s < kMaxAcceptedSgprs; ++s) {
+    const bool aliased = (s == 102 || s == 103);
+    if (aliased)
+      EXPECT_EQ(out[0].sgprs[s], 0u) << "aliased slot " << s << " decoded as an SGPR";
+    else
+      EXPECT_EQ(out[0].sgprs[s], in[0].sgprs[s]) << "sgpr " << s << " did not survive";
+  }
 }
 
 TEST(WaveDebugTest, CwsrDeserializeRecoversSerializedWaveState) {

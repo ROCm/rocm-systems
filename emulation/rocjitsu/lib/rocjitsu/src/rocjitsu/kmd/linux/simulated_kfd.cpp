@@ -380,11 +380,8 @@ void SimulatedKfd::reap_exited_debug_sessions(std::stop_token stop) {
         it = debug_sessions_.erase(it);
       } else if (pidfd_is_exited(it->second.target_pidfd.get()) == 1) {
         if (!it->second.target_exited) {
-          if (auto target = find_process_by_client_pid(it->first)) {
-            for (auto &g : gpus_)
-              if (auto *mem = g.soc ? g.soc->memory() : nullptr)
-                mem->set_process_mem_fd(target->process_id(), -1);
-          }
+          if (auto target = find_process_by_client_pid(it->first))
+            revoke_target_mem_routing(target->process_id());
           it->second.owned_dbg_fd.reset();
           it->second.target_mem_fd.reset();
           it->second.dbg_fd = -1;
@@ -404,8 +401,10 @@ void SimulatedKfd::reap_exited_debug_sessions(std::stop_token stop) {
     // thread.
     if (!released.empty()) {
       lock.unlock();
+      // The shared_ptr in `released` is what keeps proc alive across the
+      // unlocked release; release_debuggee_state only borrows it.
       for (auto &[pid, proc] : released)
-        release_debuggee_state(pid, proc);
+        release_debuggee_state(pid, proc.get());
       lock.lock();
     }
   }
@@ -797,6 +796,7 @@ int SimulatedKfd::close(uint32_t process_id) {
   // kfd_process_notifier_release_internal() disables debug when the process mm
   // actually exits. Preserve live sessions across a /dev/kfd close, but reap
   // targets whose pinned identity has exited.
+  std::vector<std::pair<pid_t, std::shared_ptr<KfdProcess>>> released;
   {
     std::lock_guard<std::mutex> debug_lock(debug_sessions_mutex_);
     for (auto it = debug_sessions_.begin(); it != debug_sessions_.end();) {
@@ -804,13 +804,14 @@ int SimulatedKfd::close(uint32_t process_id) {
         // The debugger is gone and will never ack; release any inferior
         // blocked in the RUNTIME_ENABLE handshake for it.
         cancel_runtime_handshake(it->first);
+        // Resolve the debuggee now, while the session's pinned identity still
+        // vouches for the pid. After the erase the number alone could name a
+        // process that merely reused it.
+        released.emplace_back(it->first, find_process_by_client_pid(it->first));
         it = debug_sessions_.erase(it);
       } else if (pidfd_is_exited(it->second.target_pidfd.get()) == 1) {
-        if (auto target = find_process_by_client_pid(it->first)) {
-          for (auto &g : gpus_)
-            if (auto *mem = g.soc ? g.soc->memory() : nullptr)
-              mem->set_process_mem_fd(target->process_id(), -1);
-        }
+        if (auto target = find_process_by_client_pid(it->first))
+          revoke_target_mem_routing(target->process_id());
         it->second.owned_dbg_fd.reset();
         it->second.target_mem_fd.reset();
         it->second.dbg_fd = -1;
@@ -822,6 +823,13 @@ int SimulatedKfd::close(uint32_t process_id) {
       }
     }
   }
+  // Same obligation as the background reaper: erasing the session only stops
+  // new debug traffic, so a debugger that died before this close still has to
+  // have its inferior's waves resumed, queue gates reopened and target-memory
+  // routing revoked. Done after the debug_sessions_mutex_ scope above, because
+  // this takes CU wave-state locks and the engine thread takes those first.
+  for (auto &[pid, proc_ref] : released)
+    release_debuggee_state(pid, proc_ref.get());
 
   // Set the closing flag first, under op_mutex_, so the dispatch_ioctl guard sees
   // it before any state is dismantled.
@@ -2900,8 +2908,7 @@ bool SimulatedKfd::on_wave_alu_exception(amdgpu::Wavefront &wave) {
   return true;
 }
 
-void SimulatedKfd::release_debuggee_state(pid_t target_pid,
-                                          const std::shared_ptr<KfdProcess> &target_proc) {
+void SimulatedKfd::release_debuggee_state(pid_t target_pid, KfdProcess *target_proc) {
   // Everything a session imposed on its inferior, undone in one place so that
   // explicit detach and debugger death cannot drift apart. Callers have already
   // erased the session and must not hold debug_sessions_mutex_ here: this takes
@@ -2913,8 +2920,15 @@ void SimulatedKfd::release_debuggee_state(pid_t target_pid,
     debug_events_.erase(target_pid);
   }
 
+  // Nothing below has a debuggee to release; the event purge above was the
+  // whole job. Returning here keeps the rest free of repeated null tests.
+  if (target_proc == nullptr) {
+    release_debug_checks_if_last_session();
+    return;
+  }
+
   std::vector<std::pair<uint32_t, uint32_t>> queues;
-  if (target_proc != nullptr) {
+  {
     std::lock_guard<std::mutex> alloc_lock(target_proc->alloc_mutex_);
     for (auto &[queue_id, queue] : target_proc->queue_snapshot_map_) {
       queue.exception_status = 0;
@@ -2924,7 +2938,7 @@ void SimulatedKfd::release_debuggee_state(pid_t target_pid,
 
   for (const auto &[queue_id, gpu_id] : queues) {
     auto *gpu = find_gpu(gpu_id);
-    if (!gpu || !gpu->soc || target_proc == nullptr)
+    if (!gpu || !gpu->soc)
       continue;
     gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
       cp->set_queue_debug_suspended(queue_id, target_proc->process_id(), false);
@@ -2948,12 +2962,17 @@ void SimulatedKfd::release_debuggee_state(pid_t target_pid,
     });
   }
 
-  if (target_proc != nullptr) {
-    for (auto &g : gpus_)
-      if (auto *mem = g.soc ? g.soc->memory() : nullptr)
-        mem->set_process_mem_fd(target_proc->process_id(), -1);
-  }
+  revoke_target_mem_routing(target_proc->process_id());
+  release_debug_checks_if_last_session();
+}
 
+void SimulatedKfd::revoke_target_mem_routing(uint32_t process_id) {
+  for (auto &g : gpus_)
+    if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+      mem->set_process_mem_fd(process_id, -1);
+}
+
+void SimulatedKfd::release_debug_checks_if_last_session() {
   // Debug checks stay on only while some session still wants them. Read the
   // answer under the lock, then reach into the CUs after releasing it -- the
   // whole point of this function running unlocked is that debug_sessions_mutex_
@@ -3895,7 +3914,14 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
     // on its way out. This is the same invariant SUSPEND_QUEUES observes.
     debug_sessions_.erase(target_pid);
     lk.unlock();
-    release_debuggee_state(target_pid, find_process_by_client_pid(target_pid));
+    // target_proc, not a fresh find_process_by_client_pid(): it was resolved
+    // above while the pidfd/procfd pin still vouched for the identity, so a
+    // numeric pid reused since then cannot be selected here. It is also the
+    // only resolution that is correct for a self-debugging process, where the
+    // debuggee is `caller` and need not be reachable by client pid at all --
+    // looking it up again would return nullptr and silently skip the whole
+    // release, stranding the very waves this path exists to free.
+    release_debuggee_state(target_pid, target_proc);
     // An explicit detach also has to release a waiter, or the inferior pays the
     // full liveness deadline for a debugger that is deliberately going away.
     cancel_runtime_handshake(target_pid);
