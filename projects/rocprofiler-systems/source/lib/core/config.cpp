@@ -2229,7 +2229,7 @@ get_debug()
 bool
 get_debug_sampling()
 {
-    static bool const _v = rocprofsys::get_env<bool>(
+    static const bool _v = rocprofsys::get_env<bool>(
         env_vars::DEBUG_SAMPLING,
         (settings_are_configured() ? get_debug() : get_debug_env()));
     return _v;
@@ -2581,7 +2581,7 @@ get_perfetto_annotations()
 std::uint64_t
 get_thread_pool_size()
 {
-    static std::uint64_t const _v =
+    static const std::uint64_t _v =
         get_config()->get<std::uint64_t>(std::string{ env_vars::THREAD_POOL_SIZE });
     return _v;
 }
@@ -2857,7 +2857,7 @@ get_debug_tid()
     static auto _vlist =
         parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
             rocprofsys::get_env<std::string>(env_vars::DEBUG_TIDS, ""), "debug tids", 1L);
-    static thread_local bool const _v =
+    static thread_local const bool _v =
         _vlist.empty() || _vlist.count(tim::threading::get_id()) > 0;
     return _v;
 }
@@ -2868,7 +2868,7 @@ get_debug_pid()
     static auto _vlist =
         parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
             rocprofsys::get_env<std::string>(env_vars::DEBUG_PIDS, ""), "debug pids", 1L);
-    static bool const _v = _vlist.empty() || _vlist.count(tim::process::get_id()) > 0 ||
+    static const bool _v = _vlist.empty() || _vlist.count(tim::process::get_id()) > 0 ||
                            _vlist.count(dmp::rank()) > 0;
     return _v;
 }

@@ -485,20 +485,20 @@ module_function::is_module_constrained() const
         // return _report("Skipping", "default module", 2);
         return false;
 
-    static std::regex const ext_regex{ "\\.(s|S)$", regex_opts };
-    static std::regex const sys_regex{ "^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$",
+    static const std::regex ext_regex{ "\\.(s|S)$", regex_opts };
+    static const std::regex sys_regex{ "^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$",
                                        regex_opts };
-    static std::regex const sys_build_regex{ "^(\\.\\./sysdeps/|/build/)", regex_opts };
-    static std::regex const dyninst_regex{ "(dyninst|DYNINST|(^|/)RT[[:graph:]]+\\.c$)",
+    static const std::regex sys_build_regex{ "^(\\.\\./sysdeps/|/build/)", regex_opts };
+    static const std::regex dyninst_regex{ "(dyninst|DYNINST|(^|/)RT[[:graph:]]+\\.c$)",
                                            regex_opts };
-    static std::regex const dependlib_regex{ "^(lib|)(rocprof-sys|rocprofsys|"
+    static const std::regex dependlib_regex{ "^(lib|)(rocprof-sys|rocprofsys|"
                                              "pthread|caliper|gotcha|papi|"
                                              "cupti|TAU|likwid|pfm|nvperf|unwind)",
                                              regex_opts };
-    static std::regex const core_cmod_regex{
+    static const std::regex core_cmod_regex{
         "^(malloc|(f|)lock|sig|sem)[a-z_]+(|64|_r|_l)\\.c$"
     };
-    static std::regex const core_lib_regex{ "lib(elf)(-|\\.)", regex_opts };
+    static const std::regex core_lib_regex{ "lib(elf)(-|\\.)", regex_opts };
     // static std::regex prefix_regex{ "^(_|\\.[a-zA-Z0-9])", regex_opts };
 
     // file extensions that should not be instrumented
@@ -552,30 +552,30 @@ module_function::is_routine_constrained() const
         return _report("Skipping", "function-constraint", 2);
     }
 
-    static std::regex const exclude("(rocprofsys|rocprof-sys|tim::|MPI_Init|MPI_"
+    static const std::regex exclude("(rocprofsys|rocprof-sys|tim::|MPI_Init|MPI_"
                                     "Finalize|dyninst|DYNINST|tm_clones)",
                                     regex_opts);
     // static std::regex exclude_printf("(|v|f)printf$", regex_opts);
-    static std::regex const exclude_cxx(
+    static const std::regex exclude_cxx(
         "(std::_Sp_counted_base|std::(use|has)_facet|std::locale|::sentry|^std::_|::_(M|"
         "S)_|::basic_string[a-zA-Z,<>: ]+::_M_create|::__|::_(Alloc|State)|"
         "std::(basic_|)(ifstream|ios|istream|ostream|stream))",
         regex_opts);
 
-    static std::regex const exclude_fortran(
+    static const std::regex exclude_fortran(
         "(log2visit|Log2VisitHelper)",  // From LLVM's libFortranRuntime.a library
         regex_opts);
 
-    static std::regex const leading(
+    static const std::regex leading(
         "^(\\.|frame_dummy|transaction clone|virtual thunk|non-virtual thunk|"
         "\\(|targ|kmp_threadprivate_|Kokkos::Profiling::|_IO_|___|"
         "__(GI|cxa|libc|IO|rpc|run|call|pthread|dl|nl|nss|new|old|internal|argp|malloc|"
         "libio|printf)_)",
         regex_opts);
-    static std::regex const trailing("(_internal)$", regex_opts);
+    static const std::regex trailing("(_internal)$", regex_opts);
     // static std::regex trailing(
     //    "(_|\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$", regex_opts);
-    static strset_t const whole = []() {
+    static const strset_t whole = []() {
         auto _v   = get_whole_function_names();
         auto _ret = _v;
         for(std::string const _ext : { "64", "_l", "_r" })
