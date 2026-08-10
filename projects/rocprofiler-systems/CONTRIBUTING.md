@@ -6,15 +6,15 @@
 
 # Contributing to ROCm Systems Profiler
 
-Contributions must conform to the MIT license, pass `ctest`, and satisfy the checks
-described below. The author must be able to respond to review comments and make
-requested changes.
-
 This project is developed in-tree at `projects/rocprofiler-systems/` within the
 [ROCm/rocm-systems](https://github.com/ROCm/rocm-systems) repository. This guide covers
 everything specific to rocprofiler-systems; for repository-wide topics it does not cover
 (sparse checkout, DVC large files, NPI/NTI development), see the
 [repository contributing guide](https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md).
+
+Contributions must conform to the MIT license, pass `ctest`, and satisfy the checks
+described below. The author must be able to respond to review comments and make
+requested changes.
 
 ## Issue Discussion
 
@@ -34,7 +34,7 @@ an associated issue.
 
 ## Where things live
 
-All paths below are relative to `projects/rocprofiler-systems/`.
+All paths below are relative to `<REPO_ROOT>/projects/rocprofiler-systems/`.
 
 | What you're adding | Where it goes |
 | --- | --- |
@@ -108,9 +108,10 @@ Adding a new external dependency requires a proposal — see
 
 ### Discouraged: timemory
 
-timemory is being removed from this project incrementally. Recent history contains a
-series of `refactor: Remove Timemory <function>()` commits replacing `tim::` symbols
-with `rocprofsys::` equivalents in `source/lib/common/`.
+timemory is being removed from this project incrementally, one call site at a time,
+replacing `tim::` symbols with `rocprofsys::` equivalents in `source/lib/common/`. The
+commit history documents the pattern — search `git log --oneline --grep="Remove Timemory"`
+for examples (e.g. `refactor: Remove Timemory basename()`) and follow the same shape.
 
 * **Do not introduce new `tim::` types or functions.** Use the in-tree utility above,
   or the standard library.
@@ -139,10 +140,16 @@ them locally.
 | Python | `black` | `pyproject.toml` |
 | Markdown | `markdownlint-cli2` | `.markdownlint.yaml` |
 
-Key C++ settings from `.clang-format`: column limit 90, indent width 4, spaces only,
-`PointerAlignment: Left`, custom brace wrapping (braces on their own line for
-namespaces, classes, functions, and control statements), `SortIncludes: true`,
-`NamespaceIndentation: None`.
+Key C++ settings from `.clang-format`:
+
+| Setting | Value |
+| --- | --- |
+| `column limit` | **90** |
+| `indent width` | **4** (spaces only) |
+| `PointerAlignment` | **Left** |
+| `custom brace wrapping` | (braces on their own line for namespaces, classes, functions, and control statements) |
+| `SortIncludes` | **true** |
+| `NamespaceIndentation` | **None** |
 
 ### Naming
 
@@ -213,7 +220,14 @@ pre-commit run -c projects/rocprofiler-systems/.pre-commit-config.yaml --all-fil
 
 * Add tests for new functionality. Unit tests go in a `tests/` subdirectory next to
   the code under test; name files `test_<subject>.cpp`.
-* Run the suite: `ctest --test-dir build`
+* Wire new test files into that module's own `tests/CMakeLists.txt` as an `OBJECT`
+  library (see `source/lib/common/tests/CMakeLists.txt` for an example). Add the new
+  library to `UNIT_TEST_OBJECTS` in `source/tests/CMakeLists.txt` — this is what
+  aggregates every module's tests into the single `rocprof-sys-unit-tests` binary. A
+  test file with no CMake wiring will not build or run.
+* Run the unit-test suite:
+  * `ctest --test-dir <BUILD_DIR> -R "unit-tests"`
+  * `<BUILD_DIR>/bin/rocprof-sys-unit-tests --gtest_filter=<tests>`
 * Ensure zero compiler warnings before submitting.
 
 ## Proposing architectural changes
@@ -292,8 +306,12 @@ Discussion happens on the issue.
 * Every PR in a stack must be **independently reviewable and mergeable** — it must
   build, pass CI, and make sense on its own.
 * The whole stack lands as a **single squashed commit** on `develop`.
-* Fill in every section of the PR template: Motivation, Technical Details, Issue
-  Tracking, Test Plan, Test Result.
+* Fill in every section of the [PR template](../../.github/pull_request_template.md):
+  * Motivation - Explain the purpose of this PR and the goals it aims to achieve.
+  * Technical Details - Explain the changes along with any relevant GitHub links.
+  * Issue Tracking - Include a GitHub Issue and/or JIRA ID.
+  * Test Plan - Explain any relevant testing done to verify this PR.
+  * Test Result - Briefly summarize test outcomes.
 
 > PR size is *not* automatically enforced — no size limits are configured in the PR
 > bot's `policy.yml`. The rules above are review policy, not a gate.
@@ -337,7 +355,7 @@ warning-only and never block.
   as docs.
 * Gardeners keep post-submit `develop` green and may revert offending commits, including
   bulk reverts.
-* Never push directly to a `release-staging/*` branch — always open a PR.
+* Never push directly to a `release/*` branch — always open a PR.
 
 ## C++ Core Guidelines
 
