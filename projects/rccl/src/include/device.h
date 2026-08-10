@@ -146,8 +146,15 @@ union ncclLLFifoLine {
 #ifdef ENABLE_WARP_SPEED
 #define MAXCHANNELS 512
 #else
-#define MAXCHANNELS 128
+// Raised from 128 -> 256 to let single- and multi-node configurations request
+// up to 256 channels via NCCL_MAX_NCHANNELS / NCCL_MIN_NCHANNELS. The actual
+// per-call channel count is still picked by the existing tuner; this only
+// lifts the upper bound.
+#define MAXCHANNELS 256
 #endif
+// Number of channel bits packed into one uint64_t word of channelMasks. The
+// global channelId for bit `x` in word `i` is `i*CHANNELS_PER_MASK_WORD + x`.
+#define CHANNELS_PER_MASK_WORD 64
 #define CHANNEL_LIMIT 16 // this is used to limit channels for pre MI3xx GPUs
 #define NCCL_MAX_LOCAL_RANKS 72
 #define NCCL_MIN_NTHREADS (4 * WARP_SIZE)
@@ -599,7 +606,7 @@ struct ncclKernelComm {
   bool p2pCrossClique;
   int isAllNvlink;
   int p2pnChannelsPerPeer;
-  int gfx9CheapFenceOff; // RCCL: true if gfx9 cheap post-peer fence is disabled (comm-global)
+  int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int* collNetDenseToUserRank;
 
@@ -636,8 +643,9 @@ enum ncclDevWorkStorageType : uint8_t {
 };
 
 struct channelMasks {
-  uint64_t masks[MAXCHANNELS / 64];
+  uint64_t masks[MAXCHANNELS / CHANNELS_PER_MASK_WORD];
 };
+static_assert(MAXCHANNELS % CHANNELS_PER_MASK_WORD == 0, "MAXCHANNELS must be a multiple of CHANNELS_PER_MASK_WORD");
 
 struct alignas(16) ncclDevKernelArgs {
   struct ncclKernelComm* comm;
@@ -670,7 +678,9 @@ typedef ncclDevKernelArgsStorage<(4 << 10)> ncclDevKernelArgs4K;
 // 5KB should be sufficient for now
 typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
 #else
-typedef ncclDevKernelArgs4K ncclDevKernelArgsDefaultStorage;
+// 5KB needed so 256-channel non-WarpSpeed builds can fit one batch per channel
+// in the kernel-args buffer (4KB only fits ~252 batches).
+typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
 #endif
 __host__ __device__ constexpr int ncclMaxKernelArgsSize(/*int cudaDriver, */ int cudaArch = NCCL_CUDA_ARCH) {
   // return (cudaArch < 700 || cudaDriver < 12010) ? 4<<10 : (32<<10)-4;
@@ -797,10 +807,25 @@ inline bool ncclDevFuncIsLL128RegVariant(int coll, int proto) {
          (coll == ncclFuncAllReduce || coll == ncclFuncAllGather || coll == ncclFuncBroadcast);
 }
 
+// Map user-buffer registration status to the LL128 reg-variant UserRegMode:
+//   1 = registered     (Direct path, system-scope cache-bypassing load/store)
+//   2 = non-registered (plain / non-temporal path)
+// A buffer counts as registered if either the IPC/NVLS (regUsed) or the network
+// (netRegUsed) registration is active. Keep in sync with the UserRegMode kernel
+// dimension in src/device/generate.py and the selection in src/enqueue.cc.
+inline int ncclDevFuncLL128RegMode(bool regUsed, bool netRegUsed) {
+  return (regUsed || netRegUsed) ? 1 : 2;
+}
+
+// Which unroll-factor tables were generated in this build, indexed by the
+// NCCL_UNROLL_* enum. Generated in host_table.cpp by generate.py.
+extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
+
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py
 // `reg` is the user-buffer registration mode (0=n/a, 1=registered, 2=non-registered)
 // and is only used to distinguish the LL128 reg-variant collectives.
-inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, int acc = 0, int pipeline = 0, int reg = 0) {
+inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, int acc = 0, int pipeline = 0,
+                         int reg = 0) {
   int row = -1;
   uint64_t key;
   // Pack 4-bit fields from right (LSB) to left in order:

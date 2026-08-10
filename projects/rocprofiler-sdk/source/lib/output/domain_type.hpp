@@ -46,6 +46,7 @@ enum class domain_type
     OMPT,
     HIP_GRAPH,
     ROCSHMEM,
+    HIPFILE,
     LAST,
 };
 

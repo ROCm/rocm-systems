@@ -694,7 +694,11 @@ VAccvgprReadVop3p::VAccvgprReadVop3p(const MachineInst *inst)
     : Vop3p("v_accvgpr_read", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<VAccvgprReadVop3p>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      src0(32, OperandType::OPR_SRC_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->src0 >= 256
+                ? reinterpret_cast<const OpEncoding *>(inst)->src0 +
+                      (OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN - 256)
+                : reinterpret_cast<const OpEncoding *>(inst)->src0)) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -706,15 +710,16 @@ void VAccvgprReadVop3p::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::RegisterAccess(wf).write_lane(vdst, lane,
-                                          amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane,
+                                    amdgpu::RegisterAccess(wf).read_lane(src0, lane));
   }
 }
 
 VAccvgprWriteVop3p::VAccvgprWriteVop3p(const MachineInst *inst)
     : Vop3p("v_accvgpr_write", reinterpret_cast<const OpEncoding *>(inst),
             make_exec_fn<VAccvgprWriteVop3p>()),
-      vdst(32, OperandType::OPR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, OperandType::OPR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst + OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN)),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
@@ -727,8 +732,8 @@ void VAccvgprWriteVop3p::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::RegisterAccess(wf).write_lane(vdst, lane,
-                                          amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane,
+                                    amdgpu::RegisterAccess(wf).read_lane(src0, lane));
   }
 }
 

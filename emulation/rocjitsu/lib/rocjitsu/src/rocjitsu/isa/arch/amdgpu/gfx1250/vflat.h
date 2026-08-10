@@ -22,7 +22,6 @@ public:
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadI8Vflat : public Vflat {
@@ -33,7 +32,6 @@ public:
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadU16Vflat : public Vflat {
@@ -44,7 +42,6 @@ public:
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadI16Vflat : public Vflat {
@@ -55,7 +52,6 @@ public:
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadB32Vflat : public Vflat {
@@ -66,7 +62,6 @@ public:
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadB64Vflat : public Vflat {
@@ -77,7 +72,6 @@ public:
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadB96Vflat : public Vflat {
@@ -88,7 +82,6 @@ public:
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadB128Vflat : public Vflat {
@@ -99,7 +92,6 @@ public:
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatStoreB8Vflat : public Vflat {
@@ -110,7 +102,6 @@ public:
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatStoreB16Vflat : public Vflat {
@@ -121,7 +112,6 @@ public:
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatStoreB32Vflat : public Vflat {
@@ -132,7 +122,6 @@ public:
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatStoreB64Vflat : public Vflat {
@@ -143,7 +132,6 @@ public:
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatStoreB96Vflat : public Vflat {
@@ -154,7 +142,6 @@ public:
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatStoreB128Vflat : public Vflat {
@@ -165,73 +152,78 @@ public:
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadD16U8Vflat : public Vflat {
 public:
   FlatLoadD16U8Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadD16I8Vflat : public Vflat {
 public:
   FlatLoadD16I8Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadD16B16Vflat : public Vflat {
 public:
   FlatLoadD16B16Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadD16HiU8Vflat : public Vflat {
 public:
   FlatLoadD16HiU8Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadD16HiI8Vflat : public Vflat {
 public:
   FlatLoadD16HiI8Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadD16HiB16Vflat : public Vflat {
 public:
   FlatLoadD16HiB16Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatStoreD16HiB8Vflat : public Vflat {
@@ -242,7 +234,6 @@ public:
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatStoreD16HiB16Vflat : public Vflat {
@@ -253,7 +244,6 @@ public:
   Operand vsrc;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicSwapB32Vflat : public Vflat {
@@ -266,7 +256,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicCmpswapB32Vflat : public Vflat {
@@ -279,7 +268,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicAddU32Vflat : public Vflat {
@@ -292,7 +280,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicSubU32Vflat : public Vflat {
@@ -305,7 +292,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicSubClampU32Vflat : public Vflat {
@@ -318,7 +304,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicMinI32Vflat : public Vflat {
@@ -331,7 +316,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicMinU32Vflat : public Vflat {
@@ -344,7 +328,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicMaxI32Vflat : public Vflat {
@@ -357,7 +340,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicMaxU32Vflat : public Vflat {
@@ -370,7 +352,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicAndB32Vflat : public Vflat {
@@ -383,7 +364,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicOrB32Vflat : public Vflat {
@@ -396,7 +376,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicXorB32Vflat : public Vflat {
@@ -409,7 +388,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicIncU32Vflat : public Vflat {
@@ -422,7 +400,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicDecU32Vflat : public Vflat {
@@ -435,7 +412,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicSwapB64Vflat : public Vflat {
@@ -448,7 +424,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicCmpswapB64Vflat : public Vflat {
@@ -461,7 +436,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicAddU64Vflat : public Vflat {
@@ -474,7 +448,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicSubU64Vflat : public Vflat {
@@ -487,7 +460,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicMinI64Vflat : public Vflat {
@@ -500,7 +472,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicMinU64Vflat : public Vflat {
@@ -513,7 +484,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicMaxI64Vflat : public Vflat {
@@ -526,7 +496,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicMaxU64Vflat : public Vflat {
@@ -539,7 +508,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicAndB64Vflat : public Vflat {
@@ -552,7 +520,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicOrB64Vflat : public Vflat {
@@ -565,7 +532,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicXorB64Vflat : public Vflat {
@@ -578,7 +544,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicIncU64Vflat : public Vflat {
@@ -591,7 +556,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicDecU64Vflat : public Vflat {
@@ -604,7 +568,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicCondSubU32Vflat : public Vflat {
@@ -617,7 +580,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicMinNumF32Vflat : public Vflat {
@@ -630,7 +592,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicMaxNumF32Vflat : public Vflat {
@@ -643,7 +604,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicAddF64Vflat : public Vflat {
@@ -656,7 +616,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicAddF32Vflat : public Vflat {
@@ -669,7 +628,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicPkAddF16Vflat : public Vflat {
@@ -682,7 +640,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicPkAddBf16Vflat : public Vflat {
@@ -695,7 +652,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicMinNumF64Vflat : public Vflat {
@@ -708,7 +664,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatAtomicMaxNumF64Vflat : public Vflat {
@@ -721,7 +676,6 @@ public:
   Operand saddr;
   Operand gpumem;
   Operand gpumem_in;
-  static const bool execute_registered_;
 };
 
 class FlatPrefetchB8Vflat : public Vflat {
@@ -731,7 +685,6 @@ public:
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadMonitorB32Vflat : public Vflat {
@@ -742,7 +695,6 @@ public:
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadMonitorB64Vflat : public Vflat {
@@ -753,7 +705,6 @@ public:
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 class FlatLoadMonitorB128Vflat : public Vflat {
@@ -764,7 +715,6 @@ public:
   Operand vaddr;
   Operand saddr;
   Operand gpumem;
-  static const bool execute_registered_;
 };
 
 } // namespace gfx1250

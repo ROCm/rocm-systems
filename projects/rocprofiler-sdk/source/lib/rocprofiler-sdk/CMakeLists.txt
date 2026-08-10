@@ -41,6 +41,7 @@ target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_SOURCES}
                                                       ${ROCPROFILER_LIB_HEADERS})
 add_subdirectory(hsa)
 add_subdirectory(hip)
+add_subdirectory(hipfile)
 add_subdirectory(code_object)
 add_subdirectory(context)
 add_subdirectory(counters)
@@ -65,7 +66,7 @@ target_link_libraries(
     rocprofiler-sdk-object-library
     PUBLIC rocprofiler-sdk::rocprofiler-sdk-headers
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-build-flags
-            rocprofiler-sdk::rocprofiler-sdk-memcheck
+            rocprofiler-sdk::rocprofiler-sdk-sanitizer
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-aqlprofile

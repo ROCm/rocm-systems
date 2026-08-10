@@ -53,9 +53,6 @@ class KFDSVMRangeTest : public KFDBaseComponentTest,
     void HMMProfilingEvent(int gpuNode);
     void VramOvercommitTest(int gpuNode);
     void PrefaultPartialRangeTest(int gpuNode);
-    void SVMApiDeregisterTest(int gpuNode);
-    void SVMApiOverlapReproTest(int gpuNode);
-    void SVMApiSharedPageTest(int gpuNode);
 
  protected:
     virtual void SetUp();

@@ -4,8 +4,20 @@
 #include "rocjitsu/isa/decoder.h"
 
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 
 namespace rocjitsu {
+
+std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
+                                         std::string_view target_id) {
+  const IsaTargetDescriptor *target = registry.find(target_id);
+  return target == nullptr ? nullptr : target->decoder_factory();
+}
+
+std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry, rj_code_arch_t arch) {
+  const IsaTargetDescriptor *target = registry.find(arch);
+  return target == nullptr ? nullptr : target->decoder_factory();
+}
 
 Decoder::~Decoder() {
   // If this decoder's pool is still the active one, deactivate it so

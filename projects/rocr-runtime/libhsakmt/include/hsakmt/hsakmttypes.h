@@ -608,35 +608,6 @@ typedef struct _HsaMemFlags
     };
 } HsaMemFlags;
 
-typedef struct _HsaMemMapFlags
-{
-    union
-    {
-        struct
-        {
-            unsigned int Reserved1      :  1; //
-            unsigned int CachePolicy    :  2; // see HSA_CACHING_TYPE
-            unsigned int ReadOnly       :  1; // memory is not modified while mapped
-            	    	    	    	      // allows migration scale-out
-	    unsigned int PageSize	    :  2; // see HSA_PAGE_SIZE, hint to use
-					  // this page size if possible and
-					  // smaller than default
-	    unsigned int HostAccess     :  1; // default = 0: GPU access only
-	    unsigned int Migrate        :  1; // Hint: Allows migration to local mem
-						  // of mapped GPU(s), instead of mapping
-						  // physical location
-            unsigned int Probe          :  1;     // default = 0: Indicates that a range
-                                                  // will be mapped by the process soon,
-						  // but does not initiate a map operation
-						  // may trigger eviction of nonessential
-						  // data from the memory, reduces latency
-						  // “cleanup hint” only, may be ignored
-            unsigned int Reserved       : 23;
-        } ui32;
-        HSAuint32 Value;
-    };
-} HsaMemMapFlags;
-
 typedef struct _HsaGraphicsResourceInfo {
     void       *MemoryAddress;      // For use in hsaKmtMapMemoryToGPU(Nodes)
     HSAuint64  SizeInBytes;         // Buffer size (OUT)
@@ -770,6 +741,7 @@ typedef struct
 	HSAuint64 ControlStackUsedInBytes; // Must be 4-Byte aligned
 	HsaUserContextSaveAreaHeader *SaveAreaHeader;
 	HSAuint64 Reserved2;		// runtime/system CU assignment
+	HSAuint64 SaveAreaAllocSize;	// Size of the full save area, per XCC
 } HsaQueueInfo;
 
 typedef struct _HsaQueueResource

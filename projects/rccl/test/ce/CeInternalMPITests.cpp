@@ -260,6 +260,82 @@ TEST_F(CeInternalMPITest, FiniAfterZeroCollectives)
 }
 
 // ===========================================================================
+// CeInternal_GraphLatch – graph-captured AllReduce immediately followed by an
+// eager AllReduce on the same comm. Regression for a latch bug where CE
+// 2-shot AllReduce could be selected right after a graph capture, deadlocking
+// if ranks disagreed on whether CE was allowed for a given call.
+// ===========================================================================
+
+// LATCH-01: with the captured plan still live, an eager AllReduce at a
+// CE-eligible size on the same comm must not hang and must be correct.
+// hipStreamSynchronize has no timeout; a regression here either corrupts
+// data (latch silently cleared) or hangs, caught by the test runner's
+// external --timeout (same pattern as the CE dispatch tests above).
+TEST_F(CeInternalMPITest, GraphThenEagerAllReduceDoesNotHang)
+{
+    // CE AllReduce range is [NCCL_CE_AR_MIN_MSG_BYTES, NCCL_CE_AR_MAX_MSG_BYTES];
+    // 8MiB of float32 sits comfortably inside it.
+    constexpr size_t kElem = (8ull * 1024 * 1024) / sizeof(float);
+    const int nRanks = ceComm->nRanks;
+    const int rank = ceComm->rank;
+
+    RCCLTestHelpers::SymBuf sendSym, recvSym;
+    ASSERT_EQ(RCCLTestHelpers::ncclSymBufAlloc(getActiveCommunicator(), kElem * sizeof(float), sendSym),
+              ncclSuccess) << "ncclSymBufAlloc for sendBuf failed";
+    ASSERT_EQ(RCCLTestHelpers::ncclSymBufAlloc(getActiveCommunicator(), kElem * sizeof(float), recvSym),
+              ncclSuccess) << "ncclSymBufAlloc for recvBuf failed";
+    ASSERT_EQ(hipSuccess, ceFillRankScalarFloat(sendSym.ptr, kElem, rank));
+
+    const float expectedSum = static_cast<float>(nRanks * (nRanks + 1) / 2); // sum(1..nRanks)
+
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graphExec = nullptr;
+
+    ASSERT_EQ(hipSuccess, hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal));
+    ncclResult_t ncclErr = ncclAllReduce(sendSym.ptr, recvSym.ptr, kElem, ncclFloat32, ncclSum,
+                                          getActiveCommunicator(), getActiveStream());
+    ASSERT_EQ(ncclSuccess, ncclErr);
+    ASSERT_EQ(hipSuccess, hipStreamEndCapture(getActiveStream(), &graph));
+    ASSERT_NE(nullptr, graph);
+    ASSERT_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+
+    SCOPE_EXIT(if(graphExec) (void)hipGraphExecDestroy(graphExec); if(graph) (void)hipGraphDestroy(graph));
+
+    ASSERT_EQ(hipSuccess, hipMemset(recvSym.ptr, 0, kElem * sizeof(float)));
+    ASSERT_EQ(hipSuccess, hipGraphLaunch(graphExec, getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    size_t errIdx; float errExp, errAct;
+    ASSERT_TRUE(RCCLTestHelpers::verifyBufferData<float>(
+                    recvSym.ptr, kElem,
+                    [expectedSum](size_t) { return expectedSum; },
+                    0, 1e-3, &errIdx, &errExp, &errAct))
+        << "Captured AllReduce result mismatch at idx=" << errIdx
+        << " expected=" << errExp << " got=" << errAct;
+
+    // White-box: graphExec is still live, so the CE latch must still be
+    // engaged -- otherwise the eager call below could pick CE while another
+    // rank is still mid-teardown of its own captured plan.
+    EXPECT_TRUE(ceComm->ceColl.graphModeSeen)
+        << "CE AllReduce graph latch should still be set right after launch";
+
+    // Eager AllReduce, same comm/stream, CE-eligible size, issued immediately.
+    ASSERT_EQ(hipSuccess, hipMemset(recvSym.ptr, 0, kElem * sizeof(float)));
+    ncclErr = ncclAllReduce(sendSym.ptr, recvSym.ptr, kElem, ncclFloat32, ncclSum,
+                             getActiveCommunicator(), getActiveStream());
+    ASSERT_EQ(ncclSuccess, ncclErr);
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    ASSERT_TRUE(RCCLTestHelpers::verifyBufferData<float>(
+                    recvSym.ptr, kElem,
+                    [expectedSum](size_t) { return expectedSum; },
+                    0, 1e-3, &errIdx, &errExp, &errAct))
+        << "Eager AllReduce immediately after graph capture produced wrong data"
+        << " at idx=" << errIdx << " expected=" << errExp << " got=" << errAct;
+    // SCOPE_EXIT above destroys graphExec/graph on return.
+}
+
+// ===========================================================================
 // CeInternal_Sync – ncclPrepUCSync op-count and self-target checks
 // ===========================================================================
 
@@ -504,15 +580,23 @@ TEST_F(CeInternalMPITest, LaunchFourOpsNullStreamSucceeds)
 // ===========================================================================
 
 // NEG-01: ncclCeImplemented returns false for collectives CE does not handle.
+//
+// NOTE: ncclFuncAllReduce was moved out of this negative list in PR #8443
+// ("Users/galaband/rccl ce ar no pipeline"), which added CE AllReduce support
+// (ce_coll.cc's ncclCeImplemented() switch now returns true for
+// ncclFuncAllReduce). That PR updated the switch statement but never updated
+// this test, leaving a stale assertion that CE_Internal_Neg has failed on
+// ever since (verified identical on rccl/gfx1250:f43c171 and PR #8945 tip).
+// AllReduce's positive expectation now lives in NEG-02 below, alongside the
+// driver-gated checks for the other CE-supported collectives.
 TEST(CeInternalNeg, CeImplementedReturnsFalseForUnsupported)
 {
-    EXPECT_FALSE(ncclCeImplemented(ncclFuncAllReduce,    ncclDevSum, ncclFloat32));
     EXPECT_FALSE(ncclCeImplemented(ncclFuncBroadcast,    ncclDevSum, ncclFloat32));
     EXPECT_FALSE(ncclCeImplemented(ncclFuncReduceScatter, ncclDevSum, ncclFloat32));
 }
 
 // NEG-02: On ROCm 7.12+ or 7.0.2.x, ncclCeImplemented returns true for
-//         the four supported CE collectives.
+//         the five supported CE collectives.
 TEST(CeInternalNeg, CeImplementedReturnsTrueOnSupportedDriver)
 {
     if(!isCeDriverSupported())
@@ -525,6 +609,7 @@ TEST(CeInternalNeg, CeImplementedReturnsTrueOnSupportedDriver)
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAlltoAll,  ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncScatter,   ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncGather,    ncclDevSum, ncclFloat32));
+    EXPECT_TRUE(ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat32));
 }
 
 // ===========================================================================

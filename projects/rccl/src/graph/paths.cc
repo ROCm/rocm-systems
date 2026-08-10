@@ -1224,6 +1224,11 @@ NCCL_PARAM(MaxP2pNChannels, "MAX_P2P_NCHANNELS", MAXCHANNELS);
 // When enabled, caps p2pnChannels to 16 on gfx950 (MI350) for large-scale jobs
 // (nNodes >= 16) to reduce P2P CU usage. Disabled by default.
 NCCL_PARAM(P2pCuReduceScaleEnable, "P2P_CU_REDUCE_SCALE_ENABLE", 0);
+// When set, pick p2pnChannelsPerPeer so that a P2P plan touches every channel
+// in the pool: ppp = pow2Down(p2pnChannels / nRanks). The pow2 step matters --
+// ncclP2pChannelForPart mods channel ids by the pool, so ppp*nRanks > pool
+// causes round bases to wrap and channels to collide.
+RCCL_PARAM(SaturateP2pNChannels, "SATURATE_P2P_NCHANNELS", 0);
 extern int64_t ncclParamWorkArgsBytes();
 
 ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm) {
@@ -1283,24 +1288,44 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // higher parts silently alias onto lower ones and produce wrong data
     // (seen on MI455 2x1p1g alltoall when topology fallback yields 2 channels
     // but the gfx1250 single-node doubling above asks for 4 parts per peer).
-    comm->p2pnChannels =
-      std::min(std::max(pow2Up(comm->p2pnChannels), pow2Up(comm->p2pnChannelsPerPeer)), 4 * CHANNEL_LIMIT);
-    // p2pnChannelsPerPeer cannot be greater than MAXCHANNELS
-    // Capping the comm->p2pnChannels to 32 for send/recv based collectives on multi-node MI350 (2 and 4 nodes)
-    if (((comm->nNodes == 2 && comm->topo->nRanks == 16) || (comm->nNodes == 4 && comm->topo->nRanks == 32)) &&
-        (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")))
-      comm->p2pnChannels = std::min(comm->p2pnChannels, 32);
-    // Capping the comm->p2pnChannels to 16 for send/recv based collectives with half-subscription (4 GPUs per node) multi-node MI350 (2 and 4 nodes)
-    if (((comm->nNodes == 2 && comm->topo->nRanks == 8) || (comm->nNodes == 4 && comm->topo->nRanks == 16)) &&
-        (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")))
-      comm->p2pnChannels = std::min(comm->p2pnChannels, 16);
-    // Opt-in P2P CU reduction on gfx950 (MI350) at scale: cap p2pnChannels to 16 when nNodes >= 16
-    if (ncclParamP2pCuReduceScaleEnable() && comm->nNodes >= 16 &&
-        IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))
-      comm->p2pnChannels = std::min(comm->p2pnChannels, 16);
+    //
+    // When the user explicitly raises NCCL_MAX_P2P_NCHANNELS past 4*CHANNEL_LIMIT
+    // (=64), treat it as an opt-in to the extended upper bound (up to MAXCHANNELS).
+    // Otherwise keep the historical 64 cap and per-arch multi-node caps below.
+    {
+      int userMaxP2p = (int)ncclParamMaxP2pNChannels();
+      int defaultMax = 4 * CHANNEL_LIMIT;
+      int upper = (userMaxP2p > defaultMax) ? std::min(userMaxP2p, (int)MAXCHANNELS) : defaultMax;
+      comm->p2pnChannels = std::min(std::max(pow2Up(comm->p2pnChannels), pow2Up(comm->p2pnChannelsPerPeer)), upper);
+      if (upper == defaultMax) {
+        // p2pnChannelsPerPeer cannot be greater than MAXCHANNELS
+        // Capping the comm->p2pnChannels to 32 for send/recv based collectives on multi-node MI350 (2 and 4 nodes)
+        if (((comm->nNodes == 2 && comm->topo->nRanks == 16) || (comm->nNodes == 4 && comm->topo->nRanks == 32)) &&
+            (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")))
+          comm->p2pnChannels = std::min(comm->p2pnChannels, 32);
+        // Capping the comm->p2pnChannels to 16 for send/recv based collectives with half-subscription (4 GPUs per node) multi-node MI350 (2 and 4 nodes)
+        if (((comm->nNodes == 2 && comm->topo->nRanks == 8) || (comm->nNodes == 4 && comm->topo->nRanks == 16)) &&
+            (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")))
+          comm->p2pnChannels = std::min(comm->p2pnChannels, 16);
+        // Opt-in P2P CU reduction on gfx950 (MI350) at scale: cap p2pnChannels to 16 when nNodes >= 16
+        if (ncclParamP2pCuReduceScaleEnable() && comm->nNodes >= 16 &&
+            IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))
+          comm->p2pnChannels = std::min(comm->p2pnChannels, 16);
+      }
+    }
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, MAXCHANNELS);
   }
 
+  // Opt-in: pick p2pnChannelsPerPeer so a P2P plan tiles the channel pool
+  // without wrapping. Saturates gridDim.x for alltoall-style workloads.
+  if (rcclParamSaturateP2pNChannels() && comm->nRanks > 0) {
+    int target = std::max(1, comm->p2pnChannels / comm->nRanks);
+    int newPpp = std::min(pow2Down(target), (int)MAXCHANNELS);
+    INFO(NCCL_INIT | NCCL_TUNING,
+         "RCCL_SATURATE_P2P_NCHANNELS: p2pnChannelsPerPeer %d -> %d (p2pnChannels=%d, nRanks=%d)",
+         comm->p2pnChannelsPerPeer, newPpp, comm->p2pnChannels, comm->nRanks);
+    comm->p2pnChannelsPerPeer = newPpp;
+  }
   if (comm->nNodes > 1 && comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT) {
     // In the case of >1 NVLD (and the user didn't set nChannelsPerNetPeer), the network is the bottleneck.
     // Reduce the number of channels per host to avoid going above p2pnChannels to fit all the peers within a single round.
