@@ -35,6 +35,8 @@
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/cxx/hash.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <array>
 #include <cstddef>
@@ -129,6 +131,22 @@ struct pc_sampling_service
 
     // Atomic flag for CAS-based start/stop operations
     std::atomic<bool> enabled{false};
+
+    // PC sampling is configured per agent at service setup time; these helpers mirror the
+    // agent-scoping queries used by dispatch counter collection and SPM in PR #9868.
+    bool collects_on(rocprofiler_agent_id_t agent_id) const
+    {
+        return agent_sessions.count(agent_id) > 0;
+    }
+
+    bool intersects(const pc_sampling_service& rhs) const
+    {
+        for(const auto& [agent_id, _] : agent_sessions)
+        {
+            if(rhs.agent_sessions.count(agent_id) > 0) return true;
+        }
+        return false;
+    }
 };
 
 struct context

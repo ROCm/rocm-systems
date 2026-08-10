@@ -391,10 +391,19 @@ common::Synchronized<hsa::profiler_serializer>&
 QueueController::serializer(const Queue* queue)
 {
     CHECK(queue);
+    const auto agent_id = queue->get_agent().get_rocp_agent()->id;
+
+    // Read the refcount before taking the serializer lock: update_serialization() acquires
+    // them in that order, and reversing it here would deadlock. A concurrent enable/disable
+    // for this agent can therefore race with the creation below, exactly as the previous
+    // _serialized_enabled load could, and is resolved the same way -- the next transition
+    // through update_serialization() reaches the entry once it is in the map.
+    const bool should_serialize = is_serialization_enabled(agent_id);
+
     common::Synchronized<hsa::profiler_serializer>* ret = nullptr;
     _profiler_serializer.ulock(
         [&](const auto& m) {
-            if(auto ptr = m.find(queue->get_agent().get_rocp_agent()->id); ptr != m.end())
+            if(auto ptr = m.find(agent_id); ptr != m.end())
             {
                 ret = ptr->second.get();
                 return true;
@@ -402,10 +411,10 @@ QueueController::serializer(const Queue* queue)
             return false;
         },
         [&](auto& m) {
-            ret = m.emplace(queue->get_agent().get_rocp_agent()->id,
+            ret = m.emplace(agent_id,
                             std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
                       .first->second.get();
-            if(_serialized_enabled.load() == true)
+            if(should_serialize)
             {
                 ret->wlock([&](auto& serializer) { serializer.enable({}); });
             }
@@ -429,47 +438,114 @@ per_dev_map(const QueueController::queue_map_t& _queues_v)
 };  // namespace
 
 void
-QueueController::disable_serialization()
+QueueController::update_serialization(const agent_handle_set_t& agents, bool enable)
 {
     _queues.rlock([&](const queue_map_t& _queues_v) {
-        _serialized_enabled.store(false);
         auto pd_map = per_dev_map(_queues_v);
-        _profiler_serializer.wlock([&](auto& m) {
-            for(auto& [k, v] : m)
+
+        // Agents whose effective refcount crossed zero in this call; only those get their
+        // serializer toggled. Collected under the refcount lock, applied under the serializer
+        // lock.
+        auto transitioned = std::vector<rocprofiler_agent_id_t>{};
+        bool any_enabled  = false;
+
+        _serialization_refcount.wlock([&](auto& state) {
+            // An agent can be covered by `all` and by an explicit entry at the same time, so
+            // the transition has to be decided by comparing effective counts across the
+            // update rather than by watching a single counter hit zero.
+            auto was_enabled = std::unordered_map<rocprofiler_agent_id_t, bool>{};
+            _profiler_serializer.rlock([&](const auto& serializers) {
+                for(const auto& [agent_id, _] : serializers)
+                    was_enabled.emplace(agent_id, state.enabled(agent_id));
+            });
+
+            if(agents.empty())
             {
-                if(auto it = pd_map.find(k); it != pd_map.end())
+                if(enable)
+                    ++state.all;
+                else if(state.all > 0)
+                    --state.all;
+            }
+            else
+            {
+                for(const auto& agent_id : agents)
                 {
-                    v->wlock([&](auto& serializer) { serializer.disable(it->second); });
+                    auto& count = state.per_agent[agent_id];
+                    if(enable)
+                        ++count;
+                    else if(count > 0)
+                        --count;
                 }
-                else
+            }
+
+            _profiler_serializer.rlock([&](const auto& serializers) {
+                for(const auto& [agent_id, _] : serializers)
                 {
-                    v->wlock([&](auto& serializer) { serializer.disable({}); });
+                    auto itr = was_enabled.find(agent_id);
+                    if(itr == was_enabled.end()) continue;
+                    if(itr->second != state.enabled(agent_id))
+                        transitioned.emplace_back(agent_id);
                 }
+            });
+
+            any_enabled = state.any();
+        });
+
+        _serialized_enabled.store(any_enabled);
+
+        if(transitioned.empty()) return;
+
+        _profiler_serializer.wlock([&](auto& m) {
+            for(const auto& agent_id : transitioned)
+            {
+                auto itr = m.find(agent_id);
+                if(itr == m.end() || !itr->second) continue;
+
+                auto queues = hsa_barrier::queue_map_ptr_t{};
+                if(auto it = pd_map.find(agent_id); it != pd_map.end()) queues = it->second;
+
+                itr->second->wlock([&](auto& serializer) {
+                    if(enable)
+                        serializer.enable(queues);
+                    else
+                        serializer.disable(queues);
+                });
             }
         });
     });
 }
 
 void
+QueueController::disable_serialization()
+{
+    update_serialization({}, false);
+}
+
+void
 QueueController::enable_serialization()
 {
-    _queues.rlock([&](const queue_map_t& _queues_v) {
-        _serialized_enabled.store(true);
-        auto pd_map = per_dev_map(_queues_v);
-        _profiler_serializer.wlock([&](auto& m) {
-            for(auto& [k, v] : m)
-            {
-                if(auto it = pd_map.find(k); it != pd_map.end())
-                {
-                    v->wlock([&](auto& serializer) { serializer.enable(it->second); });
-                }
-                else
-                {
-                    v->wlock([&](auto& serializer) { serializer.enable({}); });
-                }
-            }
-        });
-    });
+    update_serialization({}, true);
+}
+
+void
+QueueController::disable_serialization(const agent_handle_set_t& agents)
+{
+    update_serialization(agents, false);
+}
+
+void
+QueueController::enable_serialization(const agent_handle_set_t& agents)
+{
+    update_serialization(agents, true);
+}
+
+bool
+QueueController::is_serialization_enabled(rocprofiler_agent_id_t agent_id) const
+{
+    bool enabled = false;
+    _serialization_refcount.rlock(
+        [&](const auto& state) { enabled = state.enabled(agent_id); });
+    return enabled;
 }
 
 void
