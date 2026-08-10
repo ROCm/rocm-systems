@@ -2957,7 +2957,6 @@ bool KernelBlitManager::WriteBufferBatch(
         const size_t pinned_offset = buffer_state.buffer_ - pinned_memory->getDeviceMemory();
         pinned_copy_ops.emplace_back(buffer_state.pinnedMem_, op.dst_memory, pinned_offset,
                                      op.dst_offset + copy_offset, copy_size, op.metadata);
-        // Don't release yet - will be released after hsaCopyBatch completes
       } else {
         memcpy(buffer_state.buffer_, src_addr + copy_offset, copy_size);
         staging_copy_ops.push_back({buffer_state.buffer_,
@@ -2990,12 +2989,13 @@ bool KernelBlitManager::WriteBufferBatch(
                                     dst_memory->getDeviceMemory() + op.dstOffset, op.size,
                                     op.metadata, kNeedsSystemScope, kAttachSignal});
       }
+    } else {
+      // Release pinned memory after batch copy completes
+      for (const auto& op : pinned_copy_ops) {
+        gpu().addPinnedMem(op.srcMemory);
+      }
+      pinned_copy_ops.clear();
     }
-    // Release pinned memory after batch copy completes
-    for (const auto& op : pinned_copy_ops) {
-      gpu().addPinnedMem(op.srcMemory);
-    }
-    pinned_copy_ops.clear();
   }
 
   if (!staging_copy_ops.empty()) {
@@ -3070,7 +3070,6 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
         pinned_copy_ops.emplace_back(op.src_memory, buffer_state.pinnedMem_,
                                      op.src_offset + copy_offset, pinned_offset, copy_size,
                                      op.metadata);
-        // Don't release yet - will be released after hsaCopyBatch completes
       } else {
         staging_copy_ops.push_back({src_memory->getDeviceMemory() + op.src_offset + copy_offset,
                                     buffer_state.buffer_, copy_size, op.metadata, true, true});
@@ -3102,12 +3101,13 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
                                     dst_memory->getDeviceMemory() + op.dstOffset, op.size,
                                     op.metadata, kNeedsSystemScope, kAttachSignal});
       }
+    } else {
+      // Release pinned memory after batch copy completes
+        for (const auto& op : pinned_copy_ops) {
+          gpu().addPinnedMem(op.dstMemory);
+        }
+        pinned_copy_ops.clear();
     }
-    // Release pinned memory after batch copy completes
-    for (const auto& op : pinned_copy_ops) {
-      gpu().addPinnedMem(op.dstMemory);
-    }
-    pinned_copy_ops.clear();
   }
 
   if (!staging_copy_ops.empty()) {
@@ -3671,8 +3671,7 @@ amd::Memory* DmaBlitManager::pinHostMemory(const void* hostMem, size_t pinSize,
   // Recalculate pin memory size
   pinAllocSize = amd::alignUp(pinSize + partial, PinnedMemoryAlignment);
 
-  amd::Context& ctx = dev().context();
-  amdMemory = new (ctx) amd::Buffer(ctx, CL_MEM_USE_HOST_PTR, pinAllocSize);
+  amdMemory = new (*context_) amd::Buffer(*context_, CL_MEM_USE_HOST_PTR, pinAllocSize);
   amdMemory->setVirtualDevice(&gpu());
   if ((amdMemory != nullptr) && !amdMemory->create(tmpHost, SysMem)) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
