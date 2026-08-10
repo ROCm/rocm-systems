@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/isa_operand_simd_inl.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -28,15 +29,18 @@ std::optional<Packed16VgprSource> packed_16bit_vgpr_source(bool packed_16bit_sou
                                                            OperandType opr_type, int ev) {
   if (!packed_16bit_source || size_bits != 16)
     return std::nullopt;
-  if (opr_type == OperandType::OPR_VGPR) {
-    if (ev >= 0 && ev <= 127)
-      return Packed16VgprSource{static_cast<uint32_t>(ev), 0};
-    if (ev >= 128 && ev <= 255)
-      return Packed16VgprSource{static_cast<uint32_t>(ev - 128), 16};
+  int selector_base;
+  if (opr_type == OperandType::OPR_VGPR)
+    selector_base = 0;
+  else if (opr_type == OperandType::OPR_SRC)
+    selector_base = 256;
+  else
     return std::nullopt;
-  }
-  if (ev >= 384 && ev <= 511)
-    return Packed16VgprSource{static_cast<uint32_t>(ev - 384), 16};
+  int selector = ev - selector_base;
+  if (selector >= 0 && selector <= 127)
+    return Packed16VgprSource{static_cast<uint32_t>(selector), 0};
+  if (selector >= 128 && selector <= 255)
+    return Packed16VgprSource{static_cast<uint32_t>(selector - 128), 16};
   return std::nullopt;
 }
 
@@ -55,256 +59,10 @@ std::optional<Packed16VgprSource> packed_16bit_vgpr_dst(bool packed_16bit_dst, i
 
 namespace {
 
-uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
-  if (ev == 102)
-    return static_cast<uint32_t>(wf.scratch_base());
-  if (ev == 103)
-    return static_cast<uint32_t>(wf.scratch_base() >> 32);
-  if (ev <= 105)
-    return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
-  if (ev == 106)
-    return static_cast<uint32_t>(wf.vcc());
-  if (ev == 107)
-    return static_cast<uint32_t>(wf.vcc() >> 32);
-  if (ev >= 108 && ev <= 123)
-    return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
-  if (ev == 124)
-    return 0u; // NULL
-  if (ev == 125)
-    return wf.m0();
-  if (ev == 126)
-    return static_cast<uint32_t>(wf.exec());
-  if (ev == 127)
-    return static_cast<uint32_t>(wf.exec_raw() >> 32);
-  if (ev >= 128 && ev <= 192)
-    return static_cast<uint32_t>(ev - 128);
-  if (ev >= 193 && ev <= 208)
-    return static_cast<uint32_t>(static_cast<int32_t>(-(ev - 192)));
-  if (ev == 230)
-    return static_cast<uint32_t>(wf.scratch_base()); // SRC_FLAT_SCRATCH_BASE_LO
-  if (ev == 231)
-    return static_cast<uint32_t>(wf.scratch_base() >> 32); // SRC_FLAT_SCRATCH_BASE_HI
-  if (ev == 240)
-    return 0x3F000000u; // 0.5f
-  if (ev == 241)
-    return 0xBF000000u; // -0.5f
-  if (ev == 242)
-    return 0x3F800000u; // 1.0f
-  if (ev == 243)
-    return 0xBF800000u; // -1.0f
-  if (ev == 244)
-    return 0x40000000u; // 2.0f
-  if (ev == 245)
-    return 0xC0000000u; // -2.0f
-  if (ev == 246)
-    return 0x40800000u; // 4.0f
-  if (ev == 247)
-    return 0xC0800000u; // -4.0f
-  if (ev == 248)
-    return 0x3E22F983u; // 1/(2*pi)
-  if (ev == 235)
-    return static_cast<uint32_t>(wf.shared_aperture_base() >> 32); // SRC_SHARED_BASE
-  if (ev == 236)
-    return static_cast<uint32_t>(wf.shared_aperture_limit() >> 32); // SRC_SHARED_LIMIT
-  if (ev == 237)
-    return static_cast<uint32_t>(wf.private_aperture_base() >> 32); // SRC_PRIVATE_BASE
-  if (ev == 238)
-    return static_cast<uint32_t>(wf.private_aperture_limit() >> 32); // SRC_PRIVATE_LIMIT
-  if (ev == 249)
-    return 0u; // SRC_POPS_EXITING_WAVE_ID (not used in compute)
-  if (ev == 250)
-    return 0u; // NULL
-  if (ev == 251)
-    return (wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL))) == 0
-               ? 1u
-               : 0u; // VCCZ
-  if (ev == 252) {
-    uint64_t active = wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL);
-    return (wf.exec() & active) == 0 ? 1u : 0u; // EXECZ
-  }
-  if (ev == 253)
-    return wf.read_scc() ? 1u : 0u; // SCC
-  throw std::logic_error("Unsupported encoding value for scalar read: " + std::to_string(ev));
-}
-
-uint32_t resolve_src_scalar16(const amdgpu::Wavefront &wf, int ev) {
-  switch (ev) {
-  case 240:
-    return 0x3800u; // 0.5h
-  case 241:
-    return 0xB800u; // -0.5h
-  case 242:
-    return 0x3C00u; // 1.0h
-  case 243:
-    return 0xBC00u; // -1.0h
-  case 244:
-    return 0x4000u; // 2.0h
-  case 245:
-    return 0xC000u; // -2.0h
-  case 246:
-    return 0x4400u; // 4.0h
-  case 247:
-    return 0xC400u; // -4.0h
-  case 248:
-    return 0x3118u; // f16 1/(2*pi)
-  default:
-    return resolve_src_scalar(wf, ev);
-  }
-}
-
-// Must stay in sync with resolve_src_scalar above — returns true for
-// exactly the encoding values that resolve_src_scalar handles without
-// throwing. Used by Isa::simd_capable_value() to keep the SIMD fast
-// path off operands whose scalar broadcast would throw at runtime.
-bool can_resolve_src_scalar(int ev) {
-  return (ev >= 0 && ev <= 107) || (ev >= 108 && ev <= 123) || ev == 124 || ev == 125 ||
-         ev == 126 || ev == 127 || (ev >= 128 && ev <= 208) || ev == 230 || ev == 231 ||
-         (ev >= 235 && ev <= 238) || (ev >= 240 && ev <= 253);
-}
-
-uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {
-  if (ev == 102)
-    return wf.scratch_base();
-  if (ev <= 105) {
-    uint32_t lo =
-        amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
-    uint32_t hi =
-        amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
-    return static_cast<uint64_t>(hi) << 32 | lo;
-  }
-  if (ev == 106)
-    return wf.vcc();
-  if (ev >= 108 && ev <= 122) {
-    uint32_t lo =
-        amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
-    uint32_t hi =
-        amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
-    return static_cast<uint64_t>(hi) << 32 | lo;
-  }
-  if (ev == 124)
-    return 0u; // NULL
-  if (ev == 125)
-    return wf.m0();
-  if (ev == 126)
-    return wf.exec_raw();
-  if (ev >= 128 && ev <= 192)
-    return static_cast<uint64_t>(ev - 128);
-  if (ev >= 193 && ev <= 208)
-    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(-(ev - 192))));
-  if (ev == 230)
-    return wf.scratch_base(); // SRC_FLAT_SCRATCH_BASE
-  if (ev == 240)
-    return 0x3FE0000000000000ULL; // 0.5
-  if (ev == 241)
-    return 0xBFE0000000000000ULL; // -0.5
-  if (ev == 242)
-    return 0x3FF0000000000000ULL; // 1.0
-  if (ev == 243)
-    return 0xBFF0000000000000ULL; // -1.0
-  if (ev == 244)
-    return 0x4000000000000000ULL; // 2.0
-  if (ev == 245)
-    return 0xC000000000000000ULL; // -2.0
-  if (ev == 246)
-    return 0x4010000000000000ULL; // 4.0
-  if (ev == 247)
-    return 0xC010000000000000ULL; // -4.0
-  if (ev == 248)
-    return 0x3FC45F306DC9C883ULL; // 1/(2*pi)
-  if (ev == 235)
-    return wf.shared_aperture_base(); // SRC_SHARED_BASE
-  if (ev == 236)
-    return wf.shared_aperture_limit(); // SRC_SHARED_LIMIT
-  if (ev == 237)
-    return wf.private_aperture_base(); // SRC_PRIVATE_BASE
-  if (ev == 238)
-    return wf.private_aperture_limit(); // SRC_PRIVATE_LIMIT
-  throw std::logic_error("Unsupported encoding value for scalar64 read: " + std::to_string(ev));
-}
-
-void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {
-  if (ev == 102) {
-    uint64_t sb = wf.scratch_base();
-    wf.set_scratch_base((sb & 0xFFFFFFFF00000000ULL) | val);
-    return;
-  }
-  if (ev == 103) {
-    uint64_t sb = wf.scratch_base();
-    wf.set_scratch_base((sb & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
-    return;
-  }
-  if (ev <= 105) {
-    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
-    return;
-  }
-  if (ev == 106) {
-    wf.set_vcc((wf.vcc() & 0xFFFFFFFF00000000ULL) | val);
-    return;
-  }
-  if (ev == 107) {
-    wf.set_vcc((wf.vcc() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
-    return;
-  }
-  if (ev >= 108 && ev <= 123) {
-    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
-    return;
-  }
-  if (ev == 124)
-    return;
-  if (ev == 125) {
-    wf.set_m0(val);
-    return;
-  }
-  if (ev == 126) {
-    wf.set_exec((wf.exec() & 0xFFFFFFFF00000000ULL) | val);
-    return;
-  }
-  if (ev == 127) {
-    wf.set_exec_raw((wf.exec_raw() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
-    return;
-  }
-  throw std::logic_error("Unsupported encoding value for scalar write: " + std::to_string(ev));
-}
-
-void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {
-  if (ev == 102) {
-    wf.set_scratch_base(val);
-    return;
-  }
-  if (ev <= 105) {
-    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
-                                          static_cast<uint32_t>(val));
-    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
-                                          static_cast<uint32_t>(val >> 32));
-    return;
-  }
-  if (ev == 106) {
-    wf.set_vcc(val);
-    return;
-  }
-  if (ev >= 108 && ev <= 122) {
-    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
-                                          static_cast<uint32_t>(val));
-    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
-                                          static_cast<uint32_t>(val >> 32));
-    return;
-  }
-  if (ev == 124)
-    return;
-  if (ev == 126) {
-    wf.set_exec_raw(val);
-    return;
-  }
-  throw std::logic_error("Unsupported encoding value for scalar64 write: " + std::to_string(ev));
-}
+constexpr int kM0EncodingValue = 125;
 
 bool is_vgpr_only_type(OperandType t) {
   return t == OperandType::OPR_VGPR || t == OperandType::OPR_SRC_VGPR;
-}
-
-bool is_immediate_type(OperandType t) {
-  return t == OperandType::OPR_SIMM16 || t == OperandType::OPR_SIMM32 ||
-         t == OperandType::OPR_SIMM8 || t == OperandType::OPR_SIMM64 || t == OperandType::OPR_LABEL;
 }
 
 uint32_t vgpr_index(OperandType opr_type, int ev) {
@@ -343,11 +101,12 @@ std::optional<uint32_t> Isa::resolved_vgpr_offset(const amdgpu::Wavefront &wf, O
 
 bool Isa::simd_capable_value(OperandType opr_type, int ev) {
   return resolved_vgpr_offset(opr_type, ev).has_value() || is_immediate_type(opr_type) ||
-         can_resolve_src_scalar(ev);
+         amdgpu::can_resolve_src_scalar(ev, kM0EncodingValue);
 }
 
 uint32_t Isa::simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev) {
-  return is_immediate_type(opr_type) ? static_cast<uint32_t>(ev) : resolve_src_scalar(wf, ev);
+  return is_immediate_type(opr_type) ? static_cast<uint32_t>(ev)
+                                     : amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);
 }
 
 bool Operand::simd_capable_exec() const {
@@ -420,7 +179,7 @@ uint32_t Operand::read_scalar_exec(const amdgpu::Wavefront &wf) const {
     return static_cast<uint32_t>(literal64_value_);
   if (is_immediate_type(opr_type_))
     return static_cast<uint32_t>(encoding_value_);
-  return resolve_src_scalar(wf, encoding_value_);
+  return amdgpu::resolve_src_scalar(wf, encoding_value_, kM0EncodingValue);
 }
 
 uint32_t Operand::read_lane_exec(const amdgpu::Wavefront &wf, uint32_t lane) const {
@@ -436,7 +195,10 @@ uint32_t Operand::read_lane_exec(const amdgpu::Wavefront &wf, uint32_t lane) con
   if (auto packed = packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, ev)) {
     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, false) : off;
-    uint32_t raw = amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane);
+    uint8_t byte_mask = packed->shift ? rocjitsu::ExecutionPlugin::kHighHalfByteMask
+                                      : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
+    uint32_t raw =
+        amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane, byte_mask);
     return (raw >> packed->shift) & 0xffffu;
   }
   if (auto off = Isa::resolved_vgpr_offset(wf, opr_type_, ev, vgpr_msb_role())) {
@@ -446,8 +208,8 @@ uint32_t Operand::read_lane_exec(const amdgpu::Wavefront &wf, uint32_t lane) con
   if (is_immediate_type(opr_type_))
     return static_cast<uint32_t>(ev);
   if (size_bits_ == 16)
-    return resolve_src_scalar16(wf, ev);
-  return resolve_src_scalar(wf, ev);
+    return amdgpu::resolve_src_scalar16(wf, ev, kM0EncodingValue);
+  return amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);
 }
 
 void Operand::write_scalar_exec(amdgpu::Wavefront &wf, uint32_t val) const {
@@ -457,7 +219,7 @@ void Operand::write_scalar_exec(amdgpu::Wavefront &wf, uint32_t val) const {
   // via apply_fieldless_caps() (see fieldless_policy.py).
   if (!is_writable())
     return;
-  resolve_dst_write(wf, encoding_value_, val);
+  amdgpu::resolve_dst_write(wf, encoding_value_, val, kM0EncodingValue);
 }
 
 void Operand::write_lane_exec(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {
@@ -472,10 +234,10 @@ void Operand::write_lane_exec(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val
     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, true) : off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
-    uint32_t old = amdgpu::RegisterAccess(wf.cu()).read_vgpr(idx, lane);
-    uint32_t keep_mask = packed->shift ? 0x0000ffffu : 0xffff0000u;
-    uint32_t merged = (old & keep_mask) | ((val & 0xffffu) << packed->shift);
-    amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, merged);
+    uint8_t write_byte_mask = packed->shift ? rocjitsu::ExecutionPlugin::kHighHalfByteMask
+                                            : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
+    uint32_t placed = (val & 0xffffu) << packed->shift;
+    amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, placed, write_byte_mask);
     return;
   }
   if (auto off = Isa::resolved_vgpr_offset(wf, opr_type_, encoding_value_, vgpr_msb_role())) {
@@ -501,11 +263,13 @@ uint64_t Operand::read_lane64_exec(const amdgpu::Wavefront &wf, uint32_t lane) c
     uint32_t idx = wf.vgpr_alloc().base + voff;
     return amdgpu::RegisterAccess(wf.cu()).read_vgpr64(idx, lane);
   }
+  if (literal32_widening_)
+    return widened_literal32_value();
   if (has_literal64_)
     return literal64_value_;
   if (is_immediate_type(opr_type_))
     return read_immediate64(opr_type_, ev);
-  return resolve_src_scalar64(wf, ev);
+  return amdgpu::resolve_src_scalar64(wf, ev, kM0EncodingValue);
 }
 
 void Operand::write_lane64_exec(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {
@@ -531,11 +295,13 @@ uint64_t Operand::read_scalar64_exec(const amdgpu::Wavefront &wf) const {
   // via apply_fieldless_caps() (see fieldless_policy.py).
   if (!reads_value())
     return 0;
+  if (literal32_widening_)
+    return widened_literal32_value();
   if (has_literal64_)
     return literal64_value_;
   if (is_immediate_type(opr_type_))
     return read_immediate64(opr_type_, encoding_value_);
-  return resolve_src_scalar64(wf, encoding_value_);
+  return amdgpu::resolve_src_scalar64(wf, encoding_value_, kM0EncodingValue);
 }
 
 void Operand::write_scalar64_exec(amdgpu::Wavefront &wf, uint64_t val) const {
@@ -545,7 +311,7 @@ void Operand::write_scalar64_exec(amdgpu::Wavefront &wf, uint64_t val) const {
   // via apply_fieldless_caps() (see fieldless_policy.py).
   if (!is_writable())
     return;
-  resolve_dst_write64(wf, encoding_value_, val);
+  amdgpu::resolve_dst_write64(wf, encoding_value_, val);
 }
 
 std::optional<uint32_t> Operand::simd_vgpr_base_exec(const amdgpu::Wavefront &wf) const {
@@ -627,21 +393,68 @@ void Operand::simd_notify_read64_mut_exec(amdgpu::Wavefront &wf, uint64_t lane_m
   }
 }
 
-const bool Operand::execution_backend_registered_ = [] {
-  execution_backend() = ExecutionBackend{
-      &Operand::simd_capable_exec,        &Operand::read_lane_chunk_exec,
-      &Operand::write_lane_chunk_exec,    &Operand::read_scalar_exec,
-      &Operand::read_lane_exec,           &Operand::write_scalar_exec,
-      &Operand::write_lane_exec,          &Operand::read_lane64_exec,
-      &Operand::write_lane64_exec,        &Operand::read_scalar64_exec,
-      &Operand::write_scalar64_exec,      &Operand::simd_vgpr_base_exec,
-      &Operand::simd_vgpr_storage_exec,   &Operand::simd_vgpr_storage_mut_exec,
-      &Operand::simd_vgpr_storage64_exec, &Operand::simd_vgpr_storage64_mut_exec,
-      &Operand::simd_notify_read_exec,    &Operand::simd_notify_read_mut_exec,
-      &Operand::simd_notify_read64_exec,  &Operand::simd_notify_read64_mut_exec,
+void Operand::simd_notify_write_mut_exec(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                         uint8_t byte_mask) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    wf.cu().raw_cu().notify_vgpr_write(&wf, wf.vgpr_alloc().base + voff, lane_mask, byte_mask);
+  }
+}
+
+void Operand::simd_notify_write64_mut_exec(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                           uint8_t byte_mask) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    uint32_t reg = wf.vgpr_alloc().base + voff;
+    wf.cu().raw_cu().notify_vgpr_write(&wf, reg, lane_mask, byte_mask);
+    wf.cu().raw_cu().notify_vgpr_write(&wf, reg + 1, lane_mask, byte_mask);
+  }
+}
+
+const void *Operand::full_execution_backend() {
+  static const ExecutionBackend backend{
+      &Operand::simd_capable_exec,
+      &Operand::read_lane_chunk_exec,
+      &Operand::write_lane_chunk_exec,
+      &Operand::read_scalar_exec,
+      &Operand::read_lane_exec,
+      &Operand::write_scalar_exec,
+      &Operand::write_lane_exec,
+      &Operand::read_lane64_exec,
+      &Operand::write_lane64_exec,
+      &Operand::read_scalar64_exec,
+      &Operand::write_scalar64_exec,
+      &Operand::simd_vgpr_base_exec,
+      &Operand::simd_vgpr_storage_exec,
+      &Operand::simd_vgpr_storage_mut_exec,
+      &Operand::simd_vgpr_storage64_exec,
+      &Operand::simd_vgpr_storage64_mut_exec,
+      &Operand::simd_notify_read_exec,
+      &Operand::simd_notify_read_mut_exec,
+      &Operand::simd_notify_read64_exec,
+      &Operand::simd_notify_read64_mut_exec,
+      &Operand::simd_notify_write_mut_exec,
+      &Operand::simd_notify_write64_mut_exec,
   };
-  return true;
-}();
+  return &backend;
+}
+
+bool Operand::full_execution_backend_complete() {
+  const auto is_complete = [](const ExecutionBackend &backend) {
+    return backend.simd_capable != nullptr && backend.read_lane_chunk != nullptr &&
+           backend.write_lane_chunk != nullptr && backend.read_scalar != nullptr &&
+           backend.read_lane != nullptr && backend.write_scalar != nullptr &&
+           backend.write_lane != nullptr && backend.read_lane64 != nullptr &&
+           backend.write_lane64 != nullptr && backend.read_scalar64 != nullptr &&
+           backend.write_scalar64 != nullptr && backend.simd_vgpr_base != nullptr &&
+           backend.simd_vgpr_storage != nullptr && backend.simd_vgpr_storage_mut != nullptr &&
+           backend.simd_vgpr_storage64 != nullptr && backend.simd_vgpr_storage64_mut != nullptr &&
+           backend.simd_notify_read != nullptr && backend.simd_notify_read_mut != nullptr &&
+           backend.simd_notify_read64 != nullptr && backend.simd_notify_read64_mut != nullptr &&
+           backend.simd_notify_write_mut != nullptr && backend.simd_notify_write64_mut != nullptr;
+  };
+  return is_complete(*static_cast<const ExecutionBackend *>(full_execution_backend()));
+}
 
 } // namespace gfx1250
 } // namespace rocjitsu

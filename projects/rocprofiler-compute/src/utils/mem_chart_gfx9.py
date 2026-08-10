@@ -971,15 +971,10 @@ class MemChart:
         self.y_min = y_min
         self.y_max = y_max
 
-    def draw(
-        self, canvas: Canvas, normal_unit: str, metric_dict: dict[str, Any]
-    ) -> None:
+    def draw(self, canvas: Canvas, metric_dict: dict[str, Any]) -> None:
         # ----------------------------------------
-        # Overall rect and title
+        # Overall rect
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
-        canvas.text(
-            self.x_min + 2.0, self.y_max - 2.0, f"(Normalization: {normal_unit})"
-        )
 
         # FIXME: this is temp solution to filter out non-numeric string
         for k, v in metric_dict.items():
@@ -992,7 +987,7 @@ class MemChart:
         block_instr_buff = InstrBuff(label="Instr Buff")
         block_instr_buff.x_min = 2.0
         block_instr_buff.x_max = block_instr_buff.x_min + 27.0
-        block_instr_buff.y_max = self.y_max - 5.0
+        block_instr_buff.y_max = self.y_max - 4.0
         block_instr_buff.y_min = block_instr_buff.y_max - 24.0
 
         block_instr_buff.wave_occupancy = metric_dict.get("Wavefront Occupancy", "n/a")
@@ -1263,9 +1258,13 @@ class MemChart:
         block_hbm.draw(canvas)
 
 
-def plot_mem_chart(normal_unit: str, metric_dict: dict[str, Any]) -> str:
+def plot_mem_chart(
+    metric_dict: dict[str, Any],
+    *,
+    chart_title: str,
+) -> str:
     canvas = Canvas(width=234, height=42, xmax=234, ymax=42)
     mc = MemChart(0, 0, 233, 41)
-    mc.draw(canvas, normal_unit, metric_dict)
+    mc.draw(canvas, metric_dict)
 
-    return canvas.plot()
+    return f"{chart_title}\n{canvas.plot()}"

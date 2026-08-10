@@ -598,6 +598,8 @@ void testReduceForTileSize()
 
 HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Basic, int)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   unsigned int wavefrontSize = getWarpSize();
 
   testReduceForTileSize<2>();
@@ -843,7 +845,9 @@ void runAggregationRandomForType(AggregationType aggType, dim3 blockDim)
 }
 
 template <bool Coalesced, class T, int WarpSize, class Op = void>
-void runAggregationRandomForOps(AggregationType, const std::tuple<>) {}
+void runAggregationRandomForOps(AggregationType aggType, const std::tuple<>)
+{
+}
 
 template <bool Coalesced, class T, int WarpSize, class Op, class... Ops>
 void runAggregationRandomForOps(AggregationType aggType, const std::tuple<Op, Ops...>)
@@ -861,6 +865,8 @@ void runAggregationRandomForOps(AggregationType aggType, const std::tuple<Op, Op
 HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_arithmetic, int, unsigned int, long long,
                        unsigned long long, float, half, double)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   std::tuple<cooperative_groups::plus<TestType>,
              cooperative_groups::less<TestType>,
              cooperative_groups::greater<TestType>> types;
@@ -877,6 +883,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_arithmetic, int, uns
 HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_boolean, int, unsigned int, long long,
                    unsigned long long)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   std::tuple<cooperative_groups::bit_and<TestType>,
              cooperative_groups::bit_or<TestType>,
              cooperative_groups::bit_xor<TestType>> types;
@@ -891,6 +899,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_boolean, int, unsign
 // passes a custom operator to cooperative_groups::reduce()
 HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Custom_Op)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   int wavefrontSize = getWarpSize();
 
   dim3 blockDim = {static_cast<unsigned int>(wavefrontSize)};
@@ -953,6 +963,8 @@ void __global__ maxMagnitude(Vector* result, AggregationType* aggregationType)
 // tests that we can pass trivially copyable structs as values to reduce
 HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Trivially_Copyable_Parameters)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   dim3 gridDim = { 1 };
   dim3 blockDim = { 4 };
   LinearAllocGuard<Vector> h_result(LinearAllocs::malloc, sizeof(Vector) * blockDim.x);
@@ -1253,6 +1265,8 @@ void testArgsDifferentSizesScan(AggregationType aggType)
 // types in that range; including non-powers of two
 HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_All_Parameter_Sizes)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   SECTION("sum") {
     testArgsDifferentSizesReduce<32, Sum>();
   }
@@ -1302,6 +1316,8 @@ __global__ void sumPoints(Point* result)
 // using a standard functor in the cooperative_groups namespace with a type that is not primitive
 HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Standard_Op_Custom_Type)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   LinearAllocGuard<Point> h_result(LinearAllocs::malloc, sizeof(Point) * 32);
   LinearAllocGuard<Point> d_result(LinearAllocs::hipMalloc, sizeof(Point) * 32);
   dim3 gridDim = { 1 };
@@ -1326,6 +1342,8 @@ HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Standard_Op_Custom_Type)
 HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_arithmetic, int, unsigned int, long long,
                    unsigned long long, float, half, double)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   std::tuple<cooperative_groups::plus<TestType>,
              cooperative_groups::less<TestType>,
              cooperative_groups::greater<TestType>> ops;
@@ -1339,6 +1357,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_arithmetic, int, unsig
 
 HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_boolean, int, unsigned int, long long, unsigned long long)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   std::tuple<cooperative_groups::bit_and<TestType>,
              cooperative_groups::bit_or<TestType>,
              cooperative_groups::bit_xor<TestType>> ops;

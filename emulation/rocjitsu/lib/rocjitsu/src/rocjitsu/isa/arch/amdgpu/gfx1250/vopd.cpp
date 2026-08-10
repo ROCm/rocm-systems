@@ -42,13 +42,9 @@ constexpr uint16_t kVopdMulF64 = 34;
 constexpr uint16_t kVopdMaxNumF64 = 35;
 constexpr uint16_t kVopdMinNumF64 = 36;
 
-Operand make_src0(uint32_t bits, bool vopd3, bool use_literal, bool literal_uses_f64_high_bits,
-                  uint32_t literal, uint16_t encoded) {
-  if (use_literal && encoded == 255) {
-    if (literal_uses_f64_high_bits)
-      return Operand(bits, OperandType::OPR_SIMM32, (static_cast<uint64_t>(literal) << 32), true);
+Operand make_src0(uint32_t bits, bool vopd3, bool use_literal, uint32_t literal, uint16_t encoded) {
+  if (use_literal && encoded == 255)
     return Operand(bits, OperandType::OPR_SIMM32, static_cast<int>(literal));
-  }
   return Operand(bits, vopd3 ? OperandType::OPR_SRC_SIMPLE : OperandType::OPR_SRC, encoded);
 }
 
@@ -57,11 +53,6 @@ std::string operand_list(const Operand &dst, const Operand &src0, const Operand 
 }
 
 } // namespace
-
-bool Vopd::is_vopd(const MachineInst *inst) {
-  uint32_t word0 = *reinterpret_cast<const uint32_t *>(inst);
-  return (word0 >> 24) == 0xCF || (word0 >> 26) == 0x32;
-}
 
 const char *Vopd::op_name(uint16_t op) {
   switch (op) {
@@ -136,7 +127,7 @@ bool Vopd::is_float64_op(uint16_t op) {
 }
 
 Vopd::Vopd(const MachineInst *inst)
-    : IsaInstruction<Isa>("vopd", registered_exec_fn<Vopd>()), dstx_(32, OperandType::OPR_VGPR, 0),
+    : IsaInstruction<Isa>("vopd", selected_exec_fn(0)), dstx_(32, OperandType::OPR_VGPR, 0),
       dsty_(32, OperandType::OPR_VGPR, 0), srcx0_(32, OperandType::OPR_SRC, 0),
       srcx1_(32, OperandType::OPR_VGPR, 0), srcx2_(32, OperandType::OPR_VGPR, 0),
       srcy0_(32, OperandType::OPR_SRC, 0), srcy1_(32, OperandType::OPR_VGPR, 0),
@@ -168,8 +159,8 @@ Vopd::Vopd(const MachineInst *inst)
     uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
     dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
     dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
-    srcx0_ = make_src0(x_bits, true, false, false, 0, srcx0);
-    srcy0_ = make_src0(y_bits, true, false, false, 0, srcy0);
+    srcx0_ = make_src0(x_bits, true, false, 0, srcx0);
+    srcy0_ = make_src0(y_bits, true, false, 0, srcy0);
     srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
     srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
     srcx2_ = (opx_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcx2)
@@ -200,8 +191,8 @@ Vopd::Vopd(const MachineInst *inst)
     uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
     dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
     dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
-    srcx0_ = make_src0(x_bits, false, has_literal_, is_float64_op(opx_), literal_, srcx0);
-    srcy0_ = make_src0(y_bits, false, has_literal_, is_float64_op(opy_), literal_, srcy0);
+    srcx0_ = make_src0(x_bits, false, has_literal_, literal_, srcx0);
+    srcy0_ = make_src0(y_bits, false, has_literal_, literal_, srcy0);
     srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
     srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
   }

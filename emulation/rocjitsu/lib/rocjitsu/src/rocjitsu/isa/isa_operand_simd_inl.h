@@ -129,6 +129,14 @@ AmdgpuIsaOperand<Isa>::simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const {
 }
 
 template <typename Isa>
+std::optional<uint32_t>
+AmdgpuIsaOperand<Isa>::simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this))
+    return wf.vgpr_alloc().base + (wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off);
+  return std::nullopt;
+}
+
+template <typename Isa>
 const amdgpu::VgprStorage *
 AmdgpuIsaOperand<Isa>::simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
@@ -187,6 +195,27 @@ void AmdgpuIsaOperand<Isa>::simd_notify_read64_mut_impl(amdgpu::Wavefront &wf, u
     uint32_t physical_reg = wf.vgpr_alloc().base + voff;
     wf.cu().raw_cu().notify_vgpr_read(&wf, physical_reg, lane_mask, byte_mask);
     wf.cu().raw_cu().notify_vgpr_read(&wf, physical_reg + 1, lane_mask, byte_mask);
+  }
+}
+
+template <typename Isa>
+void AmdgpuIsaOperand<Isa>::simd_notify_write_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                                       uint8_t byte_mask) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    uint32_t physical_reg = wf.vgpr_alloc().base + voff;
+    wf.cu().raw_cu().notify_vgpr_write(&wf, physical_reg, lane_mask, byte_mask);
+  }
+}
+
+template <typename Isa>
+void AmdgpuIsaOperand<Isa>::simd_notify_write64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                                         uint8_t byte_mask) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    uint32_t physical_reg = wf.vgpr_alloc().base + voff;
+    wf.cu().raw_cu().notify_vgpr_write(&wf, physical_reg, lane_mask, byte_mask);
+    wf.cu().raw_cu().notify_vgpr_write(&wf, physical_reg + 1, lane_mask, byte_mask);
   }
 }
 

@@ -105,12 +105,13 @@ private:
 ///
 /// Typical usage:
 /// @code
+///   SimulationEngine::Config config{.num_threads = 4};
 ///   SimulationEngine engine(config);
 ///   engine.topology().set_root(std::move(my_model));
-///   engine.create(); // partitions, initializes components
+///   engine.topology().partition_balanced(config.num_threads);
+///   engine.create(); // validates the partition policy and initializes components
 ///   // (user enqueues work via CP)
 ///   auto exit = engine.run(); // starts up components, runs to completion
-///   // OR: while (engine.step()) {} // starts up on first call, one tick per call
 /// @endcode
 class SimulationEngine {
 public:
@@ -136,14 +137,19 @@ public:
   SimulationEngine(SimulationEngine &&) = delete;
   SimulationEngine &operator=(SimulationEngine &&) = delete;
 
-  /// @brief Partition the topology, initialize components, and prepare for execution.
+  /// @brief Initialize the topology and prepare for execution.
   ///
   /// @details Required after the Config-only constructor once the topology is
-  /// populated. Also used to rebuild after shutdown(). Calls
-  /// initialize_components() so that components can set up ports and handlers
-  /// before run() or step() starts them. Event self-scheduling is deferred: the
-  /// Clocked/Functional mixins enqueue their first event in startup() (invoked by the
-  /// first run()/step() call), not here, so no events exist until execution begins.
+  /// populated. Multi-threaded engines require the caller to choose an explicit
+  /// topology partition policy before calling create(); single-threaded engines
+  /// create their sole partition automatically. Also used to rebuild after
+  /// shutdown(). Calls initialize_components() so that components can set up
+  /// ports and handlers before run() or step() starts them. Event
+  /// self-scheduling is deferred: the Clocked/Functional mixins enqueue their
+  /// first event in startup() (invoked by the first run()/step() call), not
+  /// here, so no events exist until execution begins.
+  /// @throws std::invalid_argument if the worker count, partition count, or
+  /// cross-partition link configuration is invalid.
   void create();
 
   /// @brief Tear down engine state (shutdown components, join workers).

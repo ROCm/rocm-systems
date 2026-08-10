@@ -25,6 +25,7 @@ set(ROCPROFILER_HEADER_FILES
     dispatch_counting_service.h
     external_correlation.h
     fwd.h
+    hipfile.h
     hip.h
     hsa.h
     intercept_table.h
@@ -47,6 +48,7 @@ install(
     COMPONENT development)
 
 add_subdirectory(hip)
+add_subdirectory(hipfile)
 add_subdirectory(hsa)
 add_subdirectory(marker)
 add_subdirectory(ompt)

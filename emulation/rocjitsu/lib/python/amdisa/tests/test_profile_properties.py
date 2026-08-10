@@ -3,6 +3,7 @@
 
 """Unit tests for ISA dimension properties on IsaProfile subclasses."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -22,7 +23,9 @@ from amdisa.isa_profile import (
     Gfx1250Profile,
     MemoryCoherencyModel,
     Rdna1Profile,
+    Rdna2Profile,
     Rdna3Profile,
+    Rdna3_5Profile,
     Rdna4Profile,
 )
 
@@ -80,6 +83,25 @@ def test_max_addressable_vgprs_per_wf(profile, expected):
     assert profile.max_addressable_vgprs_per_wf == expected
 
 
+@pytest.mark.parametrize(
+    ('profile', 'expected_wave32', 'expected_wave64'),
+    [
+        (Cdna1Profile(), 0, 4),
+        (Cdna2Profile(), 0, 8),
+        (CdnaProfile(), 0, 8),
+        (Rdna1Profile(), 8, 4),
+        (Rdna2Profile(), 8, 4),
+        (Rdna3Profile(), 8, 4),
+        (Rdna3_5Profile(), 8, 4),
+        (Rdna4Profile(), 8, 4),
+        (Gfx1250Profile(), 16, 0),
+    ],
+)
+def test_descriptor_vgpr_count_granule(profile, expected_wave32, expected_wave64):
+    assert profile.descriptor_vgpr_count_granule_wave32 == expected_wave32
+    assert profile.descriptor_vgpr_count_granule_wave64 == expected_wave64
+
+
 def test_only_gfx1250_splits_execution_sources():
     assert Gfx1250Profile().split_execution_sources
     assert not Rdna4Profile().split_execution_sources
@@ -134,6 +156,10 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     output = emit_isa_properties(str(tmp_path), specs).read_text()
 
     assert 'uint32_t max_addressable_vgprs_per_wf = 0;' in output
+    assert 'uint32_t wave_size = 0;' in output
+    assert 'uint32_t wave_size_max = 0;' in output
+    assert 'uint32_t descriptor_vgpr_count_granule_wave32 = 0;' in output
+    assert 'uint32_t descriptor_vgpr_count_granule_wave64 = 0;' in output
     assert 'MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;' in output
     assert (
         'case ROCJITSU_CODE_ARCH_CDNA3:\n'
@@ -142,7 +168,11 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = true,\n'
         '        .uses_ttmp_workgroup_ids = false,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .wave_size = 64,\n'
+        '        .wave_size_max = 64,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
+        '        .descriptor_vgpr_count_granule_wave32 = 0,\n'
+        '        .descriptor_vgpr_count_granule_wave64 = 8,\n'
         '    };'
     ) in output
     assert (
@@ -152,7 +182,11 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .wave_size = 32,\n'
+        '        .wave_size_max = 64,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
+        '        .descriptor_vgpr_count_granule_wave32 = 8,\n'
+        '        .descriptor_vgpr_count_granule_wave64 = 4,\n'
         '    };'
     ) in output
     assert (
@@ -162,42 +196,39 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = true,\n'
+        '        .wave_size = 32,\n'
+        '        .wave_size_max = 32,\n'
         '        .max_addressable_vgprs_per_wf = 1024,\n'
+        '        .descriptor_vgpr_count_granule_wave32 = 16,\n'
+        '        .descriptor_vgpr_count_granule_wave64 = 0,\n'
         '    };'
     ) in output
 
 
-@pytest.mark.parametrize(
-    ('arch', 'profile', 'raw_exec'),
-    [
-        ('cdna3', CdnaProfile(), False),
-        ('rdna4', Rdna4Profile(), True),
-    ],
-)
-def test_operand_exec_register_access_is_wave32_gated(
-    tmp_path, arch, profile, raw_exec
-):
-    generator = CodeGenerator(
-        SimpleNamespace(
-            arch_name=arch,
-            opnd_selectors=[],
-            operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
-            profile=profile,
-        ),
-        str(tmp_path),
-    )
+def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
+    profiles = [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', CdnaProfile()),
+        ('rdna1', Rdna1Profile()),
+        ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+        ('gfx1250', Gfx1250Profile()),
+    ]
+    specs = [
+        (name, SimpleNamespace(profile=profile), None) for name, profile in profiles
+    ]
 
-    generator.gen_operand()
-    operand_cpp = (tmp_path / arch / 'operand.cpp').read_text()
+    generated = emit_isa_properties(str(tmp_path), specs).read_text()
+    checked_in = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/isa_properties.h'
+    ).read_text()
 
-    assert 'return static_cast<uint32_t>(wf.exec());' in operand_cpp
-    assert 'wf.set_exec((wf.exec() & 0xFFFFFFFF00000000ULL) | val);' in operand_cpp
-    if raw_exec:
-        assert 'return static_cast<uint32_t>(wf.exec_raw() >> 32);' in operand_cpp
-        assert 'wf.set_exec_raw((wf.exec_raw() & 0x00000000FFFFFFFFULL)' in operand_cpp
-    else:
-        assert 'exec_raw' not in operand_cpp
-        assert 'set_exec_raw' not in operand_cpp
+    assert generated == checked_in
 
 
 def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
@@ -221,13 +252,38 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     assert ': IsaOperand<Isa>(size_bits, opr_type, encoding_value)' in operand_cpp
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in operand_cpp
     assert 'uint32_t Operand::read_scalar' in operand_cpp
-    assert 'void Operand::require_execution_backend()' in operand_cpp
-    assert '!backend.simd_notify_read64_mut' in operand_cpp
+    assert 'current_isa_operand_backend()' in operand_cpp
+    assert (
+        'execution_backend_ ? execution_backend_->read_scalar : nullptr' in operand_cpp
+    )
     assert 'uint32_t Operand::read_scalar_exec' not in operand_cpp
     assert 'rocjitsu/vm/amdgpu/compute_unit.h' not in operand_cpp
     assert 'uint32_t Operand::read_scalar_exec' in operand_exec_cpp
-    assert 'Operand::execution_backend_registered_' in operand_exec_cpp
+    assert 'const void *Operand::full_execution_backend()' in operand_exec_cpp
+    assert 'bool Operand::full_execution_backend_complete()' in operand_exec_cpp
+    assert 'backend.simd_notify_read64_mut != nullptr' in operand_exec_cpp
+    assert 'execution_backend_registered_' not in operand_exec_cpp
     assert 'rocjitsu/vm/amdgpu/compute_unit.h' in operand_exec_cpp
+
+
+def test_gfx1250_instruction_execution_backend_is_dense_and_scoped(tmp_path):
+    generator = object.__new__(CodeGenerator)
+    generator.out_path = str(tmp_path)
+    generator.isa_spec = SimpleNamespace(arch_name='gfx1250', profile=Gfx1250Profile())
+    generator._split_execution_classes = ['FirstInstruction', 'SecondInstruction']
+
+    generator.gen_execution_backend()
+    backend_h = (tmp_path / 'gfx1250' / 'execution_backend.h').read_text()
+    backend_cpp = (tmp_path / 'gfx1250' / 'execution_backend_exec.cpp').read_text()
+
+    assert 'const IsaExecutionBackend &execution_backend();' in backend_h
+    assert 'std::array<Instruction::ExecuteFn, 2>' in backend_cpp
+    assert '&execute_with_backend<FirstInstruction>' in backend_cpp
+    assert '&execute_with_backend<SecondInstruction>' in backend_cpp
+    assert 'execute_impl may construct temporary operands' in backend_cpp
+    assert 'ScopedIsaExecutionBackend scope(&execution_backend());' in backend_cpp
+    assert '.operand_backend = Operand::full_execution_backend()' in backend_cpp
+    assert 'execute_registered_' not in backend_cpp
 
 
 def test_rdna4_operand_execution_backend_stays_in_common_source(tmp_path):
@@ -509,6 +565,14 @@ class TestGfx1250Profile:
             )
             == 'alu'
         )
+        assert (
+            self.p.source_split_file_stem(
+                'ENC_VOP3',
+                'V_S_EXP_F32',
+                SimpleNamespace(semantic_class='pseudo_scalar_unary'),
+            )
+            == 'alu'
+        )
 
     def test_generated_source_split_file_matcher_is_scoped(self):
         units = [_SourceImplUnit('alu', ['impl']), _SourceImplUnit('cmpx', ['impl'])]
@@ -615,11 +679,6 @@ class TestGfx1250Profile:
                 max_bytes=len('first\n\nsecond\n\n') - 1,
                 chunk_overhead=0,
             )
-
-    def test_hwreg_ids(self):
-        assert self.p.hwreg_mode_id == 1
-        assert self.p.hwreg_status_id == 2
-        assert self.p.hwreg_ib_sts2_id == 28
 
     def test_detect_profile_uses_filename_override(self, tmp_path):
         xml = tmp_path / 'amdgpu_isa_gfx1250.xml'
