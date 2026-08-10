@@ -88,7 +88,6 @@ The RCCL build and installation helper script options are as follows:
           --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)
        -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)
           --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes
-          --ce-reduce-all-ops     Build CE AllReduce reduce kernels for Sum/Prod/Min/Max (default: Sum only)
        -h|--help                  Prints this help message
        -i|--install               Install RCCL library (see --prefix argument below)
        -j|--jobs                  Specify how many parallel compilation jobs to run (32 by default)

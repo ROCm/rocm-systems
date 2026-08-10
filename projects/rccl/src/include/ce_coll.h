@@ -29,12 +29,6 @@
 #define NCCL_CE_NUM_SLOTS 2
 #endif
 
-// 0 (default): CE AllReduce reduce kernels are Sum-only.
-// 1: also build/run Prod/Min/Max (BUILD_CE_REDUCE_ALL_OPS=ON).
-#ifndef NCCL_CE_REDUCE_ALL_OPS
-#define NCCL_CE_REDUCE_ALL_OPS 0
-#endif
-
 // Per-rank staging capacity in ceARTmpBuf. ncclCeInit sizes the buffer from this
 // value, so every runtime offset must stay within it.
 inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks) {

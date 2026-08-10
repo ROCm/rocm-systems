@@ -3740,12 +3740,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
       bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       if (info->coll == ncclFuncAllReduce) {
-#if NCCL_CE_REDUCE_ALL_OPS
         const bool ceAllReduceOpSupported =
           (info->op == ncclSum || info->op == ncclProd || info->op == ncclMin || info->op == ncclMax);
-#else
-        const bool ceAllReduceOpSupported = (info->op == ncclSum);
-#endif
         if (!ceArGraphAllowed || !ceAllReduceOpSupported || (info->count % (size_t)comm->nRanks != 0) ||
             !rcclParamCeAllReduce()) {
           ceAvailable = false;
