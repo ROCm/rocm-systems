@@ -88,19 +88,24 @@ do_host_tests() {
     --gtest_color=no "$@" 2>&1 | "${stamp[@]}" | tee "$LOG_FILE"
 }
 
-# Kernel-count leak guards: run the device-kernel generators (generate.py) and
-# assert the generated kernel set still matches the committed baselines -- a
-# grand total, per-collective counts, and per-dimension value-sets for both the
-# main and symmetric generators. CPU-only: needs just python3 (no rccl build, no
-# hipify, no GPU). A kernel-count change fails here with an actionable diff
-# telling the author to update the baselines and justify the growth. See
-# src/device/test_generate_kernel_counts.py and
-# src/device/symmetric/test_generate_symmetric.py.
+# Kernel-count leak guards: the pytest suite in test/kernel-count runs the
+# device-kernel generators (src/device/generate.py, rocSHMEM OFF/ON, and
+# src/device/symmetric/generate.py) and asserts the generated kernel set still
+# matches the committed baselines -- grand total, per-collective counts, and
+# per-dimension value-sets. CPU-only: needs only python3 + pytest (no rccl build,
+# no hipify, no GPU). A kernel-count change fails here with an actionable diff
+# telling the author to update the baselines and justify the growth. This is the
+# same suite CI's test_runner drives via configs/host_tests.json; here we run it
+# in a self-provisioned venv so the lean host-test image needs no system pytest.
 do_guards() {
-  echo "==> Kernel-count guards (generate.py leak check)"
-  local py="${PYTHON:-python3}"
-  "$py" "$RCCL_ROOT/src/device/test_generate_kernel_counts.py"
-  "$py" "$RCCL_ROOT/src/device/symmetric/test_generate_symmetric.py"
+  echo "==> Kernel-count guards (generate.py leak check, pytest)"
+  local gd="$RCCL_ROOT/test/kernel-count"
+  local venv="$gd/venv"
+  if [ ! -x "$venv/bin/pytest" ]; then
+    python3 -m venv "$venv"
+    "$venv/bin/pip" install -q --disable-pip-version-check -r "$gd/requirements.txt"
+  fi
+  "$venv/bin/python" -m pytest "$gd/tests" -v
 }
 
 # The `run` phase aggregates every check the host-test pipeline executes: the
