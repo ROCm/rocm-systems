@@ -133,9 +133,9 @@ foreach(_libname IN ITEMS torch torch_cpu c10)
     list(APPEND _torch_resolved_libs ${${_cachevar}})
 endforeach()
 
-# torch_python is resolved separately and linked only into the pybind module.
-# It leaves Python symbols undefined and names no libpython of its own, so a
-# consumer that is not loaded by an interpreter cannot resolve them.
+# torch_python is resolved separately and linked only into the pybind module:
+# it leaves Python symbols undefined and names no libpython of its own, so only
+# a consumer loaded by an interpreter can resolve them.
 set(_torch_python_cachevar "_TORCH_RESOLVED_torch_python_${_tag}")
 find_library(
     ${_torch_python_cachevar}
@@ -172,8 +172,8 @@ set(CMAKE_REQUIRED_INCLUDES "${_rcfn_saved_includes}")
 
 # --- roctx-recordfn library -------------------------------------------------
 # Usage requirements are PUBLIC so consumers inherit the torch/roctx includes,
-# the torch libraries, and the DebugInfoKind flag. torch_python is deliberately
-# not among them; only the pybind module links it.
+# the torch libraries, and the DebugInfoKind flag. torch_python is not among
+# them.
 set(_rcfn_headers
     capture_buffer.h
     capture_control.h

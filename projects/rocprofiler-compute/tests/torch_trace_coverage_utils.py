@@ -3793,15 +3793,15 @@ def multiline_coverage_failure_warning(
     return "\n".join(lines)
 
 
-# torch.profiler reports AMD kernel names with a trailing descriptor suffix,
+# torch.profiler reports AMD kernel names with trailing descriptor suffixes,
 # either bracketed ("[clone .kd]") or bare (".kd"); rocprof-compute reports the
-# plain symbol. Strip the suffix so both sources use the same name.
-_KERNEL_CLONE_SUFFIX_RE = re.compile(r"\s*(?:\[clone \.[^\]]+\]|\.kd)\s*$")
+# plain symbol. A name can carry more than one, so the group repeats.
+_KERNEL_CLONE_SUFFIX_RE = re.compile(r"(?:\s*(?:\[clone \.[^\]]+\]|\.kd))+\s*$")
 
 
 def normalize_kernel_name(name: str) -> str:
-    """Remove the trailing kernel-descriptor suffix from a kernel name."""
-    return _KERNEL_CLONE_SUFFIX_RE.sub("", name)
+    """Remove the trailing kernel-descriptor suffixes from a kernel name."""
+    return _KERNEL_CLONE_SUFFIX_RE.sub("", name).strip()
 
 
 def normalize_kernel_names(names: Set[str]) -> Set[str]:

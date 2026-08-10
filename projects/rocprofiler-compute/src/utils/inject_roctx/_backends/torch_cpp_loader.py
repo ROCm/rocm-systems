@@ -26,7 +26,6 @@ _THIS_DIR = Path(__file__).resolve().parent
 # parents[2] resolves to <repo>/src in dev and <install>/libexec/<project>
 # in installed layouts; both host the roctx_recordfn sources at lib/.
 _SO_SOURCE_DIR = _THIS_DIR.parents[2] / "lib" / "roctx_recordfn"
-_SO_SOURCE = _SO_SOURCE_DIR / "roctx_recordfn.cpp"
 _SO_BUILDFILE = _SO_SOURCE_DIR / "CMakeLists.txt"
 
 _INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
@@ -38,13 +37,10 @@ C_TIER_NAMES = frozenset((TIER_PREBUILT, TIER_JIT))
 
 
 def _fingerprint_input_paths() -> tuple[Path, ...]:
-    """All C++ sources and headers, the build file and the CMake probe scripts,
-    sorted for a deterministic fingerprint independent of filesystem
-    enumeration order.
+    """The build inputs that determine the artifact: the C++ sources and
+    headers, the build file, and the CMake probe scripts.
 
-    The probe scripts resolve the torch include and library directories the
-    extension is built against, so they change the artifact and must rotate the
-    cache tag with it.
+    Sorted so the fingerprint does not depend on filesystem enumeration order.
     """
     inputs = set(_SO_SOURCE_DIR.glob("*.cpp")) | set(_SO_SOURCE_DIR.glob("*.h"))
     inputs |= set(_SO_SOURCE_DIR.glob("cmake/*.py"))
@@ -369,10 +365,12 @@ def _try_jit(
             except Exception:
                 pass
 
-    if not _SO_SOURCE.exists() or not _SO_BUILDFILE.exists():
+    missing_inputs = [p.name for p in _FINGERPRINT_INPUTS if not p.exists()]
+    if missing_inputs:
         _safe_log(
             "log",
-            f"sources missing under {_SO_SOURCE_DIR}; skipping cmake tier",
+            f"build inputs missing under {_SO_SOURCE_DIR} "
+            f"({', '.join(missing_inputs)}); skipping cmake tier",
             diagnostics,
         )
         return None
