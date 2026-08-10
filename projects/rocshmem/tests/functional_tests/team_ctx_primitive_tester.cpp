@@ -33,9 +33,10 @@ rocshmem_team_t team_primitive_world_dup;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
+template <TestType Type>
 __global__ void TeamCtxPrimitiveTest(int loop, int skip, long long int *start_time,
                                      long long int *end_time, char *source,
-                                     char *dest, size_t size, TestType type,
+                                     char *dest, size_t size,
                                      ShmemContextType ctx_type, int wf_size,
                                      rocshmem_team_t team, int batch,
                                      int *grid_psync) {
@@ -85,21 +86,14 @@ __global__ void TeamCtxPrimitiveTest(int loop, int skip, long long int *start_ti
       }
     }
 
-    switch (type) {
-      case TeamCtxGetTestType:
-        rocshmem_ctx_getmem(ctx, dest + offset, source + offset, size, 1);
-        break;
-      case TeamCtxGetNBITestType:
-        rocshmem_ctx_getmem_nbi(ctx, dest + offset, source + offset, size, 1);
-        break;
-      case TeamCtxPutTestType:
-        rocshmem_ctx_putmem(ctx, dest + offset, source + offset, size, 1);
-        break;
-      case TeamCtxPutNBITestType:
-        rocshmem_ctx_putmem_nbi(ctx, dest + offset, source + offset, size, 1);
-        break;
-      default:
-        break;
+    if constexpr (Type == TeamCtxGetTestType) {
+      rocshmem_ctx_getmem(ctx, dest + offset, source + offset, size, 1);
+    } else if constexpr (Type == TeamCtxGetNBITestType) {
+      rocshmem_ctx_getmem_nbi(ctx, dest + offset, source + offset, size, 1);
+    } else if constexpr (Type == TeamCtxPutTestType) {
+      rocshmem_ctx_putmem(ctx, dest + offset, source + offset, size, 1);
+    } else if constexpr (Type == TeamCtxPutNBITestType) {
+      rocshmem_ctx_putmem_nbi(ctx, dest + offset, source + offset, size, 1);
     }
   }
 
@@ -142,7 +136,8 @@ TeamCtxPrimitiveTester::TeamCtxPrimitiveTester(TesterArguments args)
 
   int max_co_resident_wgs_per_cu = 0;
   CHECK_HIP(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-      &max_co_resident_wgs_per_cu, TeamCtxPrimitiveTest, args.wg_size, 0));
+      &max_co_resident_wgs_per_cu, TeamCtxPrimitiveTest<TeamCtxGetTestType>,
+      args.wg_size, 0));
   const int max_sustainable_wgs =
       max_co_resident_wgs_per_cu * deviceProps.multiProcessorCount;
   if (args.num_wgs > static_cast<unsigned>(max_sustainable_wgs)) {
@@ -213,10 +208,40 @@ void TeamCtxPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
                                           int loop, size_t size) {
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(TeamCtxPrimitiveTest, gridSize, blockSize, shared_bytes,
-                     stream, loop, args.skip, start_time, end_time, source,
-                     dest, size, _type, _shmem_context, wf_size,
-                     team_primitive_world_dup, batch_size, grid_psync);
+  switch (_type) {
+    case TeamCtxGetTestType:
+      hipLaunchKernelGGL(TeamCtxPrimitiveTest<TeamCtxGetTestType>,
+                         gridSize, blockSize, shared_bytes, stream, loop,
+                         args.skip, start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, team_primitive_world_dup,
+                         batch_size, grid_psync);
+      break;
+    case TeamCtxGetNBITestType:
+      hipLaunchKernelGGL(TeamCtxPrimitiveTest<TeamCtxGetNBITestType>,
+                         gridSize, blockSize, shared_bytes, stream, loop,
+                         args.skip, start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, team_primitive_world_dup,
+                         batch_size, grid_psync);
+      break;
+    case TeamCtxPutTestType:
+      hipLaunchKernelGGL(TeamCtxPrimitiveTest<TeamCtxPutTestType>,
+                         gridSize, blockSize, shared_bytes, stream, loop,
+                         args.skip, start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, team_primitive_world_dup,
+                         batch_size, grid_psync);
+      break;
+    case TeamCtxPutNBITestType:
+      hipLaunchKernelGGL(TeamCtxPrimitiveTest<TeamCtxPutNBITestType>,
+                         gridSize, blockSize, shared_bytes, stream, loop,
+                         args.skip, start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, team_primitive_world_dup,
+                         batch_size, grid_psync);
+      break;
+    default:
+      std::cerr << "Invalid Test: unhandled TestType " << _type
+                << " in TeamCtxPrimitiveTester::launchKernel" << std::endl;
+      exit(-1);
+  }
 
   num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
   num_timed_msgs = loop * gridSize.x * blockSize.x;

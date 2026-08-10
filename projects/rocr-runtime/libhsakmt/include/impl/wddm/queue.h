@@ -54,6 +54,7 @@
 #include "hsa-runtime/inc/amd_hsa_queue.h"
 #include "hsa-runtime/inc/amd_hsa_signal.h"
 #include "impl/wddm/cmd_util.h"
+#include "util/atomic_helpers.h"
 
 namespace wsl {
 namespace thunk {
@@ -172,7 +173,10 @@ public:
   bool IsInvalidPacket(void) const {
     uint16_t *packet = (uint16_t *)((char *)ring +
                        (cmdbuf_aql_frame_write_index % ring_size) * 64);
-    return ((*packet >> HSA_PACKET_HEADER_TYPE) & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1))
+    // Acquire-load to pair with the producer's release publication, consistent
+    // with SwitchAql2PM4(); a plain read races a burst commit's not-yet-published slot.
+    uint16_t header = rocr::atomic::Load(packet, std::memory_order_acquire);
+    return ((header >> HSA_PACKET_HEADER_TYPE) & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1))
            == HSA_PACKET_TYPE_INVALID;
   }
 

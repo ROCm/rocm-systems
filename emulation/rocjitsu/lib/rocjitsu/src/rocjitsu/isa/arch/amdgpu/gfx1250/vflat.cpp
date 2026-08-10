@@ -318,6 +318,19 @@ FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void FlatLoadD16U8Vflat::implicit_uses(RegisterSet &uses) const {
+  Vflat::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void FlatLoadD16U8Vflat::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vflat::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1454)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -336,6 +349,19 @@ FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+}
+
+void FlatLoadD16I8Vflat::implicit_uses(RegisterSet &uses) const {
+  Vflat::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void FlatLoadD16I8Vflat::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vflat::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
@@ -359,6 +385,19 @@ FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void FlatLoadD16B16Vflat::implicit_uses(RegisterSet &uses) const {
+  Vflat::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void FlatLoadD16B16Vflat::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vflat::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(1456)),
@@ -378,6 +417,19 @@ FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+}
+
+void FlatLoadD16HiU8Vflat::implicit_uses(RegisterSet &uses) const {
+  Vflat::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void FlatLoadD16HiU8Vflat::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vflat::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
@@ -401,6 +453,19 @@ FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void FlatLoadD16HiI8Vflat::implicit_uses(RegisterSet &uses) const {
+  Vflat::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void FlatLoadD16HiI8Vflat::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vflat::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(1458)),
@@ -420,6 +485,19 @@ FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+}
+
+void FlatLoadD16HiB16Vflat::implicit_uses(RegisterSet &uses) const {
+  Vflat::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void FlatLoadD16HiB16Vflat::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vflat::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
