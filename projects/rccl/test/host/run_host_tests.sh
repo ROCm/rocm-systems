@@ -71,7 +71,7 @@ do_build() {
   cmake --build "$BUILD_DIR" -j"$JOBS"
 }
 
-do_run() {
+do_host_tests() {
   echo "==> Run  (filter: $GTEST_FILTER)"
   # Prepend a real-UTC timestamp to each line via `ts` (moreutils) when available,
   # tee the full stdout+stderr to LOG_FILE, and preserve the test binary's exit
@@ -88,12 +88,39 @@ do_run() {
     --gtest_color=no "$@" 2>&1 | "${stamp[@]}" | tee "$LOG_FILE"
 }
 
+# Kernel-count leak guards: run the device-kernel generators (generate.py) and
+# assert the generated kernel set still matches the committed baselines -- a
+# grand total, per-collective counts, and per-dimension value-sets for both the
+# main and symmetric generators. CPU-only: needs just python3 (no rccl build, no
+# hipify, no GPU). A kernel-count change fails here with an actionable diff
+# telling the author to update the baselines and justify the growth. See
+# src/device/test_generate_kernel_counts.py and
+# src/device/symmetric/test_generate_symmetric.py.
+do_guards() {
+  echo "==> Kernel-count guards (generate.py leak check)"
+  local py="${PYTHON:-python3}"
+  "$py" "$RCCL_ROOT/src/device/test_generate_kernel_counts.py"
+  "$py" "$RCCL_ROOT/src/device/symmetric/test_generate_symmetric.py"
+}
+
+# The `run` phase aggregates every check the host-test pipeline executes: the
+# gtest suite plus any CPU-only guards. The host-test workflow invokes `run`
+# (and `all` ends with it), so adding a future check here makes both CI and
+# local runs pick it up automatically -- no dispatch or workflow-YAML change.
+# do_host_tests runs first so the JUnit XML artifact is always produced before a
+# later guard can gate.
+do_run() {
+  do_host_tests "$@"
+  do_guards
+}
+
 case "$PHASE" in
   rccl-configure) do_rccl_configure ;;
   hipify)         do_hipify ;;
   configure)      do_configure ;;
   build)          do_build ;;
+  guards)         do_guards ;;
   run)            do_run "$@" ;;
   all)            do_rccl_configure; do_hipify; do_configure; do_build; do_run "$@" ;;
-  *) echo "usage: $0 [rccl-configure|hipify|configure|build|run|all] [extra gtest args]" >&2; exit 2 ;;
+  *) echo "usage: $0 [rccl-configure|hipify|configure|build|run|guards|all] [extra gtest args]" >&2; exit 2 ;;
 esac
