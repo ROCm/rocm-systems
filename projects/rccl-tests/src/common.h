@@ -429,12 +429,30 @@ extern thread_local int is_main_thread;
 //      128 MiB cap (gin_sdma::kGinSdmaSafeCopyBytes) is measured hang-free with
 //      no bandwidth loss; see that constant for the evidence.
 // Split the transfer into <=kGinSdmaSafeCopyBytes segments and carry the
-// caller's remote action (e.g. SignalInc) ONLY on the final segment: the SDMA
-// queue is in-order, so a single signal still correctly means "the whole
-// message has landed" and per-message signal accounting (waitSignal counts) is
-// unchanged. A <=128 MiB message is a single put with no extra overhead.
-// Threads still each own a disjoint (peer, offset) tuple, so the inner
-// segmentation is race-free.
+// caller's remote action (e.g. SignalInc) ONLY on the final segment. A
+// <=128 MiB message is a single put with no extra overhead.
+//
+// ORDERING PRECONDITION (why the trailing signal is safe): the Anvil-SDMA
+// backend selects the hardware SDMA queue per *issuer*, as
+// effectiveChannel = (blockId*warpsPerBlock + warpId)*stride % numChannels
+// (gin_anvil_sdma.h) -- NOT per peer. A single hardware queue is a strict
+// in-order FIFO; distinct channels are independent completion domains with NO
+// cross-queue ordering (only ncclGinApi_Flush drains all of a peer's channels).
+// Because this loop runs entirely within ONE thread, every segment of this
+// message -- data segments AND the final signal-carrying put -- resolves to the
+// same (blockId, warpId) and therefore the same in-order queue, even when
+// NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS > 1. So the final SignalInc is FIFO-ordered
+// behind all prior segments of this message and "signal fired" still means "the
+// whole message landed"; per-message waitSignal accounting is unchanged.
+//
+// CALLER CONTRACT: issue an entire per-peer message (all segments + the
+// signal-carrying final put) from a SINGLE thread/warp, as the AllToAll GIN
+// sites do (one thread owns each disjoint (peer, offset) tuple). Do NOT split a
+// single peer's message across multiple warps/CTAs while carrying the signal on
+// only one of them: under NUM_CHANNELS > 1 the segments could land on different
+// queues and the SignalInc could fire before an earlier segment completes
+// (silent data corruption). If you ever need that pattern, drain with a Flush
+// (or force NUM_CHANNELS=1 / SPREAD_CHANNELS=0) before signaling.
 template <typename RemoteAction>
 __device__ __forceinline__ void ginPutChunked(
     ncclGin& gin, ncclTeam team, int peer,
