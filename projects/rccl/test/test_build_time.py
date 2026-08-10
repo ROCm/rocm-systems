@@ -59,6 +59,7 @@ RCCL_ROOT: str = os.path.dirname(HERE)
 CMAKELISTS: str = os.path.join(RCCL_ROOT, "CMakeLists.txt")
 
 DEFAULT_THRESHOLD_SEC: int = 300
+BUILD_ATTEMPTS: int = 2
 
 PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
 
@@ -81,21 +82,22 @@ def run_checked(
     *,
     cwd: str | None = None,
     env: dict[str, str] | None = None,
-    capture_output: bool = True,
     stdout: int | IO[Any] | None = None,
     stderr: int | IO[Any] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a subprocess and raise CommandError if it exits non-zero."""
-    if stdout is not None or stderr is not None:
-        capture_output = False
+    """Run a subprocess and raise CommandError if it exits non-zero.
+
+    Output is captured and attached to the exception unless the caller
+    redirects it, which the build steps do to stream straight into their log.
+    """
+    redirected = stdout is not None or stderr is not None
     proc = subprocess.run(
-        cmd, cwd=cwd, env=env, capture_output=capture_output,
-        text=True, stdout=stdout, stderr=stderr, check=False,
+        cmd, cwd=cwd, env=env, text=True, check=False,
+        stdout=stdout if redirected else subprocess.PIPE,
+        stderr=stderr if redirected else subprocess.PIPE,
     )
     if proc.returncode != 0:
-        detail = ""
-        if capture_output:
-            detail = (proc.stderr or proc.stdout or "").strip()
+        detail = "" if redirected else (proc.stderr or proc.stdout or "").strip()
         raise CommandError(cmd, proc.returncode, detail)
     return proc
 
@@ -181,7 +183,7 @@ def local_gpu_targets() -> list[str]:
         raise RuntimeError("rocm_agent_enumerator not found; pass --targets explicitly")
 
     try:
-        proc = run_checked([enumerator], capture_output=True)
+        proc = run_checked([enumerator])
     except CommandError as exc:
         raise RuntimeError("rocm_agent_enumerator failed (rc=%d): %s"
                            % (exc.returncode, exc.output)) from exc
@@ -210,15 +212,10 @@ def _hipcc_accepts(hipcc: str, extra_args: list[str]) -> bool:
         empty = os.path.join(tmp, "empty.hip")
         open(empty, "w").close()
         try:
-            run_checked(
-                [hipcc, "-x", "hip"] + extra_args + ["-fsyntax-only", empty],
-                capture_output=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            return True
+            run_checked([hipcc, "-x", "hip"] + extra_args + ["-fsyntax-only", empty])
         except CommandError:
             return False
+        return True
 
 
 def compiler_works(hipcc: str) -> bool:
@@ -285,11 +282,11 @@ def build_target(
             log.flush()
             start = time.monotonic()
             try:
-                run_checked(cmd, cwd=build_dir, env=env, capture_output=False,
+                run_checked(cmd, cwd=build_dir, env=env,
                             stdout=log, stderr=subprocess.STDOUT)
                 return time.monotonic() - start, 0
-            except CommandError:
-                return time.monotonic() - start, 1
+            except CommandError as exc:
+                return time.monotonic() - start, exc.returncode
 
         configure_s, rc = run(configure)
         if rc != 0:
@@ -317,8 +314,7 @@ def rccl_dir_within(worktree: str) -> str:
 
 def git_run(*args: str) -> str:
     """Run git in the RCCL source tree; raise CommandError on failure."""
-    proc = run_checked(["git", "-C", RCCL_ROOT, *args], capture_output=True)
-    return proc.stdout.strip()
+    return run_checked(["git", "-C", RCCL_ROOT, *args]).stdout.strip()
 
 
 def git_err(*args: str) -> tuple[str | None, str | None]:
@@ -335,26 +331,32 @@ def ensure_upstream_fetched(upstream: str) -> None:
         return
     remote, ref = upstream.split("/", 1)
     try:
-        run_checked(["git", "-C", RCCL_ROOT, "fetch", "--depth=1", remote, ref],
-                    capture_output=True)
+        run_checked(["git", "-C", RCCL_ROOT, "fetch", "--depth=1", remote, ref])
     except CommandError:
+        # Deliberately best-effort: the caller reports a usable error if the
+        # merge-base is still unreachable afterwards.
         pass
 
 
 def resolve_base_sha(explicit_rev: str | None) -> tuple[str | None, str, str | None]:
-    """Return (base_sha, label, error). label is printed in the report header."""
+    """Return (base_sha, label, error). label is printed in the report header.
+
+    A --compare-base REV the caller named explicitly and that does not resolve
+    is their mistake, so it raises. Only the automatic merge-base path degrades
+    to an error string, which lets a shallow CI checkout skip rather than
+    report the missing history as a build-time regression.
+    """
     if explicit_rev:
-        sha, err = git_err("rev-parse", explicit_rev)
-        return sha, explicit_rev, err
+        return git_run("rev-parse", explicit_rev), explicit_rev, None
 
     upstream = os.environ.get("RCCL_BUILD_TIME_UPSTREAM", "origin/develop")
     ensure_upstream_fetched(upstream)
+    # merge-base already reports a full SHA, so no rev-parse is needed here.
     merge_base, err = git_err("merge-base", upstream, "HEAD")
     if err or not merge_base:
-        return None, upstream, "cannot resolve merge-base with %s: %s" % (upstream, err or "unknown error")
-    sha, err = git_err("rev-parse", merge_base)
-    label = "%s (merge-base with %s)" % (merge_base[:10], upstream)
-    return sha, label, err
+        return None, upstream, "cannot resolve merge-base with %s: %s" % (
+            upstream, err or "unknown error")
+    return merge_base, "merge-base with %s" % upstream, None
 
 
 @dataclass
@@ -378,19 +380,29 @@ def time_best_of(
     target: str, source_dir: str, build_root: str, tag: str, jobs: int,
     round_index: int, keep: bool,
 ) -> tuple[float, bool, str]:
-    """Build one revision once and return (total_s, ok, log_path) for this round."""
-    build_dir = os.path.join(build_root, "%s-%s-%d" % (target, tag, round_index))
-    log_path = os.path.join(build_root, "%s-%s-%d.log" % (target, tag, round_index))
-    for attempt in range(2):
+    """Build one revision once and return (total_s, ok, log_path) for this round.
+
+    A failed build is retried once. With --repeat 2 a comparison is four builds
+    per target, so a single flake (an OOM under a high -j, a transient ninja
+    error) would otherwise sink the run as if it were a real failure. Each
+    attempt gets its own log so the retry does not overwrite the evidence.
+    """
+    stem = "%s-%s-%d" % (target, tag, round_index)
+    log_path = ""
+    for attempt in range(BUILD_ATTEMPTS):
+        name = stem if attempt == 0 else "%s-retry%d" % (stem, attempt)
+        build_dir = os.path.join(build_root, name)
+        log_path = os.path.join(build_root, "%s.log" % name)
+
         configure_s, build_s, ok = build_target(target, build_dir, jobs, log_path, source_dir)
+        if not keep:
+            shutil.rmtree(build_dir, ignore_errors=True)
         if ok:
-            if not keep:
-                shutil.rmtree(build_dir, ignore_errors=True)
             return configure_s + build_s, True, log_path
-        if attempt == 0:
-            print("    build failed (attempt 1/2), retrying ... see %s" % log_path, flush=True)
-    if not keep:
-        shutil.rmtree(build_dir, ignore_errors=True)
+
+        if attempt + 1 < BUILD_ATTEMPTS:
+            print("    build failed (attempt %d of %d), see %s; retrying"
+                  % (attempt + 1, BUILD_ATTEMPTS, log_path), flush=True)
     return 0.0, False, log_path
 
 
@@ -444,7 +456,9 @@ def parse_args() -> argparse.Namespace:
     which.add_argument("--local-gpu", action="store_true",
                        help="time only the arch(es) of the GPUs in this machine")
     parser.add_argument("--threshold-sec", type=float,
-                        default=float(os.environ.get("RCCL_BUILD_TIME_THRESHOLD_SEC", DEFAULT_THRESHOLD_SEC)))
+                        default=float(os.environ.get("RCCL_BUILD_TIME_THRESHOLD_SEC", DEFAULT_THRESHOLD_SEC)),
+                        help="per-target wall-clock budget; ignored under --compare-base, "
+                             "which gates on the ratio instead (default: %d)" % DEFAULT_THRESHOLD_SEC)
     parser.add_argument("--jobs", type=int,
                         default=int(os.environ.get("RCCL_BUILD_TIME_JOBS", 0)) or cpu_count())
     parser.add_argument("--build-root", default=os.environ.get("RCCL_BUILD_TIME_ROOT"),
@@ -502,9 +516,9 @@ def run_comparison(
     if err:
         print("SKIP: cannot check out base commit %s (%s)" % (base_sha[:10], err))
         return 0
+    results: list[Comparison] = []
     try:
         base_dir = rccl_dir_within(worktree)
-        results: list[Comparison] = []
         for target in targets:
             if not compiler_supports(target, hipcc):
                 reason = "compiler does not support --offload-arch=%s" % target
@@ -522,7 +536,15 @@ def run_comparison(
                 continue
 
             result = Comparison(target, PASS, "", base_s, head_s)
-            pct = result.delta_pct or 0.0
+            pct = result.delta_pct
+            if pct is None:
+                # A zero-second base build means the timing, not the code, is
+                # broken; passing it as a 0% delta would hide that.
+                result.status = FAIL
+                result.note = "base build measured %s, so the ratio is meaningless" % fmt(base_s)
+                print("[%s] FAIL - %s" % (target, result.note))
+                results.append(result)
+                continue
 
             if pct > args.max_regression_pct:
                 result.status = FAIL
@@ -534,16 +556,19 @@ def run_comparison(
                    "  " + result.note if result.note else ""))
             results.append(result)
     finally:
-        git_err("worktree", "remove", "--force", worktree)
+        _, cleanup_err = git_err("worktree", "remove", "--force", worktree)
+        if cleanup_err:
+            print("WARNING: could not remove base worktree %s (%s); "
+                  "run 'git worktree prune' to clean up" % (worktree, cleanup_err))
 
     print()
     print("%-10s %10s %10s %9s  %s" % ("TARGET", "BASE", "HEAD", "DELTA", "RESULT"))
     for r in results:
-        if r.base_s is None or r.head_s is None:
+        if r.base_s is None or r.head_s is None or r.delta_pct is None:
             print("%-10s %10s %10s %9s  %s (%s)" % (r.target, "-", "-", "-", r.status, r.note))
         else:
             print("%-10s %10s %10s %8.1f%%  %s" %
-                  (r.target, fmt(r.base_s), fmt(r.head_s), r.delta_pct or 0.0, r.status))
+                  (r.target, fmt(r.base_s), fmt(r.head_s), r.delta_pct, r.status))
 
     failed = [r.target for r in results if r.status == FAIL]
     if failed:
