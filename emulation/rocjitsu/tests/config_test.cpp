@@ -1193,6 +1193,70 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   EXPECT_TRUE(restored_wf->fp16_ovfl());
 }
 
+// The checkpoint record carries the architectural registers and the TTMPs but
+// none of the trap/debug state around them, so a wave captured mid-handler
+// would restore without the EXEC restore or the privileged STATUS write that
+// leaving the handler performs. Refusing beats resuming the application with
+// the trap handler's state installed.
+TEST(CheckpointTest, RefusesToSaveAWaveInsideATrapHandler) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"gfx1250"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
+  // A plain running wave still checkpoints.
+  EXPECT_NO_THROW(
+      config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config));
+
+  wf->set_in_trap_handler(true);
+  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 2, loaded.engine_config),
+               std::runtime_error);
+  wf->set_in_trap_handler(false);
+
+  wf->set_debug_halted(true);
+  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 3, loaded.engine_config),
+               std::runtime_error);
+  wf->set_debug_halted(false);
+
+  wf->set_debug_suspended(true);
+  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 4, loaded.engine_config),
+               std::runtime_error);
+  wf->set_debug_suspended(false);
+
+  EXPECT_NO_THROW(
+      config::save_checkpoint(checkpoint.path(), *loaded.soc(), 5, loaded.engine_config));
+}
+
 TEST(CApiTest, CreateAndDestroyFromString) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"cdna3"},

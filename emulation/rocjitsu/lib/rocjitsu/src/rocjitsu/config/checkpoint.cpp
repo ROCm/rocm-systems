@@ -129,6 +129,21 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           if (w->is_halted())
             continue;
 
+          // The record holds the architectural registers and the TTMPs, but
+          // none of the trap/debug state around them: in_trap_handler, the
+          // saved EXEC and STATUS the handler will restore, TRAPSTS, and the
+          // halted/suspended reasons. Restoring a wave captured mid-handler
+          // from such a record would skip the EXEC restore and the privileged
+          // STATUS write on the way out and resume the application with the
+          // handler's state installed -- silently wrong, and hard to trace
+          // back here. Refuse instead of writing a checkpoint that cannot be
+          // restored faithfully.
+          if (w->in_trap_handler() || w->debug_paused())
+            throw std::runtime_error(
+                "Cannot checkpoint " + cu->name() + " wf" + std::to_string(w->wf_id()) +
+                ": the wave is in a trap handler or stopped for a debugger, and that state "
+                "is not part of the checkpoint format");
+
           auto sgprs_vec =
               builder.CreateVector(cu->sgpr_data(w->sgpr_alloc().base), w->num_sgprs());
           size_t vgpr_bytes = static_cast<size_t>(cu->vgpr_allocation_block_size()) *
