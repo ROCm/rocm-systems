@@ -15,6 +15,13 @@ namespace rocjitsu::amdgpu {
 inline constexpr uint32_t kAluExceptionModeMask = 0x7fu << 12;
 inline constexpr uint32_t kAluExceptionTrapstsMask = 0x7fu;
 
+// Every classifier below reports what it found through wf.raise_alu_causes()
+// as well as returning it. The generated call sites OR the return value into
+// TRAPSTS, which is architecturally sticky and so cannot tell the CU whether
+// the current instruction raised a cause or merely inherited a bit some
+// earlier instruction latched. Trap delivery needs the former, so a classifier
+// that grows a new early return has to report on that path too.
+
 /// @brief EXCP causes raised by `lhs * rhs`, optionally scaled by an output
 /// modifier.
 /// @details @p omod_scale must be applied to the exact and the rounded value
@@ -48,6 +55,7 @@ template <typename Inst> uint32_t classify_mul_f32_vop2(const Inst &inst, Wavefr
     const float rhs = std::bit_cast<float>(RegisterAccess(wf).read_lane(inst.vsrc1, lane));
     causes |= classify_mul_f32(lhs, rhs);
   }
+  wf.raise_alu_causes(causes);
   return causes;
 }
 
@@ -78,6 +86,7 @@ template <typename Inst> uint32_t classify_mul_f32_vop3(const Inst &inst, Wavefr
       omod_scale = 0.5f;
     causes |= classify_mul_f32(lhs, rhs, omod_scale);
   }
+  wf.raise_alu_causes(causes);
   return causes;
 }
 
@@ -85,8 +94,10 @@ template <typename Inst> uint32_t classify_sqrt_f32_vop1(const Inst &inst, Wavef
   const uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
     if ((exec & (1ULL << lane)) &&
-        std::bit_cast<float>(RegisterAccess(wf).read_lane(inst.src0, lane)) < 0.0f)
+        std::bit_cast<float>(RegisterAccess(wf).read_lane(inst.src0, lane)) < 0.0f) {
+      wf.raise_alu_causes(1u);
       return 1u;
+    }
   return 0;
 }
 
@@ -100,8 +111,10 @@ template <typename Inst> uint32_t classify_sqrt_f32_vop3(const Inst &inst, Wavef
       source = std::fabs(source);
     if (inst.inst_.neg & 1u)
       source = -source;
-    if (source < 0.0f)
+    if (source < 0.0f) {
+      wf.raise_alu_causes(1u);
       return 1u;
+    }
   }
   return 0;
 }
@@ -122,8 +135,10 @@ uint32_t classify_div_fixup_f32_exceptions(const Inst &inst, Wavefront &wf) {
       numerator = std::fabs(numerator);
     if (inst.inst_.neg & 4u)
       numerator = -numerator;
-    if (denominator == 0.0f && numerator != 0.0f)
+    if (denominator == 0.0f && numerator != 0.0f) {
+      wf.raise_alu_causes(1u << 2);
       return 1u << 2;
+    }
   }
   return 0;
 }
@@ -133,8 +148,10 @@ uint32_t classify_rcp_iflag_f32_exceptions(const Inst &inst, Wavefront &wf) {
   const uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
     if ((exec & (1ULL << lane)) &&
-        std::bit_cast<float>(RegisterAccess(wf).read_lane(inst.src0, lane)) == 0.0f)
+        std::bit_cast<float>(RegisterAccess(wf).read_lane(inst.src0, lane)) == 0.0f) {
+      wf.raise_alu_causes(1u << 6);
       return 1u << 6;
+    }
   return 0;
 }
 

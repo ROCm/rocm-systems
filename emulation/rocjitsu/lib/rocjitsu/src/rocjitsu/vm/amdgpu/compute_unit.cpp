@@ -449,7 +449,8 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   int inst_size_signed = inst->size();
   assert(inst_size_signed > 0 && "instruction size must be positive");
   auto inst_size = static_cast<uint64_t>(inst_size_signed);
-  const uint32_t trapsts_before = active->trapsts();
+  // The cause classifiers report into this as they run; see alu_exceptions.h.
+  active->clear_pending_alu_causes();
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
     if (active->num_vgprs_ > 0) {
@@ -656,9 +657,17 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   } else
     delete inst;
 
+  // Deliver on the causes this instruction raised, not on TRAPSTS changing.
+  // TRAPSTS.EXCP is sticky and nothing in the model clears it between
+  // instructions, so a rising-edge test went permanently quiet for any cause
+  // whose bit was already latched: raise a cause with its MODE.EXCP_EN bit
+  // clear, enable it, repeat the operation, and the second occurrence -- the
+  // one hardware traps on -- was never reported. The same silence followed a
+  // first occurrence the handler declined, which is every occurrence before a
+  // debugger attaches.
   constexpr uint32_t kAluExceptionTrapstsMask = 0x7fu;
   constexpr uint32_t kAluExceptionModeShift = 12;
-  const uint32_t new_alu_causes = (active->trapsts() & ~trapsts_before) & kAluExceptionTrapstsMask;
+  const uint32_t new_alu_causes = active->pending_alu_causes() & kAluExceptionTrapstsMask;
   const uint32_t enabled_alu_causes = (active->mode_raw() >> kAluExceptionModeShift) & 0x7fu;
   if ((new_alu_causes & enabled_alu_causes) != 0 && alu_exception_handler_ &&
       alu_exception_handler_(*active))

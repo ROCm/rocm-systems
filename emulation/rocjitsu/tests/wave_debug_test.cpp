@@ -289,6 +289,52 @@ TEST(WaveDebugTest, UnmappedScalarLoadReportsMemoryViolationAfterInstruction) {
   fx.gpu_mem.unregister_process(kProcessId);
 }
 
+// TRAPSTS.EXCP is architecturally sticky, so "the bit changed" is not the same
+// question as "this instruction raised the cause". Delivering on the rising
+// edge went permanently quiet for any cause already latched -- including every
+// cause raised before a debugger attached, since the handler declines then.
+TEST(WaveDebugTest, EnabledExceptionIsDeliveredAfterAnEarlierDisabledOccurrence) {
+  WaveDebugFixture fx;
+  constexpr uint32_t kInvalidCause = 1u << 0;
+  constexpr uint32_t kOverflowCause = 1u << 3;
+  constexpr uint32_t kModeExcpEnShift = 12;
+  // v_mul_f32 v0, v0, v0  (VOP2 op 5, src0 = v0 = 256, vsrc1 = v0, vdst = v0)
+  constexpr uint32_t kVMulF32V0 = 0x0A000000u | 256u;
+  constexpr float kHuge = 1e38f;
+
+  fx.gpu_mem.write32(kKernelAddr, kVMulF32V0);
+  fx.gpu_mem.write32(kKernelAddr + 4, kVMulF32V0);
+  fx.gpu_mem.write32(kKernelAddr + 8, kSEndpgm);
+
+  auto *wave = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1ULL);
+  const uint32_t vbase = wave->vgpr_alloc().base;
+
+  uint32_t handler_calls = 0;
+  fx.cu->set_alu_exception_handler([&](amdgpu::Wavefront &) {
+    ++handler_calls;
+    return false; // observe delivery without stopping the wave
+  });
+
+  // First occurrence with overflow *not* enabled. Some other cause is enabled
+  // so the instruction takes the exception-aware path and latches TRAPSTS --
+  // with no enable at all the generated body takes a SIMD fast path that skips
+  // the sticky update, which would not exercise the sticky-bit problem.
+  wave->set_mode_raw(kInvalidCause << kModeExcpEnShift);
+  fx.cu->write_vgpr(vbase + 0, 0, std::bit_cast<uint32_t>(kHuge));
+  fx.cu->step();
+  EXPECT_EQ(handler_calls, 0u) << "overflow is not enabled yet";
+  ASSERT_NE(wave->trapsts() & kOverflowCause, 0u) << "overflow was not latched";
+
+  // Software now enables overflow and repeats the operation. Hardware traps on
+  // this occurrence; a rising-edge test cannot, because the bit is already set.
+  wave->set_mode_raw(kOverflowCause << kModeExcpEnShift);
+  fx.cu->write_vgpr(vbase + 0, 0, std::bit_cast<uint32_t>(kHuge));
+  fx.cu->step();
+  EXPECT_EQ(handler_calls, 1u) << "second, enabled occurrence was not delivered";
+}
+
 // debug_active_ is CU-wide, so the memory probe also runs for waves belonging to
 // a process nobody is debugging. When the handler declines the stop for such a
 // wave the access must still be issued -- discarding it silently lost stores and

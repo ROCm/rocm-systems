@@ -534,6 +534,21 @@ public:
   /// @brief Write the trap status register.
   void set_trapsts(uint32_t val) { trapsts_ = val; }
 
+  /// @brief EXCP causes raised by the instruction currently executing.
+  /// @details TRAPSTS.EXCP is a sticky accumulator: hardware records a cause
+  /// there and never clears it on its own, so it cannot say whether *this*
+  /// instruction raised the cause. Trap delivery depends on that, and on
+  /// hardware it depends only on the cause occurring while MODE.EXCP_EN has
+  /// the bit set -- not on the sticky bit changing. Cause classifiers report
+  /// here as well as into TRAPSTS so the CU has the transient mask.
+  uint32_t pending_alu_causes() const { return pending_alu_causes_; }
+
+  /// @brief Clear the transient mask, before executing the next instruction.
+  void clear_pending_alu_causes() { pending_alu_causes_ = 0; }
+
+  /// @brief Record EXCP causes raised by the instruction currently executing.
+  void raise_alu_causes(uint32_t causes) { pending_alu_causes_ |= causes; }
+
   /// @brief Whether the debugger has stopped this wave (trapped or suspended).
   /// @details A debug-halted wave keeps its slot and all register state; the
   /// scheduler skips it so the CU can go quiescent without retiring the wave.
@@ -659,6 +674,7 @@ public:
     for (auto &t : ttmp_)
       t = 0;
     trapsts_ = 0;
+    pending_alu_causes_ = 0;
     sleep_cycles_ = 0;
     in_trap_handler_ = false;
     trap_interrupt_sent_ = false;
@@ -737,6 +753,7 @@ private:
 
   uint32_t ttmp_[16] = {};           ///< Trap temporary registers (TTMP0-15).
   uint32_t trapsts_ = 0;             ///< Trap status register (EXCP flags).
+  uint32_t pending_alu_causes_ = 0;  ///< EXCP causes from the current instruction.
   uint32_t sleep_cycles_ = 0;        ///< Cycles left on an in-flight S_SLEEP.
   bool in_trap_handler_ = false;     ///< Executing the configured trap-handler shader.
   bool trap_interrupt_sent_ = false; ///< Handler issued MSG_INTERRUPT for this entry.
