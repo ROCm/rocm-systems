@@ -6,6 +6,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include "op128_async.h"
+
 #define NCCL_LL128_FLAGTHREAD (NCCL_LL128_LINEELEMS - 1)
 
 #ifndef RCCL_USE_WBINVL1_VOL

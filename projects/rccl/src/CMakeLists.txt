@@ -69,6 +69,7 @@ set(SRC_FILES
   device/common.h
   device/common_kernel.h
   device/op128.h
+  device/op128_async.h
   device/primitives.h
   device/prims_ll128.h
   device/prims_ll.h
