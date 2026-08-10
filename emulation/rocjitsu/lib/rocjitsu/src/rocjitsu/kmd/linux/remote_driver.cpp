@@ -717,10 +717,19 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       default:
         break;
       }
-      // RpcHeader::payload_bytes and RpcIoctlRequest::args_bytes are uint32_t.
-      // Reject an unrepresentable caller capacity before resize() can attempt a
-      // multi-gigabyte allocation or the wire length can truncate.
-      if (inline_size > UINT32_MAX - (buf.size() - sizeof(RpcHeader)))
+      // QUERY_EXCEPTION_INFO takes info_size straight from the caller, and
+      // SUSPEND/RESUME derive theirs from num_queues; none of the three is
+      // clamped the way snapshot requests are. Bound them by the same protocol
+      // ceiling the daemon enforces, before resize() and the memcpy above run:
+      // UINT32_MAX alone still admits a multi-gigabyte allocation, a
+      // std::bad_alloc, or a huge read from the caller's buffer, all of which
+      // happen before the daemon ever sees the frame and rejects it.
+      //
+      // Fail rather than clamp. The daemon recomputes the expected tail from
+      // the echoed args, so a clamped tail with an unclamped count is a
+      // mismatch and drops the connection.
+      const size_t payload_so_far = buf.size() - sizeof(RpcHeader);
+      if (payload_so_far >= kMaxPayloadBytes || inline_size > kMaxPayloadBytes - payload_so_far)
         return -E2BIG;
       if (inline_size > 0) {
         const size_t inline_offset = buf.size();

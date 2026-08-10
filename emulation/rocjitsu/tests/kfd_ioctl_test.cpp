@@ -2334,6 +2334,41 @@ TEST(RemoteDriverDbgSnapshotTest, StrideWiderThanThePayloadLimitStillFillsEntrie
 // UINT32_MAX * sizeof(kfd_dbg_device_info_entry) (~480 GiB) and kills the
 // process on std::bad_alloc. The request must be clamped to what the transport
 // can carry, and the reply must still land in the caller's buffer.
+// Snapshot requests are clamped to the payload ceiling, but QUERY_EXCEPTION_INFO
+// takes info_size straight from the caller and SUSPEND/RESUME derive their tail
+// from num_queues. Those three were bounded only by UINT32_MAX, so a malformed
+// ioctl could drive a multi-gigabyte resize() and a copy out of the caller's
+// buffer before the frame was ever sent -- the daemon's 16 MiB limit is checked
+// on receipt, far too late to matter. They must be refused, not clamped: the
+// daemon recomputes the expected tail from the echoed args, so a short tail with
+// an unclamped count is a protocol mismatch that drops the connection.
+TEST(RemoteDriverDbgTrapTest, OversizedInlineTailIsRefusedBeforeAllocating) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+  const CloseOnScopeExit server_closer{sv[1]};
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  // Nothing is served: a request this size must be rejected locally, so the
+  // call cannot block waiting for a reply.
+  kfd_ioctl_dbg_trap_args info{};
+  info.pid = 4242;
+  info.op = KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO;
+  info.query_exception_info.info_size = 3u * 1024u * 1024u * 1024u; // 3 GiB
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &info), -E2BIG);
+
+  kfd_ioctl_dbg_trap_args suspend{};
+  suspend.pid = 4242;
+  suspend.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
+  suspend.suspend_queues.num_queues = 0x4000'0000u; // * 4 bytes = 4 GiB
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &suspend), -E2BIG);
+
+  kfd_ioctl_dbg_trap_args resume{};
+  resume.pid = 4242;
+  resume.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
+  resume.resume_queues.num_queues = 0x4000'0000u;
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &resume), -E2BIG);
+}
+
 TEST(RemoteDriverDbgSnapshotTest, OversizedSnapshotRequestIsClampedToPayloadLimit) {
   int sv[2];
   ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
