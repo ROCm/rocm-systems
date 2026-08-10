@@ -140,7 +140,11 @@ def local_gpu_targets() -> list[str]:
     if not enumerator:
         raise RuntimeError("rocm_agent_enumerator not found; pass --targets explicitly")
 
-    out = subprocess.run([enumerator], capture_output=True, text=True).stdout
+    proc = subprocess.run([enumerator], capture_output=True, text=True)
+    if proc.returncode != 0:
+        msg = (proc.stderr or proc.stdout).strip()
+        raise RuntimeError(f"rocm_agent_enumerator failed (rc={proc.returncode}): {msg}")
+    out = proc.stdout
     # Deduplicate but keep discovery order; gfx000 is the CPU agent.
     targets: list[str] = []
     for arch in re.findall(r"gfx[0-9a-fA-F]+", out):
