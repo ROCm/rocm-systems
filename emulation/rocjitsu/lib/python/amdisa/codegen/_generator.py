@@ -3784,7 +3784,21 @@ class CodeGenerator:
                 '  wf.cu().handle_sendmsg(wf, message);'
             )
             if sem.name == 'S_SENDMSGHALT':
-                body += '\n  wf.set_debug_halted(true);'
+                # "...and then HALT the wavefront". The halt is architectural,
+                # so publish it in STATUS.HALT and not only in the debugger's
+                # private flag: the s_rfe path above reads STATUS.HALT to decide
+                # whether the wave stays stopped, and saw 0 for a wave this
+                # instruction had already halted. Both halves now agree, and a
+                # debugger reading STATUS sees the same thing the wave does.
+                body += (
+                    '\n'
+                    '\n'
+                    '  // S_SENDMSGHALT halts the wave. Keep the architectural bit and the\n'
+                    '  // scheduler flag in step -- s_rfe consults STATUS.HALT on the way out.\n'
+                    '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
+                    '  wf.set_status_raw(wf.status_raw() | kStatusHalt);\n'
+                    '  wf.set_debug_halted(true);'
+                )
             return body
 
         return None

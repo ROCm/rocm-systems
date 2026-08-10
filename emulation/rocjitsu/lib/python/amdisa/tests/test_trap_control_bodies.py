@@ -73,8 +73,15 @@ class TestSendmsgBody:
         assert 'wf.set_trap_interrupt_sent(true);' in body
         assert 'wf.cu().handle_sendmsg(wf, message);' in body
 
-    def test_sendmsghalt_halts_the_wave(self):
+    def test_sendmsghalt_halts_through_architectural_status(self):
+        """S_SENDMSGHALT halts the wave -- that is the instruction, not a
+        debugger artefact. Setting only the debugger's private flag left the
+        two halves disagreeing: the s_rfe body reads STATUS.HALT to decide
+        whether the wave stays stopped, and saw 0 for a wave this instruction
+        had already halted."""
         body = _body('S_SENDMSGHALT')
+        assert 'kStatusHalt' in body
+        assert 'wf.set_status_raw(' in body
         assert 'wf.set_debug_halted(true);' in body
 
     def test_plain_sendmsg_does_not_halt(self):
