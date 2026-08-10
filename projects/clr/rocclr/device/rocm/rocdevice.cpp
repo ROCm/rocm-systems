@@ -4192,43 +4192,7 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
                               ? device_.maxSdmaReadMask_
                               : device_.maxSdmaWriteMask_;
 
-  // Simple round-robin path if all engines have equal bandwidth
-  // Disabled by default - use preferred engine logic for current GPUs
-  constexpr bool kUseSimpleRR = false;
-
-  if (kUseSimpleRR) {
-    // Simple round-robin: just cycle through valid engines
-    // This will be enabled for future GPUs where engine selection doesn't matter
-    if (validEngineMask == 0) {
-      ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
-              "No valid SDMA engines for VirtualGPU %p", vgpu);
-      return 0;
-    }
-
-    // Cycle through bit positions, find next valid engine
-    uint32_t start_bit = next_rr_engine_.fetch_add(1, std::memory_order_relaxed);
-    uint32_t selected_mask = 0;
-
-    // Try up to 32 positions to find a valid engine
-    for (uint32_t i = 0; i < 32; ++i) {
-      uint32_t bit = (start_bit + i) % 32;
-      uint32_t mask = 1u << bit;
-      if (validEngineMask & mask) {
-        selected_mask = mask;
-        break;
-      }
-    }
-
-    vgpu_to_engine_[vgpu] = selected_mask;
-
-    ClPrint(amd::LOG_INFO, amd::LOG_COPY,
-            "Assigned SDMA engine (simple RR) to VirtualGPU %p: mask=0x%x, engine_type=%d",
-            vgpu, selected_mask, engine_type);
-
-    return selected_mask;
-  }
-
-  // Current path: Query HSA for engine status and preferences
+  // Query HSA for engine status and preferences
   uint32_t freeEngineMask = 0;
   uint32_t preferredMask = 0;
   hsa_status_t status = HSA_STATUS_SUCCESS;
