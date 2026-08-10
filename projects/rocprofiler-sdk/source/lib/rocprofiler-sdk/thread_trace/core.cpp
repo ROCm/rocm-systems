@@ -482,14 +482,44 @@ DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t& aql,
     }
 }
 
+std::unordered_set<rocprofiler_agent_id_t>
+DispatchThreadTracer::configured_agents() const
+{
+    auto result = std::unordered_set<rocprofiler_agent_id_t>{};
+    std::shared_lock<std::shared_mutex> lk(agents_map_mut);
+    for(const auto& [agent_id, _] : params)
+        result.insert(agent_id);
+    return result;
+}
+
+bool
+DispatchThreadTracer::collects_on(rocprofiler_agent_id_t agent_id) const
+{
+    std::shared_lock<std::shared_mutex> lk(agents_map_mut);
+    return params.count(agent_id) > 0;
+}
+
+bool
+DispatchThreadTracer::intersects(const DispatchThreadTracer& rhs) const
+{
+    std::shared_lock<std::shared_mutex>       lk(agents_map_mut);
+    std::shared_lock<std::shared_mutex>       lk_rhs(rhs.agents_map_mut);
+    for(const auto& [agent_id, _] : params)
+    {
+        if(rhs.params.count(agent_id) > 0) return true;
+    }
+    return false;
+}
+
 void
 DispatchThreadTracer::start_context()
 {
     // Thread trace no longer registers a per-queue callback with the queue controller; the
     // HSA write interceptor now calls thread_trace::write_hook / signal_completion_hook
-    // directly (see hsa/queue.cpp). We only need to enable kernel serialization here. This is
-    // safe to call before hsa_init.
-    CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization();
+    // directly (see hsa/queue.cpp). Scope serialization to the agents configured on this
+    // context. An empty set still means every agent.
+    const auto agents = configured_agents();
+    CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization(agents);
 }
 
 void
@@ -498,9 +528,8 @@ DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-funct
     auto* controller = hsa::get_queue_controller();
     if(!controller) return;
 
-    // Thread trace no longer registers a per-queue callback (see start_context); there is
-    // nothing to remove from the queue controller here.
-    controller->disable_serialization();
+    const auto agents = configured_agents();
+    controller->disable_serialization(agents);
 }
 
 DeviceThreadTracer::DeviceThreadTracer()

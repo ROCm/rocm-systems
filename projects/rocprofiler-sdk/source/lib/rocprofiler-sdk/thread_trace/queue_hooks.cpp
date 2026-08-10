@@ -21,6 +21,8 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
@@ -50,10 +52,14 @@ write_hook(const hsa::Queue& queue,
            hsa::inst_pkt_t&               inst_pkt,
            bool&                          is_serialized)
 {
+    const auto agent_id = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
+
     auto active = context::get_active_contexts(active_thread_trace_contexts_filter());
     for(auto* ctx : active)
     {
         auto& tracer = *ctx->dispatch_thread_trace;
+        if(!tracer.collects_on(agent_id)) continue;
+
         auto [packet, bSerial] =
             tracer.pre_kernel_call(queue, kernel_id, dispatch_id, user_data, correlation_id);
         if(packet)

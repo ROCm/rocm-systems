@@ -43,6 +43,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <unordered_set>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -157,6 +158,9 @@ public:
     void resource_init();
     void resource_deinit();
 
+    bool collects_on(rocprofiler_agent_id_t agent_id) const;
+    bool intersects(const DispatchThreadTracer& rhs) const;
+
     void add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack)
     {
         auto lk       = std::unique_lock{agents_map_mut};
@@ -173,6 +177,8 @@ public:
                                  const hsa::queue_info_session_t& session,
                                  const hsa::packet_data_t&        packet_data);
     const auto& get_agents() const { return agents; }
+
+    std::unordered_set<rocprofiler_agent_id_t> configured_agents() const;
 
 private:
     std::unordered_map<hsa_agent_t, std::unique_ptr<ThreadTracerAgent>>     agents{};
