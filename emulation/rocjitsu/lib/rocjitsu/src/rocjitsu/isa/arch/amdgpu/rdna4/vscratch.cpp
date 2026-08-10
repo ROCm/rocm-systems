@@ -528,6 +528,12 @@ ScratchLoadD16U8Vscratch::ScratchLoadD16U8Vscratch(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void ScratchLoadD16U8Vscratch::implicit_uses(RegisterSet &uses) const {
+  Vscratch::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void ScratchLoadD16U8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
@@ -557,6 +563,12 @@ ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void ScratchLoadD16I8Vscratch::implicit_uses(RegisterSet &uses) const {
+  Vscratch::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void ScratchLoadD16I8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -591,6 +603,12 @@ ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void ScratchLoadD16B16Vscratch::implicit_uses(RegisterSet &uses) const {
+  Vscratch::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void ScratchLoadD16B16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
@@ -620,6 +638,12 @@ ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void ScratchLoadD16HiU8Vscratch::implicit_uses(RegisterSet &uses) const {
+  Vscratch::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void ScratchLoadD16HiU8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -653,6 +677,12 @@ ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void ScratchLoadD16HiI8Vscratch::implicit_uses(RegisterSet &uses) const {
+  Vscratch::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void ScratchLoadD16HiI8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
@@ -683,6 +713,12 @@ ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void ScratchLoadD16HiB16Vscratch::implicit_uses(RegisterSet &uses) const {
+  Vscratch::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void ScratchLoadD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {

@@ -210,6 +210,7 @@ class FlatLoadUbyteD16Flat : public Flat {
 public:
   FlatLoadUbyteD16Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
@@ -222,6 +223,7 @@ class FlatLoadUbyteD16HiFlat : public Flat {
 public:
   FlatLoadUbyteD16HiFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
@@ -234,6 +236,7 @@ class FlatLoadSbyteD16Flat : public Flat {
 public:
   FlatLoadSbyteD16Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
@@ -246,6 +249,7 @@ class FlatLoadSbyteD16HiFlat : public Flat {
 public:
   FlatLoadSbyteD16HiFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
@@ -258,6 +262,7 @@ class FlatLoadShortD16Flat : public Flat {
 public:
   FlatLoadShortD16Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
@@ -270,6 +275,7 @@ class FlatLoadShortD16HiFlat : public Flat {
 public:
   FlatLoadShortD16HiFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand flat_scratch;
