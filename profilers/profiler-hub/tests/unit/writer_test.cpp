@@ -107,8 +107,8 @@ TEST_F(writer_test, initialize_schema_called_twice_is_a_no_op)
 
     backend->initialize_schema(version_t{ 3, 0, 0 });
 
-    // Second call logs an error and returns early instead of throwing or re-executing the
-    // schema SQL against an already-initialized database.
+    // Second call logs a warning and returns early instead of throwing or re-executing
+    // the schema SQL against an already-initialized database.
     EXPECT_NO_THROW(backend->initialize_schema(version_t{ 3, 0, 0 }));
 }
 
