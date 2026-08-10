@@ -110,8 +110,7 @@ for target in "${targets[@]}"; do
     -o "junit_duration_report=call"
   )
 
-  # Only the soft-timeout pass writes a report; a rerun would drop every test
-  # that it does not select.
+  # Only the soft-timeout run is configured to output a JUnit XML report.
   first_run_status=0
   "${pytest_cmd[@]}" --timeout "${soft_timeout_seconds}" \
     --junitxml "${junit_xml}" || first_run_status=$?
