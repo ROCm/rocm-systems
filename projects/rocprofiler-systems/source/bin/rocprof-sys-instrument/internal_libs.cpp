@@ -52,8 +52,8 @@ get_symtab_file(const std::string& _name)
     auto  itr    = _cache.find(_name);
     if(itr == _cache.end())
     {
-        symtab_t* _v        = SymTab::Symtab::findOpenSymtab(_name);
-        bool      _closable = (_v == nullptr);
+        symtab_t*  _v        = SymTab::Symtab::findOpenSymtab(_name);
+        const bool _closable = (_v == nullptr);
         if(!_v) SymTab::Symtab::openFile(_v, _name);
 
         TIMEMORY_PREFER(_v != nullptr)
@@ -72,8 +72,8 @@ close_symtab_file(const std::string& _name)
     auto  itr    = _cache.find(_name);
     if(itr != _cache.end())
     {
-        symtab_t* _symtab   = itr->second.first;
-        bool      _closable = itr->second.second;
+        symtab_t*  _symtab   = itr->second.first;
+        const bool _closable = itr->second.second;
         if(_symtab && _closable) SymTab::Symtab::closeSymtab(_symtab);
         _cache.erase(itr);
         return true;
@@ -97,7 +97,8 @@ get_linked_path(const char*        _name,
                 open_modes_vec_t&& _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) })
 {
     void* _handle = nullptr;
-    bool  _noload = false;
+    // NOLINTNEXTLINE(misc-const-correctness)
+    bool _noload = false;
     for(auto _mode : _open_modes)
     {
         _handle = dlopen(_name, _mode);
@@ -105,7 +106,7 @@ get_linked_path(const char*        _name,
         if(_handle) break;
     }
 
-    tim::scope::destructor _dtor{ [&_noload, &_handle]() {
+    const tim::scope::destructor _dtor{ [&_noload, &_handle]() {
         if(_noload == false) dlclose(_handle);
     } };
 

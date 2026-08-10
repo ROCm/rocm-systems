@@ -303,7 +303,7 @@ inline std::function<bool()>&
 is_initialized_callback()
 {
     static std::function<bool()> _v = []() -> bool {
-        std::int32_t _init = 0;
+        const std::int32_t _init = 0;
 #if defined(ROCPROFSYS_USE_MPI)
         if(!is_finalized()) PMPI_Initialized(&_init);
 #endif
