@@ -428,9 +428,9 @@ TEST(wsl_dxg_thunk, an_empty_snapshot_is_released_and_closed)
     const auto nodes = read_dxg_gpu_topology(fake.table());
 
     EXPECT_TRUE(nodes.empty());
-    EXPECT_EQ(
-        fake.state.calls,
-        (std::vector<std::string>{"open_kfd", "acquire_snapshot", "release_snapshot", "close_kfd"}));
+    EXPECT_EQ(fake.state.calls,
+              (std::vector<std::string>{
+                  "open_kfd", "acquire_snapshot", "release_snapshot", "close_kfd"}));
 }
 
 // --- an incomplete function table ------------------------------------------
