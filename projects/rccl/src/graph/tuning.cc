@@ -1145,6 +1145,9 @@ ncclResult_t ncclTopoInitTunerConstants(struct ncclComm* comm) {
 
 ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCompCap, struct ncclTopoGraph** graphs) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // [RCCL] Decide the gfx950 kernel-thread variant before the thread caps below
+  // are computed/cached, so rcclGetMaxNthreads sees comm->use512Kernels.
+  rcclSetKernelVariant(comm);
   static int rcclMaxThreads[NCCL_NUM_PROTOCOLS] = {0};
   if (rcclMaxThreads[NCCL_PROTO_SIMPLE] == 0) rcclGetMaxNthreads(comm, rcclMaxThreads);
   static int maxNthreads = rcclMaxThreads[NCCL_PROTO_SIMPLE];
@@ -1162,6 +1165,11 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
   comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_LL128] = comm->maxThreads[NCCL_ALGO_TREE][NCCL_PROTO_LL128] =
     getNthreads("NCCL_LL128_NTHREADS", ncclParamLl128Nthreads(), 4 * comm->WarpSize, maxLL128Nthreads, maxLL128Nthreads,
                 comm->WarpSize);
+  // [RCCL] Surface the resolved max threads per block so the selected gfx950
+  // kernel set (256 vs 512, see RCCL_GFX950_NTHREADS) is visible in the log.
+  INFO(NCCL_INIT, "RCCL max threads/block: SIMPLE(Ring)=%d LL=%d LL128=%d [%s kernel set]",
+       comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE], comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_LL],
+       comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_LL128], comm->use512Kernels ? "512-thread" : "256-thread");
 #else
   int simpleDefaultThreads =
     (graphs[NCCL_ALGO_RING]->bwIntra * graphs[NCCL_ALGO_RING]->nChannels <= PCI_BW) ? 256 : NCCL_MAX_NTHREADS;

@@ -111,7 +111,10 @@ extern __shared__ ulong2
 #endif
 
 #ifdef ENABLE_FAULT_INJECTION
-__device__ inline void insert_random_delay_per_warp() {
+// __forceinline__: references ncclShmem, whose layout/name differs between the
+// 256 and 512 kernel sets. Forcing inline prevents a comdat symbol that would
+// otherwise be deduplicated across the two coexisting sets. See device.h.
+__device__ __forceinline__ void insert_random_delay_per_warp() {
   if ((ncclShmem.faults & RANDOM_DELAY_ON_WARP_START) && (threadIdx.x % WARP_SIZE == 0)) {
     switch ((wall_clock64() >> (threadIdx.x / WARP_SIZE * 2)) & 0x3) {
     case 0:
@@ -132,7 +135,9 @@ __device__ inline void insert_random_delay_per_warp() {
 }
 #endif
 
-__device__ inline void* ncclScratchForWarp(int warp) {
+// __forceinline__: references ncclShmemPerWarp (renamed per kernel set), so it must
+// not emit a shared comdat symbol across the 256/512 sets. See device.h.
+__device__ __forceinline__ void* ncclScratchForWarp(int warp) {
   return (char*)ncclShmemPerWarp + warp * ncclShmemScratchWarpSize();
 }
 
@@ -593,9 +598,9 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       SpecializedRunWorkBatch().run();
     } else {
 #if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
-      if (COLL_UNROLL == 1) ncclDevFuncTable_1[ncclShmem.funcId]();
-      else if (COLL_UNROLL == 2) ncclDevFuncTable_2[ncclShmem.funcId]();
-      else ncclDevFuncTable_4[ncclShmem.funcId]();
+      if (COLL_UNROLL == 1) RCCL_NT_SYM(ncclDevFuncTable_1)[ncclShmem.funcId]();
+      else if (COLL_UNROLL == 2) RCCL_NT_SYM(ncclDevFuncTable_2)[ncclShmem.funcId]();
+      else RCCL_NT_SYM(ncclDevFuncTable_4)[ncclShmem.funcId]();
 #else
       if (COLL_UNROLL == 1) NCCL_CALL_FUNCTIONS_1(ncclShmem.funcId);
       else if (COLL_UNROLL == 2) NCCL_CALL_FUNCTIONS_2(ncclShmem.funcId);
@@ -631,14 +636,16 @@ __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRI
   __global__ void ncclDevKernel_##suffix(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {}
 
 // noinline iff RCCL_DEVICE_LINKER (each devfunc is a standalone shard).
+// RCCL_NT_SYM() suffixes the symbol with _512 when building the alternate
+// gfx950 512-thread kernel set (see device.h).
 #ifdef RCCL_DEVICE_LINKER
 #define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll, userreg) \
-  __device__ __attribute__((noinline)) void ncclDevFunc_##suffix() { \
+  __device__ __attribute__((noinline)) void RCCL_NT_SYM(ncclDevFunc_##suffix)() { \
     RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline, userreg>().run(); \
   }
 #else
 #define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll, userreg) \
-  __device__ void ncclDevFunc_##suffix() { \
+  __device__ void RCCL_NT_SYM(ncclDevFunc_##suffix)() { \
     RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline, userreg>().run(); \
   }
 #endif

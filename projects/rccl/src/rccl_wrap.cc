@@ -44,6 +44,10 @@ RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
 RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
+// [RCCL] gfx950: select the compiled kernel set / max threads per block. 256 (default)
+// uses the register-spill-optimized 256-thread kernels; 512 selects the alternate
+// 512-thread kernel set (only available when RCCL_ENABLE_GFX950_512 was built).
+RCCL_PARAM(Gfx950Nthreads, "GFX950_NTHREADS", 256);
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
 RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
@@ -860,9 +864,28 @@ int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info
 }
 #endif
 
+void rcclSetKernelVariant(struct ncclComm* comm) {
+  comm->use512Kernels = false;
+#ifdef RCCL_ENABLE_GFX950_512
+  if (rcclParamGfx950Nthreads() == 512 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
+    comm->use512Kernels = true;
+    INFO(NCCL_INIT, "RCCL gfx950: using 512-thread-per-block kernel set (RCCL_GFX950_NTHREADS=512)");
+  }
+#else
+  if (rcclParamGfx950Nthreads() == 512 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
+    WARN("RCCL_GFX950_NTHREADS=512 requested but the 512-thread kernel set was not built "
+         "(gfx950 not in GPU_TARGETS or device linker disabled); using default 256-thread kernels");
+  }
+#endif
+}
+
 void rcclGetMaxNthreads(struct ncclComm* comm, int maxNthreads[]) {
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
-    maxNthreads[NCCL_PROTO_SIMPLE] = maxNthreads[NCCL_PROTO_LL128] = RCCL_GFX950_MAX_NTHREADS;
+    int simpleMax = RCCL_GFX950_MAX_NTHREADS;
+#ifdef RCCL_ENABLE_GFX950_512
+    if (comm->use512Kernels) simpleMax = RCCL_GFX950_MAX_NTHREADS_512;
+#endif
+    maxNthreads[NCCL_PROTO_SIMPLE] = maxNthreads[NCCL_PROTO_LL128] = simpleMax;
   } else {
     maxNthreads[NCCL_PROTO_SIMPLE] = maxNthreads[NCCL_PROTO_LL128] = RCCL_DEFAULT_MAX_NTHREADS;
   }

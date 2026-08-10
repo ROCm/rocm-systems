@@ -58,6 +58,27 @@ foreach(_gpu_raw ${GPU_TARGETS})
 endforeach()
 message(STATUS "Device Linker: GPU targets = ${DL_GPU_TARGETS}")
 
+# [RCCL] The alternate gfx950 512-thread kernel set is built only when gfx950 is
+# among the GPU targets. It re-compiles the device sources with -DRCCL_NTHREADS_512
+# into a distinct symbol namespace (see src/include/device.h) and links both sets
+# into the gfx950 device ELF. The host selects the set at runtime via
+# RCCL_GFX950_NTHREADS (see enqueue.cc / rccl_wrap.cc).
+set(RCCL_BUILD_GFX950_512 FALSE)
+if("gfx950" IN_LIST DL_GPU_TARGETS)
+  set(RCCL_BUILD_GFX950_512 TRUE)
+  message(STATUS "Device Linker: gfx950 512-thread kernel set ENABLED (RCCL_ENABLE_GFX950_512)")
+  # Let the host launch path (enqueue.cc / rccl_wrap.cc) reference the *_512
+  # generic kernels and the runtime selection logic.
+  target_compile_definitions(rccl PRIVATE RCCL_ENABLE_GFX950_512)
+endif()
+
+# Host-side defines: expose the second kernel set to the host launch path and make
+# the fat-binary host compile emit host stubs for the *_512 generic kernels.
+set(DL_HOST_512_DEFS "")
+if(RCCL_BUILD_GFX950_512)
+  list(APPEND DL_HOST_512_DEFS -DRCCL_ENABLE_GFX950_512 -DRCCL_HOST_FATBIN_COMPILE)
+endif()
+
 # ---------------------------------------------------------------------------
 # Optimization flags (passed to both compile and link modes of the driver)
 # ---------------------------------------------------------------------------
@@ -250,6 +271,45 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   endif()
 
   # =========================================================================
+  # [RCCL] gfx950 only: second OBJECT library compiled with -DRCCL_NTHREADS_512.
+  # Produces the *_512 device functions (distinct symbols) that the 512-thread
+  # dispatcher links against. Emitted alongside the default 256-thread set.
+  # =========================================================================
+  set(_dl_link_512_flags "")
+  set(_dl_link_512_depends "")
+  if(RCCL_BUILD_GFX950_512 AND DL_GPU_TARGET STREQUAL "gfx950")
+    set(_dev_target_512 "rccl_device_${DL_GPU_TARGET}_512")
+
+    add_library(${_dev_target_512} OBJECT ${ARCH_SOURCES})
+    set_target_properties(${_dev_target_512} PROPERTIES LINKER_LANGUAGE RCCLDEV)
+
+    target_compile_options(${_dev_target_512} PRIVATE
+      --arch=${DL_GPU_TARGET}
+      --clang=${DL_CLANG}
+      ${DL_OPT_FLAGS}
+      -std=c++17
+      ${DL_HIP_COMPILER_FLAGS}
+    )
+    target_compile_definitions(${_dev_target_512} PRIVATE RCCL_DEVICE_LINKER RCCL_NTHREADS_512)
+    target_link_libraries(${_dev_target_512} PRIVATE rccl_device_defs)
+
+    add_dependencies(${_dev_target_512} hipify_all copy_nccl_device_headers)
+    if(ENABLE_ROCSHMEM AND TARGET rocshmem_static)
+      add_dependencies(${_dev_target_512} rocshmem_static)
+    endif()
+
+    set(_link_rsp_512 "${DL_ARCH_DIR}/link_objects_512.rsp")
+    file(GENERATE OUTPUT "${_link_rsp_512}"
+      CONTENT "$<JOIN:$<TARGET_OBJECTS:${_dev_target_512}>,\n>\n")
+
+    set(_dl_link_512_flags
+      --dispatcher-512=${HIPIFY_DIR}/src/device/common.cu.cpp
+      --objects-512-rsp=${_link_rsp_512}
+    )
+    set(_dl_link_512_depends ${_dev_target_512})
+  endif()
+
+  # =========================================================================
   # Link step: driver --link mode produces device.elf
   # =========================================================================
   set(ARCH_DEVICE_ELF "${DL_ARCH_DIR}/device.elf")
@@ -317,6 +377,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       --clang=${DL_CLANG}
       ${DL_HIP_COMPILER_FLAGS}
       --dispatcher=${HIPIFY_DIR}/src/device/common.cu.cpp
+      ${_dl_link_512_flags}
       ${_rocshmem_bitcode_arg}
       ${_link_def_flags}
       ${_link_inc_flags}
@@ -324,7 +385,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       -std=c++17
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
-    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_rocshmem_link_depends}
+    DEPENDS ${_dev_target} ${_dl_link_512_depends} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_rocshmem_link_depends}
     COMMENT "DL [${DL_GPU_TARGET}] link: device.elf"
     VERBATIM
     COMMAND_EXPAND_LISTS
@@ -435,6 +496,7 @@ add_custom_command(
     ${DL_HIP_COMPILER_FLAGS}
     -Xclang -fcuda-include-gpubinary -Xclang ${DEVICE_HIPFB}
     -DRCCL_DEVICE_LINKER
+    ${DL_HOST_512_DEFS}
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}

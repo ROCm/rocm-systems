@@ -923,6 +923,10 @@ struct ncclComm {
 
   // unroll factor for comm [RCCL]
   int unroll;
+  // [RCCL] gfx950: use the alternate 512-thread-per-block compiled kernel set
+  // (RCCL_GFX950_NTHREADS=512). Only ever true when RCCL_ENABLE_GFX950_512 was
+  // built and the device arch is gfx950.
+  bool use512Kernels;
   // custom collective [RCCL]
   bool enableCustColl;
   int

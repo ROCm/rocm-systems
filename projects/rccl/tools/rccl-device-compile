@@ -538,6 +538,51 @@ def do_compile(args, forwarded_flags):
 # Link mode: objects -> device.elf
 # ---------------------------------------------------------------------------
 
+def _collect_resources(objects):
+    """Collect resource JSON dicts written alongside each object file."""
+    resource_list = []
+    for obj in objects:
+        json_path = os.path.splitext(obj)[0] + '.resources.json'
+        if os.path.exists(json_path):
+            with open(json_path) as f:
+                resource_list.append(json.load(f))
+    return resource_list
+
+
+def _build_dispatcher(clang, arch, dispatcher_src, forwarded_flags, extra_flags,
+                      max_res, disp_asm, disp_patched, disp_obj, tag):
+    """Compile -> patch -> assemble one dispatcher source into disp_obj.
+
+    extra_flags lets the caller inject e.g. -DRCCL_NTHREADS_512 so the alternate
+    512-thread generic kernels/table are emitted into a distinct symbol set.
+    """
+    disp_compile_cmd = [
+        clang,
+        '-x', 'hip',
+        '--offload-device-only',
+        f'--offload-arch={arch}',
+        '-g', '-w',
+    ] + forwarded_flags + list(extra_flags) + [
+        '-S', '-o', disp_asm, dispatcher_src,
+    ]
+    run(disp_compile_cmd, f"compile {tag} dispatcher for {arch}")
+
+    with open(disp_asm) as f:
+        disp_lines = f.readlines()
+    patched_lines = patch_dispatcher(disp_lines, max_res)
+    with open(disp_patched, 'w') as f:
+        f.writelines(patched_lines)
+
+    disp_assemble_cmd = [
+        clang,
+        '-x', 'assembler',
+        '-target', 'amdgcn-amd-amdhsa',
+        f'-mcpu={arch}',
+        '-c', '-o', disp_obj, disp_patched,
+    ]
+    run(disp_assemble_cmd, f"assemble {tag} dispatcher for {arch}")
+
+
 def do_link(args, forwarded_flags):
     clang, lld = discover_tools(args.clang)
     arch = args.arch
@@ -546,33 +591,60 @@ def do_link(args, forwarded_flags):
     dispatcher = args.dispatcher
     keep_temps = args.keep_temps
     rocshmem_bitcode = getattr(args, 'rocshmem_bitcode', None)
+    dispatcher_512 = getattr(args, 'dispatcher_512', None)
+    objects_512_rsp = getattr(args, 'objects_512_rsp', None)
 
     if not dispatcher:
         raise SystemExit("ERROR: --link requires --dispatcher=<source>")
 
-    # Collect resource JSONs from alongside each .o
-    resource_list = []
-    for obj in objects:
-        json_path = os.path.splitext(obj)[0] + '.resources.json'
-        if os.path.exists(json_path):
-            with open(json_path) as f:
-                resource_list.append(json.load(f))
+    # [RCCL] Optional second (512-thread) kernel set for gfx950. Its objects are
+    # passed via --objects-512-rsp (a response file listing .o paths); they are
+    # aggregated and dispatched separately so the 512 generic kernels reserve
+    # resources based only on the 512-thread func implementations.
+    objects_512 = []
+    if objects_512_rsp:
+        if not os.path.exists(objects_512_rsp):
+            raise SystemExit(f"ERROR: --objects-512-rsp file not found: {objects_512_rsp}")
+        with open(objects_512_rsp) as f:
+            objects_512 = [line.strip() for line in f if line.strip()]
 
+    # Collect resource JSONs from alongside each .o
+    resource_list = _collect_resources(objects)
     if not resource_list:
         raise SystemExit(f"ERROR: no .resources.json files found alongside input objects")
 
-    # Step 1: Aggregate resources
+    # Step 1: Aggregate resources (default 256-thread set)
     max_res = aggregate_resources(resource_list, arch)
     print(f"[{arch}] Aggregated {len(resource_list)} resources: "
           f"VGPR={max_res['vgpr_count']}, AGPR={max_res['agpr_count']}, "
           f"SGPR={max_res['sgpr_count']}, "
           f"scratch={max_res['private_segment_fixed_size']}")
 
+    max_res_512 = None
+    if dispatcher_512 and objects_512:
+        resource_list_512 = _collect_resources(objects_512)
+        if not resource_list_512:
+            raise SystemExit("ERROR: --dispatcher-512 given but no .resources.json found for 512 objects")
+        max_res_512 = aggregate_resources(resource_list_512, arch)
+        print(f"[{arch}] Aggregated {len(resource_list_512)} resources (512-thread set): "
+              f"VGPR={max_res_512['vgpr_count']}, AGPR={max_res_512['agpr_count']}, "
+              f"SGPR={max_res_512['sgpr_count']}, "
+              f"scratch={max_res_512['private_segment_fixed_size']}")
+        # Explicit scratch (register-spill) comparison between the two kernel sets,
+        # mirroring the measurement in the original 256-thread change (#5425).
+        _s256 = max_res['private_segment_fixed_size']
+        _s512 = max_res_512['private_segment_fixed_size']
+        print(f"[{arch}] Scratch [bytes/lane]: 256-thread set = {_s256}, "
+              f"512-thread set = {_s512} (delta {_s512 - _s256:+d})")
+
     output_dir = os.path.dirname(output) or '.'
     if keep_temps:
         disp_asm = os.path.join(output_dir, f'dispatcher_{arch}.s')
         disp_patched = os.path.join(output_dir, f'dispatcher_{arch}_patched.s')
         disp_obj = os.path.join(output_dir, f'dispatcher_{arch}.o')
+        disp512_asm = os.path.join(output_dir, f'dispatcher_{arch}_512.s')
+        disp512_patched = os.path.join(output_dir, f'dispatcher_{arch}_512_patched.s')
+        disp512_obj = os.path.join(output_dir, f'dispatcher_{arch}_512.o')
         rocshmem_obj = os.path.join(output_dir, f'rocshmem_device_{arch}.o') if rocshmem_bitcode else None
         cleanup = []
     else:
@@ -580,40 +652,27 @@ def do_link(args, forwarded_flags):
         disp_asm = os.path.join(tmpdir, 'dispatcher.s')
         disp_patched = os.path.join(tmpdir, 'dispatcher_patched.s')
         disp_obj = os.path.join(tmpdir, 'dispatcher.o')
+        disp512_asm = os.path.join(tmpdir, 'dispatcher_512.s')
+        disp512_patched = os.path.join(tmpdir, 'dispatcher_512_patched.s')
+        disp512_obj = os.path.join(tmpdir, 'dispatcher_512.o')
         rocshmem_obj = os.path.join(tmpdir, 'rocshmem_device.o') if rocshmem_bitcode else None
-        cleanup = [disp_asm, disp_patched, disp_obj, tmpdir]
+        cleanup = [disp_asm, disp_patched, disp_obj, disp512_asm, disp512_patched, disp512_obj, tmpdir]
         if rocshmem_obj:
             cleanup.insert(-1, rocshmem_obj)  # remove before rmdir
 
     try:
-        # Step 2: Compile dispatcher to assembly
-        disp_compile_cmd = [
-            clang,
-            '-x', 'hip',
-            '--offload-device-only',
-            f'--offload-arch={arch}',
-            '-g', '-w',
-        ] + forwarded_flags + [
-            '-S', '-o', disp_asm, dispatcher,
-        ]
-        run(disp_compile_cmd, f"compile dispatcher for {arch}")
+        # Steps 2-4: Compile, patch, and assemble the default (256-thread) dispatcher
+        _build_dispatcher(clang, arch, dispatcher, forwarded_flags, [],
+                          max_res, disp_asm, disp_patched, disp_obj, "256-thread")
 
-        # Step 3: Patch dispatcher with aggregated resources
-        with open(disp_asm) as f:
-            disp_lines = f.readlines()
-        patched_lines = patch_dispatcher(disp_lines, max_res)
-        with open(disp_patched, 'w') as f:
-            f.writelines(patched_lines)
-
-        # Step 4: Assemble patched dispatcher
-        disp_assemble_cmd = [
-            clang,
-            '-x', 'assembler',
-            '-target', 'amdgcn-amd-amdhsa',
-            f'-mcpu={arch}',
-            '-c', '-o', disp_obj, disp_patched,
-        ]
-        run(disp_assemble_cmd, f"assemble dispatcher for {arch}")
+        # Steps 2-4 (512-thread set): compile the alternate dispatcher with
+        # -DRCCL_NTHREADS_512 and patch it with the 512-set aggregated resources.
+        built_512 = False
+        if max_res_512 is not None:
+            _build_dispatcher(clang, arch, dispatcher_512, forwarded_flags,
+                              ['-DRCCL_NTHREADS_512'], max_res_512,
+                              disp512_asm, disp512_patched, disp512_obj, "512-thread")
+            built_512 = True
 
         # Step 5: Compile rocSHMEM device bitcode to an amdgcn object (if provided).
         # rocSHMEM device API symbols (rocshmem::*_wg, rocshmem_n_pes, …) have
@@ -640,7 +699,11 @@ def do_link(args, forwarded_flags):
         rsp_path = os.path.join(output_dir, f'link_{arch}.rsp')
         with open(rsp_path, 'w') as f:
             f.write(disp_obj + '\n')
+            if built_512:
+                f.write(disp512_obj + '\n')
             for obj in objects:
+                f.write(obj + '\n')
+            for obj in objects_512:
                 f.write(obj + '\n')
             if rocshmem_obj:
                 f.write(rocshmem_obj + '\n')
@@ -700,6 +763,16 @@ def parse_compiler_flags(argv):
         elif arg == '--dispatcher' and i + 1 < len(argv):
             our_args.extend([arg, argv[i + 1]])
             i += 1
+        elif arg.startswith('--dispatcher-512='):
+            our_args.append(arg)
+        elif arg == '--dispatcher-512' and i + 1 < len(argv):
+            our_args.extend([arg, argv[i + 1]])
+            i += 1
+        elif arg.startswith('--objects-512-rsp='):
+            our_args.append(arg)
+        elif arg == '--objects-512-rsp' and i + 1 < len(argv):
+            our_args.extend([arg, argv[i + 1]])
+            i += 1
         elif arg.startswith('--rocshmem-bitcode='):
             our_args.append(arg)
         elif arg == '--rocshmem-bitcode' and i + 1 < len(argv):
@@ -750,6 +823,8 @@ def main():
     parser.add_argument('--arch', required=False)
     parser.add_argument('--clang', default=None)
     parser.add_argument('--dispatcher', default=None)
+    parser.add_argument('--dispatcher-512', default=None, dest='dispatcher_512')
+    parser.add_argument('--objects-512-rsp', default=None, dest='objects_512_rsp')
     parser.add_argument('--rocshmem-bitcode', default=None, dest='rocshmem_bitcode')
     parser.add_argument('-o', '--output', required=False)
     parser.add_argument('--keep-temps', action='store_true')

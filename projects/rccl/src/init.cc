@@ -1191,6 +1191,10 @@ NCCL_PARAM(P2pNvlChunkSize, "P2P_NVL_CHUNKSIZE", (1 << 19)); /* 512 kB */
 static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
   int64_t envs[NCCL_NUM_PROTOCOLS] = {ncclParamLlBuffSize(), ncclParamLl128BuffSize(), ncclParamBuffSize()};
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // [RCCL] Determine the gfx950 kernel-thread variant before buffer sizes are
+  // computed: LL/LL128 FIFO sizing scales with the max threads per block, which is
+  // higher (512) when the 512-thread kernel set is selected. (Idempotent.)
+  rcclSetKernelVariant(comm);
   int defaults[NCCL_NUM_PROTOCOLS];
   rcclSetDefaultBuffSizes(comm, defaults);
 #else

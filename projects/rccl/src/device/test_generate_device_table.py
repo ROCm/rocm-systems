@@ -18,6 +18,7 @@ generated text rather than compiling it.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERATE_PY = os.path.join(HERE, "generate.py")
+DEVICE_H = os.path.join(HERE, "..", "include", "device.h")
 
 # A small, fast slice of collectives. "AllReduce RING SIMPLE Sum f32" expands to
 # both an unguarded primary and an arch-guarded variant, which exercises the
@@ -59,7 +61,10 @@ class DeviceTableGenerationTest(unittest.TestCase):
         # RCCL_DEVICE_LINKER. The generated forward declarations must stay plain:
         # a stray noinline here leaks into the definition (attribute is a union
         # across decl+def) and would force pure-RDC funcs noinline.
-        self.assertIn("__device__ void ncclDevFunc_", self.header)
+        # Symbols are wrapped in RCCL_NT_SYM() so the alternate gfx950 512-thread
+        # kernel set (-DRCCL_NTHREADS_512) gets a distinct symbol namespace; with
+        # the macro undefined RCCL_NT_SYM(x) == x.
+        self.assertIn("__device__ void RCCL_NT_SYM(ncclDevFunc_", self.header)
         self.assertNotIn("noinline", self.header)
         self.assertNotIn("RCCL_DEVFUNC_ATTR", self.header)
 
@@ -69,7 +74,7 @@ class DeviceTableGenerationTest(unittest.TestCase):
             "#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)",
             self.header,
         )
-        self.assertIn("static __device__ ncclDevFuncPtr_t const ncclDevFuncTable_", self.header)
+        self.assertIn("static __device__ ncclDevFuncPtr_t const RCCL_NT_SYM(ncclDevFuncTable_", self.header)
 
     def test_pure_rdc_dispatch_block_present(self):
         # Compile-time binary search only when NEITHER runtime-dispatch macro is set.
@@ -104,7 +109,99 @@ class DeviceTableGenerationTest(unittest.TestCase):
         # table is still emitted and the pure-RDC dispatcher is not.
         with tempfile.TemporaryDirectory(prefix="rccl_devtable_ifc_") as d:
             header = _generate(d, ifc="ON")
-        self.assertIn("static __device__ ncclDevFuncPtr_t const ncclDevFuncTable_", header)
+        self.assertIn("static __device__ ncclDevFuncPtr_t const RCCL_NT_SYM(ncclDevFuncTable_", header)
+
+
+def _extract_nt_sym_macros():
+    """Pull the RCCL_NT_SYM() macro machinery verbatim out of device.h.
+
+    Extracting (rather than duplicating) the definitions keeps this behavioral
+    test honest: if the macros in device.h change, the test exercises the change.
+    """
+    with open(DEVICE_H) as f:
+        text = f.read()
+    start = text.index("#define RCCL_CAT_(")
+    last = text.index("#define RCCL_NT_SYM(name)")
+    end = text.index("\n", last)
+    return text[start:end + 1]
+
+
+def _cpp_expand(macro_block, body, define512):
+    """Preprocess body (prefixed with the extracted macros), optionally with
+    -DRCCL_NTHREADS_512, and return stdout."""
+    src = macro_block + "\n" + body + "\n"
+    cmd = ["cpp", "-P"]
+    if define512:
+        cmd.append("-DRCCL_NTHREADS_512")
+    cmd.append("-")
+    return subprocess.run(cmd, input=src, capture_output=True, text=True, check=True).stdout
+
+
+class Gfx950ThreadVariantTest(unittest.TestCase):
+    """The alternate gfx950 512-thread kernel set (RCCL_GFX950_NTHREADS=512) is
+    produced by recompiling the same generated sources with -DRCCL_NTHREADS_512.
+    For both sets to coexist in one device ELF, every device symbol the generator
+    emits must be wrapped in RCCL_NT_SYM() so the 512 build lands in a distinct
+    (_512) symbol namespace. These tests guard that contract.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.exists(GENERATE_PY):
+            raise unittest.SkipTest("generate.py not found next to test")
+        cls._dir = tempfile.mkdtemp(prefix="rccl_devtable_512_")
+        cls.header = _generate(cls._dir)
+        spec_dir = os.path.join(cls._dir, "specialized")
+        specs = sorted(os.listdir(spec_dir))
+        if not specs:
+            raise unittest.SkipTest("no specialized files generated")
+        with open(os.path.join(spec_dir, specs[0])) as f:
+            cls.spec = f.read()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._dir, ignore_errors=True)
+
+    def test_generated_symbols_are_nt_sym_wrapped(self):
+        # device_table.h: forward declarations and the function-pointer table.
+        self.assertIn("__device__ void RCCL_NT_SYM(ncclDevFunc_", self.header)
+        self.assertIn("static __device__ ncclDevFuncPtr_t const RCCL_NT_SYM(ncclDevFuncTable_", self.header)
+        # specialized shard: the kernel wrapper and the called device function.
+        self.assertIn("RCCL_NT_SYM(ncclDevKernel_", self.spec)
+        self.assertIn("RCCL_NT_SYM(ncclDevFunc_", self.spec)
+
+    def test_nt_sym_yields_distinct_symbol_namespaces(self):
+        if shutil.which("cpp") is None:
+            self.skipTest("cpp not available")
+        macros = _extract_nt_sym_macros()
+        body = (
+            "TABLE RCCL_NT_SYM(ncclDevFuncTable_1)\n"
+            "FUNC RCCL_NT_SYM(ncclDevFunc_AllReduce_RING_SIMPLE_Sum_f32_0_0_4)\n"
+            "KERNEL RCCL_NT_SYM(ncclDevKernel_Generic_1)\n"
+            "SHMEM ncclShmem\n"
+            "PERWARP ncclShmemPerWarp\n"
+        )
+        base = _cpp_expand(macros, body, define512=False)
+        v512 = _cpp_expand(macros, body, define512=True)
+
+        # Default build: RCCL_NT_SYM(x) == x, shmem identifiers untouched.
+        self.assertRegex(base, r"TABLE\s+ncclDevFuncTable_1\b")
+        self.assertRegex(base, r"FUNC\s+ncclDevFunc_AllReduce_RING_SIMPLE_Sum_f32_0_0_4\b")
+        self.assertRegex(base, r"KERNEL\s+ncclDevKernel_Generic_1\b")
+        self.assertRegex(base, r"SHMEM\s+ncclShmem\b")
+        self.assertRegex(base, r"PERWARP\s+ncclShmemPerWarp\b")
+
+        # 512 build: every symbol gains the _512 suffix / rename.
+        self.assertRegex(v512, r"TABLE\s+ncclDevFuncTable_1_512\b")
+        self.assertRegex(v512, r"FUNC\s+ncclDevFunc_AllReduce_RING_SIMPLE_Sum_f32_0_0_4_512\b")
+        self.assertRegex(v512, r"KERNEL\s+ncclDevKernel_Generic_1_512\b")
+        self.assertRegex(v512, r"SHMEM\s+ncclShmem_512\b")
+        self.assertRegex(v512, r"PERWARP\s+ncclShmemPerWarp_512\b")
+
+        # The two sets must not collide: the 512 build emits no bare base names.
+        self.assertNotRegex(v512, r"\bncclDevFuncTable_1\b")
+        self.assertNotRegex(v512, r"\bncclDevKernel_Generic_1\b")
+        self.assertNotRegex(v512, r"\bncclShmem\b")
 
 
 if __name__ == "__main__":

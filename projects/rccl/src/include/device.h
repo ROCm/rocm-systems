@@ -124,7 +124,13 @@ union ncclLLFifoLine {
 #else
 #define WARP_SIZE 32
 #endif
-#if defined(__gfx950__)
+// [RCCL] gfx950 supports two compiled kernel variants selectable at runtime:
+// the default 256-thread set, and a 512-thread set built into a separate symbol
+// namespace (see RCCL_NT_SYM below). The 512 set is produced by re-compiling the
+// device sources with -DRCCL_NTHREADS_512.
+#if defined(__gfx950__) && defined(RCCL_NTHREADS_512)
+#define NCCL_MAX_NTHREADS 512
+#elif defined(__gfx950__)
 #define NCCL_MAX_NTHREADS 256
 #else
 #define NCCL_MAX_NTHREADS 256
@@ -142,6 +148,26 @@ union ncclLLFifoLine {
   // Number of named barriers supported by CUDA
 #define NCCL_MAX_GROUPS (NCCL_MAX_NTHREADS / WARP_SIZE)
 #endif
+
+// [RCCL] Device-symbol suffixing for the alternate gfx950 512-thread kernel set.
+// When the device sources are compiled with -DRCCL_NTHREADS_512, every device
+// symbol that must be unique across the two coexisting kernel sets is renamed
+// with a "_512" suffix via RCCL_NT_SYM(). This lets both the default 256-thread
+// set and the 512-thread set live in the same device ELF without collisions.
+// When RCCL_NTHREADS_512 is not defined, RCCL_NT_SYM(x) == x (no change).
+#define RCCL_CAT_(a, b) a##b
+#define RCCL_CAT(a, b) RCCL_CAT_(a, b)
+#if defined(RCCL_NTHREADS_512)
+#define RCCL_NT_SUFFIX _512
+// Redirect the shared-memory objects too: their layout depends on NCCL_MAX_GROUPS,
+// so the 512 set needs its own LDS allocation. Renaming the identifier here means
+// every reference in the (unmodified) device sources resolves to the _512 object.
+#define ncclShmem ncclShmem_512
+#define ncclShmemPerWarp ncclShmemPerWarp_512
+#else
+#define RCCL_NT_SUFFIX
+#endif
+#define RCCL_NT_SYM(name) RCCL_CAT(name, RCCL_NT_SUFFIX)
 
 #ifdef ENABLE_WARP_SPEED
 #define MAXCHANNELS 512

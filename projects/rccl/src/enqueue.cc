@@ -54,6 +54,30 @@ static ncclKernelMatch const ncclKerns[3] = {
   {(void*)ncclDevKernel_Generic_1, true}, {(void*)ncclDevKernel_Generic_2, true}, {(void*)ncclDevKernel_Generic_4, true}
 };
 
+#ifdef RCCL_ENABLE_GFX950_512
+// [RCCL] Alternate gfx950 kernel set compiled with 512 threads per block, living
+// in a distinct symbol namespace (see src/include/device.h). Selected at runtime
+// via RCCL_GFX950_NTHREADS=512 (comm->use512Kernels). Only present in the gfx950
+// device image; launching these on other arches is never attempted.
+__global__ void ncclDevKernel_Generic_1_512(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernel_Generic_2_512(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernel_Generic_4_512(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+static ncclKernelMatch const ncclKerns512[3] = {
+  {(void*)ncclDevKernel_Generic_1_512, true}, {(void*)ncclDevKernel_Generic_2_512, true},
+  {(void*)ncclDevKernel_Generic_4_512, true}
+};
+#endif
+
+// Select the host launch stub for this comm's unroll factor, honoring the gfx950
+// 512-thread kernel set when enabled at runtime.
+static inline void* rcclSelectKernelFn(struct ncclComm* comm) {
+  int idx = ncclGetKernelIndex(comm);
+#ifdef RCCL_ENABLE_GFX950_512
+  if (comm->use512Kernels) return ncclKerns512[idx].kernelFn;
+#endif
+  return ncclKerns[idx].kernelFn;
+}
+
 static int rcclProtoGrainSize(int proto, ncclComm* comm) {
   switch (proto) {
   case NCCL_PROTO_LL:
@@ -160,6 +184,33 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
 #ifdef GENERATE_SYM_KERNELS
   }
 #endif
+
+#ifdef RCCL_ENABLE_GFX950_512
+  // [RCCL] Configure the alternate gfx950 512-thread generic kernels. On non-gfx950
+  // devices these symbols are not in the loaded image, so cudaFuncGetAttributes
+  // fails and we simply skip them.
+  for (int k = 0; k < (int)(sizeof(ncclKerns512) / sizeof(ncclKerns512[0])); k++) {
+    void* fn = ncclKerns512[k].kernelFn;
+    cudaFuncAttributes attr = {0};
+    if (fn == nullptr) continue;
+    if (!CUDASUCCESS(cudaFuncGetAttributes(&attr, fn))) continue; // not present on this arch
+    if (maxStackSize && attr.localSizeBytes > *maxStackSize) *maxStackSize = attr.localSizeBytes;
+    if (carveout) {
+      CUDACHECKGOTO(cudaFuncSetAttribute(fn, cudaFuncAttributePreferredSharedMemoryCarveout, carveout), result,
+                    ignore512);
+    ignore512:;
+    }
+    if (ncclMaxSharedMem != 0) {
+      int sharedMemSize = ncclMaxSharedMem;
+      if (sharedMemSize <= (maxSharedMem - attr.sharedSizeBytes)) {
+        CUDACHECKGOTO(cudaFuncSetAttribute(fn, cudaFuncAttributeMaxDynamicSharedMemorySize, sharedMemSize), result,
+                      next_kernel512);
+      }
+    }
+  next_kernel512:;
+  }
+#endif
+
   return result;
 }
 
@@ -1048,7 +1099,7 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
     plan->threadPerBlock = std::max(plan->threadPerBlock, 192 /* 3*WARP_SIZE */);
 #endif
     if (!plan->kernelSpecialized) {
-      plan->kernelFn = ncclKerns[ncclGetKernelIndex(comm)].kernelFn;
+      plan->kernelFn = rcclSelectKernelFn(comm);
       plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
     }
     // Profiler
@@ -1468,7 +1519,7 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
   plan->threadPerBlock = std::max(plan->threadPerBlock, NCCL_MAX_NTHREADS);
 #endif
   if (!plan->kernelSpecialized) {
-    plan->kernelFn = ncclKerns[ncclGetKernelIndex(comm)].kernelFn;
+    plan->kernelFn = rcclSelectKernelFn(comm);
     plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
   }
 
@@ -2725,7 +2776,7 @@ void ncclAddWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, 
 }
 
 void ncclPlanSetDefaultKernel(struct ncclComm* comm, struct ncclKernelPlan* plan) {
-  plan->kernelFn = ncclKerns[ncclGetKernelIndex(comm)].kernelFn;
+  plan->kernelFn = rcclSelectKernelFn(comm);
   plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
 }
 

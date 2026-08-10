@@ -433,10 +433,13 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
   for fn in primary_funcs:
     sym = "ncclDevFunc_" + fn_sym(fn)
     guard = get_arch_guard(fn)
+    # RCCL_NT_SYM() suffixes the symbol with _512 when this header is compiled for
+    # the alternate gfx950 512-thread kernel set (-DRCCL_NTHREADS_512); otherwise
+    # it is the identity. See src/include/device.h.
     if guard:
-      out("#if %s\n__device__ void %s();\n#endif\n" % (guard, sym))
+      out("#if %s\n__device__ void RCCL_NT_SYM(%s)();\n#endif\n" % (guard, sym))
     else:
-      out("__device__ void %s();\n" % sym)
+      out("__device__ void RCCL_NT_SYM(%s)();\n" % sym)
   out("\n")
 
   index = {val: None for val in all_unrolls}
@@ -447,15 +450,15 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
   out("typedef void(*ncclDevFuncPtr_t)();\n\n")
   for unroll in all_unrolls:
     index[unroll] = 0
-    out("static __device__ ncclDevFuncPtr_t const ncclDevFuncTable_%s[] = {\n" % unroll)
+    out("static __device__ ncclDevFuncPtr_t const RCCL_NT_SYM(ncclDevFuncTable_%s)[] = {\n" % unroll)
     for fn in primary_funcs:
       if fn.unroll != unroll: continue
       sym = "ncclDevFunc_" + fn_sym(fn)
       guard = get_arch_guard(fn)
       if guard:
-        out("#if %s\n/*%4d*/ %s,\n#else\n/*%4d*/ nullptr,\n#endif\n" % (guard, index[unroll], sym, index[unroll]))
+        out("#if %s\n/*%4d*/ RCCL_NT_SYM(%s),\n#else\n/*%4d*/ nullptr,\n#endif\n" % (guard, index[unroll], sym, index[unroll]))
       else:
-        out("/*%4d*/ %s,\n" % (index[unroll], sym))
+        out("/*%4d*/ RCCL_NT_SYM(%s),\n" % (index[unroll], sym))
       index[unroll] += 1
     out("nullptr};\n")
     out("\n")
@@ -670,14 +673,17 @@ for fn in primary_funcs:
     out('#include "%s.h"\n\n' % lower_coll)
     if guard:
       out("#if %s\n" % guard)
+    # RCCL_NT_SYM() suffixes the kernel wrapper and the called device function with
+    # _512 when compiling the alternate gfx950 512-thread set (-DRCCL_NTHREADS_512),
+    # keeping the two coexisting sets in distinct symbol namespaces. See device.h.
     out(
       "DEFINE_ncclDevFunc({sym}, ncclFunc{coll}, {redop_cxx}, {ty_cxx}, "
       "NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {acc}, {pipeline}, {unroll}, {reg})\n\n"
       "__launch_bounds__(NCCL_MAX_NTHREADS, 1)\n"
-      "__global__ void ncclDevKernel_{sym}_Specialized(\n"
+      "__global__ void RCCL_NT_SYM(ncclDevKernel_{sym}_Specialized)(\n"
       "    ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {{\n"
       "  ncclShmemPerWarp[0].x = 0;\n"
-      "  {func_name}();\n"
+      "  RCCL_NT_SYM({func_name})();\n"
       "}}\n"
       .format(sym=sym, coll=fn.coll, redop_cxx=redop_to_cxx[fn.redop],
               ty_cxx=ty_to_cxx[fn.ty], algo=(fn.algo or "RING"),
