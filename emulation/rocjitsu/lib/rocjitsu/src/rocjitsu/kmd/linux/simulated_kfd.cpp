@@ -3702,6 +3702,21 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
       if (daemon_proc_stat.st_dev != client_proc_stat.st_dev ||
           daemon_proc_stat.st_ino != client_proc_stat.st_ino)
         return -ESRCH;
+      // The proc directory is pinned to the right process by the check above,
+      // but nothing yet ties the transferred mem fd to it -- O_RDWR only says
+      // the fd is writable, not whose memory it addresses. This fd becomes
+      // authoritative for guest reads and CWSR writes, so a mismatched one
+      // silently redirects both at another process. procfs gives each
+      // /proc/<pid>/mem its own inode, so comparing it against the pinned
+      // directory's own "mem" entry settles the question.
+      struct stat expected_mem_stat {};
+      struct stat client_mem_stat {};
+      if (fstatat(target_procfd->get(), "mem", &expected_mem_stat, 0) != 0 ||
+          fstat(*target_mem_fd, &client_mem_stat) != 0)
+        return -errno;
+      if (expected_mem_stat.st_dev != client_mem_stat.st_dev ||
+          expected_mem_stat.st_ino != client_mem_stat.st_ino)
+        return -ESRCH;
     }
 
     KfdProcess::DebugSession sess{};
