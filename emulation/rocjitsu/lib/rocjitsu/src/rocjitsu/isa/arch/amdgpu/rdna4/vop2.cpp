@@ -81,11 +81,10 @@ VAddF64Vop2::VAddF64Vop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32)
-         << 32),
-        true);
+    src0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_ADD_F64 does not support DPP", "");
@@ -240,11 +239,10 @@ VMulF64Vop2::VMulF64Vop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32)
-         << 32),
-        true);
+    src0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_MUL_F64 does not support DPP", "");
@@ -534,11 +532,10 @@ VMinNumF64Vop2::VMinNumF64Vop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32)
-         << 32),
-        true);
+    src0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_MIN_NUM_F64 does not support DPP", "");
@@ -560,11 +557,10 @@ VMaxNumF64Vop2::VMaxNumF64Vop2(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32)
-         << 32),
-        true);
+    src0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_MAX_NUM_F64 does not support DPP", "");
