@@ -289,6 +289,119 @@ TEST(WaveDebugTest, UnmappedScalarLoadReportsMemoryViolationAfterInstruction) {
   fx.gpu_mem.unregister_process(kProcessId);
 }
 
+// debug_active_ is CU-wide, so the memory probe also runs for waves belonging to
+// a process nobody is debugging. When the handler declines the stop for such a
+// wave the access must still be issued -- discarding it silently lost stores and
+// left loads' destination registers stale in an undebugged process.
+TEST(WaveDebugTest, DeclinedMemoryViolationStillIssuesTheAccess) {
+  WaveDebugFixture fx;
+  constexpr uint32_t kProcessId = 11;
+  constexpr uint64_t kPageSize = amdgpu::GpuMemory::PAGE_SIZE;
+  constexpr uint64_t kUnmappedAddr = 0x900000;
+
+  std::vector<uint8_t> kernel_page(kPageSize);
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
+                                                              amdgpu::Mtype::RW};
+  fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
+
+  fx.gpu_mem.write32(kKernelAddr, 0xC0000000u, kProcessId);     // s_load_dword s0, s[0:1]
+  fx.gpu_mem.write32(kKernelAddr + 4, 0, kProcessId);           // immediate offset 0
+  fx.gpu_mem.write32(kKernelAddr + 8, 0xBF800000u, kProcessId); // s_nop 0
+  auto *wave = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(kProcessId);
+  // Another process turned debugging on for this CU; this wave is not debugged.
+  fx.cu->set_debug_active(true);
+
+  // The declined access is expected to reach the pipeline, so the cache
+  // hierarchy needs its functional writeback path wired up.
+  fx.l2.set_backing_memory(&fx.gpu_mem);
+
+  ASSERT_FALSE(fx.gpu_mem.is_mapped(kUnmappedAddr, kProcessId));
+  const uint32_t sbase = wave->sgpr_alloc().base;
+  fx.cu->write_sgpr(sbase + 0, static_cast<uint32_t>(kUnmappedAddr));
+  fx.cu->write_sgpr(sbase + 1, static_cast<uint32_t>(kUnmappedAddr >> 32));
+  // A recognisable value at the unmapped address, which falls through to sparse
+  // backing, so a load that really issued can be told from one that did not.
+  fx.gpu_mem.write32(kUnmappedAddr, 0xFEEDFACEu, kProcessId);
+
+  bool handler_called = false;
+  fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &, uint64_t, bool) {
+    handler_called = true;
+    return false; // no debug session for this wave's process
+  });
+
+  fx.cu->step();
+
+  EXPECT_TRUE(handler_called);
+  EXPECT_FALSE(wave->debug_halted());
+  EXPECT_EQ(wave->pc, kKernelAddr + 8);
+  // The load was issued rather than discarded, so s0 holds what memory held.
+  EXPECT_EQ(fx.cu->read_sgpr(sbase + 0), 0xFEEDFACEu);
+
+  fx.gpu_mem.unregister_process(kProcessId);
+}
+
+// A multi-byte access that starts on a mapped page can still run off the end of
+// it. Checking only the first byte let such an access through with no
+// EC_QUEUE_WAVE_MEMORY_VIOLATION, so the whole touched range is validated.
+TEST(WaveDebugTest, ScalarLoadStraddlingIntoUnmappedPageReportsMemoryViolation) {
+  WaveDebugFixture fx;
+  constexpr uint32_t kProcessId = 9;
+  constexpr uint64_t kPageSize = amdgpu::GpuMemory::PAGE_SIZE;
+  constexpr uint64_t kDataAddr = 0x40000;
+
+  std::vector<uint8_t> kernel_page(kPageSize);
+  std::vector<uint8_t> data_page(kPageSize);
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
+                                                              amdgpu::Mtype::RW};
+  // Exactly one data page is mapped; the page above it deliberately is not.
+  page_table[kDataAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {data_page.data(), amdgpu::Mtype::RW};
+  fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
+
+  fx.gpu_mem.write32(kKernelAddr, 0xC0040000u, kProcessId);     // s_load_dwordx2 s[0:1], s[0:1]
+  fx.gpu_mem.write32(kKernelAddr + 4, 0, kProcessId);           // immediate offset 0
+  fx.gpu_mem.write32(kKernelAddr + 8, 0xBF800000u, kProcessId); // s_nop 0
+  auto *wave = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(kProcessId);
+  fx.cu->set_debug_active(true);
+
+  // Wired up so that failing to detect the straddle lets the access proceed
+  // through the pipeline, and the test then fails on the missing violation
+  // rather than on unbacked cache plumbing.
+  fx.l2.set_backing_memory(&fx.gpu_mem);
+
+  // The last four bytes of the mapped page: the first dword is mapped, the
+  // second runs into the unmapped page above.
+  const uint64_t straddle = kDataAddr + kPageSize - 4;
+  ASSERT_TRUE(fx.gpu_mem.is_mapped(straddle, kProcessId));
+  ASSERT_FALSE(fx.gpu_mem.is_mapped(straddle + 4, kProcessId));
+  const uint32_t sbase = wave->sgpr_alloc().base;
+  fx.cu->write_sgpr(sbase + 0, static_cast<uint32_t>(straddle));
+  fx.cu->write_sgpr(sbase + 1, static_cast<uint32_t>(straddle >> 32));
+
+  uint64_t fault_address = ~uint64_t{0};
+  fx.cu->set_memory_violation_handler(
+      [&](amdgpu::Wavefront &faulting_wave, uint64_t address, bool is_write) {
+        EXPECT_EQ(&faulting_wave, wave);
+        EXPECT_FALSE(is_write);
+        fault_address = address;
+        faulting_wave.debug_trap(0);
+        return true;
+      });
+
+  fx.cu->step();
+  EXPECT_EQ(fault_address, straddle);
+  EXPECT_TRUE(wave->debug_halted());
+
+  fx.gpu_mem.unregister_process(kProcessId);
+}
+
 // Linked gfx950 code forms helper addresses as GETPC plus a signed rel32
 // relocation. The 64-bit sum can have a 0x1ffff high dword even though it
 // denotes an address relative to the loaded code object. SWAPPC must relocate

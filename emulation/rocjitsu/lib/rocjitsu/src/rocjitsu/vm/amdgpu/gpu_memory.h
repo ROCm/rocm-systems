@@ -210,6 +210,23 @@ public:
     return entry.page_table->contains(addr >> PAGE_SHIFT);
   }
 
+  /// @brief Return whether every page touched by a range has a VMID mapping.
+  /// @details The range-aware form of is_mapped(), with the same deliberate
+  /// strictness: passthrough is ignored for vmid != 0. Use this rather than
+  /// is_mapped() on a base address when the access is wider than a byte -- an
+  /// access starting near the end of a mapped page can still run off it.
+  /// A zero size, or a range that wraps the address space, is not mapped.
+  bool is_range_mapped(uint64_t addr, size_t size, uint32_t vmid = 0) const {
+    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - addr)
+      return false;
+    bool mapped = true;
+    for_each_page_chunk(addr, size, [&](uint64_t ea, size_t, size_t) {
+      if (mapped && !is_mapped(ea, vmid))
+        mapped = false;
+    });
+    return mapped;
+  }
+
   /// @brief Look up PTE MTYPE for a GPU VA in the given VMID's page table.
   Mtype pte_mtype(uint64_t addr, uint32_t vmid = 0) const {
     if (vmid == 0)

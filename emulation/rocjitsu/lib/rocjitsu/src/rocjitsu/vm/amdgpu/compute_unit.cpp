@@ -587,16 +587,23 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
           dbg_addrs.push_back(d.per_lane_addr[lane]);
     }
   }
+  // One predicate for the whole access, used both to decide that this
+  // instruction faulted and to pick the address reported to the debugger below.
+  // The two must agree: if the decision said "faulted" and the report loop then
+  // found no faulting address, the access would be dropped with nothing
+  // delivered. Checking only the first byte let a multi-byte load, store or
+  // atomic that starts near the end of a mapped page run off it unnoticed, so
+  // the whole [addr, addr + dbg_bytes) range is validated.
+  const uint32_t dbg_vmid = active->process_id();
+  auto access_faults = [&](uint64_t addr) {
+    const bool shared_address = active->shared_aperture_base() != 0 &&
+                                addr >= active->shared_aperture_base() &&
+                                addr <= active->shared_aperture_limit();
+    return !shared_address && !memory_->is_range_mapped(addr, dbg_bytes, dbg_vmid);
+  };
   bool debug_memory_fault = false;
-  if (debug_probe && memory_violation_handler_) {
-    const uint32_t vmid = active->process_id();
-    debug_memory_fault = std::ranges::any_of(dbg_addrs, [&](uint64_t addr) {
-      const bool shared_address = active->shared_aperture_base() != 0 &&
-                                  addr >= active->shared_aperture_base() &&
-                                  addr <= active->shared_aperture_limit();
-      return !shared_address && !memory_->is_mapped(addr, vmid);
-    });
-  }
+  if (debug_probe && memory_violation_handler_)
+    debug_memory_fault = std::ranges::any_of(dbg_addrs, access_faults);
 
   const bool trap_return = std::string_view(inst->mnemonic()) == "s_rfe_b64";
 
@@ -635,8 +642,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   if (debug_probe && !active->debug_halted()) {
     if (debug_memory_fault)
       for (uint64_t addr : dbg_addrs)
-        if (!memory_->is_mapped(addr, active->process_id()) &&
-            memory_violation_handler_(*active, addr, dbg_is_write))
+        if (access_faults(addr) && memory_violation_handler_(*active, addr, dbg_is_write))
           return;
     if (watchpoint_handler_)
       for (uint64_t addr : dbg_addrs)
