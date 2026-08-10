@@ -8,11 +8,13 @@
 #define ROCJITSU_CODE_AMDGPU_CODE_OBJECT_H_
 
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/rj_code.h"
 
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -72,25 +74,18 @@ public:
   /// count (granulated != 0, or a CDNA target) the value is `(granulated+1)*8`;
   /// otherwise the granulated field is an RDNA-style sentinel and the wave owns
   /// the fixed per-wave SGPR pool. @p arch selects that interpretation.
+  ///
+  /// This overload scans the object's descriptors itself. Callers that already
+  /// hold a scan (e.g. the DBI orchestrator) should pass it to the overload below
+  /// to avoid re-walking the sections.
   [[nodiscard]] std::optional<uint32_t> min_kernel_sgpr_count(rj_code_arch_t arch) const;
 
-  /// @brief Wavefront size (32 or 64) shared by this object's kernels.
+  /// @brief As above, computed from already-discovered @p kernels.
   ///
-  /// @details CDNA is always Wave64; RDNA opts into Wave32 via the descriptor's
-  /// `ENABLE_WAVEFRONT_SIZE32` bit. Returns 64 (the safe value for whole-object
-  /// EXEC-mask analysis) unless every kernel descriptor is readable and Wave32.
-  [[nodiscard]] uint8_t kernel_wavefront_size(rj_code_arch_t arch) const;
-
-  /// @brief Text-section-relative entry offset of each hardware kernel entry.
-  ///
-  /// @details Decodes each descriptor's `kernel_code_entry_byte_offset` and maps
-  /// it to an offset within the containing .text section, matching
-  /// BasicBlock::start_offset(). Lets whole-object analyses pin the real kernel
-  /// entries even when an entry is a loop header with a backedge. On CDNA3/CDNA4
-  /// a descriptor with a nonzero `KERNARG_PRELOAD_SPEC_LENGTH` has a second
-  /// hardware entry 256 bytes past the descriptor entry (the firmware
-  /// kernarg-preload window), which @p arch also enumerates.
-  [[nodiscard]] std::vector<uint64_t> kernel_entry_text_offsets(rj_code_arch_t arch) const;
+  /// @details Same decode as the scanning overload, but over a caller-supplied
+  /// descriptor list (from scan_kernel_descriptors) rather than re-walking.
+  [[nodiscard]] static std::optional<uint32_t>
+  min_kernel_sgpr_count(rj_code_arch_t arch, std::span<const KernelDescriptorInfo> kernels);
 
 private:
   void load_sections();

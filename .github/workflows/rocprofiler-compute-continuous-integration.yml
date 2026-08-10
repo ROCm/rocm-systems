@@ -60,8 +60,32 @@ env:
   ROCM_PATH: "/opt/rocm"
 
 jobs:
-  prepare_matrix:
+  ci_config:
+    name: Load CI config
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+      gfx950_runner: ${{ steps.runner.outputs.gfx950_runner }}
+      gfx90a_runner: ${{ steps.runner.outputs.gfx90a_runner }}
+      gfx1151_runner: ${{ steps.runner.outputs.gfx1151_runner }}
+    steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+          set-safe-directory: true
+
+      - name: Resolve runner labels
+        id: runner
+        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
+  prepare_matrix:
+    needs: ci_config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       matrix: ${{ steps.generate_matrix.outputs.matrix }}
 
@@ -73,12 +97,34 @@ jobs:
       - name: Generate and output matrix
         id: generate_matrix
         working-directory: projects/rocprofiler-compute/.github
+        env:
+          GFX950_RUNNER: ${{ needs.ci_config.outputs.gfx950_runner }}
+          GFX94X_RUNNER: ${{ needs.ci_config.outputs.gfx94x_runner }}
+          GFX90A_RUNNER: ${{ needs.ci_config.outputs.gfx90a_runner }}
+          GFX1151_RUNNER: ${{ needs.ci_config.outputs.gfx1151_runner }}
         run: |
           if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ubuntu-nightly' -I=0 -o=json)
           else
             MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ubuntu-ci' -I=0 -o=json)
           fi
+
+          # Map arch to resolved runner labels from therock-ci-config
+          declare -A RUNNER_MAP=(
+            ["gfx950"]="$GFX950_RUNNER"
+            ["gfx94X"]="$GFX94X_RUNNER"
+            ["gfx90a"]="$GFX90A_RUNNER"
+            ["gfx1151"]="$GFX1151_RUNNER"
+          )
+          for arch in "${!RUNNER_MAP[@]}"; do
+            runner="${RUNNER_MAP[$arch]}"
+            if [ -n "$runner" ]; then
+              MATRIX_CONTENT=$(echo "$MATRIX_CONTENT" | \
+                jq -c --arg arch "$arch" --arg runner "$runner" \
+                '[.[] | if .arch == $arch then .runner = $runner else . end]')
+            fi
+          done
+
           echo "matrix=${MATRIX_CONTENT}" >> $GITHUB_OUTPUT
 
   ubuntu:
