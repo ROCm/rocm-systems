@@ -209,6 +209,70 @@ controllers.
 indexed read/write access. **VectorReg** (`vector_reg.h`) models a
 SIMD-width vector register with per-element access.
 
+### Register-file storage
+
+The functional GPU model provisions vector-register storage for every fixed
+wavefront slot in each simulated compute unit. Slots are independent of
+hardware occupancy: a wave that uses many registers still occupies one
+simulator slot, and register pressure does not reduce the number of admitted
+waves. For the shipped gfx942 configuration, the vector backing has the
+following dimensions:
+
+| Quantity                  | Value                                      |
+|---------------------------|--------------------------------------------|
+| Simulated compute units   | 320                                        |
+| Wavefront slots per CU    | 32                                         |
+| Registers per slot        | 512 combined VGPR and AGPR entries         |
+| Register width            | 64 lanes × 4 bytes                         |
+| Complete vector backing   | 1,280 MiB                                  |
+
+`RegisterFile` keeps this backing contiguous so instruction execution uses a
+stable direct-addressing path. On Linux, untouched portions do not consume
+resident memory. Storage becomes resident when a wave first accesses it and
+is zeroed when that wave retires. On Linux, wholly covered pages are also
+returned to the operating system when reclamation succeeds. The portable
+backend uses aligned, eagerly zeroed storage and retains it until the register
+file is destroyed. Both backends present the same zero-initialized,
+stable-address interface.
+
+This is a functional storage model, not a model of a physical register file.
+In particular, filling all 32 simulator slots with high-pressure waves can
+represent an occupancy that hardware could not admit. That distinction is
+important when interpreting memory measurements or using register pressure to
+approximate hardware throughput.
+
+The following reference measurements were collected on 2026-08-06 with the
+gfx942 CDNA3 KMD configuration unless another target is shown. They compare
+the former eager backing with the current demand-backed representation; all
+workloads produced their expected correctness results.
+
+| Workload                        | Eager runtime | Demand-backed runtime | Eager peak RSS | Demand-backed peak RSS |
+|---------------------------------|--------------:|----------------------:|---------------:|-----------------------:|
+| Fixed topology, no kernel       |        0.86 s |                0.13 s |  1,511,424 KiB |            198,656 KiB |
+| Corpus matvec set, 6–88 VGPR    |        3.26 s |                1.86 s | ~1,616,700 KiB |            305,864 KiB |
+| HipKittens 256³, 248 VGPR       |        2.03 s |                0.60 s | ~1,626,112 KiB |            314,368 KiB |
+| hip-matmul 128³, VGPR and AGPR  |        6.34 s |                4.91 s | ~1,615,000 KiB |            302,940 KiB |
+| IREE softmax, gfx942            |        2.09 s |                0.70 s |  1,627,477 KiB |            316,328 KiB |
+| IREE softmax, gfx950            |        1.84 s |                0.72 s |  1,387,861 KiB |            338,881 KiB |
+
+A qualified gfx942 saturation workload isolates page first-touch and
+reclamation costs. Its single-queue case places eight waves on each of 40 CUs;
+the all-slot case deliberately fills all 32 slots on all 320 CUs and is not a
+hardware-achievable occupancy for a 253-VGPR wave.
+
+| Saturation scenario                 | Eager runtime | Demand-backed runtime | Runtime change | Eager peak RSS | Demand-backed peak RSS | RSS change |
+|-------------------------------------|--------------:|----------------------:|---------------:|---------------:|-----------------------:|-----------:|
+| 253 VGPR, initialization only       |    149.162 ms |            161.507 ms |         +8.28% |              — |                      — |          — |
+| 253 VGPR, eight update passes       |  1,257.192 ms |          1,262.361 ms |         +0.41% |              — |                      — |          — |
+| Complete single-queue sweep         |       23.25 s |               22.10 s |          -4.9% |  1,592,320 KiB |            299,676 KiB |     -81.2% |
+| All slots, 253 VGPR, eight passes   |      47.678 s |              46.955 s |          -1.5% |  1,620,992 KiB |            947,352 KiB |     -41.6% |
+
+The short initialization-only case exposes the dispatch-time cost of touching
+new pages. Reusing the same live registers amortizes that cost, while retiring
+the wave makes its backing reclaimable for later dispatches. The qualified
+workload, complete methodology, and reproduction commands live in the
+[rocjitsu test corpus](https://github.com/ROCm/rocjitsu-test-corpus/tree/develop/corpus/kernels/benchmarks/vgpr_saturation).
+
 ---
 
 ## Messages and Events
