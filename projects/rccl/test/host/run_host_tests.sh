@@ -8,10 +8,13 @@
 # `all` runs the whole pipeline end to end.
 #
 # Usage:
-#   run_host_tests.sh [rccl-configure|hipify|configure|build|run|all] [extra gtest args]
+#   run_host_tests.sh [deps|rccl-configure|hipify|configure|build|guards|run|all] [extra gtest args]
 #   (default phase: all)
 #
 # Phases:
+#   deps            install the host-test build/runtime dependencies via apt
+#                   (cmake, toolchain, gtest/fmt, moreutils, python3-venv). CI
+#                   runs this as its own step; not part of `all`.
 #   rccl-configure  configure the RCCL tree (root) -- pins GPU_TARGETS so CMake
 #                   never probes for a GPU; BUILD_TESTS=OFF (we only need hipify)
 #   hipify          build the hipify_all target -> stages build/hipify/src, the
@@ -48,6 +51,19 @@ JOBS="$(nproc 2>/dev/null || echo 4)"
 
 PHASE="${1:-all}"
 [ $# -gt 0 ] && shift || true   # remaining args ($@) are forwarded to the binary
+
+# Install everything the host-test pipeline needs that the base ROCm dev image
+# lacks: cmake + host toolchain, gtest/fmt, moreutils (ts), and python3-venv
+# (the guards phase creates a venv + pip-installs pytest). Uses sudo when not
+# already root so it works both in the root CI container and locally.
+do_deps() {
+  echo "==> Install host-test dependencies (apt)"
+  local sudo=""
+  [ "$(id -u)" -eq 0 ] || sudo="sudo"
+  $sudo apt-get update
+  $sudo apt-get install -y cmake git python3 python3-venv build-essential rocm-cmake \
+    moreutils libgtest-dev libgmock-dev libfmt-dev
+}
 
 do_rccl_configure() {
   echo "==> RCCL configure  (GPU_TARGETS=$GPU_TARGETS)"
@@ -113,6 +129,7 @@ do_run() {
 }
 
 case "$PHASE" in
+  deps)           do_deps ;;
   rccl-configure) do_rccl_configure ;;
   hipify)         do_hipify ;;
   configure)      do_configure ;;
@@ -120,5 +137,5 @@ case "$PHASE" in
   guards)         do_guards ;;
   run)            do_run "$@" ;;
   all)            do_rccl_configure; do_hipify; do_configure; do_build; do_run "$@" ;;
-  *) echo "usage: $0 [rccl-configure|hipify|configure|build|run|guards|all] [extra gtest args]" >&2; exit 2 ;;
+  *) echo "usage: $0 [deps|rccl-configure|hipify|configure|build|run|guards|all] [extra gtest args]" >&2; exit 2 ;;
 esac
