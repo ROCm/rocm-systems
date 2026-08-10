@@ -3479,8 +3479,10 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   }
   std::shared_ptr<amd::smi::Monitor> m = dev->monitor();
 
-  // getTempSensorIndex will throw an out of range exception if sensor_type is
-  // not found
+  // TODO(SPLIT-FROM-AILITOOLS-297): pairs with the rocm_smi_monitor.cc sentinel
+  // change; split out together.
+  // getTempSensorIndex returns RSMI_TEMP_TYPE_INVALID
+  // for a sensor_type that isn't a valid key (e.g. *_LAST boundary values)
   uint32_t sensor_index = m->getTempSensorIndex(static_cast<rsmi_temperature_type_t>(sensor_type));
 
   // Check if sensor_index is valid (not RSMI_TEMP_TYPE_INVALID)

@@ -283,6 +283,19 @@ endif()
 # Intentionally leave out -Wsign-promo. It causes spurious warnings.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Woverloaded-virtual -Wreorder")
 
+# Code-coverage instrumentation (gcov/gcovr). Pair with BUILD_TESTS=ON, run the
+# test binary to emit .gcda, then report with gcovr. -O0 keeps line/branch
+# mapping accurate (overrides the Release -O3). Must be set before the target
+# subdirectories are added so every target inherits it.
+option(ENABLE_COVERAGE "Instrument the C/C++ build for gcov/gcovr coverage" OFF)
+if(ENABLE_COVERAGE)
+    message(STATUS "Code coverage instrumentation enabled (--coverage -O0 -g)")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} --coverage -O0 -g")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --coverage -O0 -g")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --coverage")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} --coverage")
+endif()
+
 set(ROCM_SRC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/src")
 set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")
 set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")

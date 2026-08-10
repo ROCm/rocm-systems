@@ -465,14 +465,22 @@ static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
 }
 
 uint32_t Monitor::getTempSensorIndex(rsmi_temperature_type_t type) {
+  // TODO(SPLIT-FROM-AILITOOLS-297): unrelated to the coverage tooling ticket;
+  // move this map-guard trio (getTempSensorIndex/getTempSensorEnum/
+  // getVoltSensorIndex) to its own PR + ticket. Boundary/sentinel enums (e.g.
+  // *_LAST) aren't keys; return the INVALID sentinel the caller already checks
+  // for instead of throwing out_of_range.
+  if (temp_type_index_map_.count(type) == 0) return RSMI_TEMP_TYPE_INVALID;
   return temp_type_index_map_.at(type);
 }
 
 rsmi_temperature_type_t Monitor::getTempSensorEnum(uint64_t ind) {
+  if (index_temp_type_map_.count(ind) == 0) return RSMI_TEMP_TYPE_INVALID;
   return index_temp_type_map_.at(ind);
 }
 
 uint32_t Monitor::getVoltSensorIndex(rsmi_voltage_type_t type) {
+  if (volt_type_index_map_.count(type) == 0) return RSMI_VOLT_TYPE_INVALID;
   return volt_type_index_map_.at(type);
 }
 

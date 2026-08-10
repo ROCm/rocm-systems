@@ -86,11 +86,16 @@ class TestCliBase(unittest.TestCase):
         TestCliBase.partition_data = baseline["partition_data"]
         TestCliBase.gpus = baseline["gpus"]
         TestCliBase.sub_args = baseline["sub_args"]
-        TestCliBase._initialized = True
-
+        # TODO(SPLIT-FROM-AILITOOLS-297): regression fix from #7844 (AILITOOLS-270),
+        # unrelated to the coverage ticket -- split to its own PR. Must assign on
+        # TestCliBase (not cls) before _initialized so every CLI subclass inherits
+        # it past the early-return guard.
         # TODO: Remove this condition when CLI supports User automated input
-        # Commands that need User permission to run
-        cls.cmds_need_permission = {"set": ["--fan", "--memory-partition", "--compute-partition"]}
+        # Commands that need User permission to run.
+        TestCliBase.cmds_need_permission = {
+            "set": ["--fan", "--memory-partition", "--compute-partition"]
+        }
+        TestCliBase._initialized = True
 
     @classmethod
     def _build_baseline(cls):
