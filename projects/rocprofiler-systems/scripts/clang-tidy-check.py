@@ -1,0 +1,368 @@
+#!/usr/bin/env python3
+
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+"""Run clang-tidy on changed lines and summarize the results.
+
+Covers committed changes since --base (default: HEAD), staged/unstaged
+changes on top, and new untracked files. Runs clang-tidy scoped to only the
+changed lines of each affected file, then prints which files/lines were
+checked and which clang-tidy checks fired (with locations and messages).
+"""
+
+import argparse
+import concurrent.futures
+import os
+import re
+import subprocess
+import sys
+from dataclasses import dataclass, field
+
+SOURCE_EXTENSION_RE = re.compile(
+    r".*\.(cpp|cc|c\+\+|cxx|c|cl|h|hpp|m|mm|inc)$", re.IGNORECASE
+)
+DIFF_FILE_RE = re.compile(r'^\+\+\+\ "?b/([^ \t\n"]*)')
+DIFF_HUNK_RE = re.compile(r"^@@.*\+(\d+)(,(\d+))?")
+DIAGNOSTIC_RE = re.compile(r"^(.*):(\d+):(\d+): (warning|error): (.*) \[([\w,.\-]+)\]$")
+
+_ANSI = {
+    "reset": "\033[0m",
+    "bold": "\033[1m",
+    "red": "\033[31m",
+    "yellow": "\033[33m",
+    "green": "\033[32m",
+    "cyan": "\033[36m",
+}
+
+
+def _color(text: str, *codes: str) -> str:
+    """Wrap `text` in ANSI codes when the output is not a dumb terminal."""
+    if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb":
+        return text
+    prefix = "".join(_ANSI[c] for c in codes if c in _ANSI)
+    return f"{prefix}{text}{_ANSI['reset']}"
+
+
+@dataclass
+class ChangedFile:
+    """A source file with the line ranges touched by the local diff."""
+
+    path: str
+    line_ranges: list[tuple[int, int]] = field(default_factory=list)
+
+
+@dataclass
+class Diagnostic:
+    """A single clang-tidy diagnostic, with its location and message."""
+
+    file: str
+    line: int
+    col: int
+    severity: str
+    message: str
+    checks: list[str]
+
+
+def in_line_ranges(line: int, ranges: list[tuple[int, int]]) -> bool:
+    return any(start <= line <= end for start, end in ranges)
+
+
+def get_repo_root() -> str:
+    """Return the top-level directory of the current git repository."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def get_diff_changed_files(repo_root: str, base: str | None) -> dict[str, ChangedFile]:
+    """Parse a git diff into per-file changed line ranges.
+
+    Diffs `base` (or HEAD, by default) against the working tree, so the
+    result covers committed changes since `base` plus any staged/unstaged
+    changes on top, in one pass.
+    """
+    ref = base or "HEAD"
+    diff = subprocess.run(
+        ["git", "diff", "--no-color", "-U0", ref],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+    changed: dict[str, ChangedFile] = {}
+    current_path: str | None = None
+    for line in diff.splitlines():
+        file_match = DIFF_FILE_RE.match(line)
+        if file_match:
+            path = file_match.group(1)
+            current_path = path if SOURCE_EXTENSION_RE.match(path) else None
+            continue
+
+        if current_path is None:
+            continue
+
+        hunk_match = DIFF_HUNK_RE.match(line)
+        if not hunk_match:
+            continue
+
+        start_line = int(hunk_match.group(1))
+        line_count = int(hunk_match.group(3) or 1)
+        if line_count == 0:
+            continue
+
+        full_path = os.path.join(repo_root, current_path)
+        if not os.path.isfile(full_path):
+            continue
+
+        changed.setdefault(current_path, ChangedFile(current_path))
+        end_line = start_line + line_count - 1
+        changed[current_path].line_ranges.append((start_line, end_line))
+
+    return changed
+
+
+def get_untracked_changed_files(repo_root: str) -> dict[str, ChangedFile]:
+    """Return new (untracked) source files, each spanning its full line range."""
+    paths = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+
+    untracked: dict[str, ChangedFile] = {}
+    for path in paths:
+        if not SOURCE_EXTENSION_RE.match(path):
+            continue
+        full_path = os.path.join(repo_root, path)
+        if not os.path.isfile(full_path):
+            continue
+        with open(full_path, encoding="utf-8", errors="ignore") as source_file:
+            line_count = sum(1 for _ in source_file)
+        if line_count == 0:
+            continue
+        untracked[path] = ChangedFile(path, [(1, line_count)])
+    return untracked
+
+
+def get_changed_files(repo_root: str, base: str | None) -> list[ChangedFile]:
+    """Return changed files: committed/staged/unstaged diff plus new files."""
+    changed = get_diff_changed_files(repo_root, base)
+    changed.update(get_untracked_changed_files(repo_root))
+    return list(changed.values())
+
+
+def get_enabled_checks(args: argparse.Namespace, sample_file: str) -> list[str]:
+    """Resolve the effective check list clang-tidy will apply to `sample_file`."""
+    command = [args.clang_tidy_binary, "-list-checks"]
+    if args.checks:
+        command.append(f"-checks={args.checks}")
+    command.append(f"-p={args.build_path}")
+    command.append(sample_file)
+
+    result = subprocess.run(command, capture_output=True, text=True)
+    checks = []
+    in_list = False
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if stripped == "Enabled checks:":
+            in_list = True
+            continue
+        if in_list:
+            if not stripped:
+                break
+            checks.append(stripped)
+    return checks
+
+
+def print_enabled_checks(checks: list[str]) -> None:
+    print(_color(f"Rules to apply ({len(checks)}):", "bold"))
+    for check in checks:
+        print(f"  {_color(check, 'cyan')}")
+    print()
+
+
+def print_changed_files(changed_files: list[ChangedFile]) -> None:
+    print(_color(f"Changed files ({len(changed_files)}):", "bold"))
+    for changed_file in changed_files:
+        ranges = ", ".join(f"{start}-{end}" for start, end in changed_file.line_ranges)
+        print(f"  {changed_file.path} (lines {ranges})")
+    print()
+
+
+def build_command(file_path: str, args: argparse.Namespace) -> list[str]:
+    command = [args.clang_tidy_binary]
+    if args.checks:
+        command.append(f"-checks={args.checks}")
+    command.append(f"-p={args.build_path}")
+    command.append(file_path)
+    return command
+
+
+def run_clang_tidy(command: list[str], timeout: float | None) -> tuple[str, bool]:
+    """Run a clang-tidy command, returning its output and success status."""
+    try:
+        proc = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return f"Timed out after {timeout}s: {' '.join(command)}\n", False
+    return proc.stdout + proc.stderr, proc.returncode == 0
+
+
+def parse_diagnostics(output: str, repo_root: str) -> list[Diagnostic]:
+    """Parse every clang-tidy diagnostic out of `output` for one file."""
+    diagnostics = []
+    for line in output.splitlines():
+        match = DIAGNOSTIC_RE.match(line)
+        if not match:
+            continue
+        file_path, line_no, col_no, severity, message, checks = match.groups()
+        diagnostics.append(
+            Diagnostic(
+                file=os.path.relpath(file_path, repo_root),
+                line=int(line_no),
+                col=int(col_no),
+                severity=severity,
+                message=message,
+                checks=checks.split(","),
+            )
+        )
+    return diagnostics
+
+
+def print_detected_rules(rule_diagnostics: dict[str, list[Diagnostic]]) -> None:
+    print(_color("Detected clang-tidy rules (in this diff):", "bold"))
+    if not rule_diagnostics:
+        print(f"  {_color('No issues found.', 'green')}")
+        return
+    for check_name, diagnostics in sorted(
+        rule_diagnostics.items(), key=lambda kv: len(kv[1]), reverse=True
+    ):
+        print(f"  {_color(f'{len(diagnostics):>4}', 'yellow')}  {check_name}")
+        for diagnostic in diagnostics:
+            location = f"{diagnostic.file}:{diagnostic.line}:{diagnostic.col}"
+            color = "red" if diagnostic.severity == "error" else "yellow"
+            print(f"        {_color(location, color)}: {diagnostic.message}")
+    print()
+
+
+def print_legacy_summary(
+    changed_files: list[ChangedFile],
+    file_totals: dict[str, int],
+    file_in_diff_counts: dict[str, int],
+) -> None:
+    print(_color("Legacy issues (outside this diff):", "bold"))
+    any_legacy = False
+    for changed_file in changed_files:
+        total = file_totals.get(changed_file.path, 0)
+        legacy = total - file_in_diff_counts.get(changed_file.path, 0)
+        if legacy <= 0:
+            continue
+        any_legacy = True
+        print(
+            f"  {_color(f'{legacy:>4}', 'yellow')}  {changed_file.path} "
+            f"({total} total in file)"
+        )
+    if not any_legacy:
+        print(f"  {_color('None.', 'green')}")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--build-path",
+        required=True,
+        help="Directory containing compile_commands.json",
+    )
+    parser.add_argument(
+        "--clang-tidy-binary",
+        default="clang-tidy",
+        help="Path to the clang-tidy binary (default: clang-tidy)",
+    )
+    parser.add_argument(
+        "--checks",
+        default="",
+        help="Checks filter override (default: use .clang-tidy)",
+    )
+    parser.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=os.cpu_count() or 1,
+        help="Number of parallel clang-tidy instances",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help="Per-file timeout in seconds (default: no timeout)",
+    )
+    parser.add_argument(
+        "--base",
+        default=None,
+        help=(
+            "Diff against this ref instead of HEAD, e.g. origin/develop. "
+            "Covers committed changes since the ref plus any "
+            "staged/unstaged changes on top."
+        ),
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    repo_root = get_repo_root()
+
+    changed_files = get_changed_files(repo_root, args.base)
+    if not changed_files:
+        print("No relevant changes found.")
+        return 0
+
+    sample_file = os.path.join(repo_root, changed_files[0].path)
+    print_enabled_checks(get_enabled_checks(args, sample_file))
+    print_changed_files(changed_files)
+
+    rule_diagnostics: dict[str, list[Diagnostic]] = {}
+    file_totals: dict[str, int] = {}
+    file_in_diff_counts: dict[str, int] = {}
+    any_failed = False
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        futures = {
+            pool.submit(
+                run_clang_tidy,
+                build_command(os.path.join(repo_root, changed_file.path), args),
+                args.timeout,
+            ): changed_file
+            for changed_file in changed_files
+        }
+        for future in concurrent.futures.as_completed(futures):
+            changed_file = futures[future]
+            output, succeeded = future.result()
+            any_failed = any_failed or not succeeded
+
+            diagnostics = parse_diagnostics(output, repo_root)
+            file_totals[changed_file.path] = len(diagnostics)
+
+            in_diff_count = 0
+            for diagnostic in diagnostics:
+                if not in_line_ranges(diagnostic.line, changed_file.line_ranges):
+                    continue
+                in_diff_count += 1
+                for check_name in diagnostic.checks:
+                    rule_diagnostics.setdefault(check_name, []).append(diagnostic)
+            file_in_diff_counts[changed_file.path] = in_diff_count
+
+    print_detected_rules(rule_diagnostics)
+    print_legacy_summary(changed_files, file_totals, file_in_diff_counts)
+
+    return 1 if rule_diagnostics or any_failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
