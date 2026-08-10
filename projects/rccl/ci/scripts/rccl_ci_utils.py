@@ -147,32 +147,22 @@ def setup_kpack_device_code(artifact_dir: Path) -> None:
     ROCM_KPACK_PATH with absolute paths so the kpack runtime can find
     the archives regardless of where the library is loaded from.
 
-    The @GFXARCH@ placeholder is expanded by the kpack runtime at load
-    time based on the actual GPU architecture — no manual detection needed.
+    ROCM_KPACK_PATH expects literal file paths (not @GFXARCH@ patterns).
+    The @GFXARCH@ expansion only applies to paths embedded in the ELF
+    .rocm_kpack_ref section, not to the env var override.
     """
     kpack_files = sorted(artifact_dir.rglob("*.kpack"))
     if not kpack_files:
         log.info("No .kpack files found in %s — device code may be embedded", artifact_dir)
         return
 
-    seen: set[str] = set()
-    search_patterns: list[str] = []
+    kpack_paths: list[str] = []
     for f in kpack_files:
-        parts = f.stem.rsplit("_", 1)
-        if len(parts) == 2 and parts[1].startswith("gfx"):
-            pattern = str(f.parent.resolve() / f"{parts[0]}_@GFXARCH@.kpack")
-            if pattern not in seen:
-                seen.add(pattern)
-                search_patterns.append(pattern)
-                log.info("kpack search pattern: %s", pattern)
-        else:
-            log.info("kpack file (no arch suffix): %s", f.name)
+        resolved = str(f.resolve())
+        kpack_paths.append(resolved)
+        log.info("kpack archive: %s", resolved)
 
-    if not search_patterns:
-        log.warning("Found .kpack files but no @GFXARCH@ patterns could be derived")
-        return
-
-    os.environ["ROCM_KPACK_PATH"] = ":".join(search_patterns)
+    os.environ["ROCM_KPACK_PATH"] = ":".join(kpack_paths)
     os.environ["ROCM_KPACK_DEBUG"] = "1"
     log.info("ROCM_KPACK_PATH=%s", os.environ["ROCM_KPACK_PATH"])
     log.info("ROCM_KPACK_DEBUG=1 (verbose kpack logging enabled)")

@@ -65,23 +65,21 @@ PATHS = resolve_paths()
 
 
 def _setup_kpack_env(env, rocm_path):
-    """Set ROCM_KPACK_PATH if .kpack archives exist in the artifact tree."""
+    """Set ROCM_KPACK_PATH if .kpack archives exist in the artifact tree.
+
+    ROCM_KPACK_PATH expects literal file paths, not @GFXARCH@ patterns.
+    """
     artifact_dir = Path(rocm_path)
     kpack_files = sorted(artifact_dir.rglob("*.kpack"))
     if not kpack_files:
         return
-    seen = set()
-    patterns = []
+    kpack_paths = []
     for f in kpack_files:
-        parts = f.stem.rsplit("_", 1)
-        if len(parts) == 2 and parts[1].startswith("gfx"):
-            p = str(f.parent.resolve() / f"{parts[0]}_@GFXARCH@.kpack")
-            if p not in seen:
-                seen.add(p)
-                patterns.append(p)
-                log.info("kpack search pattern: %s", p)
-    if patterns:
-        env["ROCM_KPACK_PATH"] = ":".join(patterns)
+        resolved = str(f.resolve())
+        kpack_paths.append(resolved)
+        log.info("kpack archive: %s", resolved)
+    if kpack_paths:
+        env["ROCM_KPACK_PATH"] = ":".join(kpack_paths)
         env["ROCM_KPACK_DEBUG"] = "1"
         log.info("ROCM_KPACK_PATH=%s", env["ROCM_KPACK_PATH"])
 
