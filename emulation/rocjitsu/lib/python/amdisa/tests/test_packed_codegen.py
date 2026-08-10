@@ -11,6 +11,7 @@ from amdisa.codegen.execute.packed import (
     gen_mad_mix_lo_hi,
     gen_pk_binop_f32,
 )
+from amdisa.codegen.execute.simd_codegen import vop3p_local_simd_probe_line
 
 
 def test_dot4_iu8_uses_operand_signedness_modifiers():
@@ -45,6 +46,40 @@ def test_gfx1250_pk_f32_uses_literal_aware_pair_helper():
     assert 's0_hi_w' not in cpp
     assert 's0.hi' in cpp
     assert 'read_lane64' not in cpp
+
+
+def test_renamed_vop3p_packed_f32_probe_passes_profile_selectors():
+    probe = vop3p_local_simd_probe_line('v_pk_add_f32_vop3p', ('opsel', 'opsel_hi'))
+
+    assert probe is not None
+    assert 'ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_F32_SELECTORS' in probe
+    assert 'inst_.opsel, inst_.opsel_hi' in probe
+    assert (
+        vop3p_local_simd_probe_line('v_pk_add_f32_vop3p', ('op_sel', 'op_sel_hi'))
+        is None
+    )
+    assert (
+        vop3p_local_simd_probe_line('v_pk_add_f16_vop3p', ('opsel', 'opsel_hi')) is None
+    )
+
+
+def test_renamed_vop3p_packed_fma_f32_probe_passes_all_profile_selectors():
+    probe = vop3p_local_simd_probe_line(
+        'v_pk_fma_f32_vop3p',
+        ('opsel', 'opsel_hi'),
+        'inst_.pad_14',
+    )
+
+    assert probe is not None
+    assert 'ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32_SELECTORS' in probe
+    assert 'inst_.opsel, inst_.opsel_hi, inst_.pad_14' in probe
+    assert (
+        vop3p_local_simd_probe_line(
+            'v_pk_fma_f32_vop3p',
+            ('op_sel', 'op_sel_hi'),
+        )
+        is None
+    )
 
 
 def test_gfx1250_mad_mix_f32_uses_helper_and_fma():
