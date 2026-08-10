@@ -38,7 +38,7 @@ from sqlalchemy.sql import Select
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "2.1.1"
+SCHEMA_VERSION = "2.2.0"
 
 
 Base = declarative_base()
@@ -703,7 +703,7 @@ class Database:
             # One row per sampled instruction line. Identity is
             # (pid, code_object_id, kernel, offset): the same offset in two
             # processes can be different code, so the rows stay separate.
-            "pc_sampling": select(
+            "pc_sampling_summary": select(
                 CodeObjectStore.workload_id.label("workload_id"),
                 CodeObjectStore.pid.label("pid"),
                 CodeObjectStore.code_object_id.label("code_object_id"),
