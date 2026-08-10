@@ -1162,7 +1162,7 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
               = stop_reason_bits ^ (stop_reason_bits & (stop_reason_bits - 1));
           stop_reason_bits ^= one_bit;
 
-          switch (stop_reason)
+          switch (one_bit)
             {
             case AMD_DBGAPI_WAVE_STOP_REASON_NONE:
             case AMD_DBGAPI_WAVE_STOP_REASON_DEBUG_TRAP:
