@@ -31,6 +31,22 @@ static_assert(!std::is_copy_assignable_v<DemandPagedUint32Storage>);
 static_assert(!std::is_move_constructible_v<DemandPagedUint32Storage>);
 static_assert(!std::is_move_assignable_v<DemandPagedUint32Storage>);
 
+using SoftwareLazyUint32Storage = simdojo::detail::SoftwareLazyRegisterStorage<uint32_t>;
+static_assert(!std::is_copy_constructible_v<SoftwareLazyUint32Storage>);
+static_assert(!std::is_copy_assignable_v<SoftwareLazyUint32Storage>);
+static_assert(!std::is_move_constructible_v<SoftwareLazyUint32Storage>);
+static_assert(!std::is_move_assignable_v<SoftwareLazyUint32Storage>);
+template <typename File>
+concept HasContiguousData = requires(File &file) { file.data(); };
+using SoftwareLazyUint32File = RegisterFile<uint32_t, RegisterFileStorage::SOFTWARE_LAZY>;
+static_assert(!HasContiguousData<SoftwareLazyUint32File>);
+
+#if !defined(__linux__)
+static_assert(
+    std::is_same_v<simdojo::detail::RegisterStorage<uint32_t, RegisterFileStorage::DEMAND_PAGED>,
+                   SoftwareLazyUint32Storage>);
+#endif
+
 #if defined(__linux__)
 size_t resident_page_count(const void *data, size_t bytes) {
   const long page_size_result = sysconf(_SC_PAGESIZE);
@@ -64,6 +80,69 @@ TEST(RegisterFileTest, EagerStorageClearsReusedBlock) {
   ASSERT_EQ(file.allocate(1), 0);
   for (uint32_t i = 0; i < 8; ++i)
     EXPECT_EQ(file[i], 0u) << "register " << i;
+}
+
+TEST(RegisterFileTest, SoftwareLazyStorageMaterializesOnlyMutableChunks) {
+  using Vgpr = simdojo::VectorReg<64, uint32_t>;
+  using Storage = simdojo::detail::SoftwareLazyRegisterStorage<Vgpr>;
+  Storage storage;
+  constexpr uint32_t regs_per_chunk = Storage::registers_per_chunk();
+  static_assert(regs_per_chunk > 1);
+  storage.init(2 * regs_per_chunk);
+
+  const Storage &const_storage = storage;
+  EXPECT_EQ(storage.allocated_chunk_count(), 0u);
+  EXPECT_EQ(const_storage[0][0], 0u);
+  EXPECT_EQ(const_storage[regs_per_chunk][63], 0u);
+  EXPECT_EQ(storage.allocated_chunk_count(), 0u);
+
+  storage[0][0] = 0x11111111u;
+  storage[regs_per_chunk - 1][63] = 0x22222222u;
+  EXPECT_EQ(storage.allocated_chunk_count(), 1u);
+  storage[regs_per_chunk][0] = 0x33333333u;
+  EXPECT_EQ(storage.allocated_chunk_count(), 2u);
+
+  storage.reset(regs_per_chunk / 2, regs_per_chunk);
+  EXPECT_EQ(storage.allocated_chunk_count(), 2u);
+  EXPECT_EQ(const_storage[0][0], 0x11111111u);
+  EXPECT_EQ(const_storage[regs_per_chunk - 1][63], 0u);
+  EXPECT_EQ(const_storage[regs_per_chunk][0], 0u);
+
+  storage.reset(0, 2 * regs_per_chunk);
+  EXPECT_EQ(storage.allocated_chunk_count(), 0u);
+  EXPECT_EQ(const_storage[0][0], 0u);
+  EXPECT_EQ(const_storage[regs_per_chunk][0], 0u);
+}
+
+TEST(RegisterFileTest, SoftwareLazyStorageClearsReusedUnalignedBlock) {
+  using Vgpr = simdojo::VectorReg<64, uint32_t>;
+  using File = RegisterFile<Vgpr, RegisterFileStorage::SOFTWARE_LAZY>;
+  File file("software_lazy");
+  file.init(/*total_regs=*/48, /*regs_per_block=*/24);
+
+  ASSERT_EQ(file.allocate(24), 0);
+  ASSERT_EQ(file.allocate(24), 24);
+  file[0][0] = 0x11111111u;
+  file[23][63] = 0x22222222u;
+  file[24][0] = 0x33333333u;
+  file[47][63] = 0x44444444u;
+
+  file.free(0);
+  ASSERT_EQ(file.allocate(1), 0);
+  const File &const_file = file;
+  EXPECT_EQ(const_file[0][0], 0u);
+  EXPECT_EQ(const_file[23][63], 0u);
+  EXPECT_EQ(const_file[24][0], 0x33333333u);
+  EXPECT_EQ(const_file[47][63], 0x44444444u);
+
+  file.free(0);
+  file.free(24);
+  ASSERT_EQ(file.allocate(1), 0);
+  ASSERT_EQ(file.allocate(1), 24);
+  EXPECT_EQ(const_file[0][0], 0u);
+  EXPECT_EQ(const_file[23][63], 0u);
+  EXPECT_EQ(const_file[24][0], 0u);
+  EXPECT_EQ(const_file[47][63], 0u);
 }
 
 TEST(RegisterFileTest, DemandPagedStorageIsContiguousAndInitiallyZero) {

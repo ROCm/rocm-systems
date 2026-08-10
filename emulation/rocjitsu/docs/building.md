@@ -26,6 +26,7 @@ cmake --build build
 | `RJ_ENABLE_TSAN` | `OFF` | Enable ThreadSanitizer |
 | `RJ_ENABLE_MSAN` | `OFF` | Enable MemorySanitizer |
 | `RJ_SANITIZER_RUNTIME` | `AUTO` | Select `AUTO`, `SHARED`, or `STATIC` sanitizer runtime linkage |
+| `RJ_VGPR_STORAGE_BACKEND` | `AUTO` | Select `AUTO`, `EAGER`, or portable `SOFTWARE_LAZY` VGPR backing; `AUTO` uses OS demand paging where supported |
 | `RJ_CLANG_TIDY` | `OFF` | Enable clang-tidy static analysis |
 | `LTO` | `OFF` | Enable link-time optimization for Release/RelWithDebInfo |
 
