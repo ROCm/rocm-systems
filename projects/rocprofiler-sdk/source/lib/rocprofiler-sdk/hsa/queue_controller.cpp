@@ -483,8 +483,7 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
                 {
                     auto itr = was_enabled.find(agent_id);
                     if(itr == was_enabled.end()) continue;
-                    if(itr->second != state.enabled(agent_id))
-                        transitioned.emplace_back(agent_id);
+                    if(itr->second != state.enabled(agent_id)) transitioned.emplace_back(agent_id);
                 }
             });
 
@@ -543,8 +542,7 @@ bool
 QueueController::is_serialization_enabled(rocprofiler_agent_id_t agent_id) const
 {
     bool enabled = false;
-    _serialization_refcount.rlock(
-        [&](const auto& state) { enabled = state.enabled(agent_id); });
+    _serialization_refcount.rlock([&](const auto& state) { enabled = state.enabled(agent_id); });
     return enabled;
 }
 
