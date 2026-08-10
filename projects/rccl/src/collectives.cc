@@ -617,7 +617,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   bool ceCapturing = ncclCudaGraphValid(ceGraph);
   rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
   bool ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
-  if (!symEligible && ceArGraphAllowed && rcclUseCeAllReduce(comm, count, datatype, op) &&
+  if (!symEligible && ceArGraphAllowed && rcclUseCeAllReduce(comm, count, datatype, op, /*acc=*/nullptr) &&
       comm->ceColl.ceARTmpBuf != NULL) {
     if (count == 0) return ncclSuccess;
     INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu datatype=%d op=%d rank=%d/%d", count, (int)datatype, (int)op,
