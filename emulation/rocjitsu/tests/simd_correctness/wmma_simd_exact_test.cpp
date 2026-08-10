@@ -28,8 +28,11 @@ constexpr uint32_t SCALE_A = 100, SCALE_B = 104;
 
 using WmmaF32SpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t,
                                uint32_t, uint32_t);
+// The trailing bool is MODE.FP16_OVFL. These cases compare the SIMD fast path
+// against the scalar reference, which the mode does not distinguish, so every
+// call below leaves it clear.
 using WmmaF16SpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t,
-                               uint32_t);
+                               uint32_t, bool);
 
 struct WmmaFixture : ExactFixture {
   WmmaFixture() : ExactFixture(ROCJITSU_CODE_ARCH_GFX1250, WF) {}
@@ -177,7 +180,7 @@ TEST(WmmaSimdExact, F8SpecDense) {
   };
   auto spec_f16 = [](WmmaF16SpecFn fn, Fmt fmt, const char *label) {
     run_case(label, fmt, Fmt::F16, [fn](WmmaFixture &fx, uint32_t ca) {
-      fn(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, ca);
+      fn(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, ca, false);
     });
   };
   spec_f32(amdgpu::exec_wmma_f32_f8_spec<16, 16, 64, true, true>, Fmt::FP8, "spec_f32_fp8_fp8_k64");

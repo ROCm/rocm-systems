@@ -4,7 +4,7 @@
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 
 #include "rocjitsu/code/basic_block.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>

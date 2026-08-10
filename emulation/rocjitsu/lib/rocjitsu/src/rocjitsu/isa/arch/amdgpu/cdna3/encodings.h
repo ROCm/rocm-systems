@@ -395,6 +395,7 @@ public:
   bool has_lit_0();
   using OpEncoding = Sop1MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Sopc : public IsaInstruction<Isa> {
@@ -406,6 +407,7 @@ public:
   bool has_lit_0_has_lit_1();
   using OpEncoding = SopcMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Sopp : public IsaInstruction<Isa> {
@@ -423,6 +425,7 @@ public:
   bool hasImpliedLiteral();
   using OpEncoding = SopkMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
   uint32_t literal_ = 0;
 };
 
@@ -435,6 +438,7 @@ public:
   bool has_lit_0_has_lit_1();
   using OpEncoding = Sop2MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Smem : public IsaInstruction<Isa> {

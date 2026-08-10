@@ -65,6 +65,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
@@ -123,6 +124,15 @@ static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).uses_ttmp_workgroup_ids);
 static_assert(!isa_properties(ROCJITSU_CODE_ARCH_RDNA4).uses_cluster_ttmp_workgroup_ids);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).uses_ttmp_workgroup_ids);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).uses_cluster_ttmp_workgroup_ids);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA2).descriptor_vgpr_count_granule_wave32 == 0);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA2).descriptor_vgpr_count_granule_wave64 == 8);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA3).descriptor_vgpr_count_granule_wave32 == 0);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA3).descriptor_vgpr_count_granule_wave64 == 8);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).descriptor_vgpr_count_granule_wave32 == 8);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).descriptor_vgpr_count_granule_wave64 == 4);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).descriptor_vgpr_count_granule_wave32 ==
+              16);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).descriptor_vgpr_count_granule_wave64 == 0);
 
 // RDNA3/3.5 retain monolithic S_WAITCNT (GFX11 layout).
 static_assert(HasMonolithicWaitcnt<rdna3::Isa>);
@@ -138,6 +148,57 @@ static_assert(kCdnaAccVgprsPerWf == 256);
 static_assert(cdna3::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
 static_assert(cdna4::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
 static_assert(gfx1250::Isa::MAX_ACC_VGPRS_PER_WF == 0);
+
+TEST(IsaPropertiesTest, DescriptorVgprGranuleSupportsEveryAmdgpuWavefrontMode) {
+  struct ExpectedGranule {
+    rj_code_arch_t arch;
+    uint32_t wavefront_size;
+    uint32_t granule;
+  };
+  constexpr std::array cases = {
+      ExpectedGranule{ROCJITSU_CODE_ARCH_CDNA1, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_CDNA2, 64, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_CDNA3, 64, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_CDNA4, 64, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA1, 32, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA1, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA2, 32, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA2, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA3, 32, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA3, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA3_5, 32, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA3_5, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA4, 32, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA4, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_GFX1250, 32, 16},
+  };
+
+  for (const auto &[arch, wavefront_size, granule] : cases) {
+    const auto actual = descriptor_vgpr_count_granule_for_wavefront(arch, wavefront_size);
+    ASSERT_TRUE(actual.has_value());
+    EXPECT_EQ(*actual, granule);
+  }
+}
+
+TEST(IsaPropertiesTest, DescriptorVgprGranuleRejectsUnsupportedInputs) {
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_RV32I, 32).has_value());
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_RV64I, 64).has_value());
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_CDNA2, 32).has_value());
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_GFX1250, 64).has_value());
+}
+
+TEST(CommandProcessorTest, ConfigureForCdna2UsesEightVgprDescriptorGranule) {
+  amdgpu::CommandProcessor command_processor("cdna2_command_processor");
+  command_processor.set_vgpr_granularity(4);
+
+  command_processor.configure_for_arch(ROCJITSU_CODE_ARCH_CDNA2);
+
+  EXPECT_EQ(command_processor.vgpr_granularity(), 8u);
+}
 
 class Rdna3MemoryTestCu
     : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna3::Isa> {
@@ -674,6 +735,26 @@ TEST(MfmaExecTest, OutputLoc32_4x4) {
   auto loc = amdgpu::output_loc_32(4, 4, /*col=*/2, /*row=*/1, /*b=*/0);
   EXPECT_EQ(loc.reg, 2u);
   EXPECT_EQ(loc.lane, 1u);
+}
+
+TEST(MfmaExecTest, DstBaseMapsCdna1OprAccvgprRange) {
+  // CDNA1 types MFMA/accvgpr destinations as OPR_ACCVGPR, canonicalized into
+  // [768, 1023] (OPR_ACCVGPR_ACC_MIN = 768). acc0 -> vb + ACC_VGPR_OFFSET, not
+  // vb + ACC_VGPR_OFFSET + 256 (the pre-fix bug from the shared -512 fold).
+  EXPECT_EQ(amdgpu::dst_base(/*vb=*/100, /*ev=*/768, /*acc_cd=*/1),
+            100u + amdgpu::ACC_VGPR_OFFSET + 0u);
+  EXPECT_EQ(amdgpu::dst_base(/*vb=*/100, /*ev=*/770, /*acc_cd=*/1),
+            100u + amdgpu::ACC_VGPR_OFFSET + 2u);
+}
+
+TEST(MfmaExecTest, DstBaseMapsCdna2To4AccAndVgprRanges) {
+  // CDNA2-4: acc destination via OpSel sits at [512, 767] (acc0 = 512); an
+  // ordinary VGPR destination (acc_cd=0, ev 0-255) stays in the arch bank.
+  EXPECT_EQ(amdgpu::dst_base(/*vb=*/100, /*ev=*/512, /*acc_cd=*/1),
+            100u + amdgpu::ACC_VGPR_OFFSET + 0u);
+  EXPECT_EQ(amdgpu::dst_base(/*vb=*/100, /*ev=*/5, /*acc_cd=*/1),
+            100u + amdgpu::ACC_VGPR_OFFSET + 5u);
+  EXPECT_EQ(amdgpu::dst_base(/*vb=*/100, /*ev=*/5, /*acc_cd=*/0), 100u + 5u);
 }
 
 TEST(MfmaExecTest, ResolveAccConstant) {

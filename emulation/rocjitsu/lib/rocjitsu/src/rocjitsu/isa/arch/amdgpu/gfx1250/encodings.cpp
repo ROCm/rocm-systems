@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/encodings.h"
+#include "util/except.h"
 #include <cstring>
 #include <string>
 
@@ -21,6 +22,8 @@ Sop1::Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exe
     size_ += 2 * sizeof(MachineInst);
   else if (!default_encoding())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Sop1::default_encoding() { return (inst_.ssrc0 != 254 && inst_.ssrc0 != 255); }
@@ -39,6 +42,8 @@ Sopc::Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exe
     size_ += 2 * sizeof(MachineInst);
   else if (!default_encoding())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Sopc::default_encoding() {
@@ -93,6 +98,8 @@ Sopk::Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   if (hasImpliedLiteral())
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Sopk::default_encoding() { return true; }
@@ -111,6 +118,8 @@ Sop2::Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   if (hasImpliedLiteral())
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Sop2::default_encoding() {
@@ -400,12 +409,17 @@ bool Vop3::has_dpp16() {
   return (((inst_.src0 == 250) && (inst_.src1 != 255)) && (inst_.src2 != 255));
 }
 
-Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn)
+Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn,
+             int num_encoded_sources)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  if ((num_encoded_sources > 0 && inst_.src0 == 254) ||
+      (num_encoded_sources > 1 && inst_.src1 == 254) ||
+      (num_encoded_sources > 2 && inst_.src2 == 254))
+    throw util::InvalidInst("Vop3p does not support Literal64", "");
   if (has_lit_0() || has_lit_1() || has_lit_0_and_has_lit_1() || has_lit_2() ||
       has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||
       has_lit_0_and_has_lit_1_and_has_lit_2())

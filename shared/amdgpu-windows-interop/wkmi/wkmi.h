@@ -406,9 +406,12 @@ uint64_t GetMemoryAllocationSize(const void* priv_data);  ///< Pointer to alloca
 
 /// @brief Surface swizzle information extracted from VCAM_SURFACE_DESC
 struct SurfaceSwizzleInfo {
-  uint32_t swizzle_mode;   ///< Generic swizzle mode (union of eSwizzleMode/gfx12SwizzleMode/eTilingMode)
-  uint32_t tile_swizzle;   ///< Pipe-bank XOR value (ulTileSwizzle) for plane 0
-  bool     valid;          ///< True if surfaceDesc was present and parsed successfully
+  uint32_t swizzle_mode;     ///< Generic swizzle mode (union of eSwizzleMode/gfx12SwizzleMode/eTilingMode)
+  uint32_t tile_swizzle;     ///< Pipe-bank XOR value (ulTileSwizzle) for plane 0
+  uint32_t compression_mode; ///< Distributed compression mode (ulCompressionMode); 0 == none. gfx12+.
+  uint32_t max_comp_blk;     ///< Max compressed block size for plane 0 (maxCompressedBlockSize). gfx12+.
+  uint32_t max_uncomp_blk;   ///< Max uncompressed block size for plane 0 (maxUncompressedBlockSize). gfx12+.
+  bool     valid;            ///< True if surfaceDesc was present and parsed successfully
 };
 
 /// @brief Extract swizzle mode and tile swizzle from allocation private data

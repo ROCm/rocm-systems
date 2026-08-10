@@ -46,9 +46,10 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   flags_ |= RESULT_COPY;
 }
 
@@ -89,9 +90,10 @@ SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= PREDICATED_DEF;
 }
@@ -130,9 +132,10 @@ SNotB64Sop1::SNotB64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   scc.apply_fieldless_caps(false, false, false);
 }
 
@@ -168,9 +171,10 @@ SWqmB64Sop1::SWqmB64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   scc.apply_fieldless_caps(false, false, false);
 }
 
@@ -203,9 +207,10 @@ SBrevB64Sop1::SBrevB64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
 }
 
 void SBrevB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -246,9 +251,10 @@ SBcnt0I32B64Sop1::SBcnt0I32B64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   scc.apply_fieldless_caps(false, false, false);
 }
 
@@ -290,9 +296,10 @@ SBcnt1I32B64Sop1::SBcnt1I32B64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   scc.apply_fieldless_caps(false, false, false);
 }
 
@@ -329,9 +336,10 @@ SFf0I32B64Sop1::SFf0I32B64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
 }
 
 void SFf0I32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -367,9 +375,10 @@ SFf1I32B64Sop1::SFf1I32B64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
 }
 
 void SFf1I32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -405,9 +414,10 @@ SFlbitI32B64Sop1::SFlbitI32B64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
 }
 
 void SFlbitI32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -443,9 +453,10 @@ SFlbitI32I64Sop1::SFlbitI32I64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::SignExtend);
 }
 
 void SFlbitI32I64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -598,9 +609,10 @@ SSetpcB64Sop1::SSetpcB64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   pc.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_BRANCH;
 }
@@ -622,9 +634,10 @@ SSwappcB64Sop1::SSwappcB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   pc.apply_fieldless_caps(false, false, false);
   pc_in.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_CALL;
@@ -645,9 +658,10 @@ SRfeB64Sop1::SRfeB64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   pc.apply_fieldless_caps(false, false, false);
 }
 
@@ -669,9 +683,10 @@ SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
@@ -698,9 +713,10 @@ SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
@@ -728,9 +744,10 @@ SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
@@ -757,9 +774,10 @@ SAndn2SaveexecB64Sop1::SAndn2SaveexecB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
@@ -786,9 +804,10 @@ SOrn2SaveexecB64Sop1::SOrn2SaveexecB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
@@ -815,9 +834,10 @@ SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
@@ -844,9 +864,10 @@ SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
@@ -873,9 +894,10 @@ SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
@@ -920,9 +942,10 @@ SQuadmaskB64Sop1::SQuadmaskB64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   scc.apply_fieldless_caps(false, false, false);
 }
 
@@ -974,9 +997,10 @@ SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   m0.apply_fieldless_caps(false, false, false);
 }
 
@@ -1038,9 +1062,10 @@ SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   m0.apply_fieldless_caps(false, false, false);
 }
 
@@ -1093,9 +1118,10 @@ SAndn1SaveexecB64Sop1::SAndn1SaveexecB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
@@ -1122,9 +1148,10 @@ SOrn1SaveexecB64Sop1::SOrn1SaveexecB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
@@ -1151,9 +1178,10 @@ SAndn1WrexecB64Sop1::SAndn1WrexecB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
@@ -1180,9 +1208,10 @@ SAndn2WrexecB64Sop1::SAndn2WrexecB64Sop1(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
