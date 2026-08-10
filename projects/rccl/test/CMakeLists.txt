@@ -35,6 +35,25 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
   )
 
+  # CPU-only kernel-leak guard: runs src/device/generate.py (both ENABLE_ROCSHMEM
+  # OFF and ON) and asserts the generated device-kernel set against hardcoded
+  # baselines (grand total, per-collective counts, per-dimension value-sets). A
+  # change to the kernel count fails here and forces the author to update the
+  # baselines and justify the growth. Needs no GPU and no built library.
+  add_test(
+    NAME rccl-generate-kernel-counts
+    COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/src/device/test_generate_kernel_counts.py"
+  )
+
+  # CPU-only kernel-leak guard for the symmetric generator (same three-layer
+  # baseline check). Needs no GPU and no built library.
+  add_test(
+    NAME rccl-generate-symmetric
+    COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/src/device/symmetric/test_generate_symmetric.py"
+  )
+
   if (ENABLE_CODE_COVERAGE)
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
