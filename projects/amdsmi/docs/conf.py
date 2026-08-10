@@ -58,6 +58,7 @@ html_theme_options = {
     "use_source_button": True,
     "use_download_button": True,
 }
+html_context = {"docs_header_version": "7.14.0"}
 html_title = f"AMD SMI {version}"
 html_static_path = ["static"]
 html_css_files = ["amdsmi_docs.css"]
