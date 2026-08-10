@@ -26,7 +26,7 @@
 #include "log.hpp"
 #include "hip_allocator_vmm_common.hpp"
 
-#if HIP_VERSION >= 70000000
+#if defined HAVE_AMDSMI_GPU_FABRIC_INFO
 
 #include <cstring>
 
@@ -110,7 +110,7 @@ HIPAllocatorVMMFabric::HIPAllocatorVMMFabric()
 
   if (!fabric_supported) {
     fprintf(stderr, "ROCSHMEM_ERROR: Fabric handle type is not supported on device %d. "
-            "The USE_HEAP_DEVICE_VMM_FABRIC allocator requires a GPU with fabric handle support. "
+            "The vmm_fabric allocator requires a GPU with fabric handle support. "
             "Please use a different memory allocator.\n",
             device_id);
     abort();
@@ -323,4 +323,4 @@ hipError_t HIPAllocatorVMMFabric::GetDmabufHandle(void *dev_ptr, size_t size, in
 
 }  // namespace rocshmem
 
-#endif  // HIP_VERSION >= 70000000
+#endif  // HAVE_AMDSMI_GPU_FABRIC_INFO

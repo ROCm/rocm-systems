@@ -1,0 +1,118 @@
+name: TheRock RCCL rocprofv3 smoke test
+
+on:
+  workflow_call:
+    inputs:
+      amdgpu_families:
+        type: string
+      artifact_group:
+        type: string
+      test_runs_on:
+        type: string
+      artifact_run_id:
+        type: string
+      notify_email:
+        type: string
+        default: ""
+      notify_webhook:
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      amdgpu_families:
+        type: string
+        default: "gfx94X-dcgpu"
+      artifact_group:
+        type: string
+        default: "gfx94X-dcgpu"
+      test_runs_on:
+        type: string
+        default: "linux-gfx942-8gpu-ossci-rocm"
+      artifact_run_id:
+        type: string
+        required: true
+        description: "Run ID of a completed RCCL build to fetch artifacts from"
+      notify_email:
+        type: string
+        default: ""
+        description: "Email address for result notification"
+      notify_webhook:
+        description: 'Teams webhook URL for test summary notifications'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  test_rccl_rocprof:
+    name: 'rocprofv3 smoke test'
+    runs-on: ${{ inputs.test_runs_on }}
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 110
+        --group-add 993
+        --group-add 992
+        --ulimit memlock=-1:-1
+        --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        --user 0:0
+    defaults:
+      run:
+        shell: bash
+    env:
+      VENV_DIR: ${{ github.workspace }}/.venv
+      ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id }}"
+      OUTPUT_ARTIFACTS_DIR: "./build"
+      THEROCK_BIN_DIR: "./build/bin"
+    steps:
+      - name: Checkout TheRock
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
+
+      - name: Checkout rocm-systems scripts
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: .github/scripts
+          path: "rocm-systems"
+
+      - name: Run setup test environment
+        uses: './.github/actions/setup_test_environment'
+        with:
+          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
+          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
+          VENV_DIR: ${{ env.VENV_DIR }}
+          FETCH_ARTIFACT_ARGS: "--rccl --tests --rocprofiler-sdk"
+
+      - name: Install pytest
+        run: |
+          pip install pytest
+
+      - name: Run rocprofv3 RCCL smoke tests
+        timeout-minutes: 15
+        env:
+          THEROCK_BIN_DIR: ${{ env.THEROCK_BIN_DIR }}
+          NOTIFY_EMAIL: ${{ inputs.notify_email }}
+          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook }}
+        run: |
+          NOTIFY_ARGS=()
+          [ -n "$NOTIFY_EMAIL" ] && NOTIFY_ARGS+=(--notify-email "$NOTIFY_EMAIL")
+          [ -n "$NOTIFY_WEBHOOK" ] && NOTIFY_ARGS+=(--notify-webhook "$NOTIFY_WEBHOOK")
+          set -o pipefail
+          python rocm-systems/.github/scripts/test_rccl_rocprof.py \
+            "${NOTIFY_ARGS[@]}" \
+            2>&1 | tee rocprof_test_results.txt
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocprof-smoke-test-results-${{ inputs.amdgpu_families }}
+          path: rocprof_test_results.txt

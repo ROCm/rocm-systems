@@ -70,7 +70,7 @@ std::queue<int> frame_indices_q;
 uint8_t* frame_buffers[frame_buffers_size] = {0};
 
 void ColorSpaceConversionThread(std::atomic<bool>& continue_processing, bool convert_to_rgb, Dim *p_resize_dim, OutputSurfaceInfo **surf_info, OutputSurfaceInfo **res_surf_info,
-        OutputFormatEnum e_output_format, uint8_t *p_rgb_dev_mem, uint8_t *p_resize_dev_mem, bool dump_output_frames,
+        OutputFormatEnum e_output_format, uint8_t *&p_rgb_dev_mem, uint8_t *&p_resize_dev_mem, bool dump_output_frames,
         std::string &output_file_path, RocVideoDecoder &viddec, VideoPostProcess &post_proc, MD5Generator *md5_gen_handle, bool b_generate_md5, int device_id, hipStream_t hip_stream, int col_standard) {
 
     size_t rgb_image_size, resize_image_size;

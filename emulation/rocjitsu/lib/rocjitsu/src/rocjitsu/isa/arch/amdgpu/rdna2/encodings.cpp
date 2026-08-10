@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna2/encodings.h"
+#include <cstring>
 #include <string>
 
 namespace rocjitsu {
@@ -29,6 +30,8 @@ Sop1::Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
   if (!default_encoding())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Sop1::default_encoding() { return inst_.ssrc0 != 255; }
@@ -43,6 +46,8 @@ Sopc::Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
   if (!default_encoding())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Sopc::default_encoding() { return inst_.ssrc0 != 255 && inst_.ssrc1 != 255; }
@@ -75,6 +80,8 @@ Sopk::Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   if (hasImpliedLiteral())
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Sopk::default_encoding() { return true; }
@@ -89,6 +96,8 @@ Sop2::Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
   if (!default_encoding())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Sop2::default_encoding() { return inst_.ssrc0 != 255 && inst_.ssrc1 != 255; }
@@ -124,6 +133,8 @@ Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
   if (!default_encoding())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 void Vop1::implicit_uses(RegisterSet &uses) const {
@@ -155,6 +166,8 @@ Vopc::Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
   if (!default_encoding())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Vopc::default_encoding() {
@@ -174,6 +187,8 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   if (hasImpliedLiteral())
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 void Vop2::implicit_uses(RegisterSet &uses) const {
@@ -222,6 +237,8 @@ Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exe
   if (has_lit_0() || has_lit_1() || has_lit_0_has_lit_1() || has_lit_2() || has_lit_0_has_lit_2() ||
       has_lit_1_has_lit_2() || has_lit_0_has_lit_1_has_lit_2())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Vop3::has_lit_0() { return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 != 255; }
@@ -255,6 +272,8 @@ Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn 
   if (has_lit_0() || has_lit_1() || has_lit_0_has_lit_1() || has_lit_2() || has_lit_0_has_lit_2() ||
       has_lit_1_has_lit_2() || has_lit_0_has_lit_1_has_lit_2())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Vop3p::has_lit_0() { return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 != 255; }
@@ -401,6 +420,8 @@ Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst
   if (has_lit_0() || has_lit_1() || has_lit_0_has_lit_1() || has_lit_2() || has_lit_0_has_lit_2() ||
       has_lit_1_has_lit_2() || has_lit_0_has_lit_1_has_lit_2())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Vop3SdstEnc::has_lit_0() {

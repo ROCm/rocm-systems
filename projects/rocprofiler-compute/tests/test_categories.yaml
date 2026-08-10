@@ -15,6 +15,8 @@ test_categories:
       - test_pc_sampling_analysis
       - test_tui_components
       - test_analysis_db
+      - test_analysis_orm
+      - test_code_object_analysis
       - test_torch_trace_analysis
       - test_torch_trace_coverage
       - test_L1_cache_counters
@@ -30,7 +32,6 @@ test_categories:
       - test_utils_profile_csv
       - test_inject_roctx_package
       - test_torch_cpp_loader
-      - test_autogen_config
       - test_import_guard
       - test_mem_chart
       - test_native_tool_finder
@@ -42,7 +43,6 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
-      - test_pc_sampling
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
     labels:
@@ -60,8 +60,10 @@ test_categories:
       - test_profile_misc
       - test_profile_path
       - test_pc_sampling
-      - test_profile_roofline_1
-      - test_profile_roofline_2
+      - test_profile_roofline_dir
+      - test_profile_roofline_bench
+      - test_profile_roofline_plot
+      - test_profile_roofline_validation
       - test_profile_section
       - test_profile_sets_func
       - test_profile_sort
@@ -71,7 +73,6 @@ test_categories:
       - test_metric_utils
       - test_parser
       - test_argparser
-      - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
       - test_num_xcds_cli_output
@@ -88,6 +89,8 @@ test_categories:
       - test_import_guard
       - test_profile_multi_rank
       - test_analysis_db
+      - test_analysis_orm
+      - test_code_object_analysis
       - test_pc_sampling_analysis
       - test_utils_profile_csv
       - test_inject_roctx_package
@@ -108,7 +111,6 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
-      - test_pc_sampling
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
     labels:
@@ -125,8 +127,11 @@ test_categories:
       - test_profile_misc
       - test_profile_path
       - test_pc_sampling
-      - test_profile_roofline_1
-      - test_profile_roofline_2
+      - test_profile_roofline_dir
+      - test_profile_roofline_extra_options
+      - test_profile_roofline_bench
+      - test_profile_roofline_plot
+      - test_profile_roofline_validation
       - test_profile_section
       - test_profile_sets_func
       - test_profile_sort
@@ -136,7 +141,6 @@ test_categories:
       - test_metric_utils
       - test_parser
       - test_argparser
-      - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
       - test_num_xcds_cli_output
@@ -153,6 +157,8 @@ test_categories:
       - test_import_guard
       - test_profile_multi_rank
       - test_analysis_db
+      - test_analysis_orm
+      - test_code_object_analysis
       - test_pc_sampling_analysis
       - test_utils_profile_csv
       - test_inject_roctx_package
@@ -173,7 +179,6 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
-      - test_pc_sampling
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
     labels:
@@ -190,8 +195,11 @@ test_categories:
       - test_profile_misc
       - test_profile_path
       - test_pc_sampling
-      - test_profile_roofline_1
-      - test_profile_roofline_2
+      - test_profile_roofline_dir
+      - test_profile_roofline_extra_options
+      - test_profile_roofline_bench
+      - test_profile_roofline_plot
+      - test_profile_roofline_validation
       - test_profile_section
       - test_profile_sets_func
       - test_profile_sort
@@ -201,7 +209,6 @@ test_categories:
       - test_metric_utils
       - test_parser
       - test_argparser
-      - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
       - test_num_xcds_cli_output
@@ -218,6 +225,8 @@ test_categories:
       - test_import_guard
       - test_profile_multi_rank
       - test_analysis_db
+      - test_analysis_orm
+      - test_code_object_analysis
       - test_pc_sampling_analysis
       - test_utils_profile_csv
       - test_inject_roctx_package
@@ -238,7 +247,6 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
-      - test_pc_sampling
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
     labels:

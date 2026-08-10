@@ -113,6 +113,15 @@ class VopdSlotOp:
     mnemonic: str
 
 
+@dataclass(frozen=True)
+class VopdEncodingPrefix:
+    """A primary-table prefix routed to the generated VOPD decoder."""
+
+    prefix: int
+    prefix_bits: int
+    is_vopd3: bool = False
+
+
 _VOPD_COMMON_F32_SLOT_OPS = (
     VopdSlotOp('VopdFmacF32', 0, 'v_dual_fmac_f32'),
     VopdSlotOp('VopdFmaakF32', 1, 'v_dual_fmaak_f32'),
@@ -290,6 +299,11 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def split_execution_sources(self) -> bool:
+        """True when execution bodies are emitted to separate source files."""
+        return False
+
+    @property
     def uses_true16_vop3_opsel(self) -> bool:
         """True when VOP3 16-bit operands use op_sel half selectors."""
         return False
@@ -303,31 +317,6 @@ class IsaProfile(ABC):
     def vbuffer_store_data_uses_dst_vgpr_msb_role(self) -> bool:
         """True when buffer-store data operands use the destination VGPR-MSB bank."""
         return False
-
-    @property
-    def use_hwreg_helpers(self) -> bool:
-        """True when generated SOPK getreg/setreg should use target hwreg helpers."""
-        return False
-
-    @property
-    def hwreg_mode_id(self) -> int | None:
-        """Hardware-register ID for MODE, when modeled by generated setreg code."""
-        return None
-
-    @property
-    def hwreg_status_id(self) -> int:
-        """Hardware-register ID for STATUS in generated getreg/setreg code."""
-        return 1
-
-    @property
-    def hwreg_ib_sts2_id(self) -> int | None:
-        """Hardware-register ID for IB_STS2, when exposed by the target."""
-        return None
-
-    @property
-    def hwreg_wave_sched_mode_id(self) -> int | None:
-        """Hardware-register ID for WAVE_SCHED_MODE, when exposed by the target."""
-        return None
 
     @property
     def generate_scaled_wmma_vop3px2(self) -> bool:
@@ -354,6 +343,22 @@ class IsaProfile(ABC):
         conventions diverge from the common AMD pattern).
         """
         return {}
+
+    @property
+    def semantic_class_overrides(self) -> dict[str, str]:
+        """Per-instruction semantic-class refinements for this ISA.
+
+        Unlike :attr:`semantic_overrides`, these preserve the generic
+        derivation's operation, element size, and other metadata. Use this
+        when an ISA-specific instruction shape needs a different codegen
+        template but the remaining mnemonic-derived metadata is still valid.
+        """
+        return {}
+
+    @property
+    def ds_addtid_uses_m0_byte_base(self) -> bool:
+        """True when DS ADDTID addresses use M0 as a byte-address base."""
+        return False
 
     @property
     def cmpx_writes_vcc(self) -> bool:
@@ -907,7 +912,14 @@ class _AmdgpuProfileBase(IsaProfile):
     @property
     def has_vopd3(self) -> bool:
         """True if this ISA supports the VOPD3 encoding form."""
-        return False
+        return any(prefix.is_vopd3 for prefix in self.vopd_encoding_prefixes)
+
+    @property
+    def vopd_encoding_prefixes(self) -> tuple[VopdEncodingPrefix, ...]:
+        """Primary encoding prefixes accepted by the generated VOPD decoder."""
+        if not self.has_vopd:
+            return ()
+        return (VopdEncodingPrefix(0x32, 6),)
 
     @property
     def vopd_slot_ops(self) -> tuple[VopdSlotOp, ...]:
@@ -1609,6 +1621,20 @@ class Gfx1250Profile(Rdna4Profile):
     def generated_arch_name(self) -> str | None:
         return 'gfx1250'
 
+    @property
+    def semantic_class_overrides(self) -> dict[str, str]:
+        return {
+            'DS_STORE_ADDTID_B32': 'ds_write_addtid',
+            'DS_STOREXCHG_2ADDR_RTN_B32': 'ds_atomic2',
+            'DS_STOREXCHG_2ADDR_RTN_B64': 'ds_atomic2',
+            'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32': 'ds_atomic2',
+            'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64': 'ds_atomic2',
+        }
+
+    @property
+    def ds_addtid_uses_m0_byte_base(self) -> bool:
+        return True
+
     _SKIP = frozenset(
         {
             'ENC_VOP3PX2',
@@ -1671,8 +1697,10 @@ class Gfx1250Profile(Rdna4Profile):
         return 1024
 
     @property
-    def has_vopd3(self) -> bool:
-        return True
+    def vopd_encoding_prefixes(self) -> tuple[VopdEncodingPrefix, ...]:
+        return super().vopd_encoding_prefixes + (
+            VopdEncodingPrefix(0xCF, 8, is_vopd3=True),
+        )
 
     @property
     def vopd_slot_ops(self) -> tuple[VopdSlotOp, ...]:
@@ -1687,28 +1715,12 @@ class Gfx1250Profile(Rdna4Profile):
         return True
 
     @property
+    def split_execution_sources(self) -> bool:
+        return True
+
+    @property
     def vbuffer_store_data_uses_dst_vgpr_msb_role(self) -> bool:
         return True
-
-    @property
-    def use_hwreg_helpers(self) -> bool:
-        return True
-
-    @property
-    def hwreg_mode_id(self) -> int | None:
-        return 1
-
-    @property
-    def hwreg_status_id(self) -> int:
-        return 2
-
-    @property
-    def hwreg_ib_sts2_id(self) -> int | None:
-        return 28
-
-    @property
-    def hwreg_wave_sched_mode_id(self) -> int | None:
-        return 26
 
     @property
     def generate_scaled_wmma_vop3px2(self) -> bool:
@@ -1816,7 +1828,7 @@ class Gfx1250Profile(Rdna4Profile):
             return 'data'
         if sem_class in {'vector_dot', 'vector_dot2c_bf16'}:
             return 'alu'
-        if sem_class == 'vector_unary':
+        if sem_class in {'pseudo_scalar_unary', 'vector_unary'}:
             return 'alu'
         if sem_class in {'nop', 'true_nop'}:
             return 'misc'

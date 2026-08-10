@@ -19,9 +19,14 @@
 #include "rccl/rccl.h"
 #include "util.h"
 #include "git_version.h"
+#include "os.h"
 #include <assert.h>
 #include <errno.h>
+#include <cmath>
+#include <algorithm>
+#include <cstring>
 #include <string>
+#include <sstream>
 #include <iomanip>
 
 extern int nThreads;
@@ -36,13 +41,15 @@ extern int iters;
 extern int agg_iters;
 extern int parallel_init;
 extern int blocking_coll;
+extern int per_iter_timing;
+extern int per_iter_skip;
 extern int cudaGraphLaunches;
 extern int unalign;
 
 static FILE *json_report_fp;
 static thread_local bool write_json;
 
-#define JSON_FILE_VERSION 1
+#define JSON_FILE_VERSION 3
 
 #define TIME_STRING_FORMAT "%Y-%m-%d %H:%M:%S"
 
@@ -232,6 +239,24 @@ static void jsonNull() {
   fprintf(json_report_fp, "null");
 }
 
+static void jsonFinishCurrent() {
+  switch(jsonCurrState()) {
+  case JSON_KEY:
+    jsonNull();
+    break;
+  case JSON_OBJECT_EMPTY:
+  case JSON_OBJECT_SOME:
+    jsonFinishObject();
+    break;
+  case JSON_LIST_EMPTY:
+  case JSON_LIST_SOME:
+    jsonFinishList();
+    break;
+  default:
+    assert(0);
+  }
+}
+
 // Write a (sanititzed) string
 static void jsonStr(const char *str) {
   if(str == nullptr) {
@@ -314,7 +339,7 @@ void jsonOutputInit(const char *in_path,
       return;
     }
     free(try_path);
-    if(asprintf(&try_path, "%s.%d", in_path, try_count++) == -1) {
+    if(ncclTestAsprintf(&try_path, "%s.%d", in_path, try_count++) == -1) {
       printf("# skipping json output; failed to probe destination\n");
       return;
     }
@@ -350,6 +375,7 @@ void jsonOutputInit(const char *in_path,
     jsonStr(*e);
   }
   jsonFinishList();
+  jsonKey("nccl_version"); jsonInt(test_ncclVersion);
   jsonKey("rccl_version"); jsonInt(test_ncclVersion);
 }
 
@@ -362,12 +388,17 @@ void jsonIdentifyWriter(bool is_writer) {
 void jsonOutputFinalize() {
   if(write_json) {
 
-    jsonKey("end_time");
-    char timebuffer[128];
-    formatNow(timebuffer, sizeof(timebuffer));
-    jsonStr(timebuffer);
+    if(state_n == 1 &&
+       (jsonCurrState() == JSON_OBJECT_EMPTY || jsonCurrState() == JSON_OBJECT_SOME)) {
+      jsonKey("end_time");
+      char timebuffer[128];
+      formatNow(timebuffer, sizeof(timebuffer));
+      jsonStr(timebuffer);
+    }
 
-    jsonFinishObject();
+    while(state_n > 0) {
+      jsonFinishCurrent();
+    }
 
     assert(jsonCurrState() == JSON_NONE);
     free(states);
@@ -455,15 +486,10 @@ void writeBenchMarkLineNullBody() {
 }
 
 void getFloatStr(double value, int width, char* str) {
-  int power = 0;
-  for (uint64_t val = 1; value >= val; val *= 10) power++;
-
-  if (power < width-2) sprintf(str, "%*.2f", width, value);
-  else if (power < width-1) sprintf(str, "%*.1f", width, value);
-  else if (power < width+1) sprintf(str, "%*.0f", width, value);
-  else if (width >= 7) sprintf(str, "%*.1e", width, value);
-  else if (width >= 8) sprintf(str, "%*.2e", width, value);
-  else sprintf(str, "%*.0e", width, value);
+  if (snprintf(str, width+1, "%*.2f", width, value) <= width) return;
+  if (snprintf(str, width+1, "%*.1f", width, value) <= width) return;
+  if (snprintf(str, width+1, "%*.0f", width, value) <= width) return;
+  snprintf(str, width+1, width >= 7 ? "%*.1e" : "%*.0e", width, value);
 }
 
 // Write the performance-related payload to stdout/json.
@@ -485,11 +511,7 @@ void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool re
     PRINT("  %7s  %6s  %6s    N/A", timeStr, algBwStr, busBwStr);
   }
 
-  if (!out_of_place && report_timestamps) {
-    char timebuffer[128];
-    formatNow(timebuffer, sizeof(timebuffer));
-    PRINT("%21s", timebuffer);
-  }
+  if (!out_of_place && report_timestamps && !per_iter_timing) writeTimestamp();
 
   if(write_json) {
     jsonKey(out_of_place ? "out_of_place" : "in_place");
@@ -500,6 +522,92 @@ void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool re
     jsonKey("nwrong");                             (reportErrors ? jsonDouble((double)wrongElts) : jsonNull());
     jsonFinishObject();
   }
+}
+
+static int cmpDouble(const void* a, const void* b) {
+  double da = *(const double*)a, db = *(const double*)b;
+  return (da > db) - (da < db);
+}
+
+static int percentileIndex(int n, int percentile) {
+  return std::min(n - 1, (n * percentile + 99) / 100 - 1);
+}
+
+void computeIterStats(const double* times, int n, struct IterStats* stats) {
+  double* sorted = (double*)malloc(n * sizeof(double));
+  memcpy(sorted, times, n * sizeof(double));
+  qsort(sorted, n, sizeof(double), cmpDouble);
+
+  stats->min = sorted[0];
+  stats->max = sorted[n - 1];
+  stats->p50 = sorted[n / 2];
+  stats->p95 = sorted[percentileIndex(n, 95)];
+  stats->p99 = sorted[percentileIndex(n, 99)];
+
+  double sum = 0;
+  for (int i = 0; i < n; i++) sum += sorted[i];
+  stats->avg = sum / n;
+
+  double var = 0;
+  for (int i = 0; i < n; i++) {
+    double d = sorted[i] - stats->avg;
+    var += d * d;
+  }
+  stats->stdev = sqrt(var / n);
+  free(sorted);
+}
+
+void writePerIterReport(const struct IterStats* stats, const double* iterTimes, int nIters, int skippedIters, bool out_of_place, const double* allProcessTimes, int nProcs) {
+  double cvPct = stats->avg > 0 ? (stats->stdev / stats->avg) * 100.0 : 0.0;
+
+  char minStr[8], maxStr[8], p99Str[8], cvStr[8];
+  getFloatStr(stats->min * 1e6, 7, minStr);
+  getFloatStr(stats->max * 1e6, 7, maxStr);
+  getFloatStr(stats->p99 * 1e6, 7, p99Str);
+  getFloatStr(cvPct, 7, cvStr);
+
+  PRINT("  %7s  %7s  %7s  %7s", minStr, maxStr, p99Str, cvStr);
+
+  if (write_json) {
+    const char* key = out_of_place ? "out_of_place_per_iter" : "in_place_per_iter";
+    jsonKey(key);
+    jsonStartObject();
+    jsonKey("skipped_iterations"); jsonInt(skippedIters);
+    jsonKey("min_us");   jsonDouble(stats->min * 1e6);
+    jsonKey("max_us");   jsonDouble(stats->max * 1e6);
+    jsonKey("avg_us");   jsonDouble(stats->avg * 1e6);
+    jsonKey("p50_us");   jsonDouble(stats->p50 * 1e6);
+    jsonKey("p95_us");   jsonDouble(stats->p95 * 1e6);
+    jsonKey("p99_us");   jsonDouble(stats->p99 * 1e6);
+    jsonKey("stdev_us"); jsonDouble(stats->stdev * 1e6);
+    jsonKey("cv_pct");   jsonDouble(cvPct);
+    jsonKey("times_us"); jsonStartList();
+    for (int i = 0; i < nIters; i++) {
+      jsonDouble(iterTimes[i] * 1e6);
+    }
+    jsonFinishList();
+
+    if (allProcessTimes && nProcs > 1) {
+      jsonKey("per_process_max_times_us");
+      jsonStartList();
+      for (int r = 0; r < nProcs; r++) {
+        jsonStartList();
+        for (int i = 0; i < nIters; i++) {
+          jsonDouble(allProcessTimes[r * nIters + i] * 1e6);
+        }
+        jsonFinishList();
+      }
+      jsonFinishList();
+    }
+
+    jsonFinishObject();
+  }
+}
+
+void writeTimestamp() {
+  char timebuffer[128];
+  formatNow(timebuffer, sizeof(timebuffer));
+  PRINT("%21s", timebuffer);
 }
 
 // This writes out a report about the run parameters and devices
@@ -519,8 +627,16 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
         nThreads, nGpus, minBytes, maxBytes,
         (stepFactor > 1)?stepFactor:stepBytes, (stepFactor > 1)?"factor":"bytes",
         warmup_iters, iters, agg_iters, datacheck, cudaGraphLaunches, unalign);
-  if (blocking_coll == 1) PRINT("# Blocking Enabled: wait for completion and barrier after each collective \n");
-  if (blocking_coll > 1)  PRINT("# Blocking Enabled: wait for completion after each collective (no barrier) \n");
+  if (blocking_coll == 1) PRINT("# Blocking Enabled: wait and barrier after each inner iteration (-m) \n");
+  if (blocking_coll == 2) PRINT("# Blocking Enabled: wait after each inner iteration (-m), no barrier \n");
+  if (blocking_coll == 3)
+    PRINT("# Blocking Enabled: wait and barrier after each outer iteration (-n); "
+          "time excludes barrier \n");
+  if (per_iter_timing) {
+    PRINT("# Per-Iteration Report: HIP event timing; i_* uses max over process rows");
+    if (per_iter_skip) PRINT("; summary skips first %d iterations", per_iter_skip);
+    PRINT(" \n");
+  }
   if (parallel_init) PRINT("# Parallel Init Enabled: threads call into NcclInitRank concurrently \n");
   PRINT("#\n");
 
@@ -532,7 +648,7 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
     jsonKey("minimum_bytes"); jsonSize_t(minBytes);
     jsonKey("maximum_bytes"); jsonSize_t(maxBytes);
     if(stepFactor > 1) {
-      jsonKey("step_factor");   jsonInt(stepFactor);
+      jsonKey("step_factor");   jsonSize_t(stepFactor);
     }
     else {
       jsonKey("step_bytes");  jsonSize_t(stepBytes);
@@ -544,6 +660,8 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
     jsonKey("validation");            jsonInt(datacheck);
     jsonKey("graph");                 jsonInt(cudaGraphLaunches);
     jsonKey("blocking_collectives");  jsonBool(blocking_coll);
+    jsonKey("per_iter_timing");     jsonBool(per_iter_timing);
+    jsonKey("per_iter_skip");       jsonInt(per_iter_skip);
     jsonKey("parallel_init");         jsonBool(parallel_init);
   }
 
@@ -568,7 +686,7 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
     CUDACHECK(cudaGetDeviceProperties(&prop, cudaDev));
     if (len < MAX_LINE) {
       len += snprintf(line+len, MAX_LINE-len, "#  Rank %2d Group %2d Pid %6d on %10s device %2d [%04x:%02x:%02x] %s\n",
-                      rank, color, getpid(), hostname, cudaDev, prop.pciDomainID, prop.pciBusID, prop.pciDeviceID, prop.name);
+                      rank, color, ncclTestGetPid(), hostname, cudaDev, prop.pciDomainID, prop.pciBusID, prop.pciDeviceID, prop.name);
     }
     *maxMem = std::min(*maxMem, prop.totalGlobalMem);
   }
@@ -636,29 +754,37 @@ void writeResultHeader(bool report_cputime, bool report_timestamps, bool enable_
   }
   
   PRINT("#\n");
-  
-  if (enable_out_of_place && enable_in_place) {
-  PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place                       in-place          \n", "", "", "", "", "");
-    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "size", "count", "type", "redop", "root",
-          timeStr, "algbw", "busbw", "#wrong", timeStr, "algbw", "busbw", "#wrong", extraPad, 
-          output_algo_proto_channels ? "algo      proto      nchannels" : "", tsPad, tsLbl);
-    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "(B)", "(elements)", "", "", "",
-          "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "", extraPad, "", tsPad, tsFmt);
-  } else if (enable_out_of_place) {
-    PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place          \n", "", "", "", "", "");
-    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "size", "count", "type", "redop", "root",
-          timeStr, "algbw", "busbw", "#wrong", extraPad,
-          output_algo_proto_channels ? "algo      proto      nchannels" : "", tsPad, tsLbl);
-    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "(B)", "(elements)", "", "", "",
-          "(us)", "(GB/s)", "(GB/s)", "", extraPad, "", tsPad, tsFmt);
-  } else {
-    PRINT("# %10s  %12s  %8s  %6s  %6s           in-place          \n", "", "", "", "", "");
-    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "size", "count", "type", "redop", "root",
-          timeStr, "algbw", "busbw", "#wrong", extraPad,
-          output_algo_proto_channels ? "algo      proto      nchannels" : "", tsPad, tsLbl);
-    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "(B)", "(elements)", "", "", "",
-          "(us)", "(GB/s)", "(GB/s)", "", extraPad, "", tsPad, tsFmt);
+
+  PRINT("# %10s  %12s  %8s  %6s  %6s", "", "", "", "", "");
+  const int placementWidth = per_iter_timing ? 69 : 33;
+  if (enable_out_of_place)
+    PRINT("  %*s", placementWidth, per_iter_timing ? "out-of-place (+ per-iteration)" : "out-of-place");
+  if (enable_in_place)
+    PRINT("  %*s", placementWidth, per_iter_timing ? "in-place (+ per-iteration)" : "in-place");
+  PRINT("\n");
+
+  PRINT("# %10s  %12s  %8s  %6s  %6s", "size", "count", "type", "redop", "root");
+  if (enable_out_of_place) {
+    PRINT("  %7s  %6s  %6s  %6s", timeStr, "algbw", "busbw", "#wrong");
+    if (per_iter_timing) PRINT("  %7s  %7s  %7s  %7s", "i_min", "i_max", "i_p99", "i_cv%");
   }
+  if (enable_in_place) {
+    PRINT("  %7s  %6s  %6s  %6s", timeStr, "algbw", "busbw", "#wrong");
+    if (per_iter_timing) PRINT("  %7s  %7s  %7s  %7s", "i_min", "i_max", "i_p99", "i_cv%");
+  }
+  if (output_algo_proto_channels) PRINT("  %8s  %8s  %10s", extra_col_str[0], extra_col_str[1], extra_col_str[2]);
+  PRINT(" %*s\n", tsPad, tsLbl);
+
+  PRINT("# %10s  %12s  %8s  %6s  %6s", "(B)", "(elements)", "", "", "");
+  if (enable_out_of_place) {
+    PRINT("  %7s  %6s  %6s  %6s", "(us)", "(GB/s)", "(GB/s)", "");
+    if (per_iter_timing) PRINT("  %7s  %7s  %7s  %7s", "(us)", "(us)", "(us)", "(%)");
+  }
+  if (enable_in_place) {
+    PRINT("  %7s  %6s  %6s  %6s", "(us)", "(GB/s)", "(GB/s)", "");
+    if (per_iter_timing) PRINT("  %7s  %7s  %7s  %7s", "(us)", "(us)", "(us)", "(%)");
+  }
+  PRINT(" %*s %*s\n", extraPad, "", tsPad, tsFmt);
 
   if(write_json) {
     jsonKey("results"); jsonStartList();
@@ -693,7 +819,8 @@ void writeResultFooter(const int errors[], const double bw[], double check_avg_b
   }
 }
 
-std::string getMemString(double amount) {
+std::string getMemString(int64_t amountBytes) {
+  double amount = static_cast<double>(amountBytes);
   std::string postfix = " B";
   if (abs(amount) >= 1024.0*1024.0*1024.0) {
     postfix = " GB";

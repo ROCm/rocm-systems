@@ -83,7 +83,7 @@
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <time.h>
@@ -218,10 +218,12 @@ struct buffer_ids
     rocprofiler_buffer_id_t pc_sampling_stochastic  = {};
     rocprofiler_buffer_id_t ompt_trace              = {};
     rocprofiler_buffer_id_t hip_graph_trace         = {};
+    rocprofiler_buffer_id_t rocshmem_api_trace      = {};
+    rocprofiler_buffer_id_t hipfile_api_trace       = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 15>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 17>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -235,7 +237,9 @@ struct buffer_ids
                                                        rocjpeg_api_trace,
                                                        pc_sampling_stochastic,
                                                        ompt_trace,
-                                                       hip_graph_trace};
+                                                       hip_graph_trace,
+                                                       rocshmem_api_trace,
+                                                       hipfile_api_trace};
     }
     auto pc_sampling_buffers_as_array() const
     {
@@ -1392,6 +1396,20 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
 
                 tool::write_ring_buffer(*record, domain_type::HIP_GRAPH);
             }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t*>(
+                    header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::ROCSHMEM);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_hipfile_api_ext_record_t*>(
+                    header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::HIPFILE);
+            }
             else
             {
                 ROCP_CI_LOG(WARNING) << fmt::format(
@@ -2270,7 +2288,8 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
     }
     if(!config_match_found)
     {
-        ROCP_ERROR << "Given PC sampling configuration is not supported on any of the agents";
+        ROCP_ERROR << "Given PC sampling configuration is not supported on any of the agents."
+                   << "See supported configurations with 'rocprofv3-avail info --pc-sampling'";
         std::exit(EXIT_FAILURE);
     }
 }
@@ -2770,6 +2789,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                       buffer_service_config{tool::get_config().rocjpeg_api_trace,
                                             ROCPROFILER_BUFFER_TRACING_ROCJPEG_API,
                                             get_buffers().rocjpeg_api_trace},
+                      buffer_service_config{tool::get_config().rocshmem_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT,
+                                            get_buffers().rocshmem_api_trace},
+                      buffer_service_config{tool::get_config().hipfile_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT,
+                                            get_buffers().hipfile_api_trace},
                       // Enable only the ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED operation
                       // for KFD QUEUE events; all other QUEUE related events are published as range
                       // records
@@ -2892,6 +2917,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                               dummy_callback_tracing_callback},
                       callback_service_config{tool::get_config().ompt_trace,
                                               ROCPROFILER_CALLBACK_TRACING_OMPT,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().rocshmem_api_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().hipfile_api_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,
                                               dummy_callback_tracing_callback}})
     {
         if(itr.option)
@@ -3477,11 +3508,13 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
     // function can warn if data was left unflushed, but nothing is written.
     if(skip_output) return;
 
-    // OMPT is rocpd-only: direct CSV/stats (and JSON/Perfetto/OTF2) emission is not
-    // produced for OMPT. OMPT records are written to rocpd and exported to other
-    // formats via `rocpd convert`. The record count above is still tallied so that
-    // rocpd output is produced even when OMPT is the only active trace domain.
-    if constexpr(DomainT != domain_type::OMPT)
+    // OMPT, rocSHMEM, hipFILE do not produce direct CSV/stats output. OMPT is rocpd-only (not
+    // emitted to JSON either), while rocSHMEM is emitted directly only to JSON and rocpd;
+    // both rely on `rocpd convert` for CSV/Perfetto/OTF2. The record count above is still
+    // tallied so that rocpd/JSON output is produced even when one of these is the only
+    // active trace domain.
+    if constexpr(DomainT != domain_type::OMPT && DomainT != domain_type::ROCSHMEM &&
+                 DomainT != domain_type::HIPFILE)
     {
         if(tool::get_config().stats || tool::get_config().summary_output)
         {
@@ -3540,7 +3573,9 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
         tool::pc_sampling_host_trap_buffered_output_t{tool::get_config().pc_sampling_host_trap};
     auto rocdecode_output =
         tool::rocdecode_buffered_output_t{tool::get_config().rocdecode_api_trace};
-    auto rocjpeg_output = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
+    auto rocjpeg_output  = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
+    auto rocshmem_output = tool::rocshmem_buffered_output_t{tool::get_config().rocshmem_api_trace};
+    auto hipfile_output  = tool::hipfile_buffered_output_t{tool::get_config().hipfile_api_trace};
     auto pc_sampling_stochastic_output =
         tool::pc_sampling_stochastic_buffered_output_t{tool::get_config().pc_sampling_stochastic};
 
@@ -3586,6 +3621,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
     generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups, skip_output);
     generate_output(spm_counters_output, outdata, contributions, cleanups, skip_output);
     generate_output(hip_graph_output, outdata, contributions, cleanups, skip_output);
+    generate_output(rocshmem_output, outdata, contributions, cleanups, skip_output);
+    generate_output(hipfile_output, outdata, contributions, cleanups, skip_output);
 
     if(!skip_output && tool::get_config().advanced_thread_trace &&
        !tool_metadata->att_filenames.empty())
@@ -3652,7 +3689,9 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                          pc_sampling_host_trap_output.get_generator(),
                          pc_sampling_stochastic_output.get_generator(),
                          spm_counters_output.get_generator(),
-                         hip_graph_output.get_generator());
+                         hip_graph_output.get_generator(),
+                         rocshmem_output.get_generator(),
+                         hipfile_output.get_generator());
         json_ar.finish_process();
 
         tool::close_json(json_ar);
@@ -3696,7 +3735,9 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                           counters_output.get_generator(),
                           spm_counters_output.get_generator(),
                           ompt_output.get_generator(),
-                          hip_graph_output.get_generator());
+                          hip_graph_output.get_generator(),
+                          rocshmem_output.get_generator(),
+                          hipfile_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&
@@ -3712,6 +3753,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
         auto memory_allocation_elem_data = memory_allocation_output.load_all();
         auto rocdecode_elem_data         = rocdecode_output.load_all();
         auto rocjpeg_elem_data           = rocjpeg_output.load_all();
+
         tool::write_otf2(tool::get_config(),
                          *tool_metadata,
                          getpid(),
@@ -4280,6 +4322,8 @@ rocprofiler_configure(uint32_t                 version,
     if(tool::get_config().marker_api_trace) libs |= ROCPROFILER_MARKER_CORE_TABLE;
     if(tool::get_config().rocdecode_api_trace) libs |= ROCPROFILER_ROCDECODE_TABLE;
     if(tool::get_config().rocjpeg_api_trace) libs |= ROCPROFILER_ROCJPEG_TABLE;
+    if(tool::get_config().rocshmem_api_trace) libs |= ROCPROFILER_ROCSHMEM_TABLE;
+    if(tool::get_config().hipfile_api_trace) libs |= ROCPROFILER_HIPFILE_TABLE;
 
     ROCPROFILER_CALL(
         rocprofiler_at_intercept_table_registration(api_timestamps_callback, libs, nullptr),

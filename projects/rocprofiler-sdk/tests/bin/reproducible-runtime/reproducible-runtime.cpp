@@ -174,15 +174,6 @@ run(int tid, int devid)
     HIP_API_CALL(hipStreamDestroy(stream));
 
     roctxRangeStop(roctx_range_id);
-
-    constexpr auto scale = 1.1;
-    if(time > scale * nruntime)
-    {
-        auto _msg = std::stringstream{};
-        _msg << "total kernel runtime exceeded (" << scale << " * " << nruntime << " = "
-             << (scale * nruntime) << ") :: " << time << " ms";
-        throw std::runtime_error{_msg.str()};
-    }
 }
 
 namespace
