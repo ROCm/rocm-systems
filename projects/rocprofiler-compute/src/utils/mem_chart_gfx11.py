@@ -47,7 +47,7 @@ from utils.utils_analysis import format_bw_human_readable
 
 # Keys = ``metric:`` names under each ``metric_table`` in
 # ``analysis_configs/gfx115x/0300_memory_chart.yaml`` (tables 301–309), in panel order.
-# Commented-out YAML metrics (e.g. TCP Atomic, LDS direct read/write) are omitted.
+# Commented-out YAML metrics (e.g. TCP Atomic) are omitted.
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     # Table 301: Instruction Cache
     ("ICache Requests", 450),
@@ -180,11 +180,17 @@ def _safe_float_sum(
     return total if any_valid else None
 
 
+def _stack_metrics(*lines: str) -> str:
+    """Join panel metric lines with a blank line, skipping suppressed ones."""
+    return "\n\n".join(ln for ln in lines if ln)
+
+
 def _fmt_edge(
     label: str,
     value: Any,  # noqa: ANN401
     width: int = 7,
 ) -> str:
+    """Format one kernel-edge row: ``Label  : value``."""
     label_str = f"{label:<{width}}"
     if value is not None:
         value_str = f": {format_sci(value):>7}"
@@ -334,12 +340,12 @@ def _build_kernel_and_l0(
         "",
         "",
         "",
-        "",
-        "",
         f"[{c_rd}]{_fmt_edge('ICache', m['icache_req'])}[/{c_rd}]",
         f"[{c_rd}]{ka_l}[/{c_rd}]",
         f"[{c_rd}]{_fmt_edge('DCache', m['dcache_req'])}[/{c_rd}]",
         f"[{c_rd}]{ka_l}[/{c_rd}]",
+        "",
+        "",
     ]
     kernel_edges_text = Text.from_markup("\n".join(kernel_edges_lines))
 
@@ -361,7 +367,7 @@ def _build_kernel_and_l0(
         else ""
     )
     lds_panel = Panel(
-        f"{lds_util_line}\n{lds_bw_line}\n{lds_conflict_line}",
+        _stack_metrics(lds_util_line, lds_bw_line, lds_conflict_line),
         title=f"[bold {c_bl}]LDS[/bold {c_bl}]",
         border_style=c_bl,
         width=20,
@@ -375,7 +381,10 @@ def _build_kernel_and_l0(
         else ""
     )
     tcp_panel = Panel(
-        f"{metric_line('Hit Rate', m['tcp_hit'], '%', COLORS['hit'])}\n{tcp_bw_line}",
+        _stack_metrics(
+            metric_line("Hit Rate", m["tcp_hit"], "%", COLORS["hit"]),
+            tcp_bw_line,
+        ),
         title=f"[bold {c_bl}]GL0 (TCP Cache)[/bold {c_bl}]",
         border_style=c_bl,
         width=20,
@@ -384,8 +393,10 @@ def _build_kernel_and_l0(
 
     # SQC panel
     sqc_panel = Panel(
-        f"{metric_line('ICache', m['icache_hit'], '%', COLORS['hit'])}\n"
-        f"{metric_line('DCache', m['dcache_hit'], '%', COLORS['hit'])}",
+        _stack_metrics(
+            metric_line("ICache Hit", m["icache_hit"], "%", COLORS["hit"]),
+            metric_line("DCache Hit", m["dcache_hit"], "%", COLORS["hit"]),
+        ),
         title=f"[bold {c_bl}]SQC[/bold {c_bl}]",
         border_style=c_bl,
         width=20,
@@ -552,10 +563,10 @@ def _build_memory_columns(
     gl2_gcea_edges_text = Text.from_markup("\n".join(gl2_gcea_edges_lines))
 
     gcea_panel = Panel(
-        f"{metric_line('SysArb Util', m['sarb_util'], '%', COLORS['util'])}\n"
+        f"{metric_line('SARB Util', m['sarb_util'], '%', COLORS['util'])}\n"
         f"[dim]{bar(m['sarb_util'])}[/dim]\n"
         "\n"
-        f"{metric_line('Stall', m['sarb_stall'], '%', COLORS['stall'])}",
+        f"{metric_line('SARB Stall', m['sarb_stall'], '%', COLORS['stall'])}",
         title=f"[bold {c_bl}]GCEA[/bold {c_bl}]",
         border_style=c_bl,
         width=16,
