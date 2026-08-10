@@ -82,9 +82,10 @@
  * - 1.28 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED
  * - 1.29 - hsa_amd_image_create_v2, hsa_amd_interop_map_buffer_with_size
  * - 1.30 - hsa_amd_queue_get_info: engine type and SDMA engine ID
+ * - 1.31 - hsa_amd_queue_get_info: queue read/write pointer addresses
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 30
+#define HSA_AMD_INTERFACE_VERSION_MINOR 31
 
 #ifdef __cplusplus
 extern "C" {
@@ -4942,6 +4943,18 @@ typedef enum {
    * The type of this attribute is uint32_t.
    */
   HSA_AMD_QUEUE_INFO_SDMA_ENGINE_ID,
+  /*
+   * Address of the queue's monotonic hardware read pointer. The returned
+   * uint64_t contains an address usable by agents that can directly submit to
+   * this queue. Unsupported queue types return HSA_STATUS_ERROR_INVALID_ARGUMENT.
+   */
+  HSA_AMD_QUEUE_INFO_READ_POINTER,
+  /*
+   * Address of the queue's canonical monotonic write pointer. The returned
+   * uint64_t contains an address usable by agents that can directly submit to
+   * this queue. Unsupported queue types return HSA_STATUS_ERROR_INVALID_ARGUMENT.
+   */
+  HSA_AMD_QUEUE_INFO_WRITE_POINTER,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,
