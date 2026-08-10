@@ -151,7 +151,7 @@ query_rocm_agents()
 int
 device_count()
 {
-    static int const _num_devices = query_rocm_agents();
+    static const int _num_devices = query_rocm_agents();
     return _num_devices;
 }
 

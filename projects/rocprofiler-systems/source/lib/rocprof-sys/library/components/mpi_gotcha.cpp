@@ -397,7 +397,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             if(_comm_entry.updated())
             {
                 static thread_local int _num_updates = 0;
-                static int const        _disable_after =
+                static const int        _disable_after =
                     rocprofsys::get_env<int>(env_vars::MPI_MAX_COMM_UPDATES, 4);
                 if(_num_updates++ < _disable_after) update();
             }

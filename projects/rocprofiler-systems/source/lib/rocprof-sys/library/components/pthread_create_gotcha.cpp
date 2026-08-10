@@ -616,7 +616,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     auto _enable_causal =
         (_use_causal && _sample_child && _active && !_coverage && !_offset);
 
-    static bool const debug_threading_get_id =
+    static const bool debug_threading_get_id =
         get_env<bool>(TIMEMORY_SETTINGS_PREFIX "DEBUG_THREADING_GET_ID", false);
 
     if(debug_threading_get_id)

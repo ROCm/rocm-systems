@@ -504,7 +504,7 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     auto _label = _get_label(_func, _file, _full);
     if(_label.empty()) return;
 
-    static thread_local strset_t const _labels{};
+    static thread_local const strset_t _labels{};
     const auto&                        _label_ref = *_labels.emplace(_label).first;
     auto                               _annotate  = _config.annotate_trace;
 

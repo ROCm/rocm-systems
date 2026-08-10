@@ -111,7 +111,7 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
         return 1;
     };
 
-    static bool const _keep_suffix = rocprofsys::get_env<bool>(
+    static const bool _keep_suffix = rocprofsys::get_env<bool>(
         env_vars::SAMPLING_KEEP_DYNINST_SUFFIX, get_debug_sampling());
 
     // in the dyninst binary rewrite runtime, instrumented functions are appended with

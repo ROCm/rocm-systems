@@ -108,7 +108,7 @@ get_rocprofsys_is_preloaded()
 inline bool
 get_rocprofsys_preload()
 {
-    static bool const _v = []() {
+    static const bool _v = []() {
         auto&& _preload      = get_env(env_vars::PRELOAD, true);
         auto&& _preload_libs = get_env("LD_PRELOAD", std::string{});
         return (_preload &&
