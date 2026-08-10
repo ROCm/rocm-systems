@@ -73,11 +73,13 @@ HIP_TEST_CASE(Unit_hipIpcMemAccess_Semaphores) {
   sem_t *sem_ob1{nullptr}, *sem_ob2{nullptr};
   int Num_devices = 0, CanAccessPeer = 0;
 
-  std::string cmd_line = "rm -rf /dev/shm/sem.my-sem-object*";
-  int res = system(cmd_line.c_str());
-  REQUIRE(res != -1);
-  sem_ob1 = sem_open("/my-sem-object1", O_CREAT | O_EXCL, 0660, 0);
-  sem_ob2 = sem_open("/my-sem-object2", O_CREAT | O_EXCL, 0660, 0);
+  // Use PID-qualified names to avoid collisions with stale semaphores from
+  // prior runs (which may be owned by a different user and unremovable).
+  // Avoids system("rm -rf ...") which is blocked under ASAN.
+  std::string sem_name1 = "/my-sem-object1-" + std::to_string(getpid());
+  std::string sem_name2 = "/my-sem-object2-" + std::to_string(getpid());
+  sem_ob1 = sem_open(sem_name1.c_str(), O_CREAT | O_EXCL, 0660, 0);
+  sem_ob2 = sem_open(sem_name2.c_str(), O_CREAT | O_EXCL, 0660, 0);
   REQUIRE(sem_ob1 != SEM_FAILED);
   REQUIRE(sem_ob2 != SEM_FAILED);
 
@@ -152,11 +154,11 @@ HIP_TEST_CASE(Unit_hipIpcMemAccess_Semaphores) {
     }
     exit(0);
   }
-  if ((sem_unlink("/my-sem-object1")) == -1) {
-    WARN("sem_unlink() call on /my-sem-object1 failed");
+  if ((sem_unlink(sem_name1.c_str())) == -1) {
+    WARN("sem_unlink() call on " << sem_name1 << " failed");
   }
-  if ((sem_unlink("/my-sem-object2")) == -1) {
-    WARN("sem_unlink() call on /my-sem-object2 failed");
+  if ((sem_unlink(sem_name2.c_str())) == -1) {
+    WARN("sem_unlink() call on " << sem_name2 << " failed");
   }
   int rFlag = 0;
   waitpid(pid, &rFlag, 0);
