@@ -42,10 +42,10 @@ permissions:
   contents: read
 
 concurrency:
-  # This workflow only runs on schedule / workflow_dispatch (never on PRs), so
-  # github.event.number is always empty and this effectively groups by commit.
-  # The workflow name is prepended to avoid collisions with other workflows.
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  # This workflow only runs on schedule / workflow_dispatch (never on PRs).
+  # Use workflow name only so overlapping nightly runs cancel each other
+  # consistently, matching therock-multi-arch-ci-asan-nightly.yml.
+  group: ${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
@@ -107,7 +107,6 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
-    secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -132,7 +131,6 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@main
-    secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
