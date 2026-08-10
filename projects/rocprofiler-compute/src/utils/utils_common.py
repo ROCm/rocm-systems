@@ -7,7 +7,6 @@ import ctypes
 import errno
 import io
 import os
-import pty
 import re
 import select
 import shutil
@@ -41,6 +40,11 @@ PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
 INVALID_BLOCK_HINT = (
     "\n\tRun rocprof-compute --list-blocks <arch> to see all block ids/aliases."
 )
+
+
+def is_gfx9(gpu_arch: Optional[str]) -> bool:
+    """Return True if gpu_arch is a gfx9 (CDNA) architecture."""
+    return bool(gpu_arch and gpu_arch.startswith("gfx9"))
 
 
 def is_gfx115x(gpu_arch: Optional[str]) -> bool:
@@ -473,7 +477,7 @@ def capture_subprocess_output(
     # Use a PTY in profile mode to prevent instrumentation output from
     # being interleaved with workload output.
     if profileMode:
-        pty_parent_fd, pty_child_fd = pty.openpty()
+        pty_parent_fd, pty_child_fd = os.openpty()
         stdout_arg = pty_child_fd
         stderr_arg = pty_child_fd
     else:
@@ -699,7 +703,7 @@ def load_panel_configs(
                 panel_config = config_yml["Panel Config"]
                 for data_source in panel_config["data source"]:
                     metric_table = data_source.get("metric_table")
-                    if metric_table and metric_table["metric"] is None:
+                    if metric_table and metric_table.get("metric") is None:
                         metric_table["metric"] = {}
                 configs[panel_config["id"]] = panel_config
 

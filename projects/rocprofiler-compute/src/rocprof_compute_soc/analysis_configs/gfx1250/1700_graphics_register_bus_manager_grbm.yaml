@@ -1,0 +1,106 @@
+# =============================================================================
+# gfx1250 GRBM (Graphics Register Bus Manager) Metrics
+# =============================================================================
+#
+# GRBM provides top-level utilization metrics for major GPU blocks.
+# GRBM_GUI_ACTIVE_sum represents the total cycles the GPU is active and serves
+# as the baseline for utilization calculations.
+#
+# =============================================================================
+
+Panel Config:
+  id: 1700
+  title: GRBM (Graphics Register Bus Manager)
+  description: |-
+    GRBM metrics for gfx1250. Provides top-level utilization metrics for major
+    GPU blocks, using GRBM_GUI_ACTIVE_sum as the baseline for active GPU cycles.
+
+  data source:
+
+  - metric_table:
+      id: 1701
+      title: "GRBM Metrics"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GPU Active Cycles:
+          avg: AVG(GRBM_GUI_ACTIVE_sum)
+          min: MIN(GRBM_GUI_ACTIVE_sum)
+          max: MAX(GRBM_GUI_ACTIVE_sum)
+          unit: Cycles
+        # CP Utilization: GRBM_CP_BUSY is a single OR-gate signal ("any of CPC/CPF
+        # blocks are busy") per GRBM instance. Same-pass collection (grouping policy
+        # 17.1.1) eliminates cross-pass variance; residual <1% overshoot is
+        # hardware OR-gate measurement noise, not a software artifact.
+        CP Utilization:
+          avg: AVG((100 * GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          min: MIN(100 * GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          max: MAX((100 * GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          unit: Percent
+        SPI Utilization:
+          avg: AVG((100 * GRBM_SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          min: MIN((100 * GRBM_SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          max: MAX((100 * GRBM_SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          unit: Percent
+        UTCL1 Utilization:
+          avg: AVG((100 * GRBM_UTCL1_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          min: MIN((100 * GRBM_UTCL1_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          max: MAX((100 * GRBM_UTCL1_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          unit: Percent
+        UTCL2 Utilization:
+          avg: AVG((100 * GRBM_UTCL2_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          min: MIN((100 * GRBM_UTCL2_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          max: MAX((100 * GRBM_UTCL2_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          unit: Percent
+        GL1 Utilization:
+          avg: AVG((100 * GRBM_GL1CC_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          min: MIN((100 * GRBM_GL1CC_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          max: MAX((100 * GRBM_GL1CC_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          unit: Percent
+        GLARB Utilization:
+          avg: AVG((100 * GRBM_GLARB_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          min: MIN((100 * GRBM_GLARB_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          max: MAX((100 * GRBM_GLARB_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          unit: Percent
+        SDMA Utilization:
+          avg: AVG((100 * GRBM_SDMA_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          min: MIN((100 * GRBM_SDMA_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          max: MAX((100 * GRBM_SDMA_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          unit: Percent
+        CH Utilization:
+          avg: AVG((100 * GRBM_CH_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          min: MIN((100 * GRBM_CH_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          max: MAX((100 * GRBM_CH_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          unit: Percent
+
+  metrics_description:
+    GPU Active Cycles: >-
+      Total GPU-active cycles during the measurement window.
+
+    CP Utilization: >-
+      Percentage of GPU-active cycles the Command Processor is busy.
+
+    SPI Utilization: >-
+      Percentage of GPU-active cycles the SPI is dispatching workgroups.
+
+    UTCL1 Utilization: >-
+      Percentage of GPU-active cycles UTCL1 is processing translation requests.
+
+    UTCL2 Utilization: >-
+      Percentage of GPU-active cycles UTCL2 is performing page table walks.
+
+    GL1 Utilization: >-
+      Percentage of GPU-active cycles GL1 is processing requests from WGPs.
+
+    GLARB Utilization: >-
+      Percentage of GPU-active cycles Graphics Level Arbiter is forwarding requests from GL1 to GL2.
+
+    SDMA Utilization: >-
+      Percentage of GPU-active cycles SDMA is performing data copy operations.
+
+    CH Utilization: >-
+      Percentage of GPU-active cycles the Central Hub is handling traffic between shader engines and GL2.

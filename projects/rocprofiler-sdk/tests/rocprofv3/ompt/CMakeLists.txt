@@ -196,6 +196,44 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED rocprofv3-test-ompt-host-parallel
     DISABLED "${IS_HOST_DISABLED}")
 
+# Host-side granular filter: --ompt-trace task must record only the task-category
+# operations (no parallel/sync/mutex/target leakage). Uses 4 threads so that tasks are
+# scheduled across worker threads rather than run inline.
+set(ompt-host-task-output-dir ${CMAKE_CURRENT_BINARY_DIR}/openmp-host-task-trace)
+set(ompt-host-task-env
+    "OMP_NUM_THREADS=4"
+    "OMP_DISPLAY_ENV=1"
+    "ROCR_VISIBLE_DEVICES=0"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    )
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-ompt-host-task
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --ompt-trace=task -d
+        ${ompt-host-task-output-dir} -o out --output-format rocpd --log-level env --
+        $<IF:$<TARGET_EXISTS:openmp-host>,$<TARGET_FILE:openmp-host>,openmp-host>
+    DEPENDS openmp-host
+    TIMEOUT 100
+    LABELS "integration-tests;openmp-host"
+    ENVIRONMENT "${ompt-host-task-env}"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-ompt-host-task
+    DISABLED "${IS_HOST_DISABLED}")
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-ompt-host-task
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS ${PYTEST_ARGS} -k test_granular_host_filter_only_task_ops --rocpd-input
+         ${ompt-host-task-output-dir}/out_results.db
+    DISCOVERY_ARGS ${PYTEST_ARGS} -k test_granular_host_filter_only_task_ops
+    TIMEOUT 45
+    LABELS "integration-tests;openmp-host"
+    FIXTURES_REQUIRED rocprofv3-test-ompt-host-task
+    DISABLED "${IS_HOST_DISABLED}")
+
 # Explicit "trace everything" form
 set(ompt-all-output-dir ${CMAKE_CURRENT_BINARY_DIR}/openmp-target-all-trace)
 rocprofiler_add_integration_execute_test(
