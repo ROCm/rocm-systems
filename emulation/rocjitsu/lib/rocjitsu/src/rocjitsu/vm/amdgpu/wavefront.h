@@ -560,7 +560,15 @@ public:
   /// but unlike debug_halted it does not imply an architectural stop reason.
   bool debug_suspended() const { return debug_suspended_; }
   void set_debug_suspended(bool v) { debug_suspended_ = v; }
-  bool debug_paused() const { return debug_halted_ || debug_suspended_; }
+  /// @brief Runtime-suspended: the queue's queue_percentage went to zero.
+  /// @details A separate reason from the debugger's, because the two overlap.
+  /// Sharing one bit let a runtime resume clear a debugger pause, and a
+  /// debugger or CWSR resume clear an active runtime pause.
+  bool runtime_suspended() const { return runtime_suspended_; }
+  void set_runtime_suspended(bool v) { runtime_suspended_ = v; }
+
+  /// @brief Whether any reason currently keeps this wave from being issued.
+  bool debug_paused() const { return debug_halted_ || debug_suspended_ || runtime_suspended_; }
   bool fatal_exception_pending() const { return fatal_exception_pending_; }
   void set_fatal_exception_pending(bool pending) { fatal_exception_pending_ = pending; }
 
@@ -682,6 +690,7 @@ public:
     trap_saved_exec_ = 0;
     debug_halted_ = false;
     debug_suspended_ = false;
+    runtime_suspended_ = false;
     fatal_exception_pending_ = false;
     single_step_ = false;
     trap_id_ = 0;
@@ -761,6 +770,7 @@ private:
   uint64_t trap_saved_exec_ = 0;     ///< Interrupted EXEC restored after handler completion.
   bool debug_halted_ = false;        ///< Stopped by the debugger (skipped by scheduler).
   bool debug_suspended_ = false;     ///< Queue-suspended for a stable CWSR snapshot.
+  bool runtime_suspended_ = false;   ///< Queue-suspended by the runtime (queue_percentage 0).
   bool fatal_exception_pending_ = false;
   bool single_step_ = false;   ///< Execute one instruction on resume, then re-stop.
   uint32_t trap_id_ = 0;       ///< Trap id from the last s_trap (breakpoint = 1).

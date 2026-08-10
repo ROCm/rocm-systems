@@ -289,6 +289,43 @@ TEST(WaveDebugTest, UnmappedScalarLoadReportsMemoryViolationAfterInstruction) {
   fx.gpu_mem.unregister_process(kProcessId);
 }
 
+// Runtime suspension (queue_percentage 0) and debugger suspension overlap in
+// time and are lifted by different actors. Representing both with one wave bit
+// let a runtime resume clear a debugger pause, and a debugger or CWSR resume
+// clear an active runtime pause -- in either case the wave started running
+// while something still meant it to be stopped.
+TEST(WaveDebugTest, RuntimeAndDebuggerSuspensionDoNotClobberEachOther) {
+  WaveDebugFixture fx;
+  fx.gpu_mem.write32(kKernelAddr, kSEndpgm);
+  auto *wave = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_FALSE(wave->debug_paused());
+
+  // Both reasons applied; releasing either one alone must not resume the wave.
+  wave->set_runtime_suspended(true);
+  wave->set_debug_suspended(true);
+  EXPECT_TRUE(wave->debug_paused());
+
+  wave->set_debug_suspended(false);
+  EXPECT_TRUE(wave->runtime_suspended());
+  EXPECT_TRUE(wave->debug_paused()) << "a debugger resume lifted the runtime pause";
+
+  wave->set_runtime_suspended(false);
+  EXPECT_FALSE(wave->debug_paused());
+
+  // And the other way round.
+  wave->set_runtime_suspended(true);
+  wave->set_debug_suspended(true);
+  wave->set_runtime_suspended(false);
+  EXPECT_TRUE(wave->debug_suspended());
+  EXPECT_TRUE(wave->debug_paused()) << "a runtime resume lifted the debugger pause";
+
+  // A halt is a third, independent reason.
+  wave->set_debug_suspended(false);
+  wave->set_debug_halted(true);
+  EXPECT_TRUE(wave->debug_paused());
+}
+
 // TRAPSTS.EXCP is architecturally sticky, so "the bit changed" is not the same
 // question as "this instruction raised the cause". Delivering on the rising
 // edge went permanently quiet for any cause already latched -- including every

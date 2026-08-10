@@ -658,6 +658,7 @@ void CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint
                                     uint32_t ring_size, uint32_t queue_percentage) {
   const bool suspended = queue_percentage == 0;
   bool changed = false;
+  bool wake_command_processor = false;
   {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     for (auto &q : hw_queues_) {
@@ -666,6 +667,8 @@ void CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint
         q.ring_size = ring_size;
         changed = q.runtime_suspended != suspended;
         q.runtime_suspended = suspended;
+        if (changed && !suspended)
+          wake_command_processor = std::exchange(q.debug_work_deferred, false);
         break;
       }
     }
@@ -677,12 +680,19 @@ void CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
         auto *wave = cu->wf(slot);
         if (!wave->is_halted() && wave->process_id() == process_id && wave->queue_id() == queue_id)
-          wave->set_debug_suspended(suspended);
+          // The runtime's own pause reason. Writing the debugger's bit here let
+          // a runtime resume clear a debugger pause, and a debugger or CWSR
+          // resume clear an active runtime pause.
+          wave->set_runtime_suspended(suspended);
       }
     });
     if (!suspended)
       cu->schedule_work_async();
   }
+  // Runtime resume has to release deferred queue work the same way a debugger
+  // resume does, or already-fetched work sits until the next doorbell.
+  if (wake_command_processor && engine())
+    engine()->schedule_event_now(&doorbell_event_);
 }
 
 void CommandProcessor::set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id,
@@ -1355,7 +1365,7 @@ void CommandProcessor::on_cu_idle() {
   // Retire any non-kernel entries (barriers with total_wgs==0) that are now at
   // the head, then drain again so a dependent kernel behind them can proceed.
   for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
-    if (hw_queues_[qi].debug_suspended)
+    if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
       continue;
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
@@ -1383,7 +1393,7 @@ void CommandProcessor::on_cu_idle() {
   for (size_t i = 0; i < cus_.size(); ++i)
     was_idle[i] = cus_[i]->is_idle();
   for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
-    if (hw_queues_[qi].debug_suspended)
+    if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
       continue;
     auto &qs = new_queue_states_[qi];
     if (qs.next_dispatch_idx < qs.entries.size()) {
@@ -1411,7 +1421,8 @@ bool CommandProcessor::step() {
 
 void CommandProcessor::process_queues() {
   for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
-    if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended)
+    if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended ||
+        hw_queues_[qi].runtime_suspended)
       continue;
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
@@ -2069,7 +2080,8 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
     progress = false;
 
     for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
-      if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended)
+      if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended ||
+          hw_queues_[qi].runtime_suspended)
         continue;
       auto &qs = new_queue_states_[qi];
 
