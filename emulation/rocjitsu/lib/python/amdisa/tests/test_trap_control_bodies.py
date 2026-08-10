@@ -57,6 +57,15 @@ class TestSRfeBody:
         assert 'kStatusHalt' in body
         assert 'wf.set_debug_halted(true);' in body
 
+    def test_every_spelling_of_the_return_gets_a_body(self):
+        """GFX1250 spells it S_RFE_I64 (SOP1 opcode 74). Omitting a spelling
+        leaves that ISA's generated execute_impl() an empty no-op, so its trap
+        handlers can never return."""
+        for name in ('S_RFE', 'S_RFE_B64', 'S_RFE_I64'):
+            body = _body(name)
+            assert 'kPcAddressMask' in body, f'{name} has no trap-return body'
+            assert 'wf.set_exec(wf.trap_saved_exec());' in body, name
+
 
 class TestSendmsgBody:
     def test_reports_msg_interrupt_from_inside_the_handler(self):

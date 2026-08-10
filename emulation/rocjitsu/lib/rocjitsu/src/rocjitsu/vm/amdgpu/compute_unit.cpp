@@ -614,7 +614,12 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   if (debug_probe && memory_violation_handler_)
     debug_memory_fault = std::ranges::any_of(dbg_addrs, access_faults);
 
-  const bool trap_return = std::string_view(inst->mnemonic()) == "s_rfe_b64";
+  // Every ISA's spelling of the trap return has to be recognised here, or that
+  // ISA's handler completes without KFD ever being told. GFX1250 spells it
+  // s_rfe_i64.
+  const std::string_view mnemonic(inst->mnemonic());
+  const bool trap_return =
+      mnemonic == "s_rfe_b64" || mnemonic == "s_rfe_i64" || mnemonic == "s_rfe";
 
   // Report a faulting access here, between the PC advance and the pipeline
   // decision. Both orderings matter. The report has to come after the advance

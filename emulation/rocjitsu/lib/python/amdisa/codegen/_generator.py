@@ -3725,7 +3725,12 @@ class CodeGenerator:
             enabled=enabled,
         )
 
-    _TRAP_RETURN_NAMES = ('S_RFE', 'S_RFE_B64')
+    # The trap-handler control ops are spelled differently per ISA. Every
+    # spelling has to be listed: an omitted one derives as `true_nop` and its
+    # generated execute_impl() comes out an empty body, which leaves that ISA's
+    # trap handlers unable to return at all. GFX1250 spells the return
+    # S_RFE_I64 (SOP1 opcode 74).
+    _TRAP_RETURN_NAMES = ('S_RFE', 'S_RFE_B64', 'S_RFE_I64')
     _TRAP_SENDMSG_NAMES = ('S_SENDMSG', 'S_SENDMSGHALT')
 
     def _trap_control_body(self, sem: InstructionSemantics) -> str | None:
