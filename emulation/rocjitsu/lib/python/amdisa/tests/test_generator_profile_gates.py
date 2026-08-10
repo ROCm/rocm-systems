@@ -2654,7 +2654,9 @@ def test_generated_execute_shared_calls_have_definitions(amdgpu_generated_root: 
     assert not missing
 
 
-def test_gfx1250_helper_blocks_emit_scaled_wmma_hooks():
+def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
+    gfx1250_generated_root: Path,
+):
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='gfx1250',
@@ -2663,9 +2665,57 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_hooks():
 
     assert codegen._supports_gfx1250_scaled_wmma_vop3px2()
     assert 'VWmmaScaleF32Vop3px2' in (codegen._emit_gfx1250_scaled_wmma_vop3px2_class())
-    assert 'isWmmaScaleF32Vop3px2' in (
-        codegen._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers()
-    )
+    helpers = codegen._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers()
+    assert 'isVop3pOp' in helpers
+    assert 'isWmmaScaleF32Vop3px2' not in helpers
+
+    decoder = (gfx1250_generated_root / 'decoder.cpp').read_text()
+    decode_body = decoder.split(
+        'std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {'
+    )[1].split('std::unique_ptr<Instruction> Decoder::decodeInvalid', 1)[0]
+    assert 'isWmmaScaleF32Vop3px2' not in decode_body
+    assert decoder.count('&Decoder::decodeVWmmaScaleF32Vop3px2,') == 2
+    assert 'if (!isVop3pOp(opcode[2], 0x33)' in decoder
+
+
+@pytest.mark.parametrize(
+    ('arch_name', 'expected_vopd_indices'),
+    [
+        ('rdna3', set(range(0x190, 0x198))),
+        ('rdna3_5', set(range(0x190, 0x198))),
+        ('rdna4', set(range(0x190, 0x198))),
+        ('gfx1250', set(range(0x190, 0x198)) | set(range(0x19E, 0x1A0))),
+    ],
+)
+def test_vopd_dispatch_uses_primary_decode_table(
+    amdgpu_generated_root: Path,
+    arch_name: str,
+    expected_vopd_indices: set[int],
+):
+    arch_root = amdgpu_generated_root / arch_name
+    decoder = (arch_root / 'decoder.cpp').read_text()
+    decode_body = decoder.split(
+        'std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {'
+    )[1].split('std::unique_ptr<Instruction> Decoder::decodeInvalid', 1)[0]
+
+    assert 'Vopd::is_vopd' not in decode_body
+    primary_table = decoder.split('Decoder::primary_decode_table = {', 1)[1].split(
+        '\n};', 1
+    )[0]
+    primary_entries = [
+        line.strip().removesuffix(',')
+        for line in primary_table.splitlines()
+        if line.strip()
+    ]
+    actual_vopd_indices = {
+        index
+        for index, entry in enumerate(primary_entries)
+        if entry == '&Decoder::decodeVopd'
+    }
+    assert actual_vopd_indices == expected_vopd_indices
+    assert 'Decoder::decodeVopd(const MachineInst *opcode)' in decoder
+    assert 'is_vopd' not in (arch_root / 'vopd.h').read_text()
+    assert 'is_vopd' not in (arch_root / 'vopd.cpp').read_text()
 
 
 @pytest.mark.parametrize(
@@ -2815,7 +2865,7 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     cpp = (tmp_path / 'gfx1250' / 'vopd.cpp').read_text()
     exec_cpp = (tmp_path / 'gfx1250' / 'vopd_exec.cpp').read_text()
 
-    assert '(word0 >> 24) == 0xCF' in cpp
+    assert '(word0_ >> 24) == 0xCF' in cpp
     assert '[[maybe_unused]] bool vopd3' not in cpp
     assert 'vopd3 ? OperandType::OPR_SRC_SIMPLE : OperandType::OPR_SRC' in cpp
     assert 'bool literal_uses_f64_high_bits' in cpp
@@ -2875,7 +2925,7 @@ def test_rdna4_vopd_template_uses_available_src_operand_type(tmp_path):
     assert 'OperandType::OPR_SRC_SIMPLE' not in cpp
     assert 'vopd3 ? OperandType::OPR_SRC : OperandType::OPR_SRC' not in cpp
     assert 'return Operand(bits, OperandType::OPR_SRC, encoded);' in cpp
-    assert '(word0 >> 24) == 0xCF' not in cpp
+    assert '(word0_ >> 24) == 0xCF' not in cpp
     assert 'Format::Vopd3' not in cpp
     assert 'literal_uses_f64_high_bits' in cpp
     assert 'is_float64_op' not in cpp
@@ -3392,3 +3442,42 @@ def test_only_gfx1250_generates_implicit_use_operands_overrides(
             f'{arch} has no VGPR-MSB banking, so implicit_use_operands() overrides '
             f'are dead weight: {offenders}'
         )
+
+
+@pytest.mark.parametrize(
+    'src_file,class_name',
+    [
+        ('vflat.cpp', 'FlatLoadD16U8Vflat'),
+        ('vglobal.cpp', 'GlobalLoadD16U8Vglobal'),
+        ('vscratch.cpp', 'ScratchLoadD16U8Vscratch'),
+    ],
+)
+def test_gfx1250_d16_load_preserves_destination_without_printing_it(
+    gfx1250_generated_root: Path, src_file, class_name
+):
+    """A D16 partial-def load reads vdst via the implicit hooks, not src_operands_.
+
+    GLOBAL/SCRATCH share semantic_class 'flat_load' with FLAT but emit to
+    separate files, so cover all three. Listing vdst as a source would print it
+    twice in disassembly; pin that a future generator change doing so fails here.
+    """
+    cpp = (gfx1250_generated_root / src_file).read_text()
+    ctor = _generated_constructor_body(cpp, class_name)
+
+    # vdst is a destination, never a source (kept out of the printed operands).
+    assert 'dst_operands_[0] = &vdst;' in ctor
+    assert not re.search(r'src_operands_\[[^\]]*\]\s*=\s*&vdst;', ctor)
+
+    # The preserved-destination read is modeled via both implicit hooks.
+    uses_override = f'void {class_name}::implicit_uses(RegisterSet &uses) const'
+    operands_override = f'void {class_name}::implicit_use_operands('
+    assert uses_override in cpp
+    assert operands_override in cpp
+    uses_start = cpp.index(uses_override)
+    uses_body = cpp[uses_start : cpp.index('\n}', uses_start)]
+    assert 'if (auto r = vdst.to_register_ref())' in uses_body
+    assert 'uses.expand(*r);' in uses_body
+    operands_start = cpp.index(operands_override)
+    operands_body = cpp[operands_start : cpp.index('\n}', operands_start)]
+    assert 'if (vdst.to_register_ref())' in operands_body
+    assert 'operands.push_back(&vdst);' in operands_body

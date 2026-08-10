@@ -1143,13 +1143,24 @@ class CodeGenerator:
         VOPD is skipped by the normal XML instruction generation because it
         uses a dual-slot encoding with bespoke operand packing. Keeping the
         target-specific C++ body here lets the same regeneration path recreate
-        the VOPD files and the generated decoder hook together.
+        the VOPD files and generated decoder-table entries together.
         """
         if not self._supports_generated_vopd():
             return
 
         arch = self.isa_spec.arch_name
-        has_vopd3 = self.isa_spec.profile.has_vopd3
+        vopd_encoding_prefixes = self.isa_spec.profile.vopd_encoding_prefixes
+        vopd_prefixes = [
+            prefix for prefix in vopd_encoding_prefixes if not prefix.is_vopd3
+        ]
+        vopd3_prefixes = [
+            prefix for prefix in vopd_encoding_prefixes if prefix.is_vopd3
+        ]
+        if len(vopd_prefixes) != 1 or len(vopd3_prefixes) > 1:
+            raise ValueError(f'{arch} has invalid VOPD encoding prefix metadata')
+        vopd_prefix = vopd_prefixes[0]
+        vopd3_prefix = vopd3_prefixes[0] if vopd3_prefixes else None
+        has_vopd3 = vopd3_prefix is not None
         if self.isa_spec.profile.split_execution_sources:
             vopd_exec_fn = self._split_execute_expr('Vopd')
             vopd_registration_decl = ''
@@ -1618,10 +1629,10 @@ class CodeGenerator:
                 '@VOPD_FLOAT64_CASES@', vopd_float64_case_labels
             )
             vopd3_constructor_branch = cpp_block('''
-              if ((word0_ >> 24) == 0xCF) {
+              if ((word0_ >> @VOPD3_PREFIX_SHIFT@) == @VOPD3_PREFIX@) {
                 format_ = Format::Vopd3;
                 size_ = 12;
-                encoding_id_ = 0xCF;
+                encoding_id_ = @VOPD3_PREFIX@;
                 word2_ = words[2];
                 opx_ = static_cast<uint16_t>((word0_ >> 18) & 0x3F);
                 opy_ = static_cast<uint16_t>((word0_ >> 12) & 0x3F);
@@ -1650,6 +1661,9 @@ class CodeGenerator:
                                                    : Operand(y_bits, OperandType::OPR_VGPR, vsrcy2);
               } else {
             ''')
+            vopd3_constructor_branch = vopd3_constructor_branch.replace(
+                '@VOPD3_PREFIX_SHIFT@', str(32 - vopd3_prefix.prefix_bits)
+            ).replace('@VOPD3_PREFIX@', f'0x{vopd3_prefix.prefix:X}')
             vopd3_constructor_close = '              }'
             vopd3_init_operands_prefix = cpp_block('''
               const bool vopd3 = format_ == Format::Vopd3;
@@ -1747,7 +1761,6 @@ class CodeGenerator:
             {
               public:
               explicit Vopd(const MachineInst *inst);
-              static bool is_vopd(const MachineInst *inst);
               void execute_impl(amdgpu::Wavefront &wf);
 
               private:
@@ -1905,11 +1918,6 @@ class CodeGenerator:
 
             } // namespace
 
-            bool Vopd::is_vopd(const MachineInst *inst) {
-              uint32_t word0 = *reinterpret_cast<const uint32_t *>(inst);
-              return @VOPD3_IS_VOPD_CHECK@(word0 >> 26) == 0x32;
-            }
-
             const char *Vopd::op_name(uint16_t op) {
               switch (op) {
             @VOPD_OP_NAME_CASES@
@@ -1939,7 +1947,7 @@ class CodeGenerator:
 
             @VOPD3_CONSTRUCTOR_BRANCH@
                 format_ = Format::VopdXy;
-                encoding_id_ = 0x32;
+                encoding_id_ = @VOPD_PREFIX@;
                 opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
                 opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
                 uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
@@ -2073,14 +2081,11 @@ class CodeGenerator:
             .replace('@VOPD3_HEADER_DECLS@', vopd3_header_decls)
             .replace('@VOPD_SLOT_CONSTANTS@', vopd_slot_constants)
             .replace('@VOPD3_UNUSED_ATTR@', vopd3_unused_attr)
-            .replace(
-                '@VOPD3_IS_VOPD_CHECK@',
-                '(word0 >> 24) == 0xCF || ' if has_vopd3 else '',
-            )
             .replace('@VOPD_OP_NAME_CASES@', vopd_op_name_cases)
             .replace('@VOPD3_MODEL_HELPERS@', vopd3_model_helpers)
             .replace('@VOPD3_CONSTRUCTOR_BRANCH@', vopd3_constructor_branch)
             .replace('@VOPD3_CONSTRUCTOR_CLOSE@', vopd3_constructor_close)
+            .replace('@VOPD_PREFIX@', f'0x{vopd_prefix.prefix:X}')
             .replace('@VOPD3_INIT_OPERANDS_PREFIX@', vopd3_init_operands_prefix)
             .replace('@VOPD3_INIT_OPERANDS_SUFFIX@', vopd3_init_operands_suffix)
             .replace('@VOPD_ADD_SLOT_SOURCE_CASES@', vopd_add_slot_source_cases)
@@ -2862,6 +2867,21 @@ class CodeGenerator:
         'V_DOT4C_',
         'V_DOT8C_',
     )
+    # D16 load semantic classes. Stores share the d16_hi/d16_lo flags, so the
+    # class gate is what restricts the partial-def treatment to loads.
+    # global/scratch loads use the 'flat_load' class. Byte/short buffer D16 loads
+    # (e.g. buffer_load_ubyte_d16) use 'buffer_load'/'tbuffer_load' and execute
+    # correctly; packed D16 FORMAT loads use the non-executable
+    # 'buffer_load_format_d16' class (metadata-only, see semantics._derive_buffer_data).
+    _D16_LOAD_CLASSES = frozenset(
+        {
+            'flat_load',
+            'buffer_load',
+            'tbuffer_load',
+            'ds_read',
+            'buffer_load_format_d16',
+        }
+    )
 
     def _dst_is_also_source(self, inst: Instruction) -> bool:
         """Return True if the instruction reads from its destination operand.
@@ -2889,6 +2909,24 @@ class CodeGenerator:
             or name in self._READS_DST_MNEMONICS
             or name.startswith(self._READS_DST_PREFIXES)
             or name.startswith(self._READS_DST_DOT_PREFIXES)
+        )
+
+    def _d16_load_reads_dst(self, inst: Instruction) -> bool:
+        """Return True for a D16(_HI) load whose last dst register is partial.
+
+        The last register is partial when the written bytes (num_elems *
+        elem_size) do not fill whole 32-bit registers (e.g. ushort_d16, or
+        format_d16_xyz).
+        """
+        if not self.semantics:
+            return False
+        sem = self.semantics.instructions.get(inst.name)
+        if not sem or sem.num_elems is None or sem.elem_size is None:
+            return False
+        return (
+            (sem.d16_hi or sem.d16_lo)
+            and (sem.num_elems * sem.elem_size) % 4 != 0
+            and sem.semantic_class in self._D16_LOAD_CLASSES
         )
 
     def _operand_size_override(
@@ -3608,13 +3646,6 @@ class CodeGenerator:
 
             bool isVop3pOp(const MachineInst opcode, uint32_t op) {
               return (opcode >> 24) == 0xcc && ((opcode >> 16) & 0xff) == op;
-            }
-
-            bool isWmmaScaleF32Vop3px2(const MachineInst *opcode) {
-              if (!isVop3pOp(opcode[0], 0x35) && !isVop3pOp(opcode[0], 0x3a))
-                return false;
-
-              return isVop3pOp(opcode[2], 0x33) || isVop3pOp(opcode[2], 0x88);
             }
 
             } // namespace
@@ -4648,6 +4679,16 @@ class CodeGenerator:
 
         if cls in ('buffer_store', 'tbuffer_store'):
             return self._gen_buffer_store(dst_ops, src_ops, sem, cls)
+
+        if cls in ('buffer_load_format_d16', 'buffer_store_format_d16'):
+            # Packed D16 FORMAT execution (two 16-bit components per VGPR) is not
+            # modeled by the memory pipeline; the class is metadata-only so the
+            # partial-def liveness of D16 FORMAT loads is still emitted.
+            return (
+                '  (void)wf;\n'
+                '  throw util::UnimplementedInst(mnemonic()); '
+                '// packed D16 FORMAT execution intentionally unimplemented'
+            )
 
         if cls in (
             'ds_read',
@@ -6604,6 +6645,22 @@ class CodeGenerator:
                     f'mfma_src2_encoding({expr}, '
                     'reinterpret_cast<const OpEncoding*>(inst)->acc_cd)'
                 )
+        # Dedicated AccVGPR types (accvgpr read/write/mov) are always accumulator
+        # regs, but their raw field is below the canonical ACC selector range that
+        # name()/to_register_ref() match. Canonicalize so those paths see the reg;
+        # the value still resolves to the same unified index for execute.
+        if ctx.operand_type == 'OPR_ACCVGPR':
+            # vdst field holds the accumulator number directly (0..255).
+            expr = f'({expr} + OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN)'
+        elif ctx.operand_type == 'OPR_SRC_ACCVGPR':
+            # 9-bit source field encodes acc N as 256 + N; shift into [768, 1023].
+            # Only shift a well-formed field (>= 256); a raw < 256 would escape into
+            # [512, 767], which vgpr_index() reads as an out-of-range physical VGPR.
+            expr = (
+                f'({expr} >= 256 ? '
+                f'{expr} + (OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN - 256) : '
+                f'{expr})'
+            )
         return expr
 
     @classmethod
@@ -6760,6 +6817,43 @@ class CodeGenerator:
                     dst_idx = 0
                     vgpr_msb_src_role_idx = 0
                     reads_dst = self._dst_is_also_source(inst)
+                    # D16(_HI) loads read the destination they partially write.
+                    # Model it as an implicit use so vdst stays out of the
+                    # printed operand list (see _d16_load_reads_dst). The
+                    # override declaration/definition is emitted below, sharing
+                    # the path with generic partial defs (buffer/tbuffer loads
+                    # name the dest 'vdata' and are sized as a full 32-bit
+                    # register, so _partial_def_outputs does not catch them).
+                    d16_implicit_use_opnd = None
+                    # Offset (in 32-bit registers) of the one partially-written
+                    # register within the destination: only the last register of
+                    # an odd-count FORMAT load (e.g. format_d16_xyz) is partial.
+                    d16_partial_reg_offset = 0
+                    if self._d16_load_reads_dst(inst):
+                        # FLAT/GLOBAL/SCRATCH/DS name the dest 'vdst'; MUBUF/MTBUF
+                        # (buffer/tbuffer) name it 'vdata'.
+                        d16_implicit_use_opnd = next(
+                            (
+                                o.name
+                                for o in inst.operands
+                                if o.is_output and o.name in ('vdst', 'sdst', 'vdata')
+                            ),
+                            None,
+                        )
+                        # Fail loudly: _d16_load_reads_dst() matched, so a
+                        # destination read must be modeled. A None here (e.g. a
+                        # future dest rename) would silently skip both the
+                        # implicit_uses declaration and definition below, losing
+                        # the preserved-destination read from liveness.
+                        assert d16_implicit_use_opnd is not None, (
+                            f'{inst.name}: D16 load reads its destination, but no '
+                            "'vdst'/'sdst'/'vdata' output operand was found to model "
+                            'the preserved-destination read'
+                        )
+                        d16_sem = self.semantics.instructions.get(inst.name)
+                        d16_total_bytes = d16_sem.num_elems * d16_sem.elem_size
+                        d16_vgpr_count = (d16_total_bytes + 3) // 4  # round up
+                        d16_partial_reg_offset = d16_vgpr_count - 1
                     # These gfx1250-only WMMA source-format fields derive the
                     # src0/src1 operand sizes from the instruction shape.
                     gfx1250_f8f6f4_shape = self._gfx1250_f8f6f4_wmma_shape(inst)
@@ -7078,6 +7172,23 @@ class CodeGenerator:
                                     'override'
                                 )
                             )
+                    elif d16_implicit_use_opnd:
+                        public_members.append(
+                            cgen.Statement(
+                                'void implicit_uses(RegisterSet &uses) const override'
+                            )
+                        )
+                        # Operand-backed twin for VGPR-MSB banked profiles
+                        # (gfx1250), which read banked VGPRs only from
+                        # implicit_use_operands(); see _partial_def_outputs above.
+                        if self.isa_spec.profile.uses_vgpr_msb_indexing:
+                            public_members.append(
+                                cgen.Statement(
+                                    'void implicit_use_operands('
+                                    'std::vector<const ::rocjitsu::Operand *> &operands) const '
+                                    'override'
+                                )
+                            )
                     elif _writelane_implicit_use_opnd:
                         public_members.append(
                             cgen.Statement(
@@ -7146,6 +7257,8 @@ class CodeGenerator:
                             'buffer_atomic',
                             'tbuffer_load',
                             'tbuffer_store',
+                            'buffer_load_format_d16',
+                            'buffer_store_format_d16',
                             'ds_read',
                             'ds_read2',
                             'ds_write',
@@ -8202,6 +8315,59 @@ class CodeGenerator:
                                     f'const {{\n'
                                     f'  {inst.fmt_true_enc_name}::implicit_use_operands(operands);\n'
                                     f'{_pd_operands_body}'
+                                    f'}}'
+                                )
+                            )
+                    elif d16_implicit_use_opnd:
+                        # Single-register loads read the whole destination; a
+                        # multi-register FORMAT load only reads its last (partial)
+                        # register, so expand just that one.
+                        if d16_partial_reg_offset:
+                            d16_expand_stmt = (
+                                f'uses.expand(RegisterRef{{r->cls, '
+                                f'static_cast<uint16_t>(r->index + '
+                                f'{d16_partial_reg_offset}), 1}});'
+                            )
+                        else:
+                            d16_expand_stmt = 'uses.expand(*r);'
+                        # Older MUBUF encodings redirect the load to LDS when
+                        # inst_.lds is set, leaving no VGPR destination; only guard
+                        # the preserved-destination read where such a field exists
+                        # (newer encodings have no lds field).
+                        d16_lds_guarded = 'lds' in inst_field_names
+                        d16_guard = '  if (!inst_.lds)\n' if d16_lds_guarded else ''
+                        d16_ind = '    ' if d16_lds_guarded else '  '
+                        inst_impls.append(
+                            cgen.Line(
+                                f'void {inst.fmt_name}::implicit_uses'
+                                f'(RegisterSet &uses) const {{\n'
+                                f'  {inst.fmt_true_enc_name}::implicit_uses(uses);\n'
+                                f'{d16_guard}'
+                                f'{d16_ind}if (auto r = {d16_implicit_use_opnd}.to_register_ref())\n'
+                                f'{d16_ind}  {d16_expand_stmt}\n'
+                                f'}}'
+                            )
+                        )
+                        # Operand-backed twin (see header decl): gfx1250 clears
+                        # the VGPR class from implicit_uses() and reads banked
+                        # VGPRs only from implicit_use_operands(). gfx1250 has
+                        # only single-register D16 loads, so the whole operand is
+                        # the partial register; the operand hook cannot express a
+                        # partial last register of a multi-register def.
+                        if self.isa_spec.profile.uses_vgpr_msb_indexing:
+                            assert d16_partial_reg_offset == 0, (
+                                'multi-register D16 partial def is not '
+                                'expressible via implicit_use_operands'
+                            )
+                            inst_impls.append(
+                                cgen.Line(
+                                    f'void {inst.fmt_name}::implicit_use_operands'
+                                    f'(std::vector<const ::rocjitsu::Operand *> &operands) '
+                                    f'const {{\n'
+                                    f'  {inst.fmt_true_enc_name}::implicit_use_operands(operands);\n'
+                                    f'{d16_guard}'
+                                    f'{d16_ind}if ({d16_implicit_use_opnd}.to_register_ref())\n'
+                                    f'{d16_ind}  operands.push_back(&{d16_implicit_use_opnd});\n'
                                     f'}}'
                                 )
                             )
@@ -11020,11 +11186,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             class_impl.append(
                 cgen.Line(self._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers())
             )
-            decode_body.append(
-                cgen.Statement(
-                    'if (isWmmaScaleF32Vop3px2(opcode)) return std::make_unique<VWmmaScaleF32Vop3px2>(opcode)'
-                )
-            )
         if self._supports_cdna_mfma_f8f6f4_vop3px2():
             class_impl.append(
                 cgen.Line(self._emit_cdna_mfma_f8f6f4_vop3px2_decoder_helpers())
@@ -11037,12 +11198,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     '      return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode + 2, true);\n'
                     '    return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode + 2, true);\n'
                     '  }\n'
-                )
-            )
-        if self._supports_generated_vopd():
-            decode_body.append(
-                cgen.Statement(
-                    'if (Vopd::is_vopd(opcode)) return std::make_unique<Vopd>(opcode)'
                 )
             )
         decode_body.extend(
@@ -11088,6 +11243,73 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         sub_decode_table_entries = []
         decode_funcs_found = set()
         _custom_decode_bodies: dict[str, object] = {}
+        _custom_primary_decode_funcs: dict[int, str] = {}
+        _custom_primary_decode_bodies: dict[str, object] = {}
+
+        def _reserve_primary_prefix(prefix: int, prefix_bits: int, fn: str) -> None:
+            table_bits = self.isa_spec.profile.max_enc_bits
+            if prefix_bits > table_bits:
+                raise ValueError(
+                    f'Cannot fit {prefix_bits}-bit decode prefix in '
+                    f'{table_bits}-bit primary table'
+                )
+            first = prefix << (table_bits - prefix_bits)
+            count = 1 << (table_bits - prefix_bits)
+            for index in range(first, first + count):
+                if self.isa_spec.primary_decode_table[index] is not None:
+                    raise ValueError(
+                        f'Custom decoder {fn} conflicts with primary table index {index}'
+                    )
+                previous = _custom_primary_decode_funcs.setdefault(index, fn)
+                if previous != fn:
+                    raise ValueError(
+                        f'Custom decoders {previous} and {fn} conflict at primary '
+                        f'table index {index}'
+                    )
+
+        if self._supports_generated_vopd():
+            _vopd_fn = 'decodeVopd'
+            for _prefix in self.isa_spec.profile.vopd_encoding_prefixes:
+                _reserve_primary_prefix(_prefix.prefix, _prefix.prefix_bits, _vopd_fn)
+            _custom_primary_decode_bodies[_vopd_fn] = cgen.Block(
+                [cgen.Statement('return std::make_unique<Vopd>(opcode)')]
+            )
+
+        if self._supports_gfx1250_scaled_wmma_vop3px2():
+            for _dte in self.isa_spec.primary_decode_table:
+                if (
+                    _dte is not None
+                    and not _dte.is_primary
+                    and _dte.sub_decode_funcs is not None
+                    and _dte.sub_decode_table
+                    and 'vop3p' in _dte.sub_decode_table
+                ):
+                    _scaled_wmma_fn = 'decodeVWmmaScaleF32Vop3px2'
+                    for _opcode in (0x35, 0x3A):
+                        if _dte.sub_decode_funcs[_opcode] not in (
+                            'decodeInvalid',
+                            _scaled_wmma_fn,
+                        ):
+                            raise ValueError(
+                                f'Scaled WMMA decoder conflicts with VOP3P opcode {_opcode}'
+                            )
+                        _dte.sub_decode_funcs[_opcode] = _scaled_wmma_fn
+                    _custom_decode_bodies[_scaled_wmma_fn] = cgen.Block(
+                        [
+                            cgen.Line(
+                                '  if (!isVop3pOp(opcode[2], 0x33) && '
+                                '!isVop3pOp(opcode[2], 0x88))\n'
+                                '    return decodeInvalid(opcode);\n'
+                            ),
+                            cgen.Statement(
+                                'return std::make_unique<VWmmaScaleF32Vop3px2>(opcode)'
+                            ),
+                        ]
+                    )
+                    break
+            else:
+                raise ValueError('gfx1250 scaled WMMA requires a VOP3P decode table')
+
         _vop3px2_opcode = self.isa_spec.profile.vop3px2_prefix_opcode
         if _vop3px2_opcode is not None:
             _ie_names = {
@@ -11128,7 +11350,28 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                             ]
                         )
                         break
-        for dte in self.isa_spec.primary_decode_table:
+        for _fn, _body in _custom_primary_decode_bodies.items():
+            _decl = cgen.FunctionDeclaration(
+                cgen.Value('static std::unique_ptr<Instruction>', _fn),
+                [cgen.Value('const MachineInst *', 'opcode')],
+            )
+            class_members.append(_decl)
+            decode_table_funcs.append(
+                cgen.FunctionBody(
+                    cgen.FunctionDeclaration(
+                        cgen.Value('std::unique_ptr<Instruction>', f'Decoder::{_fn}'),
+                        [cgen.Value('const MachineInst *', 'opcode')],
+                    ),
+                    _body,
+                )
+            )
+
+        for _primary_index, dte in enumerate(self.isa_spec.primary_decode_table):
+            if _primary_index in _custom_primary_decode_funcs:
+                decode_table_entries.append(
+                    f'&Decoder::{_custom_primary_decode_funcs[_primary_index]},'
+                )
+                continue
             if dte is not None:
                 decode_table_entries.append(f'&Decoder::{dte.decode_func},')
                 if dte.decode_func not in decode_funcs_found:
@@ -11182,8 +11425,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                             )
                         )
                         sub_decode_table_entry_str = []
+                        sub_decode_funcs_found = set()
                         for fn in dte.sub_decode_funcs:
-                            if fn != 'decodeInvalid':
+                            if (
+                                fn != 'decodeInvalid'
+                                and fn not in sub_decode_funcs_found
+                            ):
+                                sub_decode_funcs_found.add(fn)
                                 class_name = fn.removeprefix('decode')
                                 sub_decode_func_decls.append(
                                     cgen.FunctionDeclaration(
