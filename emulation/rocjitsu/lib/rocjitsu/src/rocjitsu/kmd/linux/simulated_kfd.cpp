@@ -367,11 +367,13 @@ void SimulatedKfd::reap_exited_debug_sessions(std::stop_token stop) {
     }
     if (stop.stop_requested())
       break;
+    std::vector<pid_t> released;
     for (auto it = debug_sessions_.begin(); it != debug_sessions_.end();) {
       if (pidfd_is_exited(it->second.debugger_pidfd.get()) == 1) {
         // The debugger is gone and will never ack; release any inferior
         // blocked in the RUNTIME_ENABLE handshake for it.
         cancel_runtime_handshake(it->first);
+        released.push_back(it->first);
         it = debug_sessions_.erase(it);
       } else if (pidfd_is_exited(it->second.target_pidfd.get()) == 1) {
         if (!it->second.target_exited) {
@@ -390,6 +392,18 @@ void SimulatedKfd::reap_exited_debug_sessions(std::stop_token stop) {
       } else {
         ++it;
       }
+    }
+    // A crashed debugger must not strand the inferior. Erasing the session only
+    // stops new debug traffic; the waves it left stopped, the closed queue
+    // gates and the target-memory routing all have to be undone too, exactly as
+    // an explicit detach does. Done outside debug_sessions_mutex_ because the
+    // release takes CU wave-state locks in the opposite order to the engine
+    // thread.
+    if (!released.empty()) {
+      lock.unlock();
+      for (pid_t pid : released)
+        release_debuggee_state(pid);
+      lock.lock();
     }
   }
 }
@@ -2883,6 +2897,68 @@ bool SimulatedKfd::on_wave_alu_exception(amdgpu::Wavefront &wave) {
   return true;
 }
 
+void SimulatedKfd::release_debuggee_state(pid_t target_pid) {
+  // Everything a session imposed on its inferior, undone in one place so that
+  // explicit detach and debugger death cannot drift apart. Callers have already
+  // erased the session and must not hold debug_sessions_mutex_ here: this takes
+  // CU wave-state locks, and the engine thread takes those first and then
+  // debug_sessions_mutex_ from its trap/watchpoint callbacks, so holding both
+  // in this order closes an AB-BA cycle against a wave that is trapping.
+  {
+    std::lock_guard<std::mutex> event_lock(debug_events_mutex_);
+    debug_events_.erase(target_pid);
+  }
+
+  auto target_proc = find_process_by_client_pid(target_pid);
+  std::vector<std::pair<uint32_t, uint32_t>> queues;
+  if (target_proc != nullptr) {
+    std::lock_guard<std::mutex> alloc_lock(target_proc->alloc_mutex_);
+    for (auto &[queue_id, queue] : target_proc->queue_snapshot_map_) {
+      queue.exception_status = 0;
+      queues.emplace_back(queue_id, queue.gpu_id);
+    }
+  }
+
+  for (const auto &[queue_id, gpu_id] : queues) {
+    auto *gpu = find_gpu(gpu_id);
+    if (!gpu || !gpu->soc || target_proc == nullptr)
+      continue;
+    gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+      cp->set_queue_debug_suspended(queue_id, target_proc->process_id(), false);
+      for (auto *cu : cp->compute_units()) {
+        bool wake = false;
+        cu->with_wave_state_locked([&] {
+          for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+            auto *wave = cu->wf(slot);
+            if (wave->is_halted() || wave->process_id() != target_proc->process_id() ||
+                wave->queue_id() != queue_id || wave->fatal_exception_pending())
+              continue;
+            wave->set_debug_single_step(false);
+            wave->set_debug_halted(false);
+            wave->set_debug_suspended(false);
+            wake = true;
+          }
+        });
+        if (wake)
+          cu->schedule_work_async();
+      }
+    });
+  }
+
+  if (target_proc != nullptr) {
+    for (auto &g : gpus_)
+      if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+        mem->set_process_mem_fd(target_proc->process_id(), -1);
+  }
+
+  // Debug checks stay on only while some session still wants them.
+  {
+    std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+    if (debug_sessions_.empty())
+      set_debug_active_on_all_cus(false);
+  }
+}
+
 void SimulatedKfd::set_debug_active_on_all_cus(bool active) {
   for (auto &gpu : gpus_) {
     if (!gpu.soc)
@@ -3797,67 +3873,25 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
     // previous debugger already consumed, to whoever attaches next. Any wave
     // the departing debugger left stopped is resumed below, so detaching never
     // strands the inferior's GPU work.
-    {
-      std::lock_guard<std::mutex> event_lock(debug_events_mutex_);
-      debug_events_.erase(target_pid);
-    }
-    std::vector<std::pair<uint32_t, uint32_t>> queues;
-    if (target_proc != nullptr) {
-      std::lock_guard<std::mutex> alloc_lock(target_proc->alloc_mutex_);
-      for (auto &[queue_id, queue] : target_proc->queue_snapshot_map_) {
-        queue.exception_status = 0;
-        queues.emplace_back(queue_id, queue.gpu_id);
-      }
-    }
-    // Drop debug_sessions_mutex_ before touching any CU. The engine thread takes
-    // these two the other way round -- ComputeUnitCore::step() runs the issue
-    // loop under the CU's wave-state lock and calls back into
+    //
+    // Erase the session first, then release the inferior outside the lock.
+    // Dropping debug_sessions_mutex_ before touching any CU is mandatory: the
+    // engine thread takes these two the other way round -- ComputeUnitCore::step()
+    // runs the issue loop under the CU's wave-state lock and calls back into
     // on_wave_trap_complete()/on_wave_watchpoint()/on_wave_illegal_inst(), each
     // of which acquires debug_sessions_mutex_ -- so holding it across
-    // with_wave_state_locked() below closes an AB-BA cycle and hangs a detach
-    // against a wave that is trapping at that moment. This is the same
-    // invariant SUSPEND_QUEUES states and observes further down.
-    lk.unlock();
-    for (const auto &[queue_id, gpu_id] : queues) {
-      auto *gpu = find_gpu(gpu_id);
-      if (!gpu || !gpu->soc)
-        continue;
-      gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
-        cp->set_queue_debug_suspended(queue_id, target_proc->process_id(), false);
-        for (auto *cu : cp->compute_units()) {
-          bool wake = false;
-          cu->with_wave_state_locked([&] {
-            for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
-              auto *wave = cu->wf(slot);
-              if (wave->is_halted() || wave->process_id() != target_proc->process_id() ||
-                  wave->queue_id() != queue_id || wave->fatal_exception_pending())
-                continue;
-              wave->set_debug_single_step(false);
-              wave->set_debug_halted(false);
-              wave->set_debug_suspended(false);
-              wake = true;
-            }
-          });
-          if (wake)
-            cu->schedule_work_async();
-        }
-      });
-    }
-    if (target_proc != nullptr) {
-      for (auto &g : gpus_)
-        if (auto *mem = g.soc ? g.soc->memory() : nullptr)
-          mem->set_process_mem_fd(target_proc->process_id(), -1);
-    }
-    // Re-take it only for the table mutation itself. The session may have been
-    // reaped while the lock was dropped, so erase by key rather than through
-    // the iterator captured above.
-    lk.lock();
+    // with_wave_state_locked() closes an AB-BA cycle and hangs a detach against
+    // a wave that is trapping at that moment. Erasing before the release also
+    // closes the window in which the session was still enabled while its events
+    // had already been cleared, letting a live callback publish into a session
+    // on its way out. This is the same invariant SUSPEND_QUEUES observes.
     debug_sessions_.erase(target_pid);
+    lk.unlock();
+    release_debuggee_state(target_pid);
     // An explicit detach also has to release a waiter, or the inferior pays the
     // full liveness deadline for a debugger that is deliberately going away.
     cancel_runtime_handshake(target_pid);
-    if (debug_sessions_.empty())
-      set_debug_active_on_all_cus(false);
+    lk.lock();
     return 0;
   }
   case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:

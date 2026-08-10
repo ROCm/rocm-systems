@@ -332,6 +332,18 @@ private:
   /// @brief Toggle per-access debugger checks on every compute unit.
   void set_debug_active_on_all_cus(bool active);
 
+  /// @brief Undo everything a debug session imposed on its inferior.
+  /// @details Resumes waves the departing debugger left stopped, reopens the
+  /// queue launch gates, clears per-queue exception status and queued debug
+  /// events, and revokes target-memory routing. Explicit detach and debugger
+  /// death must both run this, or a debugger that dies while a wave is stopped
+  /// strands the inferior's GPU work forever.
+  /// @param target_pid Client pid whose session has just been erased.
+  /// @note Must be called with debug_sessions_mutex_ *unlocked*: it takes CU
+  /// wave-state locks, and the engine thread takes those before
+  /// debug_sessions_mutex_.
+  void release_debuggee_state(pid_t target_pid);
+
   /// @brief Duplicate the authorized target-memory fd for lock-free I/O.
   util::UniqueHandle duplicate_debug_target_mem(pid_t target_pid) const;
 
