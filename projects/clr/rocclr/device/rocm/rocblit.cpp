@@ -3014,6 +3014,7 @@ bool KernelBlitManager::WriteBufferBatch(
 
   if (!staging_copy_ops.empty()) {
     if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
+      release_pinned_buffers();
       gpu().releaseGpuMemoryFence();
       gpu().command()->ReleasePinnedMemory();
       return false;
@@ -3133,6 +3134,7 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
 
   if (!staging_copy_ops.empty()) {
     if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
+      release_pinned_buffers();
       gpu().releaseGpuMemoryFence();
       gpu().command()->ReleasePinnedMemory();
       return false;
