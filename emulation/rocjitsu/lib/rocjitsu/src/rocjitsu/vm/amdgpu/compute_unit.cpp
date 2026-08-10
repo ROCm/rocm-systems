@@ -607,18 +607,40 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 
   const bool trap_return = std::string_view(inst->mnemonic()) == "s_rfe_b64";
 
-  if (debug_memory_fault) {
+  // Report a faulting access here, between the PC advance and the pipeline
+  // decision. Both orderings matter. The report has to come after the advance
+  // so a wave serialized by the handler resumes past the access rather than
+  // re-executing it; the pipeline decision has to come after the report so that
+  // discarding the access is conditional on the debugger actually claiming the
+  // fault. debug_active_ is CU-wide, so the probe also fires for waves of a
+  // process nobody is debugging -- on_wave_memory_violation() declines those,
+  // and dropping the instruction anyway silently lost a store, or left a load's
+  // destination registers stale, in an undebugged process.
+  const uint64_t issue_pc = active->pc;
+  active->pc += inst_size;
+
+  bool fault_claimed = false;
+  if (debug_memory_fault && !active->debug_halted()) {
+    for (uint64_t addr : dbg_addrs) {
+      if (access_faults(addr) && memory_violation_handler_(*active, addr, dbg_is_write)) {
+        fault_claimed = true;
+        break;
+      }
+    }
+  }
+
+  if (fault_claimed) {
     delete inst;
-  } else if (inst->is_memory_op()) {
+    return;
+  }
+  if (inst->is_memory_op()) {
     if (inst->data() && inst->data()->tag() == GLOBAL_MEM) {
       auto *d = inst->data_as<VectorMemState>();
-      d->issue_pc = active->pc;
+      d->issue_pc = issue_pc;
     }
     route_memory_inst(inst, *active);
   } else
     delete inst;
-
-  active->pc += inst_size;
 
   constexpr uint32_t kAluExceptionTrapstsMask = 0x7fu;
   constexpr uint32_t kAluExceptionModeShift = 12;
@@ -635,19 +657,14 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   if (trap_return && active->debug_halted() && active->trap_interrupt_sent())
     notify_trap_complete(*active);
 
-  // Debugger per-access checks, after the access completed and the PC advanced
-  // (so the serialized wave resumes at the next instruction). A memory fault is
-  // more severe than a watchpoint and wins if both would fire on the same
-  // instruction.
-  if (debug_probe && !active->debug_halted()) {
-    if (debug_memory_fault)
-      for (uint64_t addr : dbg_addrs)
-        if (access_faults(addr) && memory_violation_handler_(*active, addr, dbg_is_write))
-          return;
-    if (watchpoint_handler_)
-      for (uint64_t addr : dbg_addrs)
-        if (watchpoint_handler_(*active, addr, dbg_bytes, dbg_is_write, dbg_is_atomic))
-          break;
+  // Watchpoints, after the access completed and the PC advanced (so the
+  // serialized wave resumes at the next instruction). A memory fault is more
+  // severe than a watchpoint and wins if both would fire on the same
+  // instruction, which it does by returning above before reaching here.
+  if (debug_probe && !active->debug_halted() && watchpoint_handler_) {
+    for (uint64_t addr : dbg_addrs)
+      if (watchpoint_handler_(*active, addr, dbg_bytes, dbg_is_write, dbg_is_atomic))
+        break;
   }
 }
 
