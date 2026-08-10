@@ -1156,9 +1156,6 @@ class SetValueCommands:
                         str(json.dumps(accelerator_set_choices, indent=4)),
                     )
                     if args.compute_partition in accelerator_profiles["profile_types"]:
-                        accelerator_partition = amdsmi_interface.AmdSmiAcceleratorPartitionType[
-                            args.compute_partition
-                        ]
                         index = accelerator_profiles["profile_types"].index(args.compute_partition)
                         attempted_to_set = f"Attempted to set accelerator partition to {args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]}) on {gpu_string}"
                         user_requested_partition_args = f"{args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]})"
