@@ -71,6 +71,7 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("GL0 Cache BW (TCP Cache)", 80e9),
     # Table 304: LDS
     ("LDS Instructions", 125_000),
+    ("LDS Utilization", 62.0),
     ("LDS Atomic Instructions", 10_000),
     ("LDS Instruction Cycles", 250_000),
     ("LDS Wait Cycles", 12_500),
@@ -131,7 +132,6 @@ COLORS = {
     "sqc": "yellow",
     "read": "bright_cyan",
     "write": "bright_yellow",
-    "atomic": "bright_magenta",
     "util": "bright_green",
     "hit": "yellow",
     "stall": "indian_red",
@@ -280,9 +280,7 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     m["tcp_hit"] = metric_dict.get("GL0 Cache Hit Rate (TCP Cache)")
     m["tcp_bw"] = metric_dict.get("GL0 Cache BW (TCP Cache)")
 
-    m["lds_insts"] = metric_dict.get("LDS Instructions")
-    m["lds_inst_cycles"] = metric_dict.get("LDS Instruction Cycles")
-    m["lds_atomic_insts"] = metric_dict.get("LDS Atomic Instructions")
+    m["lds_util"] = metric_dict.get("LDS Utilization")
     m["lds_bw"] = metric_dict.get("LDS Estimated Bandwidth")
     m["lds_bank_conflict"] = metric_dict.get("LDS Bank Conflict Rate")
 
@@ -325,7 +323,6 @@ def _build_kernel_and_l0(
     fmt_bw = format_bw_human_readable
     c_rd = COLORS["read"]
     c_wr = COLORS["write"]
-    c_at = COLORS["atomic"]
     c_bl = COLORS["block"]
 
     # Kernel panel (height = 10+10+10 = 30 to match L0 stack)
@@ -337,22 +334,24 @@ def _build_kernel_and_l0(
         height=30,
     )
 
-    # Kernel edges — LDS, TCP, SQC groups
+    # Kernel edges — TCP and SQC request counts.
     ka_l = kernel_arrows["left"]
     ka_r = kernel_arrows["right"]
-    ka_b = kernel_arrows["both"]
     kernel_edges_lines = [
+        # Rows 0-9 face the LDS panel and stay empty: gfx115x has no LDS request
+        # counter. The LDS panel carries Util, BW and Bank Conflicts.
         "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        # Row 10 = the "GL0 (TCP Cache)" title row
         "     [white]Request[/white]",
-        "",
-        f"[{c_rd}]{_fmt_edge('Instr', m['lds_insts'])}[/{c_rd}]",
-        f"[{c_rd}]{ka_l}[/{c_rd}]",
-        f"[{c_wr}]{_fmt_edge('Cycles', m['lds_inst_cycles'])}[/{c_wr}]",
-        f"[{c_wr}]{ka_r}[/{c_wr}]",
-        f"[{c_at}]{_fmt_edge('Atomic', m['lds_atomic_insts'])}[/{c_at}]",
-        f"[{c_at}]{ka_b}[/{c_at}]",
-        "",
-        "",
         "",
         "",
         f"[{c_rd}]{_fmt_edge('Read', m['tcp_read_req'])}[/{c_rd}]",
@@ -375,6 +374,12 @@ def _build_kernel_and_l0(
     kernel_edges_text = Text.from_markup("\n".join(kernel_edges_lines))
 
     # LDS panel
+    lds_util_line = (
+        f"{metric_line('Util', m['lds_util'], '%', COLORS['util'])}\n"
+        f"[dim]{bar(m['lds_util'])}[/dim]"
+        if m["lds_util"] is not None
+        else ""
+    )
     lds_bw_line = (
         metric_line("BW", m["lds_bw"], "Bytes/s", COLORS["bw"])
         if m["lds_bw"] is not None
@@ -386,7 +391,7 @@ def _build_kernel_and_l0(
         else ""
     )
     lds_panel = Panel(
-        f"{lds_bw_line}\n{lds_conflict_line}",
+        f"{lds_util_line}\n{lds_bw_line}\n{lds_conflict_line}",
         title=f"[bold {c_bl}]LDS[/bold {c_bl}]",
         border_style=c_bl,
         width=20,
@@ -664,7 +669,6 @@ def create_mem_chart_diagram(
     kernel_arrows = {
         "left": "<" + "-" * (kernel_edge_width - 1),
         "right": "-" * (kernel_edge_width - 1) + ">",
-        "both": "<" + "-" * (kernel_edge_width - 2) + ">",
     }
 
     # Build layout columns
@@ -701,7 +705,6 @@ def create_mem_chart_diagram(
         f"[dim]Legend:[/dim] "
         f"[{COLORS['read']}]<----[/{COLORS['read']}] Read  "
         f"[{COLORS['write']}]---->[/{COLORS['write']}] Write  "
-        f"[{COLORS['atomic']}]<--->[/{COLORS['atomic']}] Atomic  "
         f"[{COLORS['util']}]█[/{COLORS['util']}] Util  "
         f"[{COLORS['hit']}]█[/{COLORS['hit']}] Hit%  "
         f"[{COLORS['stall']}]█[/{COLORS['stall']}] Stall"

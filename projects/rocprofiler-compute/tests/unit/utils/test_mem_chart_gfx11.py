@@ -378,10 +378,8 @@ class TestPlotMemChartGfx11:
         assert "System Memory" in output
         assert "Read BW" in output
         assert "Write BW" in output
-        assert "Atomic" in output
         assert re.search(r"<(?!-+>)-{3,}", output)
         assert re.search(r"(?<![<-])-{3,}>", output)
-        assert re.search(r"<-{3,}>", output)
 
     def test_contains_bandwidth_values(self):
         """Test that output contains formatted bandwidth values."""

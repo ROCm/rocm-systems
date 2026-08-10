@@ -135,6 +135,10 @@ Memory chart - LDS (Local Data Share):
     plain: Number of atomic operations executed on Local Data Share memory. Atomic operations provide thread-safe read-modify-write operations but may serialize if multiple work-items access the same address.
     rst: Number of atomic operations executed on Local Data Share memory. Atomic operations provide thread-safe read-modify-write operations but may serialize if multiple work-items access the same address.
     unit: Instructions per Normalization Unit
+  LDS Utilization:
+    plain: Percentage of shader busy cycles during which LDS was servicing indexed accesses.
+    rst: Percentage of shader busy cycles during which LDS was servicing indexed accesses.
+    unit: Percent
   LDS Bank Conflict Rate:
     plain: Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when multiple work-items in a wavefront access different addresses in the same LDS bank. High conflict rates reduce effective LDS bandwidth. Restructuring data layouts can help.
     rst: Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when multiple work-items in a wavefront access different addresses in the same LDS bank. High conflict rates reduce effective LDS bandwidth. Restructuring data layouts can help.

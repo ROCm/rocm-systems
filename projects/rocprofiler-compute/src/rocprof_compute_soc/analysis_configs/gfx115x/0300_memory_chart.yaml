@@ -144,6 +144,9 @@ Panel Config:
         LDS Instructions:
           value: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
           unit: (Instructions + $normUnit)
+        LDS Utilization:
+          value: 100 * SUM(SQC_LDS_IDX_ACTIVE_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          unit: Percent
         # Counters not available: sq_lds_direct_rd, sq_lds_direct_wr
         LDS Atomic Instructions:
           value: SUM(SQ_LDS_ATOMIC_RETURN_sum) / SUM($denom)
@@ -369,6 +372,8 @@ Panel Config:
       Number of atomic operations executed on Local Data Share memory. Atomic operations
       provide thread-safe read-modify-write operations but may serialize if multiple
       work-items access the same address.
+    LDS Utilization: >-
+      Percentage of shader busy cycles during which LDS was servicing indexed accesses.
     LDS Bank Conflict Rate: >-
       Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when
       multiple work-items in a wavefront access different addresses in the same LDS bank.
