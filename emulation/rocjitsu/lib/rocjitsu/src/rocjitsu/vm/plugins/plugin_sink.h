@@ -12,7 +12,7 @@
 ///   - Tests: StringSink — captures output for assertions, no stderr scraping.
 ///   - Integration tests: FileSink — writes to <dir>/<plugin_name>.log for
 ///     structured parsing by test harnesses.
-///   - Mixed: CompositeSink — dispatches to multiple sinks simultaneously
+///   - Mixed: the plugin group dispatches to multiple configured sinks
 ///     (e.g., stderr for interactive viewing + file for test parsing).
 ///
 /// ## Wiring
@@ -48,7 +48,6 @@
 #include <cstring>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace rocjitsu {
 
@@ -120,25 +119,6 @@ public:
 
 private:
   std::string buf_;
-};
-
-/// @brief Dispatches writes to multiple child sinks.
-class CompositeSink : public PluginSink {
-public:
-  void add(PluginSink *s) {
-    if (s)
-      children_.push_back(s);
-  }
-
-  void write(std::string_view msg) override {
-    for (auto *s : children_)
-      s->write(msg);
-  }
-
-  bool empty() const { return children_.empty(); }
-
-private:
-  std::vector<PluginSink *> children_;
 };
 
 } // namespace rocjitsu

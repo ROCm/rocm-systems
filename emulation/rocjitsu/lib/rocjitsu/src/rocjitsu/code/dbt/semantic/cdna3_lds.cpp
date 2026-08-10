@@ -6,8 +6,8 @@
 
 #include "rocjitsu/code/dbt/semantic/cdna3_lds.h"
 
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_scratch.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
 

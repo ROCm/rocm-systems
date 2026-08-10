@@ -6,12 +6,12 @@
 ///
 /// ## Sink configuration
 ///
-/// The group controls where plugin output goes. Call add_sink() to add
-/// external sinks (applied to all plugins). Call set_sink_dir() before
-/// adding plugins to enable per-plugin file sinks at <dir>/<name>.log.
+/// The group receives its complete, owned sink configuration at construction.
+/// Sink destinations cannot be added after plugins have received their output
+/// sink, so construction order and lifetime are explicit in the type.
 ///
-/// When a plugin is added via add(), the group constructs a CompositeSink
-/// combining all external sinks + an optional per-plugin FileSink, and
+/// When a plugin is added via add(), the group constructs an internal fanout sink
+/// combining all configured sinks + an optional per-plugin FileSink, and
 /// assigns it to the plugin.
 
 #pragma once
@@ -23,6 +23,9 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -48,32 +51,49 @@ using OwnedPlugin = std::unique_ptr<ExecutionPlugin, PluginDeleter>;
 /// @brief Host destroy trampoline for in-tree plugins created with `new`.
 inline void delete_execution_plugin(void *p) { delete static_cast<ExecutionPlugin *>(p); }
 
-class ExecutionPluginGroup {
-public:
-  ExecutionPluginGroup() = default;
-  virtual ~ExecutionPluginGroup() = default;
-
-  /// Add an external sink that receives output from all plugins.
-  /// The caller retains ownership (e.g., a static singleton or test fixture).
-  void add_sink(PluginSink *s) {
-    if (s)
-      external_sinks_.push_back(s);
+/// @brief Move-only sink configuration transferred into an ExecutionPluginGroup.
+struct PluginSinkConfig {
+  /// Add an owned sink and return a reference to it.
+  ///
+  /// The reference remains valid while this configuration, or the
+  /// ExecutionPluginGroup that receives it, owns the sink. Moving the
+  /// configuration transfers ownership without moving the sink itself.
+  template <typename Sink, typename... Args> Sink &emplace(Args &&...args) {
+    static_assert(std::is_base_of_v<PluginSink, Sink>, "Sink must derive from PluginSink");
+    auto sink = std::make_unique<Sink>(std::forward<Args>(args)...);
+    Sink &result = *sink;
+    sinks_.push_back(std::move(sink));
+    return result;
   }
 
-  /// Set directory for per-plugin file sinks. Each plugin added after
-  /// this call gets a FileSink at <dir>/<plugin_name>.log.
-  void set_sink_dir(const std::string &dir) { sink_dir_ = dir; }
+  /// Enable one per-plugin FileSink rooted at @p directory.
+  void set_file_directory(std::string directory) { file_directory_ = std::move(directory); }
+
+private:
+  friend class ExecutionPluginGroup;
+  std::vector<std::unique_ptr<PluginSink>> sinks_;
+  std::string file_directory_;
+};
+
+class ExecutionPluginGroup {
+public:
+  explicit ExecutionPluginGroup(PluginSinkConfig config)
+      : configured_sinks_(std::move(config.sinks_)), sink_dir_(std::move(config.file_directory_)) {}
+
+  virtual ~ExecutionPluginGroup() = default;
 
   /// Add a plugin owned with a boundary-aware deleter (see OwnedPlugin).
   bool add(OwnedPlugin p) {
     if (!p)
       return false;
     for (const auto &existing : plugins_)
-      if (existing->name() == p->name())
+      if (existing.plugin->name() == p->name())
         return false;
     p->slot_index_ = static_cast<uint32_t>(plugins_.size());
-    build_sink_for(*p);
-    plugins_.push_back(std::move(p));
+    SinkBundle sink = build_sink_bundle(p->name() + ".log");
+    if (auto *configured_sink = sink.get())
+      p->sink_ = configured_sink;
+    plugins_.push_back(PluginEntry{std::move(sink), std::move(p)});
     return true;
   }
 
@@ -87,93 +107,93 @@ public:
 
   // -- Lifecycle --
   virtual void onInit() {
-    for (auto &p : plugins_)
-      p->onInit();
+    for (auto &entry : plugins_)
+      entry.plugin->onInit();
   }
 
   virtual void onShutdown() {
-    for (auto &p : plugins_)
-      p->onShutdown();
+    for (auto &entry : plugins_)
+      entry.plugin->onShutdown();
   }
 
   // -- AMDGPU (virtual) --
   virtual void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                                 amdgpu::Wavefront &wf) {
-    for (auto &p : plugins_)
-      p->onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
+    for (auto &entry : plugins_)
+      entry.plugin->onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
   }
 
   virtual void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
                                                amdgpu::Wavefront &wf) {
-    for (auto &p : plugins_)
-      p->onAmdgpuAfterExecuteInstruction(pc, inst, wf);
+    for (auto &entry : plugins_)
+      entry.plugin->onAmdgpuAfterExecuteInstruction(pc, inst, wf);
   }
 
   virtual void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) {
-    for (auto &p : plugins_)
-      p->onAmdgpuRouteMemoryInstruction(inst, wf);
+    for (auto &entry : plugins_)
+      entry.plugin->onAmdgpuRouteMemoryInstruction(inst, wf);
   }
 
   virtual void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
-    for (auto &p : plugins_)
-      p->onAmdgpuDispatchPacketProcessed(info);
+    for (auto &entry : plugins_)
+      entry.plugin->onAmdgpuDispatchPacketProcessed(info);
   }
 
   virtual void onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
-    for (auto &p : plugins_)
-      p->onAmdgpuDispatchExecutionBegin(dispatch_id);
+    for (auto &entry : plugins_)
+      entry.plugin->onAmdgpuDispatchExecutionBegin(dispatch_id);
   }
 
   virtual void onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
-    for (auto &p : plugins_)
-      p->onAmdgpuDispatchExecutionEnd(dispatch_id);
+    for (auto &entry : plugins_)
+      entry.plugin->onAmdgpuDispatchExecutionEnd(dispatch_id);
   }
 
   virtual void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
                                            uint32_t physical_vgpr_count, uint32_t sgpr_count,
                                            std::span<amdgpu::Wavefront *> wavefronts) {
-    for (auto &p : plugins_)
-      p->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, physical_vgpr_count, sgpr_count,
-                                     wavefronts);
+    for (auto &entry : plugins_)
+      entry.plugin->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, physical_vgpr_count, sgpr_count,
+                                                wavefronts);
   }
 
   virtual void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
-    for (auto &p : plugins_)
-      p->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
+    for (auto &entry : plugins_)
+      entry.plugin->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
   }
 
   virtual void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
-    for (auto &p : plugins_)
-      p->onAmdgpuWavefrontDispatched(wf);
+    for (auto &entry : plugins_)
+      entry.plugin->onAmdgpuWavefrontDispatched(wf);
   }
 
   virtual void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
-    for (auto &p : plugins_)
-      p->onAmdgpuWavefrontHalted(wf);
+    for (auto &entry : plugins_)
+      entry.plugin->onAmdgpuWavefrontHalted(wf);
   }
 
   virtual void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
                                      uint64_t lane_mask,
                                      uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
-    for (auto &p : plugins_)
-      p->onAmdgpuReadVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+    for (auto &entry : plugins_)
+      entry.plugin->onAmdgpuReadVgprLanes(wf, physical_reg, lane_mask, byte_mask);
   }
 
   virtual void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
                                       uint64_t lane_mask,
                                       uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
-    for (auto &p : plugins_)
-      p->onAmdgpuWriteVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+    for (auto &entry : plugins_)
+      entry.plugin->onAmdgpuWriteVgprLanes(wf, physical_reg, lane_mask, byte_mask);
   }
 
   virtual void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) {
-    for (auto &p : plugins_)
-      p->onAmdgpuReadSgpr(wf, physical_reg);
+    for (auto &entry : plugins_)
+      entry.plugin->onAmdgpuReadSgpr(wf, physical_reg);
   }
 
   virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) {
-    for (auto &p : plugins_)
-      p->onAmdgpuBarrierResolved(wavefronts);
+    for (auto &entry : plugins_)
+      entry.plugin->onAmdgpuBarrierResolved(wavefronts);
   }
 
   static std::shared_ptr<ExecutionPluginGroup> empty_group() {
@@ -190,51 +210,87 @@ public:
     // memory at process death. Matches the interposer singleton's never-destructed
     // design for the same reason.
     static std::shared_ptr<ExecutionPluginGroup> *instance =
-        new std::shared_ptr<ExecutionPluginGroup>(std::make_shared<ExecutionPluginGroup>());
+        new std::shared_ptr<ExecutionPluginGroup>(
+            std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{}));
     return *instance;
   }
 
-protected:
-  /// Build a sink combining external sinks + optional file sink.
-  /// Returns nullptr if no sinks are configured (caller should keep default).
-  PluginSink *build_composite_sink(const std::string &file_name = {}) {
-    bool has_file = !sink_dir_.empty() && !file_name.empty();
-    if (external_sinks_.empty() && !has_file)
-      return nullptr;
-    if (external_sinks_.size() == 1 && !has_file)
-      return external_sinks_[0];
+private:
+  /// Internal fanout over sinks whose lifetime is guaranteed by the owning
+  /// group or SinkBundle. It is deliberately not part of the public sink API.
+  class FanoutSink final : public PluginSink {
+  public:
+    void add(PluginSink &sink) { children_.push_back(&sink); }
 
-    auto composite = std::make_unique<CompositeSink>();
-    for (auto *s : external_sinks_)
-      composite->add(s);
+    void write(std::string_view msg) override {
+      for (auto *sink : children_)
+        sink->write(msg);
+    }
+
+    bool empty() const { return children_.empty(); }
+
+  private:
+    std::vector<PluginSink *> children_;
+  };
+
+protected:
+  /// Owns one fanout sink and any per-fanout child sinks. Member order ensures
+  /// the fanout is destroyed before the children it references.
+  class SinkBundle {
+  public:
+    SinkBundle() = default;
+
+    [[nodiscard]] PluginSink *get() const { return fanout_.get(); }
+
+  private:
+    friend class ExecutionPluginGroup;
+    std::vector<std::unique_ptr<PluginSink>> children_;
+    std::unique_ptr<FanoutSink> fanout_;
+  };
+
+  /// Build a sink combining configured sinks + optional file sink.
+  /// Returns an empty bundle if no sinks are configured.
+  [[nodiscard]] SinkBundle build_sink_bundle(const std::string &file_name) const {
+    bool has_file = !sink_dir_.empty() && !file_name.empty();
+    if (configured_sinks_.empty() && !has_file)
+      return {};
+
+    SinkBundle result;
+    auto fanout = std::make_unique<FanoutSink>();
+    for (const auto &s : configured_sinks_)
+      fanout->add(*s);
     if (has_file) {
       auto fs = std::make_unique<FileSink>(sink_dir_ + "/" + file_name);
       if (fs->is_open()) {
-        composite->add(fs.get());
-        owned_sinks_.push_back(std::move(fs));
-      } else if (composite->empty()) {
+        fanout->add(*fs);
+        result.children_.push_back(std::move(fs));
+      } else if (fanout->empty()) {
         // Preserve output when the file was the only requested destination.
         // Do not add stderr when another configured sink is already usable,
         // because doing so would unexpectedly duplicate output.
-        composite->add(&StderrSink::instance());
+        auto fallback = std::make_unique<StderrSink>();
+        fanout->add(*fallback);
+        result.children_.push_back(std::move(fallback));
       }
     }
-    auto *result = composite.get();
-    owned_sinks_.push_back(std::move(composite));
+    result.fanout_ = std::move(fanout);
     return result;
   }
 
-  std::vector<PluginSink *> external_sinks_;
-  std::string sink_dir_;
-  std::vector<std::unique_ptr<PluginSink>> owned_sinks_;
-
 private:
-  void build_sink_for(ExecutionPlugin &p) {
-    if (auto *s = build_composite_sink(p.name() + ".log"))
-      p.sink_ = s;
-  }
+  // These sinks are declared before plugin entries so plugins and their local
+  // fanouts are destroyed before the configured sinks they reference.
+  std::vector<std::unique_ptr<PluginSink>> configured_sinks_;
+  std::string sink_dir_;
 
-  std::vector<std::unique_ptr<ExecutionPlugin, PluginDeleter>> plugins_;
+  /// Owns the sink assigned to one plugin. The plugin is declared last and is
+  /// therefore destroyed before its sink bundle.
+  struct PluginEntry {
+    SinkBundle sink;
+    OwnedPlugin plugin;
+  };
+
+  std::vector<PluginEntry> plugins_;
 };
 
 } // namespace rocjitsu

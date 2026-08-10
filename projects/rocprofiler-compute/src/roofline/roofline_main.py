@@ -40,6 +40,7 @@ ROOFLINE_SUPPORTED = [
     "gfx1150",
     "gfx1151",
     "gfx1152",
+    "gfx1250",
 ]
 
 SYMBOLS = [0, 1, 2, 3, 4, 5, 13, 17, 18, 20]
@@ -528,16 +529,30 @@ class Roofline:
                 ):
                     continue
 
+                x_raw = self.__ai_data[cache_level][0]
+                y_raw = self.__ai_data[cache_level][1]
+                valid = [
+                    (i, x, y)
+                    for i, (x, y) in enumerate(zip(x_raw, y_raw))
+                    if x > 0 and y > 0
+                ]
+                if not valid:
+                    continue
+
+                x_vals = [p[1] for p in valid]
+                y_vals = [p[2] for p in valid]
+                point_symbols = [symbols_list[p[0] % len(symbols_list)] for p in valid]
+
                 fig.add_trace(
                     go.Scatter(
-                        x=self.__ai_data[cache_level][0],
-                        y=self.__ai_data[cache_level][1],
+                        x=x_vals,
+                        y=y_vals,
                         name=name,
                         mode="markers",
                         marker=dict(
                             color=get_color(cache_level),
                             size=10,
-                            symbol=symbols_list[: len(self.__ai_data[cache_level][0])],
+                            symbol=point_symbols,
                         ),
                     ),
                     **subplot_kwargs,
