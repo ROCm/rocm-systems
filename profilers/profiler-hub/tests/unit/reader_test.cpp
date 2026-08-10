@@ -2649,6 +2649,148 @@ TEST_F(reader_v4_counter_test,
     ASSERT_NE(grbm->pmc_info, nullptr);
 }
 
+// ============================================================================
+// memory_activity track type — v3 synthetic fixture (rocpd_v3_mem_activity.db)
+// Covers: discovery, running-sum correctness (ALLOC/FREE/REALLOC/RECLAIM),
+// FREE agent_id recovery via address self-join, non-interference between agents.
+// ============================================================================
+
+class reader_v3_mem_activity_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        m_storage = std::make_unique<profiler_hub::storage_t>(m_database_path, "");
+        m_reader  = std::make_shared<profiler_hub::reader_t>(std::move(m_storage));
+    }
+
+    void TearDown() override
+    {
+        m_reader.reset();
+        m_storage.reset();
+    }
+
+    std::string m_database_path{ ROCPD_DB_V3_MEM_ACTIVITY_PATH };
+    std::unique_ptr<profiler_hub::storage_t> m_storage;
+    std::shared_ptr<profiler_hub::reader_t>  m_reader;
+};
+
+TEST_F(reader_v3_mem_activity_test, v3_discovers_two_mem_activity_tracks)
+{
+    // Two distinct (nid, pid, agent_id): agent 1 and agent 2.
+    auto tracks = find_tracks(m_reader->get_tracks(),
+                              profiler_hub::reader_types::track_type_t::memory_activity);
+    ASSERT_EQ(tracks.size(), 2U);
+
+    // Each track must carry agent_info; no pmc_info (fidelity caveat #2).
+    for(const auto& t : tracks)
+    {
+        ASSERT_NE(t->agent_info, nullptr);
+        ASSERT_EQ(t->pmc_info, nullptr);
+        ASSERT_NE(t->node_info, nullptr);
+        ASSERT_NE(t->process_info, nullptr);
+    }
+
+    std::set<size_t> agent_ids;
+    for(const auto& t : tracks)
+        agent_ids.insert(t->agent_info->id);
+    ASSERT_TRUE(agent_ids.count(1) == 1);
+    ASSERT_TRUE(agent_ids.count(2) == 1);
+}
+
+TEST_F(reader_v3_mem_activity_test, v3_mem_activity_running_sum_agent1)
+{
+    // Agent 1 series: ALLOC(4096) at ts=1000, FREE-recovered at ts=3000,
+    // REALLOC(no-op) at ts=4000, ALLOC(2048) at ts=5000.
+    // Expected 3 scalar samples (REALLOC is not emitted).
+    auto tracks = find_tracks(m_reader->get_tracks(),
+                              profiler_hub::reader_types::track_type_t::memory_activity);
+    profiler_hub::reader_types::track_info_ptr_t agent1_track;
+    for(const auto& t : tracks)
+    {
+        if(t->agent_info && t->agent_info->id == 1) agent1_track = t;
+    }
+    ASSERT_NE(agent1_track, nullptr);
+
+    auto scalars = m_reader->get_scalar_track(agent1_track->id);
+    ASSERT_EQ(scalars.size(), 3U);
+
+    // Timestamps must be ascending.
+    ASSERT_EQ(scalars[0].timestamp, 1000U);
+    ASSERT_EQ(scalars[1].timestamp, 3000U);
+    ASSERT_EQ(scalars[2].timestamp, 5000U);
+
+    // Running-sum values.
+    ASSERT_DOUBLE_EQ(scalars[0].value, 4096.0);  // ALLOC +4096
+    ASSERT_DOUBLE_EQ(scalars[1].value, 0.0);     // FREE -4096 (recovered)
+    ASSERT_DOUBLE_EQ(scalars[2].value, 2048.0);  // ALLOC +2048
+}
+
+TEST_F(reader_v3_mem_activity_test, v3_mem_activity_free_agent_recovery)
+{
+    // The FREE row (row 3) has agent_id=NULL in the DB. Its size and agent must be
+    // recovered from the ALLOC at the same address (4096). The running sum for agent 1
+    // goes from 4096 to 0 at ts=3000, proving the recovery was correct.
+    auto tracks = find_tracks(m_reader->get_tracks(),
+                              profiler_hub::reader_types::track_type_t::memory_activity);
+    profiler_hub::reader_types::track_info_ptr_t agent1_track;
+    for(const auto& t : tracks)
+    {
+        if(t->agent_info && t->agent_info->id == 1) agent1_track = t;
+    }
+    ASSERT_NE(agent1_track, nullptr);
+
+    auto scalars = m_reader->get_scalar_track(agent1_track->id);
+    ASSERT_GE(scalars.size(), 2U);
+    // The second sample (ts=3000) reflects the FREE: cumsum drops to 0.
+    ASSERT_EQ(scalars[1].timestamp, 3000U);
+    ASSERT_DOUBLE_EQ(scalars[1].value, 0.0);
+}
+
+TEST_F(reader_v3_mem_activity_test, v3_mem_activity_non_interference_agent2)
+{
+    // Agent 2 has exactly 1 ALLOC (ts=2000, size=8192). Its scalar series must not
+    // include any agent-1 rows (ALLOC/FREE/REALLOC) or the REALLOC no-op.
+    auto tracks = find_tracks(m_reader->get_tracks(),
+                              profiler_hub::reader_types::track_type_t::memory_activity);
+    profiler_hub::reader_types::track_info_ptr_t agent2_track;
+    for(const auto& t : tracks)
+    {
+        if(t->agent_info && t->agent_info->id == 2) agent2_track = t;
+    }
+    ASSERT_NE(agent2_track, nullptr);
+
+    auto scalars = m_reader->get_scalar_track(agent2_track->id);
+    ASSERT_EQ(scalars.size(), 1U);
+    ASSERT_EQ(scalars[0].timestamp, 2000U);
+    ASSERT_DOUBLE_EQ(scalars[0].value, 8192.0);
+}
+
+TEST_F(reader_v3_mem_activity_test, v3_mem_activity_track_stats)
+{
+    auto tracks = find_tracks(m_reader->get_tracks(),
+                              profiler_hub::reader_types::track_type_t::memory_activity);
+    for(const auto& t : tracks)
+    {
+        auto scalars = m_reader->get_scalar_track(t->id);
+        auto stats   = m_reader->get_track_stats(t->id);
+        ASSERT_TRUE(stats.min_ts.has_value());
+        ASSERT_TRUE(stats.max_ts.has_value());
+        ASSERT_EQ(stats.count, scalars.size());
+        ASSERT_EQ(stats.min_ts.value(), scalars.front().timestamp);
+        ASSERT_EQ(stats.max_ts.value(), scalars.back().timestamp);
+    }
+}
+
+TEST_F(reader_v3_mem_activity_test, v3_get_interval_track_returns_empty_for_mem_activity)
+{
+    // memory_activity is a scalar-only track; interval read must return empty.
+    auto tracks = find_tracks(m_reader->get_tracks(),
+                              profiler_hub::reader_types::track_type_t::memory_activity);
+    ASSERT_GE(tracks.size(), 1U);
+    ASSERT_TRUE(m_reader->get_interval_track(tracks.front()->id).empty());
+}
+
 class reader_v4_mem_activity_test : public ::testing::Test
 {
 protected:

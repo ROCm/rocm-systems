@@ -333,6 +333,56 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V4_MEM_ACTIVITY_PATH="${ROCPD_DB_V4_MEM_ACTIVITY_PATH}"
 )
 
+# Synthetic v3 memory_activity fixture, generated at build time from committed SQL
+# against the canonical v3 schema (same mechanism as the v3 kd_pmc fixture above).
+# Exercises get_scalar_track(memory_activity) on the v3 backend: cumulative per-agent
+# running sum with FREE agent_id recovery via address self-join. The db has no
+# rocpd_timestamp table, so the reader selects the v3 backend.
+set(_v3m_uuid "0000000000000000000000000c010001")
+set(_v3m_schema_src
+    ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
+)
+set(_v3m_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_mem_activity_data.sql)
+set(_v3m_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v3_mem_activity_gen.sql)
+file(READ ${_v3m_schema_src} _v3m_schema)
+file(READ ${_v3m_data_src} _v3m_data)
+string(
+    REGEX REPLACE
+    "INSERT INTO[^;]*rocpd_metadata[^;]*;"
+    ""
+    _v3m_schema
+    "${_v3m_schema}"
+)
+string(REPLACE "{{uuid}}" "_${_v3m_uuid}" _v3m_schema "${_v3m_schema}")
+string(REPLACE "{{guid}}" "${_v3m_uuid}" _v3m_schema "${_v3m_schema}")
+string(REPLACE "{{uuid}}" "_${_v3m_uuid}" _v3m_data "${_v3m_data}")
+string(REPLACE "{{guid}}" "${_v3m_uuid}" _v3m_data "${_v3m_data}")
+file(WRITE ${_v3m_gen_sql} "${_v3m_schema}\n${_v3m_data}\n")
+
+set(ROCPD_DB_V3_MEM_ACTIVITY_PATH
+    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v3_mem_activity.db
+)
+add_custom_command(
+    OUTPUT ${ROCPD_DB_V3_MEM_ACTIVITY_PATH}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V3_MEM_ACTIVITY_PATH}
+    COMMAND
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_MEM_ACTIVITY_PATH} ".read ${_v3m_gen_sql}"
+    DEPENDS ${_v3m_gen_sql} ${_v3m_schema_src} ${_v3m_data_src}
+    COMMENT "Generating synthetic v3 memory_activity test fixture"
+    VERBATIM
+)
+add_custom_target(
+    profiler-hub_v3_mem_activity_fixture
+    DEPENDS ${ROCPD_DB_V3_MEM_ACTIVITY_PATH}
+)
+add_dependencies(profiler-hub_unit_tests profiler-hub_v3_mem_activity_fixture)
+
+target_compile_definitions(
+    profiler-hub_unit_tests
+    PRIVATE ROCPD_DB_V3_MEM_ACTIVITY_PATH="${ROCPD_DB_V3_MEM_ACTIVITY_PATH}"
+)
+
 gtest_discover_tests(
     profiler-hub_unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
