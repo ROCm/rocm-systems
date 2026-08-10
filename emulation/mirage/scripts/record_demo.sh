@@ -69,22 +69,14 @@ demo="$(cd "$(dirname "$demo")" && pwd)/$(basename "$demo")"
 [[ -n "$out" ]] || out="${demo%.sh}.cast"
 [[ -n "$title" ]] || title="$(basename "${demo%.sh}")"
 
-# --- Provision asciinema ----------------------------------------------------
-if ! command -v asciinema >/dev/null 2>&1; then
-  echo "record_demo: asciinema not found; attempting to install it" >&2
-  if command -v pipx >/dev/null 2>&1; then
-    pipx install asciinema >&2 || true
-  elif command -v pip3 >/dev/null 2>&1; then
-    # Dev hosts increasingly mark the system env externally-managed (PEP 668);
-    # --break-system-packages is safe for a throwaway CLI like asciinema.
-    pip3 install --user asciinema >&2 2>/dev/null \
-      || pip3 install --user --break-system-packages asciinema >&2 || true
-    export PATH="$HOME/.local/bin:$PATH"
-  fi
-fi
+# --- Require asciinema ------------------------------------------------------
+# Recording a demo is a developer convenience, which is not a good enough reason
+# to mutate the machine it runs on. Provision the tool in the build or container
+# environment instead; this script only reports what is missing.
 command -v asciinema >/dev/null 2>&1 || {
-  echo "record_demo: could not provision asciinema. Install it (e.g." >&2
-  echo "  pipx install asciinema  |  apt-get install asciinema) and re-run." >&2
+  echo "record_demo: asciinema not found. Install it and re-run, e.g." >&2
+  echo "  apt-get install asciinema  |  dnf install asciinema" >&2
+  echo "  pipx install asciinema     |  pip install --user asciinema" >&2
   exit 1
 }
 

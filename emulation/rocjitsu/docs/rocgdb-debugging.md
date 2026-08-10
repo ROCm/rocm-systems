@@ -79,6 +79,9 @@ Recorded, runnable walkthroughs live in `emulation/rocjitsu/demos/` (each has a
 | [rocgdb-multiwave](../demos/rocgdb-multiwave.md) | Debug a real multi-wave kernel: both waves, each with its own private data |
 
 Regenerate a `.cast` with `emulation/mirage/scripts/record_demo.sh <demo>.sh`.
+That script requires `asciinema` on `PATH` and will not install it for you --
+provision it in your container or dev environment (`apt-get install asciinema`,
+`pipx install asciinema`).
 
 ## 4. Status
 
