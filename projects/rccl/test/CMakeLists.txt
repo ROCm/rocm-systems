@@ -37,8 +37,9 @@ if(BUILD_TESTS)
 
   # Clean-builds RCCL once per GPU target and fails if any exceeds the time
   # threshold. Opt-in: it drives its own nested from-scratch builds, so it costs
-  # minutes per target and would dominate an ordinary test run. The script is
-  # also runnable directly (test/test_build_time.py --help) without configuring.
+  # minutes per target and would dominate an ordinary test run. CTest invokes the
+  # implementation directly so this path needs no pytest; CI drives the same code
+  # through the pytest harness beside it (test/build-time/README.md).
   option(ENABLE_BUILD_TIME_TEST "Register the per-target build-time regression test" OFF)
   if(ENABLE_BUILD_TIME_TEST)
     # DEFAULT_GPUS, not the rocm_check_target_ids-filtered GPU_TARGETS: archs
@@ -46,7 +47,7 @@ if(BUILD_TESTS)
     add_test(
       NAME rccl-build-time
       COMMAND "${Python3_EXECUTABLE}"
-              "${CMAKE_CURRENT_SOURCE_DIR}/test_build_time.py"
+              "${CMAKE_CURRENT_SOURCE_DIR}/build-time/build_time.py"
               --targets ${DEFAULT_GPUS}
     )
     set_tests_properties(rccl-build-time PROPERTIES

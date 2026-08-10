@@ -196,15 +196,15 @@
       ]
     },
     "build_time": {
-      "is_gtest": false,
-      "binary": "${WORKDIR:-$PWD}/test/test_build_time.py",
+      "is_pytest": true,
+      "setup_venv": true,
+      "test_dir": "test/build-time",
       "num_ranks": 1,
       "num_nodes": 1,
       "num_gpus": 1,
       "timeout": 2400,
-      "command_args": "--local-gpu --compare-base --max-regression-pct 10 --repeat 2 --jobs 64",
       "tests": [
-        {"name": "BuildTime.LocalGpuArch", "description": "Clean build of the runner's GPU arch is no more than 10% slower than the PR's base commit"}
+        {"name": "BuildTime.LocalGpuArch", "description": "Clean build of the runner's GPU arch is no more than 10% slower than the PR's base commit; skips when the base commit is unreachable on a shallow checkout", "test_filter": "-m compare --local-gpu --compare-base --max-regression-pct 10 --repeat 2 --jobs 64"}
       ]
     }
   },

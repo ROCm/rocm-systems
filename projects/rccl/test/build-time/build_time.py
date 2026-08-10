@@ -33,12 +33,16 @@ shallow fetch of the upstream ref before resolving the merge-base; if git
 history is still unavailable it skips with a clear message rather than failing
 the run as a false regression.
 
+This module is both the implementation and a standalone CLI. The pytest
+harness in tests/ drives the same functions so that CI gets one result per GPU
+target with pytest's skip/fail semantics; see README.md.
+
 Usage:
-    ./test_build_time.py                      # every arch in DEFAULT_GPUS
-    ./test_build_time.py --local-gpu          # only this machine's arch (CI gate)
-    ./test_build_time.py --targets gfx942     # one target
-    ./test_build_time.py --threshold-sec 600 --jobs 32
-    ./test_build_time.py --local-gpu --compare-base --max-regression-pct 10
+    ./build_time.py                      # every arch in DEFAULT_GPUS
+    ./build_time.py --local-gpu          # only this machine's arch (CI gate)
+    ./build_time.py --targets gfx942     # one target
+    ./build_time.py --threshold-sec 600 --jobs 32
+    ./build_time.py --local-gpu --compare-base --max-regression-pct 10
 """
 
 from __future__ import annotations
@@ -55,7 +59,8 @@ from dataclasses import dataclass
 from typing import Any, IO
 
 HERE: str = os.path.dirname(os.path.abspath(__file__))
-RCCL_ROOT: str = os.path.dirname(HERE)
+# This file is test/build-time/build_time.py, so the project root is two up.
+RCCL_ROOT: str = os.path.dirname(os.path.dirname(HERE))
 CMAKELISTS: str = os.path.join(RCCL_ROOT, "CMakeLists.txt")
 
 DEFAULT_THRESHOLD_SEC: int = 300
@@ -233,6 +238,24 @@ def compiler_supports(target: str, hipcc: str) -> bool:
     return _hipcc_accepts(hipcc, ["--offload-arch=" + target])
 
 
+def resolve_hipcc() -> str:
+    """Return a hipcc that can actually compile HIP, or raise RuntimeError.
+
+    Both callers treat a bad toolchain as a hard error rather than a skip: it
+    is a broken runner, not an arch this ROCm cannot target.
+    """
+    bundled = os.path.join(rocm_path(), "bin", "hipcc")
+    hipcc = bundled if os.path.exists(bundled) else shutil.which("hipcc")
+    if not hipcc:
+        raise RuntimeError("hipcc not found; set ROCM_PATH or put hipcc on PATH")
+    if not compiler_works(hipcc):
+        raise RuntimeError(
+            "%s cannot compile a trivial HIP file, so no target can be measured; "
+            "check ROCM_PATH (currently %r) and the toolchain install"
+            % (hipcc, rocm_path()))
+    return hipcc
+
+
 def pick_generator() -> tuple[str, list[str]]:
     """Prefer Ninja: it parallelizes the per-arch device pipeline far better."""
     if shutil.which("ninja"):
@@ -357,6 +380,30 @@ def resolve_base_sha(explicit_rev: str | None) -> tuple[str | None, str, str | N
         return None, upstream, "cannot resolve merge-base with %s: %s" % (
             upstream, err or "unknown error")
     return merge_base, "merge-base with %s" % upstream, None
+
+
+def add_base_worktree(base_sha: str, build_root: str) -> tuple[str, str]:
+    """Check base_sha out into a throwaway worktree under build_root.
+
+    Returns (worktree_path, rccl_source_dir_within_it) and raises CommandError
+    if the checkout fails, leaving the caller to decide whether that is a skip
+    (the CLI and the pytest harness both treat it as one) or a failure.
+    """
+    worktree = os.path.join(build_root, "base-tree")
+    git_run("worktree", "add", "--detach", "--quiet", worktree, base_sha)
+    return worktree, rccl_dir_within(worktree)
+
+
+def remove_base_worktree(worktree: str) -> None:
+    """Remove a worktree from add_base_worktree, warning rather than raising.
+
+    This runs during teardown, where raising would mask whatever the caller was
+    already reporting; a leaked registration only needs a prune to clean up.
+    """
+    _, err = git_err("worktree", "remove", "--force", worktree)
+    if err:
+        print("WARNING: could not remove base worktree %s (%s); "
+              "run 'git worktree prune' to clean up" % (worktree, err))
 
 
 @dataclass
@@ -489,7 +536,12 @@ def run_comparison(
 ) -> int:
     """Time base vs head for each target and gate on the relative change."""
     explicit_rev = args.compare_base if args.compare_base else None
-    base_sha, base_label, err = resolve_base_sha(explicit_rev)
+    try:
+        base_sha, base_label, err = resolve_base_sha(explicit_rev)
+    except CommandError as exc:
+        print("ERROR: --compare-base %s does not resolve: %s" % (explicit_rev, exc),
+              file=sys.stderr)
+        return 1
     if err or not base_sha:
         print("SKIP: cannot resolve base commit (%s)" % (err or "unknown error"))
         return 0
@@ -511,14 +563,14 @@ def run_comparison(
         print("Base and head are the same commit; nothing to compare.")
         return 0
 
-    worktree = os.path.join(build_root, "base-tree")
-    _, err = git_err("worktree", "add", "--detach", "--quiet", worktree, base_sha)
-    if err:
-        print("SKIP: cannot check out base commit %s (%s)" % (base_sha[:10], err))
+    try:
+        worktree, base_dir = add_base_worktree(base_sha, build_root)
+    except CommandError as exc:
+        print("SKIP: cannot check out base commit %s (%s)" % (base_sha[:10], exc))
         return 0
+
     results: list[Comparison] = []
     try:
-        base_dir = rccl_dir_within(worktree)
         for target in targets:
             if not compiler_supports(target, hipcc):
                 reason = "compiler does not support --offload-arch=%s" % target
@@ -556,10 +608,7 @@ def run_comparison(
                    "  " + result.note if result.note else ""))
             results.append(result)
     finally:
-        _, cleanup_err = git_err("worktree", "remove", "--force", worktree)
-        if cleanup_err:
-            print("WARNING: could not remove base worktree %s (%s); "
-                  "run 'git worktree prune' to clean up" % (worktree, cleanup_err))
+        remove_base_worktree(worktree)
 
     print()
     print("%-10s %10s %10s %9s  %s" % ("TARGET", "BASE", "HEAD", "DELTA", "RESULT"))
@@ -585,15 +634,10 @@ def main() -> int:
     args = parse_args()
     targets, targets_from = resolve_targets(args)
 
-    bundled = os.path.join(rocm_path(), "bin", "hipcc")
-    hipcc = bundled if os.path.exists(bundled) else shutil.which("hipcc")
-    if not hipcc:
-        print("ERROR: hipcc not found; set ROCM_PATH or put hipcc on PATH", file=sys.stderr)
-        return 1
-    if not compiler_works(hipcc):
-        print("ERROR: %s cannot compile a trivial HIP file, so no target can be "
-              "measured.\n       Check ROCM_PATH (currently %r) and the toolchain "
-              "install." % (hipcc, rocm_path()), file=sys.stderr)
+    try:
+        hipcc = resolve_hipcc()
+    except RuntimeError as exc:
+        print("ERROR: %s" % exc, file=sys.stderr)
         return 1
 
     build_root: str = args.build_root or tempfile.mkdtemp(prefix="rccl-build-time-")

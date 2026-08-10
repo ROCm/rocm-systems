@@ -3,6 +3,9 @@
 *.gcov
 /coverage/
 build*/
+# build*/ is unanchored and would otherwise swallow this test harness, whose
+# name describes what it measures rather than a build output directory.
+!/test/build-time/
 install*/
 ext/
 src/transport/net_ib_rocm.cc
