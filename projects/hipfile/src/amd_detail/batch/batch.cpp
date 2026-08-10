@@ -261,11 +261,7 @@ BatchContext::submitOperations(BatchOperations pending_ops)
     std::unique_lock<std::shared_mutex> _ulock{context_mutex};
 
     if (pending_ops.size() > capacity - outstanding_ops.size()) {
-        std::stringstream msg;
-        msg << "Submission exceeds the capacity of this context. Number of ops submitted: ";
-        msg << pending_ops.size() << ". Context capacity: " << capacity << ". Current outstanding ops: ";
-        msg << outstanding_ops.size();
-        throw std::invalid_argument(msg.str());
+        throw BatchFull();
     }
 
     outstanding_ops.insert(pending_ops.begin(), pending_ops.end());
