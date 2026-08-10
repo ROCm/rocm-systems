@@ -91,10 +91,24 @@ inline void push_user_scope(const std::string& marker, const std::string& contex
         entry.marker  = marker;
         entry.context = context;
         g_thread.stack.push_back(std::move(entry));
-        auto stack_rollback = make_scope_guard([] { g_thread.stack.pop_back(); });
+        auto stack_rollback = make_scope_guard(
+            []
+            {
+                if (!g_thread.stack.empty())
+                {
+                    g_thread.stack.pop_back();
+                }
+            });
 
         g_thread.guards.push_back(make_userscope_guard(g_thread.stack));
-        auto guards_rollback = make_scope_guard([] { g_thread.guards.pop_back(); });
+        auto guards_rollback = make_scope_guard(
+            []
+            {
+                if (!g_thread.guards.empty())
+                {
+                    g_thread.guards.pop_back();
+                }
+            });
 
         std::string wire_string = build_marker_string(g_thread.stack);
         if (!backend.empty())

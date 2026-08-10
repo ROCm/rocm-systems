@@ -108,31 +108,35 @@ def test_source_fingerprint_is_length_delimited(tmp_path, monkeypatch):
     assert fp1 != fp2, "fingerprint collided across an input boundary"
 
 
-def test_cmake_and_runtime_compute_identical_fingerprint():
-    """The loader and CMake compute the same source fingerprint."""
+def test_probe_output_matches_cmake_field_order():
+    """The probe prints the seven fields CMake reads by index.
+
+    ``CMakeLists.txt`` reads each value with ``list(GET ... <n> ...)``, so the
+    line order is part of the contract.
+    """
     import subprocess
 
-    cmake_dir = inject_roctx_loader._SO_SOURCE_DIR
-    assert cmake_dir.is_dir(), f"missing cmake source dir at {cmake_dir}"
+    probe = inject_roctx_loader._SO_SOURCE_DIR / "cmake" / "probe_torch.py"
+    assert probe.is_file(), f"missing probe at {probe}"
 
-    snippet = (
-        "import sys, pathlib; "
-        f"sys.path.insert(0, str(pathlib.Path('{cmake_dir}/../..').resolve())); "
-        "from utils.inject_roctx._backends.torch_cpp_loader "
-        "import _source_fingerprint; "
-        "print(_source_fingerprint())"
-    )
     result = subprocess.run(
-        [sys.executable, "-c", snippet],
-        check=True,
+        [sys.executable, str(probe)],
         capture_output=True,
         text=True,
     )
-    cmake_side = result.stdout.strip()
-    runtime_side = inject_roctx_loader._source_fingerprint()
-    assert cmake_side == runtime_side, (
-        f"install-time fingerprint {cmake_side!r} != runtime {runtime_side!r}"
-    )
+    if result.returncode == 3:
+        pytest.skip("torch not importable")
+    assert result.returncode == 0, result.stderr
+
+    lines = result.stdout.splitlines()
+    assert len(lines) == 7, f"probe printed {len(lines)} lines, CMake reads 7"
+    assert lines[0] == str(sys.version_info.major)
+    assert lines[1] == str(sys.version_info.minor)
+    assert lines[2], "torch version (index 2) is empty"
+    assert lines[3], "torch include dirs (index 3) are empty"
+    assert lines[4], "torch library dirs (index 4) are empty"
+    assert lines[5].endswith("/lib"), f"unexpected wheel lib dir {lines[5]!r}"
+    assert lines[6] == inject_roctx_loader._source_fingerprint()
 
 
 # ---------------------------------------------------------------------------
@@ -141,9 +145,27 @@ def test_cmake_and_runtime_compute_identical_fingerprint():
 
 
 def roctx_recordfn_module_sources():
-    """The module's C++ source and header files."""
+    """The module's C++ source and header files, from the fingerprint inputs."""
+    return sorted(
+        p for p in inject_roctx_loader._FINGERPRINT_INPUTS if p.suffix in (".cpp", ".h")
+    )
+
+
+def test_fingerprint_inputs_cover_every_build_input():
+    """Every file the build consumes is a fingerprint input."""
     src_dir = inject_roctx_loader._SO_SOURCE_DIR
-    return sorted(set(src_dir.glob("*.cpp")) | set(src_dir.glob("*.h")))
+    if not src_dir.is_dir():
+        pytest.skip(f"module sources not present at {src_dir}")
+
+    inputs = set(inject_roctx_loader._FINGERPRINT_INPUTS)
+    expected = (
+        set(src_dir.glob("*.cpp"))
+        | set(src_dir.glob("*.h"))
+        | set(src_dir.glob("cmake/*.py"))
+        | {inject_roctx_loader._SO_BUILDFILE}
+    )
+    missing = expected - inputs
+    assert not missing, f"build inputs absent from the fingerprint: {sorted(missing)}"
 
 
 def test_roctx_recordfn_source_avoids_torch_umbrella_headers():
@@ -395,7 +417,9 @@ def test_try_jit_force_rebuild_bypasses_cache(monkeypatch, tmp_path):
     monkeypatch.setattr(
         inject_roctx_loader, "_import_module_from_path", must_not_import
     )
-    monkeypatch.setattr(inject_roctx_loader, "_SO_SOURCE", tmp_path / "missing.cpp")
+    monkeypatch.setattr(
+        inject_roctx_loader, "_FINGERPRINT_INPUTS", (tmp_path / "missing.cpp",)
+    )
 
     assert inject_roctx_loader._try_jit(_FAKE_TAG, force_rebuild=True) is None
 
@@ -419,21 +443,26 @@ def _set_so_inputs_present(monkeypatch, tmp_path):
     src_dir = tmp_path / "roctx_recordfn"
     src_dir.mkdir(parents=True, exist_ok=True)
     cpp = src_dir / "roctx_recordfn.cpp"
+    module_cpp = src_dir / "roctx_recordfn_module.cpp"
     cml = src_dir / "CMakeLists.txt"
     cpp.write_text("// stub\n")
+    module_cpp.write_text("// stub\n")
     cml.write_text("# stub\n")
     monkeypatch.setattr(inject_roctx_loader, "_SO_SOURCE_DIR", src_dir)
-    monkeypatch.setattr(inject_roctx_loader, "_SO_SOURCE", cpp)
     monkeypatch.setattr(inject_roctx_loader, "_SO_BUILDFILE", cml)
+    monkeypatch.setattr(
+        inject_roctx_loader, "_FINGERPRINT_INPUTS", (cpp, module_cpp, cml)
+    )
     return src_dir
 
 
 def test_try_jit_skips_when_sources_missing(monkeypatch, tmp_path):
     """``_try_jit`` returns ``None`` when sources are missing (no cache hit)."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    monkeypatch.setattr(inject_roctx_loader, "_SO_SOURCE", tmp_path / "nonexistent.cpp")
     monkeypatch.setattr(
-        inject_roctx_loader, "_SO_BUILDFILE", tmp_path / "nonexistent.txt"
+        inject_roctx_loader,
+        "_FINGERPRINT_INPUTS",
+        (tmp_path / "nonexistent.cpp", tmp_path / "nonexistent.txt"),
     )
 
     def fail_subprocess(*_a, **_k):
