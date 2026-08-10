@@ -16,8 +16,6 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 
-#include "util/log.h"
-
 #include <array>
 #include <cstring>
 #include <string_view>
@@ -35,8 +33,8 @@ namespace {
 ///
 /// Separately, a 64-bit source reading FLAT_SCRATCH_BASE is classified via
 /// operand inspection (see gfx1250_reads_flat_scratch_base_64bit), and the
-/// barrier-state and sleep/monitor families are DEFERRED with a pass-through
-/// warning rather than fail-closed (see is_deferred_gfx1250_family).
+/// barrier-state query and s_monitor_sleep are DEFERRED with a pass-through
+/// report rather than fail-closed (see gfx1250_b0_to_a0_is_deferred_family).
 inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemonics = {
     "ds_load_2addr_b32",
     "ds_load_2addr_b64",
@@ -146,20 +144,6 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
   return encoding.clamp != 0;
 }
 
-/// @brief True for instruction families whose A0 handling is deferred pending
-/// confirmation of the exact translated set.
-/// @details The barrier-state query and the sleep/monitor families may need
-/// target-specific translation that is not yet implemented. Rather than fail closed
-/// (which would refuse otherwise-translatable kernels that use very common ops
-/// such as s_sleep), these are passed through unchanged for now and a warning is
-/// emitted so the omission is visible. Revisit once the precise set is
-/// confirmed; if translation is required, move the relevant members to
-/// requires_b0_to_a0_expansion() so they fail closed instead.
-[[nodiscard]] bool is_deferred_gfx1250_family(std::string_view mnemonic) {
-  return mnemonic == "s_get_barrier_state" || mnemonic == "s_sleep" || mnemonic == "s_sleep_var" ||
-         mnemonic == "s_monitor_sleep";
-}
-
 [[nodiscard]] bool is_wmma_completion_wait(const Instruction &inst) {
   if (inst.size() != static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr ||
       inst.mnemonic() != "s_wait_alu")
@@ -245,6 +229,16 @@ void gfx1250_b0_to_a0_append_wmma_completion_wait_if_needed(
   words.push_back(gfx1250::build_sopp(gfx1250::kSWaitAluSopp, {.simm16 = kWaitVaVdstZero})[0]);
 }
 
+bool gfx1250_b0_to_a0_is_deferred_family(std::string_view mnemonic) {
+  // s_sleep and s_sleep_var are deliberately absent. They behave identically on
+  // A0 and B0: the only sleep-family A0 erratum is DEGFXMI400-12268, which is
+  // specific to s_monitor_sleep('forever') with MWAIT=0. Copying a plain sleep
+  // through is the correct translation, not an unimplemented one, so reporting
+  // it said nothing and buried the reports that do name a real gap -- one RCCL
+  // all_reduce run emitted 104,831 of them.
+  return mnemonic == "s_get_barrier_state" || mnemonic == "s_monitor_sleep";
+}
+
 const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &inst) {
   // CLAMP=0 is the common E4M3 operation on both steppings. CLAMP=1 selects
   // the B0-only E5M3 behavior and therefore requires a semantic expansion.
@@ -256,13 +250,11 @@ const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &
 
   // Reading FLAT_SCRATCH_BASE through a 64-bit source position is a property of
   // the operand rather than the mnemonic, so it is classified separately.
+  // Deferred families reach here and stay on the copy path. Reporting that
+  // omission is the translation loop's job: see
+  // gfx1250_b0_to_a0_is_deferred_family.
   if (!requires_b0_to_a0_expansion(inst.mnemonic()) &&
       !gfx1250_reads_flat_scratch_base_64bit(inst)) {
-    // Deferred families pass through unchanged but warn, so the not-yet-handled
-    // case is visible rather than silent. See is_deferred_gfx1250_family.
-    if (is_deferred_gfx1250_family(mnemonic))
-      util::Logger::warn("gfx1250 translation passes through '", mnemonic,
-                         "' unchanged; target-specific handling is not yet implemented");
     return nullptr;
   }
 

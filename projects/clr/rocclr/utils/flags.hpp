@@ -22,8 +22,6 @@ release(bool, AMD_LOG_ASYNC, true,                                            \
         "Async logging with in-memory buffer and background thread (set 0 to disable)")\
 debug(uint, DEBUG_GPU_FLAGS, 0,                                               \
         "The debug options for GPU device")                                   \
-release(size_t, CQ_THREAD_STACK_SIZE, 256*Ki, /* @todo: that much! */         \
-        "The default command queue thread stack size")                        \
 release(int, GPU_MAX_WORKGROUP_SIZE, 0,                                       \
         "Maximum number of workitems in a workgroup for GPU, 0 -use default") \
 debug(bool, CPU_MEMORY_GUARD_PAGES, false,                                    \
