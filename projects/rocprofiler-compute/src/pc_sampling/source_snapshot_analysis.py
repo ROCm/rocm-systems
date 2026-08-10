@@ -12,6 +12,8 @@ analysis output.
 from pathlib import Path
 from typing import Optional
 
+SOURCE_FRAME_SEPARATOR = " -> "
+
 
 def find_source_files_common_ancestor(
     source_snapshot_directory: Path,
@@ -31,6 +33,24 @@ def find_source_files_common_ancestor(
     return _find_common_parent(original_source_files)
 
 
+def make_source_relative_to_common_ancestor(
+    source: Optional[str],
+    source_files_common_ancestor: Optional[Path],
+) -> Optional[str]:
+    """Make absolute source-frame paths relative to their common ancestor."""
+    if (
+        source is None
+        or source_files_common_ancestor is None
+        or source_files_common_ancestor == Path("/")
+    ):
+        return source
+
+    return SOURCE_FRAME_SEPARATOR.join(
+        _make_source_frame_path_relative(frame, source_files_common_ancestor)
+        for frame in source.split(SOURCE_FRAME_SEPARATOR)
+    )
+
+
 def _find_common_parent(source_files: list[Path]) -> Optional[Path]:
     """Return the deepest directory containing every source file."""
     if not source_files:
@@ -42,3 +62,29 @@ def _find_common_parent(source_files: list[Path]) -> Optional[Path]:
         for ancestor in (first_parent, *first_parent.parents)
         if all(source_file.is_relative_to(ancestor) for source_file in source_files)
     )
+
+
+def _make_source_frame_path_relative(
+    source_frame: str,
+    source_files_common_ancestor: Path,
+) -> str:
+    source_path_text, line_token_suffix = _split_source_frame(source_frame)
+    source_path = Path(source_path_text)
+    if not source_path.is_absolute() or not source_path.is_relative_to(
+        source_files_common_ancestor
+    ):
+        return source_frame
+
+    relative_source_path = source_path.relative_to(source_files_common_ancestor)
+    return f"{relative_source_path}{line_token_suffix}"
+
+
+def _split_source_frame(source_frame: str) -> tuple[str, str]:
+    source_path, separator, line_token = source_frame.rpartition(":")
+    if not separator or not _is_source_line_token(line_token):
+        return source_frame, ""
+    return source_path, f"{separator}{line_token}"
+
+
+def _is_source_line_token(token: str) -> bool:
+    return token == "?" or (token.isascii() and token.isdigit())

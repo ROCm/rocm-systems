@@ -21,6 +21,10 @@ from pc_sampling.pc_sampling_analysis import (
     InstructionLineRecord,
     load_aggregated_pc_sampling,
 )
+from pc_sampling.source_snapshot_analysis import (
+    find_source_files_common_ancestor,
+    make_source_relative_to_common_ancestor,
+)
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED
 from utils import schema, utils_analysis
@@ -219,9 +223,16 @@ class db_analysis(OmniAnalyze_Base):
                 )
 
             # Add pc sampling data, then the full code-object ISA
+            source_files_common_ancestor = find_source_files_common_ancestor(
+                Path(workload_path) / "src"
+            )
             kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol] = {}
             code_object_stores = self.add_pc_sampling_data(
-                workload_path, workload_obj, kernel_objs, kernel_symbols
+                workload_path,
+                workload_obj,
+                kernel_objs,
+                kernel_symbols,
+                source_files_common_ancestor,
             )
             self.add_code_object_isa(
                 workload_path,
@@ -229,6 +240,7 @@ class db_analysis(OmniAnalyze_Base):
                 kernel_objs,
                 code_object_stores,
                 kernel_symbols,
+                source_files_common_ancestor,
             )
 
             # Add metrics and values - iterate on values, create metrics as needed
@@ -407,6 +419,7 @@ class db_analysis(OmniAnalyze_Base):
         workload_obj: orm.Workload,
         kernel_objs: dict[KernelKey, orm.Kernel],
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
+        source_files_common_ancestor: Optional[Path] = None,
     ) -> dict[CodeObjectKey, orm.CodeObjectStore]:
         """Insert the normalized PC-sampling rows for one workload."""
         code_object_stores: dict[CodeObjectKey, orm.CodeObjectStore] = {}
@@ -436,6 +449,7 @@ class db_analysis(OmniAnalyze_Base):
                         code_object_store,
                         kernel_objs,
                         kernel_symbols,
+                        source_files_common_ancestor,
                     )
 
         return code_object_stores
@@ -466,6 +480,7 @@ class db_analysis(OmniAnalyze_Base):
         code_object_store: orm.CodeObjectStore,
         kernel_objs: dict[KernelKey, orm.Kernel],
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
+        source_files_common_ancestor: Optional[Path] = None,
     ) -> None:
         """Insert one instruction line, its sample state, and child counts."""
         kernel = kernel_objs.get(line.kernel_name)
@@ -475,7 +490,9 @@ class db_analysis(OmniAnalyze_Base):
 
         instruction_line = orm.InstructionLine(
             code_object_offset=line.code_object_offset,
-            source=line.source,
+            source=make_source_relative_to_common_ancestor(
+                line.source, source_files_common_ancestor
+            ),
             instruction=line.instruction,
             kernel_symbol=db_analysis._get_or_create_kernel_symbol(
                 code_object_store, kernel, kernel_symbols
@@ -519,6 +536,7 @@ class db_analysis(OmniAnalyze_Base):
         kernel_objs: dict[KernelKey, orm.Kernel],
         code_object_stores: dict[CodeObjectKey, orm.CodeObjectStore],
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
+        source_files_common_ancestor: Optional[Path] = None,
     ) -> None:
         """Add dispatched kernels' disassembly as instruction lines,
         skipping any offset already present."""
@@ -588,12 +606,17 @@ class db_analysis(OmniAnalyze_Base):
                     kernel_symbol.code_object_offset = (
                         symbol.virtual_address - code_object_store.load_base
                     )
-                    self._add_symbol_isa(kernel_symbol, symbol)
+                    self._add_symbol_isa(
+                        kernel_symbol,
+                        symbol,
+                        source_files_common_ancestor,
+                    )
 
     @staticmethod
     def _add_symbol_isa(
         kernel_symbol: orm.KernelSymbol,
         symbol: CodeObjectSymbol,
+        source_files_common_ancestor: Optional[Path] = None,
     ) -> None:
         """Add a symbol's disassembly, skipping offsets it already holds."""
         existing_offsets = {
@@ -608,7 +631,9 @@ class db_analysis(OmniAnalyze_Base):
             Database.get_session().add(
                 orm.InstructionLine(
                     code_object_offset=code_object_offset,
-                    source=instruction.source,
+                    source=make_source_relative_to_common_ancestor(
+                        instruction.source, source_files_common_ancestor
+                    ),
                     instruction=instruction.instruction,
                     kernel_symbol=kernel_symbol,
                 )
