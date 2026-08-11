@@ -27,7 +27,6 @@ from pc_sampling.source_snapshot_analysis import (
     parse_source_frames,
     read_source_file_digest_and_lines,
     resolve_snapshot_path,
-    shorten_source_file_paths,
 )
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED
@@ -101,27 +100,25 @@ class ExpressionRow(NamedTuple):
 
 
 class SourceFrameCollector:
-    """Collects one workload's instruction source frames, then inserts them.
+    """Creates one workload's source rows as its instructions reference them.
 
-    Each file is stored under the shortest path that is unambiguous within the
-    workload, which is only known once every instruction has been seen, so the
-    frames are buffered until then.
+    A file is read and stored whole the first time a frame names it, so a
+    sampled line can be read in its surrounding context.
     """
 
     def __init__(self, workload_path: Path, workload: orm.Workload) -> None:
         self._workload_path = workload_path
         self._workload = workload
         self._frames_by_comment: dict[str, list[SourceFrame]] = {}
-        self._frames_by_instruction: list[
-            tuple[orm.InstructionLine, list[SourceFrame]]
-        ] = []
+        self._source_files: dict[str, orm.SourceFile] = {}
+        self._source_lines: dict[SourceFrame, orm.SourceLine] = {}
 
     def add_instruction(
         self,
         instruction_line: orm.InstructionLine,
         source: Optional[str],
     ) -> None:
-        """Buffer the frames of one instruction's comment."""
+        """Link one instruction to its source frames, innermost first."""
         # The sampling path substitutes "N/A" for an absent comment, which
         # would otherwise become a source file named after itself.
         if not source or source == SOURCE_LINE_MISSING:
@@ -130,78 +127,78 @@ class SourceFrameCollector:
         # Parse once per distinct comment; instructions repeat them heavily.
         if source not in self._frames_by_comment:
             self._frames_by_comment[source] = parse_source_frames(source)
-        self._frames_by_instruction.append((
-            instruction_line,
-            self._frames_by_comment[source],
-        ))
 
-    def insert_source_rows(self) -> None:
-        """Create the workload's source rows and link them to instructions."""
-        line_numbers_by_path = self._referenced_line_numbers()
-        shortened_paths = shorten_source_file_paths(set(line_numbers_by_path))
-
-        source_lines: dict[SourceFrame, orm.SourceLine] = {}
-        for absolute_path in sorted(line_numbers_by_path):
-            line_numbers = line_numbers_by_path[absolute_path]
-            digest, line_contents = self._read_snapshot_file(
-                absolute_path, line_numbers
+        for frame_index, frame in enumerate(self._frames_by_comment[source]):
+            Database.get_session().add(
+                orm.InstructionSourceLine(
+                    instruction_line=instruction_line,
+                    source_line=self._get_or_create_source_line(frame),
+                    frame_index=frame_index,
+                )
             )
+
+    def _get_or_create_source_line(self, frame: SourceFrame) -> orm.SourceLine:
+        """Return the row for one frame's line, creating it if absent.
+
+        A frame naming a line the snapshot copy does not hold, including the
+        null line of a ":?" frame, gets a row with no content.
+        """
+        absolute_path, line_number = frame
+        # Resolve the file first: it seeds the cache with the lines it holds.
+        source_file = self._get_or_create_source_file(absolute_path)
+        if frame not in self._source_lines:
+            self._source_lines[frame] = orm.SourceLine(
+                source_file=source_file,
+                line_number=line_number,
+            )
+            Database.get_session().add(self._source_lines[frame])
+        return self._source_lines[frame]
+
+    def _get_or_create_source_file(self, absolute_path: str) -> orm.SourceFile:
+        """Return the row for one file, reading its snapshot copy if absent."""
+        if absolute_path not in self._source_files:
+            digest, line_contents = self._read_snapshot_file(absolute_path)
             source_file = orm.SourceFile(
                 workload=self._workload,
-                file_path=shortened_paths[absolute_path],
+                file_path=absolute_path,
                 md5_checksum=digest,
             )
             Database.get_session().add(source_file)
-
-            # Sort with the unknown line first so the rows are deterministic.
-            for line_number in sorted(
-                line_numbers, key=lambda number: (number is not None, number)
-            ):
-                source_line = orm.SourceLine(
-                    source_file=source_file,
-                    line_number=line_number,
-                    content=line_contents.get(line_number),
-                )
-                Database.get_session().add(source_line)
-                source_lines[(absolute_path, line_number)] = source_line
-
-        self._link_instructions(source_lines)
-
-    def _referenced_line_numbers(self) -> dict[str, set[Optional[int]]]:
-        """Group every referenced line number under its source file path."""
-        line_numbers_by_path: dict[str, set[Optional[int]]] = {}
-        for frames in self._frames_by_comment.values():
-            for absolute_path, line_number in frames:
-                line_numbers_by_path.setdefault(absolute_path, set()).add(line_number)
-        return line_numbers_by_path
+            self._source_files[absolute_path] = source_file
+            self._add_source_lines(source_file, absolute_path, line_contents)
+        return self._source_files[absolute_path]
 
     def _read_snapshot_file(
-        self,
-        absolute_path: str,
-        line_numbers: set[Optional[int]],
+        self, absolute_path: str
     ) -> tuple[Optional[str], dict[int, str]]:
         """Read one referenced file out of the workload's source snapshot."""
         if not Path(absolute_path).is_absolute():
             return None, {}
 
         return read_source_file_digest_and_lines(
-            resolve_snapshot_path(self._workload_path, absolute_path),
-            {line_number for line_number in line_numbers if line_number is not None},
+            resolve_snapshot_path(self._workload_path, absolute_path)
         )
 
-    def _link_instructions(
-        self, source_lines: dict[SourceFrame, orm.SourceLine]
+    def _add_source_lines(
+        self,
+        source_file: orm.SourceFile,
+        absolute_path: str,
+        line_contents: dict[int, str],
     ) -> None:
-        """Attach each buffered instruction to its frames, innermost first."""
-        for instruction_line, frames in self._frames_by_instruction:
-            for frame_index, frame in enumerate(frames):
-                Database.get_session().add(
-                    orm.InstructionSourceLine(
-                        instruction_line=instruction_line,
-                        source_line=source_lines[frame],
-                        frame_index=frame_index,
-                    )
-                )
+        """Create a row for every line of one file's snapshot copy."""
+        source_lines = [
+            orm.SourceLine(
+                source_file=source_file,
+                line_number=line_number,
+                content=content,
+            )
+            for line_number, content in line_contents.items()
+        ]
+        Database.get_session().add_all(source_lines)
+        self._source_lines.update({
+            (absolute_path, source_line.line_number): source_line
+            for source_line in source_lines
+        })
 
 
 class db_analysis(OmniAnalyze_Base):
@@ -348,7 +345,6 @@ class db_analysis(OmniAnalyze_Base):
                 kernel_symbols,
                 source_frames,
             )
-            source_frames.insert_source_rows()
 
             # Add metrics and values - iterate on values, create metrics as needed
             self.run_analysis_metrics(workload_path, workload_obj, kernel_objs)

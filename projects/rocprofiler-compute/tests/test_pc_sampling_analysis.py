@@ -39,6 +39,12 @@ from utils.parser import (
 from utils.utils_common import is_only_pc_sampling
 
 PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI350"
+# The capture-host paths the fixture's instruction comments name.
+VCOPY_SOURCE = "/app/projects/rocprofiler-compute/sample/vcopy.cpp"
+HIP_RUNTIME_SOURCE = (
+    "/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel/include/hip/"
+    "amd_detail/amd_hip_runtime.h"
+)
 
 PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 INST_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_"
@@ -2160,10 +2166,20 @@ def test_pc_sampling_analyze_database_output(
             db_code_object_process_ids = conn.execute(
                 "SELECT DISTINCT pid FROM compute_code_object_store"
             ).fetchall()
+            db_source_line_counts = conn.execute(
+                "SELECT file_path, COUNT(*) FROM compute_source_lines_view "
+                "GROUP BY file_path ORDER BY file_path"
+            ).fetchall()
             # Content is clipped: these are long header lines.
-            db_source_lines = conn.execute(
-                "SELECT file_path, line_number, substr(content, 1, 45) "
-                "FROM compute_source_lines_view ORDER BY file_path, line_number"
+            db_referenced_source_lines = conn.execute(
+                "SELECT f.file_path, l.line_number, substr(l.content, 1, 45) "
+                "FROM compute_instruction_source_line isl "
+                "JOIN compute_source_line l "
+                "ON l.source_line_uuid = isl.source_line_uuid "
+                "JOIN compute_source_file f "
+                "ON f.source_file_uuid = l.source_file_uuid "
+                "GROUP BY f.file_path, l.line_number "
+                "ORDER BY f.file_path, l.line_number"
             ).fetchall()
         finally:
             conn.close()
@@ -2185,22 +2201,45 @@ def test_pc_sampling_analyze_database_output(
         # The chain is rebuilt innermost first.
         assert (
             db_pc_sampling.loc[db_pc_sampling["offset"] == 8192, "source"].item()
-            == "amd_hip_runtime.h:258 -> amd_hip_runtime.h:317 -> vcopy.cpp:36"
+            == f"{HIP_RUNTIME_SOURCE}:258 -> {HIP_RUNTIME_SOURCE}:317 "
+            f"-> {VCOPY_SOURCE}:36"
         )
         assert (
             db_pc_sampling.loc[db_pc_sampling["offset"] == 8256, "source"].item()
-            == "amd_hip_runtime.h:? -> amd_hip_runtime.h:308 -> vcopy.cpp:36"
+            == f"{HIP_RUNTIME_SOURCE}:? -> {HIP_RUNTIME_SOURCE}:308 "
+            f"-> {VCOPY_SOURCE}:36"
         )
-        assert db_source_lines == [
-            ("amd_hip_runtime.h", None, None),
-            ("amd_hip_runtime.h", 253, "__DEVICE__ unsigned int __hip_get_block_idx_x"),
-            ("amd_hip_runtime.h", 258, "__DEVICE__ unsigned int __hip_get_block_dim_x"),
-            ("amd_hip_runtime.h", 308, "  __HIP_DEVICE_BUILTIN(x, __hip_get_block_idx"),
-            ("amd_hip_runtime.h", 317, "  __HIP_DEVICE_BUILTIN_INTERNAL(x, __hip_get_"),
-            ("vcopy.cpp", 36, "    int id = blockIdx.x*blockDim.x+threadIdx."),
-            ("vcopy.cpp", 37, "    if (id < n)"),
-            ("vcopy.cpp", 38, "      c[id] = a[id];"),
-            ("vcopy.cpp", 39, "}"),
+        # Each file is stored whole, plus one null-line row for the ":?" frame.
+        assert db_source_line_counts == [
+            (VCOPY_SOURCE, 227),
+            (HIP_RUNTIME_SOURCE, 414),
+        ]
+        assert db_referenced_source_lines == [
+            (VCOPY_SOURCE, 36, "    int id = blockIdx.x*blockDim.x+threadIdx."),
+            (VCOPY_SOURCE, 37, "    if (id < n)"),
+            (VCOPY_SOURCE, 38, "      c[id] = a[id];"),
+            (VCOPY_SOURCE, 39, "}"),
+            (HIP_RUNTIME_SOURCE, None, None),
+            (
+                HIP_RUNTIME_SOURCE,
+                253,
+                "__DEVICE__ unsigned int __hip_get_block_idx_x",
+            ),
+            (
+                HIP_RUNTIME_SOURCE,
+                258,
+                "__DEVICE__ unsigned int __hip_get_block_dim_x",
+            ),
+            (
+                HIP_RUNTIME_SOURCE,
+                308,
+                "  __HIP_DEVICE_BUILTIN(x, __hip_get_block_idx",
+            ),
+            (
+                HIP_RUNTIME_SOURCE,
+                317,
+                "  __HIP_DEVICE_BUILTIN_INTERNAL(x, __hip_get_",
+            ),
         ]
     finally:
         common.clean_output_dir(True, str(workload_dir))
@@ -2239,8 +2278,8 @@ def test_pc_sampling_analyze_csv_output(
         assert csv_kernel.iloc[0]["dispatch_count"] == 3
         csv_source_lines = pd.read_csv(csv_dir / "source_lines.csv")
         assert set(csv_source_lines["file_path"]) == {
-            "vcopy.cpp",
-            "amd_hip_runtime.h",
+            VCOPY_SOURCE,
+            HIP_RUNTIME_SOURCE,
         }
         # Every sampling row must resolve to a kernel the kernel view exposes.
         assert set(csv_pc_sampling["kernel_uuid"]) <= set(csv_kernel["kernel_uuid"])

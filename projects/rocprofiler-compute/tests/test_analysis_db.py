@@ -1202,7 +1202,7 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
         (frame.source_line.source_file.file_path, frame.source_line.line_number)
         for line in instruction_lines
         for frame in line.source_lines
-    } == {("shared.cpp", 7)}
+    } == {("/s/shared.cpp", 7)}
 
     instruction_by_process_id = {
         line.kernel_symbol.code_object_store.pid: line for line in instruction_lines
@@ -1269,7 +1269,7 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
         (frame.source_line.source_file.file_path, frame.source_line.line_number)
         for line in instruction_lines
         for frame in line.source_lines
-    } == {("shared.cpp", 7)}
+    } == {("/s/shared.cpp", 7)}
 
     instruction_by_process_id = {
         line.kernel_symbol.code_object_store.pid: line for line in instruction_lines
@@ -1738,8 +1738,8 @@ def fetch_source_lines_by_workload(session):
     }
 
 
-def test_run_analysis_shortens_source_paths_within_each_workload(db_session, tmp_path):
-    """Two workloads sharing a basename each get their own shortened path."""
+def test_run_analysis_keeps_each_workloads_source_files_apart(db_session, tmp_path):
+    """Two workloads sharing a basename each keep their own absolute path."""
     tool_data_per_workload = {}
     for workload_name, source_path in (
         ("first", "/home/u/first/src/a.cpp"),
@@ -1757,25 +1757,24 @@ def test_run_analysis_shortens_source_paths_within_each_workload(db_session, tmp
 
     run_analysis_with_materialized_views(analyzer)
 
-    # Both reach the basename despite sharing no ancestor above "/".
     file_paths_by_workload = {
         workload_name: sorted({row[0] for row in rows})
         for workload_name, rows in fetch_source_lines_by_workload(db_session).items()
     }
-    assert file_paths_by_workload == {"first": ["a.cpp"], "second": ["a.cpp"]}
+    assert file_paths_by_workload == {
+        "first": ["/home/u/first/src/a.cpp"],
+        "second": ["/opt/projects/second/src/a.cpp"],
+    }
     assert db_session.query(orm.SourceFile).count() == 2
 
 
-def test_run_analysis_keeps_same_basename_files_apart(db_session, tmp_path):
-    """Two files sharing a basename take one parent component each."""
+def test_run_analysis_stores_lines_no_instruction_references(db_session, tmp_path):
+    """A referenced file is stored whole, not just the lines a comment names."""
     workload_path = tmp_path / "workload"
     tool_data_records = make_source_workload_tool_data_records(
         workload_path,
-        {
-            "/home/u/app/src/util.cpp": "int from_src;\n",
-            "/home/u/app/gpu/util.cpp": "int from_gpu;\n",
-        },
-        ["/home/u/app/src/util.cpp:1", "/home/u/app/gpu/util.cpp:1"],
+        {"/home/u/app/vcopy.cpp": "int first;\nint second;\nint third;\n"},
+        ["/home/u/app/vcopy.cpp:2", "/home/u/app/vcopy.cpp:2"],
     )
     analyzer = make_pc_sampling_database_analyzer({
         str(workload_path): tool_data_records
@@ -1783,9 +1782,11 @@ def test_run_analysis_keeps_same_basename_files_apart(db_session, tmp_path):
 
     run_analysis_with_materialized_views(analyzer)
 
+    digest = "86812da3721fe4b16ee110ad3dbcbbfa"
     assert fetch_source_lines_by_workload(db_session)["workload"] == [
-        ("gpu/util.cpp", "5fc040bf452666c54ec129214e8edfa1", 1, "int from_gpu;"),
-        ("src/util.cpp", "b0362677a51722acfd6e33fe915da4dc", 1, "int from_src;"),
+        ("/home/u/app/vcopy.cpp", digest, 1, "int first;"),
+        ("/home/u/app/vcopy.cpp", digest, 2, "int second;"),
+        ("/home/u/app/vcopy.cpp", digest, 3, "int third;"),
     ]
 
 
@@ -1804,8 +1805,34 @@ def test_run_analysis_records_source_file_missing_from_snapshot(db_session, tmp_
     run_analysis_with_materialized_views(analyzer)
 
     assert fetch_source_lines_by_workload(db_session)["workload"] == [
-        ("absent.cpp", None, 7, None),
-        ("present.cpp", "d4aeed8f3a65c2f28866bd51dff2ebfd", 1, "int present;"),
+        ("/home/u/app/absent.cpp", None, 7, None),
+        (
+            "/home/u/app/present.cpp",
+            "d4aeed8f3a65c2f28866bd51dff2ebfd",
+            1,
+            "int present;",
+        ),
+    ]
+
+
+def test_run_analysis_records_line_past_end_of_source_file(db_session, tmp_path):
+    """A frame naming a line the snapshot copy lacks gets a contentless row."""
+    workload_path = tmp_path / "workload"
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {"/home/u/app/vcopy.cpp": "int only;\n"},
+        ["/home/u/app/vcopy.cpp:1", "/home/u/app/vcopy.cpp:99"],
+    )
+    analyzer = make_pc_sampling_database_analyzer({
+        str(workload_path): tool_data_records
+    })
+
+    run_analysis_with_materialized_views(analyzer)
+
+    digest = "ac72447959bb8fac84d23eea9b103598"
+    assert fetch_source_lines_by_workload(db_session)["workload"] == [
+        ("/home/u/app/vcopy.cpp", digest, 1, "int only;"),
+        ("/home/u/app/vcopy.cpp", digest, 99, None),
     ]
 
 
@@ -1839,7 +1866,11 @@ def test_run_analysis_links_frames_innermost_first(db_session, tmp_path):
             frame.source_line.line_number,
         )
         for frame in chained_line.source_lines
-    ] == [(0, "hip.h", None), (1, "hip.h", 2), (2, "vcopy.cpp", 1)]
+    ] == [
+        (0, "/opt/rocm/hip.h", None),
+        (1, "/opt/rocm/hip.h", 2),
+        (2, "/home/u/app/vcopy.cpp", 1),
+    ]
 
     rebuilt_sources = {
         offset: source
@@ -1851,8 +1882,8 @@ def test_run_analysis_links_frames_innermost_first(db_session, tmp_path):
         )
     }
     assert rebuilt_sources == {
-        0x10: "hip.h:? -> hip.h:2 -> vcopy.cpp:1",
-        0x20: "vcopy.cpp:2",
+        0x10: ("/opt/rocm/hip.h:? -> /opt/rocm/hip.h:2 -> /home/u/app/vcopy.cpp:1"),
+        0x20: "/home/u/app/vcopy.cpp:2",
     }
 
 
@@ -2393,7 +2424,7 @@ def test_run_analysis_keeps_sampled_row_without_a_comment(db_session, tmp_path):
 
     assert [
         source_file.file_path for source_file in db_session.query(orm.SourceFile)
-    ] == ["vcopy.cpp"]
+    ] == ["/home/u/app/vcopy.cpp"]
     rebuilt_sources = {
         offset: source
         for offset, source in db_session.execute(
@@ -2403,4 +2434,4 @@ def test_run_analysis_keeps_sampled_row_without_a_comment(db_session, tmp_path):
             )
         )
     }
-    assert rebuilt_sources == {0x10: "vcopy.cpp:1", 0x20: None}
+    assert rebuilt_sources == {0x10: "/home/u/app/vcopy.cpp:1", 0x20: None}

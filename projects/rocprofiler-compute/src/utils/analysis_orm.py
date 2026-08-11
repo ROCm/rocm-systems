@@ -268,9 +268,8 @@ class InstructionLine(Base):
 class SourceFile(Base):
     """One source file a workload's instructions came from.
 
-    file_path is the shortest suffix of the original absolute path that is
-    unambiguous within the workload, so it identifies the file for a reader
-    rather than locating it on disk.
+    file_path is the absolute path on the capture host, which is also where the
+    file sits under the workload's source snapshot.
     """
 
     __tablename__ = f"{PREFIX}source_file"
@@ -292,7 +291,7 @@ class SourceFile(Base):
 
 
 class SourceLine(Base):
-    """One line of a source file an instruction points at.
+    """One line of a source file, whether or not an instruction points at it.
 
     A null line_number is a line the compiler could not attribute. SQLite
     treats nulls in a unique constraint as distinct, so analysis_db keeps that
