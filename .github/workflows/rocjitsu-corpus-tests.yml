@@ -26,7 +26,8 @@ on:
       corpus_ref:
         description: "Branch, tag, or SHA used by all corpus tests"
         # Last updated on 2026/08/11.
-        default: "cc781dd88cabd1638d1beeb4539c521ccf27de60"
+        # This corpus commit was merged on 2026/08/10.
+        default: "ce5da512188dd40de0bc7da298ec11b587d8fdd3"
         required: true
 
 concurrency:
@@ -40,12 +41,14 @@ permissions:
   contents: read
 
 env:
+  # Last updated on 2026/08/11.
+  # This corpus commit was merged on 2026/08/10.
+  ROCJITSU_CORPUS_REF: ce5da512188dd40de0bc7da298ec11b587d8fdd3
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
   ROCJITSU_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
   ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
-  ROCJITSU_DBT_CORPUS_REF: cc781dd88cabd1638d1beeb4539c521ccf27de60
   ROCJITSU_DBT_SHA_FRAGMENTS: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/fragments
   ROCJITSU_DBT_SHA_MANIFEST: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/gfx1250-b0-a0-sha-pairs.json
   ROCM_SDK_VERSION: 10.1.0a20260812
@@ -157,7 +160,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          ref: ${{ github.event.inputs.corpus_ref || env.ROCJITSU_DBT_CORPUS_REF }}
+          ref: ${{ github.event.inputs.corpus_ref || env.ROCJITSU_CORPUS_REF }}
           path: rocjitsu-test-corpus
 
       - name: Set up Python
@@ -480,7 +483,7 @@ jobs:
             (github.event_name == 'push' ||
              (github.event_name == 'workflow_dispatch' &&
               github.event.inputs.corpus_repository == 'ROCm/rocjitsu-test-corpus' &&
-              github.event.inputs.corpus_ref == env.ROCJITSU_DBT_CORPUS_REF))))
+              github.event.inputs.corpus_ref == env.ROCJITSU_CORPUS_REF))))
         timeout-minutes: 15
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
