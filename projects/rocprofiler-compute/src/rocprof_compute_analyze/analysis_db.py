@@ -18,12 +18,16 @@ from pc_sampling.code_object_analysis import (
     load_code_object_disassemblies,
 )
 from pc_sampling.pc_sampling_analysis import (
+    SOURCE_LINE_MISSING,
     InstructionLineRecord,
     load_aggregated_pc_sampling,
 )
 from pc_sampling.source_snapshot_analysis import (
-    find_source_files_common_ancestor,
-    make_source_relative_to_common_ancestor,
+    SourceFrame,
+    parse_source_frames,
+    read_source_file_digest_and_lines,
+    resolve_snapshot_path,
+    shorten_source_file_paths,
 )
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED
@@ -94,6 +98,110 @@ class ExpressionRow(NamedTuple):
     metric_id: str
     value_name: str
     value: str
+
+
+class SourceFrameCollector:
+    """Collects one workload's instruction source frames, then inserts them.
+
+    Each file is stored under the shortest path that is unambiguous within the
+    workload, which is only known once every instruction has been seen, so the
+    frames are buffered until then.
+    """
+
+    def __init__(self, workload_path: Path, workload: orm.Workload) -> None:
+        self._workload_path = workload_path
+        self._workload = workload
+        self._frames_by_comment: dict[str, list[SourceFrame]] = {}
+        self._frames_by_instruction: list[
+            tuple[orm.InstructionLine, list[SourceFrame]]
+        ] = []
+
+    def add_instruction(
+        self,
+        instruction_line: orm.InstructionLine,
+        source: Optional[str],
+    ) -> None:
+        """Buffer the frames of one instruction's comment."""
+        # The sampling path substitutes "N/A" for an absent comment, which
+        # would otherwise become a source file named after itself.
+        if not source or source == SOURCE_LINE_MISSING:
+            return
+
+        # Parse once per distinct comment; instructions repeat them heavily.
+        if source not in self._frames_by_comment:
+            self._frames_by_comment[source] = parse_source_frames(source)
+        self._frames_by_instruction.append((
+            instruction_line,
+            self._frames_by_comment[source],
+        ))
+
+    def insert_source_rows(self) -> None:
+        """Create the workload's source rows and link them to instructions."""
+        line_numbers_by_path = self._referenced_line_numbers()
+        shortened_paths = shorten_source_file_paths(set(line_numbers_by_path))
+
+        source_lines: dict[SourceFrame, orm.SourceLine] = {}
+        for absolute_path in sorted(line_numbers_by_path):
+            line_numbers = line_numbers_by_path[absolute_path]
+            digest, line_contents = self._read_snapshot_file(
+                absolute_path, line_numbers
+            )
+            source_file = orm.SourceFile(
+                workload=self._workload,
+                file_path=shortened_paths[absolute_path],
+                md5_checksum=digest,
+            )
+            Database.get_session().add(source_file)
+
+            # Sort with the unknown line first so the rows are deterministic.
+            for line_number in sorted(
+                line_numbers, key=lambda number: (number is not None, number)
+            ):
+                source_line = orm.SourceLine(
+                    source_file=source_file,
+                    line_number=line_number,
+                    content=line_contents.get(line_number),
+                )
+                Database.get_session().add(source_line)
+                source_lines[(absolute_path, line_number)] = source_line
+
+        self._link_instructions(source_lines)
+
+    def _referenced_line_numbers(self) -> dict[str, set[Optional[int]]]:
+        """Group every referenced line number under its source file path."""
+        line_numbers_by_path: dict[str, set[Optional[int]]] = {}
+        for frames in self._frames_by_comment.values():
+            for absolute_path, line_number in frames:
+                line_numbers_by_path.setdefault(absolute_path, set()).add(line_number)
+        return line_numbers_by_path
+
+    def _read_snapshot_file(
+        self,
+        absolute_path: str,
+        line_numbers: set[Optional[int]],
+    ) -> tuple[Optional[str], dict[int, str]]:
+        """Read one referenced file out of the workload's source snapshot."""
+        if not Path(absolute_path).is_absolute():
+            return None, {}
+
+        return read_source_file_digest_and_lines(
+            resolve_snapshot_path(self._workload_path, absolute_path),
+            {line_number for line_number in line_numbers if line_number is not None},
+        )
+
+    def _link_instructions(
+        self, source_lines: dict[SourceFrame, orm.SourceLine]
+    ) -> None:
+        """Attach each buffered instruction to its frames, innermost first."""
+        for instruction_line, frames in self._frames_by_instruction:
+            for frame_index, frame in enumerate(frames):
+                Database.get_session().add(
+                    orm.InstructionSourceLine(
+                        instruction_line=instruction_line,
+                        source_line=source_lines[frame],
+                        frame_index=frame_index,
+                    )
+                )
 
 
 class db_analysis(OmniAnalyze_Base):
@@ -223,16 +331,14 @@ class db_analysis(OmniAnalyze_Base):
                 )
 
             # Add pc sampling data, then the full code-object ISA
-            source_files_common_ancestor = find_source_files_common_ancestor(
-                Path(workload_path) / "src"
-            )
+            source_frames = SourceFrameCollector(Path(workload_path), workload_obj)
             kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol] = {}
             code_object_stores = self.add_pc_sampling_data(
                 workload_path,
                 workload_obj,
                 kernel_objs,
                 kernel_symbols,
-                source_files_common_ancestor,
+                source_frames,
             )
             self.add_code_object_isa(
                 workload_path,
@@ -240,8 +346,9 @@ class db_analysis(OmniAnalyze_Base):
                 kernel_objs,
                 code_object_stores,
                 kernel_symbols,
-                source_files_common_ancestor,
+                source_frames,
             )
+            source_frames.insert_source_rows()
 
             # Add metrics and values - iterate on values, create metrics as needed
             self.run_analysis_metrics(workload_path, workload_obj, kernel_objs)
@@ -419,7 +526,7 @@ class db_analysis(OmniAnalyze_Base):
         workload_obj: orm.Workload,
         kernel_objs: dict[KernelKey, orm.Kernel],
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
-        source_files_common_ancestor: Optional[Path] = None,
+        source_frames: SourceFrameCollector,
     ) -> dict[CodeObjectKey, orm.CodeObjectStore]:
         """Insert the normalized PC-sampling rows for one workload."""
         code_object_stores: dict[CodeObjectKey, orm.CodeObjectStore] = {}
@@ -449,7 +556,7 @@ class db_analysis(OmniAnalyze_Base):
                         code_object_store,
                         kernel_objs,
                         kernel_symbols,
-                        source_files_common_ancestor,
+                        source_frames,
                     )
 
         return code_object_stores
@@ -480,7 +587,7 @@ class db_analysis(OmniAnalyze_Base):
         code_object_store: orm.CodeObjectStore,
         kernel_objs: dict[KernelKey, orm.Kernel],
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
-        source_files_common_ancestor: Optional[Path] = None,
+        source_frames: SourceFrameCollector,
     ) -> None:
         """Insert one instruction line, its sample state, and child counts."""
         kernel = kernel_objs.get(line.kernel_name)
@@ -490,15 +597,13 @@ class db_analysis(OmniAnalyze_Base):
 
         instruction_line = orm.InstructionLine(
             code_object_offset=line.code_object_offset,
-            source=make_source_relative_to_common_ancestor(
-                line.source, source_files_common_ancestor
-            ),
             instruction=line.instruction,
             kernel_symbol=db_analysis._get_or_create_kernel_symbol(
                 code_object_store, kernel, kernel_symbols
             ),
         )
         Database.get_session().add(instruction_line)
+        source_frames.add_instruction(instruction_line, line.source)
 
         sample_state = orm.PCSampleState(
             total_count=line.total_count,
@@ -536,7 +641,7 @@ class db_analysis(OmniAnalyze_Base):
         kernel_objs: dict[KernelKey, orm.Kernel],
         code_object_stores: dict[CodeObjectKey, orm.CodeObjectStore],
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
-        source_files_common_ancestor: Optional[Path] = None,
+        source_frames: SourceFrameCollector,
     ) -> None:
         """Add dispatched kernels' disassembly as instruction lines,
         skipping any offset already present."""
@@ -606,17 +711,13 @@ class db_analysis(OmniAnalyze_Base):
                     kernel_symbol.code_object_offset = (
                         symbol.virtual_address - code_object_store.load_base
                     )
-                    self._add_symbol_isa(
-                        kernel_symbol,
-                        symbol,
-                        source_files_common_ancestor,
-                    )
+                    self._add_symbol_isa(kernel_symbol, symbol, source_frames)
 
     @staticmethod
     def _add_symbol_isa(
         kernel_symbol: orm.KernelSymbol,
         symbol: CodeObjectSymbol,
-        source_files_common_ancestor: Optional[Path] = None,
+        source_frames: SourceFrameCollector,
     ) -> None:
         """Add a symbol's disassembly, skipping offsets it already holds."""
         existing_offsets = {
@@ -628,16 +729,13 @@ class db_analysis(OmniAnalyze_Base):
             if code_object_offset in existing_offsets:
                 continue
             existing_offsets.add(code_object_offset)
-            Database.get_session().add(
-                orm.InstructionLine(
-                    code_object_offset=code_object_offset,
-                    source=make_source_relative_to_common_ancestor(
-                        instruction.source, source_files_common_ancestor
-                    ),
-                    instruction=instruction.instruction,
-                    kernel_symbol=kernel_symbol,
-                )
+            instruction_line = orm.InstructionLine(
+                code_object_offset=code_object_offset,
+                instruction=instruction.instruction,
+                kernel_symbol=kernel_symbol,
             )
+            Database.get_session().add(instruction_line)
+            source_frames.add_instruction(instruction_line, instruction.source)
 
     @staticmethod
     def evaluate(

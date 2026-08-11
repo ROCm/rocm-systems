@@ -6,6 +6,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ## ROCm Compute Profiler 3.9.0 for ROCm 10.1.0
 
 ### Added
+
 * Added GPU benchmarking and roofline profiling/analysis support for gfx1153 hardware.
 
 * Added multi-process PC sampling across profile and analyze modes.
@@ -22,12 +23,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Changed
 
 * ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) are no longer allowed with PC-sampling-only profiling; the run now fails with an error telling the user to drop the ML API tracing flag or add a counter block, since without counters there is nothing to correlate the markers against.
-
-* Changed PC-sampling summary output names and source-path representation:
-  * Renamed the SQLite view from `compute_pc_sampling_view` to `compute_pc_sampling_summary_view`.
-  * Renamed the `comment` column in `compute_instruction_line` to `source`.
-  * Renamed the CSV file from `pc_sampling.csv` to `pc_sampling_summary.csv`.
-  * `source` paths are now relative to the common ancestor of each workload's source snapshot; workloads with no non-root common ancestor retain absolute paths.
 
 ### Removed
 

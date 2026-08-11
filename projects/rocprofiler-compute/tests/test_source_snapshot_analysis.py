@@ -3,143 +3,144 @@
 
 """Unit tests for pc_sampling.source_snapshot_analysis."""
 
-from pathlib import Path
+import hashlib
 
 import pytest
 
-from pc_sampling import source_snapshot_analysis
 from pc_sampling.source_snapshot_analysis import (
-    find_source_files_common_ancestor,
+    parse_source_frames,
+    read_source_file_digest_and_lines,
+    resolve_snapshot_path,
+    shorten_source_file_paths,
 )
 
 
-def create_source_snapshot(source_snapshot_directory, original_source_path):
-    """Create an empty snapshot file for an absolute source path."""
-    snapshot_path = source_snapshot_directory / original_source_path.relative_to("/")
-    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
-    snapshot_path.touch()
-
-
-def test_find_source_files_common_ancestor_missing_directory_returns_none(tmp_path):
-    """Return None when the source snapshot directory is missing."""
-    assert find_source_files_common_ancestor(tmp_path / "missing") is None
-
-
 @pytest.mark.parametrize(
-    ("source_paths", "empty_directory_paths", "expected_ancestor"),
+    ("source", "expected_frames"),
     [
+        pytest.param(None, [], id="null_comment"),
+        pytest.param("", [], id="empty_comment"),
         pytest.param(
-            (),
-            (),
-            None,
-            id="empty_directory",
+            "/home/u/app/kernel.cpp:42",
+            [("/home/u/app/kernel.cpp", 42)],
+            id="single_frame",
         ),
         pytest.param(
-            (Path("/home/u/app/kernel.cpp"),),
-            (),
-            Path("/home/u/app"),
-            id="single_file",
+            "/opt/rocm/hip.h:258 -> /opt/rocm/hip.h:317 -> /home/u/vcopy.cpp:36",
+            [
+                ("/opt/rocm/hip.h", 258),
+                ("/opt/rocm/hip.h", 317),
+                ("/home/u/vcopy.cpp", 36),
+            ],
+            id="inline_chain_innermost_first",
         ),
         pytest.param(
-            (
-                Path("/home/u/app/src/kernel.cpp"),
-                Path("/home/u/app/include/kernel.hpp"),
-            ),
-            (),
-            Path("/home/u/app"),
-            id="deepest_shared_parent",
-        ),
-        pytest.param(
-            (
-                Path("/home/u/app/kernel.cpp"),
-                Path("/opt/rocm/include/runtime.hpp"),
-            ),
-            (),
-            Path("/"),
-            id="different_top_level_branches",
-        ),
-        pytest.param(
-            (Path("/home/u/app/kernel.cpp"),),
-            (Path("opt/empty"),),
-            Path("/home/u/app"),
-            id="ignores_empty_directories",
-        ),
-    ],
-)
-def test_find_source_files_common_ancestor(
-    tmp_path,
-    source_paths,
-    empty_directory_paths,
-    expected_ancestor,
-):
-    """Return the common ancestor for representative snapshot layouts."""
-    source_snapshot_directory = tmp_path / "src"
-    source_snapshot_directory.mkdir()
-
-    for source_path in source_paths:
-        create_source_snapshot(source_snapshot_directory, source_path)
-
-    for empty_directory_path in empty_directory_paths:
-        (source_snapshot_directory / empty_directory_path).mkdir(parents=True)
-
-    assert (
-        find_source_files_common_ancestor(source_snapshot_directory)
-        == expected_ancestor
-    )
-
-
-@pytest.mark.parametrize(
-    ("source", "common_ancestor", "expected"),
-    [
-        pytest.param(
-            ("/home/u/app/src/kernel.cpp:42 -> /home/u/app/include/kernel.hpp:?"),
-            Path("/home/u/app"),
-            "src/kernel.cpp:42 -> include/kernel.hpp:?",
-            id="multiple_frames",
+            "/opt/rocm/hip.h:? -> /home/u/vcopy.cpp:36",
+            [("/opt/rocm/hip.h", None), ("/home/u/vcopy.cpp", 36)],
+            id="dropped_line_number",
         ),
         pytest.param(
             "/home/u/app/kernel.cpp",
-            Path("/home/u/app"),
-            "kernel.cpp",
+            [("/home/u/app/kernel.cpp", None)],
             id="no_line_token",
         ),
+        pytest.param("N/A", [("N/A", None)], id="missing_source_sentinel"),
         pytest.param(
-            None,
-            Path("/home/u/app"),
-            None,
-            id="null_source",
-        ),
-        pytest.param(
-            "N/A",
-            Path("/home/u/app"),
-            "N/A",
-            id="missing_source_sentinel",
-        ),
-        pytest.param(
-            "/home/u/app/kernel.cpp:42",
-            None,
-            "/home/u/app/kernel.cpp:42",
-            id="missing_ancestor",
-        ),
-        pytest.param(
-            "/home/u/app/kernel.cpp:42",
-            Path("/"),
-            "/home/u/app/kernel.cpp:42",
-            id="filesystem_root_ancestor",
+            "C:/src/kernel.cpp:9",
+            [("C:/src/kernel.cpp", 9)],
+            id="colon_inside_path",
         ),
     ],
 )
-def test_make_source_relative_to_common_ancestor(
-    source,
-    common_ancestor,
-    expected,
-):
-    """Normalize representative source frames against a common ancestor."""
-    transformed_source = (
-        source_snapshot_analysis.make_source_relative_to_common_ancestor(
-            source,
-            common_ancestor,
-        )
+def test_parse_source_frames(source, expected_frames):
+    """Split representative instruction comments into ordered frames."""
+    assert parse_source_frames(source) == expected_frames
+
+
+@pytest.mark.parametrize(
+    ("absolute_paths", "expected_shortened_paths"),
+    [
+        pytest.param(
+            {"/home/u/app/vcopy.cpp"},
+            {"/home/u/app/vcopy.cpp": "vcopy.cpp"},
+            id="basename_is_enough",
+        ),
+        pytest.param(
+            {"/home/u/app/vcopy.cpp", "/opt/rocm/include/hip.h"},
+            {
+                "/home/u/app/vcopy.cpp": "vcopy.cpp",
+                "/opt/rocm/include/hip.h": "hip.h",
+            },
+            id="disjoint_roots_still_shorten",
+        ),
+        pytest.param(
+            {"/home/u/app/src/util.cpp", "/home/u/lib/gpu/util.cpp"},
+            {
+                "/home/u/app/src/util.cpp": "src/util.cpp",
+                "/home/u/lib/gpu/util.cpp": "gpu/util.cpp",
+            },
+            id="shared_basename_takes_one_parent",
+        ),
+        pytest.param(
+            {"/build/a/src/util.cpp", "/other/a/src/util.cpp"},
+            {
+                "/build/a/src/util.cpp": "/build/a/src/util.cpp",
+                "/other/a/src/util.cpp": "/other/a/src/util.cpp",
+            },
+            id="only_root_differs_keeps_absolute",
+        ),
+        pytest.param(
+            {"vcopy.cpp"},
+            {"vcopy.cpp": "vcopy.cpp"},
+            id="relative_path_passes_through",
+        ),
+    ],
+)
+def test_shorten_source_file_paths(absolute_paths, expected_shortened_paths):
+    """Reduce each path to the shortest suffix unique within the set."""
+    assert shorten_source_file_paths(absolute_paths) == expected_shortened_paths
+
+
+def test_resolve_snapshot_path_mirrors_absolute_path(tmp_path):
+    """The snapshot mirrors the capture-host path beneath the workload's src."""
+    assert resolve_snapshot_path(tmp_path, "/home/u/app/vcopy.cpp") == (
+        tmp_path / "src" / "home" / "u" / "app" / "vcopy.cpp"
     )
 
-    assert transformed_source == expected
+
+def test_read_source_file_digest_and_lines_returns_requested_lines(tmp_path):
+    """Return the file's md5 and only the lines that were asked for."""
+    source_file = tmp_path / "vcopy.cpp"
+    source_file.write_text("first\nsecond\nthird\n", encoding="utf-8")
+
+    digest, lines = read_source_file_digest_and_lines(source_file, {1, 3})
+
+    assert digest == hashlib.md5(source_file.read_bytes()).hexdigest()
+    assert lines == {1: "first", 3: "third"}
+
+
+def test_read_source_file_digest_and_lines_missing_file(tmp_path):
+    """A file absent from the snapshot yields no digest and no lines."""
+    assert read_source_file_digest_and_lines(tmp_path / "absent.cpp", {1}) == (None, {})
+
+
+def test_read_source_file_digest_and_lines_skips_line_past_end(tmp_path):
+    """A line number past the end of the file is absent from the mapping."""
+    source_file = tmp_path / "vcopy.cpp"
+    source_file.write_text("only\n", encoding="utf-8")
+
+    _, lines = read_source_file_digest_and_lines(source_file, {1, 99})
+
+    assert lines == {1: "only"}
+
+
+def test_read_source_file_digest_and_lines_replaces_undecodable_bytes(tmp_path):
+    """One mis-encoded source file must not abort an analysis run."""
+    source_file = tmp_path / "latin1.cpp"
+    source_file.write_bytes(b"caf\xe9\n")
+
+    digest, lines = read_source_file_digest_and_lines(source_file, {1})
+
+    # The digest covers the raw bytes, so it still identifies the file version.
+    assert digest == hashlib.md5(b"caf\xe9\n").hexdigest()
+    assert lines == {1: "caf\ufffd"}

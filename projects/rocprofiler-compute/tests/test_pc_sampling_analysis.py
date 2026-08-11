@@ -38,7 +38,7 @@ from utils.parser import (
 )
 from utils.utils_common import is_only_pc_sampling
 
-PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI300X_A1"
+PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI350"
 
 PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 INST_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_"
@@ -2160,23 +2160,48 @@ def test_pc_sampling_analyze_database_output(
             db_code_object_process_ids = conn.execute(
                 "SELECT DISTINCT pid FROM compute_code_object_store"
             ).fetchall()
+            # Content is clipped: these are long header lines.
+            db_source_lines = conn.execute(
+                "SELECT file_path, line_number, substr(content, 1, 45) "
+                "FROM compute_source_lines_view ORDER BY file_path, line_number"
+            ).fetchall()
         finally:
             conn.close()
         assert counts["compute_code_object_store"] > 0
         # Only sampled offsets carry a sample state; the dispatched kernels' full
         # disassembly is added as extra lines, so lines outnumber states.
-        assert state_count == 14
+        assert state_count == 19
         assert line_count == 20
         # Un-dispatched ISA is never stored, so no line is left un-attributed.
         assert attributed == line_count
         # inst_type is a per-sample class, so its counts sum to the sample total.
-        assert state_total == 390
+        assert state_total == 857
         assert inst_sample_total == state_total
-        assert len(db_pc_sampling) == 14
-        assert db_pc_sampling["count"].sum() == 390
+        assert len(db_pc_sampling) == 19
+        assert db_pc_sampling["count"].sum() == 857
         assert pc_sampling_views == [("compute_pc_sampling_summary_view",)]
         assert db_dispatch_count == 3
-        assert db_code_object_process_ids == [(1429079,)]
+        assert db_code_object_process_ids == [(698961,)]
+        # The chain is rebuilt innermost first.
+        assert (
+            db_pc_sampling.loc[db_pc_sampling["offset"] == 8192, "source"].item()
+            == "amd_hip_runtime.h:258 -> amd_hip_runtime.h:317 -> vcopy.cpp:36"
+        )
+        assert (
+            db_pc_sampling.loc[db_pc_sampling["offset"] == 8256, "source"].item()
+            == "amd_hip_runtime.h:? -> amd_hip_runtime.h:308 -> vcopy.cpp:36"
+        )
+        assert db_source_lines == [
+            ("amd_hip_runtime.h", None, None),
+            ("amd_hip_runtime.h", 253, "__DEVICE__ unsigned int __hip_get_block_idx_x"),
+            ("amd_hip_runtime.h", 258, "__DEVICE__ unsigned int __hip_get_block_dim_x"),
+            ("amd_hip_runtime.h", 308, "  __HIP_DEVICE_BUILTIN(x, __hip_get_block_idx"),
+            ("amd_hip_runtime.h", 317, "  __HIP_DEVICE_BUILTIN_INTERNAL(x, __hip_get_"),
+            ("vcopy.cpp", 36, "    int id = blockIdx.x*blockDim.x+threadIdx."),
+            ("vcopy.cpp", 37, "    if (id < n)"),
+            ("vcopy.cpp", 38, "      c[id] = a[id];"),
+            ("vcopy.cpp", 39, "}"),
+        ]
     finally:
         common.clean_output_dir(True, str(workload_dir))
 
@@ -2208,10 +2233,15 @@ def test_pc_sampling_analyze_csv_output(
         assert summary_csv.is_file()
         csv_pc_sampling = pd.read_csv(summary_csv)
         csv_kernel = pd.read_csv(csv_dir / "kernel.csv")
-        assert len(csv_pc_sampling) == 14
-        assert csv_pc_sampling["count"].sum() == 390
-        assert set(csv_pc_sampling["pid"]) == {1429079}
+        assert len(csv_pc_sampling) == 19
+        assert csv_pc_sampling["count"].sum() == 857
+        assert set(csv_pc_sampling["pid"]) == {698961}
         assert csv_kernel.iloc[0]["dispatch_count"] == 3
+        csv_source_lines = pd.read_csv(csv_dir / "source_lines.csv")
+        assert set(csv_source_lines["file_path"]) == {
+            "vcopy.cpp",
+            "amd_hip_runtime.h",
+        }
         # Every sampling row must resolve to a kernel the kernel view exposes.
         assert set(csv_pc_sampling["kernel_uuid"]) <= set(csv_kernel["kernel_uuid"])
     finally:

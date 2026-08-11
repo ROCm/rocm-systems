@@ -24,6 +24,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    cast,
     create_engine,
     func,
     select,
@@ -34,7 +35,12 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.sql import Select
+from sqlalchemy.sql.expression import Subquery
 
+from pc_sampling.source_snapshot_analysis import (
+    SOURCE_FRAME_SEPARATOR,
+    UNKNOWN_SOURCE_LINE_TOKEN,
+)
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
@@ -68,6 +74,8 @@ class Workload(Base):
     )
     # Workload can have multiple code objects
     code_object_stores = relationship("CodeObjectStore", back_populates="workload")
+    # Workload can have multiple source files
+    source_files = relationship("SourceFile", back_populates="workload")
 
 
 class MetricDefinition(Base):
@@ -237,7 +245,6 @@ class InstructionLine(Base):
         nullable=True,
     )
     code_object_offset = Column(Integer)
-    source = Column(Text)
     instruction = Column(Text)
 
     # Instruction line belongs to one kernel symbol
@@ -250,6 +257,93 @@ class InstructionLine(Base):
     pc_sample_state = relationship(
         "PCSampleState", back_populates="instruction_line", uselist=False
     )
+    # An instruction line has an inline stack of source lines, innermost first
+    source_lines = relationship(
+        "InstructionSourceLine",
+        back_populates="instruction_line",
+        order_by="InstructionSourceLine.frame_index",
+    )
+
+
+class SourceFile(Base):
+    """One source file a workload's instructions came from.
+
+    file_path is the shortest suffix of the original absolute path that is
+    unambiguous within the workload, so it identifies the file for a reader
+    rather than locating it on disk.
+    """
+
+    __tablename__ = f"{PREFIX}source_file"
+    # Two workloads can each hold a different a.cpp.
+    __table_args__ = (UniqueConstraint("workload_id", "file_path"),)
+
+    source_file_uuid = Column(Integer, primary_key=True)
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    )
+    file_path = Column(Text)
+    # Null when the file is absent from the workload's source snapshot.
+    md5_checksum = Column(String, nullable=True)
+
+    # Source file belongs to one workload
+    workload = relationship("Workload", back_populates="source_files")
+    # Source file owns many source lines
+    source_lines = relationship("SourceLine", back_populates="source_file")
+
+
+class SourceLine(Base):
+    """One line of a source file an instruction points at.
+
+    A null line_number is a line the compiler could not attribute. SQLite
+    treats nulls in a unique constraint as distinct, so analysis_db keeps that
+    row unique, not the database.
+    """
+
+    __tablename__ = f"{PREFIX}source_line"
+    __table_args__ = (UniqueConstraint("source_file_uuid", "line_number"),)
+
+    source_line_uuid = Column(Integer, primary_key=True)
+    source_file_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}source_file.source_file_uuid"), nullable=False
+    )
+    line_number = Column(Integer, nullable=True)
+    # Null when the line is unknown or past the end of the snapshot copy.
+    content = Column(Text, nullable=True)
+
+    # Line belongs to one source file
+    source_file = relationship("SourceFile", back_populates="source_lines")
+    # Line can be referenced by many instructions
+    instruction_source_lines = relationship(
+        "InstructionSourceLine", back_populates="source_line"
+    )
+
+
+class InstructionSourceLine(Base):
+    """One frame of an instruction's inline stack.
+
+    frame_index 0 is the line where the code was written; the highest index is
+    the line in the kernel the compiler charged it to. The ordinal belongs here
+    because one inlined line can have several call sites.
+    """
+
+    __tablename__ = f"{PREFIX}instruction_source_line"
+    __table_args__ = (UniqueConstraint("instruction_uuid", "frame_index"),)
+
+    instruction_source_line_uuid = Column(Integer, primary_key=True)
+    instruction_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}instruction_line.instruction_uuid"),
+        nullable=False,
+    )
+    source_line_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}source_line.source_line_uuid"), nullable=False
+    )
+    frame_index = Column(Integer)
+
+    # Frame belongs to one instruction line
+    instruction_line = relationship("InstructionLine", back_populates="source_lines")
+    # Frame points at one source line
+    source_line = relationship("SourceLine", back_populates="instruction_source_lines")
 
 
 class PCSampleState(Base):
@@ -536,7 +630,7 @@ class Database:
             for view_name, sql in cls.get_view_sql().items():
                 cursor = raw_conn.execute(sql)
                 csv_path = csv_dir / f"{view_name}.csv"
-                with csv_path.open("w", newline="") as f:
+                with csv_path.open("w", newline="", encoding="utf-8") as f:
                     writer = csv.writer(f)
                     writer.writerow([column[0] for column in cursor.description])
                     writer.writerows(cursor)
@@ -570,6 +664,69 @@ class Database:
         if isinstance(value, float) and not math.isfinite(value):
             return None
         return value
+
+    @staticmethod
+    def _source_chain_subquery() -> Subquery:
+        """Join each instruction's frames back into one source string.
+
+        SQLite gained group_concat's ORDER BY in 3.44, so the frames are
+        joined by walking frame_index one step at a time instead.
+        """
+        frames = (
+            select(
+                InstructionSourceLine.instruction_uuid.label("instruction_uuid"),
+                InstructionSourceLine.frame_index.label("frame_index"),
+                (
+                    SourceFile.file_path
+                    + ":"
+                    + func.coalesce(
+                        cast(SourceLine.line_number, Text), UNKNOWN_SOURCE_LINE_TOKEN
+                    )
+                ).label("frame"),
+            )
+            .select_from(InstructionSourceLine)
+            .join(
+                SourceLine,
+                InstructionSourceLine.source_line_uuid == SourceLine.source_line_uuid,
+            )
+            .join(
+                SourceFile,
+                SourceLine.source_file_uuid == SourceFile.source_file_uuid,
+            )
+        ).subquery("source_frames")
+
+        chain = (
+            select(
+                frames.c.instruction_uuid,
+                frames.c.frame_index,
+                frames.c.frame.label("source"),
+            )
+            .where(frames.c.frame_index == 0)
+            .cte("source_chain", recursive=True)
+        )
+        chain = chain.union_all(
+            select(
+                frames.c.instruction_uuid,
+                frames.c.frame_index,
+                chain.c.source + SOURCE_FRAME_SEPARATOR + frames.c.frame,
+            ).where(
+                (frames.c.instruction_uuid == chain.c.instruction_uuid)
+                & (frames.c.frame_index == chain.c.frame_index + 1)
+            )
+        )
+
+        # Every step of the walk stays in the result, so keep the step that
+        # has no next frame.
+        return (
+            select(chain.c.instruction_uuid, chain.c.source).where(
+                ~select(InstructionSourceLine.instruction_source_line_uuid)
+                .where(
+                    (InstructionSourceLine.instruction_uuid == chain.c.instruction_uuid)
+                    & (InstructionSourceLine.frame_index == chain.c.frame_index + 1)
+                )
+                .exists()
+            )
+        ).subquery("source_chain")
 
     @staticmethod
     def _compile_view_sql() -> dict[str, str]:
@@ -622,6 +779,8 @@ class Database:
             )
             .group_by(PCSampleStallReason.pc_sample_state_uuid)
         ).subquery()
+
+        source_chain_subquery = Database._source_chain_subquery()
 
         definitions: dict[str, Select[Any]] = {
             "kernel": select(
@@ -711,7 +870,7 @@ class Database:
                 Kernel.kernel_name,
                 InstructionLine.code_object_offset.label("offset"),
                 InstructionLine.instruction,
-                InstructionLine.source.label("source"),
+                source_chain_subquery.c.source.label("source"),
                 PCSampleState.total_count.label("count"),
                 PCSampleState.issue_count.label("count_issue"),
                 PCSampleState.stall_count.label("count_stall"),
@@ -736,6 +895,24 @@ class Database:
                 stall_reason_json_subquery,
                 PCSampleState.pc_sample_state_uuid
                 == stall_reason_json_subquery.c.pc_sample_state_uuid,
+            )
+            # An instruction line can have no source at all.
+            .outerjoin(
+                source_chain_subquery,
+                InstructionLine.instruction_uuid
+                == source_chain_subquery.c.instruction_uuid,
+            ),
+            "source_lines": select(
+                SourceFile.workload_id.label("workload_id"),
+                SourceFile.file_path,
+                SourceFile.md5_checksum,
+                SourceLine.line_number,
+                SourceLine.content,
+            )
+            .select_from(SourceLine)
+            .join(
+                SourceFile,
+                SourceLine.source_file_uuid == SourceFile.source_file_uuid,
             ),
         }
 
