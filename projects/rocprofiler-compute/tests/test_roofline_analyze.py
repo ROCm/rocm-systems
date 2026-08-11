@@ -21,9 +21,7 @@ config["cleanup"] = True
 roofline_dir = "tests/workloads/mem_levels_HBM/MI200"
 
 
-# =============================================================================
 # Roofline HTML generation
-# =============================================================================
 
 
 def test_analyze_generates_roofline_html(
@@ -268,12 +266,9 @@ def test_roof_mem_levels(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-# =============================================================================
 # Per-datatype HTML output validation
-# =============================================================================
 
 # Each datatype must take the correct roofline branch:
-# FP64 is dual-path (VALU + MFMA), BF16 is MFMA-only.
 DATATYPE_LEGEND_CASES = {
     "FP64": {"present": ["Peak VALU-FP64", "Peak MFMA-FP64"], "absent": []},
     "BF16": {"present": ["Peak MFMA-BF16"], "absent": ["Peak VALU-BF16"]},
