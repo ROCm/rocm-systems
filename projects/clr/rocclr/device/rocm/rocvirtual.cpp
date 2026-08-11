@@ -5072,15 +5072,25 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 // ================================================================================================
 void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
   if (vcmd.cooperativeGroups()) {
-    // Under dynamic queues an idle stream may have released its HW queue back to the pool
-    // (gpu_queue_ == nullptr). Reacquire before flushing the fence, since releaseGpuMemoryFence()
-    // dereferences gpu_queue_ in dispatchBarrierPacket().
-    if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-      SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, last_hwq_));
-      last_hwq_ = nullptr;
+    {
+      // Hold execution() across reacquire + fence: ReleaseHwQueue() nulls gpu_queue_ under the
+      // same mutex, so an unlocked window could leave it null before dispatchBarrierPacket() derefs.
+      std::scoped_lock lock(execution());
+
+      // Dynamic queues may have reclaimed an idle stream's HW queue; reacquire before the fence.
+      if (!dedicated_queue_ && gpu_queue_ == nullptr) {
+        hsa_queue_t* hwq = roc_device_.AcquireActiveQueue(priority_, last_hwq_);
+        if (hwq == nullptr) {
+          LogError("Runtime failed to acquire a HW queue for cooperative launch!");
+          vcmd.setStatus(CL_INVALID_OPERATION);
+          return;
+        }
+        SetGpuQueue(hwq);
+        last_hwq_ = nullptr;
+      }
+      // Wait for the execution on the current queue, since the coop groups will use the device queue
+      releaseGpuMemoryFence(kSkipCpuWait);
     }
-    // Wait for the execution on the current queue, since the coop groups will use the device queue
-    releaseGpuMemoryFence(kSkipCpuWait);
 
     // Get device queue for exclusive GPU access
     VirtualGPU* queue = dev().xferQueue();
