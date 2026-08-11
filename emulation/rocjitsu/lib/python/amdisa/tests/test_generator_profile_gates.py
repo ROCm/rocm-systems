@@ -2170,7 +2170,10 @@ def test_generated_operand_validates_scalar_register_selector_intervals(
             '(encoding_value>=125&&encoding_value<=125))' in operand
         )
         assert 'defer_encoding_error("invalidscalarregisterselector")' in operand
-        assert 'if(encoding_value!=254&&encoding_value!=255)validate_encoding();' in operand
+        assert (
+            'if(encoding_value!=254&&encoding_value!=255)validate_encoding();'
+            in operand
+        )
 
 
 def test_generated_operand_validates_scalar_register_selector_variants(
@@ -2181,9 +2184,7 @@ def test_generated_operand_validates_scalar_register_selector_variants(
     )
     assert 'opr_type==OperandType::OPR_SREG_M0&&' in gfx1250_operand
 
-    rdna4_operand = ''.join(
-        (rdna4_generated_root / 'operand.cpp').read_text().split()
-    )
+    rdna4_operand = ''.join((rdna4_generated_root / 'operand.cpp').read_text().split())
     assert (
         'opr_type==OperandType::OPR_SREG_LITERAL&&'
         '!((encoding_value>=0&&encoding_value<=124)||'
