@@ -4,7 +4,7 @@
 #include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 
 #include "rocjitsu/code/basic_block.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
@@ -153,8 +153,8 @@ void apply_mode_write(VgprMsbState &state, uint16_t hwreg, std::optional<uint32_
 ///
 /// S_SETREG_IMM32_B32 targeting MODE updates MODE[19:12] from the same literal
 /// bits even when those fields are outside the instruction's requested bit
-/// slice. Compiler workarounds therefore carry the intended banks in literal
-/// bits [19:12]. Model the hardware result rather than the architectural mask.
+/// slice. The intended banks are carried in literal bits [19:12]. Model that
+/// result rather than the architectural mask.
 void apply_immediate_mode_vgpr_msb_side_effect(VgprMsbState &state, uint16_t hwreg,
                                                uint32_t literal) {
   if (decode_hwreg(hwreg).id != kModeHwreg)
@@ -203,11 +203,9 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
     return;
   }
 
-  // Read the 32-bit immediate from the text image at src_loc()+4 rather than
-  // raw_encoding()[1]: raw_encoding() points at the 4-byte SOPK inst_ subobject,
-  // so [1] indexes past it and only happens to land on the adjacent literal_
-  // member — a layout-dependent out-of-bounds read. The literal follows the
-  // encoding word in the instruction stream, so the text image is authoritative.
+  // Read the 32-bit immediate from the text image at src_loc()+4. The literal
+  // follows the encoding word in the instruction stream, and the text image is
+  // the authoritative input for this analysis.
   const std::optional<uint32_t> literal = text_word_at(text, inst.src_loc() + sizeof(uint32_t));
   if (!literal || inst.size() < 2 * static_cast<int>(sizeof(uint32_t))) {
     apply_mode_write(state, hwreg, std::nullopt);

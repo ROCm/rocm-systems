@@ -400,7 +400,10 @@ memory:
   Unit_hipHostRegister_DuplicateAndDisjoint:
     <<: *level_2
     tags: [alloc]
-  Unit_hipHostRegister_with_hipExtHostRegisterCoarseGrained:
+  Unit_hipHostRegister_with_coarse_grain:
+    <<: *level_2
+    tags: [alloc]
+  Unit_hipHostRegister_with_fine_grain:
     <<: *level_2
     tags: [alloc]
   Unit_hipHostRegister_Capture:
@@ -831,13 +834,33 @@ memory:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_Swap:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Multicast:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Multicast_Large:
+    <<: *level_2
+    # ROCM-28819
+    disabled: [amd_windows]
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_P2P_Swap:
+    <<: *level_2
+    tags: [transfer, multigpu]
+  Unit_hipMemcpyBatchAsync_P2P_Multicast:
+    <<: *level_2
+    tags: [transfer, multigpu]
+  Unit_hipMemcpyBatchAsync_P2P_Multicast_Large:
+    <<: *level_3
+    tags: [transfer, multigpu]
   Unit_hipMemcpyBatchAsync_Negative:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_Attrs_Negative:
-    <<: *level_2
-    tags: [transfer]
-  Unit_hipMemcpyBatchAsync_D2D_Swap:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_H2D_Functional: *level_2

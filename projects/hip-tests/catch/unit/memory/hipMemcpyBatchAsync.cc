@@ -14,6 +14,7 @@
 #include <hip_test_defgroups.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
+#include "memcpyBatchAsync_common.hh"
 
 /**
  * @addtogroup hipMemcpyBatchAsync hipMemcpyBatchAsync
@@ -70,23 +71,6 @@ std::vector<std::pair<int, int>> GetPeerAccessibleDevicePairs() {
     HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
   return peer_pairs;
-}
-
-void EnablePeerAccess(const std::vector<std::pair<int, int>>& peer_pairs) {
-  for (const auto& [src_device, dst_device] : peer_pairs) {
-    HIP_CHECK(hipSetDevice(src_device));
-    hipError_t peer_status = hipDeviceEnablePeerAccess(dst_device, 0);
-    if (peer_status != hipSuccess && peer_status != hipErrorPeerAccessAlreadyEnabled) {
-      HIP_CHECK(peer_status);
-    }
-  }
-}
-
-void DisablePeerAccess(const std::vector<std::pair<int, int>>& peer_pairs) {
-  for (const auto& [src_device, dst_device] : peer_pairs) {
-    HIP_CHECK(hipSetDevice(src_device));
-    HIP_CHECK(hipDeviceDisablePeerAccess(dst_device));
-  }
 }
 
 std::vector<LinearAllocGuard<int>> AllocateBatchBuffers(LinearAllocs allocation_type,
@@ -372,50 +356,6 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Negative) {
         hipErrorInvalidValue);
   }
 }
-
-#if HT_AMD
-/**
- * Test Description
- * ------------------------
- * - Verifies D2D batch copies with hipMemcpyFlagExtOpSwap.
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 7.1
- */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_Swap) {
-  constexpr size_t copy_count = 3;
-  constexpr size_t copy_size = kSmallCopySize;
-  constexpr int kSwapSrcValue = 23;
-  constexpr int kSwapDstValue = 47;
-  BatchConfig config{copy_count, copy_size};
-  StreamGuard stream_guard(Streams::created);
-  std::vector<LinearAllocGuard<int>> src = AllocateBatchBuffers(LinearAllocs::hipMalloc, config);
-  std::vector<LinearAllocGuard<int>> dst = AllocateBatchBuffers(LinearAllocs::hipMalloc, config);
-  std::vector<void*> src_ptrs = MakeBatchPtrs(src);
-  std::vector<void*> dst_ptrs = MakeBatchPtrs(dst);
-  std::vector<size_t> sizes(src_ptrs.size(), copy_size);
-  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap};
-  size_t attrs_idxs[1] = {0};
-
-  FillDeviceBuffers(src_ptrs, copy_size, kSwapSrcValue);
-  FillDeviceBuffers(dst_ptrs, copy_size, kSwapDstValue);
-
-  hipError_t status =
-      hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), src_ptrs.size(), &attr,
-                          attrs_idxs, 1, nullptr, stream_guard.stream());
-  if (status == hipErrorNotSupported) {
-    SUCCEED("hipMemcpyFlagExtOpSwap is not supported on this device");
-  } else {
-    HIP_CHECK(status);
-    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
-    VerifyDeviceBuffers(src_ptrs, copy_size, kSwapDstValue);
-    VerifyDeviceBuffers(dst_ptrs, copy_size, kSwapSrcValue);
-  }
-}
-#endif
 
 /**
  * Test Description
@@ -855,6 +795,180 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Functional) {
 
 #if HT_AMD
 /**
+ * For each batch entry, the contents of two buffers are exchanged using
+ * hipMemcpyFlagExtOpSwap across generated per-side allocation types, copy counts, and sizes.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap) {
+  const size_t count = GENERATE(2, 3, 8);
+  const size_t size_in_bytes = GENERATE(as<size_t>{}, 1, 63, 4096);
+  const LinearAllocs allocTypeA =
+      GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
+  const LinearAllocs allocTypeB =
+      GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
+  CAPTURE(count, size_in_bytes, allocTypeA, allocTypeB);
+
+  const hipError_t expectedError = getSwapExpectedReturn(allocTypeA, allocTypeB);
+
+  std::vector<std::vector<unsigned char>> initialValuesA(
+      count, std::vector<unsigned char>(size_in_bytes, 10));
+  std::vector<std::vector<unsigned char>> initialValuesB(
+      count, std::vector<unsigned char>(size_in_bytes, 4));
+  std::vector<void*> swapPtrsA(count);
+  std::vector<void*> swapPtrsB(count);
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+
+  HIP_CHECK(hipSetDevice(0));
+  StreamGuard stream_guard(Streams::created);
+  for (size_t i = 0; i < count; ++i) {
+    LinearAllocGuard<unsigned char> allocB(allocTypeB, size_in_bytes);
+    swapPtrsB[i] = allocB.ptr();
+    allocations.push_back(std::move(allocB));
+    fillBuffer(swapPtrsB[i], initialValuesB[i], allocTypeB);
+
+    LinearAllocGuard<unsigned char> allocA(allocTypeA, size_in_bytes);
+    swapPtrsA[i] = allocA.ptr();
+    allocations.push_back(std::move(allocA));
+    fillBuffer(swapPtrsA[i], initialValuesA[i], allocTypeA);
+  }
+
+  std::vector<size_t> sizes(count, size_in_bytes);
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap};
+  size_t attrs_idxs[1] = {0};
+  size_t fail_index = 0;
+
+  HIP_CHECK_ERROR(hipMemcpyBatchAsync(swapPtrsA.data(), swapPtrsB.data(), sizes.data(), count,
+                                      &attr, attrs_idxs, 1, &fail_index, stream_guard.stream()),
+                  expectedError);
+
+  // Unsupported allocation/device combinations are asserted to fail above; only the supported
+  // combinations reach a real exchange worth verifying.
+  if (expectedError == hipSuccess) {
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+    for (size_t i = 0; i < count; ++i) {
+      requireBufferEquals(swapPtrsA[i], initialValuesB[i], allocTypeA);
+      requireBufferEquals(swapPtrsB[i], initialValuesA[i], allocTypeB);
+    }
+  }
+}
+
+// Batched multicast copy: one shared source, multiple destinations.
+static void RunMulticastCopyTest(size_t count, size_t size_in_bytes, LinearAllocs srcAllocType,
+                                 LinearAllocs dstAllocType) {
+  std::vector<unsigned char> initialValues(size_in_bytes, 10);
+  std::vector<void*> srcPtrs(count);
+  std::vector<void*> dstPtrs(count);
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+
+  HIP_CHECK(hipSetDevice(0));
+  StreamGuard stream_guard(Streams::created);
+  LinearAllocGuard<unsigned char> srcAlloc(srcAllocType, size_in_bytes);
+  void* srcMem = srcAlloc.ptr();
+  fillBuffer(srcMem, initialValues, srcAllocType);
+  allocations.push_back(std::move(srcAlloc));
+
+  for (size_t i = 0; i < count; ++i) {
+    srcPtrs[i] = srcMem;
+    LinearAllocGuard<unsigned char> dstAlloc(dstAllocType, size_in_bytes);
+    dstPtrs[i] = dstAlloc.ptr();
+    allocations.push_back(std::move(dstAlloc));
+  }
+
+  std::vector<size_t> sizes(count, size_in_bytes);
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault};
+  size_t attrs_idxs[1] = {0};
+  size_t fail_index = 0;
+  HIP_CHECK(hipMemcpyBatchAsync(dstPtrs.data(), srcPtrs.data(), sizes.data(), count, &attr,
+                                attrs_idxs, 1, &fail_index, stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  for (size_t i = 0; i < count; ++i) {
+    requireBufferEquals(dstPtrs[i], initialValues, dstAllocType);
+  }
+}
+
+/**
+ * Batched multicast copy: one shared source, multiple destinations.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Multicast) {
+  const size_t count = GENERATE(2, 3, 8);
+  const size_t size_in_bytes = GENERATE(as<size_t>{}, 1, 63, 4096);
+  const LinearAllocs allocTypeSrc =
+      GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
+  const LinearAllocs allocTypeDst =
+      GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
+  CAPTURE(count, size_in_bytes, allocTypeSrc, allocTypeDst);
+
+  RunMulticastCopyTest(count, size_in_bytes, allocTypeSrc, allocTypeDst);
+}
+
+/**
+ * Batched multicast copy with large per-operation size.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Multicast_Large) {
+  const size_t count = GENERATE(2, 3, 8);
+  const LinearAllocs allocTypeSrc =
+      GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
+  const LinearAllocs allocTypeDst =
+      GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
+  const size_t size_in_bytes = 1024 * 1024;
+  CAPTURE(count, size_in_bytes, allocTypeSrc, allocTypeDst);
+
+  RunMulticastCopyTest(count, size_in_bytes, allocTypeSrc, allocTypeDst);
+}
+
+/**
+ * Batch D2D copies where most entries share one source (multicast-friendly) but one entry uses a
+ * different source, e.g. srcA, srcA, srcA, srcB, srcA, srcA, srcA. Validates correctness when the
+ * batch cannot be lowered to a single multicast operation.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources) {
+  constexpr int k_count = 7;
+  const size_t size_in_bytes = 4096;
+
+  HIP_CHECK(hipSetDevice(0));
+  std::vector<unsigned char> pattern_a(size_in_bytes, 10);
+  std::vector<unsigned char> pattern_b(size_in_bytes, 4);
+
+  LinearAllocGuard<unsigned char> srcAllocA(LinearAllocs::hipMalloc, size_in_bytes);
+  LinearAllocGuard<unsigned char> srcAllocB(LinearAllocs::hipMalloc, size_in_bytes);
+  void* const srcMemA = srcAllocA.ptr();
+  void* const srcMemB = srcAllocB.ptr();
+
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  allocations.push_back(std::move(srcAllocA));
+  allocations.push_back(std::move(srcAllocB));
+
+  fillBuffer(srcMemA, pattern_a, LinearAllocs::hipMalloc);
+  fillBuffer(srcMemB, pattern_b, LinearAllocs::hipMalloc);
+
+  std::vector<void*> dst_ptrs;
+  for (int i = 0; i < k_count; ++i) {
+    LinearAllocGuard<unsigned char> dstAlloc(LinearAllocs::hipMalloc, size_in_bytes);
+    HIP_CHECK(hipMemset(dstAlloc.ptr(), 0, size_in_bytes));
+    dst_ptrs.push_back(dstAlloc.ptr());
+    allocations.push_back(std::move(dstAlloc));
+  }
+
+  std::vector<void*> src_ptrs = {srcMemA, srcMemA, srcMemA, srcMemB, srcMemA, srcMemA, srcMemA};
+  std::vector<size_t> sizes(k_count, size_in_bytes);
+
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault};
+  size_t attrs_idxs[1] = {0};
+
+  StreamGuard stream_guard(Streams::created);
+
+  size_t fail_index = 0;
+  HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), k_count, &attr,
+                                attrs_idxs, 1, &fail_index, stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  for (int i = 0; i < k_count; ++i) {
+    const std::vector<unsigned char>& expected = (i == 3) ? pattern_b : pattern_a;
+    requireBufferEquals(dst_ptrs[i], expected, LinearAllocs::hipMalloc);
+  }
+}
+
+/**
  * Test Description
  * ------------------------
  * - Verifies H2D hipMemcpyBatchAsync with hipMemcpyFlagExtOpIndirectSrc copies
@@ -942,7 +1056,6 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectDst) {
   }
 }
 #endif
-
 /**
  * End doxygen group MemoryTest.
  * @}

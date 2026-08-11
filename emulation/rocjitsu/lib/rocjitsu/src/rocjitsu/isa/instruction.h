@@ -18,6 +18,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -46,7 +47,19 @@ enum InstFlags : uint64_t {
   /// @brief AccVGPR move instruction (v_accvgpr_write, v_accvgpr_read, v_accvgpr_mov).
   ACCVGPR = (1ULL << 10),
   /// @brief Destination update is conditional and must not kill the old value.
-  PREDICATED_DEF = (1ULL << 11)
+  PREDICATED_DEF = (1ULL << 11),
+  /// @brief Executes regardless of the EXEC mask (e.g. branches).
+  IGNORES_EXEC = (1ULL << 12),
+  /// @brief Writes the EXEC mask regardless of DST operands.
+  WRITES_EXEC = (1ULL << 13),
+  /// @brief The destination value is a scalar plain copy of a single source operand
+  /// (e.g. s_mov). Lets EXEC-state analysis prove an all-ones EXEC write from an
+  /// all-ones source.
+  RESULT_COPY = (1ULL << 14),
+  /// @brief The destination value is the scalar bitwise pure OR of the source operands
+  /// (e.g. s_or, s_or_saveexec). Pure OR with an all-ones operand is all-ones
+  /// regardless of the others.
+  RESULT_OR = (1ULL << 15)
 };
 
 class BasicBlock;
@@ -178,6 +191,22 @@ public:
   /// @returns Encoding size in bytes.
   int size() const { return size_; }
 
+  /// @brief Previous decoded instruction in the same basic block.
+  /// @returns The preceding instruction, or nullptr at the block boundary.
+  [[nodiscard]] const Instruction *previous_instruction() const {
+    if (parent_ == nullptr || prev_ == nullptr || prev_->parent_ != parent_)
+      return nullptr;
+    return static_cast<const Instruction *>(prev_);
+  }
+
+  /// @brief Next decoded instruction in the same basic block.
+  /// @returns The following instruction, or nullptr at the block boundary.
+  [[nodiscard]] const Instruction *next_instruction() const {
+    if (parent_ == nullptr || next_ == nullptr || next_->parent_ != parent_)
+      return nullptr;
+    return static_cast<const Instruction *>(next_);
+  }
+
   /// @brief Source byte offset of this instruction in the decoded text section.
   ///
   /// @details Most decoder users only care about the instruction encoding and
@@ -218,6 +247,19 @@ public:
   /// @details Used for encoded fields that affect execution but are not part of
   /// the printed operand list, such as FLAT/GLOBAL `saddr` addressing fields.
   virtual void implicit_uses(RegisterSet & /*uses*/) const {}
+
+  /// @brief Report operands that are implicitly read, preserving their identity.
+  ///
+  /// @details Complements implicit_uses(): where that flattens hidden reads into
+  /// a RegisterSet (losing operand role and width), this appends the source
+  /// Operand pointers so a caller can resolve each with its own VGPR-MSB role and
+  /// width — needed on gfx1250, where a partial-write/RMW op preserve-reads its
+  /// destination and a swap preserve-reads both operands, each in its own bank.
+  /// Only register-bearing implicit reads that originate from a decoded operand
+  /// are reported here; encoded-field reads with no Operand (e.g. FLAT `saddr`)
+  /// remain exclusive to implicit_uses(). The pointed-to Operands share this
+  /// instruction's lifetime.
+  virtual void implicit_use_operands(std::vector<const Operand *> & /*operands*/) const {}
 
   /// @brief Add registers implicitly written by this instruction.
   virtual void implicit_defs(RegisterSet & /*defs*/) const {}
@@ -297,6 +339,9 @@ protected:
   std::string_view mnemonic_;
 };
 
+/// @brief Return a callback from the per-ISA backend active during decoding.
+Instruction::ExecuteFn current_instruction_execute(size_t instruction_id) noexcept;
+
 /// @brief Abstract class that holds static ISA state for a specific instruction instance.
 ///
 /// @details Provides a typed execute() taking the ISA-specific context. Subclasses override
@@ -326,37 +371,9 @@ public:
     };
   }
 
-  /// @brief Return the execution callback installed by an optional execution
-  /// translation unit.
-  ///
-  /// @details Model and execution objects must be co-linked into the same
-  /// image. The slot is image-local C++ state, not a registration ABI between
-  /// independently loaded shared libraries. Execution translation units
-  /// register their callbacks during static initialization, before any
-  /// instruction is decoded. Model-only images omit those translation units
-  /// and intentionally observe a null callback.
-  /// @tparam Derived Concrete generated instruction type.
-  /// @returns The registered execution trampoline, or null in a model-only
-  /// image.
-  template <typename Derived> static ExecuteFn registered_exec_fn() {
-    return exec_fn_slot<Derived>();
-  }
-
-  /// @brief Install a concrete instruction's execution trampoline.
-  /// @tparam Derived Concrete generated instruction type.
-  /// @returns True so the helper can initialize a namespace-scope registrar.
-  template <typename Derived> static bool register_exec_fn() {
-    exec_fn_slot<Derived>() = make_exec_fn<Derived>();
-    return true;
-  }
-
-private:
-  /// @brief Return the image-local dispatch slot for one instruction type.
-  /// @tparam Derived Concrete generated instruction type.
-  /// @returns Mutable slot populated during execution-TU static initialization.
-  template <typename Derived> static ExecuteFn &exec_fn_slot() {
-    static ExecuteFn fn = nullptr;
-    return fn;
+  /// @brief Select a callback from the active immutable per-ISA table.
+  static ExecuteFn selected_exec_fn(size_t instruction_id) {
+    return current_instruction_execute(instruction_id);
   }
 };
 

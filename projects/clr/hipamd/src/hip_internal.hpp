@@ -390,6 +390,19 @@ namespace hip {
     /// Fetch the stream Id
     uint64_t GetStreamId() const { return stream_id_; }
 
+    void SetAsyncError(hipError_t err) {
+      hipError_t expected = hipSuccess;
+      async_error_.compare_exchange_strong(expected, err,
+          std::memory_order_release, std::memory_order_relaxed);
+    }
+    hipError_t GetAndClearAsyncError() {
+      // Fast path: no error, skip the locked RMW.
+      if (async_error_.load(std::memory_order_acquire) == hipSuccess) {
+        return hipSuccess;
+      }
+      return async_error_.exchange(hipSuccess, std::memory_order_acq_rel);
+    }
+
     static void Destroy(hip::Stream* stream, bool forceDestroy = false);
     virtual bool terminate();
 
@@ -497,6 +510,9 @@ namespace hip {
     const std::vector<uint32_t> cuMask_;     //!< CU mask restricting which CUs may be used
     uint64_t stream_id_;                     //!< Process-unique monotonic stream identifier
 
+    // Per-stream async error from fire-and-forget commands; cleared on read.
+    std::atomic<hipError_t> async_error_{hipSuccess};
+
     // ----- Stream capture state -----
     hipStreamCaptureStatus captureStatus_{hipStreamCaptureStatusNone}; //!< Current capture status
     hip::Graph* pCaptureGraph_ = nullptr;                 //!< Graph being constructed by capture
@@ -599,6 +615,8 @@ namespace hip {
     bool StreamExists(const Stream* stream);
     /// Synchronize all streams (optionally only blocking ones)
     void SyncAllStreams(bool cpu_wait = true, bool wait_blocking_streams_only = false);
+    /// Returns and clears an async error from blocking streams on this device
+    hipError_t GetAndClearBlockingStreamsAsyncError();
     /// Returns true if any stream on this device is in capture mode
     bool StreamCaptureBlocking();
     /// Wait all active streams on the blocking queue. The method enqueues a wait command and

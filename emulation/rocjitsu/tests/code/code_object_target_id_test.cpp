@@ -7,14 +7,14 @@
 ///        rj_code_target_id_t value, and that the corresponding C API path
 ///        (rj_code_executable_create -> get_code_object ->
 ///        basic_block_list_create) accepts each target by exercising the
-///        create_decoder_for_target switch in rj_code.cpp.
+///        provider-selected target registry in rj_code.cpp.
 ///
 /// Covers the only currently supported targets (gfx90a, gfx942, gfx950,
 /// gfx1200, gfx1201, gfx1250) plus an unknown-machine-flag case to guard the
 /// INVALID sentinel and prevent a future edit from silently aliasing one target
 /// onto another.
 
-// \NPI new GPU: extend these tests with its MACH/triple -> target mapping.
+// \NPI new GPU: extend these tests with its provider-owned MACH/triple binding.
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_symbol.h"

@@ -323,7 +323,6 @@ rocprofiler_add_integration_validate_test(
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
 if(attdecoder_FOUND
-   AND NOT ROCPROFILER_DISABLE_ATT_DISPATCH_EVENTS
    AND DEFINED rocm_version_NUMERIC_VERSION
    AND rocm_version_NUMERIC_VERSION GREATER_EQUAL 71400)
     rocprofiler_add_integration_execute_test(

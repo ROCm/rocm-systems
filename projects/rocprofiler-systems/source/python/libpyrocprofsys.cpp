@@ -3,6 +3,7 @@
 
 #include "libpyrocprofsys.hpp"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "dl/dl.hpp"
 #include "library/coverage.hpp"
 #include "library/coverage/impl.hpp"
@@ -105,8 +106,13 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
         }
         return _use_mpi;
     };
-    rocprofsys_external_register_pause_callbacks(&pyrocprofsys_pause_callback,
-                                                 &pyrocprofsys_resume_callback);
+    // Deferred out of module init: this is the first call into the dl layer and it
+    // dlopens librocprof-sys.so, so registering here would load the whole runtime on
+    // `import rocprofsys`.
+    static auto _register_pause_callbacks = []() {
+        rocprofsys_external_register_pause_callbacks(&pyrocprofsys_pause_callback,
+                                                     &pyrocprofsys_resume_callback);
+    };
 
     omni.def("is_initialized", []() { return _is_initialized; }, "Initialization state");
 
@@ -118,6 +124,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(_is_initialized)
                 throw std::runtime_error("Error! rocprofsys is already initialized");
             _is_initialized = true;
+            _register_pause_callbacks();
             rocprofsys_set_mpi(_get_use_mpi());
             rocprofsys_init("trace", false, _v.c_str());
         },
@@ -129,6 +136,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(_is_initialized)
                 throw std::runtime_error("Error! rocprofsys is already initialized");
             _is_initialized = true;
+            _register_pause_callbacks();
             rocprofsys_set_instrumented(
                 static_cast<int>(rocprofsys::dl::InstrumentMode::PythonProfile));
             rocprofsys_set_mpi(_get_use_mpi());
@@ -454,9 +462,7 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     auto& _incl_files = _config.include_filenames;
     auto& _skip_files = _config.exclude_filenames;
     auto  _full       = py::cast<std::string>(get_frame_code(frame)->co_filename);
-    auto  _file       = (_full.find('/') != std::string::npos)
-                            ? _full.substr(_full.find_last_of('/') + 1)
-                            : _full;
+    auto  _file       = rocprofsys::path::filename(_full);
 
     if(!_config.include_internal &&
        strncmp(_full.c_str(), _rocprofsys_path.c_str(), _rocprofsys_path.length()) == 0)

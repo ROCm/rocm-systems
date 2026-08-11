@@ -574,6 +574,25 @@ static void hrr_run_roundtrip(const std::string& direct_case,
   hrr_run_playback(cap_path, /*extra_args=*/"", require_d2h);
 }
 
+static bool hrr_find_peer_accessible_pair(int& src_dev, int& dst_dev, int& ndev) {
+  HIP_CHECK(hipGetDeviceCount(&ndev));
+  if (ndev < 2) return false;
+
+  for (int src = 0; src < ndev; ++src) {
+    for (int dst = 0; dst < ndev; ++dst) {
+      if (src == dst) continue;
+      int can_access = 0;
+      HIP_CHECK(hipDeviceCanAccessPeer(&can_access, src, dst));
+      if (can_access) {
+        src_dev = src;
+        dst_dev = dst;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Env-aware capture + playback helpers (used by the repro roundtrips).
 //
@@ -887,6 +906,87 @@ HIP_TEST_CASE(Unit_HRR_HostAliasesRoundtrip) {
 HIP_TEST_CASE(Unit_HRR_MemPoolExtendedRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_mempoolext"};
   hrr_run_roundtrip("Unit_HRR_MemPoolExtended_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_DeviceMemPoolRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_devicemempool"};
+  // Exercises hipDeviceSetMemPool (device stream-ordered pool association),
+  // the one device mem-pool API left untested by Unit_HRR_DeviceInfo_Direct.
+  hrr_run_roundtrip("Unit_HRR_DeviceMemPool_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_ExtMallocRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extmalloc"};
+  // Exercises hipExtMallocWithFlags (device allocation, manual playback handler).
+  hrr_run_roundtrip("Unit_HRR_ExtMalloc_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_StreamWaitEventSptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamwaitspt"};
+  // Exercises hipStreamWaitEvent_spt (per-thread-stream cross-stream ordering).
+  hrr_run_roundtrip("Unit_HRR_StreamWaitEventSpt_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_GraphLaunchSptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_graphlaunchspt"};
+  // Exercises hipGraphLaunch_spt (per-thread-stream graph launch).
+  hrr_run_roundtrip("Unit_HRR_GraphLaunchSpt_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_ExtModuleLaunchKernelRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extmodulelaunch"};
+  // Exercises hipExtModuleLaunchKernel (manual kernarg + device-ptr replay via
+  // the HIPRTC module path, which is captured/replayed on Linux).
+  hrr_run_roundtrip("Unit_HRR_ExtModuleLaunchKernel_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_HostFreeRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_hostfree"};
+  // Exercises hipHostFree + hipHostMalloc (pinned-host alloc-map lifecycle).
+  hrr_run_roundtrip("Unit_HRR_HostFree_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_LoggingRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_logging"};
+  // Exercises hipExtSetLoggingParams / hipExtEnableLogging / hipExtDisableLogging.
+  hrr_run_roundtrip("Unit_HRR_Logging_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_StreamCaptureQuerySptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_capturequeryspt"};
+  // Exercises hipStreamIsCapturing_spt + hipStreamGetCaptureInfo_spt inside a
+  // manual capture frame (graph executes -> D2H validates the whole path).
+  hrr_run_roundtrip("Unit_HRR_StreamCaptureQuerySpt_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_StreamCaptureBeginSptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_capturebeginspt"};
+  // Validates hipStreamBeginCapture_spt on GPU (generated handler omits the
+  // ctx.in_graph_capture bookkeeping; safe for a memset-only capture region).
+  hrr_run_roundtrip("Unit_HRR_StreamCaptureBeginSpt_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_ConfigureCallRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_configurecall"};
+  // Exercises hipConfigureCall (legacy execution-stack launch configuration).
+  hrr_run_roundtrip("Unit_HRR_ConfigureCall_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_MemcpyPeerRoundtrip) {
+  int src_dev = 0;
+  int dst_dev = 1;
+  int ndev = 0;
+  if (!hrr_find_peer_accessible_pair(src_dev, dst_dev, ndev)) {
+    if (ndev < 2) {
+      HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    } else {
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    }
+  }
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memcpypeer"};
+  // Exercises hipMemcpyPeer across two GPUs: capture on a multi-GPU host, replay
+  // must recreate both allocations on their devices and validate the D2H bytes.
+  hrr_run_roundtrip("Unit_HRR_MemcpyPeer_Direct", cap.path);
 }
 
 HIP_TEST_CASE(Unit_HRR_MemsetExtraRoundtrip) {
