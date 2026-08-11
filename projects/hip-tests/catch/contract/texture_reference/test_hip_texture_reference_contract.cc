@@ -1,0 +1,180 @@
+/*
+ * Copyright Advanced Micro Devices, Inc.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <cstddef>
+#include <cstdint>
+
+#include <hip/hip_runtime_api.h>
+#include <hip_test_common.hh>
+
+// Deprecated texture-reference (hipTexRef*) scalar-state contracts. These APIs
+// are deprecated; the build sets -Wno-deprecated-declarations globally, so no
+// local pragma is required.
+//
+// Every test is image-gated via CHECK_IMAGE_SUPPORT: on devices/runtime paths
+// without image/array support each test skips (as on the local WSL2 iGPU) and
+// runs on image-capable datacenter GPUs. Coverage is limited to the scalar
+// per-reference state that a stack textureReference round-trips reliably on the
+// AMD backend (address mode, filter mode, flags, format, max anisotropy). The
+// bound-resource and bind-texture entry points require a texture bound to a
+// device texture symbol rather than a stack reference (they return
+// hipErrorInvalidSymbol on a stack reference), and the border-color and
+// mipmap-parameter getters do not read the value back on this backend, so those
+// are intentionally not covered here. Each test also treats hipErrorNotSupported
+// at its key call as a graceful skip.
+
+// BACKEND-DIFF: The deprecated hipTexRef* texture-reference API is AMD-only on
+// this HIP release. On the NVIDIA backend these map to the CUDA driver texref
+// entry points, which the CUDA 12+ headers removed or retyped (e.g.
+// hipTexRefGetFilterMode is undefined and the address/filter-mode getters expect
+// CUaddress_mode/CUfilter_mode rather than the cuda* runtime enums), so this
+// whole translation unit builds only on AMD. Parity is unlikely while CUDA keeps
+// the texref API removed; matching would mean retargeting onto texture objects.
+#if HT_NVIDIA
+// @asserts: hipTexRefSetAddressMode - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
+HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetAddressMode_NvidiaUnsupported_IsSkipped) {
+  HIP_SKIP_TEST("The deprecated texture-reference API is not exposed by the NVIDIA backend.");
+}
+#endif  // HT_NVIDIA
+
+#if HT_AMD
+
+namespace {
+// True when the runtime reports the specific hipTexRef* entry point is not
+// implemented on this backend (as opposed to a genuine contract violation).
+bool IsUnsupported(hipError_t status) { return status == hipErrorNotSupported; }
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// Pure set/get round-trips on a stack textureReference. These exercise the
+// runtime's per-reference state store: set a value, read it back, assert it
+// round-trips. Each guards its set call against hipErrorNotSupported.
+// ---------------------------------------------------------------------------
+
+// @asserts: hipTexRefSetAddressMode - deprecated texref address mode set then get round-trips per-reference state (or unsupported skip)
+HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetAddressMode_SetGetAddressMode_RoundTrips) {
+  CHECK_IMAGE_SUPPORT;
+
+  textureReference tex_ref{};
+  const hipError_t status =
+      hipTexRefSetAddressMode(&tex_ref, 0, hipAddressModeMirror);
+  if (IsUnsupported(status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipTexRefSetAddressMode is not supported by this runtime path.");
+  }
+  HIP_CHECK(status);
+
+  hipTextureAddressMode returned = hipAddressModeWrap;
+  const hipError_t get_status = hipTexRefGetAddressMode(&returned, &tex_ref, 0);
+  if (IsUnsupported(get_status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipTexRefGetAddressMode is not supported by this runtime path.");
+  }
+  HIP_CHECK(get_status);
+
+  REQUIRE(returned == hipAddressModeMirror);
+}
+
+// @asserts: hipTexRefSetFilterMode - deprecated texref filter mode set then get round-trips per-reference state (or unsupported skip)
+HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetFilterMode_SetGetFilterMode_RoundTrips) {
+  CHECK_IMAGE_SUPPORT;
+
+  textureReference tex_ref{};
+  const hipError_t status =
+      hipTexRefSetFilterMode(&tex_ref, hipFilterModeLinear);
+  if (IsUnsupported(status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipTexRefSetFilterMode is not supported by this runtime path.");
+  }
+  HIP_CHECK(status);
+
+  hipTextureFilterMode returned = hipFilterModePoint;
+  const hipError_t get_status = hipTexRefGetFilterMode(&returned, &tex_ref);
+  if (IsUnsupported(get_status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipTexRefGetFilterMode is not supported by this runtime path.");
+  }
+  HIP_CHECK(get_status);
+
+  REQUIRE(returned == hipFilterModeLinear);
+}
+
+// @asserts: hipTexRefSetFlags - deprecated texref flags set then get round-trips per-reference state (or unsupported skip)
+HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetFlags_SetGetFlags_RoundTrips) {
+  CHECK_IMAGE_SUPPORT;
+
+  textureReference tex_ref{};
+  const unsigned int flags = HIP_TRSF_READ_AS_INTEGER;
+  const hipError_t status = hipTexRefSetFlags(&tex_ref, flags);
+  if (IsUnsupported(status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipTexRefSetFlags is not supported by this runtime path.");
+  }
+  HIP_CHECK(status);
+
+  unsigned int returned = 0;
+  const hipError_t get_status = hipTexRefGetFlags(&returned, &tex_ref);
+  if (IsUnsupported(get_status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipTexRefGetFlags is not supported by this runtime path.");
+  }
+  HIP_CHECK(get_status);
+
+  REQUIRE(returned == flags);
+}
+
+// @asserts: hipTexRefSetFormat - deprecated texref array format and channel count set then get round-trip (or unsupported skip)
+HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetFormat_SetGetFormat_RoundTrips) {
+  CHECK_IMAGE_SUPPORT;
+
+  textureReference tex_ref{};
+  const hipArray_Format format = HIP_AD_FORMAT_UNSIGNED_INT8;
+  const int num_channels = 1;
+  const hipError_t status = hipTexRefSetFormat(&tex_ref, format, num_channels);
+  if (IsUnsupported(status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipTexRefSetFormat is not supported by this runtime path.");
+  }
+  HIP_CHECK(status);
+
+  hipArray_Format returned_format = HIP_AD_FORMAT_UNSIGNED_INT8;
+  int returned_channels = 0;
+  const hipError_t get_status =
+      hipTexRefGetFormat(&returned_format, &returned_channels, &tex_ref);
+  if (IsUnsupported(get_status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipTexRefGetFormat is not supported by this runtime path.");
+  }
+  HIP_CHECK(get_status);
+
+  REQUIRE(returned_format == format);
+  REQUIRE(returned_channels == num_channels);
+}
+
+// @asserts: hipTexRefSetMaxAnisotropy - deprecated texref max-anisotropy set then get round-trips per-reference state (or unsupported skip)
+HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetMaxAnisotropy_SetGetMaxAnisotropy_RoundTrips) {
+  CHECK_IMAGE_SUPPORT;
+
+  textureReference tex_ref{};
+  const unsigned int max_aniso = 4;
+  const hipError_t status = hipTexRefSetMaxAnisotropy(&tex_ref, max_aniso);
+  if (IsUnsupported(status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipTexRefSetMaxAnisotropy is not supported by this runtime path.");
+  }
+  HIP_CHECK(status);
+
+  int returned = 0;
+  const hipError_t get_status = hipTexRefGetMaxAnisotropy(&returned, &tex_ref);
+  if (IsUnsupported(get_status)) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("hipTexRefGetMaxAnisotropy is not supported by this runtime path.");
+  }
+  HIP_CHECK(get_status);
+
+  REQUIRE(returned == static_cast<int>(max_aniso));
+}
+#endif  // HT_AMD

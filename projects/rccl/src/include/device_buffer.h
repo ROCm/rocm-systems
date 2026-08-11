@@ -17,14 +17,11 @@ struct ncclMemManager;
 namespace meta::comms {
 
 class DeviceBuffer {
- public:
+public:
   // useVmm: try ncclCuMemAlloc (VMM); falls back to hipExtMalloc if VMM is
   // unavailable or the allocation fails. manager: optional ncclMemManager used
   // for VMM allocation tracking.
-  explicit DeviceBuffer(
-      std::size_t size,
-      bool useVmm = false,
-      struct ncclMemManager* manager = nullptr);
+  explicit DeviceBuffer(std::size_t size, bool useVmm = false, struct ncclMemManager* manager = nullptr);
   ~DeviceBuffer();
 
   DeviceBuffer(const DeviceBuffer&) = delete;
@@ -32,11 +29,17 @@ class DeviceBuffer {
   DeviceBuffer(DeviceBuffer&& other) noexcept;
   DeviceBuffer& operator=(DeviceBuffer&& other) noexcept;
 
-  void* get() const { return ptr_; }
-  bool isVmm() const { return isVmm_; }
-  CUmemGenericAllocationHandle vmmHandle() const { return vmmHandle_; }
+  void* get() const {
+    return ptr_;
+  }
+  bool isVmm() const {
+    return isVmm_;
+  }
+  CUmemGenericAllocationHandle vmmHandle() const {
+    return vmmHandle_;
+  }
 
- private:
+private:
   void freeBuffer();
 
   void* ptr_{nullptr};

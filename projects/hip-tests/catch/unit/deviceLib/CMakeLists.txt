@@ -77,6 +77,14 @@ set(AMD_TEST_SRC
     fp16_atomic_test.cc
 )
 
+# The OCP host reference (fcbx packed bitfield structs in amd_hip_ocp_host.hpp)
+# relies on Itanium bitfield packing and fails a static_assert under the MSVC
+# bitfield ABI on Windows. Only compile the fp4/fp6/fp8 OCP tests on non-Windows
+# until the header is made portable.
+if(NOT WIN32)
+  list(APPEND AMD_TEST_SRC ext_ocp_fp6.cc ext_ocp_fp8.cc ext_ocp_fp4.cc)
+endif()
+
 set(AMD_ARCH_SPEC_TEST_SRC
     AtomicAdd_Coherent.cc
     AtomicAdd_NonCoherent.cc
@@ -91,7 +99,7 @@ set(AMD_GFX940_SPEC_TEST_SRC
     fp8_fnuz.cc
 )
 
-set(AMD_GFX1200_SPEC_TEST_SRC
+set(AMD_OCP_TEST_SRC
     fp8_ocp.cc
 )
 
@@ -178,11 +186,11 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BIN
 # Accepted archs to compile this cmake file
 set(ACCEPTED_OFFLOAD_ARCHS gfx90a gfx942)
 set(ACCEPTED_GFX940_ARCH gfx942)
-set(ACCEPTED_GFX1200_ARCH gfx1200 gfx1201)
+set(ACCEPTED_OCP_ARCH gfx1200 gfx1201 gfx950)
 function(CheckAcceptedArchs OFFLOAD_ARCH_STR_LOCAL)
   set(ARCH_CHECK -1 PARENT_SCOPE)
   set(ARCH_GFX940 -1 PARENT_SCOPE)
-  set(ARCH_GFX1200 -1 PARENT_SCOPE)
+  set(ARCH_OCP -1 PARENT_SCOPE)
   string(REGEX MATCHALL "--offload-arch=gfx[0-9a-z]+" OFFLOAD_ARCH_LIST ${OFFLOAD_ARCH_STR_LOCAL})
   foreach(OFFLOAD_ARCH IN LISTS OFFLOAD_ARCH_LIST)
     string(REGEX MATCHALL "--offload-arch=(gfx[0-9a-z]+)" matches ${OFFLOAD_ARCH})
@@ -193,8 +201,8 @@ function(CheckAcceptedArchs OFFLOAD_ARCH_STR_LOCAL)
       if (CMAKE_MATCH_1 IN_LIST ACCEPTED_GFX940_ARCH)
         set(ARCH_GFX940 1 PARENT_SCOPE)
       endif()
-      if (CMAKE_MATCH_1 IN_LIST ACCEPTED_GFX1200_ARCH)
-        set(ARCH_GFX1200 1 PARENT_SCOPE)
+      if (CMAKE_MATCH_1 IN_LIST ACCEPTED_OCP_ARCH)
+        set(ARCH_OCP 1 PARENT_SCOPE)
       endif()
     endif()        # CMAKE_MATCH_COUNT
   endforeach()   # OFFLOAD_ARCH_LIST
@@ -209,7 +217,7 @@ if(HIP_PLATFORM MATCHES "amd")
   else()
     set(ARCH_CHECK -1)
     set(ARCH_GFX940 -1)
-    set(ARCH_GFX1200 -1)
+    set(ARCH_OCP -1)
   endif()
   set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
   set_source_files_properties(bfloat16.cc PROPERTIES COMPILE_FLAGS "-DHIP_ENABLE_WARP_SYNC_BUILTINS")
@@ -232,8 +240,8 @@ if(HIP_PLATFORM MATCHES "amd")
   if(${ARCH_GFX940} GREATER_EQUAL 0)
     set(TEST_SRC ${TEST_SRC} ${AMD_GFX940_SPEC_TEST_SRC})
   endif()
-  if(${ARCH_GFX1200} GREATER_EQUAL 0)
-    set(TEST_SRC ${TEST_SRC} ${AMD_GFX1200_SPEC_TEST_SRC})
+  if(${ARCH_OCP} GREATER_EQUAL 0)
+    set(TEST_SRC ${TEST_SRC} ${AMD_OCP_TEST_SRC})
   endif()
   hip_add_exe_to_target(NAME UnitDeviceTests
                       TEST_SRC ${TEST_SRC}

@@ -19,17 +19,21 @@ try:
     import os
     from pathlib import Path
 
-    # Set up ROCPROFSYS environment variables
+    # Set up ROCPROFSYS environment variables. The package sits at
+    # <root>/@CMAKE_INSTALL_PYTHONDIR@/rocprofsys in both the build and install trees;
+    # export nothing rather than a wrong path if the package was relocated.
     rocprofsys_root = Path(__file__).resolve().parents[4]
-    os.environ.update(
-        {
-            "ROCPROFSYS_ROOT": str(rocprofsys_root),
-            "ROCPROFSYS_PATH": str(rocprofsys_root / "lib"),
-            "ROCPROFSYS_SCRIPT_PATH": str(
-                rocprofsys_root / "libexec/rocprofiler-systems"
-            ),
-        }
-    )
+    rocprofsys_libdir = rocprofsys_root / "@CMAKE_INSTALL_LIBDIR@"
+    if (rocprofsys_libdir / "librocprof-sys-dl.so").exists():
+        os.environ.update(
+            {
+                "ROCPROFSYS_ROOT": str(rocprofsys_root),
+                "ROCPROFSYS_PATH": str(rocprofsys_libdir),
+                "ROCPROFSYS_SCRIPT_PATH": str(
+                    rocprofsys_root / "libexec/rocprofiler-systems"
+                ),
+            }
+        )
 
     from .libpyrocprofsys import coverage
     from . import user
@@ -70,7 +74,7 @@ try:
     import atexit
 
     def _finalize_at_exit():
-        if not is_finalized():
+        if is_initialized() and not is_finalized():
             finalize()
 
     atexit.register(_finalize_at_exit)

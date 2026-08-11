@@ -23,24 +23,41 @@
 
 import atexit
 import logging
+import os
 import signal
 import sys
-import os
 import threading
-
 from pathlib import Path
 
-current_path = os.path.dirname(os.path.abspath(__file__))
-python_lib_path = f"{current_path}/../../share/amd_smi"
-sys.path.insert(0, python_lib_path)
-# Prioritize the library from this installation over any pip-installed version
+# CLI module resolution order (distinct from `import amdsmi` in a user script):
+#   1. this installation's share/amd_smi copy -- the modules the CLI shipped
+#      with, always preferred so `amd-smi` uses its own version even on a host
+#      with multiple ROCm installs or a pip-installed amdsmi (restores #3082).
+#   2. a pip install -- fallback when the share copy is absent; the natural
+#      import below finds it (pip's site-packages precedes the system copy on
+#      sys.path).
+#   3. the system site-packages -- last resort.
+# A pip install is meant for Python scripting, not for changing CLI behavior,
+# so it must not override the shipped modules; the fallbacks are safety nets.
+_share_candidates = []
+_rocm = os.environ.get("ROCM_PATH") or os.environ.get("ROCM_HOME")
+if _rocm:
+    _share_candidates.append(os.path.join(_rocm, "share", "amd_smi"))
+# CLI runs from ROCM_PATH/libexec/amdsmi_cli/, so ../../share/amd_smi is the
+# installed copy relative to this file.
+_share_candidates.append(str(Path(__file__).resolve().parent.parent.parent / "share" / "amd_smi"))
+for _cand in _share_candidates:
+    if os.path.isdir(os.path.join(_cand, "amdsmi")):
+        sys.path.insert(0, _cand)
+        break
 
 try:
-    from amdsmi import amdsmi_interface, amdsmi_exception
+    from amdsmi import amdsmi_exception, amdsmi_interface
 except ImportError as e:
     print(f"Unhandled import error: {e}")
-    print("Failed to import the amdsmi Python library. Ensure it is installed in Python.")
-    print(f"Alternatively, verify that the library is in the path:\n{python_lib_path}")
+    print(
+        "Failed to import the amdsmi Python library. Install amd-smi-lib (rpm/deb) or pip install the amdsmi wheel."
+    )
     sys.exit(1)
 
 # Using basic python logging for user errors and development
@@ -129,9 +146,10 @@ def amdsmi_cli_init():
         logging.debug("amdgpu driver's initstate is live")
     if cpu_init_disabled:
         logging.debug("CPU/ESMI init disabled via AMDSMI_DISABLE_CPU_INIT")
-    elif check_amd_hsmp_driver() and hasattr(
-        amdsmi_interface.amdsmi_wrapper, "amdsmi_get_cpu_handles"
-    ):
+    # amdsmi_get_cpu_handles has shipped in every supported libamd_smi.so
+    # (ROCm 5.6+), so the previous hasattr() guard here was always true; it
+    # was removed because the regenerated wrapper binds the symbol directly.
+    elif check_amd_hsmp_driver():
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_CPUS
         logging.debug("hsmp driver's initstate is live")
     if check_amd_ionic_driver():

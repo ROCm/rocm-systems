@@ -172,7 +172,8 @@ if(HIP_PLATFORM MATCHES "amd")
     ${TEST_SRC}
     hipExtModuleLaunchKernel.cc
     hipHccModuleLaunchKernel.cc
-    hipLinkCreate.cc)
+    hipLinkCreate.cc
+    hipModuleLoadMalformedFatBinary.cc)
 
   if(BUILD_SHARED_LIBS)
     set(TEST_SRC
@@ -212,7 +213,7 @@ if(HIP_PLATFORM MATCHES "amd")
   # TODO - Rock build failure from clang
   if(NOT WIN32)
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} --cuda-device-only --offload-arch=amdgcnspirv
+                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV} --cuda-device-only --offload-arch=amdgcnspirv
                     --no-gpu-bundle-output
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                     -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
@@ -223,7 +224,7 @@ if(HIP_PLATFORM MATCHES "amd")
     add_custom_target(addKernel_spv DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv)
 
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} --cuda-device-only --offload-arch=amdgcnspirv
+                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV} --cuda-device-only --offload-arch=amdgcnspirv
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                     -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
                     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
@@ -277,6 +278,17 @@ if(HIP_PLATFORM MATCHES "amd")
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   COMMENT "Compiling copyKernelGenericTargetCompressed.code")
   add_custom_target(copyKernelGenericTargetCompressed_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTargetCompressed.code)
+
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/anyOrderLaunch.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} -mcode-object-version=5 --cuda-device-only
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/anyOrderLaunch.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/anyOrderLaunch.code
+                  -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/anyOrderLaunch.cc
+                  COMMENT "Compiling anyOrderLaunch.code")
+  add_custom_target(anyOrderLaunch_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/anyOrderLaunch.code)
+
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
@@ -284,6 +296,7 @@ if(HIP_PLATFORM MATCHES "amd")
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTarget.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTargetCompressed.code
+  ${CMAKE_CURRENT_BINARY_DIR}/anyOrderLaunch.code
 )
 
   if(UNIX)
@@ -409,6 +422,7 @@ if(HIP_PLATFORM MATCHES "amd")
   add_dependencies(ModuleTest copyKernelCompressed_code)
   add_dependencies(ModuleTest copyKernelGenericTarget_code)
   add_dependencies(ModuleTest copyKernelGenericTargetCompressed_code)
+  add_dependencies(ModuleTest anyOrderLaunch_code)
 
   if(UNIX)
     add_dependencies(ModuleTest copiousArgKernel_code copiousArgKernel0_code copiousArgKernel1_code copiousArgKernel2_code

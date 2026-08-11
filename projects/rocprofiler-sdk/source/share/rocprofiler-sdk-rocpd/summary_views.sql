@@ -10,12 +10,12 @@ SELECT
     COUNT(K.kernel_id) AS total_calls,
     SUM(K.end - K.start) / 1000.0 AS total_duration,
     (SUM(K.end - K.start) / COUNT(K.kernel_id)) / 1000.0 AS average,
-    SUM(K.end - K.start) * 100.0 / (
+    SUM(K.end - K.start) * 100.0 / NULLIF((
         SELECT
             SUM(A.end - A.start)
         FROM
             `rocpd_kernel_dispatch` A
-    ) AS percentage
+    ), 0) AS percentage
 FROM
     `rocpd_kernel_dispatch` K
     INNER JOIN `rocpd_info_kernel_symbol` S ON S.id = K.kernel_id
@@ -34,7 +34,7 @@ SELECT
     AG.type,
     GpuTime,
     WallTime,
-    GpuTime * 1.0 / WallTime AS Busy
+    GpuTime * 1.0 / NULLIF(WallTime, 0) AS Busy
 FROM
     (
         SELECT
@@ -93,7 +93,7 @@ SELECT
     COUNT(*) AS total_calls,
     SUM(duration) / 1000.0 AS total_duration,
     (SUM(duration) / COUNT(*)) / 1000.0 AS average,
-    SUM(duration) * 100.0 / total_time AS percentage
+    SUM(duration) * 100.0 / NULLIF(total_time, 0) AS percentage
 FROM
     (
         -- Kernel operations

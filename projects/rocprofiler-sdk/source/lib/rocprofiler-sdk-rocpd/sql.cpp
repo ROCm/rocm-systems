@@ -37,7 +37,7 @@
 
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <yaml-cpp/exceptions.h>
 #include <yaml-cpp/node/convert.h>

@@ -16,18 +16,19 @@
 
 struct ncclGinBarrierHandle;
 
-NCCL_EXTERN_C __host__ ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int nBarriers, ncclGinBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq);
+NCCL_EXTERN_C __host__ ncclResult_t ncclGinBarrierCreateRequirement(
+  ncclComm_t, ncclTeam_t, int nBarriers, ncclGinBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq);
 
 #if NCCL_CHECK_CUDACC
 enum class ncclGinFenceLevel {
   Relaxed
 };
 
-template<typename Coop>
+template <typename Coop>
 struct ncclGinBarrierSession_internal;
 
-template<typename Coop>
-struct ncclGinBarrierSession: ncclGinBarrierSession_internal<Coop> {
+template <typename Coop>
+struct ncclGinBarrierSession : ncclGinBarrierSession_internal<Coop> {
   NCCL_DEVICE_INLINE ncclGinBarrierSession(Coop, ncclGin, ncclTeam, ncclGinBarrierHandle, uint32_t index);
   NCCL_DEVICE_INLINE ncclGinBarrierSession(Coop, ncclGin, ncclTeamTagRail, uint32_t index);
   NCCL_DEVICE_INLINE ncclGinBarrierSession(Coop, ncclGin, ncclTeamTagWorld, uint32_t index);

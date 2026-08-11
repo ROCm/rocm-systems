@@ -22,7 +22,9 @@
 
 using meta::comms::kDdaMaxNranks;
 using nccl_dda_detail::ddaFabricMaxNBlocksForScratch;
+using nccl_dda_detail::ddaLLEpochCount;
 using nccl_dda_detail::DdaFabricBarrierState;
+using nccl_dda_detail::kDdaFabricLLArMaxBlocks;
 
 bool ncclDdaUseFabricPath(ncclComm* comm) {
   if (comm == nullptr) {
@@ -36,8 +38,17 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  if (comm->nRanks < 2 || comm->nRanks > kDdaMaxNranks ||
-      comm->bootstrap == nullptr) {
+  if (comm->nRanks < 2 || comm->nRanks > kDdaMaxNranks || comm->bootstrap == nullptr) {
+    return ncclSuccess;
+  }
+
+  // Fabric DDA assumes every rank shares one UALink clique; skip (fall back to
+  // normal RCCL) if this comm spans multiple cliques -- e.g. multiple racks.
+  if (comm->clique.size != comm->nRanks) {
+    INFO(
+      NCCL_INIT,
+      "ncclDdaFabricCommInit: comm spans multiple fabric cliques (nRanks %d, clique.size %d); skipping fabric DDA path",
+      comm->nRanks, comm->clique.size);
     return ncclSuccess;
   }
 
@@ -53,9 +64,7 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   // is unavailable the fabric path is skipped (DDA disabled, normal RCCL path
   // used). ncclCuMemAlloc rounds size up to the allocation granularity.
   if (!ncclCuMemEnable()) {
-    INFO(
-        NCCL_INIT,
-        "ncclDdaFabricCommInit: VMM unavailable; skipping fabric DDA path");
+    INFO(NCCL_INIT, "ncclDdaFabricCommInit: VMM unavailable; skipping fabric DDA path");
     return ncclSuccess;
   }
 
@@ -66,30 +75,28 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   CUmemGenericAllocationHandle scratchHandle{};
   ncclFabricMemHandler* handler = nullptr;
   void* peerDev = nullptr;
+  void** peerHost = nullptr;
   DdaFabricBarrierState* barrierState = nullptr;
+  uint32_t* epochDev = nullptr;
   std::vector<void*> h_ptrs(nRanks, nullptr);
   const int nBlocksMax = ddaFabricMaxNBlocksForScratch();
+  const size_t epochLen = ddaLLEpochCount(nRanks, nBlocksMax);
   ncclResult_t res = ncclSuccess;
 
-  res = ncclCuMemAlloc(
-      &scratch, &scratchHandle, ncclCuMemHandleType, bytes, comm->memManager);
+  res = ncclCuMemAlloc(&scratch, &scratchHandle, ncclCuMemHandleType, bytes, comm->memManager);
   if (res != ncclSuccess || scratch == nullptr) {
-    INFO(
-        NCCL_INIT,
-        "ncclDdaFabricCommInit: VMM scratch alloc failed; skipping fabric DDA path");
+    INFO(NCCL_INIT, "ncclDdaFabricCommInit: VMM scratch alloc failed; skipping fabric DDA path");
     scratch = nullptr;
     goto fail;
   }
 
-  handler = new (std::nothrow)
-      ncclFabricMemHandler(comm->bootstrap, comm->rank, nRanks, comm->memManager);
+  handler = new (std::nothrow) ncclFabricMemHandler(comm->bootstrap, comm->rank, nRanks, comm->memManager);
   if (handler == nullptr) {
     WARN("ncclDdaFabricCommInit: OOM allocating ncclFabricMemHandler");
     goto fail;
   }
 
-  NCCLCHECKGOTO(
-      handler->addSelfDeviceMem(scratch, scratchHandle, bytes), res, fail);
+  NCCLCHECKGOTO(handler->addSelfDeviceMem(scratch, scratchHandle, bytes), res, fail);
   NCCLCHECKGOTO(handler->exchangeMemPtrs(), res, fail);
 
   CUDACHECKGOTO(cudaMalloc(&peerDev, nRanks * sizeof(void*)), res, fail);
@@ -98,15 +105,13 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     NCCLCHECKGOTO(handler->getPeerDeviceMemPtr(i, &h_ptrs[i]), res, fail);
   }
 
-  CUDACHECKGOTO(
-      cudaMemcpy(
-          peerDev, h_ptrs.data(), nRanks * sizeof(void*),
-          cudaMemcpyHostToDevice),
-      res, fail);
+  CUDACHECKGOTO(cudaMemcpy(peerDev, h_ptrs.data(), nRanks * sizeof(void*), cudaMemcpyHostToDevice), res, fail);
+  NCCLCHECKGOTO(ncclCalloc(&peerHost, nRanks), res, fail);
+  CUDACHECKGOTO(cudaMemcpy(peerHost, h_ptrs.data(), nRanks * sizeof(void*), cudaMemcpyHostToHost), res, fail);
 
   {
-    auto barrierPair = meta::comms::FabricGpuBarrier::mallocAndInit(
-        nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager);
+    auto barrierPair =
+      meta::comms::FabricGpuBarrier::mallocAndInit(nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager);
     if (!barrierPair.first) {
       WARN("ncclDdaFabricCommInit: FabricGpuBarrier malloc/init failed");
       goto fail;
@@ -120,25 +125,41 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     barrierState->barrierHost = barrierPair.second;
   }
 
+  // Zero the scratch once so the first epoch (>= 1) across all LL operations
+  // never false-matches leftover flag words. Subsequent LL calls rely on
+  // monotonic epochs + the 2-bank layout rather than re-zeroing.
+  CUDACHECKGOTO(cudaMemset(scratch, 0, bytes), res, fail);
+
+  // Device epoch cells for the LL collectives: zero-initialised
+  // so the first device-derived flag is 1. Bumped on the device every LL launch.
+  CUDACHECKGOTO(cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)), res, fail);
+  CUDACHECKGOTO(cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)), res, fail);
+
   // Success: hand ownership of every resource to comm.
   comm->ddaFabricMemHandler = handler;
   comm->ddaScratch = scratch;
   comm->ddaScratchBytes = bytes;
   comm->ddaScratchIsVmm = true;
   comm->ddaPeerPtrsDev = peerDev;
+  comm->ddaPeerPtrsHost = peerHost;
   comm->ddaFabricBarrierState = barrierState;
   comm->ddaFabricMaxBlocks = nBlocksMax;
-  INFO(
-      NCCL_INIT,
-      "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm), FabricGpuBarrier nBlocks=%d, peer table on device",
-      nRanks,
-      bytes,
-      nBlocksMax);
+  comm->ddaLLEpochDev = epochDev;
+  comm->ddaLLEpochLen = (int)epochLen;
+  INFO(NCCL_INIT,
+       "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm), FabricGpuBarrier nBlocks=%d, peer table on device",
+       nRanks, bytes, nBlocksMax);
   return ncclSuccess;
 
 fail:
   if (barrierState != nullptr) {
     delete barrierState;
+  }
+  if (epochDev != nullptr) {
+    CUDACHECKIGNORE(cudaFree(epochDev));
+  }
+  if (peerHost != nullptr) {
+    free(peerHost);
   }
   if (peerDev != nullptr) {
     CUDACHECKIGNORE(cudaFree(peerDev));
@@ -162,6 +183,11 @@ ncclResult_t ncclDdaFabricCommFini(ncclComm* comm) {
   }
   CUDACHECKIGNORE(cudaFree(comm->ddaPeerPtrsDev));
   comm->ddaPeerPtrsDev = nullptr;
+  CUDACHECKIGNORE(cudaFree(comm->ddaLLEpochDev));
+  comm->ddaLLEpochDev = nullptr;
+  comm->ddaLLEpochLen = 0;
+  free(comm->ddaPeerPtrsHost);
+  comm->ddaPeerPtrsHost = nullptr;
   // Destroying the fabric handler unmaps/frees the imported peer scratch buffers.
   if (comm->ddaFabricMemHandler != nullptr) {
     delete static_cast<ncclFabricMemHandler*>(comm->ddaFabricMemHandler);

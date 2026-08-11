@@ -735,6 +735,30 @@ uint64_t Os::xgetbv(uint32_t ecx) {
 
   return ((uint64_t)edx << 32) | (uint64_t)eax;
 }
+
+bool Os::hasMovdir64b() {
+  // CPUID leaf 7, sub-leaf 0: ECX bit 28 = MOVDIR64B.
+  static const bool supported = [] {
+    int regs[4];
+#ifdef _LP64
+    __asm__ __volatile__(
+        "movq %%rbx, %%rsi;"
+        "cpuid;"
+        "xchgq %%rbx, %%rsi;"
+        : "=a"(regs[0]), "=S"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
+        : "a"(7), "c"(0));
+#else
+    __asm__ __volatile__(
+        "movl %%ebx, %%esi;"
+        "cpuid;"
+        "xchgl %%ebx, %%esi;"
+        : "=a"(regs[0]), "=S"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
+        : "a"(7), "c"(0));
+#endif
+    return static_cast<bool>((regs[2] >> 28) & 1);
+  }();
+  return supported;
+}
 #endif  // ATI_ARCH_X86
 
 uint64_t Os::offsetToEpochNanos() {
@@ -852,7 +876,11 @@ bool Os::GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr) {
 }
 
 bool amd::Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr,
-                                      size_t* foffset_ptr) {
+                                      size_t* foffset_ptr, size_t* region_bound_ptr) {
+  // Fail closed: callers must never read a stale bound on any early-return path.
+  if (region_bound_ptr != nullptr) {
+    *region_bound_ptr = 0;
+  }
   // Get the list of mapped file list
   bool ret_value = false;
   std::ifstream proc_maps;
@@ -881,6 +909,11 @@ bool amd::Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr,
       uint64_t inode;
       tokens >> permissions >> std::hex >> offset >> std::dec >> device >> inode;
       std::getline(tokens >> std::ws, uri_file_path);
+
+      // Readable bytes from image to the end of this mapping (anonymous or not).
+      if (region_bound_ptr != nullptr && !permissions.empty() && permissions[0] == 'r') {
+        *region_bound_ptr = static_cast<size_t>(high_address - address);
+      }
 
       if (inode == 0 || uri_file_path.empty()) {
         return ret_value;

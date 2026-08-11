@@ -18,8 +18,8 @@ namespace gin {
 namespace anvil {
 namespace detail {
 
-NCCL_DEVICE_INLINE void* ginAnvilResolvePeerVa(void* localAddr, int peer,
-                                               const ncclGinAnvilIpcBufEntry* table, int count) {
+NCCL_DEVICE_INLINE void* ginAnvilResolvePeerVa(void* localAddr, int peer, const ncclGinAnvilIpcBufEntry* table,
+                                               int count) {
   if (table == nullptr || count <= 0) return nullptr;
   uintptr_t addr = reinterpret_cast<uintptr_t>(localAddr);
   for (int b = 0; b < count; b++) {

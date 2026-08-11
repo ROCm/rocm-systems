@@ -31,8 +31,7 @@ LiveGpuContext* liveContexts = nullptr;
 
 static int ensureDeviceTableAllocated() {
   if (d_ipcTable != nullptr) return 0;
-  hipError_t err =
-      hipMalloc(&d_ipcTable, NCCL_GIN_ANVIL_IPC_MAX_BUFS * sizeof(ncclGinAnvilIpcBufEntry));
+  hipError_t err = hipMalloc(&d_ipcTable, NCCL_GIN_ANVIL_IPC_MAX_BUFS * sizeof(ncclGinAnvilIpcBufEntry));
   return err == hipSuccess ? 0 : -1;
 }
 
@@ -57,8 +56,7 @@ static int syncTableToDevice() {
 
   if (ensureDeviceTableAllocated() != 0) return -1;
 
-  hipError_t err =
-      hipMemcpy(d_ipcTable, masterEntries, count * sizeof(ncclGinAnvilIpcBufEntry), hipMemcpyHostToDevice);
+  hipError_t err = hipMemcpy(d_ipcTable, masterEntries, count * sizeof(ncclGinAnvilIpcBufEntry), hipMemcpyHostToDevice);
   if (err != hipSuccess) return -1;
   d_ipcTableCount = count;
   refreshAllLiveContexts();
@@ -138,10 +136,9 @@ extern "C" int ncclGinAnvilIpcTableRegisterVmm(void* localBase, size_t length, i
   return addEntry(&entry);
 }
 
-extern "C" int ncclGinAnvilIpcTableRegisterExplicit(void* localBase, const uintptr_t* remoteBases,
-                                                    int nRanks, size_t length) {
-  if (!localBase || !remoteBases || length == 0 || nRanks < 1 || nRanks > NCCL_GIN_ANVIL_IPC_MAX_RANKS)
-    return -1;
+extern "C" int ncclGinAnvilIpcTableRegisterExplicit(void* localBase, const uintptr_t* remoteBases, int nRanks,
+                                                    size_t length) {
+  if (!localBase || !remoteBases || length == 0 || nRanks < 1 || nRanks > NCCL_GIN_ANVIL_IPC_MAX_RANKS) return -1;
   std::lock_guard<std::mutex> lock(ipcTableMutex);
   if (findEntryIndex(reinterpret_cast<uintptr_t>(localBase)) >= 0) return 0;
 

@@ -20,6 +20,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -29,6 +30,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -38,6 +40,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -47,6 +50,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -56,6 +60,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -65,6 +70,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -74,6 +80,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -83,6 +90,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -92,6 +100,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -101,6 +110,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -110,6 +120,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -119,6 +130,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -128,6 +140,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -137,6 +150,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -144,8 +158,10 @@ class FlatLoadD16U8Flat : public Flat {
 public:
   FlatLoadD16U8Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -153,8 +169,10 @@ class FlatLoadD16I8Flat : public Flat {
 public:
   FlatLoadD16I8Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -162,8 +180,10 @@ class FlatLoadD16B16Flat : public Flat {
 public:
   FlatLoadD16B16Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -171,8 +191,10 @@ class FlatLoadD16HiU8Flat : public Flat {
 public:
   FlatLoadD16HiU8Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -180,8 +202,10 @@ class FlatLoadD16HiI8Flat : public Flat {
 public:
   FlatLoadD16HiI8Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -189,8 +213,10 @@ class FlatLoadD16HiB16Flat : public Flat {
 public:
   FlatLoadD16HiB16Flat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -200,6 +226,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -209,6 +236,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -219,6 +247,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -229,6 +258,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -239,6 +269,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -249,6 +280,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -259,6 +291,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -269,6 +302,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -279,6 +313,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -289,6 +324,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -299,6 +335,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -309,6 +346,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -319,6 +357,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -329,6 +368,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -339,6 +379,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -349,6 +390,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -359,6 +401,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -369,6 +412,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -379,6 +423,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -389,6 +434,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -399,6 +445,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -409,6 +456,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -419,6 +467,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -429,6 +478,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -439,6 +489,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -449,6 +500,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -459,6 +511,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -469,6 +522,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -479,6 +533,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -489,6 +544,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -499,6 +555,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 
@@ -509,6 +566,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand flat_scratch;
   Operand saddr;
 };
 

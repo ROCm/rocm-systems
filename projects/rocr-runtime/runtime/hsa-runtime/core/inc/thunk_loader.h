@@ -205,7 +205,7 @@ class ThunkLoader {
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMapMemoryToGPUNodes))(void* MemoryAddress, \
                                       HSAuint64 MemorySizeInBytes, \
                                       HSAuint64* AlternateVAGPU, \
-                                      HsaMemMapFlags MemMapFlags, \
+                                      HsaMemFlags MemFlags, \
                                       HSAuint64 NumberOfNodes, \
                                       HSAuint32* NodeArray);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtUnmapMemoryToGPU))(void* MemoryAddress);

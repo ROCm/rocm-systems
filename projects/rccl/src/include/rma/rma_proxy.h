@@ -25,7 +25,7 @@ struct ncclComm;
 struct ncclRmaArgs;
 
 struct ncclRmaSignal_t {
-  void *signalMhandle;
+  void* signalMhandle;
   uint64_t offset;
   uint64_t val;
   uint32_t op;
@@ -45,9 +45,9 @@ typedef enum ncclRmaDescType_t {
 struct ncclRmaPutSignalDesc {
   // Network function descriptor
   uint64_t srcOff;
-  void *srcHandle;
+  void* srcHandle;
   uint64_t dstOff;
-  void *dstHandle;
+  void* dstHandle;
   size_t size;
   int targetRank;
   ncclRmaSignal_t signal;
@@ -65,7 +65,7 @@ struct ncclRmaWaitSignalDesc {
 };
 
 struct ncclRmaProxyDesc {
-  struct ncclRmaProxyDesc *next;
+  struct ncclRmaProxyDesc* next;
   ncclRmaDescType_t rmaDescType;
   ncclRmaDescState_t rmaDescState;
 
@@ -87,25 +87,24 @@ struct ncclRmaProxyDesc {
   // Graph capture fields
   struct ncclKernelPlan* persistPlan; // Back reference to persistent plan during clean up
   bool persistDescValid; // Persistent descriptor is valid
-
 };
 
 struct ncclRmaProxyCtx {
-  struct ncclComm *comm;
+  struct ncclComm* comm;
 
   // GIN context for the RMA proxy context
-  void *ginCollComm;
-  void *ginCtx;
-  ncclNetDeviceHandle_t *devHandle;
+  void* ginCollComm;
+  void* ginCtx;
+  ncclNetDeviceHandle_t* devHandle;
   ncclNetProperties_t props;
 
   //---------Non-graph descriptor queues and synchronization---------
 
   // Lock-free circular buffer for pending Descs
-  size_t queueSize;  // Power of 2 size for pending queue
-  struct ncclRmaProxyDesc** circularBuffers;  // Lock-free circular buffer per peer
-  uint32_t* pis;  // Producer Indices per peer
-  uint32_t* cis;  // Consumer Indices per peer
+  size_t queueSize; // Power of 2 size for pending queue
+  struct ncclRmaProxyDesc** circularBuffers; // Lock-free circular buffer per peer
+  uint32_t* pis; // Producer Indices per peer
+  uint32_t* cis; // Consumer Indices per peer
 
   // Per-rank inProgressQueues: Descs with issued network operations waiting for completion
   struct ncclIntruQueue<struct ncclRmaProxyDesc, &ncclRmaProxyDesc::next>* inProgressQueues;
@@ -127,9 +126,9 @@ struct ncclRmaProxyCtx {
   // - Offset [nRanks*8]: shared aggregate signal counter (8 bytes)
   // Total signal buffer size: (nRanks + 1) * 8 bytes
   CUmemGenericAllocationHandle signalsCumemhandle;
-  void *signalsMhandle;
-  void *signalsGinHandle;
-  uint64_t *signalsDev;
+  void* signalsMhandle;
+  void* signalsGinHandle;
+  uint64_t* signalsDev;
   uint64_t* signalsHost; // Host buffer to track the expected values of the signals
 
   //---------Graph descriptor queues and synchronization---------
@@ -138,22 +137,22 @@ struct ncclRmaProxyCtx {
   struct ncclIntruQueue<struct ncclRmaProxyDesc, &ncclRmaProxyDesc::next>* persistentQueues;
 
   // CPU-accessible signal is required as proxy needs to poll on the signal values
-  void *cpuAccessSignalsGdrHandle;
-  void *cpuAccessSignalsMhandle;
-  void *cpuAccessSignalsGinHandle;
-  uint64_t *cpuAccessSignals;
-  uint64_t *cpuAccessSignalsDev;
+  void* cpuAccessSignalsGdrHandle;
+  void* cpuAccessSignalsMhandle;
+  void* cpuAccessSignalsGinHandle;
+  uint64_t* cpuAccessSignals;
+  uint64_t* cpuAccessSignalsDev;
   uint64_t* cpuAccessSignalsHost; // Host buffer to track the expected values of the signals
 
   // Local flush buffer
   CUmemGenericAllocationHandle flushBufCumemhandle;
-  void *flushBufMhandle;
-  void *flushBufGinHandle;
-  uint64_t *flushBufDev;
+  void* flushBufMhandle;
+  void* flushBufGinHandle;
+  uint64_t* flushBufDev;
 };
 
 struct ncclRmaProxyState {
-  struct ncclComm *comm;
+  struct ncclComm* comm;
   ncclGin_t* ncclGin;
   void* ginInstance;
   bool connected;
@@ -169,8 +168,8 @@ struct ncclRmaProxyState {
   void** rmaProxyCtxs;
   ncclNetDeviceHandle_t** rmaProxyDevHandles;
 
-  int needsProxyProgress;  // Whether we need to progress GIN operations with the proxy
-  int ginProgress;         // GIN progress is enabled
+  int needsProxyProgress; // Whether we need to progress GIN operations with the proxy
+  int ginProgress; // GIN progress is enabled
   std::thread thread;
   std::mutex mutex;
   std::condition_variable cond;
@@ -187,8 +186,8 @@ ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm);
 ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm);
 
 // RMA Proxy context management
-ncclResult_t ncclRmaProxyCreateContext(struct ncclComm *comm, void *collComm, ncclNetProperties_t props,
-                                       void **outRmaProxyCtx, ncclNetDeviceHandle_t **outDevHandle);
+ncclResult_t ncclRmaProxyCreateContext(struct ncclComm* comm, void* collComm, ncclNetProperties_t props,
+                                       void** outRmaProxyCtx, ncclNetDeviceHandle_t** outDevHandle);
 ncclResult_t ncclRmaProxyDestroyContext(ncclGin_t* ginComm, void* rmaProxyCtx);
 ncclResult_t ncclRmaProxyProgress(ncclGin_t* ncclGin, void* rmaProxyCtx);
 

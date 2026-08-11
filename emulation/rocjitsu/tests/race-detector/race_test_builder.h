@@ -130,6 +130,18 @@ public:
     waves_[wave]->checkVgprRead(reg, lane, byteMask);
   }
 
+  void checkVgprReadLanes(int wave, int reg, uint64_t laneMask, uint8_t byteMask = 0xF) {
+    waves_[wave]->checkVgprReadLanes(reg, laneMask, byteMask);
+  }
+
+  void checkVgprWrite(int wave, int reg, int lane, uint8_t byteMask = 0xF) {
+    waves_[wave]->checkVgprWrite(reg, lane, byteMask);
+  }
+
+  void checkVgprWriteLanes(int wave, int reg, uint64_t laneMask, uint8_t byteMask = 0xF) {
+    waves_[wave]->checkVgprWriteLanes(reg, laneMask, byteMask);
+  }
+
   void checkSgprRead(int wave, int reg) { waves_[wave]->checkSgprRead(reg); }
 
   void checkLdsRead(int wave, int lane, int addr, int bytes) {

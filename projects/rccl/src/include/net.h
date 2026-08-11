@@ -39,31 +39,31 @@ extern ncclNet_t netIbCast;
 extern ncclResult_t rcclCastNetP2pPolicy(void* handle, int isP2p);
 
 enum rcclIBNicType {
-    rcclIBNicTypeUnknown = -1,
-    rcclIBNicTypeDefault = 0,
-    rcclIBNicTypeMLX = 1,
-    rcclIBNicTypeAINIC = 2,
-    rcclIBNicTypeBNXT2 = 3,
-    rcclIBNicTypeMax = 4
+  rcclIBNicTypeUnknown = -1,
+  rcclIBNicTypeDefault = 0,
+  rcclIBNicTypeMLX = 1,
+  rcclIBNicTypeAINIC = 2,
+  rcclIBNicTypeBNXT2 = 3,
+  rcclIBNicTypeMax = 4
 };
 
 struct rcclIBNicInfo {
-    rcclIBNicType type;
-    int rate;
-    int count;
+  rcclIBNicType type;
+  int rate;
+  int count;
 };
 
 /**
-  * @brief Get the primary NIC info
-  * 
-  * @return rcclIBNicInfo (type, rate, count)
-  */
+ * @brief Get the primary NIC info
+ *
+ * @return rcclIBNicInfo (type, rate, count)
+ */
 extern rcclIBNicInfo rcclPrimaryNic();
 /**
-  * @brief Check if the primary NIC is AINIC
-  * 
-  * @return bool
-  */
+ * @brief Check if the primary NIC is AINIC
+ *
+ * @return bool
+ */
 extern bool rcclUseAinic();
 #endif
 

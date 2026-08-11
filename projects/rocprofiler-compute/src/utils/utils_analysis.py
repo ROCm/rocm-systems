@@ -798,6 +798,6 @@ def get_matrix_ops_type(gpu_series: str) -> str:
     Fused Multiply-Add instructions; all other architectures support Warp
     Matrix Multiply-Accumulate operations.
     """
-    if gpu_series in ["MI200", "MI300", "MI350"]:
+    if gpu_series.upper() in ["MI200", "MI300", "MI350"]:
         return "MFMA"
     return "WMMA"

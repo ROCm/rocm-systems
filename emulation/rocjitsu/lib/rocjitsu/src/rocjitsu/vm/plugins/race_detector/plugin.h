@@ -43,9 +43,8 @@ template <typename T, size_t N> struct RingBuffer {
   size_t size() const { return len; }
 };
 
-/// Find the memory instruction whose outstanding result conflicts with the
-/// racy read described by @p v, returning its PC and wave.
-std::optional<MarkedPc> findConflict(const RaceViolation &v, RaceDetector &detector);
+/// Return the memory instruction recorded as the exact conflict.
+MarkedPc findConflict(const RaceViolation &, RaceDetector &);
 
 /// Format a trace with ==> markers and wave/lane annotations.
 std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
@@ -65,11 +64,11 @@ std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
 /// compact, monotonic text range; helper/trampoline code can be far away from
 /// the first PC observed for the dispatch.
 struct DisasmCache {
-  void record(uint64_t pc, const Instruction &inst) { record(pc, inst.disassemble()); }
-
-  void record(uint64_t pc, std::string disasm) {
+  void record(uint64_t pc, const Instruction &inst) {
     std::lock_guard<std::mutex> lock(mutex_);
-    entries_.try_emplace(pc, std::move(disasm));
+    if (entries_.contains(pc))
+      return;
+    entries_.emplace(pc, inst.disassemble());
   }
 
   std::unordered_map<uint64_t, std::string> to_map() const {
@@ -90,7 +89,9 @@ struct RaceWavefrontState : WavefrontState {
 
 class RaceDetectorPlugin : public ExecutionPlugin {
 public:
-  RaceDetectorPlugin();
+  /// @param config_json Plugin configuration object as a JSON string (unused;
+  ///        this plugin takes no configuration). May be null.
+  explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
@@ -101,8 +102,12 @@ public:
 
   void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) override;
 
-  void onAmdgpuReadVgprs(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint32_t lane_begin,
-                         uint32_t lane_end, uint8_t byte_mask = 0xF) override;
+  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
+                             uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override;
+
+  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
+                              uint64_t lane_mask,
+                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override;
 
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) override;
 
@@ -125,6 +130,11 @@ private:
     }
   };
 
+  struct KernelNames {
+    std::string name;
+    std::string symbol;
+  };
+
   RaceWavefrontState *get_state(const amdgpu::Wavefront &wf) {
     return static_cast<RaceWavefrontState *>(wf.plugin_state(slot_index()));
   }
@@ -138,6 +148,7 @@ private:
 
   std::mutex report_mutex_;
   std::set<std::pair<uint32_t, uint64_t>> observed_races_;
+  std::unordered_map<uint32_t, KernelNames> dispatch_kernel_names_;
 };
 
 } // namespace rocjitsu::plugins::race_detector
