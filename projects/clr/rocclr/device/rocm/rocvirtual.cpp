@@ -5072,6 +5072,13 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 // ================================================================================================
 void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
   if (vcmd.cooperativeGroups()) {
+    // Under dynamic queues an idle stream may have released its HW queue back to the pool
+    // (gpu_queue_ == nullptr). Reacquire before flushing the fence, since releaseGpuMemoryFence()
+    // dereferences gpu_queue_ in dispatchBarrierPacket().
+    if (!dedicated_queue_ && gpu_queue_ == nullptr) {
+      SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, last_hwq_));
+      last_hwq_ = nullptr;
+    }
     // Wait for the execution on the current queue, since the coop groups will use the device queue
     releaseGpuMemoryFence(kSkipCpuWait);
 
