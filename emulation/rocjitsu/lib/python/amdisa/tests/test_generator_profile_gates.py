@@ -1882,14 +1882,17 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
         ]
         for class_name in pseudo_scalar_constructors:
             constructor = _generated_constructor_body(constructor_source, class_name)
-            assert 'OpSelSreg::OPR_SREG_VCC_LO' in constructor
-            assert 'OpSelSreg::OPR_SREG_VCC_HI' in constructor
-            assert 'may not use VCC as a destination' in constructor
+            assert '>= OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO' in constructor
+            assert 'has an invalid SReg_32_XEXEC destination' in constructor
+            assert 'may not use VCC as a destination' not in constructor
+            assert constructor.index(
+                'has an invalid SReg_32_XEXEC destination'
+            ) < constructor.index('does not support DPP')
             assert '->opsel' not in constructor
             assert 'vop3_opsel' not in constructor
-        assert constructor_source.count('may not use VCC as a destination') == len(
-            pseudo_scalar_constructors
-        )
+        assert constructor_source.count(
+            'has an invalid SReg_32_XEXEC destination'
+        ) == len(pseudo_scalar_constructors)
 
         generic_true16_constructor = _generated_constructor_body(
             constructor_source, 'VAddF16Vop3'
