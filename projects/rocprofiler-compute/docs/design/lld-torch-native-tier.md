@@ -105,33 +105,35 @@ flowchart TD
 
 ## Threading model
 
-Every thread instruments itself independently: it owns its marker stack and
-emits its own ROCTX ranges, with no locking on that path. Threads meet in only
-two shared places, the snapshot store and the published user-scope chain.
+Every thread instruments itself independently: it owns its marker stack and its
+own debug-info chain, and emits its own ROCTX ranges, with no locking on that
+path. The snapshot store is the only state the threads share.
 
 ```mermaid
 flowchart TB
     subgraph t1["python thread, id T1"]
         o1["ops"] --> s1["g_thread stack<br/>thread_local"] --> r1["ROCTX range"]
+        d1["debug-info chain<br/>thread_local"]
+        s1 -.->|"push_user_scope"| d1
     end
 
     subgraph t2["python thread, id T2"]
         o2["ops"] --> s2["g_thread stack<br/>thread_local"] --> r2["ROCTX range"]
+        d2["debug-info chain<br/>thread_local"]
+        s2 -.->|"push_user_scope"| d2
     end
 
-    subgraph w["autograd worker"]
+    subgraph w["autograd worker running the T1 graph"]
         ow["backward ops<br/>forwardThreadId = T1"] --> sw["g_thread stack<br/>thread_local"] --> rw["ROCTX range"]
     end
 
-    store[("g_snapshots<br/>key: seqNr + threadId<br/>sharded, per-shard mutex")]
-    tls[("c10 ThreadLocalDebugInfo<br/>published user-scope chain")]
+    store[("g_snapshots<br/>key: seqNr + threadId<br/>process-wide, sharded")]
 
     s1 -->|"save (N, T1)"| store
     s2 -->|"save (N, T2)"| store
     store -->|"consume (N, T1)"| sw
 
-    s1 -.->|"push_user_scope publishes"| tls
-    tls -.->|"copied to worker"| sw
+    d1 -.->|"copied with the graph task"| sw
 ```
 
 - The callback is **global**: one registration fires on every thread that runs
@@ -147,10 +149,8 @@ flowchart TB
 - A backward op runs on an autograd worker, not on the thread that built the
   graph. It consumes the snapshot saved by that thread, which it identifies by
   the `forwardThreadId` on its own record.
-- User scope crosses threads by the other route: `push_user_scope` publishes the
-  chain into `ThreadLocalDebugInfo`, PyTorch copies it to the worker, and the
-  worker overlays it whenever its stack is empty at op entry (see Cross-thread
-  context).
+- User scope reaches a worker by a different route: it is per-thread state that
+  travels with the graph task, not shared state (see Cross-thread context).
 - **Counters** are atomic; **install state** is mutex-guarded.
 
 ## Stack maintenance
@@ -220,23 +220,23 @@ flowchart LR
 
 The callback registers once for `FUNCTION` and `BACKWARD_FUNCTION` scopes. Each
 op pushes a frame and a ROCTX range on entry, and pops both on exit. What was
-pushed is stored in the observer context so exit unwinds exactly that.
+pushed is stored in the observer context so exit unwinds exactly that (see Stack
+maintenance).
 
-```mermaid
-sequenceDiagram
-    participant Op as PyTorch op
-    participant Start as start_cb
-    participant End as end_cb
-    Op->>Start: enter
-    Start->>Start: push frame + range
-    Start-->>Op: observer context
-    Op->>End: exit
-    End->>End: unwind observer context
-```
+How an op is labelled depends on what is already on the stack beneath it. The
+link back to the application comes only from user-scope frames, whose context is
+the `file:line` of the nearest frame outside the framework and this package;
+those frames are pushed by the Python tier's structural wraps around
+`nn.Module.__call__`, optimizer steps, `Tensor.backward`, collectives and
+similar entry points. An op therefore arrives with an empty stack only when
+neither another operator nor a user scope is open on the thread, which is the
+case for tensor work outside all of those wraps: setup, data preparation, or
+ad-hoc math in the script. Emptiness is judged after the overlay, so an op on an
+autograd worker that inherited a chain counts as enclosed.
 
 The leaf frame's context is one of four fixed tags, chosen from the op's scope
-and what is already on the stack. Downstream parsers match these tokens
-literally, so the mapping is part of the contract:
+and that emptiness. Downstream parsers match these tokens literally, so the
+mapping is part of the contract:
 
 | Scope | Condition | Leaf context |
 | --- | --- | --- |
@@ -245,15 +245,57 @@ literally, so the mapping is part of the contract:
 | backward | has a sequence number | `#1@autograd.bwd:0` |
 | backward | no sequence number (engine-internal) | `#1@autograd.engine:0` |
 
-Emptiness is judged after the overlay, so an op running inside a user scope, or
-on a worker that inherited a chain, is nested; `#1@aten:0` means no enclosing
-frame at all. The tags imitate the `#<n>@<location>` shape of a user-scope
-context so every frame parses the same way downstream.
+The tags imitate the `#<n>@<location>` shape of a user-scope context so every
+frame parses the same way downstream. A leaf tag never carries a location of its
+own, so `#1@aten:0` is a placeholder: such an op is still recorded and its
+kernels still attribute to that operator, but nothing roots them at a line of
+the model.
 
 `install()` is idempotent and guarded by a mutex; `uninstall()` removes the
 callback. Both track a single handle. `uninstall()` also clears the snapshot
 store: with no callback left to consume them, snapshots from a forward whose
 backward never ran would be held for the life of the process.
+
+### Worked example
+
+One stack holds frames from both producers, and nesting is just stack depth.
+Two Python scopes around two nested ATen ops give four frames:
+
+```mermaid
+flowchart LR
+    py["Python<br/>push_user_scope"]
+    cb["C++ callback<br/>start_cb"]
+
+    subgraph stk["g_thread stack, bottom to top"]
+        direction TB
+        f1["step<br/>#1@train.py:42"]
+        f2["MyModel.forward<br/>#2@model.py:10"]
+        f3["aten::matmul<br/>#1@aten.nested:0"]
+        f4["aten::mm<br/>#1@aten.nested:0"]
+        f1 --- f2 --- f3 --- f4
+    end
+
+    py --> f1
+    py --> f2
+    cb --> f3
+    cb --> f4
+    f4 --> rx["ROCTX range<br/>encodes the whole stack"]
+```
+
+Each of the four pushes emitted its own range, so the ranges nest and all four
+are open at once. The innermost one reads:
+
+```text
+step/MyModel.forward/aten::matmul/aten::mm:#1@train.py:42/#2@model.py:10/#1@aten.nested:0/#1@aten.nested:0|torch
+```
+
+Three properties make this readable downstream. Markers and contexts are
+positional, so the nth marker pairs with the nth context. Only the leaf is new
+on any given push; the frames below it are whatever the enclosing scopes and ops
+already left on the stack, which is why a C++ op inherits a Python scope's
+source location without either side knowing about the other. And both ATen
+frames are tagged `aten.nested:0` rather than `aten:0`, because the user-scope
+frame beneath them means the stack was not empty.
 
 ## Forward-to-backward correlation
 
@@ -282,17 +324,20 @@ never runs (for example detached forward).
 
 ## Cross-thread context
 
-Autograd runs on worker threads that do not inherit the main thread's stack. A
-`push_user_scope` publishes the current chain into thread-local debug info,
-which PyTorch copies to the workers. Whenever a thread's stack is empty at op
-entry (every top-level op on a worker, since it drains after each op), the
-callback overlays that chain; a matching leading prefix is skipped so it is not
-duplicated.
+Autograd runs backward on worker threads, which do not inherit the launching
+thread's stack. `push_user_scope` publishes the current chain into that thread's
+own `ThreadLocalDebugInfo`. When backward is launched PyTorch captures the
+launching thread's debug info into the graph task and restores it on the worker
+that runs that graph, so the chain travels with the work rather than through
+shared state. Whenever a thread's stack is empty at op entry (every top-level op
+on a worker, since it drains after each op), the callback overlays that chain; a
+matching leading prefix is skipped so it is not duplicated.
 
 ```mermaid
 flowchart LR
-    main[main thread scope] --> tls[(TLS chain)]
-    tls --> worker[worker overlays chain]
+    scope["push_user_scope<br/>on the launching thread"] --> tls["that thread's<br/>ThreadLocalDebugInfo"]
+    tls --> task["captured into<br/>the graph task"]
+    task --> worker["restored on the worker,<br/>overlaid when stack is empty"]
 ```
 
 The debug-info slot is a private string-keyed slot when the PyTorch build
@@ -350,8 +395,9 @@ must tolerate the missing field: `_parse_function_backend` in
 ## Validation
 
 - **gtest** — snapshot store (save/consume, one-shot, LRU eviction, per-shard,
-  concurrency), wire encoding round-trip, leaf labels, install/uninstall, scope
-  balance, and real forward/backward runs on GPU.
+  concurrency, cross-thread key isolation), wire encoding round-trip, leaf
+  labels, install/uninstall, scope balance, and real forward/backward runs on
+  GPU.
 - **Counters** — `dump_stats()` surfaces push/pop balance, snapshot hit rate,
   and callback errors.
 
