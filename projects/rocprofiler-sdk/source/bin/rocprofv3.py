@@ -1224,7 +1224,6 @@ For attachment profiling of running processes:
     add_parser_bool_argument(
         att_options,
         "--att-no-detail",
-        default=False,
         help="Collect occupancy data without instruction-level detail.",
     )
 
