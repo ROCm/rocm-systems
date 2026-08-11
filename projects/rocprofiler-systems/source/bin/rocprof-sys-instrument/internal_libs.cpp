@@ -98,8 +98,9 @@ std::optional<std::string>
 get_linked_path(const char*        _name,
                 open_modes_vec_t&& _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) })
 {
-    void*      _handle = nullptr;
-    const bool _noload = false;
+    void* _handle = nullptr;
+    // NOLINTNEXTLINE(misc-const-correctness)
+    bool _noload = false;
     for(auto _mode : _open_modes)
     {
         _handle = dlopen(_name, _mode);
