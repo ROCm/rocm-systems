@@ -114,7 +114,7 @@ Panel Config:
           unit: WGPs
           peak: $cu_per_gpu
           pct_of_peak: true
-          coll_level: SQG_LEVEL_WGP_ACTIVE_sum
+          coll_level: SQG_LEVEL_WGP_ACTIVE
         IPC:
           value: AVG(((SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
           unit: Instr/cycle
@@ -210,11 +210,11 @@ Panel Config:
           peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
           pct_of_peak: true
         Instruction Cache Fetch Latency:
-          value: AVG((SQ_IFETCH_LEVEL_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
+          value: AVG((SUM(SQ_IFETCH_LEVEL_ACCUM) / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
           unit: Cycles
           peak: None
           pct_of_peak: false
-          coll_level: SQ_IFETCH_LEVEL_sum
+          coll_level: SQ_IFETCH_LEVEL
 
   metrics_description:
     VALU FLOPs (FP16): >-

@@ -351,6 +351,42 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
+        VALU Integer Operations:
+          avg: AVG(SP_VALU_IOPS_sum / $denom)
+          min: MIN(SP_VALU_IOPS_sum / $denom)
+          max: MAX(SP_VALU_IOPS_sum / $denom)
+          unit: (Count + $normUnit)
+        VALU FP Operations - FP16:
+          avg: AVG(SP_VALU_FLOPS_FP16_sum / $denom)
+          min: MIN(SP_VALU_FLOPS_FP16_sum / $denom)
+          max: MAX(SP_VALU_FLOPS_FP16_sum / $denom)
+          unit: (Count + $normUnit)
+        VALU FP Operations - FP16 Trans:
+          avg: AVG(SP_VALU_FLOPS_FP16_TRANS_sum / $denom)
+          min: MIN(SP_VALU_FLOPS_FP16_TRANS_sum / $denom)
+          max: MAX(SP_VALU_FLOPS_FP16_TRANS_sum / $denom)
+          unit: (Count + $normUnit)
+        VALU FP Operations - FP32:
+          avg: AVG(SP_VALU_FLOPS_FP32_sum / $denom)
+          min: MIN(SP_VALU_FLOPS_FP32_sum / $denom)
+          max: MAX(SP_VALU_FLOPS_FP32_sum / $denom)
+          unit: (Count + $normUnit)
+        VALU FP Operations - FP32 Trans:
+          avg: AVG(SP_VALU_FLOPS_FP32_TRANS_sum / $denom)
+          min: MIN(SP_VALU_FLOPS_FP32_TRANS_sum / $denom)
+          max: MAX(SP_VALU_FLOPS_FP32_TRANS_sum / $denom)
+          unit: (Count + $normUnit)
+        VALU FP Operations - FP64:
+          avg: AVG(SP_VALU_FLOPS_FP64_sum / $denom)
+          min: MIN(SP_VALU_FLOPS_FP64_sum / $denom)
+          max: MAX(SP_VALU_FLOPS_FP64_sum / $denom)
+          unit: (Count + $normUnit)
+        VALU FP Operations - FP64 Trans:
+          avg: AVG(SP_VALU_FLOPS_FP64_TRANS_sum / $denom)
+          min: MIN(SP_VALU_FLOPS_FP64_TRANS_sum / $denom)
+          max: MAX(SP_VALU_FLOPS_FP64_TRANS_sum / $denom)
+          unit: (Count + $normUnit)
+
   - metric_table:
       id: 710
       title: "WMMA Instruction FLOPs and IOPs Counting"
@@ -467,6 +503,8 @@ Panel Config:
         min: Min
         max: Max
         unit: Unit
+      # Table 56 latency metrics require Accum(LEVEL) counters and are omitted.
+      metric:
   - metric_table:
       id: 714
       title: "WGP-TXA Interface"
@@ -534,6 +572,12 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
+        TXD Data Bus Utilization:
+          avg: AVG((100 * SP_VGPR_TDLDS_DATA_WR_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          min: MIN((100 * SP_VGPR_TDLDS_DATA_WR_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          max: MAX((100 * SP_VGPR_TDLDS_DATA_WR_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          unit: Percent
+
   - metric_table:
       id: 716
       title: "Instruction Cache"
@@ -579,6 +623,12 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
+        Interface Stall Rate:
+          avg: AVG((100 * SQC_TC_STALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          min: MIN((100 * SQC_TC_STALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          max: MAX((100 * SQC_TC_STALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          unit: Percent
+
   metrics_description:
     WGP Utilization: >-
       Percentage of WGP clock cycles at least one wavefront is active.

@@ -35,7 +35,7 @@ Panel Config:
           value: AVG((100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
           unit: Percent
         ICache Latency:
-          value: AVG((SQC_ICACHE_INFLIGHT_LEVEL_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
+          value: AVG((SUM(SQC_ICACHE_INFLIGHT_LEVEL_ACCUM) / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
           unit: Cycles
         ICache Request Stall Rate:
           value: AVG((100 * SQC_ICACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
@@ -44,7 +44,7 @@ Panel Config:
           value: AVG(SQC_TC_INST_REQ_sum * 128 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
           unit: GB/s
         ICache-GL1 Request Latency:
-          value: AVG((SQC_ICACHE_TC_INFLIGHT_LEVEL_sum / SQC_TC_INST_REQ_sum) if (SQC_TC_INST_REQ_sum != 0) else None)
+          value: AVG((SUM(SQC_ICACHE_TC_INFLIGHT_LEVEL_ACCUM) / SQC_TC_INST_REQ_sum) if (SQC_TC_INST_REQ_sum != 0) else None)
           unit: Cycles
 
   - metric_table:
@@ -67,9 +67,8 @@ Panel Config:
         Dcache Hit Rate:
           value: AVG((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
           unit: Percent
-        # Commented out: uses LEVEL counter (SQC_DCACHE_INFLIGHT_LEVEL_sum)
         Dcache Latency:
-          value: AVG((SQC_DCACHE_INFLIGHT_LEVEL_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
+          value: AVG((SUM(SQC_DCACHE_INFLIGHT_LEVEL_ACCUM) / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
           unit: Cycles
         Dcache Request Stall Rate:
           value: AVG((100 * SQC_DCACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
@@ -80,9 +79,8 @@ Panel Config:
         Dcache-GL1 Read Bandwidth:
           value: AVG(SQC_TC_DATA_READ_REQ_sum * 128 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
           unit: GB/s
-        # Commented out: uses LEVEL counter (SQC_DCACHE_TC_INFLIGHT_LEVEL_sum)
         Dcache-GL1 Request Latency:
-          value: AVG((SQC_DCACHE_TC_INFLIGHT_LEVEL_sum / SQC_TC_DATA_READ_REQ_sum) if (SQC_TC_DATA_READ_REQ_sum != 0) else None)
+          value: AVG((SUM(SQC_DCACHE_TC_INFLIGHT_LEVEL_ACCUM) / SQC_TC_DATA_READ_REQ_sum) if (SQC_TC_DATA_READ_REQ_sum != 0) else None)
           unit: Cycles
 
   - metric_table:

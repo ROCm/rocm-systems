@@ -300,6 +300,22 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
+        GL2-EA PCIE Bandwidth - Read:
+          avg: AVG(GL2C_EA_RDREQ_PCIE_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          min: MIN(GL2C_EA_RDREQ_PCIE_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          max: MAX(GL2C_EA_RDREQ_PCIE_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+        GL2-EA PCIE Bandwidth - Write:
+          avg: AVG(GL2C_EA_WRREQ_PCIE_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          min: MIN(GL2C_EA_WRREQ_PCIE_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          max: MAX(GL2C_EA_WRREQ_PCIE_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+        GL2-EA PCIE Bandwidth - Atomic:
+          avg: AVG(GL2C_EA_ATOMIC_PCIE_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          min: MIN(GL2C_EA_ATOMIC_PCIE_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          max: MAX(GL2C_EA_ATOMIC_PCIE_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+
   - metric_table:
       id: 1307
       title: "GL2C-EA Interface - Remote Node Bandwidth"

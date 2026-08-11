@@ -921,6 +921,35 @@ WGP VALU Instruction Mix:
     plain: Number of WMMA instructions issued.
     rst: Number of WMMA instructions issued.
     unit: Count per Normalization Unit
+WGP VALU FLOPs and IOPs Counting:
+  VALU Integer Operations:
+    plain: Total integer operations executed by VALU.
+    rst: Total integer operations executed by VALU.
+    unit: Count per Normalization Unit
+  VALU FP Operations - FP16:
+    plain: Total FP16 operations executed by VALU.
+    rst: Total FP16 operations executed by VALU.
+    unit: Count per Normalization Unit
+  VALU FP Operations - FP16 Trans:
+    plain: Total FP16 transcendental operations executed by VALU.
+    rst: Total FP16 transcendental operations executed by VALU.
+    unit: Count per Normalization Unit
+  VALU FP Operations - FP32:
+    plain: Total FP32 operations executed by VALU.
+    rst: Total FP32 operations executed by VALU.
+    unit: Count per Normalization Unit
+  VALU FP Operations - FP32 Trans:
+    plain: Total FP32 transcendental operations executed by VALU.
+    rst: Total FP32 transcendental operations executed by VALU.
+    unit: Count per Normalization Unit
+  VALU FP Operations - FP64:
+    plain: Total FP64 operations executed by VALU.
+    rst: Total FP64 operations executed by VALU.
+    unit: Count per Normalization Unit
+  VALU FP Operations - FP64 Trans:
+    plain: Total FP64 transcendental operations executed by VALU.
+    rst: Total FP64 transcendental operations executed by VALU.
+    unit: Count per Normalization Unit
 WGP WMMA Instruction FLOPs and IOPs Counting:
   WMMA FP Operations - FP32:
     plain: Total FP32 WMMA instruction dispatches.
@@ -1021,6 +1050,11 @@ WGP-TXA Interface:
     plain: Percentage of cycles the TXA request bus Row 1 is stalled.
     rst: Percentage of cycles the TXA request bus Row 1 is stalled.
     unit: Percent
+WGP-TXD Interface:
+  TXD Data Bus Utilization:
+    plain: Percentage of WGP-busy cycles the TXD data return bus is active.
+    rst: Percentage of WGP-busy cycles the TXD data return bus is active.
+    unit: Percent
 WGP Instruction Cache:
   Icache Hit Rate:
     plain: Instruction Cache hit rate.
@@ -1035,6 +1069,11 @@ WGP Scalar Data Cache:
     plain: Total Scalar Data Cache bandwidth.
     rst: Total Scalar Data Cache bandwidth.
     unit: Bytes per Normalization Unit
+SQC-GL1 Interface:
+  Interface Stall Rate:
+    plain: Percentage of WGP-busy cycles the SQC-GL1 interface is stalled.
+    rst: Percentage of WGP-busy cycles the SQC-GL1 interface is stalled.
+    unit: Percent
 TXA Utilization:
   Utilization:
     plain: Percentage of cycles the TXA is processing memory requests.
@@ -1924,6 +1963,19 @@ GL2C-EA Interface - Host CPU Bandwidth:
   GL2-EA Host CPU Bandwidth - Atomic:
     plain: Total host CPU atomic bandwidth between GL2 and EA.
     rst: Total host CPU atomic bandwidth between GL2 and EA.
+    unit: GB/s
+GL2C-EA Interface - PCIe Bandwidth:
+  GL2-EA PCIE Bandwidth - Read:
+    plain: Total PCIe read bandwidth between GL2 and EA.
+    rst: Total PCIe read bandwidth between GL2 and EA.
+    unit: GB/s
+  GL2-EA PCIE Bandwidth - Write:
+    plain: Total PCIe write bandwidth between GL2 and EA.
+    rst: Total PCIe write bandwidth between GL2 and EA.
+    unit: GB/s
+  GL2-EA PCIE Bandwidth - Atomic:
+    plain: Total PCIe atomic bandwidth between GL2 and EA.
+    rst: Total PCIe atomic bandwidth between GL2 and EA.
     unit: GB/s
 GL2C-EA Interface - Remote Node Bandwidth:
   GL2-EA Remote Node Bandwidth - Read:
