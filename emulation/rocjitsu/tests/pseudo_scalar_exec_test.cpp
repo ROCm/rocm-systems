@@ -5,10 +5,10 @@
 /// @brief Cross-architecture pseudo-scalar transcendental execution tests.
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "rocjitsu/isa/decoder.h"

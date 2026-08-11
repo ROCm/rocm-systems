@@ -15,6 +15,7 @@ from amdisa.__main__ import (
     _unshared_execute_keys_from_variants,
 )
 from amdisa.codegen import CodeGenerator
+from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
     gen_vector_mad_64_32,
@@ -67,7 +68,7 @@ def rocjitsu_source_root() -> Path:
 
 
 @pytest.fixture
-def amdgpu_generated_root(rocjitsu_source_root: Path) -> Path:
+def amdgpu_root(rocjitsu_source_root: Path) -> Path:
     return (
         rocjitsu_source_root
         / 'lib'
@@ -78,6 +79,11 @@ def amdgpu_generated_root(rocjitsu_source_root: Path) -> Path:
         / 'arch'
         / 'amdgpu'
     )
+
+
+@pytest.fixture
+def amdgpu_generated_root(amdgpu_root: Path) -> Path:
+    return amdgpu_root / 'generated'
 
 
 @pytest.fixture
@@ -235,6 +241,7 @@ def _execution_source_path(path: Path) -> Path:
 
 
 def test_gfx1250_model_sources_do_not_include_execution_headers(
+    amdgpu_root: Path,
     gfx1250_generated_root: Path,
 ):
     forbidden_includes = (
@@ -242,7 +249,7 @@ def test_gfx1250_model_sources_do_not_include_execution_headers(
         '#include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"',
         '#include "rocjitsu/isa/arch/amdgpu/gfx1250/mma_exec.h"',
         '#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"',
-        '#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"',
+        '#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"',
         '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"',
         '#include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"',
     )
@@ -258,10 +265,14 @@ def test_gfx1250_model_sources_do_not_include_execution_headers(
         for forbidden in forbidden_includes:
             assert forbidden not in source, f'{path.name} includes {forbidden}'
 
-    for header_name in ('isa.h', 'operand.h', 'encodings.h'):
+    for header_name in ('operand.h', 'encodings.h'):
         header = (gfx1250_generated_root / header_name).read_text()
         assert '#include "rocjitsu/vm/' not in header
         assert 'shared/dpp_sdwa_ops.h' not in header
+
+    isa_header = (amdgpu_root / 'gfx1250' / 'isa.h').read_text()
+    assert '#include "rocjitsu/vm/' not in isa_header
+    assert 'shared/dpp_sdwa_ops.h' not in isa_header
 
 
 def test_gfx1250_model_include_graph_does_not_reach_vm(
@@ -2899,17 +2910,23 @@ def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member(
     assert '((amdgpu::vop3_opsel(inst_) & 0x1u) << 1)' not in body
 
 
-def test_generated_execute_shared_calls_have_definitions(amdgpu_generated_root: Path):
+def test_generated_execute_shared_calls_have_definitions(
+    amdgpu_root: Path, amdgpu_generated_root: Path
+):
     import re
 
     definitions = set()
-    for path in (amdgpu_generated_root / 'shared').glob('*.h'):
-        definitions.update(
-            re.findall(
-                r'(?:inline\s+)?void\s+(execute_[A-Za-z0-9_]+)\s*\(',
-                path.read_text(),
+    for shared_root in (
+        amdgpu_root / 'shared',
+        amdgpu_generated_root / 'shared',
+    ):
+        for path in shared_root.glob('*.h'):
+            definitions.update(
+                re.findall(
+                    r'(?:inline\s+)?void\s+(execute_[A-Za-z0-9_]+)\s*\(',
+                    path.read_text(),
+                )
             )
-        )
 
     missing = []
     for path in amdgpu_generated_root.rglob('*.cpp'):
@@ -3133,6 +3150,7 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
         operand_types={'OPR_SRC_SIMPLE'},
     )
     codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
 
     codegen.gen_vopd()
     cpp = (tmp_path / 'gfx1250' / 'vopd.cpp').read_text()
@@ -3194,6 +3212,7 @@ def test_rdna4_vopd_template_uses_available_src_operand_type(tmp_path):
         operand_types={'OPR_SRC'},
     )
     codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
 
     codegen.gen_vopd()
     cpp = (tmp_path / 'rdna4' / 'vopd.cpp').read_text()
@@ -3232,6 +3251,7 @@ def test_rdna3_and_rdna35_vopd_generation_matches_common_profile(tmp_path):
             operand_types={'OPR_SRC'},
         )
         codegen.out_path = str(tmp_path)
+        codegen.config = CodegenConfig()
 
         codegen.gen_vopd()
         generated[arch_name] = (tmp_path / arch_name / 'vopd.cpp').read_text()
@@ -3260,6 +3280,7 @@ def test_gfx1250_vopd_uses_plain_src_when_simple_src_operand_is_absent(tmp_path)
         operand_types={'OPR_SRC'},
     )
     codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
 
     codegen.gen_vopd()
     cpp = (tmp_path / 'gfx1250' / 'vopd.cpp').read_text()
@@ -3466,7 +3487,9 @@ def test_gfx1250_buffer_u64_atomic_payload_width_uses_two_dwords():
     assert 'data_base + 1' in body
 
 
-def test_ev124_125_arch_gating_in_generated_operand(amdgpu_generated_root: Path):
+def test_ev124_125_arch_gating_in_generated_operand(
+    amdgpu_root: Path, amdgpu_generated_root: Path
+):
     # M0 is encoded as 125 on RDNA3+ (and gfx1250) and as 124 on the
     # older RDNA1/2 and all CDNA arches. Verify the generated operand.cpp
     # carries the correct kM0EncodingValue constant for each ISA.
@@ -3498,9 +3521,7 @@ def test_ev124_125_arch_gating_in_generated_operand(amdgpu_generated_root: Path)
     # scalar_operand_resolve.h rather than emitted per-arch, so verify the gating
     # there: encoding value 124 is the NULL slot when M0 is 125, and the operand
     # matching the arch's M0 encoding reads M0.
-    shared_resolve = (
-        amdgpu_generated_root / 'shared' / 'scalar_operand_resolve.h'
-    ).read_text()
+    shared_resolve = (amdgpu_root / 'shared' / 'scalar_operand_resolve.h').read_text()
     assert 'if (m0_ev == 125 && ev == 124)\n    return 0u; // NULL' in shared_resolve
     assert 'if (ev == m0_ev)\n    return wf.m0();' in shared_resolve
 

@@ -13,6 +13,7 @@ from amdisa.codegen._generator import (
     _ImplOutputs,
     _SourceImplUnit,
 )
+from amdisa.codegen.config import CodegenConfig
 from amdisa.__main__ import _detect_profile
 from amdisa.gpuisa import InstEncoding, Instruction, MicrocodeField
 from amdisa.isa_properties_codegen import emit_isa_properties
@@ -225,7 +226,7 @@ def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
     generated = emit_isa_properties(str(tmp_path), specs).read_text()
     checked_in = (
         Path(__file__).resolve().parents[3]
-        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/isa_properties.h'
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h'
     ).read_text()
 
     assert generated == checked_in
@@ -270,6 +271,7 @@ def test_gfx1250_instruction_execution_backend_is_dense_and_scoped(tmp_path):
     generator = object.__new__(CodeGenerator)
     generator.out_path = str(tmp_path)
     generator.isa_spec = SimpleNamespace(arch_name='gfx1250', profile=Gfx1250Profile())
+    generator.config = CodegenConfig()
     generator._split_execution_classes = ['FirstInstruction', 'SecondInstruction']
 
     generator.gen_execution_backend()
