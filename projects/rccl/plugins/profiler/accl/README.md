@@ -24,16 +24,27 @@ Per-collective JSONL records with timing decomposition:
 
 ```json
 {
-  "coll": "AllReduce",
-  "msg_size": 4194304,
-  "total_exec_us": 150.3,
-  "launch_overhead_us": 5.2,
-  "gpu_kernel_avg_us": 45.1,
-  "proxy_peer_wait_us": 38.7,
-  "proxy_network_us": 1.2,
-  "proxy_flush_us": 42.3,
-  "proxy_gpu_wait_us": 12.8,
-  "bottleneck": "PROXY-FLUSH/GDR"
+  "header": {"rank": 0, "n_ranks": 8},
+  "coll_perf": {
+    "coll": "AllReduce", "coll_sn": 10, "coll_msg_size_bytes": 4194304,
+    "coll_algo": "Ring", "coll_proto": "Simple", "coll_n_channels": 4,
+    "coll_exec_time_us": 150.30,
+    "coll_algobw_gbs": 0.027907, "coll_busbw_gbs": 0.048836,
+    "coll_timing_source": "gpu_globaltimer",
+    "decomposition": {
+      "launch_overhead_us": 5.20,
+      "gpu_kernel_avg_us": 45.10, "gpu_kernel_min_us": 44.80, "gpu_kernel_max_us": 45.40,
+      "proxy_gpu_wait_us": 12.80, "proxy_network_us": 1.20,
+      "proxy_peer_wait_us": 38.70, "proxy_flush_us": 42.30,
+      "proxy_gpu_recv_wait_us": 0.00,
+      "n_proxy_ops": 8, "n_send_ops": 4, "n_recv_ops": 4
+    },
+    "event_trace_ts": {
+      "kernel_events": [
+        {"channel_id": 0, "kernel_start_ts": 123456, "kernel_stop_ts": 128006, "duration_us": 45}
+      ]
+    }
+  }
 }
 ```
 
@@ -59,7 +70,8 @@ export NCCL_INSPECTOR_REQUIRE_KERNEL_TIMING=0  # required on some ROCm versions
 ./all_reduce_perf -b 1K -e 256M -f 2 -g 1 -n 20 -w 5
 ```
 
-Output files are written as `accl_rank_<N>.jsonl` in the output directory.
+Output files are written as `accl_profiler_rank<N>_<hostname>_pid<PID>_0x<commHash>.jsonl`
+in the output directory.
 
 ## Report Script
 

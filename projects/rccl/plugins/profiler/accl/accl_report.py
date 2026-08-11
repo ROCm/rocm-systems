@@ -68,7 +68,7 @@ def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
 
             sn = cp.get('coll_sn', 0)
             n_ranks = hdr.get('n_ranks', 1)
-            if sn <= warmup * n_ranks:
+            if sn <= warmup:
                 continue
 
             decomp = cp.get('decomposition', {})
@@ -98,6 +98,10 @@ def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
                 n_send_ops=decomp.get('n_send_ops', 0),
                 n_recv_ops=decomp.get('n_recv_ops', 0),
             ))
+    if not records and warmup > 0:
+        print(f"WARNING: 0 records after filtering warmup={warmup}. "
+              f"File may have fewer than {warmup} iterations.",
+              file=sys.stderr)
     return records
 
 

@@ -8,14 +8,13 @@
  */
 
 #include "accl_profiler.h"
-#include <dlfcn.h>
-#include <unistd.h>
-#include <errno.h>
 
-// Pull in the NCCL profiler v5 types from the RCCL headers.
-// We use v5 since the inspector plugin proved it works on ROCm.
-// The v5 descriptor is a subset of v6 (no CE/proxyDiag arms),
-// but includes all the fields we need.
+#include <dlfcn.h>
+#include <errno.h>
+#include <unistd.h>
+
+// NCCL profiler v5 types — v5 is a subset of v6 (no CE/proxyDiag arms)
+// but includes all fields we need. Matches the inspector plugin.
 #include "nccl/profiler.h"
 
 #define __hidden __attribute__((visibility("hidden")))
@@ -54,6 +53,7 @@ static struct acclCollInfo* acclAllocColl() {
     }
   }
   pthread_mutex_unlock(&gCollPoolMutex);
+  ACCL_WARN("ACCL Profiler: coll pool exhausted (%d slots), dropping collective", ACCL_COLL_POOL_SIZE);
   return NULL;
 }
 
@@ -87,6 +87,7 @@ static struct acclProxyOpInfo* acclAllocProxyOp() {
     }
   }
   pthread_mutex_unlock(&gProxyOpPoolMutex);
+  ACCL_WARN("ACCL Profiler: proxy op pool exhausted (%d slots)", ACCL_PROXY_OP_POOL_SIZE);
   return NULL;
 }
 
@@ -119,6 +120,7 @@ static struct acclProxyStepInfo* acclAllocProxyStep() {
     }
   }
   pthread_mutex_unlock(&gProxyStepPoolMutex);
+  ACCL_WARN("ACCL Profiler: proxy step pool exhausted (%d slots)", ACCL_PROXY_STEP_POOL_SIZE);
   return NULL;
 }
 
@@ -137,16 +139,25 @@ static void acclFreeProxyStep(struct acclProxyStepInfo* step) {
 // ============================================================================
 static int acclDatatypeSize(const char* dt) {
   if (!dt) return 4;
-  if (strstr(dt, "int8") || strstr(dt, "Int8") || strstr(dt, "uint8") ||
-      strstr(dt, "Uint8") || strstr(dt, "fp8") || strstr(dt, "Fp8"))
+  static const struct { const char* name; int size; } table[] = {
+    {"ncclInt8",        1}, {"ncclUint8",       1},
+    {"ncclFloat8e4m3",  1}, {"ncclFloat8e5m2",  1},
+    {"ncclFloat16",     2}, {"ncclBfloat16",    2},
+    {"ncclInt32",       4}, {"ncclUint32",      4}, {"ncclFloat32", 4},
+    {"ncclInt64",       8}, {"ncclUint64",      8}, {"ncclFloat64", 8},
+  };
+  for (size_t i = 0; i < sizeof(table)/sizeof(table[0]); i++) {
+    if (strcmp(dt, table[i].name) == 0) return table[i].size;
+  }
+  if (strstr(dt, "8e4m3") || strstr(dt, "8e5m2") ||
+      strstr(dt, "int8") || strstr(dt, "Int8") ||
+      strstr(dt, "uint8") || strstr(dt, "Uint8"))
     return 1;
-  if (strstr(dt, "float16") || strstr(dt, "Float16") ||
-      strstr(dt, "bfloat16") || strstr(dt, "Bfloat16"))
+  if (strstr(dt, "16"))
     return 2;
-  if (strstr(dt, "int64") || strstr(dt, "Int64") || strstr(dt, "uint64") ||
-      strstr(dt, "Uint64") || strstr(dt, "float64") || strstr(dt, "Float64"))
+  if (strstr(dt, "64"))
     return 8;
-  return 4;  // int32, uint32, float32 default
+  return 4;
 }
 
 // ============================================================================
@@ -273,7 +284,8 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
 
     double dur;
     if (kch->startGpuClk != 0 && kch->stopGpuClk != 0 && kch->stopGpuClk > kch->startGpuClk) {
-      dur = (double)(kch->tsStopUs - kch->tsStartUs);
+      // AMD wall_clock64() runs at 100 MHz (10 ns/tick)
+      dur = (double)(kch->stopGpuClk - kch->startGpuClk) / 100.0;
       hasGpuTiming = 1;
     } else {
       dur = (double)(kch->tsStopUs - kch->tsStartUs);
@@ -382,7 +394,6 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   if (commName) strncpy(ctx->commName, commName, sizeof(ctx->commName) - 1);
 
   pthread_mutex_init(&ctx->outputMutex, NULL);
-  pthread_mutex_init(&ctx->ringMutex, NULL);
 
   // Open output file
   const char* outDir = getenv("ACCL_PROFILER_OUTPUT_DIR");
@@ -392,7 +403,8 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   gethostname(hostname, sizeof(hostname) - 1);
 
   snprintf(ctx->outputPath, sizeof(ctx->outputPath),
-    "%s/accl_profiler_rank%d_%s.jsonl", outDir, rank, hostname);
+    "%s/accl_profiler_rank%d_%s_pid%d_0x%lx.jsonl",
+    outDir, rank, hostname, (int)getpid(), (unsigned long)commHash);
   ctx->outputFile = fopen(ctx->outputPath, "a");
   if (!ctx->outputFile) {
     ACCL_WARN("ACCL Profiler: Failed to open %s: %s", ctx->outputPath, strerror(errno));
@@ -419,7 +431,6 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
     ctx->outputFile = NULL;
   }
   pthread_mutex_destroy(&ctx->outputMutex);
-  pthread_mutex_destroy(&ctx->ringMutex);
   free(ctx);
   return ncclSuccess;
 }
@@ -518,6 +529,7 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     }
     op->type = ncclProfileProxyOp;
     op->parentObj = parentColl;
+    if (parentColl) acclCollRef(parentColl);
     op->channelId = eDescr->proxyOp.channelId;
     op->peer = eDescr->proxyOp.peer;
     op->nSteps = eDescr->proxyOp.nSteps;
@@ -575,7 +587,7 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
     pthread_mutex_lock(&coll->mutex);
     coll->nKernelChCompleted++;
     int allDone = (coll->nKernelChCompleted == coll->nKernelChStarted &&
-                   coll->nKernelChCompleted == coll->nChannels);
+                   coll->nKernelChStarted > 0);
     pthread_mutex_unlock(&coll->mutex);
 
     int shouldFinalize = 0;
@@ -606,6 +618,10 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
       pthread_mutex_unlock(&coll->mutex);
     }
     acclFreeProxyOp(op);
+    if (coll && acclCollDeref(coll)) {
+      acclFinalizeCollective(coll);
+      acclFreeColl(coll);
+    }
     return ncclSuccess;
   }
 

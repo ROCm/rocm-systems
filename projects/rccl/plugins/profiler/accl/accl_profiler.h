@@ -6,8 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <sys/time.h>
+#include <time.h>
 
 // NCCL profiler event type bits (from nccl_profiler.h)
 enum {
@@ -37,8 +37,6 @@ typedef enum {
 // Limits
 #define ACCL_MAX_CHANNELS      64
 #define ACCL_MAX_PROXY_OPS     256
-#define ACCL_MAX_STEPS_PER_OP  32
-#define ACCL_RING_SIZE         1024
 
 static inline uint64_t acclGetTimeUs() {
   struct timespec ts;
@@ -168,14 +166,6 @@ struct acclCompletedRecord {
   int hasGpuTiming;
 };
 
-// Ring buffer for completed records
-struct acclCompletedRing {
-  struct acclCompletedRecord records[ACCL_RING_SIZE];
-  int head;
-  int tail;
-  int count;
-};
-
 // Per-communicator context
 struct acclCommContext {
   uint64_t    commHash;
@@ -188,16 +178,6 @@ struct acclCommContext {
   FILE*       outputFile;
   char        outputPath[1024];
   pthread_mutex_t outputMutex;
-
-  // Completed records ring
-  struct acclCompletedRing ring;
-  pthread_mutex_t ringMutex;
-
-  // Dump thread
-  pthread_t   dumpThread;
-  int         dumpThreadRunning;
-  pthread_mutex_t dumpMutex;
-  pthread_cond_t  dumpCond;
 };
 
 #endif // ACCL_PROFILER_H_
