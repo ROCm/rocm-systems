@@ -2583,39 +2583,94 @@ find_program(
     HINTS "${ROCM_PATH}"
     PATH_SUFFIXES bin
 )
+# NO_DEFAULT_PATH: only an in-tree Mirage qualifies. An unrelated one installed
+# on PATH would be a different build than the librocjitsu.so staged below, and
+# the mismatch surfaces as an opaque "enable_debug failed (STATUS_ERROR)" rather
+# than as a version error.
 find_program(
     MIRAGE_EXECUTABLE
     NAMES mirage
-    HINTS
+    PATHS
         "${CMAKE_SOURCE_DIR}/../mirage/target/release"
         "${CMAKE_SOURCE_DIR}/../mirage/target/debug"
-    PATH_SUFFIXES bin
+    NO_DEFAULT_PATH
 )
 # Mirage is as much a prerequisite as rocgdb and hipcc: without it the harness
 # has nothing to run the debuggee under. Registering the test anyway produced a
 # test that could only skip, or -- worse -- one that ran a Mirage which then
 # loaded whatever librocjitsu.so it happened to find, or none at all and exited
 # 127 long before reaching ROCgdb.
-if(ROCGDB_EXECUTABLE AND HIPCC_EXECUTABLE AND MIRAGE_EXECUTABLE)
+# A Mirage binary older than Mirage's own sources is not usable here: this
+# branch changes the ctl and rocjitsu_sys crates, and a prebuilt binary that
+# predates them fails attachment with an opaque "enable_debug failed
+# (STATUS_ERROR)". CMake deliberately does not drive cargo, so refuse to
+# register rather than test a binary that does not match the tree, and say what
+# to run. Configure-time only, so `cargo build` needs a re-run of cmake -- which
+# the message states.
+set(_rocgdb_mirage_stale FALSE)
+if(MIRAGE_EXECUTABLE)
+    file(
+        GLOB_RECURSE _rocgdb_mirage_sources
+        CONFIGURE_DEPENDS
+        "${CMAKE_SOURCE_DIR}/../mirage/*/src/*.rs"
+        "${CMAKE_SOURCE_DIR}/../mirage/*/Cargo.toml"
+    )
+    foreach(_src IN LISTS _rocgdb_mirage_sources)
+        if("${_src}" IS_NEWER_THAN "${MIRAGE_EXECUTABLE}")
+            set(_rocgdb_mirage_stale TRUE)
+            break()
+        endif()
+    endforeach()
+    if(_rocgdb_mirage_stale)
+        message(
+            STATUS
+            "rocgdb debug smoke test disabled (${MIRAGE_EXECUTABLE} is older than "
+            "mirage's sources; run `cargo build` in emulation/mirage, then re-run cmake)"
+        )
+    endif()
+endif()
+
+if(
+    ROCGDB_EXECUTABLE
+    AND HIPCC_EXECUTABLE
+    AND MIRAGE_EXECUTABLE
+    AND NOT _rocgdb_mirage_stale
+)
     # Stage the librocjitsu.so this build just produced into a stub ROCm root
     # and point Mirage at it. $ROCM_HOME/lib is one of Mirage's documented
     # search locations (emulation/mirage/rocjitsu/src/lib.rs kmd_search_dirs),
     # and the search is additive, so a stub root cannot shadow anything else.
     set(_rocgdb_rocm_home ${CMAKE_CURRENT_BINARY_DIR}/rocgdb_rocm_home)
+    # Stage Mirage next to the library as <prefix>/bin/mirage + <prefix>/lib.
+    # Mirage's own discovery looks beside its executable before anything else
+    # (kmd_search_dirs in emulation/mirage/rocjitsu/src/lib.rs), so running the
+    # staged copy makes it resolve *this* build's librocjitsu.so first, whatever
+    # else exists on the machine. Relying on ROCM_HOME alone left every earlier
+    # search entry -- including a rocjitsu/build beside the developer's own
+    # mirage -- ahead of the staged one.
     add_custom_command(
-        OUTPUT ${_rocgdb_rocm_home}/lib/librocjitsu.so
+        OUTPUT
+            ${_rocgdb_rocm_home}/lib/librocjitsu.so
+            ${_rocgdb_rocm_home}/bin/mirage
         COMMAND ${CMAKE_COMMAND} -E make_directory ${_rocgdb_rocm_home}/lib
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${_rocgdb_rocm_home}/bin
         COMMAND
             ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:rocjitsu_shared>
             ${_rocgdb_rocm_home}/lib/librocjitsu.so
-        DEPENDS rocjitsu_shared
-        COMMENT "Staging librocjitsu.so for the rocgdb debug smoke test"
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_if_different ${MIRAGE_EXECUTABLE}
+            ${_rocgdb_rocm_home}/bin/mirage
+        DEPENDS rocjitsu_shared ${MIRAGE_EXECUTABLE}
+        COMMENT
+            "Staging mirage + librocjitsu.so for the rocgdb debug smoke test"
         VERBATIM
     )
     add_custom_target(
         rocgdb_demo_rocm_home
         ALL
-        DEPENDS ${_rocgdb_rocm_home}/lib/librocjitsu.so
+        DEPENDS
+            ${_rocgdb_rocm_home}/lib/librocjitsu.so
+            ${_rocgdb_rocm_home}/bin/mirage
     )
 
     rj_add_test(
@@ -2624,7 +2679,7 @@ if(ROCGDB_EXECUTABLE AND HIPCC_EXECUTABLE AND MIRAGE_EXECUTABLE)
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         TIMEOUT 300
         ENVIRONMENT
-            "MIRAGE_BIN=${MIRAGE_EXECUTABLE}"
+            "MIRAGE_BIN=${_rocgdb_rocm_home}/bin/mirage"
             "ROCM_HOME=${_rocgdb_rocm_home}"
         SKIP_REGULAR_EXPRESSION "SKIP:"
     )
@@ -2632,7 +2687,7 @@ if(ROCGDB_EXECUTABLE AND HIPCC_EXECUTABLE AND MIRAGE_EXECUTABLE)
         STATUS
         "rocgdb debug smoke test enabled (found ${ROCGDB_EXECUTABLE})"
     )
-else()
+elseif(NOT _rocgdb_mirage_stale)
     message(
         STATUS
         "rocgdb debug smoke test disabled (need rocgdb, hipcc and mirage)"
