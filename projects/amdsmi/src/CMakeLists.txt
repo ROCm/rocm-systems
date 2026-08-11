@@ -41,8 +41,19 @@ set(NIC_SOURCES ${NIC_SOURCES} "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amd_smi_ain
 set(NIC_INCLUDES ${NIC_INCLUDES} ${INC_DIR}/impl/nic/amd_smi_ainic_device.h)
 set(NIC_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/")
 
+# Optional: route the UMA carveout BIOS setting through the vendored libfwupd
+# (fwupd BIOS-settings interface) on platforms lacking the amdgpu sysfs node,
+# e.g. HP UEFI-HII APUs. Off by default; when off, fwupd_carveout.cc compiles a
+# no-op stub and no GLib/libfwupd dependency is introduced.
+option(AMDSMI_ENABLE_FWUPD "Route UMA carveout through the vendored libfwupd" OFF)
+if(AMDSMI_ENABLE_FWUPD)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(FWUPD REQUIRED IMPORTED_TARGET fwupd)
+endif()
+
 set(SRC_LIST
     "${SRC_DIR}/amd_smi.cc"
+    "${SRC_DIR}/fwupd_carveout.cc"
     "${SRC_DIR}/amd_smi_cper.cc"
     "${SRC_DIR}/amd_smi_common.cc"
     "${SRC_DIR}/amd_smi_drm.cc"
@@ -184,6 +195,10 @@ function(amdsmi_configure_common_target _TARGET)
             )
         endif()
         target_include_directories(${_TARGET} PRIVATE ${_WSL_HSAKMT_INC})
+
+    if(AMDSMI_ENABLE_FWUPD)
+        target_compile_definitions(${_TARGET} PRIVATE AMDSMI_ENABLE_FWUPD)
+        target_link_libraries(${_TARGET} PRIVATE PkgConfig::FWUPD)
     endif()
 
     target_include_directories(

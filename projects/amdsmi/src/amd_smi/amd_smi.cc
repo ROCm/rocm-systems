@@ -76,6 +76,7 @@
 #ifdef ENABLE_WSL_BACKEND
 #include "amd_smi/impl/amd_smi_wsl_device.h"
 #endif
+#include "fwupd_carveout.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
@@ -8477,6 +8478,12 @@ static amdsmi_status_t get_gpu_uma_carveout_info_internal(amd::smi::AMDSmiGPUDev
     return AMDSMI_STATUS_INVAL;
   }
 
+  // Prefer the fwupd BIOS-settings path (PolicyKit-brokered, and the only
+  // carveout interface on UEFI-HII platforms); fall back to the amdgpu sysfs node.
+  if (amd::smi::fwupd_get_carveout_info(info) == AMDSMI_STATUS_SUCCESS) {
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
   // Get GPU path for sysfs
   std::string gpu_path = gpu_device->get_gpu_path();
 
@@ -8487,6 +8494,7 @@ static amdsmi_status_t get_gpu_uma_carveout_info_internal(amd::smi::AMDSmiGPUDev
   // Check if UMA carveout is available
   std::ifstream carveout_file(carveout_path);
   if (!carveout_file.good()) {
+    // Neither fwupd nor the amdgpu sysfs node exposes the carveout.
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
@@ -8603,6 +8611,13 @@ amdsmi_status_t amdsmi_set_gpu_uma_carveout(amdsmi_processor_handle processor_ha
 #endif
 
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+
+  // Prefer the fwupd BIOS-settings path (PolicyKit-brokered); fall back to the
+  // amdgpu sysfs node only when fwupd cannot service the request.
+  amdsmi_status_t fwupd_ret = amd::smi::fwupd_set_carveout(option_index);
+  if (fwupd_ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+    return fwupd_ret;
+  }
 
   // Get GPU path for sysfs
   std::string gpu_path = gpu_device->get_gpu_path();
