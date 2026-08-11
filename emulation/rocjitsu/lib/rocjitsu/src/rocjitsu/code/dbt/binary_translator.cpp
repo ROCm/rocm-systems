@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/dbt/binary_translator.h"
 
+#include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/analysis/exec_state.h"
 #include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/analysis/liveness.h"
@@ -45,6 +46,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <queue>
 #include <set>
 #include <span>
 #include <sstream>
@@ -179,6 +181,21 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
   dst.insert(dst.end(), src.begin(), src.end());
 }
 
+/// @brief Carry state established after the original descriptor translation into a recomputation.
+/// @returns Diagnostics produced by the recomputation itself.
+[[nodiscard]] std::vector<TranslationDiagnostic>
+preserve_descriptor_translation_state(KdTranslation &recomputed, const KdTranslation &established) {
+  std::vector<TranslationDiagnostic> fresh_diagnostics = std::move(recomputed.diagnostics);
+  recomputed.kernel_name = established.kernel_name;
+  recomputed.sidecar_descriptor = established.sidecar_descriptor;
+  recomputed.virtual_lds_lowering = established.virtual_lds_lowering;
+  recomputed.target_entry_text_offset = established.target_entry_text_offset;
+  recomputed.target_body_entry_text_offset = established.target_body_entry_text_offset;
+  recomputed.diagnostics = established.diagnostics;
+  append_diagnostics(recomputed.diagnostics, fresh_diagnostics);
+  return fresh_diagnostics;
+}
+
 /// @brief Return a human-readable kernel label for diagnostics.
 ///
 /// @details Some code objects carry empty kernel symbol names. Falling back to
@@ -265,6 +282,244 @@ struct KernelTranslationScope {
   BasicBlock *entry = nullptr;
   std::vector<BasicBlock *> blocks;
 };
+
+[[nodiscard]] std::optional<std::vector<uint64_t>>
+defined_text_function_offsets(const AmdGpuCodeObject &object) {
+  if (object.text_sections().size() != 1 || object.image_data() == nullptr)
+    return std::nullopt;
+  const auto image =
+      std::span(reinterpret_cast<const uint8_t *>(object.image_data()), object.image_size());
+  if (image.size() < sizeof(Elf64_Ehdr))
+    return std::nullopt;
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  if (ehdr.e_type != ET_DYN || ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
+      ehdr.e_shoff > image.size() ||
+      static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr) > image.size() - ehdr.e_shoff) {
+    return std::nullopt;
+  }
+  std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
+  std::memcpy(sections.data(), image.data() + ehdr.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+
+  const Section &text = *object.text_sections().front();
+  const auto text_section = std::ranges::find_if(sections, [&](const Elf64_Shdr &section) {
+    return section.sh_offset == text.sectionOffset() && section.sh_addr == text.vaddr() &&
+           section.sh_size == text.size() && (section.sh_flags & SHF_EXECINSTR) != 0;
+  });
+  if (text_section == sections.end())
+    return std::nullopt;
+  const uint16_t text_index = static_cast<uint16_t>(text_section - sections.begin());
+
+  std::vector<uint64_t> offsets;
+  bool saw_static_symbols = false;
+  for (const Elf64_Shdr &symbols : sections) {
+    if (symbols.sh_type != SHT_SYMTAB)
+      continue;
+    saw_static_symbols = true;
+    if (symbols.sh_size == 0)
+      continue;
+    if (symbols.sh_entsize != sizeof(Elf64_Sym) || symbols.sh_offset > image.size() ||
+        symbols.sh_size > image.size() - symbols.sh_offset ||
+        symbols.sh_size % sizeof(Elf64_Sym) != 0)
+      return std::nullopt;
+    const size_t count = symbols.sh_size / sizeof(Elf64_Sym);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Sym symbol{};
+      std::memcpy(&symbol, image.data() + symbols.sh_offset + index * sizeof(Elf64_Sym),
+                  sizeof(symbol));
+      if (symbol.st_shndx != text_index || elf_symbol_type(symbol.st_info) != kElfSymbolTypeFunc)
+        continue;
+      if (symbol.st_value < text.vaddr())
+        continue;
+      const uint64_t offset = symbol.st_value - text.vaddr();
+      if (offset < text.size())
+        offsets.push_back(offset);
+    }
+  }
+  if (!saw_static_symbols)
+    return std::nullopt;
+  std::ranges::sort(offsets);
+  offsets.erase(std::ranges::unique(offsets).begin(), offsets.end());
+  return offsets;
+}
+
+enum class ExternalPairOrigin : uint8_t {
+  KernargAddress,
+  LoadedValue,
+};
+
+using ExternalPairState = std::unordered_map<uint16_t, ExternalPairOrigin>;
+
+[[nodiscard]] std::optional<uint16_t> sgpr_pair_operand(const Operand *operand) {
+  if (operand == nullptr)
+    return std::nullopt;
+  const auto ref = operand->to_register_ref();
+  if (!ref || ref->cls != RegClass::SGPR || ref->width < 2 ||
+      static_cast<uint32_t>(ref->index) + 1 >= REGISTER_SET_MAX_SGPRS) {
+    return std::nullopt;
+  }
+  return ref->index;
+}
+
+void transfer_external_pairs(ExternalPairState &state, const Instruction &inst,
+                             std::unordered_set<uint64_t> *calls) {
+  const std::string_view mnemonic = inst.mnemonic();
+  const auto dst = sgpr_pair_operand(inst.dst_operand(0));
+  const auto src0 = sgpr_pair_operand(inst.src_operand(0));
+  std::vector<std::pair<uint16_t, ExternalPairOrigin>> results;
+
+  if (mnemonic == "s_mov_b64" && dst && src0) {
+    if (const auto source = state.find(*src0); source != state.end())
+      results.emplace_back(*dst, source->second);
+  } else if (mnemonic == "s_add_nc_u64" && dst) {
+    const auto src1 = sgpr_pair_operand(inst.src_operand(1));
+    const std::optional<uint16_t> address =
+        src0 && *src0 == *dst ? src0 : (src1 && *src1 == *dst ? src1 : std::nullopt);
+    if (address) {
+      const auto source = state.find(*address);
+      if (source != state.end() && source->second == ExternalPairOrigin::KernargAddress)
+        results.emplace_back(*dst, source->second);
+    }
+  } else if (mnemonic.starts_with("s_load_b") && dst && src0) {
+    const auto base = state.find(*src0);
+    const auto dst_ref = inst.dst_operand(0)->to_register_ref();
+    if (base != state.end() && dst_ref && dst_ref->cls == RegClass::SGPR &&
+        (base->second == ExternalPairOrigin::KernargAddress ||
+         base->second == ExternalPairOrigin::LoadedValue)) {
+      const uint32_t end = static_cast<uint32_t>(dst_ref->index) + dst_ref->width;
+      for (uint32_t pair = dst_ref->index; pair + 1 < end; pair += 2)
+        results.emplace_back(static_cast<uint16_t>(pair), ExternalPairOrigin::LoadedValue);
+    }
+  }
+
+  if ((inst.flags() & INDIRECT_CALL) != 0 && src0) {
+    const auto target = state.find(*src0);
+    if (calls != nullptr && target != state.end() &&
+        target->second == ExternalPairOrigin::LoadedValue) {
+      calls->insert(inst.src_loc());
+    }
+  }
+
+  const InstDefUse def_use(inst);
+  std::erase_if(state, [&](const auto &item) {
+    return def_use.defs.contains(RegisterRef{RegClass::SGPR, item.first, 1}) ||
+           def_use.defs.contains(
+               RegisterRef{RegClass::SGPR, static_cast<uint16_t>(item.first + 1), 1});
+  });
+  for (const auto &[pair, origin] : results)
+    state[pair] = origin;
+
+  if ((inst.flags() & INDIRECT_CALL) != 0) {
+    std::erase_if(state, [](const auto &item) {
+      return !is_callee_saved_sgpr(item.first) ||
+             !is_callee_saved_sgpr(static_cast<uint16_t>(item.first + 1));
+    });
+  }
+}
+
+[[nodiscard]] ExternalPairState meet_external_predecessors(
+    const BasicBlock &block, const std::unordered_set<const BasicBlock *> &allowed,
+    const std::unordered_map<const BasicBlock *, size_t> &positions,
+    const std::vector<ExternalPairState> &out, const std::vector<bool> &initialized,
+    std::optional<uint16_t> entry_kernarg_pair, const BasicBlock *entry) {
+  ExternalPairState result;
+  bool have_input = false;
+  if (&block == entry && entry_kernarg_pair) {
+    result[*entry_kernarg_pair] = ExternalPairOrigin::KernargAddress;
+    have_input = true;
+  }
+  for (const BasicBlock *predecessor : block.predecessors()) {
+    const auto position = positions.find(predecessor);
+    if (!allowed.contains(predecessor) || position == positions.end() ||
+        !initialized[position->second]) {
+      continue;
+    }
+    if (!have_input) {
+      result = out[position->second];
+      have_input = true;
+      continue;
+    }
+    std::erase_if(result, [&](const auto &item) {
+      const auto incoming = out[position->second].find(item.first);
+      return incoming == out[position->second].end() || incoming->second != item.second;
+    });
+  }
+  return result;
+}
+
+[[nodiscard]] std::unordered_set<uint64_t>
+kernarg_loaded_indirect_calls(const KernelTranslationScope &scope) {
+  if (scope.translation == nullptr || scope.entry == nullptr ||
+      !scope.translation->source_has_kernarg_segment_ptr) {
+    return {};
+  }
+  bool has_indirect_call = false;
+  for (BasicBlock *block : scope.blocks) {
+    if (block == nullptr)
+      continue;
+    for (const Instruction &inst : block->instructions())
+      has_indirect_call |= (inst.flags() & INDIRECT_CALL) != 0;
+  }
+  if (!has_indirect_call)
+    return {};
+
+  std::unordered_map<const BasicBlock *, size_t> positions;
+  std::unordered_set<const BasicBlock *> allowed;
+  for (size_t index = 0; index < scope.blocks.size(); ++index) {
+    if (scope.blocks[index] != nullptr) {
+      positions.emplace(scope.blocks[index], index);
+      allowed.insert(scope.blocks[index]);
+    }
+  }
+  const auto entry_position = positions.find(scope.entry);
+  if (entry_position == positions.end())
+    return {};
+
+  std::vector<ExternalPairState> in(scope.blocks.size());
+  std::vector<ExternalPairState> out(scope.blocks.size());
+  std::vector<bool> initialized(scope.blocks.size(), false);
+  std::vector<bool> queued(scope.blocks.size(), false);
+  std::queue<size_t> worklist;
+  worklist.push(entry_position->second);
+  queued[entry_position->second] = true;
+  while (!worklist.empty()) {
+    const size_t index = worklist.front();
+    worklist.pop();
+    queued[index] = false;
+    BasicBlock *block = scope.blocks[index];
+    if (block == nullptr)
+      continue;
+    ExternalPairState next_in =
+        meet_external_predecessors(*block, allowed, positions, out, initialized,
+                                   scope.translation->kernarg_segment_ptr_sgpr, scope.entry);
+    ExternalPairState next_out = next_in;
+    for (const Instruction &inst : block->instructions())
+      transfer_external_pairs(next_out, inst, nullptr);
+    const bool changed = !initialized[index] || next_in != in[index] || next_out != out[index];
+    initialized[index] = true;
+    in[index] = std::move(next_in);
+    out[index] = std::move(next_out);
+    if (!changed)
+      continue;
+    for (BasicBlock *successor : block->successors()) {
+      const auto position = positions.find(successor);
+      if (position != positions.end() && !queued[position->second]) {
+        worklist.push(position->second);
+        queued[position->second] = true;
+      }
+    }
+  }
+
+  std::unordered_set<uint64_t> calls;
+  for (size_t index = 0; index < scope.blocks.size(); ++index) {
+    if (scope.blocks[index] == nullptr || !initialized[index])
+      continue;
+    ExternalPairState state = in[index];
+    for (const Instruction &inst : scope.blocks[index]->instructions())
+      transfer_external_pairs(state, inst, &calls);
+  }
+  return calls;
+}
 
 /// @brief Descriptor state mutated by one kernel-scope translation transaction.
 struct DescriptorVariantCheckpoint {
@@ -716,6 +971,7 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
 
     // Forward pass: collect the body's blocks and its candidate return terminators.
     std::vector<BasicBlock *> stack{entry};
+    const std::unordered_set<uint64_t> root_boundaries(adopted_roots.begin(), adopted_roots.end());
     std::unordered_set<BasicBlock *> body;
     std::vector<std::pair<BasicBlock *, uint16_t>> candidates;
     while (!stack.empty()) {
@@ -730,8 +986,11 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
           candidates.emplace_back(
               block, static_cast<uint16_t>(text_word_at(text, term->src_loc()) & 0xffu));
       }
-      for (BasicBlock *succ : block->successors())
+      for (BasicBlock *succ : block->successors()) {
+        if (succ != nullptr && succ != entry && root_boundaries.contains(succ->start_offset()))
+          continue;
         stack.push_back(succ);
+      }
     }
 
     // Whether (vgpr, lane) still holds what `v_writelane_b32` put there from `sgpr`, asked at one
@@ -1441,10 +1700,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   }
 
   const auto relocation_function_tables = discover_relocation_function_tables(obj);
+  const auto text_function_offsets = defined_text_function_offsets(obj);
   auto block_leaders = kernel_block_leaders(descriptor_translations, text);
   for (const RelocationFunctionTable &table : relocation_function_tables) {
     for (const RelocationFunctionPointer &entry : table.entries)
       block_leaders.push_back(entry.target_text_offset);
+  }
+  if (text_function_offsets) {
+    block_leaders.insert(block_leaders.end(), text_function_offsets->begin(),
+                         text_function_offsets->end());
   }
   std::ranges::sort(block_leaders);
   block_leaders.erase(std::ranges::unique(block_leaders).begin(), block_leaders.end());
@@ -1614,6 +1878,29 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
   }
 
+  std::unordered_map<uint64_t, std::unordered_set<uint64_t>> external_calls_by_scope;
+  bool has_externally_supplied_call = false;
+  for (const KernelTranslationScope &scope : scopes) {
+    auto calls = kernarg_loaded_indirect_calls(scope);
+    if (calls.empty() || scope.translation == nullptr)
+      continue;
+    has_externally_supplied_call = true;
+    external_calls_by_scope[kernel_scope_key(*scope.translation)] = std::move(calls);
+  }
+  if (has_externally_supplied_call && (!text_function_offsets || text_function_offsets->empty())) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "the complete static device-function set could not be enumerated for a "
+                 "kernarg-loaded indirect "
+                 "call; leaving code object unchanged");
+    return leave_unchanged();
+  }
+  if (has_externally_supplied_call && scopes.size() != 1) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "kernarg-loaded indirect calls require one compatible kernel translation scope; "
+                 "leaving code object unchanged");
+    return leave_unchanged();
+  }
+
   // A device function whose address is produced only by a data relocation -- a C++ vtable slot is
   // the common case -- is named by no decoded edge, so no kernel scope reaches it. Translated text
   // replaces .text wholesale, so leaving it unreached drops the body and strands the addend that
@@ -1659,8 +1946,25 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     };
 
     for (const RelocationFunctionTable &table : relocation_function_tables) {
-      for (const RelocationFunctionPointer &slot : table.entries)
+      for (const RelocationFunctionPointer &slot : table.entries) {
         adopt(slot.target_text_offset);
+      }
+    }
+    if (has_externally_supplied_call) {
+      // A function pointer freshly loaded from this launch's kernarg memory can
+      // name any defined device function with a compatible signature. Preserve
+      // one canonical copy of every STT_FUNC and retarget every symbol before
+      // admitting the unresolved runtime call.
+      for (uint64_t function_offset : *text_function_offsets) {
+        const BasicBlock *entry = block_for_offset(block_index, function_offset);
+        if (entry == nullptr || entry->start_offset() != function_offset) {
+          append_error(result.diagnostics, DiagnosticKind::Legalization,
+                       "defined device function is not an instruction boundary; leaving code "
+                       "object unchanged");
+          return leave_unchanged();
+        }
+        adopt(function_offset);
+      }
     }
     // A getpc that computes a code address makes that body address-taken just as surely as a
     // relocation slot does, so its target has to be accounted for before the rewrite is permitted.
@@ -1967,6 +2271,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     assert(scope.translation != nullptr && "kernel scope should have descriptor translation");
     if (scope.translation->skipped)
       continue;
+    const auto external_calls = external_calls_by_scope.find(kernel_scope_key(*scope.translation));
 
     const size_t output_begin = translated_text.size();
     const size_t text_relocations_begin = text_relocations.size();
@@ -2654,6 +2959,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         const bool has_recovered_indirect_call = recovered_it != recovered_indirect_by_call.end();
         const bool has_relocation_table_call = relocation_table_calls.contains(offset);
         const bool recovered_indirect_return = valid_call_return_offsets.contains(offset);
+        const bool has_fresh_external_target = external_calls != external_calls_by_scope.end() &&
+                                               external_calls->second.contains(offset);
         const auto direct_branch_delta = inst.branch_offset_bytes();
         // A transfer through a value this object loaded from memory needs no per-target proof once
         // every code address the object can produce is relocated: the loaded word is either a
@@ -2662,31 +2969,36 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // vtable slot that no dataflow fact can name, and no amount of consumer-side analysis will
         // ever name it.
         //
-        // The permission is object-wide because the question it answers is. A consumer cannot tell
-        // where a loaded 64-bit word came from, so tying it to this transfer's provenance is not
-        // available; what makes it sound is that both routes into `.text` are covered. Addresses
-        // the object computes for itself are the ones code_addresses_fully_accounted ranges over.
-        // An address supplied from outside -- a kernarg holding a device function pointer, or a
-        // pointer another code object resolved -- can only have been obtained from a `.text`
-        // symbol, and relocate_text_symbols() rewrites those and refuses the whole object when a
-        // referenced text symbol has no exact offset map. Translation happens at load, so there is
-        // no window in which a caller could have captured a pre-translation value.
+        // The external permission is scoped to the kernel whose reaching-value
+        // analysis proved this transfer. What makes it sound is that both routes into `.text` are
+        // covered. Addresses the object computes for itself are the ones
+        // code_addresses_fully_accounted ranges over. An address supplied from outside -- a kernarg
+        // holding a device function pointer, or a pointer another code object resolved -- can only
+        // have been obtained from a `.text` symbol, and relocate_text_symbols() rewrites those and
+        // refuses the whole object when a referenced text symbol has no exact offset map.
+        // Translation happens at load, so there is no window in which a caller could have captured
+        // a pre-translation value.
         //
         // What that leaves is narrow and worth stating: a host that derives an entry from a symbol
         // plus a byte offset, and a symbol that is present but unreferenced, which
         // relocate_text_symbols() tolerates so debug labels in padding do not refuse the object.
+        // A target proven to come from an ordinary-launch kernarg load is the
+        // non-vacuous external counterpart: the pointer is created after this
+        // load-time translation, and all defined function bodies were adopted
+        // above. Requiring every text symbol to move closes the same symbol-plus-
+        // offset gap for that path.
         const bool target_is_relocated_by_construction =
             object_produces_code_addresses && code_addresses_fully_accounted;
         if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
             !has_recovered_indirect_call && !has_relocation_table_call &&
             !recovered_indirect_return && !direct_branch_delta &&
-            target_is_relocated_by_construction) {
+            (target_is_relocated_by_construction || has_fresh_external_target)) {
           relied_on_relocated_by_construction = true;
         }
         if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
             !has_recovered_indirect_call && !has_relocation_table_call &&
             !recovered_indirect_return && !direct_branch_delta &&
-            !target_is_relocated_by_construction) {
+            !target_is_relocated_by_construction && !has_fresh_external_target) {
           auto failure = make_kernel_failure(
               DiagnosticKind::Legalization,
               "indirect branch or call target recovery is not implemented for relocated kernel "
@@ -3426,9 +3738,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           }
           return leave_unchanged();
         }
-        updated->kernel_name = translation.kernel_name;
-        updated->sidecar_descriptor = translation.sidecar_descriptor;
-        updated->virtual_lds_lowering = translation.virtual_lds_lowering;
+        const std::vector<TranslationDiagnostic> recompute_diagnostics =
+            preserve_descriptor_translation_state(*updated, translation);
         // Register feedback also recomputes ordinary, non-virtual descriptors.
         // Only a virtual-LDS variant owns a backing-pointer entry prologue;
         // asking an unrelated ISA pair to materialize one makes otherwise
@@ -3452,7 +3763,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             auto failure = make_kernel_failure(DiagnosticKind::KernelDescriptor,
                                                "kernel descriptor translation requires unsupported "
                                                "resource or ABI virtualization");
-            for (const TranslationDiagnostic &diagnostic : updated->diagnostics) {
+            for (const TranslationDiagnostic &diagnostic : recompute_diagnostics) {
               if (diagnostic.severity != DiagnosticSeverity::Error)
                 continue;
               failure.kind = diagnostic.kind;
@@ -3469,13 +3780,13 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
               break;
             }
           }
-          append_diagnostics(result.diagnostics, updated->diagnostics);
+          append_diagnostics(result.diagnostics, recompute_diagnostics);
           append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
                        "kernel descriptor translation requires unsupported resource or ABI "
                        "virtualization; leaving code object unchanged");
           return leave_unchanged();
         }
-        append_diagnostics(result.diagnostics, updated->diagnostics);
+        append_diagnostics(result.diagnostics, recompute_diagnostics);
 
         if (updated->prologue_words != translation.prologue_words) {
           auto failure = make_kernel_failure(

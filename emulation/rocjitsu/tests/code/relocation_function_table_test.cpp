@@ -319,6 +319,27 @@ void remove_got_reference(std::vector<uint8_t> &image) {
   std::memcpy(image.data() + rela->sh_offset, &first, sizeof(first));
 }
 
+void make_got_reference_target_function(std::vector<uint8_t> &image, uint64_t target_vaddr) {
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
+  std::memcpy(sections.data(), image.data() + ehdr.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+  const auto symbols = std::ranges::find(sections, SHT_DYNSYM, &Elf64_Shdr::sh_type);
+  const auto text = std::ranges::find_if(
+      sections, [](const Elf64_Shdr &section) { return (section.sh_flags & SHF_EXECINSTR) != 0; });
+  ASSERT_NE(symbols, sections.end());
+  ASSERT_NE(text, sections.end());
+  ASSERT_GE(symbols->sh_size, 2 * sizeof(Elf64_Sym));
+
+  Elf64_Sym function{};
+  std::memcpy(&function, image.data() + symbols->sh_offset + sizeof(Elf64_Sym), sizeof(function));
+  function.st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+  function.st_shndx = static_cast<uint16_t>(text - sections.begin());
+  function.st_value = target_vaddr;
+  function.st_size = sizeof(uint32_t);
+  std::memcpy(image.data() + symbols->sh_offset + sizeof(Elf64_Sym), &function, sizeof(function));
+}
+
 // Mutate the first R_AMDGPU_RELATIVE64 relocation in the .rela section via a
 // caller-supplied editor, so negative tests can corrupt one table entry's slot
 // offset or addend and confirm discovery rejects just that entry.
@@ -344,6 +365,39 @@ void edit_first_relative64(std::vector<uint8_t> &image,
   FAIL() << "no R_AMDGPU_RELATIVE64 relocation found to edit";
 }
 
+void append_conflicting_duplicate_relocation_section(std::vector<uint8_t> &image) {
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
+  std::memcpy(sections.data(), image.data() + ehdr.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+  const auto rela_section = std::ranges::find(sections, SHT_RELA, &Elf64_Shdr::sh_type);
+  ASSERT_NE(rela_section, sections.end());
+  ASSERT_EQ(rela_section->sh_size % sizeof(Elf64_Rela), 0u);
+
+  std::vector<Elf64_Rela> relas(rela_section->sh_size / sizeof(Elf64_Rela));
+  std::memcpy(relas.data(), image.data() + rela_section->sh_offset, rela_section->sh_size);
+  const auto relative = std::ranges::find_if(relas, [](const Elf64_Rela &rela) {
+    return elf_reloc_type(rela.r_info) == R_AMDGPU_RELATIVE64;
+  });
+  ASSERT_NE(relative, relas.end());
+  relative->r_addend += sizeof(uint32_t);
+
+  image.resize(ehdr.e_shoff);
+  const uint64_t duplicate_rela_offset = align_up(image.size(), alignof(Elf64_Rela));
+  image.resize(duplicate_rela_offset);
+  const auto *rela_bytes = reinterpret_cast<const uint8_t *>(relas.data());
+  image.insert(image.end(), rela_bytes, rela_bytes + relas.size() * sizeof(Elf64_Rela));
+
+  Elf64_Shdr duplicate = *rela_section;
+  duplicate.sh_offset = duplicate_rela_offset;
+  sections.push_back(duplicate);
+  ehdr.e_shoff = align_up(image.size(), alignof(Elf64_Shdr));
+  ehdr.e_shnum = static_cast<uint16_t>(sections.size());
+  image.resize(ehdr.e_shoff + sections.size() * sizeof(Elf64_Shdr));
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+  std::memcpy(image.data() + ehdr.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+}
+
 TEST(RelocationFunctionTable, DiscoversGotReferencedRelativeTextPointers) {
   const auto image = make_relocation_function_table_elf();
   const AmdGpuCodeObject object(image.data(), image.size());
@@ -359,6 +413,24 @@ TEST(RelocationFunctionTable, DiscoversGotReferencedRelativeTextPointers) {
   EXPECT_EQ(tables[0].entries[0].target_text_offset, 4u);
   EXPECT_EQ(tables[0].entries[1].slot_vaddr, 0x2010u);
   EXPECT_EQ(tables[0].entries[1].target_text_offset, 12u);
+}
+
+TEST(RelocationFunctionTable, MergesConflictingDuplicateRelocationSectionsDeterministically) {
+  auto image = make_relocation_function_table_elf();
+  append_conflicting_duplicate_relocation_section(image);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+
+  const auto tables = discover_relocation_function_tables(object);
+  ASSERT_EQ(tables.size(), 1u);
+  EXPECT_EQ(tables[0].got_slot_vaddrs, std::vector<uint64_t>{0x3000u});
+  ASSERT_EQ(tables[0].entries.size(), 3u);
+  EXPECT_EQ(tables[0].entries[0].slot_vaddr, 0x2000u);
+  EXPECT_EQ(tables[0].entries[0].target_text_offset, 4u);
+  EXPECT_EQ(tables[0].entries[1].slot_vaddr, 0x2000u);
+  EXPECT_EQ(tables[0].entries[1].target_text_offset, 8u);
+  EXPECT_EQ(tables[0].entries[2].slot_vaddr, 0x2010u);
+  EXPECT_EQ(tables[0].entries[2].target_text_offset, 12u);
 }
 
 TEST(RelocationFunctionTable, DiscoveryRejectsMisalignedTableSlot) {
@@ -537,6 +609,56 @@ TEST(RelocationFunctionTable, ResolvesRcclDirectIndexedTableDispatch) {
             analysis.address_builders[0].source_address_add_offset);
   EXPECT_EQ(table_free_analysis.address_builders[0].target_vaddr,
             analysis.address_builders[0].target_vaddr);
+}
+
+TEST(RelocationFunctionTable, ResolvesDirectFunctionPointerThroughGotLoad) {
+  constexpr uint64_t kTextVaddr = 0x1000;
+  constexpr uint64_t kGotVaddr = 0x3000;
+  constexpr uint64_t kCalleeOffset = 32;
+  const auto text_words =
+      make_direct_table_dispatch_text_with_addend(kGotVaddr - (kTextVaddr + sizeof(uint32_t)));
+  auto image = make_relocation_function_table_elf(text_words);
+  make_got_reference_target_function(image, kTextVaddr + kCalleeOffset);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+
+  const auto tables = discover_relocation_function_tables(object);
+  ASSERT_EQ(tables.size(), 1u);
+  EXPECT_EQ(tables[0].table_vaddr, kGotVaddr);
+  EXPECT_EQ(tables[0].table_size, sizeof(uint64_t));
+  EXPECT_TRUE(tables[0].exact_base_only);
+  EXPECT_TRUE(tables[0].got_slot_vaddrs.empty());
+  ASSERT_EQ(tables[0].entries.size(), 1u);
+  EXPECT_EQ(tables[0].entries[0].slot_vaddr, kGotVaddr);
+  EXPECT_EQ(tables[0].entries[0].target_text_offset, kCalleeOffset);
+  EXPECT_TRUE(tables[0].entries[0].abi_function_symbol);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 1> leaders{kCalleeOffset};
+  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto dispatches = analyze_relocation_pairs(blocks, tables, kTextVaddr).dispatches;
+  ASSERT_EQ(dispatches.size(), 1u);
+  EXPECT_EQ(dispatches[0].table_index, 0u);
+  EXPECT_EQ(dispatches[0].source_call_offset, 24u);
+  EXPECT_EQ(dispatches[0].return_sreg, 30u);
+  EXPECT_EQ(dispatches[0].source_getpc_offset, 0u);
+  EXPECT_EQ(dispatches[0].source_address_add_offset, 4u);
+  EXPECT_EQ(dispatches[0].source_table_address_vaddr, kGotVaddr);
+
+  const auto indexed_text = make_direct_table_dispatch_text_with_addend(
+      kGotVaddr + sizeof(uint32_t) - (kTextVaddr + sizeof(uint32_t)));
+  auto indexed_image = make_relocation_function_table_elf(indexed_text);
+  make_got_reference_target_function(indexed_image, kTextVaddr + kCalleeOffset);
+  const AmdGpuCodeObject indexed_object(indexed_image.data(), indexed_image.size());
+  ASSERT_TRUE(indexed_object.is_valid());
+  const auto indexed_tables = discover_relocation_function_tables(indexed_object);
+  ASSERT_EQ(indexed_tables.size(), 1u);
+  const auto indexed_blocks =
+      BasicBlock::build(indexed_object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  EXPECT_TRUE(
+      analyze_relocation_pairs(indexed_blocks, indexed_tables, kTextVaddr).dispatches.empty())
+      << "an indexed address must not widen a synthetic single-slot table";
 }
 
 TEST(RelocationFunctionTable, RejectsChainedAddressAddDispatch) {

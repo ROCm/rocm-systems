@@ -31,16 +31,22 @@ struct RelocationFunctionPointer {
 
   /// Original `.text`-relative byte offset encoded by the relocation addend.
   uint64_t target_text_offset = 0;
+
+  /// True when the slot is an `R_AMDGPU_ABS64` reference to an `STT_FUNC`.
+  /// Such entries use the standard AMDGPU function ABI and return through
+  /// s[30:31], even when no in-object call site reaches the exported body.
+  bool abi_function_symbol = false;
 };
 
 /// @brief One finite data object populated with relocated device-function pointers.
 ///
-/// @details The object is identified structurally: an allocated, non-executable
-/// `STT_OBJECT` contains one or more aligned slots with symbol-less
-/// `R_AMDGPU_RELATIVE64` addends into `.text`. Code may materialize the table
-/// address directly or load it through a GOT slot. Consequently GOT references
-/// strengthen discovery but are optional and are recorded separately from the
-/// populated entries.
+/// @details The object is identified structurally: either an allocated,
+/// non-executable `STT_OBJECT` contains aligned slots with symbol-less
+/// `R_AMDGPU_RELATIVE64` addends into `.text`, or a single allocated data slot
+/// has an `R_AMDGPU_ABS64` relocation to an `STT_FUNC` in `.text`. Code may
+/// materialize a table address directly or load it through a GOT slot.
+/// Consequently GOT references strengthen multi-entry discovery but are
+/// optional and are recorded separately from the populated entries.
 struct RelocationFunctionTable {
   /// Original virtual address from the defining object's `st_value`.
   uint64_t table_vaddr = 0;
@@ -48,12 +54,18 @@ struct RelocationFunctionTable {
   /// Object extent from `st_size`, used to associate relocation places with this table.
   uint64_t table_size = 0;
 
+  /// True for a synthetic single-slot table that must match only its exact address.
+  bool exact_base_only = false;
+
   /// GOT relocation places whose `R_AMDGPU_ABS64` value resolves to this object.
   /// Empty when translated code addresses the table directly.
   std::vector<uint64_t> got_slot_vaddrs;
 
-  /// Populated slots, sorted by `slot_vaddr`. Slots without a qualifying text
-  /// relocation are not possible callees and do not appear here.
+  /// Populated callee entries, sorted by slot address and target offset. ABI
+  /// symbol provenance is combined for duplicate entries. A malformed input may relocate one slot
+  /// to multiple targets; those entries are retained as a conservative callee set rather than
+  /// interpreted as a one-to-one slot map. Slots without a qualifying text relocation are not
+  /// possible callees and do not appear here.
   std::vector<RelocationFunctionPointer> entries;
 };
 
@@ -130,13 +142,15 @@ analyze_relocation_pairs(std::span<const std::unique_ptr<BasicBlock>> blocks,
 
 /// @brief Discover finite device-call tables from ELF symbols and relocations.
 ///
-/// @details A candidate must be a non-empty `STT_OBJECT` whose size is a
-/// multiple of eight bytes. It must reside in an allocated, non-executable
-/// section and contain at least one aligned
-/// symbol-less `R_AMDGPU_RELATIVE64` relocation whose addend lands in the code
-/// object's single `.text` section. `R_AMDGPU_ABS64` references to the object
-/// are recorded as optional GOT slots. Discovery deliberately depends on ELF
-/// structure rather than table or application symbol names.
+/// @details A multi-entry candidate must be a non-empty `STT_OBJECT` whose size
+/// is a multiple of eight bytes. It must reside in an allocated, non-executable
+/// section and contain at least one aligned symbol-less `R_AMDGPU_RELATIVE64`
+/// relocation whose addend lands in the code object's single `.text` section.
+/// `R_AMDGPU_ABS64` references to the object are recorded as optional GOT
+/// slots. A direct `R_AMDGPU_ABS64` relocation from an aligned allocated data
+/// slot to an `STT_FUNC` in `.text` is represented as a one-entry table.
+/// Discovery deliberately depends on ELF structure rather than application
+/// symbol names.
 ///
 /// @returns Tables sorted by `table_vaddr`. Invalid, ambiguous, and unsupported
 /// ELF records are ignored; an object without a qualifying populated entry is

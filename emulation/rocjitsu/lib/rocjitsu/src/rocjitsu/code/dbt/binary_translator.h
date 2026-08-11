@@ -173,6 +173,13 @@ struct TranslatedCodeObject {
 /// direct PC-relative branch immediates and recovered indirect transfer windows
 /// are patched through the kernel-local source-to-target block placement map.
 /// Fallthrough is preserved by emitting reachable blocks in original .text order.
+///
+/// Kernarg-supplied device-function pointers require a load-time environment
+/// that translates every GPU module before admitting it for execution. A
+/// pointer may name this object's relocated STT_FUNC body or an already-
+/// relocated body in another translated module; the code object alone cannot
+/// distinguish those origins. An embedding runtime must not mix translated
+/// modules with callable untranslated GPU modules.
 class BinaryTranslator {
 public:
   /// @brief Construct a translator for the given (guest, host) ISA pair.

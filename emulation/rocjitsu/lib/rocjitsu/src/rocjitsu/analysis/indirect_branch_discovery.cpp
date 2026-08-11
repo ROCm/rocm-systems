@@ -2505,6 +2505,12 @@ bool is_callee_saved_vgpr(uint16_t phys_vgpr) {
   return phys_vgpr >= 40 && phys_vgpr <= 255 && ((phys_vgpr - 40) % 16) < 8;
 }
 
+bool is_callee_saved_sgpr(uint16_t sgpr) {
+  // Intersection of CSR_AMDGPU_SGPRs and CSR_AMDGPU_SI_Gfx_SGPRs.
+  return (sgpr >= 30 && sgpr <= 31) || (sgpr >= 64 && sgpr <= 71) || (sgpr >= 80 && sgpr <= 87) ||
+         (sgpr >= 96 && sgpr <= 105);
+}
+
 std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,

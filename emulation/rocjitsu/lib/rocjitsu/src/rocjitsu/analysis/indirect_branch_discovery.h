@@ -149,6 +149,15 @@ struct PcAddressBuilder {
 /// proven callee-saved and reports false.
 [[nodiscard]] bool is_callee_saved_vgpr(uint16_t phys_vgpr);
 
+/// @brief Whether an SGPR is preserved by every AMDGPU calling convention the
+/// translator may encounter for a device function.
+///
+/// @details Code objects do not record whether a particular helper uses the
+/// default device convention or the graphics convention. This predicate uses
+/// their intersection, so an unsummarized call cannot preserve a stale value
+/// merely because one convention saves the register.
+[[nodiscard]] bool is_callee_saved_sgpr(uint16_t sgpr);
+
 /// @returns Recovered indirect branch/call metadata.
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
