@@ -67,6 +67,29 @@ private:
   /// Combined with mm_index_ to form a 64-bit byte address into VRAM.
   uint32_t mm_index_hi_{0};
 
+  /// @brief Last value written via MM_DATA to a high-address (>= 0x10000) indirect
+  /// register. Used to auto-acknowledge polling loops (TLB flush, semaphore acquire).
+  uint32_t last_indirect_write_{0};
+
+  /// @brief Current VBIOS ROM byte address set by a write to SMUIO ROM_INDEX.
+  /// Incremented by 4 after each ROM_DATA dword read (auto-advance).
+  uint32_t rom_index_{0};
+
+  /// @brief Last dword register address written to RSMU_INDEX (kRegRsmuIndex).
+  /// Used to serve the correct data on the next RSMU_DATA read.
+  uint32_t rsmu_index_{0};
+
+  /// @brief GPU MC base address (fb_start) for VRAM-to-memfd offset calculation.
+  /// Derived from RSMU non-MP0 reads that return 0x1 (bit 0 shifted by 24 = 0x1000000).
+  static constexpr uint64_t kFbStart = 0x1000000ULL;
+
+  /// @brief Service PSP ring fence by scanning VRAM for ring frames and writing
+  /// fence_value to fence_addr. Called periodically and on C2PMSG_67 write.
+  void service_psp_ring_fence();
+
+  /// @brief Monotonically increasing scan generation — used to avoid redundant scans.
+  uint32_t fence_scan_gen_{0};
+
   /// @brief memfd backing BAR0 VRAM (borrowed). -1 if not available.
   int vram_fd_{-1};
 

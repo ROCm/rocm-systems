@@ -13,6 +13,9 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <sys/mman.h>
+#include <time.h>
+#include <unistd.h>
 
 namespace rocjitsu::vfu {
 
@@ -68,7 +71,9 @@ int VfuServer::init() {
 
   // -----------------------------------------------------------------------
   // 2. Create the libvfio-user context bound to the UNIX socket.
+  // Remove any stale socket left by a previous crash before binding.
   // -----------------------------------------------------------------------
+  ::unlink(opts_.socket_path.c_str());
   ctx_ = vfu_create_ctx(VFU_TRANS_SOCK,
                         opts_.socket_path.c_str(),
                         0,
@@ -163,7 +168,8 @@ int VfuServer::init() {
                        VFU_PCI_DEV_BAR5_REGION_IDX,
                        BarSizes::kBar5Mmio,
                        bar5_cb,
-                       VFU_REGION_FLAG_RW | VFU_REGION_FLAG_MEM,
+                       VFU_REGION_FLAG_RW | VFU_REGION_FLAG_MEM |
+                         VFU_REGION_FLAG_ALWAYS_CB,
                        nullptr, 0, -1, 0) != 0) {
     std::perror("vfu_setup_region BAR5");
     return -1;
@@ -208,6 +214,12 @@ int VfuServer::run() {
 
   std::fprintf(stderr, "[vfu] client connected\n");
 
+  // Start background fence service thread.
+  int vram_fd = bar0_ ? bar0_->fd() : -1;
+  uint64_t vram_sz = bar0_ ? bar0_->size() : 0;
+  fence_stop_.store(false);
+  fence_thread_ = std::thread(&VfuServer::fence_service_loop, this, vram_fd, vram_sz);
+
   // Event loop: process one vfio-user message per iteration.
   int ret = 0;
   while (!stop_requested_.load(std::memory_order_relaxed)) {
@@ -225,7 +237,57 @@ int VfuServer::run() {
     }
   }
 
+  fence_stop_.store(true);
+  if (fence_thread_.joinable())
+    fence_thread_.join();
+
   return ret;
+}
+
+void VfuServer::fence_service_loop(int vram_fd, uint64_t vram_size) {
+  if (vram_fd < 0 || vram_size == 0)
+    return;
+
+  // PSP ring frames are 64 bytes each; scan VRAM from fb_start.
+  // fb_start = 0x1000000 (from 0x1 RSMU fallback for MC base).
+  static constexpr uint64_t fb_start = 0x1000000ULL;
+  // Scan up to 64MB from fb_start to cover all PSP BOs.
+  // Scan first 16MB of VRAM — PSP BOs (ring, fence, fw_pri, cmd_buf) are
+  // allocated early and should reside within the first 16MB from fb_start.
+  const uint64_t scan_size = std::min<uint64_t>(16ULL * 1024 * 1024,
+                                                 vram_size > fb_start ?
+                                                 vram_size - fb_start : 0);
+  static constexpr size_t frame_size = 64;
+
+  while (!fence_stop_.load(std::memory_order_relaxed)) {
+    // Scan for PSP ring frames and write fence values.
+    void *p = ::mmap(nullptr, scan_size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                     vram_fd, static_cast<off_t>(fb_start));
+    if (p != MAP_FAILED) {
+      auto *mem = static_cast<uint8_t *>(p);
+      for (size_t off = 0; off + frame_size <= scan_size; off += frame_size) {
+        const auto *frame = reinterpret_cast<const uint32_t *>(mem + off);
+        uint32_t fence_lo  = frame[3];
+        uint32_t fence_hi  = frame[4];
+        uint32_t fence_val = frame[5];
+        if (fence_val == 0) continue;
+        uint64_t fence_gpu = (static_cast<uint64_t>(fence_hi) << 32) | fence_lo;
+        bool in_vram = (fence_gpu >= fb_start && fence_gpu < fb_start + vram_size);
+        if (!in_vram) continue;
+        uint64_t fence_off = fence_gpu - fb_start;
+        if (fence_off >= scan_size) continue;
+        auto *fence_ptr = reinterpret_cast<uint32_t *>(mem + fence_off);
+        if (*fence_ptr != fence_val) {
+          std::fprintf(stderr, "[fence] write: fence_gpu=0x%llx val=%u\n",
+                       (unsigned long long)fence_gpu, fence_val);
+          *fence_ptr = fence_val;
+        }
+      }
+      ::munmap(p, scan_size);
+    }
+    struct timespec ts{0, 500000};  // 500μs between scans
+    ::nanosleep(&ts, nullptr);
+  }
 }
 
 } // namespace rocjitsu::vfu

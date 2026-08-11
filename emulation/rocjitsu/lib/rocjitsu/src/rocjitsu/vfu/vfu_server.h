@@ -26,6 +26,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <thread>
 
 // Forward-declare libvfio-user types.
 typedef struct vfu_ctx vfu_ctx_t;
@@ -73,6 +74,12 @@ private:
 
   VfuServerOptions opts_;
   vfu_ctx_t *ctx_ = nullptr;
+
+  /// @brief Background thread that periodically scans VRAM for PSP ring fence
+  /// frames and writes fence_value to fence_addr, allowing PSP command completion.
+  std::thread fence_thread_;
+  std::atomic<bool> fence_stop_{false};
+  void fence_service_loop(int vram_fd, uint64_t vram_size);
 
   rj_vm_t *vm_handle_ = nullptr;  ///< Owned VM handle (from rj_vm_create).
   rocjitsu::SimulatedKfd *driver_ = nullptr; ///< Non-owning pointer into vm_handle_.

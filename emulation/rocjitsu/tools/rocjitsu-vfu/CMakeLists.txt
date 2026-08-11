@@ -35,6 +35,8 @@ target_link_libraries(
         rocjitsu_isa_risc_v
         simdojo
         rocjitsu_vm
+        rocjitsu_isa_registry
+        rocjitsu_plugin_loader
         rocjitsu_vm_amdgpu
         rocjitsu_vm_risc_v
         rocjitsu_config

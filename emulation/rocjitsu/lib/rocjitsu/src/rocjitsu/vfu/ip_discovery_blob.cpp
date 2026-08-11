@@ -22,23 +22,23 @@ constexpr uint32_t kHarvestTableSig    = 0x56524148; // "HARV"
 constexpr uint16_t kDiscoveryVersion   = 2;
 constexpr int      kTotalTables        = 6;
 
-// Hardware IDs (from soc15_hw_ip.h in the DKMS source)
-constexpr uint16_t kHwIdMp1    =  1;
-constexpr uint16_t kHwIdThm    =  3;
-constexpr uint16_t kHwIdSmuio  =  4;
-constexpr uint16_t kHwIdGc     = 11;
-constexpr uint16_t kHwIdMmhub  = 34;
-constexpr uint16_t kHwIdAthub  = 35;
-constexpr uint16_t kHwIdOsssys = 40;
-constexpr uint16_t kHwIdHdp    = 41;
-constexpr uint16_t kHwIdSdma0  = 42;  // instances 0-4 for MI350P
-constexpr uint16_t kHwIdDf     = 46;
-constexpr uint16_t kHwIdUmc    = 196; // actually 12 for VCN/UMC context - see below
-constexpr uint16_t kHwIdXgmi   = 200;
-constexpr uint16_t kHwIdNbif   = 192;
-constexpr uint16_t kHwIdMp0    = 202;
-constexpr uint16_t kHwIdPcie   = 187;
-constexpr uint16_t kHwIdLsdma  = 91;  // LSDMA_HWID
+// Hardware IDs — must match *_HWID in soc15_hw_ip.h exactly.
+constexpr uint16_t kHwIdMp1    =   1;  // MP1_HWID
+constexpr uint16_t kHwIdThm    =   3;  // THM_HWID
+constexpr uint16_t kHwIdSmuio  =   4;  // SMUIO_HWID
+constexpr uint16_t kHwIdGc     =  11;  // GC_HWID
+constexpr uint16_t kHwIdMmhub  =  34;  // MMHUB_HWID
+constexpr uint16_t kHwIdAthub  =  35;  // ATHUB_HWID
+constexpr uint16_t kHwIdOsssys =  40;  // OSSSYS_HWID
+constexpr uint16_t kHwIdHdp    =  41;  // HDP_HWID
+constexpr uint16_t kHwIdSdma0  =  42;  // SDMA0_HWID (instances 0-4 for MI350P)
+constexpr uint16_t kHwIdDf     =  46;  // DF_HWID
+constexpr uint16_t kHwIdLsdma  =  91;  // LSDMA_HWID
+constexpr uint16_t kHwIdNbif   = 108;  // NBIF_HWID
+constexpr uint16_t kHwIdUmc    = 150;  // UMC_HWID
+constexpr uint16_t kHwIdPcie   =  70;  // PCIE_HWID
+constexpr uint16_t kHwIdXgmi   = 200;  // XGMI_HWID
+constexpr uint16_t kHwIdMp0    = 255;  // MP0_HWID
 
 // ---------------------------------------------------------------------------
 // Low-level serialisation helpers
@@ -158,11 +158,13 @@ std::vector<uint8_t> build_gfx944_discovery_blob() {
   w.write_u32(0x00000001); // id (arbitrary, non-zero)
   w.write_u16(1);           // num_dies = 1
 
-  // die_info[0]: die_id=1, die_offset = (offset of die_header FROM ip_hdr_pos)
-  // die_header starts immediately after the die_info array + padding
-  uint16_t die_hdr_rel_off = static_cast<uint16_t>(kIpHdrInnerSize);
-  w.write_u16(1);                // die_id
-  w.write_u16(die_hdr_rel_off);  // die_offset (relative to ip_discovery_header start)
+  // die_info[0]: die_id=0 (must match loop index i=0 in amdgpu_discovery_reg_base_init).
+  // die_offset is an ABSOLUTE offset from discovery_bin[0], not relative to ip_hdr.
+  // die_header immediately follows the ip_discovery_header, so its absolute offset
+  // is ip_hdr_pos + kIpHdrInnerSize.
+  uint16_t die_hdr_abs_off = static_cast<uint16_t>(ip_hdr_pos + kIpHdrInnerSize);
+  w.write_u16(0);                // die_id = 0
+  w.write_u16(die_hdr_abs_off);  // die_offset (absolute from blob start)
   // die_info[1..15]: zeroed
   for (int i = 1; i < 16; ++i) { w.write_u16(0); w.write_u16(0); }
   w.write_u16(0); // padding
@@ -172,7 +174,7 @@ std::vector<uint8_t> build_gfx944_discovery_blob() {
   //    die_header: uint16 die_id, uint16 num_ips
   // ----------------------------------------------------------------
   size_t die_hdr_pos = w.tell(); // == ip_hdr_pos + kIpHdrInnerSize
-  w.write_u16(1); // die_id = 1
+  w.write_u16(0); // die_id = 0 (must match die_info[0].die_id and loop index)
   size_t num_ips_pos = w.tell();
   w.write_u16(0); // num_ips placeholder
 
@@ -182,56 +184,73 @@ std::vector<uint8_t> build_gfx944_discovery_blob() {
   size_t ip_array_start = w.tell();
   int num_ips = 0;
 
-  // GC (shader engine) — version 9.4.4 → activates gfx_v9_4_3_ip_block
-  emit_ip(w, kHwIdGc,    0, 9,  4, 4, {0x2000, 0xa000, 0x2402c00});  ++num_ips;
+  // All base addresses taken from aldebaran_ip_offset.h INST0_SEGx values.
+  // These populate adev->reg_offset[HWIP][0][base_idx] for SOC15_REG_OFFSET.
+
+  // GC — version 9.4.4 → activates gfx_v9_4_3_ip_block
+  emit_ip(w, kHwIdGc,    0, 9,  4, 4, {0x2000, 0xa000, 0x2402c00});    ++num_ips;
 
   // MMHUB — version 9.4.4
-  emit_ip(w, kHwIdMmhub, 0, 9,  4, 4, {0x1a000, 0x2408800});          ++num_ips;
+  emit_ip(w, kHwIdMmhub, 0, 9,  4, 4, {0x1a000, 0x2408800});           ++num_ips;
 
-  // ATHUB — version 9.4.2 (unchanged from aldebaran)
-  emit_ip(w, kHwIdAthub, 0, 9,  4, 2, {0xc20, 0x2408c00});            ++num_ips;
+  // ATHUB — version 9.4.2
+  emit_ip(w, kHwIdAthub, 0, 9,  4, 2, {0xc20, 0x2408c00});             ++num_ips;
 
   // OSSSYS (IH) — version 4.4.0
-  emit_ip(w, kHwIdOsssys,0, 4,  4, 0, {0x10a0, 0x240a000});           ++num_ips;
+  emit_ip(w, kHwIdOsssys,0, 4,  4, 0, {0x10a0, 0x240a000});            ++num_ips;
 
   // HDP — version 4.4.0
-  emit_ip(w, kHwIdHdp,   0, 4,  4, 0, {0xf20, 0x240a400});            ++num_ips;
+  emit_ip(w, kHwIdHdp,   0, 4,  4, 0, {0xf20, 0x240a400});             ++num_ips;
 
   // DF — version 3.6.2
   emit_ip(w, kHwIdDf,    0, 3,  6, 2, {0x7000, 0x240b800, 0x7c00000}); ++num_ips;
 
-  // NBIF — version 6.3.1 (MI300X reference)
-  emit_ip(w, kHwIdNbif,  0, 6,  3, 1, {0x0, 0x10000, 0x2410000});      ++num_ips;
+  // NBIF — version 6.3.1. Segments from aldebaran NBIO_BASE, with seg1 relocated
+  // to 0xE00 so RSMU_INDEX/DATA land at BAR5 byte 0x3800/0x3804 (above the
+  // threshold where QEMU routes vfio-user callbacks; original 0x14 gives byte 0x50
+  // which QEMU maps as direct RAM and bypasses the vfio-user trap path).
+  emit_ip(w, kHwIdNbif,  0, 6,  3, 1,
+          {0x0, 0xE00, 0xd20, 0x10400, 0x241b000, 0x4040000});          ++num_ips;
 
-  // MP0 — version 13.0.14 (GFX9.4.4 PSP version)
-  emit_ip(w, kHwIdMp0,   0, 13, 0, 14,{0x15200, 0x243d000});           ++num_ips;
+  // MP0 — version 13.0.0 (maps to psp_v13_0_ip_block; psp_13_0_0_sos.bin exists
+  // in VM firmware; doesn't add ras_v1_0_ip_block which crashes without real hw).
+  emit_ip(w, kHwIdMp0,   0, 13, 0, 0,
+          {0x16000, 0xdc0000, 0xe00000, 0xe40000, 0x243fc00});           ++num_ips;
 
-  // MP1 (SMU) — version 13.0.14
-  emit_ip(w, kHwIdMp1,   0, 13, 0, 14,{0x16000, 0xdc0000, 0xe00000, 0x243fc00}); ++num_ips;
+  // MP1 (SMU) — version 13.0.0. Same segments as MP0.
+  emit_ip(w, kHwIdMp1,   0, 13, 0, 0,
+          {0x16000, 0xdc0000, 0xe00000, 0xe40000, 0x243fc00});           ++num_ips;
 
   // THM — version 13.0.14
-  emit_ip(w, kHwIdThm,   0, 13, 0, 14,{0x16600, 0x2400c00});           ++num_ips;
+  emit_ip(w, kHwIdThm,   0, 13, 0, 14,{0x16600, 0x2400c00});            ++num_ips;
 
-  // SMUIO — version 13.0.14
-  emit_ip(w, kHwIdSmuio, 0, 13, 0, 14,{0x16800, 0x16a00, 0x2401000, 0x3440000}); ++num_ips;
+  // SMUIO — version 13.0.6 → smuio_v13_0_6_funcs (13.0.14 is not in the switch).
+  emit_ip(w, kHwIdSmuio, 0, 13, 0, 6,
+          {0x16800, 0x16a00, 0x2401000, 0x3440000});                     ++num_ips;
 
-  // SDMA — 5 instances (SDMA 4.4.5 for MI350P)
+  // SDMA — 5 instances (SDMA 4.4.5). Strides from aldebaran SDMA0_BASE.
   for (uint8_t i = 0; i < 5; ++i) {
-    uint32_t base0 = 0x1260 + i * 0x600;
-    uint32_t base1 = 0x12540 + i * 0x20;
-    uint32_t base2 = 0x40a800 + i * 0x400;
+    uint32_t base0 = 0x1260 + static_cast<uint32_t>(i) * 0x600;
+    uint32_t base1 = 0x12540 + static_cast<uint32_t>(i) * 0x20;
+    uint32_t base2 = 0x40a800 + static_cast<uint32_t>(i) * 0x400;
     emit_ip(w, kHwIdSdma0, i, 4, 4, 5, {base0, base1, base2});
     ++num_ips;
   }
 
-  // XGMI — version 6.1.0 (no external links on MI350P but driver checks for it)
-  emit_ip(w, kHwIdXgmi,  0, 6,  1, 0, {0x78000});                      ++num_ips;
+  // XGMI — omitted. GFX9.4.4 sets xgmi.supported via amdgpu_is_multi_aid().
+  // Including XGMI IP_VERSION(6,1,0) triggers adev->smuio.funcs->is_host_gpu_xgmi_supported()
+  // before smuio funcs are set up, causing a null deref in gmc_v9_0_early_init.
 
-  // PCIE — version 11.0.5
-  emit_ip(w, kHwIdPcie,  0, 11, 0, 5, {0x11180000});                   ++num_ips;
+  // PCIE — version 11.0.5. No segment table in aldebaran; use a high address.
+  emit_ip(w, kHwIdPcie,  0, 11, 0, 5, {0x11180000});                    ++num_ips;
 
-  // UMC — version 12.0.0 (GFX9.4.4 memory controller) -- hw_id 196
-  emit_ip(w, kHwIdUmc,   0, 12, 0, 0, {0x50000, 0x52000, 0x54000, 0x56000}); ++num_ips;
+  // UMC — version 12.0.0. Segments from aldebaran UMC_BASE INST0.
+  emit_ip(w, kHwIdUmc,   0, 12, 0, 0, {0x14000, 0x54000, 0x2425800});  ++num_ips;
+
+  // VCN — version 4.0.5 (maps to vcn_v4_0_5_ip_block and jpeg_v4_0_5_ip_block with
+  // num_jpeg_inst=1; 4.0.6 gives num_jpeg_inst=2 which triggers a crash in sw_init).
+  // UVD_HWID = VCN_HWID = 12; base addresses from MI300X reference.
+  emit_ip(w, 12,          0, 4,  0, 5, {0x81000, 0x2430000});               ++num_ips;
 
   // Fill in num_ips now that we know it
   blob[num_ips_pos]     = static_cast<uint8_t>(num_ips & 0xff);
@@ -288,8 +307,10 @@ std::vector<uint8_t> build_gfx944_discovery_blob() {
   blob[t2+4] = harv_size & 0xff;
   blob[t2+5] = harv_size >> 8;
 
-  // binary_checksum: sum of all bytes from after the checksum field to end
-  size_t chk_start = binary_checksum_pos + 4; // after binary_checksum + binary_size
+  // binary_checksum: sum of all bytes from after the checksum field to binary_size.
+  // The driver computes: offset = offsetof(binary_checksum) + sizeof(binary_checksum)
+  // i.e. chk_start = 8 + 2 = 10, which includes binary_size itself.
+  size_t chk_start = binary_checksum_pos + 2; // skip only binary_checksum, not binary_size
   uint16_t bin_checksum = checksum_range(blob, chk_start, binary_size - chk_start);
   blob[binary_checksum_pos]     = bin_checksum & 0xff;
   blob[binary_checksum_pos + 1] = bin_checksum >> 8;

@@ -30,6 +30,16 @@ inline constexpr uint32_t kRegMmIndex              = 0x0000 * 4; ///< MM indirec
 inline constexpr uint32_t kRegMmData               = 0x0001 * 4; ///< MM indirect data.
 inline constexpr uint32_t kRegMmIndexHi            = 0x0006 * 4; ///< MM indirect index high (for >32-bit).
 
+// PCIE / RSMU indirect access registers (NBIF seg1 base = 0xE00 in our blob).
+// amdgpu_device_indirect_{r,w}reg writes reg_addr to RSMU_INDEX then
+// reads/writes data from/to RSMU_DATA (no bit-31 flag).
+// regBIF_BX_PF0_RSMU_INDEX = 0x0000, BASE_IDX=1 → dword 0xE00, byte 0x3800.
+// regBIF_BX_PF0_RSMU_DATA  = 0x0001, BASE_IDX=1 → dword 0xE01, byte 0x3804.
+// Using 0xE00 instead of the hardware-correct 0x14 so QEMU routes these BAR5
+// accesses through the vfio-user callback (low offsets bypass the trap path).
+inline constexpr uint32_t kRegRsmuIndex            = 0x0E00 * 4; ///< PCIE indirect index (RSMU_INDEX).
+inline constexpr uint32_t kRegRsmuData             = 0x0E01 * 4; ///< PCIE indirect data  (RSMU_DATA).
+
 // GFX engine status
 inline constexpr uint32_t kRegGrbmStatus           = 0x8010 * 4; ///< GFX/CP busy bits.
 inline constexpr uint32_t kRegGrbmStatus2          = 0x8012 * 4; ///< Additional busy bits.
@@ -94,6 +104,29 @@ inline constexpr uint32_t kRegRccConfigMemsize     = 0x0de3 * 4; ///< VRAM size 
 //   We must return 0x80000000 immediately so the driver doesn't spin.
 inline constexpr uint32_t kMmIndirectMp0C2pmsg33  = 0x16061; ///< Dword index (not byte) for indirect.
 
+// MMHUB VM invalidation engine registers (MMHUB_BASE_seg0=0x1A000):
+//   regVM_INVALIDATE_ENG0_REQ=0x0BC3, eng_distance=1, ENG17_REQ dword=0x25D4, byte=0x9750
+//   regVM_INVALIDATE_ENG0_ACK=0x0BD5, ENG17_ACK dword=0x25E6, byte=0x9798
+// Same write-triggered ACK strategy as GC.
+inline constexpr uint32_t kRegMmhubVmInvEng0Req = (0x1A000 + 0x0BC3) * 4; ///< MMHUB ENG0 REQ.
+inline constexpr uint32_t kRegMmhubVmInvEng0Ack = (0x1A000 + 0x0BD5) * 4; ///< MMHUB ENG0 ACK.
+inline constexpr uint32_t kMmhubVmInvEngDistance = 1 * 4; ///< Byte stride between MMHUB engines.
+
+// GC VM invalidation engine 17 registers (for GFX9.4.x, GC_BASE_seg0=0x2000):
+//   ENG17_REQ byte = (0x2000 + 0x0894) * 4 = 0xa250 — write triggers TLB flush
+//   ENG17_ACK byte = (0x2000 + 0x08a6) * 4 = 0xa298 — poll until vmid bit set
+// Strategy: on write to REQ, copy value to ACK so the poll exits immediately.
+inline constexpr uint32_t kRegGcVmInvEng17Req = (0x2000 + 0x0894) * 4; ///< GC ENG17 invalidate request.
+inline constexpr uint32_t kRegGcVmInvEng17Ack = (0x2000 + 0x08a6) * 4; ///< GC ENG17 invalidate ACK.
+
+// MMHUB VM invalidation engine 17 (MMHUB_BASE_seg0=0x1a000):
+//   ENG0_REQ=0x0b40, eng_distance=1 for mmhub_v1_8 (check mmhub_v1_8.c).
+// For now, use the same REQ→ACK copy trick for all invalidate engines found
+// in the range [kRegGcVmInvEng0Req, kRegGcVmInvEng0Req + 32*eng_distance*4].
+inline constexpr uint32_t kRegGcVmInvEng0Req = (0x2000 + 0x0883) * 4; ///< GC ENG0 invalidate request.
+inline constexpr uint32_t kRegGcVmInvEng0Ack = (0x2000 + 0x0895) * 4; ///< GC ENG0 invalidate ACK.
+inline constexpr uint32_t kGcVmInvEngDistance = 1 * 4; ///< Byte stride between engines.
+
 // ---------------------------------------------------------------------------
 // Key reset / init values returned by the register model.
 // ---------------------------------------------------------------------------
@@ -107,8 +140,9 @@ inline constexpr uint32_t kSdmaVersionStub = 0x00040405;
 /// SMC response "OK" (driver polls until non-zero).
 inline constexpr uint32_t kSmcRespOk = 0x00000001;
 
-/// RCC_CONFIG_MEMSIZE: 256 MB default VRAM BAR reported as 256 (in MB).
-inline constexpr uint32_t kVramSizeMb = 256;
+/// RCC_CONFIG_MEMSIZE: 512 MB default VRAM BAR reported as 512 (in MB).
+/// GFX9.4.4 needs 280 MB TMR reserve, so VRAM must be > 280 MB.
+inline constexpr uint32_t kVramSizeMb = 512;
 
 /// C2PMSG_33 firmware-ready bit (bit 31 set = PSP/firmware init complete).
 inline constexpr uint32_t kC2pmsg33FwReady = 0x80000000;

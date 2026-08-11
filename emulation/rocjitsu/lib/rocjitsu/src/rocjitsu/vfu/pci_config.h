@@ -39,7 +39,7 @@ struct PciIdentity {
 /// BAR2/3: 64-bit prefetchable doorbell region (2 MB, fixed for all CDNA4).
 /// BAR5:   32-bit non-prefetchable MMIO register window (256 KB, fixed for BONAIRE+).
 struct BarSizes {
-  static constexpr uint64_t kBar0VramDefault  = 256ULL * 1024 * 1024;  ///< 256 MB (no ReBAR)
+  static constexpr uint64_t kBar0VramDefault  = 512ULL * 1024 * 1024;  ///< 512 MB — GFX9.4.4 needs 280 MB TMR reserve + headroom
   static constexpr uint64_t kBar0VramFull     = 144ULL * 1024 * 1024 * 1024; ///< 144 GB (ReBAR)
   static constexpr uint64_t kBar2Doorbell     = 2ULL * 1024 * 1024;    ///< 2 MB
   static constexpr uint64_t kBar5Mmio        = 256ULL * 1024;          ///< 256 KB

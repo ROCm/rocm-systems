@@ -51,7 +51,7 @@ int main(int argc, char **argv) {
           "                  (default: /tmp/rocjitsu-vfu-0.sock)\n"
           "  --config PATH   rocjitsu topology JSON config\n"
           "                  (default: configs/gfx950_mi350p_kmd.json)\n"
-          "  --rebar         Advertise full 144 GB VRAM BAR instead of 256 MB\n"
+          "  --rebar         Advertise full 144 GB VRAM BAR instead of 512 MB\n"
           "\n"
           "QEMU invocation:\n"
           "  qemu-system-x86_64 -accel kvm -m 16G \\\n"

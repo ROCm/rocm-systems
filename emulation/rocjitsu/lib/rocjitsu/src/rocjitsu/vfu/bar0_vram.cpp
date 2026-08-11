@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vfu/bar0_vram.h"
 #include "rocjitsu/vfu/ip_discovery_blob.h"
+#include "rocjitsu/vfu/minimal_vbios.h"
 
 #include <cstdio>
 #include <cstring>
@@ -20,6 +21,17 @@ Bar0Vram::Bar0Vram(uint64_t size)
     : memfd_("rocjitsu_vram", static_cast<size_t>(size)) {
   if (!memfd_.valid())
     return;
+
+  // Write minimal atom VBIOS at VRAM byte 0.
+  // amdgpu_read_bios_from_vram() ioremaps BAR0+0 and checks for 0x55 0xAA signature.
+  // Placing a valid minimal VBIOS here lets adev->bios get populated so the
+  // atom context is created, allowing smu_v13_0_get_vbios_bootup_values() to parse it.
+  memfd_.with_mapping(0, sizeof(kMinimalVbios), PROT_WRITE,
+                      [](void *p) {
+                        std::memcpy(p, kMinimalVbios, sizeof(kMinimalVbios));
+                      });
+  std::fprintf(stderr, "[vfu/bar0] minimal VBIOS written at VRAM+0x0 (%zu bytes)\n",
+               sizeof(kMinimalVbios));
 
   // Write the GFX9.4.4 IP discovery binary at vram_size - DISCOVERY_TMR_OFFSET.
   // amdgpu_discovery_read_binary_from_mem() reads mmRCC_CONFIG_MEMSIZE from
