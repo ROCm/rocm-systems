@@ -61,6 +61,14 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Set to false to skip the RCCL build step entirely. Default: true when the section is present."
+        },
+        "_comment": {
+          "type": "string",
+          "description": "Inline documentation comment (not interpreted by the runner)"
+        },
         "install_flags": {
           "type": "array",
           "items": { "type": "string" },
@@ -272,6 +280,10 @@
         "description": {
           "type": "string",
           "description": "Human-readable description of this configuration block (not interpreted by the runner)"
+        },
+        "_comment": {
+          "type": "string",
+          "description": "Inline documentation comment (not interpreted by the runner)"
         },
         "tests": {
           "type": "array",
