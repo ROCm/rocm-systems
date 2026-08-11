@@ -1,43 +1,40 @@
-# RCCL paired A/B perf-regression gate.
+# RCCL paired A/B perf-regression gate (on-demand).
 #
-# DEPLOYMENT: RCCL now lives in the ROCm/rocm-systems monorepo at projects/rccl.
-# This file belongs in that repo at
-#   .github/workflows/rccl_perf_regression.yml
-# It runs on the self-hosted org runner "tw-gfx950-ainic-ROCm-scale-runner"
-# (org: ROCm). Adjust `runs-on` labels to match how that runner was registered.
-# The `paths` filter keeps the gate scoped to RCCL-only changes in the monorepo;
-# build_rccl.sh auto-detects the projects/rccl cmake subdir in the checkout.
+# DEPLOYMENT: RCCL lives in the ROCm/rocm-systems monorepo at projects/rccl.
+# This file belongs at .github/workflows/rccl_perf_regression.yml and runs on the
+# self-hosted org runner "tw-gfx950-ainic-ROCm-scale-runner".
 #
 # The Slurm submit/poll/report scripts these steps call
 # (rccl_build.sbatch, rccl_ab.sbatch, submit_and_poll.sh, format_report.py)
-# are version-controlled in ROCm/cvs, on a branch with further related
-# changes landing before it merges to main:
-#   https://github.com/ROCm/cvs/tree/aimvt-196-rccl-regression-robustness/ci/rccl_perf_gate
+# are version-controlled in ROCm/cvs under ci/rccl_perf_gate.
 #
-# Flow per PR:
-#   1. Check out PR head with full history (merge-base resolution needs it).
-#   2. [build job] rccl_build.sbatch: build librccl.so for reference (merge-base)
-#      and candidate (PR head) on a single build node, then template their lib
-#      dirs into a per-run copy of ci_detect.json. This is a single-node CPU
-#      compile with no RDMA/MPI involved, so it runs under its own concurrency
-#      lock instead of the pinned 4-node lock below -- it no longer holds all
-#      4 nodes idle for its ~15-20min duration.
-#   3. [detect job] rccl_ab.sbatch: run the A/B detector on the pinned 4-node
-#      set, using the config the build job produced.
-#   4. format_report.py: render verdict to the job summary + PR comment.
-#   5. Advisory mode: job fails hard only on infra/polling errors, not on
-#      a detected regression yet (see PR description).
+# TRIGGER (mandatory pre-merge check, run on demand — see AIMVT-285):
+#   Instead of running on every push, the gate runs when an organization
+#   member/collaborator comments the exact command `/perf-regression` on the PR
+#   (workflow_dispatch is also supported for manual/testing runs). It reports a
+#   commit status pinned to the PR head SHA (context below); branch protection
+#   should require that context so merge stays blocked until it passes.
+#
+# Jobs (write tokens are isolated from the jobs that execute PR code):
+#   resolve  (ubuntu, WRITE token, NO PR code) authorize + validate command +
+#            resolve PR head/base + set pending status + ack comment.
+#   build    (self-hosted, read-only token, PR code) build reference + candidate
+#            librccl on one build node; per-PR concurrency.
+#   detect   (self-hosted, read-only token, PR code) A/B detector on the pinned
+#            4-node set; globally serialized; renders + uploads the report.
+#   finalize (ubuntu, WRITE token, NO PR code) compute the verdict, set the final
+#            commit status, and post the PR comment. Best-effort for runs that a
+#            newer request supersedes via concurrency.
+#
+# Advisory mode: the verdict fails the status only on infra/polling errors, not
+# on a detected regression yet (see AIMVT-285 / prior PR description).
 name: RCCL Perf Regression Gate
 
 on:
-  pull_request:
-    branches: [main, develop]
-    paths:
-      - 'projects/rccl/**'
-      - '.github/workflows/rccl_perf_regression.yml'
-  # Allow manual dispatch for testing the pipeline before the workflow is on develop.
-  # Inputs mirror what a PR run would supply; omit them to use the defaults
-  # (A=A detect: ref == cand == current built lib, expects 0 regressions).
+  issue_comment:
+    types: [created]
+  # Manual dispatch for testing / ad-hoc runs. Inputs mirror a PR run; omit them
+  # to use the defaults (A=A detect: ref == cand == current built lib).
   workflow_dispatch:
     inputs:
       config:
@@ -53,69 +50,184 @@ env:
   RCCL_CI_ROOT: /it-share/rccl-ci
   SLURM_RESERVATION: rccl_ci
   NODELIST: mia1-p01-g[22,26,28,32]
+  PERF_COMMAND: /perf-regression
+  STATUS_CONTEXT: RCCL Perf Regression Gate (on demand)
 
-permissions:
-  contents: read
-  pull-requests: write
+# No token by default; grant write only to the jobs that never run PR code.
+permissions: {}
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # resolve: authorization + context resolution + pending feedback.
+  # Runs on a hosted runner and never checks out PR code, so its write-capable
+  # token is never exposed to untrusted code.
+  # ---------------------------------------------------------------------------
+  resolve:
+    # Coarse gate: manual dispatch, or a PR comment by an org member/collaborator.
+    # The exact command match is enforced in the step below (contains() would
+    # also match substrings/quotations, so it can't be trusted for this).
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      ( github.event.issue.pull_request &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      statuses: write
+    outputs:
+      authorized: ${{ steps.gate.outputs.authorized }}
+      head_sha: ${{ steps.ctx.outputs.head_sha }}
+      base_ref: ${{ steps.ctx.outputs.base_ref }}
+      pr_number: ${{ steps.ctx.outputs.pr_number }}
+      requester: ${{ steps.ctx.outputs.requester }}
+    steps:
+      - name: Validate command (exact /perf-regression on PR comments)
+        id: gate
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "authorized=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Exact, trimmed, single-line match -- rejects substrings and quotations.
+          trimmed="$(printf '%s' "${COMMENT_BODY}" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          if [[ "${trimmed}" == "${PERF_COMMAND}" ]]; then
+            echo "authorized=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "authorized=false" >> "$GITHUB_OUTPUT"
+            echo "Comment is not exactly '${PERF_COMMAND}'; not triggering."
+          fi
+
+      - name: Resolve PR context
+        id: ctx
+        if: steps.gate.outputs.authorized == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            pr="${{ github.event.issue.number }}"
+            data="$(gh api "repos/${{ github.repository }}/pulls/${pr}")"
+            head_sha="$(printf '%s' "${data}" | jq -r '.head.sha')"
+            base_ref="$(printf '%s' "${data}" | jq -r '.base.ref')"
+            echo "pr_number=${pr}" >> "$GITHUB_OUTPUT"
+            echo "requester=${{ github.event.comment.user.login }}" >> "$GITHUB_OUTPUT"
+          else
+            head_sha="${{ github.sha }}"
+            base_ref="${{ github.ref_name }}"
+            echo "pr_number=" >> "$GITHUB_OUTPUT"
+            echo "requester=${{ github.actor }}" >> "$GITHUB_OUTPUT"
+          fi
+          # base_ref is untrusted API data -- validate before any downstream git use.
+          git check-ref-format "refs/heads/${base_ref}"
+          echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
+          echo "base_ref=${base_ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Mark commit status pending (PR only)
+        if: steps.gate.outputs.authorized == 'true' && steps.ctx.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.ctx.outputs.head_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh api -X POST "repos/${{ github.repository }}/statuses/${HEAD_SHA}" \
+            -f state=pending \
+            -f "context=${STATUS_CONTEXT}" \
+            -f "target_url=${RUN_URL}" \
+            -f "description=Perf regression run queued"
+
+      - name: Acknowledge on the PR
+        if: steps.gate.outputs.authorized == 'true' && steps.ctx.outputs.pr_number != ''
+        uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
+        with:
+          header: rccl-perf-gate
+          number: ${{ steps.ctx.outputs.pr_number }}
+          GITHUB_TOKEN: ${{ github.token }}
+          message: |
+            🏃 **RCCL Perf Regression Gate** queued for commit `${{ steps.ctx.outputs.head_sha }}` (requested by @${{ steps.ctx.outputs.requester }}).
+
+            [View run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+  # ---------------------------------------------------------------------------
+  # build: compile reference + candidate librccl on one build node.
+  # Runs PR code -> read-only token, per-PR concurrency (so PRs don't cancel
+  # each other; a newer /perf-regression on the SAME PR supersedes an older one).
+  # ---------------------------------------------------------------------------
   build:
+    needs: resolve
     # Forked PRs cannot run this workflow: it builds and MPI-executes the PR's
     # own source on a self-hosted runner, so arbitrary fork code would get
     # arbitrary code execution on our infrastructure. Scope to same-repo PRs
     # only; workflow_dispatch is unaffected (it already requires repo write
-    # access to trigger).
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # access to trigger). (Kept from the original -- a no-op under
+    # issue_comment/workflow_dispatch, which are never 'pull_request', so the
+    # existing guard isn't weakened.)
+    if: >
+      needs.resolve.outputs.authorized == 'true' &&
+      ( github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository )
     # Separate lock from the detect job below: build never touches the pinned
     # nodes, so it shouldn't queue behind another PR's in-flight A/B run.
     # (Real cross-PR parallelism from this also needs a 2nd self-hosted runner
     # -- see "Runner capacity" in the PR's known gaps. With one runner, this
     # still shortens how long the 4-node reservation is held per PR.)
     concurrency:
-      group: rccl-perf-gate-build
-      cancel-in-progress: false
+      # Per-PR so PRs don't cancel each other; job-level concurrency can't read
+      # `needs`, so derive the key from the event.
+      group: rccl-perf-gate-build-${{ github.event.issue.number || github.ref }}
+      cancel-in-progress: true
     runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
     timeout-minutes: 60
+    permissions:
+      contents: read
     outputs:
-      config_json: ${{ steps.resolve.outputs.config_json }}
+      config_json: ${{ steps.build.outputs.config_json }}
     steps:
-      - name: Checkout PR (full history)
+      - name: Checkout PR head (pinned SHA, full history)
         uses: actions/checkout@v4
         with:
-          # github.sha/github.ref point at the PR's synthetic merge commit on
-          # pull_request events, not the PR head -- use the head SHA directly
-          # so candidate == PR head exactly (matters for merge-base diffing).
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.resolve.outputs.head_sha }}
           fetch-depth: 0
 
-      - name: Detect changed paths
-        id: paths
-        if: github.event_name == 'pull_request'
+      - name: Fetch base branch
+        env:
+          BASE_REF: ${{ needs.resolve.outputs.base_ref }}
         run: |
-          git diff --name-only origin/${{ github.base_ref }}...HEAD \
-            | grep -q '^projects/rccl/' \
-            && echo "rccl_changed=1" >> "$GITHUB_OUTPUT" \
-            || echo "rccl_changed=0" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          git check-ref-format "refs/heads/${BASE_REF}"
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+
+      - name: Detect changed paths (merge-base)
+        id: paths
+        env:
+          BASE_REF: ${{ needs.resolve.outputs.base_ref }}
+        run: |
+          set -euo pipefail
+          base="$(git merge-base "origin/${BASE_REF}" HEAD)"
+          if git diff --name-only "${base}" HEAD | grep -q '^projects/rccl/'; then
+            echo "rccl_changed=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "rccl_changed=0" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build reference + candidate librccl (single build node)
-        id: resolve
+        id: build
         env:
-          BUILD_RCCL: ${{ github.event_name == 'pull_request' && steps.paths.outputs.rccl_changed || inputs.build_rccl || '0' }}
+          BUILD_RCCL: ${{ github.event_name == 'issue_comment' && steps.paths.outputs.rccl_changed || inputs.build_rccl || '0' }}
           CANDIDATE_SRC: ${{ github.workspace }}
-          BASE_REF: origin/${{ github.base_ref || 'develop' }}
+          BASE_REF: origin/${{ needs.resolve.outputs.base_ref }}
           _CONFIG: ${{ inputs.config || '/it-share/rccl-ci/configs/ci_detect_prod.json' }}
         run: |
           if [[ "${BUILD_RCCL}" == "1" ]]; then
-            # This job's concurrency lock no longer matches the detect job's
-            # lock, so another PR's build can now run while this PR is still
-            # waiting for/running its detect step. Templating the shared prod
-            # config file in place (the old behavior) would let one PR's build
-            # clobber another PR's in-flight detect config -- give every run
-            # its own copy instead.
+            # Give every run its own config copy so a concurrent build can't
+            # clobber another PR's in-flight detect config.
             RUN_CONFIG="${RCCL_CI_ROOT}/configs/ci_detect_run_${{ github.run_id }}.json"
             cp "${_CONFIG}" "${RUN_CONFIG}"
-            # Set the output before sbatch runs (not after) so the cleanup-on-
-            # failure step below can still find this path if sbatch fails.
+            # Set the output before sbatch so cleanup-on-failure can find it.
             echo "config_json=${RUN_CONFIG}" >> "$GITHUB_OUTPUT"
             sbatch --wait \
               --export="ALL,CANDIDATE_SRC=${CANDIDATE_SRC},BASE_REF=${BASE_REF},CONFIG_JSON=${RUN_CONFIG}" \
@@ -126,20 +238,28 @@ jobs:
           fi
 
       - name: Clean up per-run config copy on build failure
-        # Covers the case the detect job's own cleanup step can't: if sbatch
-        # fails after the per-run config copy was made, `detect` never runs
-        # (needs: build), so nothing else removes this file from NFS.
+        # If sbatch fails after the per-run copy is made, detect never runs, so
+        # nothing else removes this file from NFS.
         if: failure()
         env:
-          _CONFIG: ${{ steps.resolve.outputs.config_json }}
+          _CONFIG: ${{ steps.build.outputs.config_json }}
         run: |
           case "${_CONFIG}" in
             "${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
           esac
 
+  # ---------------------------------------------------------------------------
+  # detect: A/B detector on the pinned 4-node set. Globally serialized (only one
+  # A/B job on those nodes at a time). Runs PR-built artifacts -> read-only
+  # token; renders + uploads the report for finalize to post.
+  # ---------------------------------------------------------------------------
   detect:
-    needs: build
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    needs: [resolve, build]
+    # Same-repo guard preserved (see build) -- no-op under issue_comment/dispatch.
+    if: >
+      needs.resolve.outputs.authorized == 'true' &&
+      needs.build.result == 'success' &&
+      ( github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository )
     # Serialise: the pinned calibration nodes can host only one A/B job at a
     # time, and thresholds are only valid there. Do NOT cancel in-progress (a
     # running allocation must finish cleanly to release the nodes).
@@ -148,14 +268,15 @@ jobs:
       cancel-in-progress: false
     runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
     timeout-minutes: 540
+    permissions:
+      contents: read
+    outputs:
+      exit_code: ${{ steps.detect.outputs.exit_code }}
     steps:
       - name: Run A/B detector (pinned 4-node allocation)
         id: detect
-        # Don't fail here; we still want to post the report below -- the final
-        # "Gate" step enforces it based on the captured exit code below, not
-        # this step's outcome (continue-on-error reports "failure" the same
-        # way for a detected regression and for a polling error, so outcome
-        # alone can't tell them apart).
+        # Capture the exit code; the finalize job decides pass/fail from it
+        # (continue-on-error can't distinguish a regression from an infra error).
         continue-on-error: true
         env:
           _CONFIG: ${{ needs.build.outputs.config_json }}
@@ -176,15 +297,15 @@ jobs:
             --output "${RUNNER_TEMP}/rccl_report.md"
           cat "${RUNNER_TEMP}/rccl_report.md" >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Post / update PR comment
-        if: always() && github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
+      - name: Upload rendered report (for finalize)
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          header: rccl-perf-gate
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: rccl-perf-report
           path: ${{ runner.temp }}/rccl_report.md
+          if-no-files-found: ignore
 
-      - name: Upload artifacts
+      - name: Upload A/B artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -193,6 +314,7 @@ jobs:
             /it-share/rccl-ci/ab_artifacts/ab_regression_report.json
             /it-share/rccl-ci/ab_artifacts/ab_derived_thresholds.json
             /it-share/rccl-ci/ab_artifacts/rccl_runs.log
+          if-no-files-found: ignore
 
       - name: Clean up per-run config copy
         if: always()
@@ -203,23 +325,87 @@ jobs:
             "${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
           esac
 
-      - name: Gate on detector verdict
-        if: always()
+  # ---------------------------------------------------------------------------
+  # finalize: compute the verdict and publish feedback. Hosted runner, WRITE
+  # token, never checks out PR code. Runs even if build/detect failed so the
+  # commit status is always resolved (best-effort if a newer run supersedes it).
+  # ---------------------------------------------------------------------------
+  finalize:
+    needs: [resolve, build, detect]
+    if: always() && needs.resolve.outputs.authorized == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+      pull-requests: write
+      statuses: write
+    steps:
+      - name: Download rendered report (if any)
+        if: needs.resolve.outputs.pr_number != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: rccl-perf-report
+          path: report
+
+      - name: Compute verdict and set commit status
+        id: verdict
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          DETECT_RESULT: ${{ needs.detect.result }}
+          DETECT_CODE: ${{ needs.detect.outputs.exit_code }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          # submit_and_poll.sh exit codes: 0 = pass, 1 = regression detected,
-          # 2 = submission/polling error (job never reached a terminal state).
-          # steps.detect.outcome can't distinguish 1 from 2 -- continue-on-error
-          # reports "failure" for any nonzero exit -- so branch on the exit
-          # code we captured explicitly instead.
-          code="${{ steps.detect.outputs.exit_code }}"
-          if [[ "${code}" != "0" && "${code}" != "1" ]]; then
-            echo "::error::Detector failed to run (SLURM submission/polling error or timeout, exit ${code}). Report on NFS may be stale — not gating on it."
-            exit 2
+          set -euo pipefail
+          # Advisory: a detected regression (detector exit 1) does NOT fail the
+          # gate; only build failure / detector infra errors do.
+          state=success; desc="Perf gate passed"
+          if [[ "${BUILD_RESULT}" != "success" ]]; then
+            state=failure; desc="Build job ${BUILD_RESULT}"
+          elif [[ "${DETECT_RESULT}" == "cancelled" || "${DETECT_RESULT}" == "skipped" ]]; then
+            state=error; desc="Detector ${DETECT_RESULT}"
+          elif [[ "${DETECT_CODE}" != "0" && "${DETECT_CODE}" != "1" ]]; then
+            state=failure; desc="Detector infra error (exit ${DETECT_CODE:-unknown})"
           fi
-          # Advisory mode (see PR description): report the verdict but don't
-          # fail the job on a detected regression yet. Infra failures above
-          # still fail hard regardless of mode.
-          python3 "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/format_report.py" \
-            "${RCCL_CI_ROOT}/ab_artifacts/ab_regression_report.json" \
-            --no-exit-code \
-            --output /dev/null
+          echo "state=${state}" >> "$GITHUB_OUTPUT"
+          echo "desc=${desc}" >> "$GITHUB_OUTPUT"
+          if [[ -n "${HEAD_SHA}" ]]; then
+            gh api -X POST "repos/${{ github.repository }}/statuses/${HEAD_SHA}" \
+              -f "state=${state}" \
+              -f "context=${STATUS_CONTEXT}" \
+              -f "target_url=${RUN_URL}" \
+              -f "description=${desc}"
+          fi
+
+      - name: Assemble PR comment
+        if: needs.resolve.outputs.pr_number != ''
+        env:
+          HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+          STATE: ${{ steps.verdict.outputs.state }}
+          DESC: ${{ steps.verdict.outputs.desc }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### RCCL Perf Regression Gate (on demand)"
+            echo
+            echo "- Commit: \`${HEAD_SHA}\`"
+            echo "- Result: **${STATE}** — ${DESC}"
+            echo "- [Run log](${RUN_URL})"
+            echo
+            if [[ -f report/rccl_report.md ]]; then
+              cat report/rccl_report.md
+            fi
+          } > comment.md
+
+      - name: Post / update PR comment
+        if: needs.resolve.outputs.pr_number != ''
+        uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
+        with:
+          header: rccl-perf-gate
+          number: ${{ needs.resolve.outputs.pr_number }}
+          GITHUB_TOKEN: ${{ github.token }}
+          path: comment.md
