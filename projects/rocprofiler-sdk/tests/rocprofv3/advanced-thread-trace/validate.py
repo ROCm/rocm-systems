@@ -328,9 +328,7 @@ def test_att_no_detail(att_no_detail_out_dir_path):
             validate_occupancy_rows(json.load(f), occupancy_file)
 
     wave_files = sorted(
-        Path(att_no_detail_out_dir_path).glob(
-            "ui_output_*/se*_sm*_sl*_wv*.json"
-        )
+        Path(att_no_detail_out_dir_path).glob("ui_output_*/se*_sm*_sl*_wv*.json")
     )
     for wave_file in wave_files:
         with open(wave_file, "r", encoding="utf-8") as f:
