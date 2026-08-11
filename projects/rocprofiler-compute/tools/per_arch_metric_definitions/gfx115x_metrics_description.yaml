@@ -107,6 +107,10 @@ Memory chart - TCP Cache (GL0 Vector Cache):
     rst: TCP write requests per normalization unit (TCP_REQ_WRITE_sum).
     unit: Requests per Normalization Unit
 Memory chart - LDS (Local Data Share):
+  LDS Req:
+    plain: Number of LDS instructions issued by the shader, including FLAT instructions that resolve to LDS. This counts instructions rather than data movement, so it does not distinguish reads from writes.
+    rst: Number of LDS instructions issued by the shader, including FLAT instructions that resolve to LDS. This counts instructions rather than data movement, so it does not distinguish reads from writes.
+    unit: Requests per Normalization Unit
   LDS Utilization:
     plain: Percentage of shader busy cycles during which LDS was servicing indexed accesses.
     rst: Percentage of shader busy cycles during which LDS was servicing indexed accesses.

@@ -63,6 +63,7 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("GL0 Cache Hit Rate (TCP Cache)", 88.0),
     ("GL0 Cache BW (TCP Cache)", 80e9),
     # Table 304: LDS
+    ("LDS Req", 125_000),
     ("LDS Utilization", 62.0),
     ("LDS Bank Conflict Rate", 4.0),
     ("LDS Estimated Bandwidth", 256e9),
@@ -258,6 +259,7 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     m["tcp_hit"] = metric_dict.get("GL0 Cache Hit Rate (TCP Cache)")
     m["tcp_bw"] = metric_dict.get("GL0 Cache BW (TCP Cache)")
 
+    m["lds_req"] = metric_dict.get("LDS Req")
     m["lds_util"] = metric_dict.get("LDS Utilization")
     m["lds_bw"] = metric_dict.get("LDS Estimated Bandwidth")
     m["lds_bank_conflict"] = metric_dict.get("LDS Bank Conflict Rate")
@@ -312,24 +314,26 @@ def _build_kernel_and_l0(
         height=30,
     )
 
-    # Kernel edges — TCP and SQC request counts.
+    # Kernel edges — LDS, TCP and SQC request counts.
     ka_l = kernel_arrows["left"]
     ka_r = kernel_arrows["right"]
+    ka_p = kernel_arrows["plain"]
     kernel_edges_lines = [
-        # Rows 0-9 face the LDS panel and stay empty: gfx115x has no LDS request
-        # counter. The LDS panel carries Util, BW and Bank Conflicts.
+        # Row 0 = the "LDS" title row, and the header for every request row below.
+        "     [white]Request[/white]",
         "",
         "",
-        "",
-        "",
-        "",
+        # SQ_INSTS_LDS counts instructions issued, not data movement, so it splits
+        # into neither reads nor writes: one unstyled, arrow-less line.
+        _fmt_edge("LDS", m["lds_req"]),
+        ka_p,
         "",
         "",
         "",
         "",
         "",
         # Row 10 = the "GL0 (TCP Cache)" title row
-        "     [white]Request[/white]",
+        "",
         "",
         "",
         f"[{c_rd}]{_fmt_edge('Read', m['tcp_read_req'])}[/{c_rd}]",
@@ -653,6 +657,7 @@ def create_mem_chart_diagram(
     kernel_arrows = {
         "left": "<" + "-" * (kernel_edge_width - 1),
         "right": "-" * (kernel_edge_width - 1) + ">",
+        "plain": "-" * kernel_edge_width,
     }
 
     # Build layout columns

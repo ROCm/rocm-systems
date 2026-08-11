@@ -120,6 +120,9 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
+        LDS Req:
+          value: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
         LDS Utilization:
           value: 100 * SUM(SQC_LDS_IDX_ACTIVE_sum) / SUM(SQ_BUSY_CYCLES_sum)
           unit: Percent
@@ -265,6 +268,10 @@ Panel Config:
       Percentage of GL0 vector cache (TCP Cache) requests serviced from cache. TCP Cache is the
       first-level cache for vector memory operations. Higher hit rates reduce traffic
       to the GL1 cache and lower memory access latency for vector operations.
+    LDS Req: >-
+      Number of LDS instructions issued by the shader, including FLAT instructions that
+      resolve to LDS. This counts instructions rather than data movement, so it does not
+      distinguish reads from writes.
     LDS Utilization: >-
       Percentage of shader busy cycles during which LDS was servicing indexed accesses.
     LDS Bank Conflict Rate: >-
