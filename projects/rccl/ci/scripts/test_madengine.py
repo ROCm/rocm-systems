@@ -21,10 +21,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -63,8 +65,8 @@ WORKLOAD_CONFIGS = {
         ],
         "base_image": "rocm/primus:v26.4",
         "gpu_target": "gfx950",
-        "precision": "bf16",
         "metric_key": "tokens_per_second_per_gpu",
+        "multiple_results": "perf_primus-megatron-Llama-3.1-70B.csv",
         "reference_values": {
             "2N": 1685,
             "4N": 1600,
@@ -75,7 +77,10 @@ WORKLOAD_CONFIGS = {
         "slurm_partition": "meta64",
         "gpus_per_node": 8,
         "time_limit": "03:00:00",
-        "container_mounts": ["/shared:/shared"],
+        "docker_mounts": {"/dev/infiniband": "/dev/infiniband"},
+        "docker_run_options": "--privileged --group-add render --shm-size 64G "
+            "--device=/dev/infiniband --cap-add IPC_LOCK "
+            "--ulimit memlock=-1 -v /sys:/sys:ro -v /run/udev:/run/udev:ro",
     },
     "llama-4-scout-training": {
         "type": "training",
@@ -86,8 +91,8 @@ WORKLOAD_CONFIGS = {
         ],
         "base_image": "rocm/primus:v26.4",
         "gpu_target": "gfx950",
-        "precision": "bf16",
         "metric_key": "tokens_per_second_per_gpu",
+        "multiple_results": "perf_primus-megatron-Llama-3.1-70B.csv",
         "reference_values": {
             "2N": 2734,
             "4N": 2337,
@@ -95,7 +100,10 @@ WORKLOAD_CONFIGS = {
         "slurm_partition": "meta64",
         "gpus_per_node": 8,
         "time_limit": "02:00:00",
-        "container_mounts": ["/shared:/shared"],
+        "docker_mounts": {"/dev/infiniband": "/dev/infiniband"},
+        "docker_run_options": "--privileged --group-add render --shm-size 64G "
+            "--device=/dev/infiniband --cap-add IPC_LOCK "
+            "--ulimit memlock=-1 -v /sys:/sys:ro -v /run/udev:/run/udev:ro",
     },
 }
 
@@ -349,20 +357,27 @@ def patch_madengine_for_cluster(
             log.info("run_orchestrator.py already patched or yum string not found")
 
 
-def get_rccl_commit() -> str:
-    """Get the current RCCL commit hash from git or environment."""
+def get_rccl_commit(rccl_lib: Path | None = None) -> str:
+    """Derive a unique identifier for the RCCL build.
+
+    Checks, in order: RCCL_COMMIT_HASH env, GITHUB_RUN_ID env, sha256 of
+    the librccl.so binary.  Does NOT fall back to ``git rev-parse HEAD``
+    because in CI the checkout is TheRock (not RCCL), which would produce
+    a constant tag and cause stale cache hits on persistent runners.
+    """
     commit = os.environ.get("RCCL_COMMIT_HASH", "")
     if commit:
-        return commit
+        return commit[:12]
 
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=True,
-        )
-        return result.stdout.strip()[:12]
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return "unknown"
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    if run_id:
+        return f"run{run_id}"
+
+    if rccl_lib and rccl_lib.exists():
+        h = hashlib.sha256(rccl_lib.read_bytes()).hexdigest()
+        return h[:12]
+
+    return "unknown"
 
 
 def _rccl_uses_kpack(rccl_lib: Path) -> bool:
@@ -396,7 +411,7 @@ def build_rccl_overlay_image(
     SLURM compute nodes can pull it automatically.  Returns the final
     image tag (registry-qualified if pushed).
     """
-    rccl_commit = get_rccl_commit()
+    rccl_commit = get_rccl_commit(rccl_lib)
     tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}"
 
     result = subprocess.run(
@@ -482,7 +497,8 @@ ENV NCCL_DEBUG=WARN
         log.info("Overlay image built: %s", tag)
 
     if registry:
-        push_tag = f"{registry}/rccl-ci:{base_image.replace('/', '-')}-{rccl_commit}"
+        safe_base = base_image.replace("/", "-").replace(":", "-")
+        push_tag = f"{registry}/rccl-ci:{safe_base}-{rccl_commit}"
         log.info("Tagging overlay for registry: %s -> %s", tag, push_tag)
         subprocess.run(["docker", "tag", tag, push_tag], check=True)
         log.info("Pushing overlay image to registry: %s", push_tag)
@@ -501,27 +517,25 @@ def generate_manifest(
     nodes: int,
     work_dir: Path,
     nodelist: str = "",
+    registry: str = "",
 ) -> Path:
-    """Generate a madengine manifest.json for the workload."""
+    """Generate a madengine manifest.json for the workload.
+
+    Structure follows the reference template from the mad-rccl branch:
+    deployment config under ``deployment_config``, env vars inside both
+    ``context.docker_env_vars`` and ``deployment_config.env_vars``, mounts
+    in ``context.docker_mounts``.
+    """
     gpus_per_node = workload_config["gpus_per_node"]
-    total_gpus = nodes * gpus_per_node
 
     nccl_env = dict(cluster_config.get("nccl_env", {}))
     if nodes == 1:
         nccl_env.pop("NCCL_NET", None)
-        # Single-node doesn't need multi-NIC; keep only the first interface
-        # to avoid Gloo failures on nodes that lack secondary NICs.
         ifname = nccl_env.get("NCCL_SOCKET_IFNAME", "")
         if "," in ifname:
             nccl_env["NCCL_SOCKET_IFNAME"] = ifname.split(",")[0]
-    env_vars = {
-        **nccl_env,
-        "NCCL_DEBUG": "WARN",
-    }
 
-    if cluster_config.get("mount_host_ib_libs") and nodes > 1:
-        if "NCCL_SOCKET_IFNAME" in nccl_env:
-            env_vars["GLOO_SOCKET_IFNAME"] = nccl_env["NCCL_SOCKET_IFNAME"]
+    socket_ifname = nccl_env.get("NCCL_SOCKET_IFNAME", "")
 
     # HF_TOKEN is passed via MAD_SECRETS_HFTOKEN in the process environment
     # (set in the workflow). Do NOT write it into the manifest — the manifest
@@ -531,44 +545,62 @@ def generate_manifest(
     scripts_dir = work_dir / "scripts" / "primus_megatron-lm"
     if not scripts_dir.is_dir():
         scripts_dir = work_dir / "scripts" / "primus" / "megatron-lm"
-    run_sh = scripts_dir / "run.sh"
-    if run_sh.exists():
-        run_sh_text = run_sh.read_text()
-        if model_repo not in run_sh_text:
-            for alias in workload_config.get("model_repo_aliases", []):
-                if alias in run_sh_text:
-                    log.info("Model repo %s not in run.sh, using alias %s",
-                             model_repo, alias)
-                    model_repo = alias
-                    break
+
     image_key = "overlay"
+    gpu_indices = ",".join(str(i) for i in range(gpus_per_node))
+    render_ds = [128 + i for i in range(gpus_per_node)]
+
+    docker_env_vars = {
+        **nccl_env,
+        "NCCL_DEBUG": "WARN",
+        "NCCL_IB_DISABLE": "0",
+        "NCCL_TIMEOUT": "900",
+        "IBV_SHOW_WARNINGS": "1",
+    }
+    if socket_ifname:
+        docker_env_vars["GLOO_SOCKET_IFNAME"] = socket_ifname
+
+    docker_mounts = dict(workload_config.get("docker_mounts", {}))
+    docker_run_opts = workload_config.get("docker_run_options", "")
+
+    slurm_config = {
+        "partition": cluster_config.get("slurm_partition", workload_config["slurm_partition"]),
+        "qos": cluster_config.get("slurm_qos", ""),
+        "nodes": nodes,
+        "gpus_per_node": gpus_per_node,
+        "time": workload_config["time_limit"],
+        "output_dir": "./slurm_output",
+        "exclusive": True,
+        "enable_node_check": False,
+        "network_interface": socket_ifname,
+        **({"nodelist": nodelist} if nodelist else {}),
+    }
 
     manifest = {
-        "model_repo": model_repo,
         "built_images": {
             image_key: {
                 "docker_image": overlay_image,
-                "local_image": True,
-                "base_docker": overlay_image,
+                "local_image": not bool(registry),
+                "registry_image": overlay_image if registry else None,
+                "registry": registry or None,
+                "base_docker": workload_config["base_image"],
                 "build_status": "SKIPPED",
-                "build_time": 0,
+                "build_duration": 0,
+                "gpu_vendor": "AMD",
             },
         },
         "built_models": {
             image_key: {
                 "name": model_repo,
-                "tags": ["pyt", "pretrain", "training"],
+                "tags": workload_config.get("tags", ["pyt", "pretrain", "training"]),
                 "dockerfile": "N/A (overlay image)",
                 "scripts": f"scripts/{scripts_dir.name}/run.sh",
-                "n_gpus": str(total_gpus),
+                "n_gpus": "-1",
                 "owner": "",
-                "training_precision": workload_config.get("precision", ""),
+                "training_precision": "",
+                "multiple_results": workload_config.get("multiple_results", ""),
                 "args": f"--model_repo {model_repo}",
-                "additional_docker_run_options": (
-                    "--device=/dev/infiniband"
-                    if cluster_config.get("mount_host_ib_libs") and nodes > 1
-                    else ""
-                ),
+                "additional_docker_run_options": docker_run_opts,
                 "data": "",
                 "cred": "",
                 "timeout": None,
@@ -577,40 +609,33 @@ def generate_manifest(
         "context": {
             "gpu_vendor": "AMD",
             "guest_os": "UBUNTU",
-            "docker_gpus": ",".join(str(i) for i in range(gpus_per_node)),
-            "gpu_renderDs": [128 + i for i in range(gpus_per_node)],
-            "docker_env_vars": {
-                "MAD_SYSTEM_GPU_ARCHITECTURE": cluster_config["gpu_target"],
-                "MAD_SYSTEM_NGPUS": str(gpus_per_node),
-                "MAD_SYSTEM_HIP_VERSION": "6.4",
-                "MAD_SYSTEM_GPU_PRODUCT_NAME": cluster_config["gpu_target"],
-                **nccl_env,
-                "NCCL_IB_DISABLE": "0",
-                "NCCL_SOCKET_IFNAME": nccl_env.get("NCCL_SOCKET_IFNAME", "eth0"),
-                "MAD_MULTI_NODE_RUNNER": "",
-            },
-            "docker_mounts": {},
-            "docker_build_arg": {
-                "MAD_SYSTEM_GPU_ARCHITECTURE": cluster_config["gpu_target"],
-            },
+            "docker_gpus": gpu_indices,
+            "gpu_renderDs": render_ds,
+            "docker_env_vars": docker_env_vars,
+            "docker_mounts": docker_mounts,
+            "docker_build_arg": {},
         },
-        "slurm": {
-            "partition": cluster_config.get("slurm_partition", workload_config["slurm_partition"]),
-            "qos": cluster_config.get("slurm_qos", ""),
-            "network_interface": nccl_env.get("NCCL_SOCKET_IFNAME", ""),
-            "nodes": nodes,
-            "ntasks_per_node": gpus_per_node,
-            "gpus_per_node": gpus_per_node,
-            "time": workload_config["time_limit"],
-            "exclusive": True,
-            "enable_node_check": False,
-            **({"nodelist": nodelist} if nodelist else {}),
+        "deployment_config": {
+            "target": "slurm",
+            "slurm": slurm_config,
+            "distributed": {
+                "launcher": "primus",
+                "backend": "nccl",
+                "port": 29500,
+                "nnodes": nodes,
+                "nproc_per_node": gpus_per_node,
+            },
+            "env_vars": {
+                **docker_env_vars,
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+                "TORCH_NCCL_HIGH_PRIORITY": "1",
+                "OMP_NUM_THREADS": "8",
+                "MIOPEN_FIND_MODE": "1",
+            },
+            "debug": False,
+            "docker_gpus": gpu_indices,
         },
-        "env": env_vars,
     }
-
-    if workload_config.get("container_mounts"):
-        manifest["container_mounts"] = workload_config["container_mounts"]
 
     manifest_path = work_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2))
@@ -623,57 +648,20 @@ def run_madengine(
     output_csv: Path,
     work_dir: Path,
     timeout_minutes: int = 120,
-    gpu_target: str = "gfx950",
-    gpus_per_node: int = 8,
-    nodes: int = 2,
-    slurm_partition: str = "meta64",
-    slurm_time: str = "02:00:00",
-    nccl_env: dict | None = None,
-    network_interface: str = "",
-    nodelist: str = "",
 ) -> int:
-    """Run madengine with the given manifest and return the exit code."""
-    render_ds = [128 + i for i in range(gpus_per_node)]
-    gpu_indices = ",".join(str(i) for i in range(gpus_per_node))
-    env_vars = {
-        "MAD_SYSTEM_GPU_ARCHITECTURE": gpu_target,
-        "MAD_SYSTEM_NGPUS": str(gpus_per_node),
-        "MAD_SYSTEM_HIP_VERSION": "6.4",
-        "MAD_SYSTEM_GPU_PRODUCT_NAME": gpu_target,
-    }
-    if nccl_env:
-        env_vars.update(nccl_env)
-    env_vars["NCCL_IB_DISABLE"] = "0"
-    env_vars["MAD_MULTI_NODE_RUNNER"] = ""
-    additional_context = json.dumps({
-        "gpu_vendor": "AMD",
-        "docker_gpus": gpu_indices,
-        "gpu_renderDs": render_ds,
-        "docker_env_vars": env_vars,
-        "slurm": {
-            "partition": slurm_partition,
-            "network_interface": network_interface,
-            "nodes": nodes,
-            "gpus_per_node": gpus_per_node,
-            "time": slurm_time,
-            "exclusive": True,
-            "enable_node_check": False,
-            **({"nodelist": nodelist} if nodelist else {}),
-        },
-        "distributed": {
-            "launcher": "primus",
-            "nnodes": nodes,
-            "nproc_per_node": gpus_per_node,
-            "backend": "nccl",
-        },
-    })
+    """Run madengine with the given manifest and return the exit code.
+
+    The manifest already contains deployment_config with slurm, distributed,
+    and env_vars sections.  madengine merges deployment_config into
+    additional_context automatically (run_orchestrator.py:225-234), so we
+    do not need to duplicate those here.
+    """
     cmd = [
         "madengine", "run",
         "-m", str(manifest_path),
         "-o", str(output_csv),
         "--live-output",
         "--verbose",
-        "--additional-context", additional_context,
     ]
 
     log.info("Running: %s", " ".join(cmd))
@@ -709,22 +697,41 @@ def run_madengine(
         return 124
 
 
-def parse_perf_csv(csv_path: Path, metric_key: str) -> dict:
-    """Parse madengine perf.csv and extract the key metric."""
-    if not csv_path.exists():
-        log.error("perf.csv not found at %s", csv_path)
-        return {}
+def parse_perf_results(work_dir: Path) -> list[dict]:
+    """Parse madengine performance results.
 
-    log.info("Parsing perf.csv: %s", csv_path)
-    results = {}
-    with open(csv_path) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            log.info("perf.csv row: %s", dict(row))
-            for key, value in row.items():
-                results[key] = value
+    Prefers ``perf_entry_super.json`` (31 fixed columns, per-precision rows
+    with ``multi_results``).  Falls back to ``perf.csv`` (variable-width,
+    long-format).  Returns a list of result dicts — one per row.
+    """
+    super_json = work_dir / "perf_entry_super.json"
+    if super_json.exists():
+        try:
+            entries = json.loads(super_json.read_text())
+            if entries:
+                log.info("Parsed %d result(s) from perf_entry_super.json", len(entries))
+                for e in entries:
+                    log.info("  model=%s perf=%s metric=%s status=%s precision=%s",
+                             e.get("model"), e.get("performance"),
+                             e.get("metric"), e.get("status"),
+                             e.get("training_precision"))
+                return entries
+        except (json.JSONDecodeError, TypeError) as exc:
+            log.warning("Could not parse %s: %s", super_json, exc)
 
-    return results
+    csv_path = work_dir / "perf.csv"
+    if csv_path.exists():
+        rows = []
+        with open(csv_path) as f:
+            for row in csv.DictReader(f):
+                log.info("perf.csv row: %s", dict(row))
+                rows.append(dict(row))
+        if rows:
+            log.info("Parsed %d row(s) from perf.csv", len(rows))
+            return rows
+
+    log.warning("No perf results found in %s", work_dir)
+    return []
 
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -1023,7 +1030,6 @@ def main() -> None:
 
     workload_config = WORKLOAD_CONFIGS[args.workload]
     cluster_config = CLUSTER_CONFIGS[args.cluster]
-    rccl_commit = get_rccl_commit()
     scale = f"{args.nodes}N/{args.nodes * workload_config['gpus_per_node']}GPU"
 
     results_dir = args.results_dir or Path(cluster_config["results_base"])
@@ -1034,6 +1040,8 @@ def main() -> None:
     # Step 1: Find RCCL library
     rccl_lib = find_rccl_library(args.artifact_dir)
     log.info("RCCL library: %s", rccl_lib)
+    rccl_commit = get_rccl_commit(rccl_lib)
+    log.info("RCCL commit/tag: %s", rccl_commit)
 
     # Step 2: Install madengine
     madengine_dir = install_madengine(work_dir)
@@ -1082,79 +1090,69 @@ def main() -> None:
         args.nodes,
         work_dir,
         nodelist=nodelist,
+        registry=args.registry,
     )
 
     # Step 5: Run the workload
     output_csv = work_dir / "perf.csv"
-    nccl_env = dict(cluster_config.get("nccl_env", {}))
-    if args.nodes == 1:
-        nccl_env.pop("NCCL_NET", None)
-        ifname = nccl_env.get("NCCL_SOCKET_IFNAME", "")
-        if "," in ifname:
-            nccl_env["NCCL_SOCKET_IFNAME"] = ifname.split(",")[0]
     exit_code = run_madengine(
         manifest_path, output_csv, work_dir, args.timeout_minutes,
-        gpu_target=cluster_config["gpu_target"],
-        gpus_per_node=workload_config["gpus_per_node"],
-        nodes=args.nodes,
-        slurm_partition=cluster_config["slurm_partition"],
-        slurm_time=workload_config["time_limit"],
-        nccl_env=nccl_env,
-        network_interface=nccl_env.get("NCCL_SOCKET_IFNAME", ""),
-        nodelist=nodelist,
     )
 
-    # Step 6: Parse results — try perf.csv first, fall back to live log
-    metric_value = None
-    metric_key = workload_config["metric_key"]
-    if output_csv.exists():
-        perf_data = parse_perf_csv(output_csv, metric_key)
-        if metric_key in perf_data and perf_data[metric_key]:
-            try:
-                metric_value = float(perf_data[metric_key])
-                log.info("Metric %s = %.1f (from perf.csv)", metric_key, metric_value)
-            except (ValueError, TypeError):
-                log.warning("Could not parse metric %s: %s", metric_key, perf_data.get(metric_key))
-
-        run_id = os.environ.get("GITHUB_RUN_ID", "local")
-        run_artifacts = results_dir / "runs" / run_id
-        try:
-            run_artifacts.mkdir(parents=True, exist_ok=True)
-            subprocess.run(["cp", str(output_csv), str(run_artifacts / "perf.csv")], check=True)
-        except OSError as exc:
-            log.warning("Could not save run artifacts to %s: %s", run_artifacts, exc)
-    else:
-        log.warning("No perf.csv produced — checking live logs for metrics")
-
-    # Fall back to live log parsing when perf.csv has no metrics.
-    # madengine's perf collector can miss metrics when primus defers
-    # collection to the login node, but the live log always has them.
+    # Step 6: Parse results — structured output first, live log fallback
+    perf_results = parse_perf_results(work_dir)
     live_log_runs = parse_live_log_metrics(work_dir)
+
+    # Save run artifacts
+    run_id = os.environ.get("GITHUB_RUN_ID", "local")
+    run_artifacts = results_dir / "runs" / run_id
+    try:
+        run_artifacts.mkdir(parents=True, exist_ok=True)
+        for f in ["perf.csv", "perf_entry_super.csv", "perf_entry_super.json"]:
+            src = work_dir / f
+            if src.exists():
+                shutil.copy2(str(src), str(run_artifacts / f))
+    except OSError as exc:
+        log.warning("Could not save run artifacts to %s: %s", run_artifacts, exc)
+
+    # Extract metric from structured results (perf_entry_super has
+    # performance/metric in long-format: metric name is a value in the
+    # ``metric`` column, not a column name).
+    metric_value = None
+    if perf_results:
+        for row in perf_results:
+            perf_val = row.get("performance", "")
+            if perf_val:
+                try:
+                    metric_value = float(perf_val)
+                    log.info("Metric %s = %.1f (from structured results)",
+                             row.get("metric", "?"), metric_value)
+                except (ValueError, TypeError):
+                    pass
+
+    # Fall back to live log parsing when structured results have no metrics.
     if metric_value is None and live_log_runs:
         best_run = live_log_runs[-1]
-        if metric_key == "tokens_per_second_per_gpu" and "tokens_per_second_per_gpu" in best_run:
-            metric_value = best_run["tokens_per_second_per_gpu"]
-            log.info("Metric %s = %.1f (from live log)", metric_key, metric_value)
-        elif "tflops_avg" in best_run:
-            metric_value = best_run["tflops_avg"]
-            log.info("Metric tflops_avg = %.1f (from live log, key %s not found)", metric_value, metric_key)
+        metric_value = best_run.get("tokens_per_second_per_gpu") or best_run.get("tflops_avg")
+        if metric_value is not None:
+            log.info("Metric = %.1f (from live log fallback)", metric_value)
 
     # Override exit_code if training actually completed successfully.
     # madengine can report failure (exit code 3) when its perf collector
     # can't parse the output format, even though training ran to completion.
     if exit_code != 0 and live_log_runs:
-        all_completed = all(r["completed"] for r in live_log_runs)
-        if all_completed:
+        all_completed = all(r.get("completed", False) for r in live_log_runs)
+        if all_completed and metric_value is not None:
             log.info(
                 "Overriding madengine exit code %d → 0: all %d training run(s) "
-                "completed successfully (live log verification)",
+                "completed with metrics (live log verification)",
                 exit_code, len(live_log_runs),
             )
             for r in live_log_runs:
                 log.info(
                     "  %s: %d/%d iters, %.1f TFLOP/s, %.1f tokens/s/GPU",
-                    r["log_file"], r["iter"], r["total"],
-                    r["tflops_avg"], r["tokens_per_second_per_gpu"],
+                    r.get("log_file", "?"), r.get("iter", 0), r.get("total", 0),
+                    r.get("tflops_avg", 0), r.get("tokens_per_second_per_gpu", 0),
                 )
             exit_code = 0
 
@@ -1201,7 +1199,7 @@ def main() -> None:
                 args.workload,
                 scale,
                 run.get("tokens_per_second_per_gpu"),
-                status,
+                "pass" if run.get("completed", False) else "fail",
                 rccl_commit,
                 extra=extra,
                 precision=run.get("precision"),
