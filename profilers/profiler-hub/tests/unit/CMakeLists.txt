@@ -211,6 +211,57 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_KD_PMC_PATH="${ROCPD_DB_V3_KD_PMC_PATH}"
 )
 
+# Synthetic v3 track-shapes fixture, generated at build time from committed SQL
+# against the canonical v3 schema (same mechanism as the kd_pmc fixture above).
+# Carries one track of each v3 dma / memory / cpu_thread shape the other v3
+# fixtures leave dark in get_track_stats / get_interval_track. The db has no
+# rocpd_timestamp table, so the reader selects the v3 backend.
+set(_v3s_uuid "00000000000000000000000000730003")
+set(_v3s_schema_src
+    ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
+)
+set(_v3s_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_track_shapes_data.sql)
+set(_v3s_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v3_track_shapes_gen.sql)
+file(READ ${_v3s_schema_src} _v3s_schema)
+file(READ ${_v3s_data_src} _v3s_data)
+string(
+    REGEX REPLACE
+    "INSERT INTO[^;]*rocpd_metadata[^;]*;"
+    ""
+    _v3s_schema
+    "${_v3s_schema}"
+)
+string(REPLACE "{{uuid}}" "_${_v3s_uuid}" _v3s_schema "${_v3s_schema}")
+string(REPLACE "{{guid}}" "${_v3s_uuid}" _v3s_schema "${_v3s_schema}")
+string(REPLACE "{{uuid}}" "_${_v3s_uuid}" _v3s_data "${_v3s_data}")
+string(REPLACE "{{guid}}" "${_v3s_uuid}" _v3s_data "${_v3s_data}")
+file(WRITE ${_v3s_gen_sql} "${_v3s_schema}\n${_v3s_data}\n")
+
+set(ROCPD_DB_V3_TRACK_SHAPES_PATH
+    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v3_track_shapes.db
+)
+add_custom_command(
+    OUTPUT ${ROCPD_DB_V3_TRACK_SHAPES_PATH}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V3_TRACK_SHAPES_PATH}
+    COMMAND
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_TRACK_SHAPES_PATH}
+        ".read ${_v3s_gen_sql}"
+    DEPENDS ${_v3s_gen_sql} ${_v3s_schema_src} ${_v3s_data_src}
+    COMMENT "Generating synthetic v3 track-shapes test fixture"
+    VERBATIM
+)
+add_custom_target(
+    profiler-hub_v3_track_shapes_fixture
+    DEPENDS ${ROCPD_DB_V3_TRACK_SHAPES_PATH}
+)
+add_dependencies(profiler-hub_unit_tests profiler-hub_v3_track_shapes_fixture)
+
+target_compile_definitions(
+    profiler-hub_unit_tests
+    PRIVATE ROCPD_DB_V3_TRACK_SHAPES_PATH="${ROCPD_DB_V3_TRACK_SHAPES_PATH}"
+)
+
 # Synthetic v4.0 kernel_dispatch_pmc fixture, generated at build time from committed
 # SQL against the bundled v4.0 schema (no canonical v4.0 DDL lives in-tree, so the
 # schema copy ships in fixtures/). Mirrors the v3 fixture data shape; the presence
