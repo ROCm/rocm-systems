@@ -402,15 +402,30 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
         }
       }
 
+      // pp_od_clk_voltage may omit a domain that lacks overdrive support
+      // (e.g. no OD_FCLK section on MI45x), leaving its parsed max at 0. In
+      // that case clear the flag so the pp_dpm_* loop below derives min/max.
       if (sclk) {
-        max = smax;
-        min = smin;
+        if (smax > 0) {
+          max = smax;
+          min = smin;
+        } else {
+          sclk = false;
+        }
       } else if (mclk) {
-        max = mmax;
-        min = mmin;
+        if (mmax > 0) {
+          max = mmax;
+          min = mmin;
+        } else {
+          mclk = false;
+        }
       } else if (fclk) {
-        max = fmax;
-        min = fmin;
+        if (fmax > 0) {
+          max = fmax;
+          min = fmin;
+        } else {
+          fclk = false;
+        }
       }
 
       smclk_ranges.close();
