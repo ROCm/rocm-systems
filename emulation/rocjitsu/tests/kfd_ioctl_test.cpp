@@ -1371,7 +1371,11 @@ protected:
         cmd.in_proc_handle = ::open("/proc/self", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
         if (cmd.in_proc_handle < 0)
           return -errno;
-        cmd.in_mem_handle = ::open("/proc/self/mem", O_RDWR | O_CLOEXEC);
+        // mem_mismatch_path_ lets a test transfer a writable mem fd belonging to
+        // some other process, which is what the identity check exists to catch.
+        const char *mem_path =
+            mem_mismatch_path_.empty() ? "/proc/self/mem" : mem_mismatch_path_.c_str();
+        cmd.in_mem_handle = ::open(mem_path, O_RDWR | O_CLOEXEC);
         if (cmd.in_mem_handle < 0) {
           ::close(cmd.in_proc_handle);
           return -errno;
@@ -1406,7 +1410,82 @@ protected:
   const rj_client_pid_t kClientPid = getpid();
   rj_vm_t *vm_ = nullptr;
   uint32_t process_id_ = 0;
+  std::string mem_mismatch_path_;
 };
+
+// The transferred mem fd becomes authoritative for guest reads and CWSR writes,
+// so O_RDWR is not enough to accept it -- it also has to name the memory of the
+// process whose /proc directory was pinned. A writable mem fd for some other
+// live process must be refused, or the daemon would silently redirect both at
+// the wrong address space.
+TEST_F(DbgTrapDaemonTest, EnableRejectsAMemFdForADifferentProcess) {
+  // A live child, so /proc/<pid>/mem exists and is openable for the whole test.
+  int sync[2];
+  ASSERT_EQ(pipe2(sync, O_CLOEXEC), 0);
+  pid_t other = fork();
+  ASSERT_GE(other, 0);
+  if (other == 0) {
+    ::close(sync[1]);
+    char b = 0;
+    while (::read(sync[0], &b, 1) == -1 && errno == EINTR) {
+    }
+    _exit(0);
+  }
+  ::close(sync[0]);
+  const util::UniqueHandle sync_closer{sync[1]};
+  auto reap = [&] {
+    kill(other, SIGKILL);
+    while (waitpid(other, nullptr, 0) == -1 && errno == EINTR) {
+    }
+  };
+
+  const std::string other_mem = std::format("/proc/{}/mem", other);
+  // Confirm the premise: procfs gives it a different inode from our own.
+  struct stat ours {};
+  struct stat theirs {};
+  const int self_mem = ::open("/proc/self/mem", O_RDWR | O_CLOEXEC);
+  ASSERT_GE(self_mem, 0);
+  const int their_mem = ::open(other_mem.c_str(), O_RDWR | O_CLOEXEC);
+  if (their_mem < 0) {
+    // Hardened kernels can refuse this open outright; the gate is then moot.
+    ::close(self_mem);
+    reap();
+    GTEST_SKIP() << "cannot open another process's mem: " << strerror(errno);
+  }
+  ASSERT_EQ(fstat(self_mem, &ours), 0);
+  ASSERT_EQ(fstat(their_mem, &theirs), 0);
+  EXPECT_NE(ours.st_ino, theirs.st_ino);
+  ::close(self_mem);
+  ::close(their_mem);
+
+  int notifier = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(notifier, 0);
+  const util::UniqueHandle notifier_closer{notifier};
+
+  mem_mismatch_path_ = other_mem;
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(kClientPid);
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = 0x0BADF00D;
+  int in_handle_out = -2;
+  EXPECT_EQ(execute(AMDKFD_IOC_DBG_TRAP, &en, sizeof(en), notifier, &in_handle_out), -ESRCH)
+      << "a writable mem fd for another process was accepted";
+  EXPECT_NE(in_handle_out, -1) << "the notifier was adopted by a rejected ENABLE";
+
+  // The matching fd still works, so the gate rejects the mismatch and not the
+  // transfer itself.
+  mem_mismatch_path_.clear();
+  int notifier2 = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(notifier2, 0);
+  kfd_ioctl_dbg_trap_args ok{};
+  ok.pid = static_cast<uint32_t>(kClientPid);
+  ok.op = KFD_IOC_DBG_TRAP_ENABLE;
+  ok.enable.dbg_fd = 0x0BADF00D;
+  EXPECT_EQ(execute(AMDKFD_IOC_DBG_TRAP, &ok, sizeof(ok), notifier2, nullptr), 0);
+  EXPECT_EQ(disable(), 0);
+
+  reap();
+}
 
 // The transferred fd (in_handle) replaces the client-side dbg_fd in the payload
 // and the session takes ownership (in_handle cleared so the transport does not
