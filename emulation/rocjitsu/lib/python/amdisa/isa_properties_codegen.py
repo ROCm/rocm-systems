@@ -41,7 +41,11 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         uses_cluster_ttmp_workgroup_ids = (
             'true' if profile.uses_cluster_ttmp_workgroup_ids else 'false'
         )
+        wave_size = profile.wave_size
+        wave_size_max = profile.wave_size_max
         addressable_vgprs = profile.max_addressable_vgprs_per_wf
+        vgpr_count_granule_wave32 = profile.descriptor_vgpr_count_granule_wave32
+        vgpr_count_granule_wave64 = profile.descriptor_vgpr_count_granule_wave64
         max_addressable_vgprs_per_wf = max(
             max_addressable_vgprs_per_wf, addressable_vgprs
         )
@@ -52,7 +56,11 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
             f'        .descriptor_sgpr_count_encoded = {descriptor_sgpr_count_encoded},',
             f'        .uses_ttmp_workgroup_ids = {uses_ttmp_workgroup_ids},',
             f'        .uses_cluster_ttmp_workgroup_ids = {uses_cluster_ttmp_workgroup_ids},',
+            f'        .wave_size = {wave_size},',
+            f'        .wave_size_max = {wave_size_max},',
             f'        .max_addressable_vgprs_per_wf = {addressable_vgprs},',
+            f'        .descriptor_vgpr_count_granule_wave32 = {vgpr_count_granule_wave32},',
+            f'        .descriptor_vgpr_count_granule_wave64 = {vgpr_count_granule_wave64},',
             '    };',
         ]
 
@@ -69,6 +77,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         '#include "rocjitsu/base/api.h"',
         '',
         '#include <cstdint>',
+        '#include <optional>',
         '',
         'namespace rocjitsu {',
         '',
@@ -77,7 +86,11 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         '  bool descriptor_sgpr_count_encoded = true;',
         '  bool uses_ttmp_workgroup_ids = false;',
         '  bool uses_cluster_ttmp_workgroup_ids = false;',
+        '  uint32_t wave_size = 0;',
+        '  uint32_t wave_size_max = 0;',
         '  uint32_t max_addressable_vgprs_per_wf = 0;',
+        '  uint32_t descriptor_vgpr_count_granule_wave32 = 0;',
+        '  uint32_t descriptor_vgpr_count_granule_wave64 = 0;',
         '};',
         '',
         'inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = '
@@ -89,6 +102,16 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         '  default:',
         '    return {};',
         '  }',
+        '}',
+        '',
+        '[[nodiscard]] constexpr std::optional<uint32_t>',
+        'descriptor_vgpr_count_granule_for_wavefront(rj_code_arch_t arch, uint32_t wavefront_size) {',
+        '  const auto properties = isa_properties(arch);',
+        '  if (wavefront_size == 32 && properties.descriptor_vgpr_count_granule_wave32 != 0)',
+        '    return properties.descriptor_vgpr_count_granule_wave32;',
+        '  if (wavefront_size == 64 && properties.descriptor_vgpr_count_granule_wave64 != 0)',
+        '    return properties.descriptor_vgpr_count_granule_wave64;',
+        '  return std::nullopt;',
         '}',
         '',
         '} // namespace rocjitsu',
