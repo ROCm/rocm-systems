@@ -434,6 +434,62 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_MEM_ACTIVITY_PATH="${ROCPD_DB_V3_MEM_ACTIVITY_PATH}"
 )
 
+# Synthetic v3 memory_activity time-window fixture, generated at build time from
+# committed SQL against the canonical v3 schema (same mechanism as the v3 kd_pmc
+# fixture above). ALLOC/FREE rows straddle a chosen window so the time-window
+# `continue` filters in get_scalar_track(memory_activity) all fire. The db has no
+# rocpd_timestamp table, so the reader selects the v3 backend.
+set(_v3mw_uuid "00000000000000000000000000730045")
+set(_v3mw_schema_src
+    ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
+)
+set(_v3mw_data_src
+    ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_mem_activity_window_data.sql
+)
+set(_v3mw_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v3_mem_activity_window_gen.sql)
+file(READ ${_v3mw_schema_src} _v3mw_schema)
+file(READ ${_v3mw_data_src} _v3mw_data)
+string(
+    REGEX REPLACE
+    "INSERT INTO[^;]*rocpd_metadata[^;]*;"
+    ""
+    _v3mw_schema
+    "${_v3mw_schema}"
+)
+string(REPLACE "{{uuid}}" "_${_v3mw_uuid}" _v3mw_schema "${_v3mw_schema}")
+string(REPLACE "{{guid}}" "${_v3mw_uuid}" _v3mw_schema "${_v3mw_schema}")
+string(REPLACE "{{uuid}}" "_${_v3mw_uuid}" _v3mw_data "${_v3mw_data}")
+string(REPLACE "{{guid}}" "${_v3mw_uuid}" _v3mw_data "${_v3mw_data}")
+file(WRITE ${_v3mw_gen_sql} "${_v3mw_schema}\n${_v3mw_data}\n")
+
+set(ROCPD_DB_V3_MEM_ACTIVITY_WINDOW_PATH
+    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v3_mem_activity_window.db
+)
+add_custom_command(
+    OUTPUT ${ROCPD_DB_V3_MEM_ACTIVITY_WINDOW_PATH}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V3_MEM_ACTIVITY_WINDOW_PATH}
+    COMMAND
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_MEM_ACTIVITY_WINDOW_PATH}
+        ".read ${_v3mw_gen_sql}"
+    DEPENDS ${_v3mw_gen_sql} ${_v3mw_schema_src} ${_v3mw_data_src}
+    COMMENT "Generating synthetic v3 memory_activity time-window test fixture"
+    VERBATIM
+)
+add_custom_target(
+    profiler-hub_v3_mem_activity_window_fixture
+    DEPENDS ${ROCPD_DB_V3_MEM_ACTIVITY_WINDOW_PATH}
+)
+add_dependencies(
+    profiler-hub_unit_tests profiler-hub_v3_mem_activity_window_fixture
+)
+
+target_compile_definitions(
+    profiler-hub_unit_tests
+    PRIVATE
+        ROCPD_DB_V3_MEM_ACTIVITY_WINDOW_PATH="${ROCPD_DB_V3_MEM_ACTIVITY_WINDOW_PATH}"
+)
+
 # Synthetic v4.0 summary/GROUP-BY-name fixture, generated at build time from committed
 # SQL against the bundled v4.0 schema (reused unchanged from the kd_pmc fixture above).
 # Shares the by-construction oracle with the v3 summary fixture so both reader backends

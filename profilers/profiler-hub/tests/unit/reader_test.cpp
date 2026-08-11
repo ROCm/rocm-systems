@@ -2912,6 +2912,113 @@ TEST_F(reader_v3_mem_activity_test, v3_get_interval_track_returns_empty_for_mem_
     ASSERT_TRUE(m_reader->get_interval_track(tracks.front()->id).empty());
 }
 
+// ============================================================================
+// memory_activity time-window straddle — v3 synthetic fixture (task 045, gap 3).
+// The window `continue` filters inside get_scalar_track's memory_activity branch
+// (source/reader_impl.cpp ~2515-2520 ALLOC, ~2548-2553 FREE) are point-in-window
+// on r.start, inclusive: a row is kept iff window.start <= r.start <= window.end.
+// The fixture (rocpd_v3_mem_activity_window_data.sql) has ALLOC and FREE rows both
+// BEFORE and AFTER a [3000,5000] window, so all four filters fire; the emitted
+// running-sum values reflect the skipped pre-window rows, proving the filter runs
+// AFTER accumulation, not before.
+// ============================================================================
+
+class reader_v3_mem_activity_window_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        m_storage = std::make_unique<profiler_hub::storage_t>(m_database_path, "");
+        m_reader  = std::make_shared<profiler_hub::reader_t>(std::move(m_storage));
+    }
+
+    void TearDown() override
+    {
+        m_reader.reset();
+        m_storage.reset();
+    }
+
+    // The single memory_activity track (agent 1) in the straddle fixture.
+    profiler_hub::reader_types::track_info_ptr_t mem_activity_track()
+    {
+        auto tracks =
+            find_tracks(m_reader->get_tracks(),
+                        profiler_hub::reader_types::track_type_t::memory_activity);
+        EXPECT_EQ(tracks.size(), 1U);
+        return tracks.empty() ? nullptr : tracks.front();
+    }
+
+    std::string m_database_path{ ROCPD_DB_V3_MEM_ACTIVITY_WINDOW_PATH };
+    std::unique_ptr<profiler_hub::storage_t> m_storage;
+    std::shared_ptr<profiler_hub::reader_t>  m_reader;
+};
+
+TEST_F(reader_v3_mem_activity_window_test, unwindowed_returns_full_straddle_series)
+{
+    auto track = mem_activity_track();
+    ASSERT_NE(track, nullptr);
+
+    auto scalars = m_reader->get_scalar_track(track->id);
+    ASSERT_EQ(scalars.size(), 7U);
+    ASSERT_TRUE(is_timestamp_sorted(scalars));
+
+    // Cumulative running sum across all 7 ALLOC/FREE rows.
+    const std::vector<std::pair<uint64_t, double>> expected = {
+        { 1000, 100.0 },  { 2000, 0.0 },    { 3000, 500.0 }, { 4000, 300.0 },
+        { 5000, 1000.0 }, { 6000, 1999.0 }, { 7000, 1000.0 }
+    };
+    ASSERT_EQ(scalars.size(), expected.size());
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        ASSERT_EQ(scalars[i].timestamp, expected[i].first);
+        ASSERT_DOUBLE_EQ(scalars[i].value, expected[i].second);
+    }
+}
+
+TEST_F(reader_v3_mem_activity_window_test, time_window_straddle_filters_alloc_and_free)
+{
+    auto track = mem_activity_track();
+    ASSERT_NE(track, nullptr);
+
+    profiler_hub::reader_types::event_filter_t f;
+    f.time_window.start = 3000;
+    f.time_window.end   = 5000;
+    auto scalars        = m_reader->get_scalar_track(track->id, f);
+
+    // Boundary-inclusive: rows at 3000 and 5000 are kept; the pre-window ALLOC(1000)
+    // + FREE(2000) and post-window ALLOC(6000) + FREE(7000) are all dropped, firing
+    // every ALLOC and FREE `continue` on both sides of the window.
+    ASSERT_EQ(scalars.size(), 3U);
+    ASSERT_TRUE(is_timestamp_sorted(scalars));
+    ASSERT_EQ(scalars[0].timestamp, 3000U);
+    ASSERT_DOUBLE_EQ(scalars[0].value, 500.0);
+    ASSERT_EQ(scalars[1].timestamp, 4000U);
+    ASSERT_DOUBLE_EQ(scalars[1].value, 300.0);
+    ASSERT_EQ(scalars[2].timestamp, 5000U);
+    ASSERT_DOUBLE_EQ(scalars[2].value, 1000.0);
+
+    // The filter demonstrably removed rows (full series is 7).
+    ASSERT_LT(scalars.size(), m_reader->get_scalar_track(track->id).size());
+}
+
+TEST_F(reader_v3_mem_activity_window_test, time_window_start_only_drops_earlier_rows)
+{
+    auto track = mem_activity_track();
+    ASSERT_NE(track, nullptr);
+
+    // Only start set (end = nullopt): exercises the has_value() guard on the end
+    // filter while the start `continue` drops every row with start < 6000.
+    profiler_hub::reader_types::event_filter_t f;
+    f.time_window.start = 6000;
+    auto scalars        = m_reader->get_scalar_track(track->id, f);
+
+    ASSERT_EQ(scalars.size(), 2U);
+    ASSERT_EQ(scalars[0].timestamp, 6000U);
+    ASSERT_DOUBLE_EQ(scalars[0].value, 1999.0);  // ALLOC 999 on running 1000
+    ASSERT_EQ(scalars[1].timestamp, 7000U);
+    ASSERT_DOUBLE_EQ(scalars[1].value, 1000.0);  // FREE 999
+}
+
 class reader_v4_mem_activity_test : public ::testing::Test
 {
 protected:
