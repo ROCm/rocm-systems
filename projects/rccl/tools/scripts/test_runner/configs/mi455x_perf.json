@@ -24,7 +24,6 @@
     "--bind-to none"
   ],
   "build_configuration": {
-    "enabled": false,
     "_comment": "perf binaries come from rccl_tests_build_configuration / external build"
   },
   "test_configurations": {

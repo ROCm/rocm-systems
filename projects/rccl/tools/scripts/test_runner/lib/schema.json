@@ -61,10 +61,6 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "Set to false to skip the RCCL build step entirely. Default: true when the section is present."
-        },
         "_comment": {
           "type": "string",
           "description": "Inline documentation comment (not interpreted by the runner)"
