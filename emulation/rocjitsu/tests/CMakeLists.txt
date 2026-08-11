@@ -476,7 +476,9 @@ add_executable(
 if(HAS_DEVICE_KERNELS)
     target_sources(
         rocjitsu_tests
-        PRIVATE dbt/multikernel_indirect_branch_test.cpp
+        PRIVATE
+            dbt/device_kernels_translate_tests.cpp
+            dbt/multikernel_indirect_branch_test.cpp
     )
 endif()
 if(HAS_GFX1250_DEVICE_KERNELS)
