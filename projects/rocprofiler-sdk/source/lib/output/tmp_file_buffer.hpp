@@ -118,9 +118,17 @@ offload_buffer(domain_type type)
         return;
     }
 
-    auto                  _lk      = std::lock_guard<std::mutex>(filebuf->file.file_mutex);
-    [[maybe_unused]] auto _success = filebuf->file.open();
-    auto&                 _fs      = filebuf->file.stream;
+    auto _lk = std::lock_guard<std::mutex>(filebuf->file.file_mutex);
+    if(!filebuf->file.open())
+    {
+        auto _nbytes = (filebuf->buffer.count() * filebuf->buffer.data_size());
+        ROCP_ERROR << fmt::format("failed to offload {} B from {} buffer to temporary file '{}'",
+                                  _nbytes,
+                                  get_domain_column_name(type),
+                                  filebuf->file.filename);
+        return;
+    }
+    auto& _fs = filebuf->file.stream;
 
     ROCP_CI_LOG_IF(WARNING, _fs.tellg() != _fs.tellp())  // this should always be true
         << "tellg=" << _fs.tellg() << ", tellp=" << _fs.tellp();
