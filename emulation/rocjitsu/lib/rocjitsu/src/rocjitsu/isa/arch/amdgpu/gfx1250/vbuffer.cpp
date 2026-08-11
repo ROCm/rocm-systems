@@ -349,6 +349,19 @@ BufferLoadD16U8Vbuffer::BufferLoadD16U8Vbuffer(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void BufferLoadD16U8Vbuffer::implicit_uses(RegisterSet &uses) const {
+  Vbuffer::implicit_uses(uses);
+  if (auto r = vdata.to_register_ref())
+    uses.expand(*r);
+}
+
+void BufferLoadD16U8Vbuffer::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vbuffer::implicit_use_operands(operands);
+  if (vdata.to_register_ref())
+    operands.push_back(&vdata);
+}
+
 BufferLoadD16I8Vbuffer::BufferLoadD16I8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(1394)),
@@ -369,6 +382,19 @@ BufferLoadD16I8Vbuffer::BufferLoadD16I8Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+}
+
+void BufferLoadD16I8Vbuffer::implicit_uses(RegisterSet &uses) const {
+  Vbuffer::implicit_uses(uses);
+  if (auto r = vdata.to_register_ref())
+    uses.expand(*r);
+}
+
+void BufferLoadD16I8Vbuffer::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vbuffer::implicit_use_operands(operands);
+  if (vdata.to_register_ref())
+    operands.push_back(&vdata);
 }
 
 BufferLoadD16B16Vbuffer::BufferLoadD16B16Vbuffer(const MachineInst *inst)
@@ -393,6 +419,19 @@ BufferLoadD16B16Vbuffer::BufferLoadD16B16Vbuffer(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void BufferLoadD16B16Vbuffer::implicit_uses(RegisterSet &uses) const {
+  Vbuffer::implicit_uses(uses);
+  if (auto r = vdata.to_register_ref())
+    uses.expand(*r);
+}
+
+void BufferLoadD16B16Vbuffer::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vbuffer::implicit_use_operands(operands);
+  if (vdata.to_register_ref())
+    operands.push_back(&vdata);
+}
+
 BufferLoadD16HiU8Vbuffer::BufferLoadD16HiU8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(1396)),
@@ -413,6 +452,19 @@ BufferLoadD16HiU8Vbuffer::BufferLoadD16HiU8Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+}
+
+void BufferLoadD16HiU8Vbuffer::implicit_uses(RegisterSet &uses) const {
+  Vbuffer::implicit_uses(uses);
+  if (auto r = vdata.to_register_ref())
+    uses.expand(*r);
+}
+
+void BufferLoadD16HiU8Vbuffer::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vbuffer::implicit_use_operands(operands);
+  if (vdata.to_register_ref())
+    operands.push_back(&vdata);
 }
 
 BufferLoadD16HiI8Vbuffer::BufferLoadD16HiI8Vbuffer(const MachineInst *inst)
@@ -437,6 +489,19 @@ BufferLoadD16HiI8Vbuffer::BufferLoadD16HiI8Vbuffer(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void BufferLoadD16HiI8Vbuffer::implicit_uses(RegisterSet &uses) const {
+  Vbuffer::implicit_uses(uses);
+  if (auto r = vdata.to_register_ref())
+    uses.expand(*r);
+}
+
+void BufferLoadD16HiI8Vbuffer::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vbuffer::implicit_use_operands(operands);
+  if (vdata.to_register_ref())
+    operands.push_back(&vdata);
+}
+
 BufferLoadD16HiB16Vbuffer::BufferLoadD16HiB16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(1398)),
@@ -457,6 +522,19 @@ BufferLoadD16HiB16Vbuffer::BufferLoadD16HiB16Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+}
+
+void BufferLoadD16HiB16Vbuffer::implicit_uses(RegisterSet &uses) const {
+  Vbuffer::implicit_uses(uses);
+  if (auto r = vdata.to_register_ref())
+    uses.expand(*r);
+}
+
+void BufferLoadD16HiB16Vbuffer::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vbuffer::implicit_use_operands(operands);
+  if (vdata.to_register_ref())
+    operands.push_back(&vdata);
 }
 
 BufferStoreD16HiB8Vbuffer::BufferStoreD16HiB8Vbuffer(const MachineInst *inst)

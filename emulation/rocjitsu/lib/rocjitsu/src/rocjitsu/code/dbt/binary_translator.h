@@ -28,6 +28,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "rocjitsu/code/dbt/encoding_translator.h"
@@ -224,6 +225,14 @@ private:
   EncodingTranslateFn encoding_translate_;                  ///< Per-pair encoding translator.
   LegalizationLookupFn legalization_lookup_;                ///< Per-pair legalization table.
   std::unique_ptr<SemanticTranslator> semantic_translator_; ///< Per-pair semantic rule engine.
+
+  /// @brief Deferred-family mnemonics already reported in this translation.
+  ///
+  /// @details Cleared at the start of every translate() call. Scoping the
+  /// suppression to one code object keeps the report informative without
+  /// letting the first object that uses a deferred mnemonic hide the same gap
+  /// in every object loaded after it.
+  std::unordered_set<std::string> reported_deferred_families_;
 };
 
 } // namespace rocjitsu

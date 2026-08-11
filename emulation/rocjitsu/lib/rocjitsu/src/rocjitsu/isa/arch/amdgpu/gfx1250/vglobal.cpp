@@ -331,6 +331,19 @@ GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void GlobalLoadD16U8Vglobal::implicit_uses(RegisterSet &uses) const {
+  Vglobal::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void GlobalLoadD16U8Vglobal::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vglobal::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(1540)),
@@ -350,6 +363,19 @@ GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+}
+
+void GlobalLoadD16I8Vglobal::implicit_uses(RegisterSet &uses) const {
+  Vglobal::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void GlobalLoadD16I8Vglobal::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vglobal::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
@@ -373,6 +399,19 @@ GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void GlobalLoadD16B16Vglobal::implicit_uses(RegisterSet &uses) const {
+  Vglobal::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void GlobalLoadD16B16Vglobal::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vglobal::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(1542)),
@@ -392,6 +431,19 @@ GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+}
+
+void GlobalLoadD16HiU8Vglobal::implicit_uses(RegisterSet &uses) const {
+  Vglobal::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void GlobalLoadD16HiU8Vglobal::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vglobal::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
@@ -415,6 +467,19 @@ GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void GlobalLoadD16HiI8Vglobal::implicit_uses(RegisterSet &uses) const {
+  Vglobal::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void GlobalLoadD16HiI8Vglobal::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vglobal::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(1544)),
@@ -434,6 +499,19 @@ GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+}
+
+void GlobalLoadD16HiB16Vglobal::implicit_uses(RegisterSet &uses) const {
+  Vglobal::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
+void GlobalLoadD16HiB16Vglobal::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vglobal::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 GlobalStoreD16HiB8Vglobal::GlobalStoreD16HiB8Vglobal(const MachineInst *inst)

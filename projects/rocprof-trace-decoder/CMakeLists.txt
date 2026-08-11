@@ -3,17 +3,7 @@
 #
 cmake_minimum_required(VERSION 3.16.0)
 
-if(NOT DEFINED VERSION_MAJOR)
-    set(VERSION_MAJOR 0)
-endif()
-
-if(NOT DEFINED VERSION_MINOR)
-    set(VERSION_MINOR 2)
-endif()
-
-if(NOT DEFINED VERSION_PATCH)
-    set(VERSION_PATCH 1)
-endif()
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.cmake)
 
 set(VERSION_PATCH ${VERSION_PATCH})
 
