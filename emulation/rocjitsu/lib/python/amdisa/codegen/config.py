@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
 AMDGPU_INCLUDE_BASE = 'rocjitsu/isa/arch/amdgpu'
 AMDGPU_GENERATED_INCLUDE_BASE = f'{AMDGPU_INCLUDE_BASE}/generated'
 

@@ -104,10 +104,7 @@ def test_encoding_constants_reject_base_name_collisions(tmp_path):
 
 def test_checked_in_rdna4_headers_pin_representative_generated_constants():
     project_root = Path(__file__).resolve().parents[4]
-    isa_dir = (
-        project_root
-        / 'lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/rdna4'
-    )
+    isa_dir = project_root / 'lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/rdna4'
 
     opcodes = (isa_dir / 'opcodes.h').read_text()
     encodings = (isa_dir / 'encodings.h').read_text()

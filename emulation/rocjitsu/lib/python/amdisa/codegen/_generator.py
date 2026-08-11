@@ -2773,9 +2773,7 @@ class CodeGenerator:
             True,
             [
                 (
-                    self.config.handwritten_include(
-                        self.isa_spec.arch_name, 'isa.h'
-                    ),
+                    self.config.handwritten_include(self.isa_spec.arch_name, 'isa.h'),
                     False,
                 ),
                 (
@@ -2817,9 +2815,7 @@ class CodeGenerator:
 
         _enc_cpp_includes = [
             (
-                self.config.generated_include(
-                    self.isa_spec.arch_name, 'encodings.h'
-                ),
+                self.config.generated_include(self.isa_spec.arch_name, 'encodings.h'),
                 False,
             ),
             ('cstring', True),
@@ -8787,9 +8783,7 @@ class CodeGenerator:
                 if has_shared:
                     cpp_includes.append(
                         (
-                            self.config.generated_include(
-                                'shared', 'execute_shared.h'
-                            ),
+                            self.config.generated_include('shared', 'execute_shared.h'),
                             False,
                         )
                     )
@@ -11743,16 +11737,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             False,
             [
                 (
-                    self.config.generated_include(
-                        self.isa_spec.arch_name, 'decoder.h'
-                    ),
+                    self.config.generated_include(self.isa_spec.arch_name, 'decoder.h'),
                     False,
                 ),
                 ('util/except.h', False),
                 (
-                    self.config.generated_include(
-                        self.isa_spec.arch_name, 'insts.h'
-                    ),
+                    self.config.generated_include(self.isa_spec.arch_name, 'insts.h'),
                     False,
                 ),
                 ('bit', True),
@@ -11868,9 +11858,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             True,
             [
                 (
-                    self.config.generated_include(
-                        self.isa_spec.arch_name, 'decoder.h'
-                    ),
+                    self.config.generated_include(self.isa_spec.arch_name, 'decoder.h'),
                     False,
                 ),
                 (

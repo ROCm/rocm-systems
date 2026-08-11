@@ -10,9 +10,7 @@ rj_add_object_library(rocjitsu_isa
     target_registry.cpp
 )
 
-set(RJ_AMDGPU_GENERATED_DIR
-    "${CMAKE_CURRENT_SOURCE_DIR}/arch/amdgpu/generated"
-)
+set(RJ_AMDGPU_GENERATED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/arch/amdgpu/generated")
 
 add_subdirectory(arch/amdgpu/cdna1)
 add_subdirectory(arch/amdgpu/cdna2)
