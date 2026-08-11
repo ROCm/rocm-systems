@@ -91,9 +91,9 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSetupNullptrHandle)
 
 TEST_F(HipFileUnit, TestHipFileBatchIOSubmitSuccess)
 {
-    hipFileBatchHandle_t           b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
-    hipFileIOParams_t              io_param;
-    std::shared_ptr<MBatchContext> mock_b_context = std::make_shared<MBatchContext>();
+    hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
+    hipFileIOParams_t                          io_param;
+    std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
 
     EXPECT_CALL(mock_state, getBatchContext).WillOnce(Return(mock_b_context));
     EXPECT_CALL(*mock_b_context, submitOperations);
@@ -104,9 +104,9 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSubmitSuccess)
 
 TEST_F(HipFileUnit, TestHipFileBatchIOSubmitBadHandle)
 {
-    hipFileBatchHandle_t           b_handle = nullptr;
-    hipFileIOParams_t              io_param;
-    std::shared_ptr<MBatchContext> mock_b_context = std::make_shared<MBatchContext>();
+    hipFileBatchHandle_t                       b_handle = nullptr;
+    hipFileIOParams_t                          io_param;
+    std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
 
     EXPECT_CALL(mock_state, getBatchContext).WillOnce(Throw(InvalidBatchHandle()));
     EXPECT_CALL(*mock_b_context, submitOperations).Times(0);
@@ -118,9 +118,9 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSubmitBadHandle)
 
 TEST_F(HipFileUnit, TestHipFileBatchIOSubmitBadArgument)
 {
-    hipFileBatchHandle_t           b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
-    hipFileIOParams_t              io_param;
-    std::shared_ptr<MBatchContext> mock_b_context = std::make_shared<MBatchContext>();
+    hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
+    hipFileIOParams_t                          io_param;
+    std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
 
     EXPECT_CALL(mock_state, getBatchContext).WillOnce(Return(mock_b_context));
     EXPECT_CALL(*mock_b_context, submitOperations).WillOnce(Throw(std::invalid_argument("")));
@@ -131,8 +131,8 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSubmitBadArgument)
 
 TEST_F(HipFileUnit, TestHipFileBatchIOSubmitNullptrParams)
 {
-    hipFileBatchHandle_t           b_handle       = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
-    std::shared_ptr<MBatchContext> mock_b_context = std::make_shared<MBatchContext>();
+    hipFileBatchHandle_t                       b_handle = reinterpret_cast<hipFileBatchHandle_t>(0x12345678);
+    std::shared_ptr<StrictMock<MBatchContext>> mock_b_context = std::make_shared<StrictMock<MBatchContext>>();
 
     // With nr > 0 and a nullptr iocbp, the API must reject the call before
     // ever reaching the batch context (avoids dereferencing the nullptr).
