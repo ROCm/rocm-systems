@@ -499,6 +499,28 @@ TEST(AltRsmiTest, ARSMIInitCalledTwiceIsShortCircuited) {
   );
 }
 
+TEST(AltRsmiTest, ARSMIInitBadKfdPathFailsToOpenDir) {
+  RUN_ISOLATED_TEST(
+    "ARSMIInitBadKfdPathFailsToOpenDir",
+    []() {
+      AltRsmiTestUtils::ResetState();
+
+      // PID-scoped like kTestDrmBasePath, and via temp_directory_path() rather
+      // than a hardcoded /tmp: the path must be guaranteed absent, including
+      // when several CI jobs share a node.
+      const std::string missingPath =
+          std::filesystem::temp_directory_path().string() +
+          "/rccl_alt_rsmi_missing_" + std::to_string(getpid());
+      ASSERT_FALSE(std::filesystem::exists(missingPath));
+      AltRsmiTestUtils::SetNodesPath(missingPath);
+
+      EXPECT_EQ(ARSMI_init(), 1);
+
+      AltRsmiTestUtils::ResetState();
+    }
+  );
+}
+
 TEST(AltRsmiTest, ARSMIInitMissingIoLinksPropertiesFile) {
   RUN_ISOLATED_TEST(
     "ARSMIInitMissingIoLinksPropertiesFile",
