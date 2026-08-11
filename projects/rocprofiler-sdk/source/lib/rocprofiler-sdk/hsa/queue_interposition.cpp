@@ -383,6 +383,12 @@ struct completion_monitor
     // inbox) while this is nonzero, or a late register_completion could strand an
     // entry in `incoming` after the thread is gone -- hanging drain_completion_monitor.
     std::atomic<uint64_t> registering = {0};
+    // Set by the monitor thread as the last thing it does before returning. The
+    // monitor can exit on either `!running` or finalization, and only
+    // stop_completion_monitor clears `running`, so `running` alone cannot tell a
+    // waiter the thread is gone. drain_completion_monitor keys off this to avoid
+    // polling inflight forever if the thread has already exited.
+    std::atomic<bool> exited = {false};
 };
 
 completion_monitor&
@@ -777,6 +783,10 @@ completion_monitor_loop(completion_monitor& mon)
         mon.inflight.fetch_sub(1, std::memory_order_relaxed);
     }
     mon.active.clear();
+
+    // Publish that the thread is exiting so a concurrent drain_completion_monitor stops
+    // waiting on inflight rather than polling a counter no live thread can drive down.
+    mon.exited.store(true, std::memory_order_release);
 }
 
 // Create the wake signal and launch the monitor thread. Idempotent: a second call
@@ -803,11 +813,14 @@ drain_completion_monitor()
     if(!mon.running.load(std::memory_order_acquire)) return;
 
     // Poll the in-flight counter (registered minus completed) until it reaches zero.
-    // The monitor makes progress independently; this only observes quiescence without
-    // touching its private active set.
+    // The monitor makes progress independently; this only observes it without touching
+    // its private active set. Also stop if the monitor thread has exited (it can exit
+    // on finalization while `running` is still set): a dead thread will never drive
+    // inflight down, so continuing to poll would hang.
     constexpr auto poll_interval = std::chrono::milliseconds{1};
     while(mon.inflight.load(std::memory_order_acquire) > 0)
     {
+        if(mon.exited.load(std::memory_order_acquire)) break;
         get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
         std::this_thread::sleep_for(poll_interval);
     }
@@ -823,6 +836,24 @@ stop_completion_monitor()
 
     get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
     if(mon.thread.joinable()) mon.thread.join();
+
+    // A producer may still be between the bypass gate and its register_completion when
+    // the monitor exits (the gate reads fini_status; registering++ happens a few
+    // instructions later). Producers are gated off from starting new work by
+    // fini_status, and this window is bounded non-blocking CPU work, so wait for the
+    // last of them to finish before sweeping. Then process any entry they stranded so
+    // signals / correlation-id refs are released rather than leaked.
+    constexpr auto drain_interval = std::chrono::microseconds{100};
+    while(mon.registering.load(std::memory_order_acquire) > 0)
+        std::this_thread::sleep_for(drain_interval);
+
+    drain_incoming(mon);
+    for(auto& pending : mon.active)
+    {
+        run_completion(pending.session);
+        mon.inflight.fetch_sub(1, std::memory_order_relaxed);
+    }
+    mon.active.clear();
 
     get_core_table()->hsa_signal_destroy_fn(mon.wake_signal);
     mon.wake_signal = {};
