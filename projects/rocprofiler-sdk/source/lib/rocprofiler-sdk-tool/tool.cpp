@@ -1882,9 +1882,8 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
             tool::tool_counter_value_t{_counter_id, record_data[count].counter_value});
     }
 
-    if(!serialized_records.empty())
+    if(!serialized_records.empty() && counter_record.write(serialized_records))
     {
-        counter_record.write(serialized_records);
         tool::write_ring_buffer(counter_record, domain_type::COUNTER_COLLECTION);
     }
 }
@@ -2032,9 +2031,8 @@ spm_data_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispat
                 _counter_id, records[count]->value, records[count]->timestamp, records[count]->id});
         }
 
-        if(!serialized_records.empty())
+        if(!serialized_records.empty() && counter_record.write(serialized_records))
         {
-            counter_record.write(serialized_records);
             tool::write_ring_buffer(counter_record, domain_type::SPM_COUNTER_COLLECTION);
         }
     }
