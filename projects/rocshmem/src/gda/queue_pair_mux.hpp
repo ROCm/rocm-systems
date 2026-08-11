@@ -34,6 +34,7 @@
 
 #include "constmem.hpp"
 #include "gda_enums.hpp"
+#include "log.hpp"
 #include "queue_pair.hpp"
 #include "util.hpp"
 
@@ -550,8 +551,8 @@ __host__ T QueuePairMux::to_provider_endianness(T val) {
     return QueuePairMLX5::to_provider_endianness<T>(val);
 #endif
   default:
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(provider));
   }
 }
 

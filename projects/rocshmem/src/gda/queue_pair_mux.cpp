@@ -27,7 +27,7 @@
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 
-#include "queue_pair_provider.hpp"
+#include "log.hpp"
 #include "queue_pair_mux.hpp"
 
 #if defined(GDA_IONIC)
@@ -82,8 +82,8 @@ __host__ QueuePairMux::QueuePairUnion QueuePairMux::QueuePairUnion::construct(
     return {std::move(other.mlx5)};
 #endif
   default:
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(provider));
   }
 }
 
@@ -106,8 +106,8 @@ __host__ QueuePairMux::QueuePairUnion& QueuePairMux::QueuePairUnion::assign(
     break;
 #endif
   default:
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(provider));
   }
   return *this;
 }
@@ -131,8 +131,8 @@ __host__ void QueuePairMux::QueuePairUnion::destruct(GDAProvider provider) {
     break;
 #endif
   default:
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(provider));
   }
 }
 
@@ -196,8 +196,8 @@ __host__ int QueuePairMux::buffer_register(void *addr, size_t length) {
     return qp.mlx5.buffer_register(addr, length);
 #endif
   default:
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(provider));
   }
 }
 
@@ -216,8 +216,8 @@ __host__ int QueuePairMux::buffer_unregister(void *addr) {
     return qp.mlx5.buffer_unregister(addr);
 #endif
   default:
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(provider));
   }
 }
 
@@ -236,8 +236,8 @@ __host__ int QueuePairMux::buffer_unregister_all() {
     return qp.mlx5.buffer_unregister_all();
 #endif
   default:
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(provider));
   }
 }
 
