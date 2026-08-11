@@ -68,6 +68,8 @@ done
 
 corpus_test_status=0
 corpus_work_dir="$(pwd -P)"
+lsan_suppressions="${ROCJITSU_SOURCE_DIR}/tests/corpus/lsan.supp"
+export LSAN_OPTIONS="${LSAN_OPTIONS:+${LSAN_OPTIONS}:}suppressions=${lsan_suppressions}"
 
 for target in "${targets[@]}"; do
   read -r name rocjitsu_config skip_tests_config <<< "${target}"
@@ -79,9 +81,10 @@ for target in "${targets[@]}"; do
   cache_dir="${corpus_work_dir}/.pytest-cache/${name}"
 
   pytest_cmd=(
-    rocjitsu --config "${rocjitsu_config_path}" -- pytest tests/test_corpus.py
+    pytest tests/test_corpus.py
     --target "${name}"
     --suite iree,kernels,cts
+    --run-wrapper "rocjitsu --config ${rocjitsu_config_path} --"
     --skip-tests-config "${skip_tests_config_path}"
     --artifact-directory "${artifact_dir}"
     --durations=0

@@ -88,6 +88,9 @@ jobs:
             enable_tsan: 0
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
+            run_corpus: true
+            corpus_soft_timeout: 15
+            corpus_hard_timeout: 30
           - name: asan-ubsan
             allow_failure: true
             # Keep the first corpus gate on the fastest lane. Focused second-pass
@@ -103,6 +106,9 @@ jobs:
             enable_tsan: 0
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
+            run_corpus: false
+            corpus_soft_timeout: 15
+            corpus_hard_timeout: 30
           - name: tsan
             allow_failure: false
             verify_dbt_idempotence: 0
@@ -117,6 +123,9 @@ jobs:
             enable_tsan: 1
             enable_expensive_checks: 0
             sanitizer_runtime: SHARED
+            run_corpus: false
+            corpus_soft_timeout: 15
+            corpus_hard_timeout: 30
           - name: asan-ubsan-gcc
             allow_failure: true
             verify_dbt_idempotence: 0
@@ -134,6 +143,11 @@ jobs:
             sanitizer_runtime: SHARED
             c_compiler: gcc
             cxx_compiler: g++
+            run_corpus: true
+            # Due to sanitizer and expensive checks
+            # one test needs ~145s in CI to finish.
+            corpus_soft_timeout: 240
+            corpus_hard_timeout: 480
 
     steps:
       - name: Install base dependencies
@@ -159,7 +173,7 @@ jobs:
             shared/machine-readable-isa/isa
 
       - name: Checkout rocjitsu corpus
-        if: matrix.name == 'release'
+        if: matrix.run_corpus
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
@@ -314,7 +328,7 @@ jobs:
             --output-on-failure
 
       - name: Install corpus test dependencies
-        if: matrix.name == 'release'
+        if: matrix.run_corpus
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         run: |
           uv pip install --system -r requirements.txt
@@ -325,14 +339,14 @@ jobs:
           rocm-sdk init
 
       - name: Run amdisa tests
-        if: matrix.name == 'release'
+        if: matrix.run_corpus
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         run: |
           uv pip install --system -e lib/python
           python -m pytest lib/python/amdisa/tests
 
       - name: Run corpus tests
-        if: matrix.name == 'release'
+        if: matrix.run_corpus
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         env:
@@ -352,8 +366,8 @@ jobs:
           fi
           corpus_test_flags=(
             --workers "${WORKERS}" \
-            --soft-timeout 15 \
-            --hard-timeout 30 \
+            --soft-timeout "${{ matrix.corpus_soft_timeout }}" \
+            --hard-timeout "${{ matrix.corpus_hard_timeout }}" \
             --rerun-failed \
           )
           bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-corpus-tests.sh" "${corpus_test_flags[@]}" || corpus_test_status=$?
