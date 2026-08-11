@@ -1420,71 +1420,71 @@ protected:
 // the wrong address space.
 TEST_F(DbgTrapDaemonTest, EnableRejectsAMemFdForADifferentProcess) {
   // A live child, so /proc/<pid>/mem exists and is openable for the whole test.
-  int sync[2];
-  ASSERT_EQ(pipe2(sync, O_CLOEXEC), 0);
+  // ChildProcessGuard rather than a hand-rolled reap: every ASSERT_* below
+  // returns from the test, and only RAII kills and waits on all of those paths.
   pid_t other = fork();
   ASSERT_GE(other, 0);
   if (other == 0) {
-    ::close(sync[1]);
-    char b = 0;
-    while (::read(sync[0], &b, 1) == -1 && errno == EINTR) {
-    }
+    for (;;)
+      pause();
     _exit(0);
   }
-  ::close(sync[0]);
-  const util::UniqueHandle sync_closer{sync[1]};
-  auto reap = [&] {
-    kill(other, SIGKILL);
-    while (waitpid(other, nullptr, 0) == -1 && errno == EINTR) {
-    }
-  };
+  ChildProcessGuard other_guard(other);
 
   const std::string other_mem = std::format("/proc/{}/mem", other);
   // Confirm the premise: procfs gives it a different inode from our own.
   struct stat ours {};
   struct stat theirs {};
-  const int self_mem = ::open("/proc/self/mem", O_RDWR | O_CLOEXEC);
-  ASSERT_GE(self_mem, 0);
-  const int their_mem = ::open(other_mem.c_str(), O_RDWR | O_CLOEXEC);
-  if (their_mem < 0) {
+  const util::UniqueHandle self_mem{::open("/proc/self/mem", O_RDWR | O_CLOEXEC)};
+  ASSERT_GE(self_mem.get(), 0);
+  const util::UniqueHandle their_mem{::open(other_mem.c_str(), O_RDWR | O_CLOEXEC)};
+  if (their_mem.get() < 0) {
     // Hardened kernels can refuse this open outright; the gate is then moot.
-    ::close(self_mem);
-    reap();
     GTEST_SKIP() << "cannot open another process's mem: " << strerror(errno);
   }
-  ASSERT_EQ(fstat(self_mem, &ours), 0);
-  ASSERT_EQ(fstat(their_mem, &theirs), 0);
+  ASSERT_EQ(fstat(self_mem.get(), &ours), 0);
+  ASSERT_EQ(fstat(their_mem.get(), &theirs), 0);
   EXPECT_NE(ours.st_ino, theirs.st_ino);
-  ::close(self_mem);
-  ::close(their_mem);
 
   int notifier = eventfd(0, EFD_CLOEXEC);
   ASSERT_GE(notifier, 0);
-  const util::UniqueHandle notifier_closer{notifier};
+  util::UniqueHandle notifier_closer{notifier};
 
   mem_mismatch_path_ = other_mem;
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(kClientPid);
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
   en.enable.dbg_fd = 0x0BADF00D;
-  int in_handle_out = -2;
-  EXPECT_EQ(execute(AMDKFD_IOC_DBG_TRAP, &en, sizeof(en), notifier, &in_handle_out), -ESRCH)
-      << "a writable mem fd for another process was accepted";
+  // -1 rather than a sentinel the assertion would accept: execute() leaves the
+  // out-param untouched on its own early returns, and initialising it to
+  // anything else lets "never written" pass as "not adopted".
+  int in_handle_out = -1;
+  const int rejected = execute(AMDKFD_IOC_DBG_TRAP, &en, sizeof(en), notifier, &in_handle_out);
+  EXPECT_EQ(rejected, -ESRCH) << "a writable mem fd for another process was accepted";
   EXPECT_NE(in_handle_out, -1) << "the notifier was adopted by a rejected ENABLE";
+  // Only a rejected ENABLE leaves the fd ours to close. If the gate regressed
+  // and the session took it, dropping ownership here keeps the failure to one
+  // assertion instead of adding a close() of a descriptor since reissued.
+  if (rejected == 0)
+    (void)notifier_closer.release();
 
   // The matching fd still works, so the gate rejects the mismatch and not the
   // transfer itself.
   mem_mismatch_path_.clear();
   int notifier2 = eventfd(0, EFD_CLOEXEC);
   ASSERT_GE(notifier2, 0);
+  util::UniqueHandle notifier2_closer{notifier2};
   kfd_ioctl_dbg_trap_args ok{};
   ok.pid = static_cast<uint32_t>(kClientPid);
   ok.op = KFD_IOC_DBG_TRAP_ENABLE;
   ok.enable.dbg_fd = 0x0BADF00D;
-  EXPECT_EQ(execute(AMDKFD_IOC_DBG_TRAP, &ok, sizeof(ok), notifier2, nullptr), 0);
+  const int accepted = execute(AMDKFD_IOC_DBG_TRAP, &ok, sizeof(ok), notifier2, nullptr);
+  EXPECT_EQ(accepted, 0);
+  // Adopted by the session on success, so hand it over; still ours to close if
+  // the ENABLE failed.
+  if (accepted == 0)
+    (void)notifier2_closer.release();
   EXPECT_EQ(disable(), 0);
-
-  reap();
 }
 
 // The transferred fd (in_handle) replaces the client-side dbg_fd in the payload

@@ -1254,16 +1254,13 @@ TEST(CheckpointTest, RefusesToSaveTrappedOrDebuggerStoppedWaves) {
   wf->set_debug_suspended(false);
 
   // The runtime's own pause is not a debugger stop. A queue throttled to
-  // queue_percentage 0 carries no trap or debugger state and the CP re-derives
-  // queue suspension on restore, so it must stay checkpointable -- this is the
-  // one assertion that tells debug_stopped() apart from debug_paused().
+  // queue_percentage 0 carries none of the trap or debugger state the refusals
+  // above exist to protect, so it must stay checkpointable -- this is the one
+  // assertion that tells debug_stopped() apart from debug_paused().
   wf->set_runtime_suspended(true);
   EXPECT_NO_THROW(
       config::save_checkpoint(checkpoint.path(), *loaded.soc(), 5, loaded.engine_config));
   wf->set_runtime_suspended(false);
-
-  EXPECT_NO_THROW(
-      config::save_checkpoint(checkpoint.path(), *loaded.soc(), 6, loaded.engine_config));
 }
 
 TEST(CApiTest, CreateAndDestroyFromString) {

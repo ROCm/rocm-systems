@@ -285,6 +285,10 @@ public:
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
 
+  /// STATUS.HALT. Bit 13 on every modelled architecture -- see StatusReg::HALT
+  /// in each arch's isa.h, which all spell it member<13, 13>.
+  static constexpr uint32_t kStatusHaltMask = 1u << 13;
+
   bool dx10_clamp() const { return (mode_raw_ & DX10_CLAMP_BIT) != 0; }
   bool gpr_idx_en() const { return mode_has_gpr_idx_en_ && ((mode_raw_ & GPR_IDX_EN_BIT) != 0); }
   bool fp16_ovfl() const { return (mode_raw_ & FP16_OVFL_BIT) != 0; }
@@ -474,6 +478,21 @@ public:
   void write_scc(bool val) {
     uint32_t s = status_raw();
     set_status_raw(val ? (s | 1u) : (s & ~1u));
+  }
+
+  /// @brief STATUS.HALT, the architectural "this wave is halted" bit.
+  /// @details Bit 13 on every architecture this emulator models (StatusReg::HALT
+  /// in each arch's isa.h). s_sendmsghalt sets it and s_rfe reads it to decide
+  /// whether the wave stays stopped on the way out of the trap handler, so it is
+  /// live wave state that a debugger resume has to clear -- not a private flag.
+  /// Named here so the bit position is written once instead of at each user.
+  bool status_halt() const { return (status_raw() & kStatusHaltMask) != 0; }
+
+  /// @brief Set or clear STATUS.HALT.
+  /// @param val New STATUS.HALT value.
+  void set_status_halt(bool val) {
+    const uint32_t s = status_raw();
+    set_status_raw(val ? (s | kStatusHaltMask) : (s & ~kStatusHaltMask));
   }
 
   /// @brief Return the current execution state.

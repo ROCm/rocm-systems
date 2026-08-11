@@ -2526,6 +2526,25 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
   if (!gpu || !gpu->soc || ctx_base == 0)
     return false;
 
+  // Never publish a record shaped for the wrong architecture. The codec
+  // reproduces the gfx9.4 layout only (kmd/linux/cwsr.h), and the differences
+  // elsewhere are not confined to one field -- the control stack, the
+  // COMPUTE_RELAUNCH bits, the wave64 VGPR stride and the SGPR alias slots all
+  // move. rocm-dbgapi would decode the image against its own layout and act on
+  // whatever it read, so producing nothing is strictly better than producing
+  // that. Reported here rather than refused at DBG_TRAP_ENABLE: every errno
+  // that path can return except ESRCH and EALREADY becomes
+  // AMD_DBGAPI_STATUS_ERROR, which rocm-dbgapi turns into a [[noreturn]]
+  // fatal_error, so refusing there aborts the debugger instead of declining.
+  // Declining cleanly is the topology's job (HSA_CAP_TRAP_DEBUG_SUPPORT), and
+  // that surface is deliberately kept identical to the real KFD driver.
+  if (!kmd::cwsr_layout_modelled(gpu->soc->arch())) {
+    util::Logger::warn("wave stop not published: no CWSR record layout is modelled for arch=",
+                       static_cast<int>(gpu->soc->arch()),
+                       "; GPU debugging is supported on gfx942/gfx950 only");
+    return false;
+  }
+
   std::vector<kmd::CwsrWaveState> waves;
   gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
     for (auto *cu : cp->compute_units()) {
@@ -2953,6 +2972,12 @@ void SimulatedKfd::release_debuggee_state(pid_t target_pid, KfdProcess *target_p
             wave->set_debug_single_step(false);
             wave->set_debug_halted(false);
             wave->set_debug_suspended(false);
+            // The architectural half of the same stop. s_sendmsghalt raises
+            // STATUS.HALT and s_rfe consults it on the way out of the handler,
+            // so leaving it set outlives the session: the wave would re-halt at
+            // the handler return with no debugger left to resume it, and the
+            // queue would never drain.
+            wave->set_status_halt(false);
             wake = true;
           }
         });
@@ -3007,7 +3032,7 @@ util::UniqueHandle SimulatedKfd::duplicate_debug_target_mem(pid_t target_pid) co
 
 void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWaveState &state) {
   constexpr uint32_t kModeDebugEnMask = 1u << 11;
-  constexpr uint32_t kStatusHaltMask = 1u << 13;
+  constexpr uint32_t kStatusHaltMask = amdgpu::Wavefront::kStatusHaltMask;
   wave.pc = state.pc;
   // Mirror of the un-shadowing in build_cwsr_wave_state(): while a handler is
   // mid-flight the published EXEC is the interrupted application mask, so the
@@ -3033,6 +3058,14 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
     wave.set_trap_saved_status(restored_status);
   else
     wave.set_status_raw(restored_status);
+  // NOTE: the live STATUS.HALT is deliberately *not* cleared here even on a
+  // resume. While the handler is mid-flight the bit is the handler's own
+  // request to keep the wave stopped (the ROCr sequence raises it with s_setreg
+  // and only then returns), and clearing it loses the breakpoint --
+  // DbgTrapCwsrShadowsTrapHandlerRegistersAndRoutesDebuggerEdits pins that. A
+  // wave halted *at* s_sendmsghalt is in the same window but wants the opposite,
+  // and the two are not distinguishable from the record alone. See the review
+  // note on execute_s_sendmsghalt_sopp.
   wave.set_mode_raw(state.mode);
   wave.set_trapsts(state.trapsts);
   wave.set_debug_wave_id(state.wave_id);
@@ -3778,22 +3811,6 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
   case KFD_IOC_DBG_TRAP_ENABLE: {
     if (enabled)
       return -EALREADY; // target process is already debug enabled
-
-    // Refuse a target whose CWSR record layout this build does not model.
-    // Stopping a wave means writing its state into the context-save area at
-    // exactly the offsets rocm-dbgapi will read, and the codec reproduces the
-    // gfx9.4 layout only (see kmd/linux/cwsr.h). Attaching anyway would publish
-    // an image dbgapi decodes against a different layout and act on -- worse
-    // than saying the target is unsupported, which is what real KFD does for a
-    // device that cannot be debugged.
-    for (auto &gpu : gpus_) {
-      if (gpu.soc && !kmd::cwsr_layout_modelled(gpu.soc->arch())) {
-        util::Logger::warn("DBG_TRAP_ENABLE refused: no CWSR record layout is modelled for arch=",
-                           static_cast<int>(gpu.soc->arch()),
-                           "; debugging is supported on gfx942/gfx950 only");
-        return -ENOTSUP;
-      }
-    }
 
     const int dbg_fd = static_cast<int>(args->enable.dbg_fd);
     // Validate the notifier before trusting it. In daemon mode the fd was

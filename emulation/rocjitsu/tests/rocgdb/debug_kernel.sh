@@ -45,8 +45,13 @@ skip() {
 }
 
 # --- Locate tools -----------------------------------------------------------
+# MIRAGE_BIN is authoritative when set, never advisory. ctest points it at the
+# staged <ROCM_HOME>/bin/mirage precisely so mirage resolves *this* build's
+# librocjitsu.so; falling through to PATH when the staged copy is missing or not
+# executable would run some other mirage against some other library and report
+# the result as this build's, which is the failure the staging exists to prevent.
 find_mirage() {
-  if [[ -n "${MIRAGE_BIN:-}" && -x "${MIRAGE_BIN}" ]]; then echo "${MIRAGE_BIN}"; return; fi
+  if [[ -n "${MIRAGE_BIN:-}" ]]; then echo "${MIRAGE_BIN}"; return; fi
   if command -v mirage >/dev/null 2>&1; then command -v mirage; return; fi
   for c in "$here/../../../mirage/target/debug/mirage" \
            "$here/../../../mirage/target/release/mirage"; do
@@ -54,6 +59,13 @@ find_mirage() {
   done
 }
 
+# Checked here rather than inside find_mirage: that runs in a command
+# substitution, where `exit` would leave only the subshell and the empty result
+# would be reported as a skip.
+if [[ -n "${MIRAGE_BIN:-}" && ! -x "${MIRAGE_BIN}" ]]; then
+  echo "FAIL: MIRAGE_BIN=${MIRAGE_BIN} is not an executable file" >&2
+  exit 1
+fi
 mirage_bin="$(find_mirage)"
 [[ -z "$mirage_bin" ]] && skip "mirage binary not found (set MIRAGE_BIN)"
 command -v hipcc  >/dev/null 2>&1 || skip "hipcc not found"
@@ -137,14 +149,20 @@ fail=0
 # held to `exit 0` the way the clean scenarios are -- rocgdb's batch status for a
 # run that ends on a fatal GPU signal is not something this harness pins down,
 # and guessing it would make the test fail on a healthy stack. What must never
-# pass silently is the run being cut short, so reject everything from 124 up:
-# `timeout` kills with 124, the shell reports 126/127 for a command it could not
-# execute, and a signalled child reports 128+signo. Each means the markers below
-# were matched against a truncated log. rocgdb itself only ever exits 0 or 1, so
-# nothing legitimate is above that line.
+# pass silently is the run never producing a whole log, so reject everything from
+# 124 up.
+#
+# The status is mirage's, not rocgdb's: every scenario runs `timeout N mirage run
+# -- rocgdb ...`, and mirage forwards the guest's status masked to 8 bits
+# (ctl/src/lib.rs), reporting 128+signo for a signalled guest and 127 when it
+# could not spawn the command at all. On top of that `timeout` uses 124 for a
+# kill and 125 for its own failure, and the shell uses 126/127 for a command it
+# could not execute. rocgdb itself only ever exits 0 or 1, so nothing legitimate
+# reaches 124 and everything at or above it means the markers below would be
+# matched against a truncated log.
 check_not_killed() { # <status> <scenario description>
   if [[ $1 -ge 124 ]]; then
-    echo "FAIL: $2 rocgdb run was killed (status $1)" >&2
+    echo "FAIL: $2 rocgdb run did not complete (status $1)" >&2
     fail=1
   fi
 }
@@ -378,14 +396,16 @@ timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -
     -ex 'continue' \
     "$app" </dev/null >"$outfile6" 2>&1
 status6=$?
-if [[ $status6 -ne 0 ]]; then
-  echo "FAIL: private/scratch rocgdb run exited with status $status6" >&2
-  fail=1
-fi
 out6="$(cat "$outfile6")"
 echo "--------------------------------------------------------------------"
 echo "$out6"
 echo "--------------------------------------------------------------------"
+# Tested after the log is echoed, the way scenarios 2, 3 and 7 do it, so the
+# diagnosis is not printed above the output that explains it.
+if [[ $status6 -ne 0 ]]; then
+  echo "FAIL: private/scratch rocgdb run exited with status $status6" >&2
+  fail=1
+fi
 check6() { # <regex> <description>  (checks the sixth run's output)
   if grep -qaE "$1" <<<"$out6"; then
     echo "  ok: $2"

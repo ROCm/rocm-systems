@@ -2587,14 +2587,27 @@ find_program(
 # on PATH would be a different build than the librocjitsu.so staged below, and
 # the mismatch surfaces as an opaque "enable_debug failed (STATUS_ERROR)" rather
 # than as a version error.
+#
+# A fresh cache entry name (not MIRAGE_EXECUTABLE) is deliberate: find_program is
+# a no-op when its cache variable is already set, so any build tree configured
+# while this used HINTS -- which does not suppress the default PATH search --
+# would keep an out-of-tree hit forever and NO_DEFAULT_PATH would never apply to
+# the very trees it was added for.
+#
+# build/manylinux/bin is where emulation/mirage/scripts/mirage.sh installs, so it
+# belongs beside the two cargo target dirs; PATH_SUFFIXES covers it without
+# reopening the default search.
 find_program(
-    MIRAGE_EXECUTABLE
+    RJ_MIRAGE_EXECUTABLE
     NAMES mirage
     PATHS
         "${CMAKE_SOURCE_DIR}/../mirage/target/release"
         "${CMAKE_SOURCE_DIR}/../mirage/target/debug"
+        "${CMAKE_SOURCE_DIR}/../mirage/build/manylinux"
+    PATH_SUFFIXES bin
     NO_DEFAULT_PATH
 )
+set(MIRAGE_EXECUTABLE "${RJ_MIRAGE_EXECUTABLE}")
 # Mirage is as much a prerequisite as rocgdb and hipcc: without it the harness
 # has nothing to run the debuggee under. Registering the test anyway produced a
 # test that could only skip, or -- worse -- one that ran a Mirage which then
@@ -2607,27 +2620,37 @@ find_program(
 # register rather than test a binary that does not match the tree, and say what
 # to run. Configure-time only, so `cargo build` needs a re-run of cmake -- which
 # the message states.
+#
+# No CONFIGURE_DEPENDS: it re-runs cmake when the *set* of matched files changes,
+# never when an existing file's mtime does, which is the only thing this gate
+# reads -- so it cannot fire for the case that matters and costs a recursive walk
+# of the whole mirage tree on every build.
 set(_rocgdb_mirage_stale FALSE)
 if(MIRAGE_EXECUTABLE)
+    # mirage is a workspace whose root package is the `mirage` binary itself
+    # (src/main.rs, declared by the top-level Cargo.toml), so the per-crate
+    # patterns alone would miss the entry point most likely to change.
     file(
         GLOB_RECURSE _rocgdb_mirage_sources
-        CONFIGURE_DEPENDS
         "${CMAKE_SOURCE_DIR}/../mirage/*/src/*.rs"
         "${CMAKE_SOURCE_DIR}/../mirage/*/Cargo.toml"
+        "${CMAKE_SOURCE_DIR}/../mirage/src/*.rs"
+        "${CMAKE_SOURCE_DIR}/../mirage/build.rs"
+        "${CMAKE_SOURCE_DIR}/../mirage/Cargo.toml"
+        "${CMAKE_SOURCE_DIR}/../mirage/Cargo.lock"
     )
+    # Phrased as "the binary is not newer than the source" rather than the
+    # reverse: CMake's IS_NEWER_THAN is also true when the two timestamps are
+    # *equal*, so testing the source directly calls a tie stale. Ties are the
+    # common case after a checkout, a container copy, or a CI cache restore, and
+    # calling them stale silently deregisters the test with a message telling the
+    # developer to run a build they already ran.
     foreach(_src IN LISTS _rocgdb_mirage_sources)
-        if("${_src}" IS_NEWER_THAN "${MIRAGE_EXECUTABLE}")
+        if(NOT "${MIRAGE_EXECUTABLE}" IS_NEWER_THAN "${_src}")
             set(_rocgdb_mirage_stale TRUE)
             break()
         endif()
     endforeach()
-    if(_rocgdb_mirage_stale)
-        message(
-            STATUS
-            "rocgdb debug smoke test disabled (${MIRAGE_EXECUTABLE} is older than "
-            "mirage's sources; run `cargo build` in emulation/mirage, then re-run cmake)"
-        )
-    endif()
 endif()
 
 if(
@@ -2642,12 +2665,14 @@ if(
     # and the search is additive, so a stub root cannot shadow anything else.
     set(_rocgdb_rocm_home ${CMAKE_CURRENT_BINARY_DIR}/rocgdb_rocm_home)
     # Stage Mirage next to the library as <prefix>/bin/mirage + <prefix>/lib.
-    # Mirage's own discovery looks beside its executable before anything else
-    # (kmd_search_dirs in emulation/mirage/rocjitsu/src/lib.rs), so running the
-    # staged copy makes it resolve *this* build's librocjitsu.so first, whatever
-    # else exists on the machine. Relying on ROCM_HOME alone left every earlier
-    # search entry -- including a rocjitsu/build beside the developer's own
-    # mirage -- ahead of the staged one.
+    # kmd_search_dirs (emulation/mirage/rocjitsu/src/lib.rs) probes
+    # <exe_dir>/../..{,/..}/rocjitsu/build first and only then <exe_dir>/../lib,
+    # with $ROCM_HOME/lib after both. Run in place from
+    # emulation/mirage/target/debug, the third of those probes resolves to
+    # emulation/rocjitsu/build -- the developer's own tree -- so ROCM_HOME never
+    # got a look in. Running the staged copy puts none of the rocjitsu/build
+    # probes on a real directory, and <exe_dir>/../lib is this build's staged
+    # librocjitsu.so.
     add_custom_command(
         OUTPUT
             ${_rocgdb_rocm_home}/lib/librocjitsu.so
@@ -2659,6 +2684,13 @@ if(
             ${_rocgdb_rocm_home}/lib/librocjitsu.so
         COMMAND
             ${CMAKE_COMMAND} -E copy_if_different ${MIRAGE_EXECUTABLE}
+            ${_rocgdb_rocm_home}/bin/mirage
+        # copy_if_different leaves the destination's mtime alone when the bytes
+        # already match, so without this the outputs stay older than their inputs
+        # and the generator re-issues all four commands -- a byte-compare of a
+        # 69 MB binary and the shared library -- on every incremental build.
+        COMMAND
+            ${CMAKE_COMMAND} -E touch ${_rocgdb_rocm_home}/lib/librocjitsu.so
             ${_rocgdb_rocm_home}/bin/mirage
         DEPENDS rocjitsu_shared ${MIRAGE_EXECUTABLE}
         COMMENT
@@ -2687,9 +2719,26 @@ if(
         STATUS
         "rocgdb debug smoke test enabled (found ${ROCGDB_EXECUTABLE})"
     )
-elseif(NOT _rocgdb_mirage_stale)
-    message(
-        STATUS
-        "rocgdb debug smoke test disabled (need rocgdb, hipcc and mirage)"
-    )
+else()
+    # One message naming every unmet reason. Reporting only staleness when rocgdb
+    # is also missing sends the developer to `cargo build`, after which the test
+    # still does not register and nothing new is printed to say why.
+    set(_rocgdb_missing "")
+    if(NOT ROCGDB_EXECUTABLE)
+        list(APPEND _rocgdb_missing "rocgdb")
+    endif()
+    if(NOT HIPCC_EXECUTABLE)
+        list(APPEND _rocgdb_missing "hipcc")
+    endif()
+    if(NOT MIRAGE_EXECUTABLE)
+        list(APPEND _rocgdb_missing "mirage")
+    endif()
+    if(_rocgdb_mirage_stale)
+        list(
+            APPEND _rocgdb_missing
+            "a mirage newer than its sources (run `cargo build` in emulation/mirage, then re-run cmake)"
+        )
+    endif()
+    list(JOIN _rocgdb_missing ", " _rocgdb_missing)
+    message(STATUS "rocgdb debug smoke test disabled (need ${_rocgdb_missing})")
 endif()
