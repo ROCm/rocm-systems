@@ -24,9 +24,7 @@
   "kernels": [
     "hip_matmul_matvec::m256_n1_k1024",
     "hip_streamk_simple::m256_n256_k256",
-    "hip_streamk_two_tile::m256_n256_k256",
-    "llama_mul_mat_vec_q::default",
-    "llama_rms_norm::default"
+    "hip_streamk_two_tile::m256_n256_k256"
   ],
   "llama": [
     "llama.gfx942.backend_ops.LIGHTNING_INDEXER.28d7def07117",

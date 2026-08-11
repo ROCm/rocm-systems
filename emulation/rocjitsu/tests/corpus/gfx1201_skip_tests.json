@@ -42,8 +42,6 @@
   ],
   "kernels": [
     "hip_matmul_matvec::m256_n1_k1024",
-    "llama_mul_mat_vec_q::default",
-    "llama_rms_norm::default",
     "rocblas_sgemm::square_16x16",
     "rocblas_sgemm::rect_64x1x64",
     "rocblas_sgemm::fuzz_iter2",

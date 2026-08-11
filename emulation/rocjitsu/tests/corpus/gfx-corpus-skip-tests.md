@@ -22,7 +22,7 @@ Classification buckets:
 
 ## gfx942
 
-### functional failure: 52
+### functional failure: 50
 
 - `cts.gfx942.fpsan.fpsan_amdgcn_math_extra_test`
 - `cts.gfx942.fpsan.fpsan_atomic_test`
@@ -74,8 +74,6 @@ Classification buckets:
 - `llama.gfx942.backend_ops.UPSCALE.f4497e2354a8`
 - `llama.gfx942.backend_ops.XIELU.925694f8c916`
 - `llama.gfx942.backend_ops.XIELU.dc6e5386ba70`
-- `llama_mul_mat_vec_q::default`
-- `llama_rms_norm::default`
 
 ### flaky: 1
 
@@ -212,7 +210,7 @@ Classification buckets:
 
 ## gfx1201
 
-### functional failure: 145
+### functional failure: 143
 
 - `cts.gfx1201.fpsan.fpsan_amdgcn_ldexp_test`
 - `cts.gfx1201.fpsan.fpsan_amdgcn_math_extra_test`
@@ -340,8 +338,6 @@ Classification buckets:
 - `llama.gfx1201.backend_ops.TOPK_MOE.91b601cce199`
 - `llama.gfx1201.backend_ops.TOPK_MOE.ba01fa21e49a`
 - `llama.gfx1201.backend_ops.TOPK_MOE.fa7a6e1ee615`
-- `llama_mul_mat_vec_q::default`
-- `llama_rms_norm::default`
 - `rocblas_sgemm::alpha_beta`
 - `rocblas_sgemm::beta_zero`
 - `rocblas_sgemm::fuzz_iter0`
