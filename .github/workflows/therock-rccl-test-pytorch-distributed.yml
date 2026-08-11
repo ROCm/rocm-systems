@@ -17,6 +17,9 @@ on:
       notify_email:
         type: string
         default: ''
+      notify_webhook:
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       amdgpu_families:
@@ -33,6 +36,10 @@ on:
         default: 'smoke'
       notify_email:
         description: 'Email address to send test summary report'
+        type: string
+        default: ''
+      notify_webhook:
+        description: 'Teams webhook URL for test summary notifications'
         type: string
         default: ''
 
@@ -108,17 +115,18 @@ jobs:
           NCCL_DEBUG: INFO
           TORCH_NCCL_BLOCKING_WAIT: 1
           TORCH_NCCL_ASYNC_ERROR_HANDLING: 1
+          NOTIFY_EMAIL: ${{ inputs.notify_email }}
+          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook }}
         run: |
-          NOTIFY_ARGS=""
-          if [ -n "${{ inputs.notify_email }}" ]; then
-            NOTIFY_ARGS="--notify-email ${{ inputs.notify_email }}"
-          fi
+          NOTIFY_ARGS=()
+          [ -n "$NOTIFY_EMAIL" ] && NOTIFY_ARGS+=(--notify-email "$NOTIFY_EMAIL")
+          [ -n "$NOTIFY_WEBHOOK" ] && NOTIFY_ARGS+=(--notify-webhook "$NOTIFY_WEBHOOK")
           python rocm-systems/.github/scripts/test_pytorch_c10d.py \
             --artifact-dir ${{ env.OUTPUT_ARTIFACTS_DIR }} \
             --pytorch-src ${{ env.PYTORCH_SRC }} \
             --results-log ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.log \
             --test-scope ${{ inputs.test_scope || 'smoke' }} \
-            $NOTIFY_ARGS
+            "${NOTIFY_ARGS[@]}"
 
       - name: Upload test results
         if: always()

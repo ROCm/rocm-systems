@@ -22,8 +22,6 @@ release(bool, AMD_LOG_ASYNC, true,                                            \
         "Async logging with in-memory buffer and background thread (set 0 to disable)")\
 debug(uint, DEBUG_GPU_FLAGS, 0,                                               \
         "The debug options for GPU device")                                   \
-release(size_t, CQ_THREAD_STACK_SIZE, 256*Ki, /* @todo: that much! */         \
-        "The default command queue thread stack size")                        \
 release(int, GPU_MAX_WORKGROUP_SIZE, 0,                                       \
         "Maximum number of workitems in a workgroup for GPU, 0 -use default") \
 debug(bool, CPU_MEMORY_GUARD_PAGES, false,                                    \
@@ -241,8 +239,6 @@ release(bool, HIP_VMEM_MANAGE_SUPPORT, true,                                  \
         "Virtual Memory Management Support")                                  \
 release(uint, DEBUG_HIP_GRAPH_DOT_PRINT, 0,                               \
         "0 = Disable, 1 = Print during Graph Inst, 2 = Print during Graph Launch") \
-release(bool, DEBUG_HIP_FORCE_ASYNC_QUEUE, false,                             \
-        "Forces grpahs into async queue mode. DEBUG_HIP_FORCE_GRAPH_QUEUES must be 1") \
 release(uint, DEBUG_HIP_FORCE_GRAPH_QUEUES, 4,                                \
         "Forces the number of streams for the graph parallel execution")      \
 release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
@@ -267,8 +263,8 @@ release(bool, DEBUG_CLR_SYSMEM_POOL, false,                                   \
 release(uint, DEBUG_HIP_DYNAMIC_QUEUES, 1,                                    \
         "Dynamic queue management: 0=off, 1=Depth heuristic,"                 \
         " 2=1 + dedicated null-stream queue")                                 \
-release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, false,                        \
-        "Ignore priority streams")                                            \
+release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, true,                         \
+        "Treat all streams as normal priority")                               \
 release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
         "Set this to true, to avoid host side abort for GPU errors")          \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \

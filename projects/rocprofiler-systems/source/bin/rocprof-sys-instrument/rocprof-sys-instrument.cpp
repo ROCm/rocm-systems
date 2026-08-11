@@ -218,9 +218,6 @@ exists(const std::string& name);
 bool
 is_file(std::string _name);
 
-bool
-is_directory(std::string _name);
-
 std::string
 get_cwd();
 
@@ -1198,7 +1195,7 @@ main(int argc, char** argv)
     if(_cmdv && _cmdv[0] && strlen(_cmdv[0]) > 0)
     {
         auto _is_executable    = rocprofsys_get_is_executable(_cmdv[0], binary_rewrite);
-        std::string _cmdv_base = ::basename(_cmdv[0]);
+        std::string _cmdv_base = path::filename(_cmdv[0]);
         auto        _has_lib_suffix = _cmdv_base.length() > 3 &&
                                (_cmdv_base.find(".so.") != std::string::npos ||
                                 _cmdv_base.find(".so") == (_cmdv_base.length() - 3) ||
@@ -1249,8 +1246,8 @@ main(int argc, char** argv)
     if(binary_rewrite && outfile.empty())
     {
         auto _is_local = (path::realpath(cmdv0) ==
-                          fmt::format("{}/{}", get_cwd(), ::basename(cmdv0.c_str())));
-        auto _cmd      = std::string{ ::basename(cmdv0.c_str()) };
+                          fmt::format("{}/{}", get_cwd(), path::filename(cmdv0)));
+        auto _cmd      = path::filename(cmdv0);
         if(_cmd.find('.') == std::string::npos)
         {
             // there is no extension, assume it is an exe
@@ -1854,10 +1851,8 @@ main(int argc, char** argv)
 
     for(const auto& itr : extra_libs)
     {
-        string_t _name = itr;
-        size_t   _pos  = _name.find_last_of('/');
-        if(_pos != npos_v) _name = _name.substr(_pos + 1);
-        _pos = _name.find('.');
+        string_t _name = path::filename(itr);
+        size_t   _pos  = _name.find('.');
         if(_pos != npos_v) _name = _name.substr(0, _pos);
         _pos = _name.find("librocprof-sys-");
         if(_pos != npos_v)
@@ -2775,13 +2770,13 @@ get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
         auto _orig = _name;
         for(auto itr : _search_paths)
         {
-            if(!is_directory(itr) || is_file(itr)) itr = path::parent_path(itr);
+            if(!path::is_directory(itr) || is_file(itr)) itr = path::parent_path(itr);
 
             auto _exists = false;
             ROCPROFSYS_ADD_LOG_ENTRY("searching", itr, "for", _name);
             for(const auto& pitr :
                 { absolute(fmt::format("{}/{}", itr, _name)),
-                  absolute(fmt::format("{}/{}", itr, filepath::basename(_name))) })
+                  absolute(fmt::format("{}/{}", itr, path::filename(_name))) })
             {
                 _exists = exists(pitr) && is_file(pitr);
                 if(_exists)
@@ -2820,7 +2815,7 @@ get_absolute_filepath(std::string _name)
 {
     auto _search_paths  = strvec_t{};
     auto _combine_paths = std::vector<strvec_t>{ bin_search_paths, lib_search_paths };
-    auto _base_name     = std::string_view{ filepath::basename(_name) };
+    auto _base_name     = path::filename(_name);
     // if the name looks like a library, put the lib_search_paths first
     if(_base_name.find("lib") == 0 || _base_name.find(".so") != std::string::npos ||
        _base_name.find(".a") != std::string::npos)
@@ -2869,14 +2864,6 @@ is_file(std::string _name)
     _name = path::realpath(_name);
     struct stat buffer;
     return (stat(_name.c_str(), &buffer) == 0 && S_ISREG(buffer.st_mode) != 0);
-}
-
-bool
-is_directory(std::string _name)
-{
-    _name = path::realpath(_name);
-    struct stat buffer;
-    return (stat(_name.c_str(), &buffer) == 0 && S_ISDIR(buffer.st_mode) != 0);
 }
 
 std::string

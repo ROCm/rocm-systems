@@ -119,6 +119,18 @@ SUPPORTED_DATATYPES: dict[str, dict[str, OpsSupport]] = {
         "I32": OpsSupport.VALU,
         "I64": OpsSupport.VALU,
     },  # Unsupported: F4, F6, F8
+    "gfx1250": {
+        "FP4": OpsSupport.MATRIX,
+        "FP6": OpsSupport.MATRIX,
+        "FP8": OpsSupport.MATRIX,
+        "FP16": OpsSupport.VALU | OpsSupport.MATRIX,
+        "BF16": OpsSupport.MATRIX,
+        "FP32": OpsSupport.VALU | OpsSupport.MATRIX,
+        "FP64": OpsSupport.VALU,
+        "I8": OpsSupport.VALU | OpsSupport.MATRIX,
+        "I32": OpsSupport.VALU,
+        "I64": OpsSupport.VALU,
+    },
 }
 
 CACHE_LEVELS = ["ai_l0", "ai_l1", "ai_l2", "ai_hbm", "ai_lds"]
@@ -507,11 +519,11 @@ def calc_ai_analyze(
                 value = row.get("Value", 0)
                 if metric == "AI HBM":
                     ai_hbm = sanitize_ai_value(value)
-                elif metric == "AI L2":
+                elif metric in ("AI L2", "AI GL2"):
                     ai_l2 = sanitize_ai_value(value)
                 elif metric == "AI L1":
                     ai_l1 = sanitize_ai_value(value)
-                elif metric == "AI L0":
+                elif metric in ("AI L0", "AI GL0"):
                     ai_l0 = sanitize_ai_value(value)
                 elif metric == "AI LDS":
                     ai_lds = sanitize_ai_value(value)

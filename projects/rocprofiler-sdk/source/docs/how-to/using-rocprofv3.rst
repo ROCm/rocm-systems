@@ -579,11 +579,11 @@ Here are the contents of ``rocjpeg_api_trace.csv`` file:
 rocSHMEM trace
 ++++++++++++++
 
-`rocSHMEM <https://rocm.docs.amd.com/projects/rocshmem/en/latest/>`_ is an intra-kernel networking library that provides GPU-centric networking through an OpenSHMEM-like interface. This option traces the rocSHMEM host-stream API (the ``rocshmem_*_on_stream`` routines that enqueue communication and synchronization operations on a HIP stream).
+`rocSHMEM <https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/>`_ is an intra-kernel networking library that provides GPU-centric networking through an OpenSHMEM-like interface. This option traces the rocSHMEM host-stream API (the ``rocshmem_*_on_stream`` routines that enqueue communication and synchronization operations on a HIP stream).
 
 .. note::
 
-   rocSHMEM tracing requires rocSHMEM to be built with rocprofiler-register support (the ``USE_ROCPROFILER_REGISTER`` build option, enabled by default). See the `rocSHMEM build documentation <https://rocm.docs.amd.com/projects/rocshmem/en/latest/build.html>`_ for details.
+   rocSHMEM tracing requires rocSHMEM to be built with rocprofiler-register support (the ``USE_ROCPROFILER_REGISTER`` build option, enabled by default). See the `rocSHMEM build documentation <https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/build.html>`_ for details.
 
 .. code-block:: shell
 
