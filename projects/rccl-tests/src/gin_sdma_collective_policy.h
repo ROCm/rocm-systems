@@ -4,17 +4,28 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Shared design constants for the GIN-SDMA collective path (deviceImpl == 3).
-// Currently the single source of truth for the two put-size limits that
-// common.h::ginPutChunked segments every GIN-tier put against. Kept as a
-// standalone, dependency-free header (no ncclDevComm, no GPU intrinsics, no
-// getenv) so the same values can be shared by the device kernels and validated
-// on the host.
+// Shared design constants and segment math for the GIN-SDMA collective path
+// (deviceImpl == 3). The single source of truth for the two put-size limits
+// that common.h::ginPutChunked segments every GIN-tier put against, plus the
+// pure segmentation arithmetic itself. Kept as a standalone, dependency-free
+// header (no ncclDevComm, no GPU intrinsics, no getenv) so the same code is
+// (a) called from the __global__ kernels on device and (b) unit-tested on the
+// host with GoogleTest (define GIN_SDMA_HOST_ONLY to drop the device attributes
+// and compile it as plain host C++; see test/gin_sdma_policy_test.cpp).
 
 #ifndef GIN_SDMA_COLLECTIVE_POLICY_H_
 #define GIN_SDMA_COLLECTIVE_POLICY_H_
 
 #include <cstddef>
+
+// The device kernels get __host__ __device__; plain host builds (and the host
+// unit test, which defines GIN_SDMA_HOST_ONLY) get no attribute so the header
+// compiles as ordinary C++ with no device codegen.
+#if (defined(__CUDACC__) || defined(__HIPCC__)) && !defined(GIN_SDMA_HOST_ONLY)
+#define GIN_SDMA_HD __host__ __device__
+#else
+#define GIN_SDMA_HD
+#endif
 
 namespace gin_sdma {
 
@@ -46,6 +57,50 @@ static constexpr size_t kGinPutMaxBytes = 1024ull * 1024 * 1024;  // 1 GiB (2^30
 // do not raise without re-measuring. ginPutChunked segments every GIN-tier put
 // to this size, so it protects ALL GIN-SDMA collectives that route through it.
 static constexpr size_t kGinSdmaSafeCopyBytes = 128ull * 1024 * 1024;  // 128 MiB (reliable single-copy max)
+
+// The single per-put segmentation limit ginPutChunked clamps to: the smaller of
+// the two constants above (correctness bound AND reliability bound). Compile-time
+// constant so the device loop and the host unit test share one value.
+static constexpr size_t kGinPutSegBytes =
+    kGinSdmaSafeCopyBytes < kGinPutMaxBytes ? kGinSdmaSafeCopyBytes : kGinPutMaxBytes;
+
+// ------------------------------ segment math ------------------------------
+//
+// Pure arithmetic for splitting one peer transfer into <=kGinPutSegBytes puts.
+// ginPutChunked (common.h) drives its gin.put() loop entirely from these two
+// functions, so the same code that runs on device is what the host unit test
+// exercises. Every GIN-tier put must satisfy: no segment exceeds the cap, the
+// segments tile [0,bytes) contiguously and sum back to bytes, and exactly one
+// segment is flagged final (it alone carries the caller's SignalInc).
+
+// One gin.put() segment of a chunked transfer.
+struct PutSegment {
+  size_t offset;   // byte offset of this segment within the transfer
+  size_t bytes;    // segment length in bytes (always <= maxSeg)
+  bool   isFinal;  // last segment: carries the caller's remote action (signal)
+};
+
+// Number of gin.put() segments a `bytes`-length transfer splits into when each
+// put is capped at `maxSeg`. A zero-length transfer still issues exactly one
+// (empty) put so its trailing signal fires; otherwise it is ceil(bytes/maxSeg).
+// maxSeg == 0 is a caller error and yields 0 (callers pass a nonzero cap).
+GIN_SDMA_HD inline size_t ginPutSegmentCount(size_t bytes, size_t maxSeg) {
+  if (maxSeg == 0) return 0;
+  if (bytes == 0) return 1;
+  return (bytes + maxSeg - 1) / maxSeg;
+}
+
+// The i-th (0-based, i < ginPutSegmentCount) segment of a `bytes`-length
+// transfer capped at `maxSeg`. Segments tile [0,bytes) contiguously; the last
+// one is flagged isFinal so ginPutChunked carries the remote action on it alone.
+GIN_SDMA_HD inline PutSegment ginPutSegmentAt(size_t bytes, size_t maxSeg, size_t i) {
+  PutSegment s{0, 0, false};
+  s.offset = i * maxSeg;
+  const size_t rem = bytes - s.offset;
+  s.bytes = rem > maxSeg ? maxSeg : rem;
+  s.isFinal = (s.offset + s.bytes >= bytes);
+  return s;
+}
 
 }  // namespace gin_sdma
 
