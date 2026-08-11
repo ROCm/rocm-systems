@@ -2606,6 +2606,86 @@ TEST_F(reader_v3_amb_pmc_test, v3_exactly_one_ambiguous_pmc)
     EXPECT_EQ(ambiguous_count, 1U);
 }
 
+// v3 dma-by-destination-agent fixture: the crossed 2-agent x 2-stream x 12 = 48
+// memory_copy pattern (fixtures/rocpd_v3_dma_agent_data.sql) that proves dma tracks
+// partition by dst_agent_id, not stream_id -- the reproducible in-tree stand-in for
+// roc-optiq's rocpd-transpose.db.
+class reader_v3_dma_agent_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        m_storage = std::make_unique<profiler_hub::storage_t>(m_database_path, "");
+        m_reader  = std::make_shared<profiler_hub::reader_t>(std::move(m_storage));
+    }
+
+    void TearDown() override
+    {
+        m_reader.reset();
+        m_storage.reset();
+    }
+
+    std::string m_database_path{ ROCPD_DB_V3_DMA_AGENT_PATH };
+    std::unique_ptr<profiler_hub::storage_t> m_storage;
+    std::shared_ptr<profiler_hub::reader_t>  m_reader;
+};
+
+TEST_F(reader_v3_dma_agent_test, dma_tracks_partition_by_destination_agent)
+{
+    // The 48 memory copies fully cross two destination agents (id 1, 2) with two
+    // streams (12 events per agent/stream cell), all on one queue. Keyed by
+    // (nid,pid,queue_id,dst_agent_id) this MUST yield exactly 2 dma tracks -- one per
+    // destination agent, 24 events each -- matching Optiq's
+    // GetRocprofMemoryCopyTrackQuery by-agent swimlane grouping. The old stream-keyed
+    // identity would instead have given 2 tracks of 24 split BY STREAM, each spanning
+    // both agents: the exact inverse. This test pins the by-agent partition and guards
+    // against a regression back to by-stream.
+    auto tracks = m_reader->get_tracks();
+    auto dma    = find_tracks(tracks, profiler_hub::reader_types::track_type_t::dma);
+    ASSERT_EQ(dma.size(), 2U);
+
+    std::set<size_t> track_agent_ids;
+    for(const auto& track : dma)
+    {
+        // Every dma track carries agent_info resolved from its dst_agent_id (stream_info
+        // is left null on dma tracks under the by-agent key).
+        ASSERT_NE(track->agent_info, nullptr)
+            << "dma track must resolve agent_info from dst_agent_id";
+        ASSERT_EQ(track->stream_info, nullptr)
+            << "dma track must not carry stream_info under the by-agent key";
+        track_agent_ids.insert(track->agent_info->id);
+
+        auto intervals = m_reader->get_interval_track(track->id);
+        ASSERT_EQ(intervals.size(), 24U)
+            << "each destination-agent track holds 24 copies (12 per stream)";
+
+        // Membership proof: every copy in this track targets the SAME destination agent
+        // as the track, and the track's copies span BOTH streams (proving the partition
+        // is by agent, not by stream). copyStreamX/copyStreamY name each copy's stream.
+        std::set<std::string> stream_names;
+        for(const auto& ev : intervals)
+        {
+            auto details = m_reader->get_event_info(ev.id);
+            ASSERT_TRUE(details.has_value());
+            auto* dst_agent_id = find_prop(*details, "dst_agent_id");
+            ASSERT_NE(dst_agent_id, nullptr);
+            ASSERT_TRUE(std::holds_alternative<uint64_t>(*dst_agent_id));
+            ASSERT_EQ(std::get<uint64_t>(*dst_agent_id), track->agent_info->id)
+                << "copy in a dma track must target that track's destination agent";
+            stream_names.insert(ev.display_name);
+        }
+        ASSERT_EQ(stream_names.size(), 2U) << "a destination-agent track must span both "
+                                              "streams (by-agent, not by-stream)";
+        ASSERT_TRUE(stream_names.count("copyStreamX") == 1);
+        ASSERT_TRUE(stream_names.count("copyStreamY") == 1);
+    }
+
+    // The two tracks resolve to the two distinct destination agents (id 1 and 2).
+    ASSERT_EQ(track_agent_ids.size(), 2U);
+    ASSERT_TRUE(track_agent_ids.count(1) == 1);
+    ASSERT_TRUE(track_agent_ids.count(2) == 1);
+}
+
 // --- Tier 3: synthetic v4.0 ambiguous-pmc fixture ----------------------------
 
 class reader_v4_amb_pmc_test : public ::testing::Test

@@ -750,6 +750,57 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_AMB_PMC_PATH="${ROCPD_DB_V3_AMB_PMC_PATH}"
 )
 
+# Synthetic v3 dma-by-destination-agent fixture, generated at build time from
+# committed SQL against the canonical v3 schema (same mechanism as the kd_pmc
+# fixture above). 48 memory copies fully cross two destination agents and two
+# streams (12 per cell) on one queue, so dma tracks keyed by dst_agent_id yield
+# exactly two agent-tracks spanning both streams. The db has no rocpd_timestamp
+# table, so the reader selects the v3 backend.
+set(_v3da_uuid "00000000000000000000000000d30003")
+set(_v3da_schema_src
+    ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
+)
+set(_v3da_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_dma_agent_data.sql)
+set(_v3da_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v3_dma_agent_gen.sql)
+file(READ ${_v3da_schema_src} _v3da_schema)
+file(READ ${_v3da_data_src} _v3da_data)
+string(
+    REGEX REPLACE
+    "INSERT INTO[^;]*rocpd_metadata[^;]*;"
+    ""
+    _v3da_schema
+    "${_v3da_schema}"
+)
+string(REPLACE "{{uuid}}" "_${_v3da_uuid}" _v3da_schema "${_v3da_schema}")
+string(REPLACE "{{guid}}" "${_v3da_uuid}" _v3da_schema "${_v3da_schema}")
+string(REPLACE "{{uuid}}" "_${_v3da_uuid}" _v3da_data "${_v3da_data}")
+string(REPLACE "{{guid}}" "${_v3da_uuid}" _v3da_data "${_v3da_data}")
+file(WRITE ${_v3da_gen_sql} "${_v3da_schema}\n${_v3da_data}\n")
+
+set(ROCPD_DB_V3_DMA_AGENT_PATH
+    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v3_dma_agent.db
+)
+add_custom_command(
+    OUTPUT ${ROCPD_DB_V3_DMA_AGENT_PATH}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V3_DMA_AGENT_PATH}
+    COMMAND
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_DMA_AGENT_PATH} ".read ${_v3da_gen_sql}"
+    DEPENDS ${_v3da_gen_sql} ${_v3da_schema_src} ${_v3da_data_src}
+    COMMENT "Generating synthetic v3 dma-by-destination-agent test fixture"
+    VERBATIM
+)
+add_custom_target(
+    profiler-hub_v3_dma_agent_fixture
+    DEPENDS ${ROCPD_DB_V3_DMA_AGENT_PATH}
+)
+add_dependencies(profiler-hub_unit_tests profiler-hub_v3_dma_agent_fixture)
+
+target_compile_definitions(
+    profiler-hub_unit_tests
+    PRIVATE ROCPD_DB_V3_DMA_AGENT_PATH="${ROCPD_DB_V3_DMA_AGENT_PATH}"
+)
+
 gtest_discover_tests(
     profiler-hub_unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
