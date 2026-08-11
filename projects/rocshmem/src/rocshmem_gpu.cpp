@@ -245,7 +245,7 @@ __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
 
 __device__ void rocshmem_putmem(void *dest, const void *source, size_t nelems,
                                  int pe) {
-  rocshmem_ctx_putmem(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
+  [[clang::always_inline]] rocshmem_ctx_putmem(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
 template <typename T>
@@ -275,7 +275,7 @@ __device__ void rocshmem_get(T *dest, const T *source, size_t nelems, int pe) {
 
 __device__ void rocshmem_putmem_nbi(void *dest, const void *source,
                                      size_t nelems, int pe) {
-  rocshmem_ctx_putmem_nbi(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
+  [[clang::always_inline]] rocshmem_ctx_putmem_nbi(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
 template <typename T>

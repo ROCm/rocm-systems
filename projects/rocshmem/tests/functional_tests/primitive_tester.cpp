@@ -88,9 +88,9 @@ __global__ void PrimitiveTest(int loop, int skip,
     } else if constexpr (Type == GetNBITestType) {
       rocshmem_ctx_getmem_nbi(ctx, dest + offset, source + offset, size, 1);
     } else if constexpr (Type == PutTestType) {
-      rocshmem_ctx_putmem(ctx, dest + offset, source + offset, size, 1);
+      [[clang::always_inline]] rocshmem_ctx_putmem(ctx, dest + offset, source + offset, size, 1);
     } else if constexpr (Type == PutNBITestType) {
-      rocshmem_ctx_putmem_nbi(ctx, dest + offset, source + offset, size, 1);
+      [[clang::always_inline]] rocshmem_ctx_putmem_nbi(ctx, dest + offset, source + offset, size, 1);
     } else if constexpr (Type == PTestType) {
       /* Assignment required to verify we can send non-symmetric memory */
       char val = source[offset];

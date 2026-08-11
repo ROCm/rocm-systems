@@ -91,9 +91,9 @@ __global__ void TeamCtxPrimitiveTest(int loop, int skip, long long int *start_ti
     } else if constexpr (Type == TeamCtxGetNBITestType) {
       rocshmem_ctx_getmem_nbi(ctx, dest + offset, source + offset, size, 1);
     } else if constexpr (Type == TeamCtxPutTestType) {
-      rocshmem_ctx_putmem(ctx, dest + offset, source + offset, size, 1);
+      [[clang::always_inline]] rocshmem_ctx_putmem(ctx, dest + offset, source + offset, size, 1);
     } else if constexpr (Type == TeamCtxPutNBITestType) {
-      rocshmem_ctx_putmem_nbi(ctx, dest + offset, source + offset, size, 1);
+      [[clang::always_inline]] rocshmem_ctx_putmem_nbi(ctx, dest + offset, source + offset, size, 1);
     }
   }
 
