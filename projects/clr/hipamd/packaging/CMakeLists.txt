@@ -107,6 +107,7 @@ install(FILES ${CMAKE_BINARY_DIR}/hipamd/share/hip/version DESTINATION ${CMAKE_I
 if(WIN32)
     install(FILES ${CMAKE_BINARY_DIR}/hipamd/share/hip/version DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME .hipVersion COMPONENT dev)
 endif()
+install(DIRECTORY ${HIP_COMMON_DIR}/cmake/ DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hip COMPONENT dev)
 install(FILES ${CMAKE_BINARY_DIR}/hipamd/hip-config.cmake ${CMAKE_BINARY_DIR}/hipamd/hip-config-version.cmake DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hip COMPONENT dev)
 install(FILES ${CMAKE_BINARY_DIR}/hipamd/hip-config-amd.cmake DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hip COMPONENT dev)
 install(FILES ${CMAKE_BINARY_DIR}/hipamd/hip-config-nvidia.cmake DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hip COMPONENT dev)
