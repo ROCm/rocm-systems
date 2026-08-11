@@ -329,25 +329,6 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
 
 }  // namespace
 
-size_t
-get_async_signal_handler_thread_count()
-{
-    constexpr auto fallback_thread_count = int64_t{4};
-
-    const auto gpu_thread_count = common::get_env("GPU_MAX_HW_QUEUES", fallback_thread_count);
-    const auto thread_count =
-        common::get_env("ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS", gpu_thread_count);
-
-    if(thread_count < 1)
-    {
-        ROCP_WARNING << "ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS/GPU_MAX_HW_QUEUES resolved to "
-                     << thread_count << "; using 1 async signal handler thread";
-        return 1;
-    }
-
-    return static_cast<size_t>(thread_count);
-}
-
 namespace
 {
 bool
@@ -661,8 +642,7 @@ completion_monitor_loop(completion_monitor& mon)
     auto conds   = std::vector<hsa_signal_condition_t>{};
     auto values  = std::vector<hsa_signal_value_t>{};
 
-    constexpr auto timeout_hint =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::milliseconds{100});
+    constexpr auto timeout_hint = std::chrono::nanoseconds{std::chrono::milliseconds{100}};
 
     while(true)
     {
@@ -707,7 +687,7 @@ completion_monitor_loop(completion_monitor& mon)
 
         // The satisfying index/value are unused: rather than trust the single index
         // wait_any reports, the active set is rescanned below for all completed waits.
-        auto satisfying_value = hsa_signal_value_t{0};
+        [[maybe_unused]] auto satisfying_value = hsa_signal_value_t{0};
         get_amd_ext_table()->hsa_amd_signal_wait_any_fn(static_cast<uint32_t>(signals.size()),
                                                         signals.data(),
                                                         conds.data(),
@@ -715,13 +695,13 @@ completion_monitor_loop(completion_monitor& mon)
                                                         timeout_hint.count(),
                                                         HSA_WAIT_STATE_BLOCKED,
                                                         &satisfying_value);
-        (void) satisfying_value;
 
         // Regardless of which signal woke us, scan the active set for completed waits:
         // wait_any reports only one index, but several may have dropped at once.
         // Compact survivors into the reused scratch buffer, then swap so neither
         // buffer is reallocated across iterations.
         mon.active_scratch.clear();
+        mon.active_scratch.reserve(mon.active.size());
         for(auto& pending : mon.active)
         {
             auto value = get_core_table()->hsa_signal_load_relaxed_fn(pending.completion_signal);
@@ -734,6 +714,11 @@ completion_monitor_loop(completion_monitor& mon)
                 mon.active_scratch.emplace_back(std::move(pending));
         }
         mon.active.swap(mon.active_scratch);
+
+        // Release the swapped-out entries (completed sessions moved-from above, plus
+        // any still-live shared_ptrs from a prior iteration) rather than holding them
+        // until the next swap.
+        mon.active_scratch.clear();
     }
 
     // Teardown: the monitor is the sole owner of `active` here (callers join before
