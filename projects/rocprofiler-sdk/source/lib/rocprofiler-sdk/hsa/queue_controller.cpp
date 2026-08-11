@@ -893,6 +893,12 @@ queue_controller_sync()
 void
 queue_controller_fini()
 {
+    // Mark global shutdown before the sync/drain: this is the true global-teardown path
+    // (distinct from the transient per-client finalizer syncs), so the drain must bound
+    // its wait -- an in-flight barrier-coupled dependency may never resolve here, and the
+    // stop_completion_monitor sweep below is the authoritative flush.
+    queue_interposition::request_completion_monitor_shutdown();
+
     // synchronize first
     queue_controller_sync();
 

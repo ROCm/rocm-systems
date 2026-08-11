@@ -390,6 +390,13 @@ struct completion_monitor
     // waiter the thread is gone. drain_completion_monitor keys off this to avoid
     // polling inflight forever if the thread has already exited.
     std::atomic<bool> exited = {false};
+    // Set once, at the start of global finalization (never transiently). Distinct from
+    // the overloaded registration fini_status, which also goes -1 briefly around a
+    // per-client finalizer while the SDK keeps running. drain_completion_monitor keys
+    // off this to stop its otherwise-unbounded wait at global shutdown, where an
+    // in-flight dependency may never resolve and stop_completion_monitor's bounded
+    // sweep is the authoritative flush instead.
+    std::atomic<bool> shutdown_requested = {false};
 };
 
 completion_monitor&
@@ -728,7 +735,7 @@ completion_monitor_loop(completion_monitor& mon)
             if(value < pending.starting_value)
             {
                 run_completion(pending.session);
-                mon.inflight.fetch_sub(1, std::memory_order_relaxed);
+                mon.inflight.fetch_sub(1, std::memory_order_release);
             }
             else
                 mon.active_scratch.emplace_back(std::move(pending));
@@ -756,7 +763,7 @@ completion_monitor_loop(completion_monitor& mon)
         for(auto& pending : mon.active)
         {
             run_completion(pending.session);
-            mon.inflight.fetch_sub(1, std::memory_order_relaxed);
+            mon.inflight.fetch_sub(1, std::memory_order_release);
         }
         mon.active.clear();
 
@@ -783,7 +790,7 @@ completion_monitor_loop(completion_monitor& mon)
     for(auto& pending : mon.active)
     {
         run_completion(pending.session);
-        mon.inflight.fetch_sub(1, std::memory_order_relaxed);
+        mon.inflight.fetch_sub(1, std::memory_order_release);
     }
     mon.active.clear();
 
@@ -801,9 +808,10 @@ start_completion_monitor()
     if(mon.running.exchange(true)) return;
 
     // Reset per-cycle state so a re-init after a prior fini starts clean: the previous
-    // monitor left `exited` true, which would otherwise make the new cycle's first
-    // drain_completion_monitor return immediately without draining.
+    // monitor left `exited` and `shutdown_requested` true, which would otherwise make the
+    // new cycle's first drain_completion_monitor return immediately without draining.
     mon.exited.store(false, std::memory_order_release);
+    mon.shutdown_requested.store(false, std::memory_order_release);
     mon.inflight.store(0, std::memory_order_release);
     mon.registering.store(0, std::memory_order_release);
 
@@ -828,16 +836,25 @@ drain_completion_monitor()
     auto& mon = get_completion_monitor();
     if(!mon.running.load(std::memory_order_acquire)) return;
 
+    // At global shutdown this unbounded wait must not run: an in-flight dependency may
+    // never resolve (the barrier-coupled case this path targets), and the bounded
+    // stop_completion_monitor sweep is the authoritative flush instead. Runtime drains
+    // (context stop, code-object unload) do not set this flag, so their wait stays
+    // correct -- the monitor is alive and their dependencies will resolve.
+    if(mon.shutdown_requested.load(std::memory_order_acquire)) return;
+
     // Poll the in-flight counter (registered minus completed) until it reaches zero.
-    // The monitor makes progress independently; this only observes it without touching
-    // its private active set. Also stop if the monitor thread has exited (it can exit
-    // on finalization while `running` is still set): a dead thread will never drive
-    // inflight down, so continuing to poll would hang.
+    // Purely an observer: the monitor drives inflight down on its own (it wakes on the
+    // in-flight completion signals it is already waiting on, plus its own timeout), so
+    // this loop only sleeps and re-reads. Deliberately does NOT bump wake_signal: doing
+    // so would be a cross-thread write to a signal that a concurrent stop_completion_
+    // monitor (finalize thread) may be destroying, and the nudge is not needed for
+    // progress. Also stop if the monitor thread has exited: a dead thread will never
+    // drive inflight down, so continuing to poll would hang.
     constexpr auto poll_interval = std::chrono::milliseconds{1};
     while(mon.inflight.load(std::memory_order_acquire) > 0)
     {
         if(mon.exited.load(std::memory_order_acquire)) break;
-        get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
         std::this_thread::sleep_for(poll_interval);
     }
 }
@@ -1781,6 +1798,12 @@ interposition_sync()
     drain_completion_monitor();
 }
 
+void
+request_completion_monitor_shutdown()
+{
+    get_completion_monitor().shutdown_requested.store(true, std::memory_order_release);
+}
+
 // Stop the monitor: clear running, wake it so it observes the flag, and join. After
 // this returns the monitor thread is dead and its active set is safe to access.
 void
@@ -1808,7 +1831,7 @@ stop_completion_monitor()
     for(auto& pending : mon.active)
     {
         run_completion(pending.session);
-        mon.inflight.fetch_sub(1, std::memory_order_relaxed);
+        mon.inflight.fetch_sub(1, std::memory_order_release);
     }
     mon.active.clear();
 
