@@ -1,0 +1,69 @@
+name: ABI Compliance Report
+
+on:
+  workflow_run:
+    workflows: ["ABI Compliance Check"]
+    types:
+      - completed
+
+# Runs on the trusted base ref after the untrusted check workflow completes.
+# pull-requests: write is safe here because no fork code is executed.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label_pr:
+    name: Apply ABI Labels to PR
+    runs-on: ubuntu-22.04
+    # Only label when the triggering event was a pull_request
+    if: github.event.workflow_run.event == 'pull_request'
+
+    steps:
+      - name: Download major ABI outcome
+        uses: actions/download-artifact@v4
+        with:
+          name: major-abi-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: major-artifacts
+        continue-on-error: true
+
+      - name: Download minor ABI outcome
+        uses: actions/download-artifact@v4
+        with:
+          name: minor-abi-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: minor-artifacts
+        continue-on-error: true
+
+      - name: Apply ABI labels to PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          PR_NUMBER=$(cat major-artifacts/pr_number.txt 2>/dev/null || true)
+          if [[ -z "$PR_NUMBER" ]]; then
+            echo "No PR number found in artifact, skipping labels"
+            exit 0
+          fi
+
+          MAJOR_OUTCOME=$(cat major-artifacts/outcome.txt 2>/dev/null || echo "skipped")
+          MINOR_OUTCOME=$(cat minor-artifacts/outcome.txt 2>/dev/null || echo "skipped")
+
+          if [[ "$MAJOR_OUTCOME" == "failure" ]]; then
+            echo "Adding MAJOR ABI BREAKAGE label to PR #$PR_NUMBER"
+            gh pr edit "$PR_NUMBER" --add-label "MAJOR ABI BREAKAGE"
+          else
+            echo "Removing MAJOR ABI BREAKAGE label from PR #$PR_NUMBER if present"
+            gh pr edit "$PR_NUMBER" --remove-label "MAJOR ABI BREAKAGE" || true
+          fi
+
+          if [[ "$MINOR_OUTCOME" == "failure" ]]; then
+            echo "Adding MINOR ABI BREAKAGE label to PR #$PR_NUMBER"
+            gh pr edit "$PR_NUMBER" --add-label "MINOR ABI BREAKAGE"
+          else
+            echo "Removing MINOR ABI BREAKAGE label from PR #$PR_NUMBER if present"
+            gh pr edit "$PR_NUMBER" --remove-label "MINOR ABI BREAKAGE" || true
+          fi
