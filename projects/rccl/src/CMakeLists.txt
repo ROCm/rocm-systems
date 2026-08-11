@@ -82,6 +82,10 @@ set(SRC_FILES
   device/ce_reduce.cc
   device/common.cu
   device/onerank.cu
+  device/tdm/cachePolicy.h
+  device/tdm/syncPolicy.h
+  device/tdm/asyncCopy.h
+  device/tdm/tdmCopy.h
   device/network/unpack/unpack_defs.h
   device/network/unpack/unpack.h
   device/symmetric/all_gather.cuh

@@ -19,8 +19,15 @@ namespace RcclUnitTesting
 {
   constexpr int warpSize = 32;
 
+// The kernels and fixtures below name the gfx1250 TDM descriptor types and drive the
+// tensor load/store instructions directly, so they only exist when the SDK ships
+// hip/amd_detail/amd_gfx1250_TDM.h. Without it asyncCopy.h leaves TileMover undeclared
+// and this coverage compiles out; test/CMakeLists.txt warns when that happens. The
+// AsyncDataCopier cases at the bottom need no descriptor and always build.
+#if TDM_TOOLCHAIN_AVAILABLE
+
  // Naive TDM copy kernel: each warp copies one 1-D tile of data from global memory to LDS at a time and then writes back to global memory.
- // Exercises tdm.h
+ // Exercises the SDK's TDM descriptor header
   template<typename T>
 __global__ void kernelNaiveTDMCopy(const T* __restrict__ src, T* __restrict__ dst, size_t numElements, int numElementsPerTile, int offAlignmentLDS) {
   extern __shared__ __align__(128) unsigned char sharedBytes[];
@@ -63,11 +70,14 @@ __global__ void kernelNaiveTDMCopy(const T* __restrict__ src, T* __restrict__ ds
     dstPtr += itemsProcessedPerGridIteration;
   }
 }
+#endif // TDM_TOOLCHAIN_AVAILABLE
 
  // Naive TDM copy kernel: each warp copies one 1-D tile of data from global memory to LDS at a time and then writes back to global memory.
  // Allows for injecting misalignment of the LDS pointer to test the tile mover's ability to handle it.
- // Exercises TileMover API
- template<typename T, typename TileMoverType = TileMover<T>>
+ // Exercises whichever tile mover is supplied (TileMover or AsyncDataCopier), so the
+ // mover is named explicitly by each launcher rather than defaulted here, keeping this
+ // kernel usable when TileMover is unavailable.
+ template<typename T, typename TileMoverType>
  __global__ void kernelNaiveTDMCopyTileApi(const T* __restrict__ src, T* __restrict__ dst, size_t numElements, int numElementsPerTile, int offAlignmentLDS) {
    extern __shared__ __align__(128) unsigned char sharedBytes[];
    T* shmem = reinterpret_cast<T*>(sharedBytes + offAlignmentLDS); // 
@@ -101,6 +111,7 @@ __global__ void kernelNaiveTDMCopy(const T* __restrict__ src, T* __restrict__ ds
 
 // Launcher policies select which kernel a fixture exercises. Each provides a
 // templated operator() so it works for any element type under test.
+#if TDM_TOOLCHAIN_AVAILABLE
 struct NaiveTDMLauncher {
   template<typename T>
   void operator()(int numBlocks, int blockSize, int sharedMem, const T* in, T* out, size_t numElements, int numElementsPerTile, int offAlignmentLDS) const {
@@ -111,9 +122,10 @@ struct NaiveTDMLauncher {
 struct TileApiTDMLauncher {
   template<typename T>
   void operator()(int numBlocks, int blockSize, int sharedMem, const T* in, T* out, size_t numElements, int numElementsPerTile, int offAlignmentLDS) const {
-    kernelNaiveTDMCopyTileApi<<<numBlocks, blockSize, sharedMem>>>(in, out, numElements, numElementsPerTile, offAlignmentLDS);
+    kernelNaiveTDMCopyTileApi<T, TileMover<T>><<<numBlocks, blockSize, sharedMem>>>(in, out, numElements, numElementsPerTile, offAlignmentLDS);
   }
 };
+#endif // TDM_TOOLCHAIN_AVAILABLE
 
 // Same kernel as TileApiTDMLauncher, but drives it with the AsyncDataCopier tile mover, which is implemented
 // on top of the async-to/from-LDS builtins rather than the TDM tensor load/store instructions.
@@ -145,9 +157,11 @@ protected:
   } 
 }; 
 
+using TestAsyncDataCopierTileApi = AsyncCopyTestBase<AsyncDataCopierTileApiLauncher>;
+
+#if TDM_TOOLCHAIN_AVAILABLE
 using TestNaiveTDM = AsyncCopyTestBase<NaiveTDMLauncher>;
 using TestTileApiTDM = AsyncCopyTestBase<TileApiTDMLauncher>;
-using TestAsyncDataCopierTileApi = AsyncCopyTestBase<AsyncDataCopierTileApiLauncher>;
 
 TEST_F(TestNaiveTDM, char) {
   const int N = 314159;;
@@ -190,6 +204,7 @@ TEST_F(TestTileApiTDM, Double) {
   for (int i = 0; i < N; i++) h_in[i] = static_cast<double>(i) * 3.14159;
   TestRoundTrip(h_in);
 }
+#endif // TDM_TOOLCHAIN_AVAILABLE
 
 // Same tile-copy kernel as TDMTestTileApi, but driven by the AsyncDataCopier tile mover.
 TEST_F(TestAsyncDataCopierTileApi, Byte) {

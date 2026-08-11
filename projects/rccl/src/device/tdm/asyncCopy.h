@@ -23,9 +23,28 @@ THE SOFTWARE.
 #ifndef __ASYNCCOPY_H
 #define __ASYNCCOPY_H
 
-#include "tdm.h"
 #include "cachePolicy.h"
 #include "syncPolicy.h"   // shared SyncPolicy encoding (same as tdmCopy.h)
+
+#ifndef __has_include
+#  define __has_include(x) 0
+#endif
+// The TileMover wrappers at the bottom of this header are built on the gfx1250 TDM
+// descriptor types, so they need the SDK's descriptor header. Use the same
+// host-evaluable detection as tdmCopy.h, guarded so the two can be included together.
+// Unlike tdmCopy.h this keys the include on header availability rather than
+// TDM_SUPPORTED, because the descriptor types must be nameable in every compilation
+// pass that parses those wrappers, not just a gfx1250 device pass.
+#ifndef TDM_TOOLCHAIN_AVAILABLE
+#  if __has_include(<hip/amd_detail/amd_gfx1250_TDM.h>)
+#    define TDM_TOOLCHAIN_AVAILABLE 1
+#  else
+#    define TDM_TOOLCHAIN_AVAILABLE 0
+#  endif
+#endif
+#if TDM_TOOLCHAIN_AVAILABLE
+#  include <hip/amd_detail/amd_gfx1250_TDM.h>   // gfx1250_TDM_GROUP0/1 descriptor types
+#endif
 
 // Used for setting TDM descriptor fields and arguments to the async load/store builtins
 using __rccl_int32x2 = int32_t __attribute__((__vector_size__(8)));
@@ -248,6 +267,11 @@ __device__ void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalDst, siz
 
 
 /* TDM APIs */
+// setTransferSize and TileMover name the TDM descriptor types directly, so they only
+// exist when the SDK ships the descriptor header. An SDK without it leaves them
+// undeclared, making any use a compile error rather than a silent no-op copy;
+// AsyncDataCopier below needs no descriptor and stays available either way.
+#if TDM_TOOLCHAIN_AVAILABLE
 // Higher productivity async copy wrappers on top of TDM header, which is lower level.
 // The TDM API does not have a function to set the transfer size, so we need to do it manually.
 __device__ static void setTransferSize(gfx1250_TDM_GROUP1& group1, int numElements){
@@ -255,6 +279,7 @@ __device__ static void setTransferSize(gfx1250_TDM_GROUP1& group1, int numElemen
   group1.tensorDim0Stride(numElements);
   group1.tileDim0(numElements);
 }
+#endif // TDM_TOOLCHAIN_AVAILABLE
 
 // Warp-level tile copier built on top of the async-to/from-LDS builtins.  Exposes the same interface as
 // TileMover so the two can be used interchangeably as the TileMoverType of a copy kernel.  An entire warp
@@ -286,6 +311,7 @@ struct AsyncDataCopier{
   }
 };
 
+#if TDM_TOOLCHAIN_AVAILABLE
 // Warp-level data copier.  Moves whole 1D tiles in between global memory and LDS using the TDM.  Both pointers ideally should be a multiple of 128-byte aligned 
 // for maximum performance.
 template<typename T, CachePolicy cp = DEFAULT_CACHE_POLICY>
@@ -317,6 +343,7 @@ struct TileMover{
     __builtin_amdgcn_s_wait_tensorcnt(WAIT_CNT);
   }
 };
+#endif // TDM_TOOLCHAIN_AVAILABLE
 
 
 // ============================================================================
