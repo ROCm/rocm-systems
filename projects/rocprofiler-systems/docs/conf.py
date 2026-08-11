@@ -73,5 +73,5 @@ doxygen_project = {
 }
 doxysphinx_enabled = True
 
-# Uncomment if facing rate limit exceed issue with local build
+# Uncomment if you encounter rate limits when building
 # external_projects_remote_repository = ""
