@@ -625,6 +625,44 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_MISSING_META_PATH="${ROCPD_DB_V3_MISSING_META_PATH}"
 )
 
+# Synthetic v4.0 ambiguous-pmc fixture, generated at build time from committed SQL
+# against the bundled v4.0 schema (reused unchanged from the kd_pmc fixture above).
+# The presence of rocpd_timestamp makes the reader select the v4 backend.
+set(_v4ap_uuid "0000000000000000000000000a014004")
+set(_v4ap_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4_amb_pmc_data.sql)
+set(_v4ap_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v4_amb_pmc_gen.sql)
+file(READ ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql _v4ap_schema)
+file(READ ${_v4ap_data_src} _v4ap_data)
+string(REPLACE "{{uuid}}" "_${_v4ap_uuid}" _v4ap_schema "${_v4ap_schema}")
+string(REPLACE "{{guid}}" "${_v4ap_uuid}" _v4ap_schema "${_v4ap_schema}")
+string(REPLACE "{{uuid}}" "_${_v4ap_uuid}" _v4ap_data "${_v4ap_data}")
+string(REPLACE "{{guid}}" "${_v4ap_uuid}" _v4ap_data "${_v4ap_data}")
+file(WRITE ${_v4ap_gen_sql} "${_v4ap_schema}\n${_v4ap_data}\n")
+
+set(ROCPD_DB_V4_AMB_PMC_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v4_amb_pmc.db)
+add_custom_command(
+    OUTPUT ${ROCPD_DB_V4_AMB_PMC_PATH}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V4_AMB_PMC_PATH}
+    COMMAND
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_AMB_PMC_PATH} ".read ${_v4ap_gen_sql}"
+    DEPENDS ${_v4ap_gen_sql}
+            ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql
+            ${_v4ap_data_src}
+    COMMENT "Generating synthetic v4.0 ambiguous-pmc test fixture"
+    VERBATIM
+)
+add_custom_target(
+    profiler-hub_v4_amb_pmc_fixture
+    DEPENDS ${ROCPD_DB_V4_AMB_PMC_PATH}
+)
+add_dependencies(profiler-hub_unit_tests profiler-hub_v4_amb_pmc_fixture)
+
+target_compile_definitions(
+    profiler-hub_unit_tests
+    PRIVATE ROCPD_DB_V4_AMB_PMC_PATH="${ROCPD_DB_V4_AMB_PMC_PATH}"
+)
+
 gtest_discover_tests(
     profiler-hub_unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
