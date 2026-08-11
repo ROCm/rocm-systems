@@ -200,8 +200,6 @@ FindGlobalPool(hsa_amd_memory_pool_t pool, void* data, bool kern_arg)
     return HSA_STATUS_INFO_BREAK;
 }
 
-#define ROCP_LD_AQLPROFILE
-
 // This is the call-back function for hsa_amd_agent_iterate_memory_pools() that
 // finds a pool with the properties of HSA_AMD_SEGMENT_GLOBAL and that is NOT
 // HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT
