@@ -3779,6 +3779,22 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
     if (enabled)
       return -EALREADY; // target process is already debug enabled
 
+    // Refuse a target whose CWSR record layout this build does not model.
+    // Stopping a wave means writing its state into the context-save area at
+    // exactly the offsets rocm-dbgapi will read, and the codec reproduces the
+    // gfx9.4 layout only (see kmd/linux/cwsr.h). Attaching anyway would publish
+    // an image dbgapi decodes against a different layout and act on -- worse
+    // than saying the target is unsupported, which is what real KFD does for a
+    // device that cannot be debugged.
+    for (auto &gpu : gpus_) {
+      if (gpu.soc && !kmd::cwsr_layout_modelled(gpu.soc->arch())) {
+        util::Logger::warn("DBG_TRAP_ENABLE refused: no CWSR record layout is modelled for arch=",
+                           static_cast<int>(gpu.soc->arch()),
+                           "; debugging is supported on gfx942/gfx950 only");
+        return -ENOTSUP;
+      }
+    }
+
     const int dbg_fd = static_cast<int>(args->enable.dbg_fd);
     // Validate the notifier before trusting it. In daemon mode the fd was
     // received via SCM_RIGHTS and already substituted into our fd space; in

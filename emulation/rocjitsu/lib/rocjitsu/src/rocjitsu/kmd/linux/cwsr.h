@@ -19,6 +19,8 @@
 #ifndef ROCJITSU_KMD_LINUX_CWSR_H_
 #define ROCJITSU_KMD_LINUX_CWSR_H_
 
+#include "rocjitsu/code/rj_code.h"
+
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -27,6 +29,24 @@
 
 namespace rocjitsu {
 namespace kmd {
+
+/// @brief Whether this module models the CWSR record layout for @p arch.
+/// @details The codec reproduces the gfx9.4 layout only, and the differences on
+/// other generations are not confined to one field: the control stack carries a
+/// different number of state words, COMPUTE_RELAUNCH packs different bits, the
+/// VGPR stride assumes wave64, the SGPR alias slots sit elsewhere, and the
+/// dispatch identity lives in different TTMPs. Serializing a wave from an
+/// unmodelled architecture would hand rocm-dbgapi an image it decodes against
+/// its own layout, which is worse than refusing: the debugger reads plausible
+/// nonsense instead of reporting that the target is unsupported.
+/// @param arch Architecture of the GPU whose queue would be serialized.
+/// @returns True if serialize/deserialize produce an image dbgapi can decode.
+constexpr bool cwsr_layout_modelled(rj_code_arch_t arch) {
+  // gfx942 / gfx950. gfx908 adds an ACC-VGPR block and gfx908/gfx90a keep the
+  // packet id in TTMP6, so CDNA1/CDNA2 are deliberately excluded even though
+  // they are also gfx9.
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
 
 /// @brief The saved architectural state of one stopped wave.
 ///
