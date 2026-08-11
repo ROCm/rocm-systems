@@ -39,6 +39,7 @@ force_reduce_pipeline=false
 generate_sym_kernels=true
 device_linker=true
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
+build_gfx950_512_threads_kernels=false
 quiet_warnings=false
 build_rocshmem_support=false
 rocshmem_mono_hash="0e2998b11f99e8302c72f1ac2ce9f2b8c1816587"
@@ -53,6 +54,7 @@ function display_help()
     echo " Options:"
     echo "       --address-sanitizer     Build with address sanitizer enabled"
     echo "       --amdgpu_targets        Only compile for specified GPU architecture(s). For multiple targets, separate by ';' (builds for all supported GPU architectures by default)"
+    echo "       --build-gfx950-512-threads-kernels  Build the runtime-selectable gfx950 512-thread kernel set (default off; also requires ROCm <= 7.0.2 and compiler support for -mllvm -amdgpu-agpr-bug-fix)"
     echo "       --cmake-options         Pass additional CMake options (e.g. --cmake-options \"-DFOO=BAR -DBAZ=ON\")"
     echo "       --debug                 Build debug library"
     echo "       --debug-fast            Build debug library with lto optimization disabled (fast build times)"
@@ -116,7 +118,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,build-gfx950-512-threads-kernels,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -133,6 +135,7 @@ while true; do
     case "${1}" in
          --address-sanitizer)        build_address_sanitizer=true;                                                                     shift ;;
          --amdgpu_targets)           build_amdgpu_targets=${2};                                                                        shift 2 ;;
+         --build-gfx950-512-threads-kernels) build_gfx950_512_threads_kernels=true;                                                    shift ;;
          --cmake-options)            custom_cmake_options=${2};                                                                        shift 2 ;;
          --debug)                    build_release=false;                                                                              shift ;;
          --debug-fast)               build_release=false; debug_fast=true;                                                             shift ;;
@@ -404,6 +407,13 @@ fi
 # Enable WARP_SPEED only on MI350/MI300 platforms
 if [[ "${warp_speed_enabled}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_WARP_SPEED=ON"
+fi
+
+# Opt-in: build the second, runtime-selectable gfx950 512-thread kernel set.
+# Off by default; the device linker further gates it on ROCm <= 7.0.2 and ld.lld
+# support for -mllvm amdgpu-agpr-bug-fix.
+if [[ "${build_gfx950_512_threads_kernels}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DBUILD_GFX950_512_THREADS_KERNELS=ON"
 fi
 
 # Suppress Warnings

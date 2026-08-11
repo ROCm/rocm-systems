@@ -593,6 +593,8 @@ def do_link(args, forwarded_flags):
     rocshmem_bitcode = getattr(args, 'rocshmem_bitcode', None)
     dispatcher_512 = getattr(args, 'dispatcher_512', None)
     objects_512_rsp = getattr(args, 'objects_512_rsp', None)
+    # Extra compile flags for the 512-thread set (e.g. -mllvm -amdgpu-agpr-bug-fix=1).
+    compile_512_flags = list(getattr(args, 'compile_512_flags', []) or [])
 
     if not dispatcher:
         raise SystemExit("ERROR: --link requires --dispatcher=<source>")
@@ -669,8 +671,10 @@ def do_link(args, forwarded_flags):
         # -DRCCL_NTHREADS_512 and patch it with the 512-set aggregated resources.
         built_512 = False
         if max_res_512 is not None:
+            # compile_512_flags carries e.g. `-mllvm -amdgpu-agpr-bug-fix=1` so the
+            # 512-thread dispatcher codegen matches its object set.
             _build_dispatcher(clang, arch, dispatcher_512, forwarded_flags,
-                              ['-DRCCL_NTHREADS_512'], max_res_512,
+                              ['-DRCCL_NTHREADS_512'] + compile_512_flags, max_res_512,
                               disp512_asm, disp512_patched, disp512_obj, "512-thread")
             built_512 = True
 
@@ -773,6 +777,11 @@ def parse_compiler_flags(argv):
         elif arg == '--objects-512-rsp' and i + 1 < len(argv):
             our_args.extend([arg, argv[i + 1]])
             i += 1
+        elif arg.startswith('--compile-512-flag='):
+            our_args.append(arg)
+        elif arg == '--compile-512-flag' and i + 1 < len(argv):
+            our_args.extend([arg, argv[i + 1]])
+            i += 1
         elif arg.startswith('--rocshmem-bitcode='):
             our_args.append(arg)
         elif arg == '--rocshmem-bitcode' and i + 1 < len(argv):
@@ -825,6 +834,8 @@ def main():
     parser.add_argument('--dispatcher', default=None)
     parser.add_argument('--dispatcher-512', default=None, dest='dispatcher_512')
     parser.add_argument('--objects-512-rsp', default=None, dest='objects_512_rsp')
+    parser.add_argument('--compile-512-flag', action='append', default=[],
+                        dest='compile_512_flags')
     parser.add_argument('--rocshmem-bitcode', default=None, dest='rocshmem_bitcode')
     parser.add_argument('-o', '--output', required=False)
     parser.add_argument('--keep-temps', action='store_true')
