@@ -28,13 +28,16 @@
 
 import re
 
-from rocm_docs import ROCmDocs
-
 with open("../VERSION", encoding="utf-8") as f:
     match = re.search(r"([0-9.]+)[^0-9.]+", f.read())
     if not match:
         raise ValueError("VERSION not found!")
     version_number = match[1]
+
+extensions = [
+    "rocm_docs",
+    "rocm_docs.doxygen",
+]
 
 external_projects_current_project = "rocprofiler-systems"
 
@@ -59,6 +62,10 @@ html_theme_options = {
 
 external_toc_path = "./sphinx/_toc.yml"
 
+# Generate llms.txt
+rocm_docs_generate_llms = True
+
+# Doxygen-related settings
 doxygen_root = "doxygen"
 doxygen_project = {
     "name": "ROCm Systems Profiler (rocprofiler-systems) API reference",
