@@ -39,7 +39,9 @@ if(NOT _rcfn_python)
 endif()
 
 # Probe the environment for python/torch metadata and the source fingerprint.
-# Exit code 3 means torch is unavailable and the build is skipped.
+# Exit code 3 means torch or torch.utils.cpp_extension is unavailable and the
+# build is skipped. ERROR_VARIABLE captures the probe's stderr, so the skip
+# branch has to print it or the reason is never seen.
 execute_process(
     COMMAND "${_rcfn_python}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/probe_torch.py"
     OUTPUT_VARIABLE _rcfn_probe
@@ -50,8 +52,9 @@ execute_process(
 if(_rcfn_probe_rc EQUAL 3)
     message(
         STATUS
-        "roctx_recordfn: skipping build (torch not importable in "
-        "${_rcfn_python}); torch-trace tests will skip."
+        "roctx_recordfn: skipping build (torch or torch.utils.cpp_extension "
+        "not importable in ${_rcfn_python}); torch-trace tests will "
+        "skip.\n${_rcfn_probe_err}"
     )
     return()
 elseif(NOT _rcfn_probe_rc EQUAL 0)
