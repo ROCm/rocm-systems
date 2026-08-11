@@ -440,6 +440,9 @@ class TestCdnaProfile:
     def test_has_wmma_false(self):
         assert self.p.has_wmma is False
 
+    def test_has_swmmac_false(self):
+        assert self.p.has_swmmac is False
+
     def test_has_vopd_false(self):
         assert self.p.has_vopd is False
 
@@ -551,6 +554,9 @@ class TestRdna3Profile:
     def test_has_wmma(self):
         assert self.p.has_wmma is True
 
+    def test_has_swmmac_false(self):
+        assert self.p.has_swmmac is False
+
     def test_has_vopd(self):
         assert self.p.has_vopd is True
 
@@ -604,6 +610,9 @@ class TestRdna4Profile:
 
     def test_has_wmma(self):
         assert self.p.has_wmma is True
+
+    def test_has_swmmac(self):
+        assert self.p.has_swmmac is True
 
     def test_has_vopd(self):
         assert self.p.has_vopd is True

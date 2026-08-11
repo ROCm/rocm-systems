@@ -80,6 +80,9 @@ def _gen_mfma(
         'cdna5': Cdna5Profile,
     }
     profile = profile or profiles[arch_name]()
+    if not hasattr(profile, 'has_swmmac'):
+        profile_type = profiles.get(arch_name)
+        profile.has_swmmac = profile_type().has_swmmac if profile_type else False
     return gen_mfma(
         ExecuteContext(
             inst=inst,
@@ -1189,6 +1192,22 @@ def test_matrix_direct_sparse_operands_reach_final_call():
         'amdgpu::src_base(vb, src1.encoding_value_), s2, index_base, '
         '16, index_key,' in body
     )
+
+
+@pytest.mark.parametrize('uses_vgpr_msb_indexing', [False, True])
+def test_unsupported_swmmac_layout_does_not_emit_sparse_setup(
+    uses_vgpr_msb_indexing,
+):
+    body = _gen_mfma(
+        Instruction('V_SWMMAC_F32_16X16X32_F16', 'ENC_VOP3P', 0, []),
+        'test_arch',
+        SimpleNamespace(uses_vgpr_msb_indexing=uses_vgpr_msb_indexing),
+    )
+
+    assert 'index_base' not in body
+    assert 'index_key' not in body
+    assert 'exec_swmmac' not in body
+    assert 'amdgpu::exec_f32(' in body
 
 
 def test_matrix_i32_final_call_sources_follow_profile_gate():

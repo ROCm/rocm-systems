@@ -285,6 +285,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     arch = arch_name
     is_dense_wmma = name.startswith('V_WMMA_')
     uses_rdna4_swmmac_layout = arch == 'rdna4' and is_swmmac
+    uses_supported_swmmac_layout = is_swmmac and ctx.profile.has_swmmac
     uses_plain_vgpr_dst = arch in ('rdna3', 'rdna3_5', 'rdna4') and (
         is_dense_wmma or uses_rdna4_swmmac_layout
     )
@@ -306,7 +307,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         )
         src0_base_expr = 'src0_base'
         src1_base_expr = 'src1_base'
-        if is_swmmac:
+        if uses_supported_swmmac_layout:
             L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
             L.append(f'  uint32_t s2 = dst;')
             L.append(
@@ -345,7 +346,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             L.append(f'  uint32_t dst = vb + {d}.encoding_value_;')
         else:
             L.append(f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, 1);')
-        if is_swmmac:
+        if uses_supported_swmmac_layout:
             L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
             L.append(f'  uint32_t s2 = dst;')
             L.append(

@@ -929,6 +929,11 @@ class _AmdgpuProfileBase(IsaProfile):
         return False
 
     @property
+    def has_swmmac(self) -> bool:
+        """True if this ISA has sparse WMMA matrix instructions."""
+        return False
+
+    @property
     def flat_scratch_mechanism(self) -> str:
         """How scratch base is located: 'hwreg' (CDNA3/4) or 'sgpr_pair'."""
         return 'sgpr_pair'
@@ -1627,6 +1632,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
 
     @property
     def has_wmma(self) -> bool:
+        return True
+
+    @property
+    def has_swmmac(self) -> bool:
         return True
 
     @property
