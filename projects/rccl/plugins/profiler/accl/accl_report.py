@@ -263,9 +263,12 @@ def print_compare_report(base_recs: List[Record], cand_recs: List[Record],
               f"{'─'*10}─{'─'*10}─{'─'*7}─┼─"
               f"{'─'*8}─{'─'*8}─{'─'*7}─┼─{'─'*20}")
 
-        coll_flags = []
+        bw_flags = []
+        kern_flags = []
         busbw_auc_b = 0
         busbw_auc_c = 0
+        exec_auc_b = 0
+        exec_auc_c = 0
         peak_bw_b = 0
         peak_bw_c = 0
 
@@ -292,7 +295,6 @@ def print_compare_report(base_recs: List[Record], cand_recs: List[Record],
             if b.mean_busbw > 0:
                 bw_change = (c.mean_busbw - b.mean_busbw) / b.mean_busbw * 100
                 if bw_change < -threshold:
-                    # Determine cause
                     if b.mean_proxy_network_us > 0 and c.mean_proxy_network_us > 0:
                         net_change = (c.mean_proxy_network_us - b.mean_proxy_network_us) / b.mean_proxy_network_us * 100
                         kern_change = (c.mean_kernel_us - b.mean_kernel_us) / b.mean_kernel_us * 100 if b.mean_kernel_us > 0 else 0
@@ -304,13 +306,22 @@ def print_compare_report(base_recs: List[Record], cand_recs: List[Record],
                             flag = "<< REGRESSION"
                     else:
                         flag = "<< REGRESSION"
-                    coll_flags.append((sz, flag))
+                    bw_flags.append((sz, flag))
                 elif bw_change < -5:
                     flag = "<< bw warning"
+
+            if not flag and b.mean_kernel_us > 0:
+                kern_change = (c.mean_kernel_us - b.mean_kernel_us) / b.mean_kernel_us * 100
+                kern_abs = c.mean_kernel_us - b.mean_kernel_us
+                if kern_change > 5 and kern_abs > 1.0:
+                    flag = f"<< KERNEL +{kern_change:.0f}%"
+                    kern_flags.append((sz, flag))
 
             # AUC
             busbw_auc_b += b.mean_busbw
             busbw_auc_c += c.mean_busbw
+            exec_auc_b += b.mean_exec_us
+            exec_auc_c += c.mean_exec_us
             if b.mean_busbw > peak_bw_b:
                 peak_bw_b = b.mean_busbw
             if c.mean_busbw > peak_bw_c:
@@ -323,11 +334,12 @@ def print_compare_report(base_recs: List[Record], cand_recs: List[Record],
                   f"{b.mean_proxy_network_us:8.1f} {c.mean_proxy_network_us:8.1f} {net_d:>7s} │ {flag}")
 
         # Decomposition comparison for flagged sizes
-        if coll_flags:
+        all_flags = bw_flags + kern_flags
+        if all_flags:
             print(f"\n  Decomposition for flagged sizes:")
             print(f"  {'Size':>8s} │ {'Component':>16s} │ {'Base(us)':>10s} {'Cand(us)':>10s} {'Δ%':>8s} │ Diagnosis")
             print(f"  {'─'*8}─┼─{'─'*16}─┼─{'─'*10}─{'─'*10}─{'─'*8}─┼─{'─'*30}")
-            for sz, _ in coll_flags:
+            for sz, _ in all_flags:
                 b = base_aggs.get((coll, sz))
                 c = cand_aggs.get((coll, sz))
                 if not b or not c:
@@ -365,21 +377,29 @@ def print_compare_report(base_recs: List[Record], cand_recs: List[Record],
         # Summary
         auc_d = pct_delta(busbw_auc_b, busbw_auc_c)
         peak_d = pct_delta(peak_bw_b, peak_bw_c)
-        verdict = "PASS" if not coll_flags else "FAIL"
+        exec_d = pct_delta(exec_auc_b, exec_auc_c)
+        verdict = "PASS" if not bw_flags and not kern_flags else "FAIL"
         print(f"\n  AUC BusBW: {busbw_auc_b:.2f} → {busbw_auc_c:.2f}  ({auc_d})")
+        print(f"  AUC Exec:  {exec_auc_b:.2f} → {exec_auc_c:.2f}  ({exec_d})")
         print(f"  Peak BusBW: {peak_bw_b:.4f} → {peak_bw_c:.4f}  ({peak_d})")
         print(f"  VERDICT: {verdict}")
 
-        summary_results.append((coll, verdict, auc_d, peak_d, len(coll_flags)))
+        flag_parts = []
+        if bw_flags:
+            flag_parts.append(f"{len(bw_flags)} bw")
+        if kern_flags:
+            flag_parts.append(f"{len(kern_flags)} kern")
+        flag_str = ", ".join(flag_parts) if flag_parts else "0"
+        summary_results.append((coll, verdict, auc_d, peak_d, exec_d, flag_str))
 
     # Final summary table
     print(f"\n{'='*80}")
     print(f"  EXECUTIVE SUMMARY")
     print(f"{'='*80}")
-    print(f"  {'Collective':>15s} │ {'Verdict':>8s} │ {'AUC Δ':>8s} │ {'Peak Δ':>8s} │ Flags")
-    print(f"  {'─'*15}─┼─{'─'*8}─┼─{'─'*8}─┼─{'─'*8}─┼─{'─'*10}")
-    for coll, verdict, auc_d, peak_d, nflags in summary_results:
-        print(f"  {coll:>15s} │ {verdict:>8s} │ {auc_d:>8s} │ {peak_d:>8s} │ {nflags}")
+    print(f"  {'Collective':>15s} │ {'Verdict':>8s} │ {'AUC Δ':>8s} │ {'Peak Δ':>8s} │ {'Exec Δ':>8s} │ Flags")
+    print(f"  {'─'*15}─┼─{'─'*8}─┼─{'─'*8}─┼─{'─'*8}─┼─{'─'*8}─┼─{'─'*10}")
+    for coll, verdict, auc_d, peak_d, exec_d, flag_str in summary_results:
+        print(f"  {coll:>15s} │ {verdict:>8s} │ {auc_d:>8s} │ {peak_d:>8s} │ {exec_d:>8s} │ {flag_str}")
 
 
 def main():
