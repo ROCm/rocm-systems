@@ -131,7 +131,9 @@ namespace RcclUnitTesting
     bool           inPlace;
     bool           useManagedMem;
     bool           userRegistered;
-    void*          commRegHandle;
+    void*          outputRegHandle;
+    void*          inputRegHandle;
+
     ncclWindow_t    inputWin      = nullptr;      // Handle for ncclCommWindowRegister (input)
     ncclWindow_t    outputWin     = nullptr;      // Handle for ncclCommWindowRegister (output)
     size_t         numInputBytesAllocated;

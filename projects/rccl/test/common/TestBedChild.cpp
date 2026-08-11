@@ -624,14 +624,20 @@ namespace RcclUnitTesting
     }
   }
 
-    this->graphs[groupId].resize(numRanksToExecute);
-    this->graphExecs[groupId].resize(numRanksToExecute);
-    this->graphEnabled[groupId].resize(numRanksToExecute);
-    for (int i = 0; i < numRanksToExecute; i++)
+    size_t const totalLocalDevices = this->deviceIds.size();
+    this->graphs[groupId].resize(totalLocalDevices);
+    this->graphExecs[groupId].resize(totalLocalDevices);
+    this->graphEnabled[groupId].resize(totalLocalDevices);
+    for (int i = 0; i < totalLocalDevices; i++)
     {
       this->graphs[groupId][i].resize(this->numStreamsPerGroup[groupId]);
       this->graphExecs[groupId][i].resize(this->numStreamsPerGroup[groupId]);
       this->graphEnabled[groupId][i].resize(this->numStreamsPerGroup[groupId]);
+      // Reset graphEnabled state for all streams on this device
+      for (int s = 0; s < this->numStreamsPerGroup[groupId]; s++)
+      {
+        this->graphEnabled[groupId][i][s] = false;
+      }
     }
 
     // Start HIP graph stream capture if requested
@@ -662,7 +668,7 @@ namespace RcclUnitTesting
         TEST_INFO("Group %d collective %d running %d threads", groupId, collId, numThreadsToUse);
       ErrCode errCode = TEST_SUCCESS;
       auto& errCodeVal = reinterpret_cast<int&>(errCode);
-      #pragma omp parallel for num_threads(numThreadsToUse) reduction(max : errCodeVal)
+      // #pragma omp parallel for num_threads(numThreadsToUse) reduction(max : errCodeVal)
       for (int localRank : localRanksToExecute)
       {
         if (this->verbose && this->useRankThreading)
@@ -903,6 +909,9 @@ namespace RcclUnitTesting
         }
       }
       usElapsed = duration_cast<microseconds>(Clock::now() - start).count();
+      if (!streamsToComplete.empty()) {
+        std::this_thread::sleep_for(std::chrono::microseconds(10));
+      }
     }
 
     // timed out
@@ -911,6 +920,7 @@ namespace RcclUnitTesting
       if (this->verbose) TEST_INFO("Collective timed out, aborting");
       for (int localRank : localRanksToExecute)
       {
+        CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
         ncclCommAbort(this->comms[localRank]);
         timedout = 1;
       }
@@ -922,6 +932,7 @@ namespace RcclUnitTesting
     for (int localRank : localRanksToExecute)
     {
       if (this->verbose) TEST_INFO("Starting synchronization for group %d rank %d", groupId, localRank);
+      CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
       for (int i = 0; i < this->numStreamsPerGroup[groupId]; i++)
         CHECK_HIP(hipStreamSynchronize(this->streams[groupId][localRank][i]));
     }
@@ -957,20 +968,35 @@ namespace RcclUnitTesting
   ErrCode TestBedChild::ValidateResults()
   {
     // Read values sent by parent [see TestBed::ValidateResults()]
-    int globalRank, groupId, collId;
+    int globalRank = -1;
+    int groupId = -1;
+    int collId = -1;
     PIPE_READ(globalRank);
     PIPE_READ(groupId);
     PIPE_READ(collId);
 
     if (this->verbose) TEST_INFO("Child %d begins ValidateResults()", this->childId);
 
-    if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
+    if (globalRank < this->rankOffset || (this->rankOffset +  static_cast<int>(comms.size()) <= globalRank))
     {
       TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
       return TEST_FAIL;
     }
     int const localRank = globalRank - rankOffset;
+    if (groupId < 0 || groupId >= static_cast<int>(this->collArgs.size()))
+    {
+      TEST_ERROR("Child %d Rank %d: Invalid groupId %d (collArgs size: %zu)",
+               this->childId, globalRank, groupId, this->collArgs.size());
+      return TEST_FAIL;
+    }
+    if (localRank >= static_cast<int>(this->collArgs[groupId].size()))
+    {
+      TEST_ERROR("Child %d Rank %d: localRank %d out of bounds for groupId %d (size: %zu)",
+               this->childId, globalRank, localRank, groupId, this->collArgs[groupId].size());
+      return TEST_FAIL;
+    }
     CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+    CHECK_HIP(hipDeviceSynchronize());
 
     ErrCode status = TEST_SUCCESS;
     for (int collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
@@ -997,14 +1023,22 @@ namespace RcclUnitTesting
     PIPE_READ(groupId);
 
     if (this->verbose) TEST_INFO("Child %d begins LaunchGraphs for group %d", this->childId, groupId);
+    if (groupId < 0 || groupId >= static_cast<int>(this->graphExecs.size()))
+    {
+      TEST_ERROR("Child %d: Invalid groupId %d for LaunchGraphs (graphExecs size: %zu)",
+               this->childId, groupId, this->graphExecs.size());
+               return TEST_FAIL;
+    }
 
-    for (int localRank = 0; localRank < this->deviceIds.size(); ++localRank) {
+    for (size_t localRank = 0; localRank < this->deviceIds.size(); ++localRank) {
       CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
 
       for (int streamIdx = 0; streamIdx < this->numStreamsPerGroup[groupId]; ++streamIdx)
       {
-        if (this->verbose) TEST_INFO("Launch graph for group %d rank %d stream %d", groupId, localRank, streamIdx);
-        CHECK_HIP(hipGraphLaunch(this->graphExecs[groupId][localRank][streamIdx], this->streams[groupId][localRank][streamIdx]));
+        if (this->graphEnabled[groupId][localRank][streamIdx]){
+          if (this->verbose) TEST_INFO("Launch graph for group %d rank %d stream %d", groupId, localRank, streamIdx);
+          CHECK_HIP(hipGraphLaunch(this->graphExecs[groupId][localRank][streamIdx], this->streams[groupId][localRank][streamIdx]));
+        }
       }
     }
 
@@ -1087,12 +1121,19 @@ namespace RcclUnitTesting
         // =====================================================================
         // 2. Deregister Standard Buffers (ncclCommDeregister)
         // =====================================================================
-        if (collArg.commRegHandle != nullptr)
+        if (collArg.inputRegHandle != nullptr)
         {
           CHILD_NCCL_CALL_RANK(errCode,
-            ncclCommDeregister(this->comms[localRank], collArg.commRegHandle),
+            ncclCommDeregister(this->comms[localRank], collArg.inputRegHandle),
             "ncclCommDeregister");
-          collArg.commRegHandle = nullptr;
+          collArg.inputRegHandle = nullptr;
+        }
+         if (collArg.outputRegHandle != nullptr)
+        {
+          CHILD_NCCL_CALL_RANK(errCode,
+            ncclCommDeregister(this->comms[localRank], collArg.outputRegHandle),
+            "ncclCommDeregister");
+          collArg.outputRegHandle = nullptr;
         }
 
         if (collArg.biasRegHandle != nullptr)
@@ -1135,88 +1176,106 @@ namespace RcclUnitTesting
   }
 
   ErrCode TestBedChild::DestroyComms()
-{
-  if (this->verbose) TEST_INFO("Child %d begins DestroyComms", this->childId);
-
-  // 1. Release NCCL communicators
-  for (int i = 0; i < this->comms.size(); ++i)
   {
-    if (this->comms[i] == nullptr) continue;
-
-    if (this->useBlocking == false)
+    if (this->verbose) TEST_INFO("Child %d begins DestroyComms", this->childId);
+    
+    // 1. Release NCCL communicators
+    for (int i = 0; i < this->comms.size(); ++i)
     {
-      ncclCommFinalize(this->comms[i]);
-      CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorCommFinalize", i);
-    }
-    else
-    {
-      CHILD_NCCL_CALL(ncclCommFinalize(this->comms[i]), "ncclCommFinalize");
-    }
-  }
-
-  for (int i = 0; i < this->comms.size(); ++i)
-  {
-    if (this->comms[i] != nullptr)
-    {
-      CHILD_NCCL_CALL(ncclCommDestroy(this->comms[i]), "ncclCommDestroy");
-      this->comms[i] = nullptr;
-    }
-  }
-
-  // 2. Safely release HIP streams with correct device context
-  for (int i = 0; i < this->numGroupCalls; ++i)
-  {
-    for (int j = 0; j < this->streams[i].size(); ++j)
-    {
-      // Switch active GPU context to the device that owns this stream group
-      CHECK_HIP(hipSetDevice(this->deviceIds[j]));
-
-      for (int k = 0; k < this->streams[i][j].size(); ++k)
+      if (this->comms[i] == nullptr) continue;
+      if (this->useBlocking == false)
       {
-        // Avoid destroying null handles or the default stream (0)
-        if (this->streams[i][j][k] != nullptr)
+        ncclCommFinalize(this->comms[i]);
+        CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorCommFinalize", i);
+      }
+      else
+      {
+        CHILD_NCCL_CALL(ncclCommFinalize(this->comms[i]), "ncclCommFinalize");
+      }
+    }
+    
+    for (int i = 0; i < this->comms.size(); ++i)
+    {
+      if (this->comms[i] != nullptr)
+      {
+        CHILD_NCCL_CALL(ncclCommDestroy(this->comms[i]), "ncclCommDestroy");
+        this->comms[i] = nullptr;
+      }
+    }
+
+    // 2. Safely release HIP streams with correct device context
+    for (int i = 0; i < this->numGroupCalls; ++i)
+    {
+      for (int j = 0; j < this->streams[i].size(); ++j)
+      {
+        // Switch active GPU context to the device that owns this stream group
+        CHECK_HIP(hipSetDevice(this->deviceIds[j]));
+
+        for (int k = 0; k < this->streams[i][j].size(); ++k)
         {
-          CHECK_HIP(hipStreamDestroy(this->streams[i][j][k]));
-          this->streams[i][j][k] = nullptr; // Avoid double-destruction
+          // Avoid destroying null handles or the default stream (0)
+          if (this->streams[i][j][k] != nullptr)
+          {
+            CHECK_HIP(hipStreamDestroy(this->streams[i][j][k]));
+            this->streams[i][j][k] = nullptr; // Avoid double-destruction
+          }
         }
       }
     }
-  }
 
-  this->comms.clear();
-  this->streams.clear();
-  
-  if (this->verbose) TEST_INFO("Child %d finishes DestroyComms", this->childId);
-  return TEST_SUCCESS;
-}
+    this->comms.clear();
+    this->streams.clear();
+    if (this->verbose) TEST_INFO("Child %d finishes DestroyComms", this->childId);
+    return TEST_SUCCESS;
+  }
 
   ErrCode TestBedChild::DestroyGraphs()
   {
     if (this->verbose) TEST_INFO("Child %d begins DestroyGraphs", this->childId);
 
-    int groupId;
+    int groupId = -1;
     PIPE_READ(groupId);
 
-    // Release graphs
+    if (groupId < 0 || 
+      groupId >= static_cast<int>(this->graphs.size()) || 
+      this->graphs[groupId].empty())
+      {
+        if (this->verbose) TEST_INFO("Child %d: No graphs present to destroy for group %d", this->childId, groupId);
+        return TEST_SUCCESS;
+      }
+
+    // MUST synchronize streams FIRST to ensure in-flight graphs finish execution!
     for (int localRank = 0; localRank < this->deviceIds.size(); ++localRank)
     {
       CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
-      for (int streamIdx = 0; streamIdx < this->numStreamsPerGroup[groupId]; ++streamIdx)
+      for (int i = 0; i < this->numStreamsPerGroup[groupId]; ++i)
       {
-        if (graphEnabled[groupId][localRank][streamIdx])
-        {
-          if (this->verbose) TEST_INFO("Destroying graphs for group %d rank %d stream %d", groupId, localRank, streamIdx);
-
-          CHECK_HIP(hipGraphDestroy(this->graphs[groupId][localRank][streamIdx]));
-          CHECK_HIP(hipGraphExecDestroy(this->graphExecs[groupId][localRank][streamIdx]));
-        }
+        CHECK_HIP(hipStreamSynchronize(this->streams[groupId][localRank][i]));
       }
+      CHECK_HIP(hipDeviceSynchronize());
     }
 
-    for (int localRank = 0; localRank < this->deviceIds.size(); ++localRank)
+    // Release graphs
+    for (size_t localRank = 0; localRank < this->deviceIds.size(); ++localRank)
     {
-      for (int i = 0; i < this->numStreamsPerGroup[groupId]; ++i)
-        CHECK_HIP(hipStreamSynchronize(this->streams[groupId][localRank][i]));
+      CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+      for (size_t streamIdx = 0; streamIdx < this->numStreamsPerGroup[groupId]; ++streamIdx)
+      {
+        if (streamIdx < this->graphEnabled[groupId][localRank].size() && this->graphEnabled[groupId][localRank][streamIdx])
+        {
+          if (this->verbose) TEST_INFO("Destroying graphs for group %d rank %d stream %d", groupId, localRank, streamIdx);
+          if (this->graphExecs[groupId][localRank][streamIdx])
+          {
+            CHECK_HIP(hipGraphExecDestroy(this->graphExecs[groupId][localRank][streamIdx]));
+            this->graphExecs[groupId][localRank][streamIdx] = nullptr;
+          }
+          if (this->graphs[groupId][localRank][streamIdx])
+          {
+            CHECK_HIP(hipGraphDestroy(this->graphs[groupId][localRank][streamIdx]));
+            this->graphs[groupId][localRank][streamIdx] = nullptr;
+          }
+        }
+      }
     }
 
     this->graphs[groupId].clear();
@@ -1297,18 +1356,40 @@ namespace RcclUnitTesting
           // CASE 2: Legacy / Buffer Registration Path (ncclCommRegister)
           else if (collArg.userRegistered)
           {
-            // Register full buffer (outputGpu when in-place, inputGpu when out-of-place)
-            void* regPtr = collArg.inPlace ? collArg.outputGpu.ptr : collArg.inputGpu.ptr;
-            size_t regSize = collArg.inPlace ? collArg.numOutputBytesAllocated : collArg.numInputBytesAllocated;
-
-            if (regPtr && regSize > 0)
+            if (collArg.inPlace)
             {
-              CHILD_NCCL_CALL_RANK(errCode,
-              ncclCommRegister(this->comms[localRank],
-                               regPtr,
-                               regSize,
-                               &(collArg.commRegHandle)),
-              "ncclCommRegister");
+              if (collArg.outputGpu.ptr && collArg.numOutputBytesAllocated > 0)
+              {
+                CHILD_NCCL_CALL_RANK(errCode,
+                ncclCommRegister(this->comms[localRank],
+                                 collArg.outputGpu.ptr,
+                                 collArg.numOutputBytesAllocated,
+                                 &(collArg.outputRegHandle)),
+                "ncclCommRegister (output in-place)");
+              }
+           } 
+           else
+           {
+              // Register BOTH input AND output buffers for out-of-place operations
+              if (collArg.inputGpu.ptr && collArg.numInputBytesAllocated > 0)
+              {
+                CHILD_NCCL_CALL_RANK(errCode,
+                ncclCommRegister(this->comms[localRank],
+                                 collArg.inputGpu.ptr,
+                                 collArg.numInputBytesAllocated,
+                                 &(collArg.inputRegHandle)),
+                "ncclCommRegister (input)");
+              }
+
+              if (collArg.outputGpu.ptr && collArg.numOutputBytesAllocated > 0)
+              {
+                CHILD_NCCL_CALL_RANK(errCode,
+                ncclCommRegister(this->comms[localRank],
+                                 collArg.outputGpu.ptr,
+                                 collArg.numOutputBytesAllocated,
+                                 &(collArg.outputRegHandle)),
+                "ncclCommRegister (output)");
+              }
             }
           }
         }
@@ -1317,6 +1398,12 @@ namespace RcclUnitTesting
 
     // Completes handle exchange for all local ranks simultaneously
     CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd RegisterMem");
+    // Ensure GPU memory mapping / TLB invalidations complete across all local ranks
+    for (size_t localRank = 0; localRank < this->comms.size(); ++localRank)
+     {
+      CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+      CHECK_HIP(hipDeviceSynchronize());
+    }
 
     if (this->verbose) TEST_INFO("Child %d finishes RegisterMem()", this->childId);
     return TEST_SUCCESS;

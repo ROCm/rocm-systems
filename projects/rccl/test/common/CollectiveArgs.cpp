@@ -57,6 +57,61 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
+  // ErrCode CollectiveArgs::AllocateMem(bool   const inPlace,
+  //                                     bool   const useManagedMem,
+  //                                     bool   const userRegistered)
+  // {
+  //   this->numInputBytesAllocated     = this->numInputElements * DataTypeToBytes(this->dataType);
+  //   this->numOutputBytesAllocated    = this->numOutputElements * DataTypeToBytes(this->dataType);
+  //   this->numInputElementsAllocated  = this->numInputElements;
+  //   this->numOutputElementsAllocated = this->numOutputElements;
+  //   this->inPlace                    = inPlace;
+  //   this->useManagedMem              = useManagedMem;
+  //   this->userRegistered             = userRegistered;
+
+  //   CHECK_HIP(hipSetDevice(this->deviceId));
+
+  //   if (inPlace)
+  //   {
+  //     if (this->funcType == ncclCollScatter)
+  //     {
+  //       CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
+  //       this->outputGpu.Attach(this->inputGpu.U1 + (this->globalRank  * this->numOutputBytesAllocated));
+  //     }
+  //     else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
+  //     {
+  //       CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
+  //       this->inputGpu.Attach(this->outputGpu.U1 + (this->globalRank * this->numInputBytesAllocated));
+  //     }
+  //     else
+  //     {
+  //       size_t const numBytes = std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated);
+  //       CHECK_CALL(this->inputGpu.AllocateGpuMem(numBytes, useManagedMem, userRegistered));
+  //       this->outputGpu.Attach(this->inputGpu.ptr);
+  //     }
+  //     CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
+  //   }
+  //   else
+  //   {
+  //     CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
+  //     CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
+  //     CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
+  //   }
+  //   CHECK_CALL(this->outputCpu.AllocateCpuMem(this->numOutputBytesAllocated));
+
+  //   // Allocate bias buffers if bias is enabled
+  //   if (this->options.useBias)
+  //   {
+  //     this->numBiasElements = this->options.biasNumElements;
+  //     this->numBiasBytesAllocated = this->numBiasElements * DataTypeToBytes(this->dataType);
+  //     CHECK_CALL(this->biasGpu.AllocateGpuMem(this->numBiasBytesAllocated, useManagedMem, userRegistered));
+  //     CHECK_CALL(this->biasCpu.AllocateCpuMem(this->numBiasBytesAllocated));
+  //     this->biasRegHandle = nullptr;
+  //   }
+
+  //   return TEST_SUCCESS;
+  // }
+
   ErrCode CollectiveArgs::AllocateMem(bool   const inPlace,
                                       bool   const useManagedMem,
                                       bool   const userRegistered)
@@ -70,18 +125,55 @@ namespace RcclUnitTesting
     this->userRegistered             = userRegistered;
 
     CHECK_HIP(hipSetDevice(this->deviceId));
+    int const rootRank = this->options.root; // Respect specified root rank
 
     if (inPlace)
     {
       if (this->funcType == ncclCollScatter)
       {
-        CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
-        this->outputGpu.Attach(this->inputGpu.U1 + (this->globalRank  * this->numOutputBytesAllocated));
+        if (this->globalRank == rootRank)
+        {
+          // Root rank holds full input buffer (N * outCount)
+          CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
+          // Root's recvbuff points to its own slice in sendbuff
+          this->outputGpu.Attach(this->inputGpu.U1 + (rootRank * this->numOutputBytesAllocated));
+        }
+        else
+        {
+          // Non-root ranks only need a single outCount buffer for receiving
+          CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
+          // sendbuff is unused on non-root ranks; attach at offset 0
+          this->inputGpu.Attach(this->outputGpu.ptr);
+        }
       }
-      else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
+      else if (this->funcType == ncclCollGather)
+      {
+        if (this->globalRank == rootRank)
+        {
+          // Root rank holds full output buffer (N * inCount)
+          CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
+          // Root's sendbuff points to its own slice in recvbuff
+          this->inputGpu.Attach(this->outputGpu.U1 + (rootRank * this->numInputBytesAllocated));
+        }
+        else
+        {
+          // Non-root ranks only need a single inCount buffer for sending
+          CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
+          // recvbuff is unused on non-root ranks; attach at offset 0
+          this->outputGpu.Attach(this->inputGpu.ptr);
+        }
+      }
+      else if (this->funcType == ncclCollAllGather)
       {
         CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
         this->inputGpu.Attach(this->outputGpu.U1 + (this->globalRank * this->numInputBytesAllocated));
+      }
+      else if (this->funcType == ncclCollReduceScatter)
+      {
+        // Every rank allocates full input buffer (N * recvCount)
+        CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
+        // Each rank's recvbuff points to its slice inside sendbuff
+        this->outputGpu.Attach(this->inputGpu.U1 + (this->globalRank * this->numOutputBytesAllocated));
       }
       else
       {

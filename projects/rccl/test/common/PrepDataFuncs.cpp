@@ -11,8 +11,36 @@
 
 namespace RcclUnitTesting
 {
+
+  class ScopedDevice {
+  public:
+    explicit ScopedDevice(int targetDeviceId) {
+      // Save the caller's current device
+      if (hipGetDevice(&savedDeviceId_) != hipSuccess) {
+        savedDeviceId_ = 0;
+      }
+      // Only switch context if target is different from current
+      if (savedDeviceId_ != targetDeviceId) {
+        hipSetDevice(targetDeviceId);
+      }
+    }
+
+    ~ScopedDevice() {
+      // Automatically restore caller's original device on scope exit
+      hipSetDevice(savedDeviceId_);
+    }
+
+    // Prevent copying/moving
+    ScopedDevice(const ScopedDevice&) = delete;
+    ScopedDevice& operator=(const ScopedDevice&) = delete;
+
+  private:
+    int savedDeviceId_ = 0;
+  };
+
   ErrCode DefaultPrepareDataFunc(CollectiveArgs &collArgs)
   {
+    ScopedDevice dev(collArgs.deviceId);
     switch (collArgs.funcType)
     {
     case ncclCollBroadcast:     return DefaultPrepData_Broadcast(collArgs);

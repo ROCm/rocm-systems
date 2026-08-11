@@ -16,20 +16,6 @@ enum primsMode {
   primsModePatAg = 2
 };
 
-__device__ inline void invalidate_vector_l1() {
-#if defined(__gfx942__) || defined(__gfx950__)
-    // CDNA 3 / MI300 path
-    asm volatile("buffer_inv sc0 sc1");
-#elif defined(__gfx90a__)
-    // CDNA 2 / MI200 path
-    asm volatile("buffer_wbinvl1");
-#else
-    // Fallback or other architectures
-    __threadfence_system(); 
-#endif
-}
-
-
 template <typename T, typename RedOp, typename Fan, int Direct, int SlicePerChunk, int StepPerSlice, int Unroll,
           int P2p, int MultimemSrcs, int MultimemDsts, bool isNetOffload, int Metadata, int Pipeline, int useAcc>
 class Primitives<T, RedOp, Fan, Direct,
