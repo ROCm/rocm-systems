@@ -21,8 +21,6 @@ include(GNUInstallDirs)
 #  If you don't specify CMAKE_INSTALL_PREFIX, hip-rocclr runtime will be installed to "<ROCM_PATH>/hip".
 #  By default, CMake will search for a folder named vdi or ROCclr relative to the current path. Specify -DROCCLR_PATH=$ROCCLR_DIR if rocclr source is in obscure location.
 #  By default, CMake will search for a folder named opencl or ROCm-OpenCL-Runtime relative to the current path. Specify -DAMD_OPENCL_PATH=$OPENCL_DIR if opencl source is in obscure location.
-list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
-
 
 #############################
 # Options
