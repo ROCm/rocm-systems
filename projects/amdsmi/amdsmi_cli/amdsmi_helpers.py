@@ -1367,6 +1367,21 @@ class AMDSMIHelpers:
         except:
             return False
 
+    def is_device_apu(self, device_handle):
+        """Return whether the specified device is an APU (integrated GPU).
+
+        Uses the ASIC ``AMDGPU_IDS_FLAGS_FUSION`` (0x1) flag. Used to gate
+        platform-wide APU BIOS features (e.g. the UMA carveout, which fwupd
+        exposes globally) so they are not applied to discrete GPUs.
+
+        param device_handle: device handle
+        """
+        try:
+            asic_info = amdsmi_interface.amdsmi_get_gpu_asic_info(device_handle)
+            return bool(asic_info.get("flags", 0) & 0x1)
+        except Exception:
+            return False
+
     def get_perf_levels(self):
         perf_levels_str = [clock.name for clock in amdsmi_interface.AmdSmiDevPerfLevel]
         perf_levels_int = list(set(clock.value for clock in amdsmi_interface.AmdSmiDevPerfLevel))

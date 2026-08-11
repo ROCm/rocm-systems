@@ -1393,7 +1393,14 @@ class StaticCommands:
             not_supported = (
                 e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
             )
-            fwupd_setting = fwupd_bios.get_carveout_setting() if not_supported else None
+            # The fwupd carveout is a platform-wide APU BIOS setting; only fall
+            # back to it for the integrated (FUSION) device, never for a dGPU
+            # that merely lacks the sysfs node.
+            fwupd_setting = (
+                fwupd_bios.get_carveout_setting()
+                if not_supported and self.helpers.is_device_apu(args.gpu)
+                else None
+            )
             if fwupd_setting is not None:
                 # UEFI-HII platform: the BIOS exposes the carveout through fwupd.
                 options = [

@@ -1929,9 +1929,18 @@ class SetValueCommands:
             if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                 raise PermissionError("Command requires elevation") from e
             if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
-                # The kernel node is absent; the knob may still be exposed by the
-                # platform BIOS through fwupd (HP UEFI-HII).
-                self._set_mem_carveout_fwupd(args)
+                if self.helpers.is_device_apu(args.gpu):
+                    # The kernel node is absent; the knob may still be exposed by
+                    # the platform BIOS through fwupd (HP UEFI-HII). Restrict to
+                    # the integrated (FUSION) device -- never a dGPU.
+                    self._set_mem_carveout_fwupd(args)
+                else:
+                    self.logger.store_output(
+                        args.gpu,
+                        "mem_carveout",
+                        "Not supported: UMA carveout applies to the integrated GPU (APU) only.",
+                    )
+                    self.logger.print_output()
             else:
                 self.logger.store_output(
                     args.gpu,

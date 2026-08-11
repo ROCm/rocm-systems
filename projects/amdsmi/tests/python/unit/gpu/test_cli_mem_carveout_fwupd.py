@@ -176,11 +176,15 @@ class _FakeLogger:
 
 
 class _FakeHelpers:
-    def __init__(self):
+    def __init__(self, is_apu=True):
         self.reboot_prompts = 0
+        self._is_apu = is_apu
 
     def prompt_reboot(self):
         self.reboot_prompts += 1
+
+    def is_device_apu(self, _gpu):
+        return self._is_apu
 
 
 def _fwupd_run(recorder, version="2.1.1", payload=None, set_result=(0, "", "")):
@@ -364,9 +368,10 @@ class TestFwupdBiosAdapter(_CarveoutFwupdBase):
 
 
 class TestStaticCarveoutFwupdFallback(_CarveoutFwupdBase):
-    def _run_static(self, fmt, **patch_kwargs):
+    def _run_static(self, fmt, is_apu=True, **patch_kwargs):
         commands = object.__new__(self.static_mod.StaticCommands)
         commands.logger = _FakeLogger(fmt)
+        commands.helpers = _FakeHelpers(is_apu=is_apu)
         static_dict = {}
         args = argparse.Namespace(mem_carveout=True, gpu=object())
         _recorder, stack = self._patch_fwupd(**patch_kwargs)
@@ -397,12 +402,21 @@ class TestStaticCarveoutFwupdFallback(_CarveoutFwupdBase):
         static_dict = self._run_static("human", which=None)
         self.assertIn("no UMA carveout interface", static_dict["mem_carveout"])
 
+    def test_static_dgpu_skips_fwupd(self):
+        # A discrete GPU returns NOT_SUPPORTED too, but must not surface the
+        # APU's platform-wide fwupd carveout even when fwupd is available.
+        static_dict = self._run_static("human", is_apu=False)
+        text = static_dict["mem_carveout"]
+        self.assertIn("N/A", text)
+        for option in _CARVEOUT_OPTIONS:
+            self.assertNotIn(option, text)
+
 
 class TestSetCarveoutFwupdFallback(_CarveoutFwupdBase):
-    def _run_set(self, index, **patch_kwargs):
+    def _run_set(self, index, is_apu=True, **patch_kwargs):
         commands = object.__new__(self.set_mod.SetValueCommands)
         logger = _FakeLogger("human")
-        helpers = _FakeHelpers()
+        helpers = _FakeHelpers(is_apu=is_apu)
         commands.logger = logger
         commands.helpers = helpers
         args = argparse.Namespace(mem_carveout=index, gpu=object())
@@ -433,6 +447,13 @@ class TestSetCarveoutFwupdFallback(_CarveoutFwupdBase):
         os.environ["AMDSMI_DRY_RUN"] = "1"
         _logger, _helpers, recorder = self._run_set(0)
         self.assertEqual(recorder, [])
+
+    def test_set_dgpu_skips_fwupd(self):
+        # Setting the carveout on a discrete GPU must not write the APU BIOS knob.
+        logger, helpers, recorder = self._run_set(0, is_apu=False)
+        self.assertEqual(recorder, [])
+        self.assertIn("APU", logger.last("mem_carveout"))
+        self.assertEqual(helpers.reboot_prompts, 0)
 
 
 if __name__ == "__main__":
