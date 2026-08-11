@@ -7,8 +7,8 @@
 #include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
 
 #include "rocjitsu/analysis/liveness.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
@@ -174,8 +174,8 @@ void set_word_field(uint32_t &word, uint32_t value, uint32_t shift, uint32_t wid
 
 /// @brief Copy the instruction's words from the authoritative source image.
 ///
-/// @details raw_encoding() addresses only the base-format subobject, so any
-/// literal or modifier word that follows it must come from the text image.
+/// @details The rewrite operates on the exact source bytes, including any
+/// literal or modifier words, so copy the complete bounded instruction span.
 [[nodiscard]] std::optional<std::vector<uint32_t>>
 instruction_words(const Instruction &inst, uint64_t offset, std::span<const uint8_t> source_text) {
   const size_t size = static_cast<size_t>(inst.size());
