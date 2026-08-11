@@ -324,6 +324,18 @@ interposition_sync();
  */
 void
 stop_completion_monitor();
+
+/**
+ * @brief Signal that global finalization has begun
+ *
+ * Sets a one-way "global shutdown" flag (distinct from the transient per-client
+ * finalizer state) that drain_completion_monitor honors to bound its otherwise
+ * unbounded wait: at global shutdown an in-flight dependency may never resolve, and
+ * stop_completion_monitor's bounded sweep is the authoritative flush. Must be called
+ * before the finalize-path drain, and only on the true global-teardown path.
+ */
+void
+request_completion_monitor_shutdown();
 }  // namespace queue_interposition
 }  // namespace hsa
 }  // namespace rocprofiler
