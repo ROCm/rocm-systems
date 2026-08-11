@@ -10748,64 +10748,45 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             if uses_packed_16bit_sources
             else ''
         )
-        scalar_selector_validation = ''
-        scalar_register_operand_types = sorted(
-            selector.operand_type
-            for selector in self.isa_spec.opnd_selectors
-            if selector.operand_type.startswith('OPR_SREG')
-        )
-        for operand_type in scalar_register_operand_types:
+        selector_validation = ''
+        for selector in sorted(
+            self.isa_spec.opnd_selectors, key=lambda item: item.operand_type
+        ):
+            operand_type = selector.operand_type
+            if operand_type == 'OPR_SSRC_LANESEL':
+                error = 'InvalidLaneSelector'
+            elif operand_type.startswith('OPR_SREG'):
+                error = 'InvalidScalarRegisterSelector'
+            elif operand_type.startswith('OPR_SDST'):
+                error = 'InvalidSelector'
+            elif operand_type == 'OPR_EXEC':
+                error = 'InvalidExecSelector'
+            elif operand_type == 'OPR_SRC_VGPR':
+                error = 'InvalidVgprSourceSelector'
+            elif operand_type in (
+                'OPR_SSRC',
+                'OPR_SSRC_NOLDS',
+                'OPR_SSRC_NOLIT',
+                'OPR_SSRC_SPECIAL_SCC',
+            ):
+                error = 'InvalidScalarSourceSelector'
+            else:
+                # Some selector declarations describe the names produced from
+                # a transformed or instruction-specific raw field rather than
+                # the constructor's input namespace. Validate only operand
+                # families whose constructors receive canonical selectors.
+                continue
             intervals = self._operand_selector_intervals(operand_type)
+            if not intervals:
+                continue
             valid_expr = ' || '.join(
                 f'(encoding_value >= {lo} && encoding_value <= {hi})'
                 for lo, hi in intervals
             )
-            scalar_selector_validation += (
+            selector_validation += (
                 f'  if (opr_type == OperandType::{operand_type} && '
-                f'!({valid_expr})) {{\n'
-                '    defer_encoding_error("invalid scalar register selector");\n'
-                '    if (encoding_value != 254 && encoding_value != 255)\n'
-                '      validate_encoding();\n'
-                '  }\n'
-            )
-        lane_selector_validation = ''
-        if 'OPR_SSRC_LANESEL' in self.isa_spec.operand_types:
-            intervals = self._operand_selector_intervals('OPR_SSRC_LANESEL')
-            valid_expr = ' || '.join(
-                f'(encoding_value >= {lo} && encoding_value <= {hi})'
-                for lo, hi in intervals
-            )
-            lane_selector_validation = (
-                '  if (opr_type == OperandType::OPR_SSRC_LANESEL && '
                 f'!({valid_expr}))\n'
-                '    throw util::InvalidInst("invalid lane selector", "");\n'
-            )
-        exec_selector_validation = ''
-        if 'OPR_EXEC' in self.isa_spec.operand_types:
-            selector = next(
-                item
-                for item in self.isa_spec.opnd_selectors
-                if item.operand_type == 'OPR_EXEC'
-            )
-            exec_values = [int(value, 0) for _, value in selector.op_sel_vals]
-            if len(exec_values) != 1:
-                raise ValueError('OPR_EXEC must declare exactly one selector')
-            exec_selector_validation = (
-                '  if (opr_type == OperandType::OPR_EXEC && '
-                f'encoding_value != {exec_values[0]})\n'
-                '    throw util::InvalidInst("invalid EXEC selector", "");\n'
-            )
-        scalar_source_selector_validation = ''
-        if 'OPR_SSRC' in self.isa_spec.operand_types:
-            intervals = self._operand_selector_intervals('OPR_SSRC')
-            valid_expr = ' || '.join(
-                f'(encoding_value >= {lo} && encoding_value <= {hi})'
-                for lo, hi in intervals
-            )
-            scalar_source_selector_validation = (
-                '  if (opr_type == OperandType::OPR_SSRC && '
-                f'!({valid_expr}))\n'
-                '    throw util::InvalidInst("invalid scalar source selector", "");\n'
+                f'    defer_encoding_error(EncodingError::{error});\n'
             )
         packed_16bit_ctor_impl = []
         if uses_packed_16bit_sources:
@@ -10817,14 +10798,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     '              packed_16bit_source, packed_16bit_dst) {\n'
                     '}'
                 )
-            )
-        vgpr_source_selector_validation = ''
-        if 'OPR_SRC_VGPR' in self.isa_spec.operand_types:
-            vgpr_source_selector_validation = (
-                '  if (opr_type == OperandType::OPR_SRC_VGPR &&\n'
-                '      (encoding_value < OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN ||\n'
-                '       encoding_value > OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX))\n'
-                '    throw util::InvalidInst("invalid VGPR source selector", "");\n'
             )
         literal64_impl = (
             'std::optional<uint64_t> Operand::literal64_value() const {\n'
@@ -10856,11 +10829,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     f'    : {operand_base_init}(size_bits, opr_type, encoding_value)'
                     f'{execution_backend_ctor_init}'
                     f'{operand_ctor_init} {{\n'
-                    f'{scalar_selector_validation}'
-                    f'{lane_selector_validation}'
-                    f'{exec_selector_validation}'
-                    f'{vgpr_source_selector_validation}'
-                    f'{scalar_source_selector_validation}'
+                    f'{selector_validation}'
                     '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
                     '}'
                 ),
@@ -10872,11 +10841,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     f'{execution_backend_ctor_init},\n'
                     '      literal16_display_value_(literal16_display_value),\n'
                     '      has_literal16_display_(has_literal16_display) {\n'
-                    f'{scalar_selector_validation}'
-                    f'{lane_selector_validation}'
-                    f'{exec_selector_validation}'
-                    f'{vgpr_source_selector_validation}'
-                    f'{scalar_source_selector_validation}'
+                    f'{selector_validation}'
                     '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
                     '}'
                 ),

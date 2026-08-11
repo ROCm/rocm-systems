@@ -25,6 +25,9 @@
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
@@ -75,6 +78,16 @@ constexpr uint32_t make_sopp(uint32_t op, uint32_t simm16) {
 
 constexpr uint32_t make_vop2(uint32_t op, uint32_t vdst, uint32_t vsrc1, uint32_t src0) {
   return ((op & 0x3Fu) << 25) | ((vdst & 0xFFu) << 17) | ((vsrc1 & 0xFFu) << 9) | (src0 & 0x1FFu);
+}
+
+constexpr uint32_t make_cdna1_sop1(uint32_t sdst, uint32_t ssrc0) {
+  return 0xBE800000u | ((sdst & 0x7Fu) << 16) | (ssrc0 & 0xFFu);
+}
+
+TEST(OperandLayoutTest, DeferredSelectorStateFitsExistingPadding) {
+  EXPECT_EQ(sizeof(Operand), 32u);
+  EXPECT_EQ(sizeof(gfx1250::Operand), 80u);
+  EXPECT_EQ(sizeof(gfx1250::VAddF32Vop3), 528u);
 }
 
 TEST(CodeArchApiTest, PreservesExistingPublicEnumValues) {
@@ -193,6 +206,33 @@ TEST(ScalarRegisterSelectorDecodeTest, Rdna1AndRdna2RejectReservedHole) {
 
   validate(ROCJITSU_CODE_ARCH_RDNA1, "rdna1", rdna1_lower, rdna1_hole, rdna1_upper);
   validate(ROCJITSU_CODE_ARCH_RDNA2, "rdna2", rdna2_lower, rdna2_hole, rdna2_upper);
+}
+
+TEST(OperandSelectorDecodeTest, Cdna1SdstRejectsReservedHole) {
+  constexpr uint32_t lower = make_cdna1_sop1(124, 0);
+  constexpr uint32_t hole = make_cdna1_sop1(125, 0);
+  constexpr uint32_t upper = make_cdna1_sop1(126, 0);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &[word, expected_selector] : {std::pair{lower, 124}, std::pair{upper, 126}}) {
+    std::unique_ptr<Instruction> inst;
+    ASSERT_NO_THROW(inst.reset(decoder->decode(&word)));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->num_dst_operands(), 1);
+    ASSERT_NE(inst->dst_operand(0), nullptr);
+    EXPECT_EQ(inst->dst_operand(0)->encoding_value(), expected_selector);
+  }
+
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(&hole)), util::InvalidInst);
+}
+
+TEST(OperandSelectorDecodeTest, Cdna1RestrictedScalarSourceRejectsLiteralSelector) {
+  cdna1::Operand valid(32, cdna1::OperandType::OPR_SSRC_NOLIT, 253);
+  EXPECT_NO_THROW(valid.validate_encoding());
+
+  cdna1::Operand invalid(32, cdna1::OperandType::OPR_SSRC_NOLIT, 255);
+  EXPECT_THROW(invalid.validate_encoding(), util::InvalidInst);
 }
 
 TEST(RawEncodingTest, PreservesScalarLiteralWordsAcrossAmdgpuIsas) {

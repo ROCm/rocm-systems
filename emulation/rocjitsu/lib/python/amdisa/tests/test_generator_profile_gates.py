@@ -2169,9 +2169,8 @@ def test_generated_operand_validates_scalar_register_selector_intervals(
             '!((encoding_value>=0&&encoding_value<=123)||'
             '(encoding_value>=125&&encoding_value<=125))' in operand
         )
-        assert 'defer_encoding_error("invalidscalarregisterselector")' in operand
         assert (
-            'if(encoding_value!=254&&encoding_value!=255)validate_encoding();'
+            'defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);'
             in operand
         )
 
@@ -2192,6 +2191,31 @@ def test_generated_operand_validates_scalar_register_selector_variants(
     )
 
 
+def test_generated_operand_validates_scalar_selector_families(
+    amdgpu_generated_root: Path,
+):
+    operand = ''.join(
+        (amdgpu_generated_root / 'cdna1' / 'operand.cpp').read_text().split()
+    )
+
+    assert (
+        'opr_type==OperandType::OPR_SDST&&'
+        '!((encoding_value>=0&&encoding_value<=124)||'
+        '(encoding_value>=126&&encoding_value<=127))' in operand
+    )
+    assert (
+        'opr_type==OperandType::OPR_SSRC_NOLIT&&'
+        '!((encoding_value>=0&&encoding_value<=124)||'
+        '(encoding_value>=126&&encoding_value<=208)||'
+        '(encoding_value>=235&&encoding_value<=248)||'
+        '(encoding_value>=251&&encoding_value<=253))' in operand
+    )
+    assert 'defer_encoding_error(EncodingError::InvalidSelector);' in operand
+    assert (
+        'defer_encoding_error(EncodingError::InvalidScalarSourceSelector);' in operand
+    )
+
+
 def test_gfx1250_generated_operand_validates_lane_selectors(
     gfx1250_generated_root: Path,
 ):
@@ -2201,7 +2225,7 @@ def test_gfx1250_generated_operand_validates_lane_selectors(
     assert 'OPR_SSRC_LANESEL_POS_INT_MAX = 191' in operand_types
     assert '#include "util/except.h"' in operand
     assert 'opr_type == OperandType::OPR_SSRC_LANESEL' in operand
-    assert 'invalid lane selector' in operand
+    assert 'EncodingError::InvalidLaneSelector' in operand
 
 
 def test_gfx1250_generated_operand_rejects_invalid_exec_selector(
@@ -2209,8 +2233,9 @@ def test_gfx1250_generated_operand_rejects_invalid_exec_selector(
 ):
     operand = (gfx1250_generated_root / 'operand.cpp').read_text()
     assert '#include "util/except.h"' in operand
-    assert 'opr_type == OperandType::OPR_EXEC && encoding_value != 126' in operand
-    assert 'invalid EXEC selector' in operand
+    assert 'opr_type == OperandType::OPR_EXEC' in operand
+    assert '(encoding_value >= 126 && encoding_value <= 126)' in operand
+    assert 'EncodingError::InvalidExecSelector' in operand
 
 
 def test_gfx1250_generated_vop3_add_f16_applies_dpp(
@@ -3198,7 +3223,7 @@ def test_gfx1250_generated_operand_rejects_reserved_scalar_source_selectors(
 
     assert 'opr_type == OperandType::OPR_SSRC' in operand
     assert '(encoding_value >= 209 && encoding_value <= 229)' not in operand
-    assert 'invalid scalar source selector' in operand
+    assert 'EncodingError::InvalidScalarSourceSelector' in operand
 
 
 def test_generated_execute_shared_calls_have_definitions(
@@ -3881,9 +3906,9 @@ def test_generated_operands_validate_vgpr_source_selectors(
     amdgpu_generated_root: Path,
 ):
     validation = (
-        'if (opr_type == OperandType::OPR_SRC_VGPR &&\n'
-        '      (encoding_value < OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN ||\n'
-        '       encoding_value > OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX))'
+        'if (opr_type == OperandType::OPR_SRC_VGPR && '
+        '!((encoding_value >= 256 && encoding_value <= 511)))\n'
+        '    defer_encoding_error(EncodingError::InvalidVgprSourceSelector);'
     )
     for arch in (
         'cdna1',

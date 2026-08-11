@@ -304,7 +304,17 @@ public:
   amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
 
 protected:
-  void defer_encoding_error(const char *message) { encoding_error_ = message; }
+  enum class EncodingError : uint8_t {
+    None,
+    InvalidSelector,
+    InvalidScalarRegisterSelector,
+    InvalidLaneSelector,
+    InvalidExecSelector,
+    InvalidVgprSourceSelector,
+    InvalidScalarSourceSelector,
+  };
+
+  void defer_encoding_error(EncodingError error) { encoding_error_ = error; }
 
   /// @brief Capability/role flags, set once at construction and never
   /// mutated afterward. Subclass constructors set is_vgpr_; fieldless
@@ -320,7 +330,7 @@ protected:
   bool reads_value_ = true;
   bool writable_ = true;
   bool fieldless_ = false;
-  const char *encoding_error_ = nullptr;
+  EncodingError encoding_error_ = EncodingError::None;
 
 private:
   // Private SIMD fast-path backend for RegisterAccess.

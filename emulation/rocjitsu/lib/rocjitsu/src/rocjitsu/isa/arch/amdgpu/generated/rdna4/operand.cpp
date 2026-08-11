@@ -65,39 +65,37 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
     : IsaOperand<Isa>(size_bits, opr_type, encoding_value),
       execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())),
       packed_16bit_source_(packed_16bit_source), packed_16bit_dst_(packed_16bit_dst) {
-  if (opr_type == OperandType::OPR_SREG && !((encoding_value >= 0 && encoding_value <= 124))) {
-    defer_encoding_error("invalid scalar register selector");
-    if (encoding_value != 254 && encoding_value != 255)
-      validate_encoding();
-  }
+  if (opr_type == OperandType::OPR_EXEC && !((encoding_value >= 126 && encoding_value <= 126)))
+    defer_encoding_error(EncodingError::InvalidExecSelector);
+  if (opr_type == OperandType::OPR_SDST && !((encoding_value >= 0 && encoding_value <= 127)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SDST_EXEC && !((encoding_value >= 126 && encoding_value <= 127)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SDST_M0 && !((encoding_value >= 125 && encoding_value <= 125)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SRC_VGPR && !((encoding_value >= 256 && encoding_value <= 511)))
+    defer_encoding_error(EncodingError::InvalidVgprSourceSelector);
+  if (opr_type == OperandType::OPR_SREG && !((encoding_value >= 0 && encoding_value <= 124)))
+    defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
   if (opr_type == OperandType::OPR_SREG_LITERAL &&
       !((encoding_value >= 0 && encoding_value <= 124) ||
-        (encoding_value >= 255 && encoding_value <= 255))) {
-    defer_encoding_error("invalid scalar register selector");
-    if (encoding_value != 254 && encoding_value != 255)
-      validate_encoding();
-  }
-  if (opr_type == OperandType::OPR_SREG_M0 && !((encoding_value >= 0 && encoding_value <= 125))) {
-    defer_encoding_error("invalid scalar register selector");
-    if (encoding_value != 254 && encoding_value != 255)
-      validate_encoding();
-  }
-  if (opr_type == OperandType::OPR_SSRC_LANESEL &&
-      !((encoding_value >= 0 && encoding_value <= 125) ||
-        (encoding_value >= 128 && encoding_value <= 191)))
-    throw util::InvalidInst("invalid lane selector", "");
-  if (opr_type == OperandType::OPR_EXEC && encoding_value != 126)
-    throw util::InvalidInst("invalid EXEC selector", "");
-  if (opr_type == OperandType::OPR_SRC_VGPR &&
-      (encoding_value < OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN ||
-       encoding_value > OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX))
-    throw util::InvalidInst("invalid VGPR source selector", "");
+        (encoding_value >= 255 && encoding_value <= 255)))
+    defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
+  if (opr_type == OperandType::OPR_SREG_M0 && !((encoding_value >= 0 && encoding_value <= 125)))
+    defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
   if (opr_type == OperandType::OPR_SSRC && !((encoding_value >= 0 && encoding_value <= 208) ||
                                              (encoding_value >= 235 && encoding_value <= 238) ||
                                              (encoding_value >= 240 && encoding_value <= 248) ||
                                              (encoding_value >= 253 && encoding_value <= 253) ||
                                              (encoding_value >= 255 && encoding_value <= 255)))
-    throw util::InvalidInst("invalid scalar source selector", "");
+    defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
+  if (opr_type == OperandType::OPR_SSRC_LANESEL &&
+      !((encoding_value >= 0 && encoding_value <= 125) ||
+        (encoding_value >= 128 && encoding_value <= 191)))
+    defer_encoding_error(EncodingError::InvalidLaneSelector);
+  if (opr_type == OperandType::OPR_SSRC_SPECIAL_SCC &&
+      !((encoding_value >= 253 && encoding_value <= 253)))
+    defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
 
@@ -112,39 +110,37 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
       execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())),
       literal16_display_value_(literal16_display_value),
       has_literal16_display_(has_literal16_display) {
-  if (opr_type == OperandType::OPR_SREG && !((encoding_value >= 0 && encoding_value <= 124))) {
-    defer_encoding_error("invalid scalar register selector");
-    if (encoding_value != 254 && encoding_value != 255)
-      validate_encoding();
-  }
+  if (opr_type == OperandType::OPR_EXEC && !((encoding_value >= 126 && encoding_value <= 126)))
+    defer_encoding_error(EncodingError::InvalidExecSelector);
+  if (opr_type == OperandType::OPR_SDST && !((encoding_value >= 0 && encoding_value <= 127)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SDST_EXEC && !((encoding_value >= 126 && encoding_value <= 127)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SDST_M0 && !((encoding_value >= 125 && encoding_value <= 125)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SRC_VGPR && !((encoding_value >= 256 && encoding_value <= 511)))
+    defer_encoding_error(EncodingError::InvalidVgprSourceSelector);
+  if (opr_type == OperandType::OPR_SREG && !((encoding_value >= 0 && encoding_value <= 124)))
+    defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
   if (opr_type == OperandType::OPR_SREG_LITERAL &&
       !((encoding_value >= 0 && encoding_value <= 124) ||
-        (encoding_value >= 255 && encoding_value <= 255))) {
-    defer_encoding_error("invalid scalar register selector");
-    if (encoding_value != 254 && encoding_value != 255)
-      validate_encoding();
-  }
-  if (opr_type == OperandType::OPR_SREG_M0 && !((encoding_value >= 0 && encoding_value <= 125))) {
-    defer_encoding_error("invalid scalar register selector");
-    if (encoding_value != 254 && encoding_value != 255)
-      validate_encoding();
-  }
-  if (opr_type == OperandType::OPR_SSRC_LANESEL &&
-      !((encoding_value >= 0 && encoding_value <= 125) ||
-        (encoding_value >= 128 && encoding_value <= 191)))
-    throw util::InvalidInst("invalid lane selector", "");
-  if (opr_type == OperandType::OPR_EXEC && encoding_value != 126)
-    throw util::InvalidInst("invalid EXEC selector", "");
-  if (opr_type == OperandType::OPR_SRC_VGPR &&
-      (encoding_value < OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN ||
-       encoding_value > OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX))
-    throw util::InvalidInst("invalid VGPR source selector", "");
+        (encoding_value >= 255 && encoding_value <= 255)))
+    defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
+  if (opr_type == OperandType::OPR_SREG_M0 && !((encoding_value >= 0 && encoding_value <= 125)))
+    defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
   if (opr_type == OperandType::OPR_SSRC && !((encoding_value >= 0 && encoding_value <= 208) ||
                                              (encoding_value >= 235 && encoding_value <= 238) ||
                                              (encoding_value >= 240 && encoding_value <= 248) ||
                                              (encoding_value >= 253 && encoding_value <= 253) ||
                                              (encoding_value >= 255 && encoding_value <= 255)))
-    throw util::InvalidInst("invalid scalar source selector", "");
+    defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
+  if (opr_type == OperandType::OPR_SSRC_LANESEL &&
+      !((encoding_value >= 0 && encoding_value <= 125) ||
+        (encoding_value >= 128 && encoding_value <= 191)))
+    defer_encoding_error(EncodingError::InvalidLaneSelector);
+  if (opr_type == OperandType::OPR_SSRC_SPECIAL_SCC &&
+      !((encoding_value >= 253 && encoding_value <= 253)))
+    defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
 
