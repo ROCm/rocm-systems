@@ -664,6 +664,39 @@ add_custom_command(
 )
 
 # ===========================================================================
+# gin_alltoall_sdma.cu.cpp: GIN-SDMA alltoall kernel.
+#
+# The two extra defines have to be passed here rather than via
+# set_source_files_properties(): this file is filtered out of the rccl target,
+# so per-source properties are never consulted. Pinning the backend mask to a
+# single bit makes ncclGinCallImpl take its compile-time singleton branch.
+# ===========================================================================
+set(GIN_ALLTOALL_SDMA_FAT_OBJ "")
+if(ENABLE_ROCSHMEM_GIN)
+  set(GIN_ALLTOALL_SDMA_FAT_OBJ "${DEVICE_BUILD_DIR}/gin_alltoall_sdma.o")
+  add_custom_command(
+    OUTPUT  ${GIN_ALLTOALL_SDMA_FAT_OBJ}
+    COMMAND ${DL_CLANG}
+      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+      ${DL_HIP_COMPILER_FLAGS}
+      -DRCCL_DEVICE_LINKER
+      -DNCCL_GIN_ANVIL_SDMA_ENABLE=1
+      -DNCCL_GIN_PROXY_ENABLE=0
+      ${_link_def_flags}
+      ${_host_inc_flags}
+      ${DL_OPT_FLAGS}
+      ${DL_INHERITED_FLAGS}
+      -std=c++17
+      -fPIC
+      -c -o ${GIN_ALLTOALL_SDMA_FAT_OBJ}
+      ${HIPIFY_DIR}/src/gin_alltoall_sdma.cu.cpp
+    DEPENDS ${HIPIFY_DIR}/src/gin_alltoall_sdma.cu.cpp
+    COMMENT "DL compile: gin_alltoall_sdma.cu.cpp (GIN-SDMA alltoall kernel)"
+    VERBATIM
+  )
+endif()
+
+# ===========================================================================
 # dda_all_reduce_fabric.cu.cpp: fabric/VMM counterpart of the IPC file above.
 # ===========================================================================
 set(DDA_ALL_REDUCE_FABRIC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_fabric.o")
@@ -993,7 +1026,7 @@ endif()
 # Top-level target
 # ===========================================================================
 add_custom_target(device_linker_build ALL
-  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJS} ${SYM_FAT_OBJS}
+  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJS} ${SYM_FAT_OBJS} ${GIN_ALLTOALL_SDMA_FAT_OBJ}
 )
 add_dependencies(device_linker_build hipify_all copy_nccl_device_headers)
 if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND TARGET rocshmem_static)
@@ -1024,6 +1057,7 @@ set(DEVICE_LINKER_OBJECTS
   ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ}
   ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ}
   ${SYM_FAT_OBJS}
+  ${GIN_ALLTOALL_SDMA_FAT_OBJ}
 )
 
 # ===========================================================================
