@@ -240,7 +240,6 @@ class DmaBlitManager : public device::HostBlitManager {
 
   //! Batch version of hsaCopy - resolves multiple Memory objects to addresses/agents
   bool hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
-                    HwQueueEngine host_copy_direction = HwQueueEngine::Unknown,
                     const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
                     std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
 
