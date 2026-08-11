@@ -24,14 +24,14 @@
 
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/vop3.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/vopd.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3_5/vopd.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/operand.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/sop2.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/vop3.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/sop2.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vopd.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -136,6 +136,42 @@ INSTANTIATE_TEST_SUITE_P(
       name += info.param.expected_mnemonic;
       return name;
     });
+
+TEST(RawEncodingTest, PreservesScalarLiteralWordsAcrossAmdgpuIsas) {
+  struct Case {
+    rj_code_arch_t arch;
+    const char *arch_name;
+    uint32_t word;
+  };
+  constexpr uint32_t s_mov_b32_literal = 0xBE8000FFu;
+  constexpr uint32_t rdna1_s_mov_b32_literal = 0xBE8003FFu;
+  constexpr Case cases[] = {
+      {ROCJITSU_CODE_ARCH_CDNA1, "cdna1", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_CDNA2, "cdna2", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_CDNA3, "cdna3", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_CDNA4, "cdna4", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_RDNA1, "rdna1", rdna1_s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_RDNA2, "rdna2", rdna1_s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", s_mov_b32_literal},
+  };
+
+  for (const auto &tc : cases) {
+    SCOPED_TRACE(tc.arch_name);
+    const uint32_t words[] = {tc.word, 0x12345678u};
+    auto decoder = Decoder::create(tc.arch);
+    ASSERT_NE(decoder, nullptr) << tc.arch_name;
+    std::unique_ptr<Instruction> inst;
+    ASSERT_NO_THROW(inst.reset(decoder->decode(words))) << tc.arch_name;
+    ASSERT_NE(inst, nullptr) << tc.arch_name;
+    ASSERT_EQ(inst->size(), sizeof(words)) << tc.arch_name;
+    ASSERT_NE(inst->raw_encoding(), nullptr) << tc.arch_name;
+    EXPECT_EQ(inst->raw_encoding()[0], words[0]) << tc.arch_name;
+    EXPECT_EQ(inst->raw_encoding()[1], words[1]) << tc.arch_name;
+  }
+}
 
 TEST(FieldlessOperandDecodeTest, SaveexecExposesInertExecAndSccOperands) {
   const uint32_t words[] = {

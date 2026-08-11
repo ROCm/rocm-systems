@@ -24,16 +24,9 @@ on:
         default: "ROCm/rocjitsu-test-corpus"
         required: true
       corpus_ref:
-        description: "Branch, tag, or SHA containing the gfx1250 corpus suites"
+        description: "Branch, tag, or SHA used by all corpus tests"
         # Last updated on 2026/07/29.
         default: "42944a3ff37490441dcd0f1838e289a419af082d"
-        required: true
-      legacy_corpus_ref:
-        description: "Branch, tag, or SHA for the existing corpus tests"
-        # TODO: Drop this pin once the workflow's ROCm SDK includes the gfx1250
-        # rocBLAS and hipBLASLt libraries required by the latest corpus.
-        # Last updated on 2026/07/17.
-        default: "aa54cc86c9ebff3eb840743b36ff8d9b3b2d43c4"
         required: true
 
 concurrency:
@@ -50,13 +43,13 @@ env:
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
   ROCJITSU_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
-  ROCJITSU_DBT_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-dbt-test-corpus
   ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_DBT_CORPUS_REF: 42944a3ff37490441dcd0f1838e289a419af082d
   ROCJITSU_DBT_SHA_FRAGMENTS: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/fragments
   ROCJITSU_DBT_SHA_MANIFEST: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/gfx1250-b0-a0-sha-pairs.json
   ROCM_SDK_VERSION: 7.15.0a20260728
+  ROCM_SDK_DEVICE_GFX_GROUP: "gfx1100 gfx1201 gfx1250 gfx942 gfx950"
   UV_VERSION: 0.9.26
 
 jobs:
@@ -158,23 +151,13 @@ jobs:
             .github
             shared/machine-readable-isa/isa
 
-      - name: Checkout rocjitsu corpus
-        if: matrix.name == 'release'
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/07/17.
-          ref: ${{ github.event.inputs.legacy_corpus_ref || 'aa54cc86c9ebff3eb840743b36ff8d9b3b2d43c4' }}
-          path: rocjitsu-test-corpus
-
-      - name: Checkout gfx1250 corpus
+      - name: Checkout corpus
         if: matrix.enable_tsan == 0
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/07/29.
           ref: ${{ github.event.inputs.corpus_ref || env.ROCJITSU_DBT_CORPUS_REF }}
-          path: rocjitsu-dbt-test-corpus
+          path: rocjitsu-test-corpus
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -227,7 +210,6 @@ jobs:
             "DaemonTest\.LoggingPlugin"
             "BfeRegressionTest\.ThreadIdxY"
             "LoggingTest\.dispatch_logged"
-            "ProfiledPluginTest\.hook_profile_output"
             "CvtNarrow\.AllTests"
             "RaceTest\..*"
           )
@@ -316,12 +298,18 @@ jobs:
       - name: Install corpus test dependencies
         if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
+        shell: bash
         run: |
           uv pip install --system -r requirements.txt
+          ROCM_SDK_DEVICE_PACKAGES=()
+          for gfx in ${ROCM_SDK_DEVICE_GFX_GROUP}; do
+            ROCM_SDK_DEVICE_PACKAGES+=(
+              "rocm-sdk-device-${gfx}==${ROCM_SDK_VERSION}"
+            )
+          done
           uv pip install --system --prerelease allow \
             --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
-            "rocm-sdk-device-gfx942==${ROCM_SDK_VERSION}" \
-            "rocm-sdk-device-gfx950==${ROCM_SDK_VERSION}"
+            "${ROCM_SDK_DEVICE_PACKAGES[@]}"
           rocm-sdk init
 
       - name: Run amdisa tests
@@ -362,7 +350,7 @@ jobs:
       - name: Compare plain and translated gfx1250 simulator runs
         if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' }}
         timeout-minutes: 45
-        working-directory: ${{ env.ROCJITSU_DBT_CORPUS_DIR }}
+        working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         env:
           ROCJITSU_SEMANTIC_TIMEOUT_SECONDS: 120
@@ -410,8 +398,8 @@ jobs:
         with:
           name: gfx1250-semantic-qualification-${{ matrix.name }}
           path: |
-            ${{ env.ROCJITSU_DBT_CORPUS_DIR }}/.pytest-artifacts/gfx1250-semantic-qualification/**/logs
-            ${{ env.ROCJITSU_DBT_CORPUS_DIR }}/.pytest-artifacts/gfx1250-semantic-qualification/translation-diffs
+            ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts/gfx1250-semantic-qualification/**/logs
+            ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts/gfx1250-semantic-qualification/translation-diffs
           if-no-files-found: ignore
           retention-days: 7
 
@@ -419,7 +407,7 @@ jobs:
         id: extract_dbt
         if: ${{ !cancelled() && matrix.enable_tsan == 0 && steps.build_rocjitsu.outcome == 'success' }}
         timeout-minutes: 10
-        working-directory: ${{ env.ROCJITSU_DBT_CORPUS_DIR }}
+        working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         run: |
           uv venv --python 3.12 "${ROCJITSU_DBT_VENV}"
@@ -443,7 +431,7 @@ jobs:
         id: run_dbt
         if: ${{ !cancelled() && matrix.enable_tsan == 0 && steps.extract_dbt.outcome == 'success' }}
         timeout-minutes: ${{ matrix.dbt_job_timeout }}
-        working-directory: ${{ env.ROCJITSU_DBT_CORPUS_DIR }}
+        working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         run: |
           DBT_ROCM_PATH="$("${ROCJITSU_DBT_VENV}/bin/rocm-sdk" path --root)"
@@ -491,7 +479,7 @@ jobs:
               github.event.inputs.corpus_repository == 'ROCm/rocjitsu-test-corpus' &&
               github.event.inputs.corpus_ref == env.ROCJITSU_DBT_CORPUS_REF))))
         timeout-minutes: 15
-        working-directory: ${{ env.ROCJITSU_DBT_CORPUS_DIR }}
+        working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         run: |
           DBT_WORKERS="$(nproc)"
@@ -513,7 +501,7 @@ jobs:
         id: finalize_dbt_sha_pairs
         if: matrix.name == 'release' && steps.collect_dbt_sha_pairs.outcome == 'success'
         timeout-minutes: 2
-        working-directory: ${{ env.ROCJITSU_DBT_CORPUS_DIR }}
+        working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         run: |
           python3 \
@@ -562,6 +550,6 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: gfx1250-dbt-logs-${{ matrix.name }}
-          path: ${{ env.ROCJITSU_DBT_CORPUS_DIR }}/.pytest-artifacts/gfx1250-dbt
+          path: ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts/gfx1250-dbt
           if-no-files-found: ignore
           retention-days: 7
