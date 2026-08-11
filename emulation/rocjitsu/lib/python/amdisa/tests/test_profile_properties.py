@@ -458,6 +458,10 @@ class TestRdna3Profile:
     def test_has_vopd3_false(self):
         assert self.p.has_vopd3 is False
 
+    def test_vopd_slot_opcodes(self):
+        assert self.p.vopd_x_slot_opcodes == frozenset(range(14))
+        assert self.p.vopd_y_slot_opcodes == frozenset((*range(14), 16, 17, 18))
+
     def test_operand_read64_zero_extends_simm32_literal(self, tmp_path):
         generator = CodeGenerator(
             SimpleNamespace(
@@ -515,6 +519,18 @@ class TestGfx1250Profile:
 
     def test_has_vopd3(self):
         assert self.p.has_vopd3 is True
+
+    def test_vopd_slot_opcodes(self):
+        assert self.p.vopd_x_slot_opcodes == frozenset(range(12))
+        assert self.p.vopd_y_slot_opcodes == frozenset(
+            (*range(12), 16, 17, *range(20, 25))
+        )
+        assert self.p.vopd3_x_slot_opcodes == frozenset(
+            (0, *range(3, 12), 16, 17, *range(19, 23), *range(32, 37))
+        )
+        assert self.p.vopd3_y_slot_opcodes == frozenset(
+            (0, *range(3, 12), *range(16, 25))
+        )
 
     def test_generated_arch_name(self):
         assert self.p.generated_arch_name == 'gfx1250'
