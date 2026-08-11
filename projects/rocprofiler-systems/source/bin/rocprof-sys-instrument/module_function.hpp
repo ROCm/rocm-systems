@@ -104,6 +104,7 @@ struct module_function
     bool is_overlapping() const;  // checks if func overlaps
 
 private:
+    bool                is_object_module() const;  // named after its own object
     symbol_linkage_t    get_linkage() const;
     symbol_visibility_t get_visibility() const;
     bool is_loop_num_instructions_constrained() const;  // checks loop instr constraint

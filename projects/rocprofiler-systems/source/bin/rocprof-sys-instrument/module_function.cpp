@@ -411,6 +411,26 @@ module_function::get_visibility() const
     return _v;
 }
 
+// Dyninst names a module either after the source file its code was compiled
+// from, taken from the debug info, e.g. "/home/me/src/app.cpp", or, when that
+// code has no debug info, after the object holding it, i.e. the binary or
+// library file itself, e.g. "/home/me/bin/app".
+//
+// Constraints that search a module name for the name of a known component must
+// tell the two apart: a source path names the code, so it is searched whole,
+// whereas an object path names a file the user may keep in any directory, so
+// only its filename is searched. E.g. "/home/me/dyninst-tests/app" is
+// not part of dyninst.
+bool
+module_function::is_object_module() const
+{
+    auto* _object = (module) ? module->getObject() : nullptr;
+    if(_object == nullptr) return false;
+
+    return rocprofsys::path::filename(module_name) ==
+           rocprofsys::path::filename(_object->pathName());
+}
+
 bool
 module_function::is_internal_constrained() const
 {
@@ -422,10 +442,11 @@ module_function::is_internal_constrained() const
 
     const auto& _gnu_libs = get_internal_libs_data();
 
-    auto _module_base = rocprofsys::path::filename(module_name);
-    auto _module_real = rocprofsys::path::realpath(module_name);
+    auto        _module_base = rocprofsys::path::filename(module_name);
+    auto        _module_real = rocprofsys::path::realpath(module_name);
+    const auto& _module_id   = is_object_module() ? _module_base : module_name;
 
-    if(std::regex_search(module_name,
+    if(std::regex_search(_module_id,
                          std::regex{ "lib(rocprof-sys|rocprofsys|timemory|perfetto)" }))
         return _report("Excluding", "module", "rocprofsys", 3);
     else if(std::regex_match(module_name,
@@ -485,6 +506,9 @@ module_function::is_module_constrained() const
         // return _report("Skipping", "default module", 2);
         return false;
 
+    auto        _module_base = rocprofsys::path::filename(module_name);
+    const auto& _module_id   = is_object_module() ? _module_base : module_name;
+
     static std::regex ext_regex{ "\\.(s|S)$", regex_opts };
     static std::regex sys_regex{ "^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$", regex_opts };
     static std::regex sys_build_regex{ "^(\\.\\./sysdeps/|/build/)", regex_opts };
@@ -510,11 +534,11 @@ module_function::is_module_constrained() const
         return _report("Excluding", "system module", 3);
 
     // dyninst modules that must not be instrumented
-    if(std::regex_search(module_name, dyninst_regex))
+    if(std::regex_search(_module_id, dyninst_regex))
         return _report("Excluding", "dyninst module", 3);
 
     // modules used by rocprof-sys and dependent libraries
-    if(std::regex_search(module_name, core_lib_regex) ||
+    if(std::regex_search(_module_id, core_lib_regex) ||
        std::regex_search(module_name, core_cmod_regex))
         return _report("Excluding", "core module", 3);
 
