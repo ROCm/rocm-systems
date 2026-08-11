@@ -111,7 +111,11 @@ class SplitBarrierBenchmark : public Benchmark<SplitBarrierBenchmark> {
 // In compute_a/compute_c iteration units the block cannot finish before the
 // straggler, and the split version only saves the gap work that fits inside the
 // bubble; anything beyond it spills past the wait.
-static double PredictedCeiling(int heavy, int light, int indep) {
+//
+// This models bubble recovery only. It is not a hard bound: freeing the waiting
+// waves earlier also lets them fill otherwise idle issue slots, so a measured
+// speedup can legitimately come out above it.
+static double BubbleRecoveryModel(int heavy, int light, int indep) {
   const double bubble = static_cast<double>(heavy) - light;
   const double spill = std::max(0.0, static_cast<double>(indep) - bubble);
   const double full = static_cast<double>(heavy) + indep;
@@ -183,7 +187,7 @@ HIP_TEST_CASE(Performance_SplitBarrier_ImbalancedWorkgroup) {
     const float split_best = std::get<2>(split_stats);
     const double measured =
         (split_best > 0.0f) ? (full_best / split_best) : 0.0;
-    const double ceiling = PredictedCeiling(s.heavy, s.light, s.indep);
+    const double model = BubbleRecoveryModel(s.heavy, s.light, s.indep);
 
     std::ostringstream line;
     line << std::left << std::setw(19) << s.name << std::right
@@ -193,11 +197,16 @@ HIP_TEST_CASE(Performance_SplitBarrier_ImbalancedWorkgroup) {
          << std::fixed << std::setprecision(4) << std::setw(8) << full_best
          << "ms split=" << std::setw(8) << split_best << "ms  |  measured="
          << std::setprecision(3) << std::setw(5) << measured
-         << "x ceiling=" << std::setw(5) << ceiling << "x";
-    if (ceiling > 1.0) {
-      const double recovered = 100.0 * (measured - 1.0) / (ceiling - 1.0);
-      line << " recovered=" << std::setprecision(1) << std::setw(6) << recovered
-           << "%";
+         << "x model=" << std::setw(5) << model << "x";
+    if (model > 1.0) {
+      const double recovered = 100.0 * (measured - 1.0) / (model - 1.0);
+      if (measured > model) {
+        line << " above model (+" << std::setprecision(1)
+             << 100.0 * (measured - model) / model << "%)";
+      } else {
+        line << " recovered=" << std::setprecision(1) << std::setw(6)
+             << recovered << "%";
+      }
     }
     summary.push_back(line.str());
 
@@ -210,4 +219,8 @@ HIP_TEST_CASE(Performance_SplitBarrier_ImbalancedWorkgroup) {
   for (const std::string& line : summary) {
     std::cout << "[split_barrier][perf] " << line << std::endl;
   }
+  std::cout << "[split_barrier][perf] model = bubble recovery only; freeing the "
+               "waiting waves earlier can also fill idle issue slots, so "
+               "measured may sit above it"
+            << std::endl;
 }
