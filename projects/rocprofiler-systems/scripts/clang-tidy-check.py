@@ -170,14 +170,15 @@ def get_changed_files(repo_root: str, base: str | None) -> list[ChangedFile]:
     return list(changed.values())
 
 
+def _tidy_args(args: argparse.Namespace) -> list[str]:
+    """Return the clang-tidy flags common to every invocation."""
+    flags = [f"-checks={args.checks}"] if args.checks else []
+    return [*flags, f"-p={args.build_path}"]
+
+
 def get_enabled_checks(args: argparse.Namespace, sample_file: str) -> list[str]:
     """Resolve the effective check list clang-tidy will apply to `sample_file`."""
-    command = [args.clang_tidy_binary, "-list-checks"]
-    if args.checks:
-        command.append(f"-checks={args.checks}")
-    command.append(f"-p={args.build_path}")
-    command.append(sample_file)
-
+    command = [args.clang_tidy_binary, "-list-checks", *_tidy_args(args), sample_file]
     result = subprocess.run(command, capture_output=True, text=True)
     checks = []
     in_list = False
@@ -209,11 +210,7 @@ def print_changed_files(changed_files: list[ChangedFile]) -> None:
 
 
 def build_command(file_path: str, args: argparse.Namespace) -> list[str]:
-    command = [args.clang_tidy_binary]
-    if args.checks:
-        command.append(f"-checks={args.checks}")
-    command.append(f"-p={args.build_path}")
-    command.append(file_path)
+    command = [args.clang_tidy_binary, *_tidy_args(args), file_path]
     return command
 
 
