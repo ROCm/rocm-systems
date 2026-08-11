@@ -111,6 +111,38 @@ cannot legitimately disagree. The log names the symbol, ABI version or adapter
 that was rejected; the fix is to update the WSL ROCm runtime package to one
 matching this rocprofiler-SDK.
 
+Overriding ``librocdxg`` at run time
+------------------------------------
+
+A newer ``librocdxg`` can be put ahead of the installed one on the loader search
+path instead of replacing the system package. ROCprofiler-SDK asks ``dlopen``
+for the unversioned ``librocdxg.so``, so the override has to be reachable under
+that name and under the usual chain of version links — a directory of correctly
+named symlinks, placed first on ``LD_LIBRARY_PATH``:
+
+.. code-block:: shell
+
+   mkdir -p /tmp/dxg-lib
+   ln -sf /path/to/newer/librocdxg.so.1.2.2 /tmp/dxg-lib/librocdxg.so.1.2.2
+   ln -sf librocdxg.so.1.2.2 /tmp/dxg-lib/librocdxg.so.1
+   ln -sf librocdxg.so.1 /tmp/dxg-lib/librocdxg.so
+   export LD_LIBRARY_PATH=/tmp/dxg-lib:${LD_LIBRARY_PATH}
+
+Adjust the version suffix to match the library that was built. Preloading by
+bare name — ``LD_PRELOAD=librocdxg.so`` — works as well, because the loader
+still resolves the name through an ordinary search.
+
+.. warning::
+
+   Preloading by absolute path — ``LD_PRELOAD=/path/to/librocdxg.so.1.2.2`` —
+   does **not** work, even though the preload itself succeeds. glibc registers a
+   preloaded object under the path it was given and under that object's
+   ``SONAME``, ``librocdxg.so.1``. ROCprofiler-SDK requests ``librocdxg.so``,
+   which matches neither string, so the loader falls through to a path search
+   and quietly loads a second, stock copy. The symptom is that the
+   ``does not export DxgGetNodeTopology`` warnings persist and no GPU agents
+   appear, even though the newer library is demonstrably loaded in the process.
+
 Environment variables
 ======================
 
@@ -134,6 +166,19 @@ Environment variables
    value is validated and must be of the form ``gfx<NNN>`` with at least three
    decimal digits; a malformed value is ignored with a warning and the
    node-reported target is used.
+
+``HSA_ENABLE_DXG_DETECTION``
+   An HSA runtime variable rather than a ROCprofiler-SDK one, but a
+   prerequisite for everything on this page. ROCr only enables DXG detection by
+   default since upstream commit ``901f9a5`` ("rocr: Enable DXG detection by
+   default", PR #3863); before that it was opt-in. On a ROCm release predating
+   that commit — ROCm 7.2.4, which ships ROCr 1.18, is one — ``hsa_init()``
+   fails with status ``4104`` unless ``HSA_ENABLE_DXG_DETECTION=1`` is set, and
+   every tool then reports ``no supported GPU devices``, which reads like absent
+   hardware rather than a configuration gap. Export it from ``~/.profile`` or
+   from the job script rather than from ``~/.bashrc``: Ubuntu's default
+   ``.bashrc`` returns early for non-interactive shells, so scripts and CI would
+   never see it.
 
 .. note::
 
