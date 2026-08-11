@@ -608,7 +608,7 @@ HsaRsrcFactory::SignalWait(const hsa_signal_t& signal) const
     {
         const hsa_signal_value_t signal_value =
             rocprofiler::aqlprofile::get_core_table()->hsa_signal_wait_scacquire_fn(
-                signal, HSA_SIGNAL_CONDITION_LT, 1, 1<<30, HSA_WAIT_STATE_BLOCKED);
+                signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
         if(signal_value == 0)
         {
             break;
