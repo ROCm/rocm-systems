@@ -314,7 +314,9 @@ def _build_kernel_and_l0(
         height=30,
     )
 
-    # Kernel edges — LDS, TCP and SQC request counts.
+    # Kernel edges — LDS, TCP and SQC request counts. Each arrow row sits on the
+    # same rendered row as its counterpart in the GL1 edge column, so a read (or
+    # write) reads straight across the chart at one height.
     ka_l = kernel_arrows["left"]
     ka_r = kernel_arrows["right"]
     ka_p = kernel_arrows["plain"]
@@ -335,21 +337,22 @@ def _build_kernel_and_l0(
         # Row 10 = the "GL0 (TCP Cache)" title row
         "",
         "",
-        "",
         f"[{c_rd}]{_fmt_edge('Read', m['tcp_read_req'])}[/{c_rd}]",
         f"[{c_rd}]{ka_l}[/{c_rd}]",
+        "",
+        "",
         f"[{c_wr}]{_fmt_edge('Write', m['tcp_write_req'])}[/{c_wr}]",
         f"[{c_wr}]{ka_r}[/{c_wr}]",
         "",
         "",
         "",
-        "",
-        "",
+        # Row 21 = the SQC "Read BW" label in the GL1 edge column
         "",
         f"[{c_rd}]{_fmt_edge('ICache Read', m['icache_req'])}[/{c_rd}]",
         f"[{c_rd}]{ka_l}[/{c_rd}]",
         f"[{c_rd}]{_fmt_edge('DCache Read', m['dcache_req'])}[/{c_rd}]",
         f"[{c_rd}]{ka_l}[/{c_rd}]",
+        "",
         "",
         "",
     ]
