@@ -21,7 +21,9 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.mi_gpu_spec import MIGPUSpecs
 from utils.native_tool_finder import NativeToolFinder
+from utils.specs import MachineSpecs
 from utils.utils_common import (
     PROFILE_OUTPUT_FORMAT,
     format_time,
@@ -43,6 +45,28 @@ _FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
     "triton_trace": ("triton",),
     "ml_api_trace": KNOWN_ML_API_BACKENDS,
 }
+
+
+def _partition_warning_messages(mspec: MachineSpecs) -> list[str]:
+    """Return notices on how active partition modes shape analysis metrics."""
+    if not MIGPUSpecs.is_partition_supported(
+        getattr(mspec, "gpu_arch", None), getattr(mspec, "gpu_model", None)
+    ):
+        return []
+
+    messages = []
+    for label, attribute, derived in (
+        ("Compute", "compute_partition", "logical XCDs and L2 channels"),
+        ("Memory", "memory_partition", "HBM channels"),
+    ):
+        partition = getattr(mspec, attribute, None)
+        if not partition or partition.strip().lower() == "n/a":
+            continue
+        messages.append(
+            f"{label} partition: {partition}. Analysis mode will calculate metrics "
+            f"based on the number of {derived} derived for this partition mode."
+        )
+    return messages
 
 
 def _compute_selected_frameworks(args: argparse.Namespace) -> set[str]:
@@ -319,6 +343,9 @@ class RocProfCompute_Base:
             mspec=self._soc._mspec,
             soc=self._soc,
         )
+
+        for message in _partition_warning_messages(self._soc._mspec):
+            console_warning(message)
 
     def profile(
         self,

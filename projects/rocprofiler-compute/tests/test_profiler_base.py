@@ -12,7 +12,10 @@ import yaml
 
 from pc_sampling.pc_sampling_profile import PCSamplingLimits
 from rocprof_compute_base import RocProfCompute
-from rocprof_compute_profile.profiler_base import RocProfCompute_Base
+from rocprof_compute_profile.profiler_base import (
+    RocProfCompute_Base,
+    _partition_warning_messages,
+)
 from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
 from rocprof_compute_profile.profiler_rocprofiler_sdk import rocprofiler_sdk_profiler
 from utils.utils_common import PROFILE_OUTPUT_FORMAT
@@ -65,6 +68,30 @@ def _setup_test_files(tmp_path, remaining, setup):
         binary.chmod(0o755)
         return [s.replace("{binary}", str(binary)) for s in remaining]
     return remaining
+
+
+@pytest.mark.parametrize(
+    "gpu_arch, compute_partition, memory_partition, expected",
+    [
+        pytest.param("gfx942", "CPX", "NPS4", 2, id="both_partitions"),
+        pytest.param("gfx942", "SPX", None, 1, id="memory_partition_missing"),
+        pytest.param("gfx942", "SPX", "N/A", 1, id="memory_partition_na"),
+        pytest.param("gfx90a", "N/A", "N/A", 0, id="cdna_without_partitions"),
+        pytest.param("gfx1151", None, None, 0, id="rdna"),
+    ],
+)
+def test_partition_warning_messages(
+    gpu_arch, compute_partition, memory_partition, expected
+):
+    """Partition notices only apply to supported partitioned GPUs."""
+    mspec = SimpleNamespace(
+        gpu_arch=gpu_arch,
+        gpu_model=None,
+        compute_partition=compute_partition,
+        memory_partition=memory_partition,
+    )
+
+    assert len(_partition_warning_messages(mspec)) == expected
 
 
 # ---------------------------------------------------------------------------
