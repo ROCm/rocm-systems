@@ -50,6 +50,8 @@
 
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/hsa_internal.h"
+#include "core/inc/runtime.h"
+#include "core/inc/thunk_loader.h"
 #include "core/util/utils.h"
 
 namespace rocr {
@@ -615,8 +617,12 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src,
   std::lock_guard<std::mutex> guard(lock_);
 
   if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy()) {
+    void* real_dst = dst;
+    void* real_src = const_cast<void*>(src);
+    HSAKMT_CALL(hsaKmtTranslateGpuVa)(dst, &real_dst);
+    HSAKMT_CALL(hsaKmtTranslateGpuVa)(const_cast<void*>(src), &real_src);
     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] src = %p, dst = %p, size = 0x%lx", src, dst, size);
-    memcpy(dst, src, size);
+    memcpy(real_dst, real_src, size);
     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] Fast copy success");
     return HSA_STATUS_SUCCESS;
   }
@@ -654,8 +660,12 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
     std::vector<core::Signal*>& gang_signals) {
 
   if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy() && dep_signals.empty()) {
+    void* real_dst = dst;
+    void* real_src = const_cast<void*>(src);
+    HSAKMT_CALL(hsaKmtTranslateGpuVa)(dst, &real_dst);
+    HSAKMT_CALL(hsaKmtTranslateGpuVa)(const_cast<void*>(src), &real_src);
     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] src = %p, dst = %p, size = 0x%lx", src, dst, size);
-    memcpy(dst, src, size);
+    memcpy(real_dst, real_src, size);
     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] Fast copy success");
 
     hsa_signal_t signal = {(core::Signal::Convert(&out_signal)).handle};

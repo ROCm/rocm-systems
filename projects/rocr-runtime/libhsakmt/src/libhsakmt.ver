@@ -112,6 +112,7 @@ hsaKmtMemoryGetCpuAddr;
 hsaKmtMemoryCpuMap;
 hsaKmtSetSigbusDelay;
 hsaKmtGetAmdGPUDeviceFd;
+hsaKmtTranslateGpuVa;
 local: *;
 };
 

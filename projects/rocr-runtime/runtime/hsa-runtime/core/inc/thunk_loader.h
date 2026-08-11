@@ -204,6 +204,7 @@ class ThunkLoader {
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMapMemoryToGPU))(void*  MemoryAddress, \
                                       HSAuint64 MemorySizeInBytes, \
                                       HSAuint64* AlternateVAGPU);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtTranslateGpuVa))(void* gpu_va, void** cpu_va);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMapMemoryToGPUNodes))(void* MemoryAddress, \
                                       HSAuint64 MemorySizeInBytes, \
                                       HSAuint64* AlternateVAGPU, \
@@ -496,6 +497,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtMapMemoryToGPU)* HSAKMT_PFN(hsaKmtMapMemoryToGPU);
     HSAKMT_DEF(hsaKmtMapMemoryToGPUNodes)* HSAKMT_PFN(hsaKmtMapMemoryToGPUNodes);
     HSAKMT_DEF(hsaKmtUnmapMemoryToGPU)* HSAKMT_PFN(hsaKmtUnmapMemoryToGPU);
+    HSAKMT_DEF(hsaKmtTranslateGpuVa)* HSAKMT_PFN(hsaKmtTranslateGpuVa);
     HSAKMT_DEF(hsaKmtDbgRegister)* HSAKMT_PFN(hsaKmtDbgRegister);
     HSAKMT_DEF(hsaKmtDbgUnregister)* HSAKMT_PFN(hsaKmtDbgUnregister);
     HSAKMT_DEF(hsaKmtDbgWavefrontControl)* HSAKMT_PFN(hsaKmtDbgWavefrontControl);
