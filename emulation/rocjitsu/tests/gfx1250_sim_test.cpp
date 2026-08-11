@@ -4595,7 +4595,7 @@ TEST(Gfx1250DecodeTest, PublicDecoderReportsInvalidVopdEncoding) {
   ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_GFX1250, &decoder), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(decoder, nullptr);
 
-  rj_code_inst_t *inst = nullptr;
+  auto *inst = reinterpret_cast<rj_code_inst_t *>(static_cast<uintptr_t>(1));
   EXPECT_EQ(rj_code_decoder_decode(decoder, words, &inst), ROCJITSU_STATUS_ERROR);
   EXPECT_EQ(inst, nullptr);
   rj_code_decoder_destroy(decoder);

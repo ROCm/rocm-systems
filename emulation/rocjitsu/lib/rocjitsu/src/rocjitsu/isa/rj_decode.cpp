@@ -69,6 +69,7 @@ rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
   if (!decoder || !decoder->decoder || !binary_inst || !inst)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
+  *inst = nullptr;
   Instruction *decoded = nullptr;
   try {
     decoded = decoder->decoder->decode(binary_inst);
