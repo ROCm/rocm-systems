@@ -74,7 +74,9 @@ void checkSegmentation(size_t bytes) {
     EXPECT_EQ(s.isFinal, (i == n - 1)) << "bytes=" << bytes << " i=" << i;
 
     // Interior segments are exactly full (only the tail may be short).
-    if (i + 1 < n) EXPECT_EQ(s.bytes, maxSeg) << "bytes=" << bytes << " i=" << i;
+    if (i + 1 < n) {
+      EXPECT_EQ(s.bytes, maxSeg) << "bytes=" << bytes << " i=" << i;
+    }
 
     sum += s.bytes;
   }
