@@ -104,6 +104,9 @@ read_symlink(const std::string& path) ROCPROFSYS_INTERNAL_API;
 [[nodiscard]] inline bool
 is_directory(std::string_view path) ROCPROFSYS_INTERNAL_API;
 
+[[nodiscard]] inline bool
+is_regular_file(std::string_view path) ROCPROFSYS_INTERNAL_API;
+
 inline std::string
 get_rocprofsys_root() ROCPROFSYS_INTERNAL_API;
 
@@ -282,6 +285,24 @@ is_directory(std::string_view path)
 {
     std::error_code unused_error_code;
     return std::filesystem::is_directory(path, unused_error_code);
+}
+
+/**
+ * @brief Check whether a path exists and is a regular file.
+ *
+ * Follows symbolic links: a link that resolves to a regular file returns true,
+ * a broken link returns false. Directories, device nodes, FIFOs and sockets are
+ * not regular files and yield false. Never throws; any filesystem error
+ * (missing path, permission failure) yields false.
+ *
+ * @param path Filesystem path to test.
+ * @return true if @p path resolves to a regular file, false otherwise.
+ */
+[[nodiscard]] bool
+is_regular_file(std::string_view path)
+{
+    std::error_code unused_error_code;
+    return std::filesystem::is_regular_file(path, unused_error_code);
 }
 
 /**
