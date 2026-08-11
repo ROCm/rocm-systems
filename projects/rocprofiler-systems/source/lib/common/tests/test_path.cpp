@@ -287,6 +287,74 @@ TEST_F(PathTest, IsDirectory_RelativePath)
     ASSERT_EQ(chdir(saved_cwd), 0);
 }
 
+TEST_F(PathTest, IsRegularFile_ExistingFile)
+{
+    std::string file_path = create_file("isregular_file.txt");
+    EXPECT_TRUE(is_regular_file(file_path));
+}
+
+TEST_F(PathTest, IsRegularFile_NonexistentFile)
+{
+    EXPECT_FALSE(is_regular_file(m_test_dir + "/nonexistent_file.txt"));
+}
+
+TEST_F(PathTest, IsRegularFile_Directory) { EXPECT_FALSE(is_regular_file(m_test_dir)); }
+
+TEST_F(PathTest, IsRegularFile_NonexistentPath)
+{
+    EXPECT_FALSE(is_regular_file("/nonexistent/path"));
+}
+
+TEST_F(PathTest, IsRegularFile_SymlinkToFile)
+{
+    std::string target    = create_file("isregular_target.txt");
+    std::string link_path = create_symlink(target, "isregular_link_to_file");
+    EXPECT_TRUE(is_regular_file(link_path));
+}
+
+TEST_F(PathTest, IsRegularFile_SymlinkToDirectory)
+{
+    std::string subdir    = create_subdir("isregular_target_dir");
+    std::string link_path = create_symlink(subdir, "isregular_link_to_dir");
+    EXPECT_FALSE(is_regular_file(link_path));
+}
+
+TEST_F(PathTest, IsRegularFile_BrokenSymlink)
+{
+    std::string link_path =
+        create_symlink("/nonexistent/target", "isregular_broken_link");
+    EXPECT_FALSE(is_regular_file(link_path));
+}
+
+TEST_F(PathTest, IsRegularFile_EmptyPath) { EXPECT_FALSE(is_regular_file("")); }
+
+TEST_F(PathTest, IsRegularFile_SpecialCharactersInPath)
+{
+    std::string file_path = create_file("isregular file with spaces.txt");
+    EXPECT_TRUE(is_regular_file(file_path));
+}
+
+TEST_F(PathTest, IsRegularFile_Fifo)
+{
+    std::string fifo_path = m_test_dir + "/isregular_fifo";
+    ASSERT_EQ(mkfifo(fifo_path.c_str(), 0644), 0);
+    EXPECT_FALSE(is_regular_file(fifo_path));
+}
+
+TEST_F(PathTest, IsRegularFile_RelativePath)
+{
+    const std::string file_name = "isregular_relative_file.txt";
+    create_file(file_name);
+
+    char saved_cwd[PATH_MAX];
+    ASSERT_NE(getcwd(saved_cwd, sizeof(saved_cwd)), nullptr);
+    ASSERT_EQ(chdir(m_test_dir.c_str()), 0);
+
+    EXPECT_TRUE(is_regular_file(file_name));
+
+    ASSERT_EQ(chdir(saved_cwd), 0);
+}
+
 TEST_F(PathTest, GetRocprofsysRoot_ReturnsNonEmptyAbsolute)
 {
     std::string root = get_rocprofsys_root();
