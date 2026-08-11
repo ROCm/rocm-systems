@@ -2836,8 +2836,14 @@ bool KernelBlitManager::ShaderCopyBufferBatchRaw(
   const size_t kernarg_reservation = (kCBAlignment - 1) +
                                      (gpu_kernel.KernargSegmentAlignment() - 1) +
                                      gpu_kernel.KernargSegmentByteSize();
+  const size_t kernarg_pool_chunk_size = gpu().KernArgPoolChunkSize();
+  if (kernarg_reservation > kernarg_pool_chunk_size ||
+      kernarg_pool_chunk_size - kernarg_reservation < sizeof(CopyBufferBatchDescriptor)) {
+    LogError("Kernarg pool chunk is too small for a batch copy dispatch");
+    return false;
+  }
   const size_t max_operations_per_dispatch =
-      (gpu().KernArgPoolChunkSize() - kernarg_reservation) / sizeof(CopyBufferBatchDescriptor);
+      (kernarg_pool_chunk_size - kernarg_reservation) / sizeof(CopyBufferBatchDescriptor);
   const size_t descriptor_buffer_bytes =
       max_operations_per_dispatch * sizeof(CopyBufferBatchDescriptor);
   bool attach_signal = false;
