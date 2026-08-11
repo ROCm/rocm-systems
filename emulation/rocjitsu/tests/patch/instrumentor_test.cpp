@@ -309,27 +309,6 @@ TEST(Validator, RejectsNegativeInstructionSize) {
   EXPECT_NE(err.find("size must be 4 or 8"), std::string::npos) << "error was: " << err;
 }
 
-TEST(SpillPolicy, EmptySpillSetPasses) {
-  RegisterSet spill_set;
-  std::string err;
-  EXPECT_TRUE(check_spill_policy(spill_set, SpillPolicy::NoSpillsSupported, &err));
-  EXPECT_TRUE(err.empty()) << err;
-}
-
-TEST(SpillPolicy, NamesSpecialRegistersInDiagnostic) {
-  // Spill sets are normally projected to ordinary registers before they reach
-  // check_spill_policy, but the diagnostic must still name any special member
-  // by its architectural name rather than emitting "?0".
-  RegisterSet spill_set;
-  spill_set.expand(RegisterRef{RegClass::EXEC, 0, 1});
-  spill_set.expand(RegisterRef{RegClass::SCC, 0, 1});
-  std::string err;
-  EXPECT_FALSE(check_spill_policy(spill_set, SpillPolicy::NoSpillsSupported, &err));
-  EXPECT_NE(err.find("exec"), std::string::npos) << err;
-  EXPECT_NE(err.find("scc"), std::string::npos) << err;
-  EXPECT_EQ(err.find('?'), std::string::npos) << err;
-}
-
 //==============================================================================
 // Section 1b: validate_inline_nop_plan
 //
@@ -1581,6 +1560,23 @@ TEST(InstrumentorSpill, PlanVgprSpillsRejectsNonVgpr) {
   EXPECT_FALSE(plan_vgpr_spills(spill, spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err));
   EXPECT_TRUE(out.empty());
   EXPECT_NE(err.find("s7"), std::string::npos);
+}
+
+// A special register (EXEC/SCC/...) in the spill set is named by its
+// architectural name -- def/use surfaces special singletons, so a
+// consumer that forgets to project them out must still get a readable diagnostic.
+TEST(InstrumentorSpill, PlanVgprSpillsNamesSpecialRegisters) {
+  RegisterSet spill;
+  spill.expand(RegisterRef{RegClass::EXEC, 0, 1});
+  spill.expand(RegisterRef{RegClass::SCC, 0, 1});
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  EXPECT_FALSE(plan_vgpr_spills(spill, spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("exec"), std::string::npos) << err;
+  EXPECT_NE(err.find("scc"), std::string::npos) << err;
+  EXPECT_EQ(err.find('?'), std::string::npos) << err;
 }
 
 // An offset past the CDNA4 12-bit FLAT field fails even within the scratch limit.
