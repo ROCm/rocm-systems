@@ -75,9 +75,9 @@ get_hsa_pcs_buffer_size(uint32_t gfx_target_version)
 {
     // Since ROCM-22213, the buffer is split per XCC, so we need larger buffers for these GPUs.
     // For now, just enable for MI300/350/400 series chips.
-    const auto is_multi_xcc = [](uint32_t gfx_target_version) -> bool {
+    const auto is_multi_xcc = [](uint32_t gfx_version) -> bool {
         // gfx_target_version encodes major*10000 + minor*100 + patch
-        switch(gfx_target_version / 100)
+        switch(gfx_version / 100)
         {
             case 904:
             case 905:
