@@ -297,7 +297,19 @@ TEST(rocprofiler_lib, agent)
         EXPECT_EQ(agent->workgroup_max_dim.x, hsa_agent->workgroup_max_dim[0]) << msg;
         EXPECT_EQ(agent->workgroup_max_dim.y, hsa_agent->workgroup_max_dim[1]) << msg;
         EXPECT_EQ(agent->workgroup_max_dim.z, hsa_agent->workgroup_max_dim[2]) << msg;
-        EXPECT_EQ(agent->grid_max_size, hsa_agent->grid_max_size) << msg;
+        // 'grid_max_size' is not read from the driver: the gnulinux and the WSL agent paths both
+        // publish the same hardcoded INT32_MAX. HSA answers HSA_AGENT_INFO_GRID_MAX_SIZE from its
+        // own source, and a runtime predating ROCR's min(kern_cluster_max_dim_.x, INT32_MAX)
+        // change reports UINT32_MAX, so rocprofiler's constant can legitimately lag whichever
+        // runtime is installed. Only that one understood pair is tolerated: a zeroed or otherwise
+        // unpopulated record still has to match HSA exactly. Do not tighten this back to a plain
+        // equality without also changing the hardcoded constant on both platform paths.
+        constexpr auto grid_max = static_cast<uint32_t>(std::numeric_limits<int32_t>::max());
+        EXPECT_TRUE(agent->grid_max_size == hsa_agent->grid_max_size ||
+                    (agent->grid_max_size == grid_max &&
+                     hsa_agent->grid_max_size == std::numeric_limits<uint32_t>::max()))
+            << msg << " :: grid_max_size rocprofiler=" << agent->grid_max_size
+            << " hsa=" << hsa_agent->grid_max_size;
         // Skip the checks for older grid x, y, z dimension values.
         if(hsa_agent->grid_max_dim.x != std::numeric_limits<uint32_t>::max())
         {
