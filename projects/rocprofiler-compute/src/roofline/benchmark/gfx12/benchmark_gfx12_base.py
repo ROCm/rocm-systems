@@ -95,11 +95,14 @@ class Bench_gfx12(benchmark_base.Bench_base):
         # HBM Bandwidth benchmark
         # ----------------------------------------
         self.hbm_bw_src = """
-        template<typename T>
-        __global__ void HBM_bw(T *dst, const T *src)
+        extern "C" __global__ void HBM_bw(__uint128_t *src, long numSteps)
         {
             const unsigned int gid = blockDim.x * blockIdx.x + threadIdx.x;
-            dst[gid] = src[gid];
+            __uint128_t tmp = 0;
+            for (long i = 0; i < numSteps; ++i)
+                tmp += src[gid + i * blockDim.x * gridDim.x];
+            if (tmp == (__uint128_t)-1)
+                src[gid] = tmp;
         }
         """
 
