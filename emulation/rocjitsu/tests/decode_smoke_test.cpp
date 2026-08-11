@@ -25,6 +25,10 @@
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vopd.h"
@@ -153,6 +157,43 @@ INSTANTIATE_TEST_SUITE_P(
       name += info.param.expected_mnemonic;
       return name;
     });
+
+TEST(ScalarRegisterSelectorDecodeTest, Rdna1AndRdna2RejectReservedHole) {
+  constexpr auto rdna1_lower =
+      rdna1::build_vop3(rdna1::kVReadfirstlaneB32Vop3, {.vdst = 123, .src0 = 256});
+  constexpr auto rdna1_hole =
+      rdna1::build_vop3(rdna1::kVReadfirstlaneB32Vop3, {.vdst = 124, .src0 = 256});
+  constexpr auto rdna1_upper =
+      rdna1::build_vop3(rdna1::kVReadfirstlaneB32Vop3, {.vdst = 125, .src0 = 256});
+  constexpr auto rdna2_lower =
+      rdna2::build_vop3(rdna2::kVReadfirstlaneB32Vop3, {.vdst = 123, .src0 = 256});
+  constexpr auto rdna2_hole =
+      rdna2::build_vop3(rdna2::kVReadfirstlaneB32Vop3, {.vdst = 124, .src0 = 256});
+  constexpr auto rdna2_upper =
+      rdna2::build_vop3(rdna2::kVReadfirstlaneB32Vop3, {.vdst = 125, .src0 = 256});
+
+  auto validate = [](rj_code_arch_t arch, const char *arch_name, const auto &lower,
+                     const auto &hole, const auto &upper) {
+    SCOPED_TRACE(arch_name);
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+
+    for (const auto &[words, expected_selector] :
+         {std::pair{&lower, 123}, std::pair{&upper, 125}}) {
+      std::unique_ptr<Instruction> inst;
+      ASSERT_NO_THROW(inst.reset(decoder->decode(words->data())));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_EQ(inst->num_dst_operands(), 1);
+      ASSERT_NE(inst->dst_operand(0), nullptr);
+      EXPECT_EQ(inst->dst_operand(0)->encoding_value(), expected_selector);
+    }
+
+    EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(hole.data())), util::InvalidInst);
+  };
+
+  validate(ROCJITSU_CODE_ARCH_RDNA1, "rdna1", rdna1_lower, rdna1_hole, rdna1_upper);
+  validate(ROCJITSU_CODE_ARCH_RDNA2, "rdna2", rdna2_lower, rdna2_hole, rdna2_upper);
+}
 
 TEST(RawEncodingTest, PreservesScalarLiteralWordsAcrossAmdgpuIsas) {
   struct Case {

@@ -2157,12 +2157,38 @@ def test_gfx1250_generated_vop3_auxiliary_masks_are_wave32(
         assert 'sdst(32, OperandType::OPR_SREG' in ctor
 
 
-def test_gfx1250_generated_operand_rejects_invalid_scalar_selector(
-    gfx1250_generated_root: Path,
+def test_generated_operand_validates_scalar_register_selector_intervals(
+    amdgpu_generated_root: Path,
 ):
-    operand = (gfx1250_generated_root / 'operand.cpp').read_text()
-    assert 'opr_type == OperandType::OPR_SREG && encoding_value > 124' in operand
-    assert 'invalid scalar register selector' in operand
+    for arch in ('rdna1', 'rdna2'):
+        operand = ''.join(
+            (amdgpu_generated_root / arch / 'operand.cpp').read_text().split()
+        )
+        assert (
+            'opr_type==OperandType::OPR_SREG&&'
+            '!((encoding_value>=0&&encoding_value<=123)||'
+            '(encoding_value>=125&&encoding_value<=125))' in operand
+        )
+        assert 'defer_encoding_error("invalidscalarregisterselector")' in operand
+        assert 'if(encoding_value!=254&&encoding_value!=255)validate_encoding();' in operand
+
+
+def test_generated_operand_validates_scalar_register_selector_variants(
+    gfx1250_generated_root: Path, rdna4_generated_root: Path
+):
+    gfx1250_operand = ''.join(
+        (gfx1250_generated_root / 'operand.cpp').read_text().split()
+    )
+    assert 'opr_type==OperandType::OPR_SREG_M0&&' in gfx1250_operand
+
+    rdna4_operand = ''.join(
+        (rdna4_generated_root / 'operand.cpp').read_text().split()
+    )
+    assert (
+        'opr_type==OperandType::OPR_SREG_LITERAL&&'
+        '!((encoding_value>=0&&encoding_value<=124)||'
+        '(encoding_value>=255&&encoding_value<=255))' in rdna4_operand
+    )
 
 
 def test_gfx1250_generated_operand_validates_lane_selectors(

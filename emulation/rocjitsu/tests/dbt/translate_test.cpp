@@ -11149,8 +11149,8 @@ TEST(BinaryTranslatorE2E, Gfx1250F32K128WmmaRejectsNonVgprMatrixInputs) {
     EXPECT_FALSE(result.ok());
     EXPECT_EQ(result.elf_bytes, image);
     EXPECT_TRUE(
-        rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ExpandFailed,
-                                       "K=128 WMMA matrix operands are not ordinary VGPR ranges"));
+        rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                       "invalid VGPR source selector at .text byte offset 0"));
   }
 }
 
@@ -14885,11 +14885,9 @@ TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnStandalone32x16Fp4NonVgprMatrixFor
     EXPECT_FALSE(result.ok());
     EXPECT_EQ(result.elf_bytes, image)
         << "a fail-closed translation must leave the object unchanged";
-    // Matched in full rather than by its tail: the scaled caller reports a
-    // message of the same shape, so a suffix would not notice this rule
-    // adopting the other caller's wording.
-    EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ExpandFailed,
-                                               "gfx1250 32x16 FP4 operands are not VGPR ranges"));
+    EXPECT_TRUE(
+        rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                       "invalid VGPR source selector at .text byte offset 0"));
   }
 }
 

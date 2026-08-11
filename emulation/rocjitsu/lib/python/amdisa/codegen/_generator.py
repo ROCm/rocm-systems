@@ -7172,29 +7172,6 @@ class CodeGenerator:
             self._fieldless_canon_cache = cache
         return cache.get(operand_type, 0)
 
-    def _operand_selector_max(self, operand_type: str) -> int:
-        """Return the largest numeric selector declared for an operand type."""
-        selector = next(
-            (
-                item
-                for item in self.isa_spec.opnd_selectors
-                if item.operand_type == operand_type
-            ),
-            None,
-        )
-        if selector is None:
-            raise ValueError(f'{operand_type}: operand selector is not defined')
-
-        values = []
-        for _, value in selector.op_sel_vals:
-            try:
-                values.append(int(value, 0))
-            except (TypeError, ValueError):
-                continue
-        if not values:
-            raise ValueError(f'{operand_type}: operand selector has no numeric values')
-        return max(values)
-
     def _operand_selector_intervals(self, operand_type: str) -> list[tuple[int, int]]:
         """Return merged numeric intervals declared for an operand type."""
         selector = next(
@@ -10772,12 +10749,24 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             else ''
         )
         scalar_selector_validation = ''
-        if 'OPR_SREG' in self.isa_spec.operand_types:
-            scalar_selector_max = self._operand_selector_max('OPR_SREG')
-            scalar_selector_validation = (
-                '  if (opr_type == OperandType::OPR_SREG && '
-                f'encoding_value > {scalar_selector_max})\n'
-                '    throw util::InvalidInst("invalid scalar register selector", "");\n'
+        scalar_register_operand_types = sorted(
+            selector.operand_type
+            for selector in self.isa_spec.opnd_selectors
+            if selector.operand_type.startswith('OPR_SREG')
+        )
+        for operand_type in scalar_register_operand_types:
+            intervals = self._operand_selector_intervals(operand_type)
+            valid_expr = ' || '.join(
+                f'(encoding_value >= {lo} && encoding_value <= {hi})'
+                for lo, hi in intervals
+            )
+            scalar_selector_validation += (
+                f'  if (opr_type == OperandType::{operand_type} && '
+                f'!({valid_expr})) {{\n'
+                '    defer_encoding_error("invalid scalar register selector");\n'
+                '    if (encoding_value != 254 && encoding_value != 255)\n'
+                '      validate_encoding();\n'
+                '  }\n'
             )
         lane_selector_validation = ''
         if 'OPR_SSRC_LANESEL' in self.isa_spec.operand_types:

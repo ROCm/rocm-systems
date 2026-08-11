@@ -3,11 +3,17 @@
 
 #include "rocjitsu/isa/operand.h"
 #include "simdojo/components/vector_reg.h"
+#include "util/except.h"
 
 #include <memory>
 #include <stdexcept>
 
 namespace rocjitsu {
+
+void Operand::validate_encoding() const {
+  if (encoding_error_)
+    throw util::InvalidInst(encoding_error_, "");
+}
 
 std::optional<RegisterRef> Operand::to_register_ref() const { return std::nullopt; }
 
