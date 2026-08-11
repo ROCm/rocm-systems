@@ -76,6 +76,10 @@ static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
     return BY_ORDER;
   }
 
+  if (rcclParamIbCastCommNGroups() > 0) {
+    return BY_ID;
+  }
+
   if (ncclParamIbCastOooRq() || (ncclParamIbCastResiliencyPortFailover() == 1)) {
     return BY_ID;
   }
@@ -403,9 +407,6 @@ static ncclResult_t ncclIbCreateQpMlx5(struct ncclIbQpCreateAttr* createQpAttrs,
 }
 
 
-// TODO - QP sharing: Cts offload to do disabled
-//        ensure comm level useCtsOffload flag is forced to false when QP sharing is enabled
-//        that inturn ensures createQpAttr->isCtsEnabled will be set to false from wherever QP create is called.
 static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs, struct ncclIbQp* qp) {
   struct ibv_qp_init_attr qpInitAttr;
   enum ncclIbChannelType channel_type = (createQpAttrs->isDataQp ? ncclIbChannelTypeData : ncclIbChannelTypeCts);
@@ -735,8 +736,6 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
 // was delivered from the receiver side) on the QPs before modifying the QPs
 // to RTR.
 static ncclResult_t IbCastSenderQpsToRts(ncclIbSendComm* comm, struct ncclIbConnectionMetadata* remMeta) {
-  // TODO - QP sharing:
-  // Capture receiver's commId for QP sharing imm_data encoding
   if (rcclParamIbCastCommNGroups() > 0) {
     comm->remCommId = remMeta->commId;
 
@@ -782,9 +781,9 @@ static ncclResult_t IbCastSenderQpsToRts(ncclIbSendComm* comm, struct ncclIbConn
       localQp->ece = {0};
     }
 
-    struct ncclIbQpRtrAttr *rtrAttr = &localQp->rtrAttr;
-    remDevInfo->mtu = std::min(remDevInfo->mtu, ibDev->portAttr.active_mtu);
-    rtrAttr->mtu = remDevInfo->mtu;
+    struct ncclIbQpRtrAttr* rtrAttr = &localQp->rtrAttr;
+    rtrAttr->mtu = std::min(remDevInfo->mtu, ibDev->portAttr.active_mtu);
+    remDevInfo->mtu = rtrAttr->mtu;
     rtrAttr->linkLayer = remDevInfo->link_layer;
     rtrAttr->tc = remDevInfo->link_layer == IBV_LINK_LAYER_ETHERNET ? remMeta->tc : -1;
     rtrAttr->sl = remMeta->sl;
@@ -848,8 +847,6 @@ ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendCo
   stage->buffer = NULL;
 
   NCCLCHECK(ncclIbMalloc((void**)&comm, sizeof(struct ncclIbSendComm)));
-  // TODO - QP sharing:
-  //        double check if IbCastBaseCommInit() called inside IbCastSendCommInit to copy the base->qps to base->activeQPs is taken care for secondary comm's QP 
   NCCLCHECKGOTO(IbCastSendCommInit(comm), ret, fail);
   NCCLCHECKGOTO(IbCastStatsInit(&comm->base.stats), ret, fail);
   NCCLCHECKGOTO(ncclSocketInit(&comm->base.sock, &handle->connectAddr, handle->magic, ncclSocketTypeNetIb, NULL, 1),
@@ -930,15 +927,6 @@ ib_recv_dev_list:
   comm->base.remIbDevIdx = -1;
   comm->base.sharedPrimaryNqps = 0;
   comm->remCommId = 0;
-
-#if 0
-  // TODO - QP sharing
-  //        do we need to update activeQps here or leave it for IbCastSendCommInit() which is already doing it ?
-  // Initialize activeQps identity mapping
-  for (int q = 0; q < NCCL_IB_MAX_QPS; q++) {
-    comm->base.activeQps[q] = &comm->base.qps[q];
-  }
-#endif
 
   if (comm->base.resiliency) {
     NCCLCHECK(IbCastResiliencyDeviceNumSet(comm->base.resiliency, comm->base.vProps.ndevs, remoteVProps.ndevs));
@@ -1367,9 +1355,6 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
   // number of max requests because every CTS message is signaled.
   qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2);
 
-  // TODO - QP sharing:
-  //        handle settings QP sharing attributes
-  //        skip QP creation & call to IbCastQpRtr/IbCastQpRts for secondary comm
   qpCreateAttrs.isQpSharingEnabled = (rcclParamIbCastCommNGroups() > 0) ? true : false;
   qpCreateAttrs.qpSharingGroupIdx = remMeta->sharedGroupIdx;
   depthMult = (rcclParamIbCastCommNGroups() > 0) ? std::max((int64_t)1, rcclParamIbCastQpDepthMultiplier()) : 1;
@@ -1619,8 +1604,6 @@ ncclResult_t IbCastAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle
   }
 
   NCCLCHECK(ncclIbMalloc((void**)&rComm, sizeof(struct ncclIbRecvComm)));
-  // TODO - QP sharing:
-  //        double check if IbCastBaseCommInit() called inside IbCastRecvCommInit to copy the base->qps to base->activeQPs is taken care for secondary comm's QP 
   NCCLCHECKGOTO(IbCastRecvCommInit(rComm), ret, fail);
   NCCLCHECKGOTO(IbCastStatsInit(&rComm->base.stats), ret, fail);
   stage->comm = rComm;
@@ -1706,15 +1689,6 @@ ib_recv:
   rComm->base.sharedGroupIdx = -1;
   rComm->base.remIbDevIdx = -1;
   rComm->base.sharedPrimaryNqps = 0;
-
-#if 0
-  // TODO - QP sharing
-  //        do we need to update activeQps here or leave it for IbCastSendCommInit() which is already doing it ?
-  // Initialize activeQps identity mapping
-  for (int q = 0; q < NCCL_IB_MAX_QPS; q++) {
-    rComm->base.activeQps[q] = &rComm->base.qps[q];
-  }
-#endif
 
   // IB setup
   // Pre-declare variables because of goto
@@ -1869,6 +1843,9 @@ ib_recv:
         rComm->base.qps[q].qp = recvSlot->qp;
         rComm->base.qps[q].devIndex = recvSlot->devIndex;
         rComm->base.qps[q].ctsQpSlot = recvSlot->ctsQpSlot;
+        // remDevIdx is normally set by IbCastReceiverQpsCreateToRts, which is
+        // skipped for secondary comms; set it here or CTS rkey selection is wrong.
+        rComm->base.qps[q].remDevIdx = remMeta.qpInfo[q].devIndex;
         rComm->base.activeQps[q] = &rComm->base.qps[q];
 
         meta.qpInfo[q].qpn = recvSlot->qp->qp_num;
@@ -1890,7 +1867,7 @@ ib_recv:
       INFO(NCCL_NET, "NET/IB: %s: QP sharing PRIMARY receiver commId=%u group=%d depthMult=%d",
            __func__, rComm->base.commId, recvGroupIdx, recvDepthMult);
       rComm->base.isSharedQpPrimary = true;
-      rComm->useCtsOffload = false; // TODO - QP sharing: check connect side
+      rComm->useCtsOffload = false; // sender useCtsOffload is also false: IbCastOffloadEnabled=false at init (init.cc)
     }
   }
 
@@ -2103,7 +2080,7 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
       if (comm->base.resiliency) {
         NCCLCHECK(IbCastResiliencyClose(comm->base.resiliency));
       }
-      IbCastFreeCommId(comm->base.commId);
+      IbCastFreeCommIdLocked(comm->base.commId);  // caller holds g_IbCastSharedQpMutex
 
       // Deregister per-comm MRs (not shared)
       for (int i = 0; i < comm->base.vProps.ndevs; i++) {
@@ -2140,20 +2117,6 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
     }
 
     if (comm->base.resiliency) {
-      NCCLCHECK(IbCastResiliencyClose(comm->base.resiliency));
-    }
-
-    for (int i = 0; i < comm->base.vProps.ndevs; i++) {
-      struct ncclIbSendCommDev* commDev = comm->devs + i;
-      if (commDev->ctsFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->ctsFifoMr));
-      if (commDev->cmplsRecordsMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->cmplsRecordsMr));
-      if (commDev->putSignalScratchpadMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->putSignalScratchpadMr));
-      if (comm->base.resiliency) {
-        NCCLCHECK(IbCastResiliencyDevDestroy(comm->base.resiliency, i));
-      }
-      NCCLCHECK(IbCastDestroyBase(&commDev->base));
-    }
-    if (comm->base.resiliency) {
       NCCLCHECK(IbCastResiliencyDestroy(&comm->base.resiliency));
     }
     free(comm);
@@ -2188,14 +2151,14 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
 
       if (comm->base.resiliency) {
         NCCLCHECK(IbCastResiliencyClose(comm->base.resiliency));
-	  }
+      }
       if (slot0) {
         slot0->cqRefcount--;
         if (slot0->cqRefcount <= 0) {
           IbCastCleanupGroupCqs(slot0);
         }
       }
-      IbCastFreeCommId(comm->base.commId);
+      IbCastFreeCommIdLocked(comm->base.commId);  // caller holds g_IbCastSharedQpMutex
 
       // GPU flush cleanup remains per-comm
       for (int i = 0; i < comm->base.vProps.ndevs; i++) {
@@ -2247,32 +2210,6 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
         }
         NCCLCHECK(IbCastDestroyBase(&commDev->base));
       }
-    }
-    if (comm->base.resiliency) {
-      NCCLCHECK(IbCastResiliencyClose(comm->base.resiliency));
-    }
-
-    for (int i = 0; i < comm->base.vProps.ndevs; i++) {
-      struct ncclIbRecvCommDev* commDev = comm->devs + i;
-      if (comm->flushEnabled) {
-        if (commDev->gpuFlush.gpuFlushGpuMem != nullptr) {
-          CUDACHECK(hipFree(commDev->gpuFlush.gpuFlushGpuMem));
-          commDev->gpuFlush.gpuFlushGpuMem = nullptr;
-          if (commDev->gpuFlush.gpuMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.gpuMr));
-          commDev->gpuFlush.gpuMr = nullptr;
-          if (commDev->gpuFlush.dmabufFd > 0) {
-            close(commDev->gpuFlush.dmabufFd);
-          }
-        }
-        if (commDev->gpuFlush.qp.qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(commDev->gpuFlush.qp.qp));
-        if (commDev->gpuFlush.hostMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.hostMr));
-      }
-      if (commDev->ctsFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->ctsFifoMr));
-      if (commDev->cmplsRecordsMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->cmplsRecordsMr));
-      if (comm->base.resiliency) {
-        IbCastResiliencyDevDestroy(comm->base.resiliency, i);
-      }
-      NCCLCHECK(IbCastDestroyBase(&commDev->base));
     }
     if (comm->base.resiliency) {
       NCCLCHECK(IbCastResiliencyDestroy(&comm->base.resiliency));

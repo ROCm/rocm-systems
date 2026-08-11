@@ -569,6 +569,10 @@ exit:
                                "(load balancer integration with resiliency is pending)");
     castGlobalQpSchedParms.enable = false;
   }
+  if (ret == ncclSuccess && castGlobalQpSchedParms.enable && rcclParamIbCastCommNGroups() > 0) {
+    INFO(NCCL_INIT | NCCL_NET, "NET/IB : QP sharing enabled - disabling QP scheduler");
+    castGlobalQpSchedParms.enable = false;
+  }
   if (ret == ncclSuccess && IbCastOffloadEnabled &&
       (ncclParamIbCastResiliencyPortFailover() || ncclParamIbCastResiliencyPortRecovery())) {
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : PORT_FAILOVER/RECOVERY enabled - disabling CTS offload "
