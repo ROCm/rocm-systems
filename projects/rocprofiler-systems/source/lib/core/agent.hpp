@@ -48,6 +48,13 @@ struct agent
     };  // Per-type ID (GPU, CPU) of the agent as they are stored in the agent_manager
     std::string
         agent_info;  // JSON formatted serialization of the available agent information
+
+    // PCIe identity + runtime visibility (GPU agents)
+    std::uint32_t location_id{ 0 };  // PCIe BDF (bus/device/function) encoded, from KFD
+    std::uint32_t domain{ 0 };       // PCI domain of the device
+    bool          hip_visible{ true };  // rocprofiler-sdk runtime_visibility.hip estimate
+                                        // (honors ROCR/HIP/CUDA_VISIBLE_DEVICES); true
+                                        // when the SDK cannot report visibility.
 };
 
 }  // namespace rocprofsys
