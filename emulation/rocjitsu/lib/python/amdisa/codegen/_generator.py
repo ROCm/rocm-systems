@@ -2317,6 +2317,10 @@ class CodeGenerator:
             unsupported_literal64_fields = self._unsupported_literal64_selector_fields(
                 inst_enc
             )
+            supports_fixed_size_embedding = (
+                self._supports_gfx1250_scaled_wmma_vop3px2()
+                and inst_enc.fmt_enc_name == 'Vop3p'
+            )
             dpp_struct, dpp8_struct = self._vop_dpp_struct_names(inst_enc.enc_name)
             dpp_extension_conditions = []
             if dpp_struct is not None and self._supports_dpp_for_encoding(
@@ -2331,25 +2335,34 @@ class CodeGenerator:
             # their DPP control DWORD must be counted explicitly.
             needs_explicit_dpp_size = owns_dpp_extension and inst_enc.bit_cnt >= 64
             class_members = []
-            public_members = [
-                cgen.Line('public:'),
+            constructor_args = [
+                cgen.Value('std::string_view', 'mnemonic'),
+                cgen.Value(
+                    f'const {inst_enc.fmt_enc_name}MachineInst',
+                    '*inst',
+                ),
+                cgen.Value('ExecuteFn', 'exec_fn'),
+            ]
+            if unsupported_literal64_fields:
+                constructor_args.append(cgen.Value('int', 'num_encoded_sources = 3'))
+            if supports_fixed_size_embedding:
+                constructor_args.append(
+                    cgen.Value(
+                        'ExtensionDecodePolicy',
+                        'extension_policy = ExtensionDecodePolicy::Decode',
+                    )
+                )
+            public_members = [cgen.Line('public:')]
+            if supports_fixed_size_embedding:
+                public_members.append(
+                    cgen.Line('enum class ExtensionDecodePolicy { Decode, Skip };')
+                )
+            public_members.append(
                 cgen.FunctionDeclaration(
                     cgen.Value('', f'{inst_enc.fmt_enc_name}'),
-                    [
-                        cgen.Value('std::string_view', 'mnemonic'),
-                        cgen.Value(
-                            f'const {inst_enc.fmt_enc_name}MachineInst',
-                            '*inst',
-                        ),
-                        cgen.Value('ExecuteFn', 'exec_fn'),
-                        *(
-                            [cgen.Value('int', 'num_encoded_sources = 3')]
-                            if unsupported_literal64_fields
-                            else []
-                        ),
-                    ],
-                ),
-            ]
+                    constructor_args,
+                )
+            )
             # Determine whether the constructor needs a runtime size
             # check for an extension DWORD beyond the base encoding.
             #
@@ -2433,6 +2446,8 @@ class CodeGenerator:
                 if name.startswith('has_lit') and not name.startswith('has_lit64')
             ]
             literal32_condition = ' || '.join(f'{name}()' for name in literal32_conds)
+            if supports_fixed_size_embedding:
+                size_line += ' if (extension_policy == ExtensionDecodePolicy::Decode) {'
             # Some profiles expose SRC_LITERAL64 in their global operand
             # selector table even when a particular encoding has no 64-bit
             # literal extension form.  Derive the affected source fields from
@@ -2516,25 +2531,30 @@ class CodeGenerator:
                     ' std::memcpy(raw_words_.data(), inst, size_);'
                     ' raw_encoding_ = raw_words_.data();'
                 )
+            if supports_fixed_size_embedding:
+                size_line += ' }'
+            constructor_extra_params = ''
+            if unsupported_literal64_fields:
+                constructor_extra_params += ', int num_encoded_sources'
+            if supports_fixed_size_embedding:
+                constructor_extra_params += ', ExtensionDecodePolicy extension_policy'
             if rule.use_flat_mnemonic:
                 # FLAT mnemonics are dynamically constructed ("scratch_*",
                 # "global_*"). Store the owned string in a member so the
                 # string_view in Instruction doesn't dangle.
                 class_ctor_impl = (
                     f'{inst_enc.fmt_enc_name}::{inst_enc.fmt_enc_name}'
-                    f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst, ExecuteFn exec_fn) '
+                    f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst, '
+                    f'ExecuteFn exec_fn{constructor_extra_params}) '
                     f': IsaInstruction<Isa>("", exec_fn), inst_(*inst), '
                     f'owned_mnemonic_({mnemonic_expr}) '
                     f'{{ mnemonic_ = owned_mnemonic_;{size_line}}}'
                 )
             else:
-                encoded_sources_param = (
-                    ', int num_encoded_sources' if unsupported_literal64_fields else ''
-                )
                 class_ctor_impl = (
                     f'{inst_enc.fmt_enc_name}::{inst_enc.fmt_enc_name}'
                     f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst'
-                    f', ExecuteFn exec_fn{encoded_sources_param}) '
+                    f', ExecuteFn exec_fn{constructor_extra_params}) '
                     f': IsaInstruction<Isa>({mnemonic_expr}, exec_fn), inst_(*inst) '
                     f'{{{size_line}}}'
                 )
@@ -3639,7 +3659,7 @@ class CodeGenerator:
         model = textwrap.dedent('''\
             VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
                 : Vop3p(gfx1250_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
-                        @EXEC_FN@),
+                        @EXEC_FN@, 3, Vop3p::ExtensionDecodePolicy::Skip),
                   vdst(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->vdst),
                   src0(gfx1250_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,

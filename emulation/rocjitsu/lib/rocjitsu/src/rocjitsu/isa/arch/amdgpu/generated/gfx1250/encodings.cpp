@@ -410,24 +410,26 @@ bool Vop3::has_dpp16() {
 }
 
 Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn,
-             int num_encoded_sources)
+             int num_encoded_sources, ExtensionDecodePolicy extension_policy)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if ((num_encoded_sources > 0 && inst_.src0 == 254) ||
-      (num_encoded_sources > 1 && inst_.src1 == 254) ||
-      (num_encoded_sources > 2 && inst_.src2 == 254))
-    throw util::InvalidInst("Vop3p does not support Literal64", "");
-  if (has_lit_0() || has_lit_1() || has_lit_0_and_has_lit_1() || has_lit_2() ||
-      has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||
-      has_lit_0_and_has_lit_1_and_has_lit_2())
-    size_ += sizeof(MachineInst);
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    size_ += sizeof(MachineInst);
-  std::memcpy(raw_words_.data(), inst, size_);
-  raw_encoding_ = raw_words_.data();
+  if (extension_policy == ExtensionDecodePolicy::Decode) {
+    if ((num_encoded_sources > 0 && inst_.src0 == 254) ||
+        (num_encoded_sources > 1 && inst_.src1 == 254) ||
+        (num_encoded_sources > 2 && inst_.src2 == 254))
+      throw util::InvalidInst("Vop3p does not support Literal64", "");
+    if (has_lit_0() || has_lit_1() || has_lit_0_and_has_lit_1() || has_lit_2() ||
+        has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||
+        has_lit_0_and_has_lit_1_and_has_lit_2())
+      size_ += sizeof(MachineInst);
+    if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
+      size_ += sizeof(MachineInst);
+    std::memcpy(raw_words_.data(), inst, size_);
+    raw_encoding_ = raw_words_.data();
+  }
 }
 
 void Vop3p::implicit_uses(RegisterSet &uses) const {

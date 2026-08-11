@@ -567,8 +567,10 @@ public:
 
 class Vop3p : public IsaInstruction<Isa> {
 public:
+  enum class ExtensionDecodePolicy { Decode, Skip };
   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn,
-        int num_encoded_sources = 3);
+        int num_encoded_sources = 3,
+        ExtensionDecodePolicy extension_policy = ExtensionDecodePolicy::Decode);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   bool has_lit_0();
