@@ -2153,6 +2153,35 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     assert 'src0.clear_delegate();' not in body
 
 
+def test_generated_dpp8_disassembly_uses_encoding_state(
+    amdgpu_generated_root: Path,
+) -> None:
+    for arch in ('rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4', 'gfx1250'):
+        encodings_cpp = (amdgpu_generated_root / arch / 'encodings.cpp').read_text()
+        encodings_h = (amdgpu_generated_root / arch / 'encodings.h').read_text()
+        generated_cpp = '\n'.join(
+            path.read_text() for path in (amdgpu_generated_root / arch).glob('*.cpp')
+        )
+
+        vop1_modifiers = encodings_cpp[
+            encodings_cpp.index('void Vop1::build_modifiers') :
+        ]
+        vop1_modifiers = vop1_modifiers[: vop1_modifiers.index('\n\n')]
+
+        assert 'append_dpp8_disassembly' in encodings_cpp
+        assert 'auto *inst = &inst_;' not in vop1_modifiers
+        for class_name in ('Vop1', 'Vop2', 'Vopc', 'Vop3', 'Vop3p', 'Vop3SdstEnc'):
+            class_match = re.search(
+                rf'class {class_name}\b.*?\n}};', encodings_h, flags=re.DOTALL
+            )
+            assert class_match is not None
+            assert 'owned_mnemonic_' not in class_match.group()
+        assert 'dpp8_mnemonic' not in generated_cpp
+        assert re.search(r'\? "v_add_f16_dpp"\s*: "v_add_f16_e32"', generated_cpp)
+        if arch not in ('rdna1', 'rdna2'):
+            assert re.search(r'"v_rcp_f16_e64_dpp"\s*: "v_rcp_f16"', generated_cpp)
+
+
 def test_generated_sdwa_uses_shared_source_staging(
     amdgpu_generated_root: Path,
 ) -> None:
@@ -3206,6 +3235,11 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'make_src0(y_bits, true, false, 0, srcy0)' in cpp
     assert 'make_src0(x_bits, false, has_literal_, literal_, srcx0)' in cpp
     assert 'make_src0(y_bits, false, has_literal_, literal_, srcy0)' in cpp
+    assert 'if (!is_valid_opcode(opx_, kVopdXOpcodeMask))' in cpp
+    assert 'if (!is_valid_opcode(opy_, kVopdYOpcodeMask))' in cpp
+    assert 'if (!is_valid_opcode(opx_, kVopd3XOpcodeMask))' in cpp
+    assert 'if (!is_valid_opcode(opy_, kVopd3YOpcodeMask))' in cpp
+    assert 'if (vdstx < y_end && vdsty < x_end)' in cpp
     assert 'case 3:\n              case 7:' not in cpp
     assert 'if (lhs == 0.0f || rhs == 0.0f)' in exec_cpp
     src_neg_start = exec_cpp.index('bool Vopd::uses_src_neg_modifier')

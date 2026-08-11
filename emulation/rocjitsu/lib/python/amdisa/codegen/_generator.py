@@ -1316,6 +1316,40 @@ class CodeGenerator:
             f'  case k{op.enum_name}:\n    return "{op.mnemonic}";'
             for op in vopd_slot_ops
         )
+
+        def opcode_mask(name: str, opcodes: frozenset[int]) -> str:
+            unknown_opcodes = opcodes.difference(op.opcode for op in vopd_slot_ops)
+            if unknown_opcodes:
+                raise ValueError(
+                    f'{arch} {name} references unknown VOPD opcodes: '
+                    f'{sorted(unknown_opcodes)}'
+                )
+            mask = sum(1 << opcode for opcode in opcodes)
+            return f'constexpr uint64_t {name} = 0x{mask:016X}ULL;'
+
+        opcode_masks = [
+            opcode_mask('kVopdXOpcodeMask', self.isa_spec.profile.vopd_x_slot_opcodes),
+            opcode_mask('kVopdYOpcodeMask', self.isa_spec.profile.vopd_y_slot_opcodes),
+        ]
+        if has_vopd3:
+            opcode_masks.extend(
+                (
+                    opcode_mask(
+                        'kVopd3XOpcodeMask',
+                        self.isa_spec.profile.vopd3_x_slot_opcodes,
+                    ),
+                    opcode_mask(
+                        'kVopd3YOpcodeMask',
+                        self.isa_spec.profile.vopd3_y_slot_opcodes,
+                    ),
+                )
+            )
+        vopd_opcode_validation_helpers = '\n'.join(opcode_masks) + textwrap.dedent('''
+
+            bool is_valid_opcode(uint16_t opcode, uint64_t mask) {
+              return opcode < 64 && (mask & (1ULL << opcode));
+            }
+        ''')
         vopd_src_neg_case_labels = case_labels(
             (
                 'VopdFmacF32',
@@ -1746,6 +1780,10 @@ class CodeGenerator:
                 word2_ = words[2];
                 opx_ = static_cast<uint16_t>((word0_ >> 18) & 0x3F);
                 opy_ = static_cast<uint16_t>((word0_ >> 12) & 0x3F);
+                if (!is_valid_opcode(opx_, kVopd3XOpcodeMask))
+                  throw util::InvalidInst("invalid VOPD3 X opcode", "");
+                if (!is_valid_opcode(opy_, kVopd3YOpcodeMask))
+                  throw util::InvalidInst("invalid VOPD3 Y opcode", "");
                 uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
                 uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
                 negx_ = static_cast<uint8_t>((word1_ >> 9) & 0x7);
@@ -1759,6 +1797,10 @@ class CodeGenerator:
 
                 uint32_t x_bits = is_float64_op(opx_) ? 64 : 32;
                 uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
+                const uint32_t x_end = vdstx + x_bits / 32;
+                const uint32_t y_end = vdsty + y_bits / 32;
+                if (vdstx < y_end && vdsty < x_end)
+                  throw util::InvalidInst("VOPD3 destination ranges overlap", "");
                 dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
                 dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
                 srcx0_ = make_src0(x_bits, true, false, 0, srcx0);
@@ -2010,6 +2052,8 @@ class CodeGenerator:
             // VOPD slot opcode values are the MRISA <Opcode> values for V_DUAL_* encodings.
             @VOPD_SLOT_CONSTANTS@
 
+            @VOPD_OPCODE_VALIDATION_HELPERS@
+
             Operand make_src0(uint32_t bits, @VOPD3_UNUSED_ATTR@bool vopd3, bool use_literal,
                               uint32_t literal, uint16_t encoded) {
               if (use_literal && encoded == 255)
@@ -2056,6 +2100,10 @@ class CodeGenerator:
                 encoding_id_ = @VOPD_PREFIX@;
                 opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
                 opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
+                if (!is_valid_opcode(opx_, kVopdXOpcodeMask))
+                  throw util::InvalidInst("invalid VOPD X opcode", "");
+                if (!is_valid_opcode(opy_, kVopdYOpcodeMask))
+                  throw util::InvalidInst("invalid VOPD Y opcode", "");
                 uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
                 uint16_t vsrcx1 = static_cast<uint16_t>((word0_ >> 9) & 0xFF);
                 uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
@@ -2184,6 +2232,7 @@ class CodeGenerator:
             .replace('@VOPD3_FORMAT_ENUM@', ', Vopd3' if has_vopd3 else '')
             .replace('@VOPD3_HEADER_DECLS@', vopd3_header_decls)
             .replace('@VOPD_SLOT_CONSTANTS@', vopd_slot_constants)
+            .replace('@VOPD_OPCODE_VALIDATION_HELPERS@', vopd_opcode_validation_helpers)
             .replace('@VOPD3_UNUSED_ATTR@', vopd3_unused_attr)
             .replace('@VOPD_OP_NAME_CASES@', vopd_op_name_cases)
             .replace('@VOPD3_MODEL_HELPERS@', vopd3_model_helpers)
@@ -2423,6 +2472,13 @@ class CodeGenerator:
                     )
                 else:
                     modifier_lines += f'if ({field_ref}) modifiers_ += "{mod.display}";'
+            dpp8_modifier_line = ''
+            if dpp8_struct is not None:
+                dpp8_modifier_line = (
+                    'if (amdgpu::dpp::is_src_dpp8(inst_.src0)) '
+                    'amdgpu::dpp::append_dpp8_disassembly('
+                    'out, dpp8_lane_sel_, dpp_fi_);'
+                )
 
             has_op = any(f.name == 'op' for f in inst_enc.ucode_fields)
             size_line = (
@@ -2564,19 +2620,24 @@ class CodeGenerator:
             # that have modifier flags (memory instructions). This is
             # called lazily by disassemble() instead of eagerly in the
             # constructor, avoiding string allocation on the hot path.
-            if modifier_lines:
+            if modifier_lines or dpp8_modifier_line:
                 public_members.append(
                     cgen.Line('void build_modifiers(std::string &out) const override;'),
                 )
                 # The modifier_lines were written for the constructor where
                 # they appended to modifiers_ and accessed inst->field.
                 # Rewrite to append to 'out' and access via local pointer.
-                mod_impl = modifier_lines.replace('modifiers_', 'out')
+                mod_impl = (
+                    modifier_lines.replace('modifiers_', 'out') + dpp8_modifier_line
+                )
+                mod_prologue = (
+                    ' auto *inst = &inst_;(void)inst;' if modifier_lines else ''
+                )
                 class_func_impls.append(
                     cgen.Line(
                         f'void {inst_enc.fmt_enc_name}::build_modifiers'
                         f'(std::string &out) const '
-                        f'{{ auto *inst = &inst_;(void)inst;'
+                        f'{{{mod_prologue}'
                         f'{mod_impl}}}'
                     )
                 )
@@ -7409,6 +7470,27 @@ class CodeGenerator:
                     # so the encoding base gets a string_view to static storage.
                     rule = self.isa_spec.profile.mnemonic_rule(enc.enc_name)
                     full_mnemonic = inst.mnemonic + (rule.suffix or '')
+                    mnemonic_expr = f'"{full_mnemonic}"'
+                    _, dpp8_struct = self._vop_dpp_struct_names(enc.enc_name)
+                    if dpp8_struct is not None:
+                        compact_encoding = enc.enc_name.upper() in (
+                            'ENC_VOP1',
+                            'ENC_VOP2',
+                            'ENC_VOPC',
+                        )
+                        if compact_encoding:
+                            assert full_mnemonic.endswith('_e32'), (
+                                f'{inst.name}: compact DPP8 mnemonic does not end in _e32: '
+                                f'{full_mnemonic}'
+                            )
+                            dpp8_mnemonic = full_mnemonic[:-4] + '_dpp'
+                        else:
+                            dpp8_mnemonic = full_mnemonic + '_e64_dpp'
+                        mnemonic_expr = (
+                            'amdgpu::dpp::is_src_dpp8('
+                            'reinterpret_cast<const OpEncoding*>(inst)->src0) ? '
+                            f'"{dpp8_mnemonic}" : "{full_mnemonic}"'
+                        )
                     exec_fn_expr = f'make_exec_fn<{inst.fmt_name}>()'
                     if profile.split_execution_sources:
                         exec_fn_expr = self._split_execute_expr(inst.fmt_name)
@@ -7441,7 +7523,7 @@ class CodeGenerator:
                                 f', {len(active_selector_fields)}'
                             )
                     init_list_parts = [
-                        f'{inst.fmt_true_enc_name}("{full_mnemonic}", '
+                        f'{inst.fmt_true_enc_name}({mnemonic_expr}, '
                         f'reinterpret_cast<const OpEncoding*>(inst), '
                         f'{exec_fn_expr}{encoded_source_count_arg})'
                     ] + opnd_ctor_init
