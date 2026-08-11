@@ -30,17 +30,17 @@ if(rccl_FOUND)
 endif()
 
 # python-rocdecode / python-rocjpeg hard-depend on the codec libs + headers at build time
-# (they include the codec headers and link rocDecode::rocDecode / rocJPEG::rocJPEG), so
-# build them only when the packages are discoverable AND new enough. rocDecode_FOUND /
-# rocJPEG_FOUND and the versions are set by the top-level find_package() in
+# (they include the codec headers and link rocdecode::rocdecode / rocjpeg::rocjpeg), so
+# build them only when the packages are discoverable AND new enough. rocdecode_FOUND /
+# rocjpeg_FOUND and the versions are set by the top-level find_package() in
 # cmake/rocprofiler_config_interfaces.cmake and inherited here. The version gates mirror
 # tests/bin/CMakeLists.txt (which builds the rocdecode/rocjpeg demo binaries). These are
 # optional, source-installable ROCm components.
-if(rocDecode_FOUND AND rocDecode_VERSION VERSION_GREATER 0.8.0)
+if(rocdecode_FOUND AND rocdecode_VERSION VERSION_GREATER 0.8.0)
     add_subdirectory(python-rocdecode)
 endif()
 
-if(rocJPEG_FOUND AND rocJPEG_VERSION VERSION_GREATER 0.6.0)
+if(rocjpeg_FOUND AND rocjpeg_VERSION VERSION_GREATER 0.6.0)
     add_subdirectory(python-rocjpeg)
 endif()
 

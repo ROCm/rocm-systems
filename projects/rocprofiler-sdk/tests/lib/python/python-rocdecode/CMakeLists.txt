@@ -26,18 +26,16 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(rocprofiler-sdk-tests-bin-python-rocdecode LANGUAGES CXX)
 
 find_package(rocprofiler-sdk REQUIRED)
-find_package(rocDecode REQUIRED)
+find_package(rocdecode REQUIRED)
+find_package(hip REQUIRED)
 
-# This module drives only the rocDecode bitstream-reader API (CPU-side, in the traced
+# This module drives only the rocdecode bitstream-reader API (CPU-side, in the traced
 # dispatch table) to exercise ROCDECODE_API tracing without needing a working VA-API video
-# decoder. It therefore links only rocDecode -- no HIP, and no RocVideoDecoder helper.
+# decoder. It therefore links only rocdecode -- no HIP, and no RocVideoDecoder helper.
 add_library(python-rocdecode SHARED)
 target_sources(python-rocdecode PRIVATE python-rocdecode.cpp)
-# rocDecode public headers transitively include <hip/hip_runtime.h>, which requires the
-# HIP platform macro. We don't otherwise need HIP here, so just set the define.
-target_compile_definitions(python-rocdecode PRIVATE __HIP_PLATFORM_AMD__)
 target_link_libraries(python-rocdecode PRIVATE rocprofiler-sdk::tests-build-flags
-                                               rocDecode::rocDecode)
+                                               rocdecode::rocdecode hip::host)
 set_target_properties(
     python-rocdecode
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"

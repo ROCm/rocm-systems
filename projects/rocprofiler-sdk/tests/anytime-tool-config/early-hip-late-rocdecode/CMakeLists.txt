@@ -41,16 +41,16 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 find_package(Python3 REQUIRED)
 
-# rocDecode_FOUND / rocDecode_VERSION / rocDecode_ROOT_DIR are inherited from the
-# top-level find_package(rocDecode). Media path matches tests/rocdecode.
+# rocdecode_FOUND / rocdecode_VERSION / rocdecode_ROOT_DIR are inherited from the
+# top-level find_package(rocdecode). Media path matches tests/rocdecode.
 file(GLOB_RECURSE ROCDECODE_VIDEO_FILE
-     "${rocDecode_ROOT_DIR}/share/rocdecode/video/*AMD_driving_virtual_20-H265.265")
+     "${rocdecode_ROOT_DIR}/share/rocdecode/video/*AMD_driving_virtual_20-H265.265")
 
 set(IS_DISABLED OFF)
 if(NOT TARGET python-rocdecode)
     set(IS_DISABLED ON)
 elseif(NOT EXISTS "${ROCDECODE_VIDEO_FILE}")
-    message(WARNING "rocDecode video not found: ${ROCDECODE_VIDEO_FILE}")
+    message(WARNING "rocdecode video not found: ${ROCDECODE_VIDEO_FILE}")
     set(IS_DISABLED ON)
 endif()
 

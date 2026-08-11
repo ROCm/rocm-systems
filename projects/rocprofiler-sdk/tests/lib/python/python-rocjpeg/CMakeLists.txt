@@ -26,15 +26,13 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(rocprofiler-sdk-tests-bin-python-rocjpeg LANGUAGES CXX)
 
 find_package(rocprofiler-sdk REQUIRED)
-find_package(rocJPEG REQUIRED)
+find_package(rocjpeg REQUIRED)
+find_package(hip REQUIRED)
 
 add_library(python-rocjpeg SHARED)
 target_sources(python-rocjpeg PRIVATE python-rocjpeg.cpp)
-# rocJPEG public headers transitively include <hip/hip_runtime.h>, which requires the HIP
-# platform macro. We don't otherwise need HIP here, so just set the define.
-target_compile_definitions(python-rocjpeg PRIVATE __HIP_PLATFORM_AMD__)
 target_link_libraries(python-rocjpeg PRIVATE rocprofiler-sdk::tests-build-flags
-                                             rocJPEG::rocJPEG)
+                                             rocjpeg::rocjpeg hip::host)
 set_target_properties(
     python-rocjpeg
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"

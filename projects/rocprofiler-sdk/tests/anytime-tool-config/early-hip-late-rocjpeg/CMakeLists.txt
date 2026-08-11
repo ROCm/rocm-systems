@@ -21,14 +21,14 @@
 # THE SOFTWARE.
 
 #
-# Early (preloaded, HIP-only) tool + late (rocJPEG) tool.
+# Early (preloaded, HIP-only) tool + late (rocjpeg) tool.
 #
-# Proves a late tool captures the rocJPEG API service of a shared GPU JPEG-decode
+# Proves a late tool captures the rocjpeg API service of a shared GPU JPEG-decode
 # workload, disjoint from the early tool's HIP-API subset.
 #
-# Optional dependency: requires rocJPEG (libs + the python-rocjpeg workload module +
+# Optional dependency: requires rocjpeg (libs + the python-rocjpeg workload module +
 # sample media). Mirrors tests/rocjpeg gating: the test is always registered but DISABLED
-# when the dependency is unavailable. At runtime, if the rocJPEG VA-API backend is
+# when the dependency is unavailable. At runtime, if the rocjpeg VA-API backend is
 # unavailable, the driver prints "test skipped" (SKIP_REGULAR_EXPRESSION) and the test
 # reports as skipped.
 #
@@ -42,15 +42,15 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 find_package(Python3 REQUIRED)
 
-# rocJPEG_FOUND / rocJPEG_VERSION / rocJPEG_ROOT_DIR are inherited from the top-level
-# find_package(rocJPEG). The version gate matches tests/bin/CMakeLists.txt (> 0.6.0).
-set(rocJPEG_IMAGE_FILE "${rocJPEG_ROOT_DIR}/share/rocjpeg/images/mug_420.jpg")
+# rocjpeg_FOUND / rocjpeg_VERSION / rocjpeg_ROOT_DIR are inherited from the top-level
+# find_package(rocjpeg). The version gate matches tests/bin/CMakeLists.txt (> 0.6.0).
+set(rocjpeg_IMAGE_FILE "${rocjpeg_ROOT_DIR}/share/rocjpeg/images/mug_420.jpg")
 
 set(IS_DISABLED OFF)
 if(NOT TARGET python-rocjpeg)
     set(IS_DISABLED ON)
-elseif(NOT EXISTS "${rocJPEG_IMAGE_FILE}")
-    message(WARNING "rocJPEG image not found: ${rocJPEG_IMAGE_FILE}")
+elseif(NOT EXISTS "${rocjpeg_IMAGE_FILE}")
+    message(WARNING "rocjpeg image not found: ${rocjpeg_IMAGE_FILE}")
     set(IS_DISABLED ON)
 endif()
 
@@ -60,7 +60,7 @@ set(early-hip-late-rocjpeg-env
     "ROCPROFILER_TOOL_CONTEXTS=HIP_API_BUFFERED"
     "ROCPROFILER_TOOL_OUTPUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/early-hip-late-rocjpeg-tool-a.json"
     "ROCPROFILER_TOOL_LATE_OUTPUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/early-hip-late-rocjpeg-tool-b.json"
-    "ROCJPEG_IMAGE_FILE=${rocJPEG_IMAGE_FILE}"
+    "ROCJPEG_IMAGE_FILE=${rocjpeg_IMAGE_FILE}"
     "ROCPROFILER_TOOL_DISABLE_PERFETTO=1")
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py)
