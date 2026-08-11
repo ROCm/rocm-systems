@@ -92,8 +92,7 @@ struct gpu_perf_counter_traits
         {
             if(dev->is_supported())
             {
-                entries.push_back(
-                    device_entry{ std::move(dev), enabled_metrics_t{ {} } });
+                entries.push_back(device_entry{ std::move(dev), enabled_metrics_t{} });
             }
         }
 
