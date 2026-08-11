@@ -62,7 +62,6 @@ AsyncMonitor::completeOp(AsyncOp *op)
         }
         op->file.reset();
         op->buffer.reset();
-        op->stream.reset();
         completed_ops.push_back(op);
     }
     cv.notify_one();
