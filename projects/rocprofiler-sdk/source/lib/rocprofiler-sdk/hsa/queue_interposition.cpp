@@ -35,6 +35,7 @@
 #include "lib/common/container/static_vector.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
@@ -377,6 +378,11 @@ struct completion_monitor
     // Registered-but-not-yet-completed waits (inbox + active). Lets other threads
     // observe quiescence without touching the monitor-private `active` vector.
     std::atomic<uint64_t> inflight = {0};
+    // Count of producers currently in the doorbell path that may still call
+    // register_completion. The monitor must not exit its loop (and abandon the
+    // inbox) while this is nonzero, or a late register_completion could strand an
+    // entry in `incoming` after the thread is gone -- hanging drain_completion_monitor.
+    std::atomic<uint64_t> registering = {0};
 };
 
 completion_monitor&
@@ -726,16 +732,45 @@ completion_monitor_loop(completion_monitor& mon)
         mon.active_scratch.clear();
     }
 
-    // Teardown: pull any entries still queued in the inbox into `active` before
-    // draining. On a shutdown break, a batch registered just before the break can be
-    // stranded in `incoming` with its inflight count already incremented; failing to
-    // process it here would leak its signal/correlation-id refs and leave inflight
-    // nonzero, hanging drain_completion_monitor(). Producers no longer register once
-    // finalization has begun, so no new entries arrive after this drain.
-    drain_incoming(mon);
+    // Teardown: a producer already inside process_doorbell_impl when the loop broke
+    // can still call register_completion after this point. Wait for all such in-flight
+    // producers to finish (registering == 0), draining the inbox as they land, so no
+    // entry is stranded in `incoming` after the thread exits (which would leak its
+    // signal/correlation-id refs and hang drain_completion_monitor on inflight > 0).
+    // New producers cannot start once finalization has set fini_status, so the
+    // registering count only falls and this loop always finishes.
+    constexpr auto drain_interval = std::chrono::microseconds{100};
+    auto           drain_iters    = uint64_t{0};
+    do
+    {
+        drain_incoming(mon);
+        for(auto& pending : mon.active)
+        {
+            run_completion(pending.session);
+            mon.inflight.fetch_sub(1, std::memory_order_relaxed);
+        }
+        mon.active.clear();
 
-    // Run remaining completions so signals/correlation ids are released and inflight
-    // reaches zero.
+        if(mon.registering.load(std::memory_order_acquire) == 0) break;
+
+        // Producers between the entry gate and their registering-- are bounded and
+        // never block on the monitor, so this must finish. Surface a diagnostic if
+        // it does not, rather than hang silently.
+        ++drain_iters;
+        constexpr auto warn_interval = uint64_t{10000};  // ~1s at 100us
+        if(drain_iters % warn_interval == 0)
+            ROCP_WARNING << fmt::format(
+                "Completion monitor still waiting for {} in-flight producer(s) to finish during "
+                "teardown after {} ms",
+                mon.registering.load(std::memory_order_acquire),
+                (drain_iters * drain_interval.count()) / 1000);
+
+        std::this_thread::sleep_for(drain_interval);
+    } while(true);
+
+    // Final drain: catch any entry registered between the last drain and registering
+    // reaching zero.
+    drain_incoming(mon);
     for(auto& pending : mon.active)
     {
         run_completion(pending.session);
@@ -1343,6 +1378,15 @@ process_doorbell_impl(const queue_state_ptr_t& state,
                       const doorbell_fn_t&     ring_doorbell)
 {
     if(!state) return;
+
+    // Mark this producer as potentially about to register a completion. The monitor
+    // will not exit (abandoning the inbox) while any producer is in this window, so a
+    // register_completion at the tail of this function can never land after the monitor
+    // thread has gone. Decremented on every exit path.
+    auto& mon = get_completion_monitor();
+    mon.registering.fetch_add(1, std::memory_order_acq_rel);
+    auto _registering_dtor = common::scope_destructor{
+        [&mon]() { mon.registering.fetch_sub(1, std::memory_order_acq_rel); }};
 
     auto* state_ptr            = state.get();
     auto  deferred_completions = pending_completion_vector_t{};
