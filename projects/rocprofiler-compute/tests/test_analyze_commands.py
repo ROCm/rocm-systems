@@ -21,6 +21,19 @@ indirs = [
     "tests/workloads/vcopy/RDNA35_HALO",
 ]
 
+PC_SAMPLING_SOURCE_WORKLOAD = (
+    Path(__file__).resolve().parent / "workloads" / "vcopy_pc_sampling_only" / "MI350"
+)
+SOURCE_WORKLOAD_NAME = "pc_sampling_source_workload"
+SOURCE_WORKLOAD_SUB_NAME = "run_001"
+
+
+def setup_pc_sampling_source_workload(tmp_path):
+    """Copy the PC-sampling source fixture into a temporary workload."""
+    workload_path = tmp_path / SOURCE_WORKLOAD_NAME / SOURCE_WORKLOAD_SUB_NAME
+    shutil.copytree(PC_SAMPLING_SOURCE_WORKLOAD, workload_path)
+    return workload_path
+
 
 @pytest.mark.misc
 def test_valid_path(binary_handler_analyze_rocprof_compute):
@@ -1022,3 +1035,64 @@ def test_list_torch_operators_no_trace_data(
     assert "Total: 0 operators" in output
 
     common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.misc
+@pytest.mark.parametrize(
+    ("output_format", "output_name", "exports_source_snapshot"),
+    [
+        pytest.param(
+            "csv",
+            "pc_sampling_source_csv",
+            True,
+            id="csv-exports-source-snapshot",
+        ),
+        pytest.param(
+            "db",
+            "pc_sampling_source_db",
+            False,
+            id="db-does-not-export-source-snapshot",
+        ),
+    ],
+)
+def test_analyze_source_snapshot_output_format(
+    binary_handler_analyze_rocprof_compute,
+    monkeypatch,
+    tmp_path,
+    output_format,
+    output_name,
+    exports_source_snapshot,
+):
+    """Export source snapshots for CSV output but not database output."""
+    expected_source_file_tree = common.read_binary_file_tree(
+        PC_SAMPLING_SOURCE_WORKLOAD / "src"
+    )
+    workload_path = setup_pc_sampling_source_workload(tmp_path).resolve()
+    output_path = (tmp_path / output_name).resolve()
+    monkeypatch.chdir(tmp_path)
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        str(workload_path),
+        "--block",
+        "21",
+        "--output-format",
+        output_format,
+        "--output-name",
+        output_name,
+    ])
+
+    assert code == 0
+    workload_source_path = (
+        output_path / "source" / SOURCE_WORKLOAD_NAME / SOURCE_WORKLOAD_SUB_NAME
+    )
+    if exports_source_snapshot:
+        assert workload_source_path.is_dir()
+        assert (
+            common.read_binary_file_tree(workload_source_path)
+            == expected_source_file_tree
+        )
+    else:
+        assert output_path.with_suffix(".db").is_file()
+        assert not (output_path / "source").exists()
