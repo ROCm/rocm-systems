@@ -257,6 +257,7 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
         SimpleNamespace(
             arch_name='gfx1250',
             generated_dir_name='cdna5',
+            cpp_namespace='cdna5',
             opnd_selectors=[],
             operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
             profile=Gfx1250Profile(),
@@ -269,10 +270,10 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     operand_cpp = (tmp_path / 'cdna5' / 'operand.cpp').read_text()
     operand_exec_cpp = (tmp_path / 'cdna5' / 'operand_exec.cpp').read_text()
 
-    assert 'namespace gfx1250 {' in operand_h
+    assert 'namespace cdna5 {' in operand_h
     assert 'rocjitsu/isa/arch/amdgpu/cdna5/isa.h' in operand_h
     assert 'rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h' in operand_h
-    assert 'ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_OPERAND_H_' in operand_h
+    assert 'ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_OPERAND_H_' in operand_h
     assert 'class Operand : public IsaOperand<Isa>' in operand_h
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in operand_h
     assert ': IsaOperand<Isa>(size_bits, opr_type, encoding_value)' in operand_cpp
@@ -607,6 +608,7 @@ class TestGfx1250Profile:
     def test_generated_identities(self):
         assert self.p.generated_arch_name == 'gfx1250'
         assert self.p.generated_dir_name == 'cdna5'
+        assert self.p.cpp_namespace == 'cdna5'
 
     def test_field_renames_literal(self):
         assert self.p.field_renames('ENC_SOP1').get('literal') == 'simm32'

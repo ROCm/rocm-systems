@@ -333,6 +333,18 @@ def _parse_cdna_specs(*names: str):
     return specs
 
 
+def test_gfx1250_parser_separates_logical_arch_directory_and_cpp_namespace():
+    isa_xml = _mrisa_dir() / 'amdgpu_isa_gfx1250.xml'
+    if not isa_xml.is_file():
+        pytest.skip('gfx1250 machine-readable ISA XML not available')
+
+    spec = Parser(str(isa_xml), Gfx1250Profile()).isa_spec
+
+    assert spec.arch_name == 'gfx1250'
+    assert spec.generated_dir_name == 'cdna5'
+    assert spec.cpp_namespace == 'cdna5'
+
+
 @pytest.mark.parametrize(
     'isa_name,profile_type',
     [

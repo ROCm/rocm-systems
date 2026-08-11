@@ -322,6 +322,11 @@ class CodeGenerator:
             or self.isa_spec.arch_name
         )
 
+    @property
+    def cpp_namespace(self) -> str:
+        """C++ namespace for this ISA's generated declarations."""
+        return getattr(self.isa_spec, 'cpp_namespace', None) or self.isa_spec.arch_name
+
     def _split_execute_expr(self, class_name: str) -> str:
         """Return the model constructor expression for one split instruction."""
         if not self.isa_spec.profile.split_execution_sources:
@@ -546,7 +551,7 @@ class CodeGenerator:
         ``kSGetPcB64``) is emitted only when all instances of that mnemonic in
         this ISA use the same raw opcode.
         """
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         mnemonic_values: dict[str, list[int]] = defaultdict(list)
         concrete: list[tuple[str, int]] = []
         seen: dict[str, int] = {}
@@ -671,7 +676,7 @@ class CodeGenerator:
         structure: callers should describe only operands and modifiers, while
         the generator remains responsible for the binary layout.
         """
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         body: list[str] = [
             CppFile._prologue_comment(),
             f'#ifndef ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_BUILDERS_H_',
@@ -1256,7 +1261,7 @@ class CodeGenerator:
         if not self.isa_spec.profile.split_execution_sources:
             return
 
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         generated_arch = self.config.generated_include(self.generated_dir_name)
         handwritten_arch = self.config.handwritten_include(self.generated_dir_name)
         execution_ids = ''.join(
@@ -1354,7 +1359,8 @@ class CodeGenerator:
         if not self._supports_generated_vopd():
             return
 
-        arch = self.isa_spec.arch_name
+        logical_arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         vopd_encoding_prefixes = self.isa_spec.profile.vopd_encoding_prefixes
         vopd_prefixes = [
             prefix for prefix in vopd_encoding_prefixes if not prefix.is_vopd3
@@ -1363,7 +1369,9 @@ class CodeGenerator:
             prefix for prefix in vopd_encoding_prefixes if prefix.is_vopd3
         ]
         if len(vopd_prefixes) != 1 or len(vopd3_prefixes) > 1:
-            raise ValueError(f'{arch} has invalid VOPD encoding prefix metadata')
+            raise ValueError(
+                f'{logical_arch} has invalid VOPD encoding prefix metadata'
+            )
         vopd_prefix = vopd_prefixes[0]
         vopd3_prefix = vopd3_prefixes[0] if vopd3_prefixes else None
         has_vopd3 = vopd3_prefix is not None
@@ -1381,7 +1389,9 @@ class CodeGenerator:
 
         vopd_slot_ops = self.isa_spec.profile.vopd_slot_ops
         if not vopd_slot_ops:
-            raise ValueError(f'{arch} has VOPD enabled without a slot opcode table')
+            raise ValueError(
+                f'{logical_arch} has VOPD enabled without a slot opcode table'
+            )
         vopd_slot_op_names = {op.enum_name for op in vopd_slot_ops}
 
         def has_op(enum_name: str) -> bool:
@@ -1419,7 +1429,7 @@ class CodeGenerator:
             unknown_opcodes = opcodes.difference(op.opcode for op in vopd_slot_ops)
             if unknown_opcodes:
                 raise ValueError(
-                    f'{arch} {name} references unknown VOPD opcodes: '
+                    f'{logical_arch} {name} references unknown VOPD opcodes: '
                     f'{sorted(unknown_opcodes)}'
                 )
             mask = sum(1 << opcode for opcode in opcodes)
@@ -2458,7 +2468,7 @@ class CodeGenerator:
             includes,
             [],
             enc_structs,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
             generated_dir_name=self.generated_dir_name,
         )
         cpp_file.gen_code()
@@ -3071,7 +3081,7 @@ class CodeGenerator:
             ],
             [],
             enc_classes,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
             True,
             generated_dir_name=self.generated_dir_name,
         )
@@ -3117,7 +3127,7 @@ class CodeGenerator:
             _enc_cpp_includes,
             [],
             class_func_impls,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
             generated_dir_name=self.generated_dir_name,
         )
         class_def_file.gen_code()
@@ -9183,7 +9193,7 @@ class CodeGenerator:
                     h_includes,
                     [],
                     inst_classes,
-                    self.isa_spec.arch_name,
+                    self.cpp_namespace,
                     True,
                     generated_dir_name=self.generated_dir_name,
                 )
@@ -9327,7 +9337,7 @@ class CodeGenerator:
         # encoding instruction headers. Only primary (non-alt) encodings
         # that have instructions generate their own files; alt encoding
         # instructions are merged into their parent's file.
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         guard = f'ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_INSTS_H_'
         inc_base = self.config.generated_include(self.generated_dir_name)
         insts_h_lines = [
@@ -9427,7 +9437,7 @@ class CodeGenerator:
                 cpp_includes,
                 [],
                 class_func_impls,
-                self.isa_spec.arch_name,
+                self.cpp_namespace,
                 generated_dir_name=self.generated_dir_name,
             ).gen_code()
             return
@@ -9491,7 +9501,7 @@ class CodeGenerator:
                 cpp_includes,
                 [],
                 chunk,
-                self.isa_spec.arch_name,
+                self.cpp_namespace,
                 generated_dir_name=self.generated_dir_name,
             ).gen_code()
 
@@ -10339,7 +10349,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             [],
             [],
             code_lines,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
             generated_dir_name=self.generated_dir_name,
         )
         opnd_type_def_file.gen_code()
@@ -10370,7 +10380,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
     def gen_operand(self) -> None:
         """Generate the ISA-specific Operand class with name resolution."""
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         scalar_null_precedes_m0 = self.isa_spec.profile.scalar_null_precedes_m0
         uses_packed_16bit_sources = (
             self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
@@ -12215,7 +12225,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             ],
             ['Instruction'],
             class_def,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
             True,
             generated_dir_name=self.generated_dir_name,
         )
@@ -12238,7 +12248,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             ],
             [],
             class_impl,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
             generated_dir_name=self.generated_dir_name,
         )
         class_def_file.gen_code()
@@ -12297,7 +12307,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     f'  {{"{inst.mnemonic}", {{0x{w0:08X}U, 0x{w1:08X}U}}}},'
                 )
 
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         ns = arch
         guard = f'ROCJITSU_ISA_AMDGPU_{arch.upper()}_TEST_ENCODINGS_H_'
         lines = CppFile._prologue_comment().splitlines()
@@ -12359,7 +12369,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             ],
             [],
             isa_struct,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
             generated_dir_name=self.generated_dir_name,
         )
         isa_struct_file.gen_code()

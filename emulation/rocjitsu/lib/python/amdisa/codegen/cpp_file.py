@@ -31,7 +31,7 @@ class CppFile:
         includes: List of (include_name, is_system_header) pairs.
         fwd_decls: Forward declarations within the namespace.
         src_code: Source code objects (strings or cgen objects).
-        arch_name: ISA architecture name.
+        cpp_namespace: ISA-specific C++ namespace.
         generated_dir_name: Filesystem directory for the generated file.
         replace_structs: If True, replace 'struct' with 'class' in output.
         file_name: File name with extension.
@@ -56,7 +56,7 @@ class CppFile:
         includes: list[tuple[str, bool]],
         fwd_decls: list[str],
         src_code: Sequence[object],
-        arch_name: str,
+        cpp_namespace: str,
         replace_structs: bool = False,
         generated_dir_name: str | None = None,
     ) -> None:
@@ -66,8 +66,8 @@ class CppFile:
         self.includes = includes
         self.fwd_decls = fwd_decls
         self.src_code = src_code
-        self.arch_name = arch_name
-        self.generated_dir_name = generated_dir_name or arch_name
+        self.cpp_namespace = cpp_namespace
+        self.generated_dir_name = generated_dir_name or cpp_namespace
         self.replace_structs = replace_structs
         self.file_name = self.name
 
@@ -75,7 +75,7 @@ class CppFile:
             self.file_name += '.h'
             include_guard_components = [s.upper() for s in self.name.split('_')]
             self.include_guard = (
-                f'ROCJITSU_ISA_ARCH_AMDGPU_{self.arch_name.upper()}_'
+                f'ROCJITSU_ISA_ARCH_AMDGPU_{self.cpp_namespace.upper()}_'
                 + '_'.join(include_guard_components)
                 + '_H_'
             )
@@ -94,7 +94,7 @@ class CppFile:
         f.writelines(
             [f'\n{cgen.Statement("class " + x)}' + '\n\n' for x in self.fwd_decls]
         )
-        f.write(f'namespace {self.arch_name} {{\n')
+        f.write(f'namespace {self.cpp_namespace} {{\n')
         f.write('\n')
 
     def gen_header(self, f: TextIO) -> None:
@@ -105,13 +105,13 @@ class CppFile:
             )
         else:
             f.writelines([f'{e}\n\n' for e in self.src_code])
-        f.write(f'}} // namespace {self.arch_name}\n}}' f' // namespace rocjitsu\n')
+        f.write(f'}} // namespace {self.cpp_namespace}\n}}' f' // namespace rocjitsu\n')
         f.write(f'\n#endif // {self.include_guard}\n')
 
     def gen_cpp(self, f: TextIO) -> None:
         """Write source file body and closing namespaces."""
         f.writelines([f'{e}\n\n' for e in self.src_code])
-        f.write(f'}} // namespace {self.arch_name}' f'\n}} // namespace rocjitsu\n')
+        f.write(f'}} // namespace {self.cpp_namespace}' f'\n}} // namespace rocjitsu\n')
 
     def gen_code(self) -> None:
         """Generate the file (header or source)."""
