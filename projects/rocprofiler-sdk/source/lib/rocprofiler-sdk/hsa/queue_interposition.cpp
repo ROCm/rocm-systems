@@ -36,13 +36,13 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
-#include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
@@ -60,12 +60,13 @@
 #include <hsa/hsa_api_trace.h>
 #include <pthread.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <functional>
 #include <mutex>
-#include <shared_mutex>
 #include <thread>
 #include <vector>
 
@@ -78,18 +79,6 @@ namespace queue_interposition
 namespace
 {
 auto s_active_queue_interposition_consumers = std::atomic<uint32_t>{0};
-
-// Makes the inline pool's construct-and-submit region mutually exclusive with
-// interposition_sync()'s join. Submitters hold it SHARED; the sync takes it
-// EXCLUSIVE, so a submitter mid-construction cannot slip a task past a sync that
-// already read "not constructed". A leaf lock: it nests inside g_submit_gate
-// (shared) on the hand_off_proven() path, never the reverse.
-std::shared_mutex g_handler_gate;
-
-// Set with release right after the inline pool's static initializer completes, so
-// interposition_sync() can tell "constructed, must join" from "never constructed"
-// without itself constructing the pool. Acquire-loaded by the exists-check.
-std::atomic<bool> g_async_handler_constructed{false};
 
 // NOTE:
 //  - "installed" is for checking whether HSA functions have been passed
@@ -243,8 +232,17 @@ get_doorbell_tls()
     return _v;
 }
 
-using async_signal_task_t        = std::function<void()>;
-using async_signal_task_vector_t = std::vector<async_signal_task_t>;
+// One in-flight completion wait: a batch's completion signal, the value it was
+// enqueued at (the signal drops below this once the kernel completes), and the
+// session whose completion bookkeeping runs when it does.
+struct pending_completion
+{
+    hsa_signal_t                          completion_signal = {};
+    hsa_signal_value_t                    starting_value    = 0;
+    std::shared_ptr<queue_info_session_t> session           = {};
+};
+
+using pending_completion_vector_t = std::vector<pending_completion>;
 
 inline void
 publish_submitted_packets(QueueState* state, uint64_t submit_pos)
@@ -329,14 +327,6 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
     }
 }
 
-bool
-async_signal_handler_exists()
-{
-    // Acquire pairs with the release store in get_async_signal_handler(): a true
-    // read means the pool is fully constructed. Never reads the raw m_object
-    // pointer, which a concurrent constructor may be publishing (TSan race).
-    return g_async_handler_constructed.load(std::memory_order_acquire);
-}
 }  // namespace
 
 size_t
@@ -360,57 +350,6 @@ get_async_signal_handler_thread_count()
 
 namespace
 {
-internal_threading::task_group_t*
-get_async_signal_handler()
-{
-    using task_group_t           = internal_threading::task_group_t;
-    using create_task_group_fn_t = task_group_t* (*) (void*, size_t);
-
-    // default to 4 threads if neither GPU_MAX_HW_QUEUES or ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS
-    // is set, since the async signal handler is primarily intended for handling queue completion
-    // signals and a typical GPU may have on the order of 4 hardware queues. Note: GPU_MAX_HW_QUEUES
-    // is a ROCr/HSA environment variable. If GPU_MAX_HW_QUEUES is set but
-    // ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS is not set, we will use the value of
-    // GPU_MAX_HW_QUEUES to determine the number of threads for the async signal handler. If
-    // ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS is set, it will take precedence over
-    // GPU_MAX_HW_QUEUES.
-    static auto*& _v =
-        common::static_object<internal_threading::task_group_t>::construct_via_function(
-            static_cast<create_task_group_fn_t>(&internal_threading::create_task_group),
-            get_async_signal_handler_thread_count());
-
-    // Release-store unconditionally on every call, AFTER the static initializer:
-    // the constructing thread's store is ordered after the constructor, and any
-    // other thread reached here only by acquiring the same static guard, so it
-    // carries the construction in its happens-before chain too. Must NOT go in
-    // construct_via_function's call_once, which runs before the object exists.
-    g_async_handler_constructed.store(true, std::memory_order_release);
-
-    return _v;
-}
-
-// The ONLY caller of get_async_signal_handler()->async(). Makes the
-// construct-and-submit region mutually exclusive with interposition_sync() so a
-// task can never be queued on a pool the sync already decided not to join.
-// Consumes `task` only on the path that returns true: every false return happens
-// before the std::move, so a rejected task is destroyed intact by the caller.
-bool
-submit_inline_async(std::function<void()>&& task, bool refuse_during_fini)
-{
-    // 1. FIRST, before any lock: a child forked while a vanished parent thread
-    // held g_handler_gate can never acquire it, so testing staleness after taking
-    // the gate would deadlock the child instead of letting it defer/skip.
-    if(internal_threading::fork_stale()) return false;
-    // 2. construct+submit region, shared so concurrent submitters proceed together.
-    auto _g = std::shared_lock<std::shared_mutex>{g_handler_gate};
-    // 3. Inside the region: a submitter that read fini==0 then blocked on the gate
-    // must still be refused, or it would submit after the exclusive sync section.
-    if(refuse_during_fini && registration::get_fini_status() != 0) return false;
-    // 4. Constructs the pool on first real use (correct for signal-less work).
-    get_async_signal_handler()->async(std::move(task));
-    return true;
-}
-
 bool
 context_filter(const context::context* ctx)
 {
@@ -440,54 +379,52 @@ bit_extract(Integral x, int first, int last)
     return (x >> first) & bit_mask(0, last - first);
 }
 
-void
-async_signal_handler(hsa_signal_t                            completion_signal,
-                     hsa_signal_value_t                      starting_value,
-                     std::shared_ptr<queue_info_session_t>&& session)
+// Shared state for the single completion-monitor thread. Enqueue threads push new
+// waits onto `incoming` (the only cross-thread field, hence Synchronized) and bump
+// `wake_signal`, which is appended to the monitor's wait array so
+// hsa_amd_signal_wait_any returns and the monitor can pick them up. `active` is the
+// monitor's live watch set, touched only by the monitor thread; `active_scratch` is a
+// reused compaction buffer swapped with `active` each pass to avoid reallocation;
+// wake_signal, thread, and running are set once at startup.
+struct completion_monitor
 {
-    constexpr auto timeout_hint =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::microseconds{10});
+    common::Synchronized<std::vector<pending_completion>> incoming       = {};
+    std::vector<pending_completion>                       active         = {};
+    std::vector<pending_completion>                       active_scratch = {};
+    hsa_signal_t                                          wake_signal    = {};
+    std::thread                                           thread         = {};
+    std::atomic<bool>                                     running        = {false};
+    // Registered-but-not-yet-completed waits (inbox + active). Lets other threads
+    // observe quiescence without touching the monitor-private `active` vector.
+    std::atomic<uint64_t> inflight = {0};
+};
 
-    auto signal_value = starting_value;
-    auto niterations  = uint64_t{0};
+completion_monitor&
+get_completion_monitor()
+{
+    static auto* _v = new completion_monitor{};
+    return *_v;
+}
 
-    // Stop only on completion or finalization; never run cleanup while the kernel is live.
-    while(true)
-    {
-        signal_value = get_core_table()->hsa_signal_wait_relaxed_fn(completion_signal,
-                                                                    HSA_SIGNAL_CONDITION_LT,
-                                                                    starting_value,
-                                                                    timeout_hint.count(),
-                                                                    HSA_WAIT_STATE_ACTIVE);
+// Hand a completed-batch wait to the monitor: enqueue it on the shared inbox and
+// bump the wake signal so the monitor picks it up. Single point of registration;
+// a multi-monitor variant would select a monitor here.
+void
+register_completion(pending_completion&& pending)
+{
+    auto& mon = get_completion_monitor();
+    mon.inflight.fetch_add(1, std::memory_order_relaxed);
+    mon.incoming.wlock([&pending](auto& inbox) { inbox.emplace_back(std::move(pending)); });
+    get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
+}
 
-        if(signal_value < starting_value) break;         // kernel completed
-        if(registration::get_fini_status() != 0) break;  // tearing down: run cleanup path
-        ++niterations;
-
-        // Surface long-running waits for diagnostics without giving up the wait.
-        constexpr auto warn_interval = (1UL << 20);
-        if(niterations % warn_interval == 0)
-            ROCP_WARNING << fmt::format(
-                "Async signal handler still waiting on signal {{.handle={}}} after {} iterations "
-                "(value={}, starting_value={})",
-                completion_signal.handle,
-                niterations,
-                signal_value,
-                starting_value);
-    }
-
-    ROCP_INFO << fmt::format("Async signal handler invoked for signal {{.handle={}}} with "
-                             "value {} (original value={}, iterations={})",
-                             completion_signal.handle,
-                             signal_value,
-                             starting_value,
-                             niterations);
-
-    if(auto delay_us = common::get_env("ROCPROFILER_TEST_INLINE_ASYNC_DELAY_US", 0); delay_us > 0)
-    {
-        std::this_thread::sleep_for(std::chrono::microseconds{delay_us});
-    }
-
+// Completion bookkeeping for one batch, run after its completion signal drops.
+// Emits dispatch-complete records, releases/decrements the completion signal, and
+// drops the correlation-id references. Waiting is done elsewhere (the monitor);
+// this only runs once the kernel is known complete (or during teardown cleanup).
+void
+run_completion(const std::shared_ptr<queue_info_session_t>& session)
+{
     for(auto& packet : session->packet_data)
     {
         auto dispatch_time = kernel_dispatch::get_dispatch_time(*session, packet);
@@ -696,16 +633,178 @@ signal_less_batch_eligible(Queue*                                            que
     return _eligible;
 }
 
+// Move any newly-registered waits from the shared inbox into the monitor's private
+// active set. Called only by the monitor thread.
+void
+drain_incoming(completion_monitor& mon)
+{
+    mon.incoming.wlock([&mon](auto& inbox) {
+        for(auto& pending : inbox)
+            mon.active.emplace_back(std::move(pending));
+        inbox.clear();
+    });
+}
+
+// Body of the single completion-monitor thread. Waits on the whole set of in-flight
+// completion signals at once (plus a wake signal appended at the end) via
+// hsa_amd_signal_wait_any, so the number of signals watched is decoupled from the
+// number of threads. When any completion signal drops below its starting value, its
+// batch's completion bookkeeping runs and the entry is removed; the wake signal lets
+// producers add new waits or request shutdown. Exits once running is cleared and no
+// waits remain.
+void
+completion_monitor_loop(completion_monitor& mon)
+{
+    // hsa_amd_signal_wait_any takes parallel arrays; rebuilt from `active` (+ wake
+    // signal) each iteration. The wake signal always occupies the final slot.
+    auto signals = std::vector<hsa_signal_t>{};
+    auto conds   = std::vector<hsa_signal_condition_t>{};
+    auto values  = std::vector<hsa_signal_value_t>{};
+
+    constexpr auto timeout_hint =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::milliseconds{100});
+
+    while(true)
+    {
+        drain_incoming(mon);
+
+        // Reset the wake signal before waiting: any producer bump that happened while
+        // we were processing is folded into this pass by the drain above, and a bump
+        // that arrives after this store re-satisfies the wait so we never miss it.
+        get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 0);
+
+        // One more drain closes the window between the pre-wait drain and the reset.
+        drain_incoming(mon);
+
+        if(mon.active.empty())
+        {
+            // Nothing to watch. Exit if shutting down; otherwise block on the wake
+            // signal alone until a producer registers work or requests shutdown.
+            if(!mon.running.load(std::memory_order_acquire)) break;
+
+            get_core_table()->hsa_signal_wait_relaxed_fn(mon.wake_signal,
+                                                         HSA_SIGNAL_CONDITION_NE,
+                                                         0,
+                                                         timeout_hint.count(),
+                                                         HSA_WAIT_STATE_BLOCKED);
+            continue;
+        }
+
+        signals.clear();
+        conds.clear();
+        values.clear();
+        for(const auto& pending : mon.active)
+        {
+            signals.emplace_back(pending.completion_signal);
+            conds.emplace_back(HSA_SIGNAL_CONDITION_LT);
+            values.emplace_back(pending.starting_value);
+        }
+        // Wake signal occupies the final slot, so the satisfying index is commonly
+        // nonzero when a producer bumps it to interrupt the wait.
+        signals.emplace_back(mon.wake_signal);
+        conds.emplace_back(HSA_SIGNAL_CONDITION_NE);
+        values.emplace_back(0);
+
+        // The satisfying index/value are unused: rather than trust the single index
+        // wait_any reports, the active set is rescanned below for all completed waits.
+        auto satisfying_value = hsa_signal_value_t{0};
+        get_amd_ext_table()->hsa_amd_signal_wait_any_fn(static_cast<uint32_t>(signals.size()),
+                                                        signals.data(),
+                                                        conds.data(),
+                                                        values.data(),
+                                                        timeout_hint.count(),
+                                                        HSA_WAIT_STATE_BLOCKED,
+                                                        &satisfying_value);
+        (void) satisfying_value;
+
+        // Regardless of which signal woke us, scan the active set for completed waits:
+        // wait_any reports only one index, but several may have dropped at once.
+        // Compact survivors into the reused scratch buffer, then swap so neither
+        // buffer is reallocated across iterations.
+        mon.active_scratch.clear();
+        for(auto& pending : mon.active)
+        {
+            auto value = get_core_table()->hsa_signal_load_relaxed_fn(pending.completion_signal);
+            if(value < pending.starting_value)
+            {
+                run_completion(pending.session);
+                mon.inflight.fetch_sub(1, std::memory_order_relaxed);
+            }
+            else
+                mon.active_scratch.emplace_back(std::move(pending));
+        }
+        mon.active.swap(mon.active_scratch);
+    }
+
+    // Teardown: the monitor is the sole owner of `active` here (callers join before
+    // touching it). Run remaining completions so signals/correlation ids are released.
+    for(auto& pending : mon.active)
+    {
+        run_completion(pending.session);
+        mon.inflight.fetch_sub(1, std::memory_order_relaxed);
+    }
+    mon.active.clear();
+}
+
+// Create the wake signal and launch the monitor thread. Idempotent: a second call
+// while already running is a no-op.
+void
+start_completion_monitor()
+{
+    auto& mon = get_completion_monitor();
+    if(mon.running.exchange(true)) return;
+
+    auto status = get_amd_ext_table()->hsa_amd_signal_create_fn(0, 0, nullptr, 0, &mon.wake_signal);
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS)
+        << "failed to create completion-monitor wake signal";
+
+    mon.thread = std::thread{[&mon]() { completion_monitor_loop(mon); }};
+}
+
+// Wait for all in-flight completions to drain without stopping the monitor. Safe to
+// call while interception is still active (e.g. on context stop).
+void
+drain_completion_monitor()
+{
+    auto& mon = get_completion_monitor();
+    if(!mon.running.load(std::memory_order_acquire)) return;
+
+    // Poll the in-flight counter (registered minus completed) until it reaches zero.
+    // The monitor makes progress independently; this only observes quiescence without
+    // touching its private active set.
+    constexpr auto poll_interval = std::chrono::milliseconds{1};
+    while(mon.inflight.load(std::memory_order_acquire) > 0)
+    {
+        get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
+        std::this_thread::sleep_for(poll_interval);
+    }
+}
+
+// Stop the monitor: clear running, wake it so it observes the flag, and join. After
+// this returns the monitor thread is dead and its active set is safe to access.
+void
+stop_completion_monitor()
+{
+    auto& mon = get_completion_monitor();
+    if(!mon.running.exchange(false)) return;
+
+    get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
+    if(mon.thread.joinable()) mon.thread.join();
+
+    get_core_table()->hsa_signal_destroy_fn(mon.wake_signal);
+    mon.wake_signal = {};
+}
+
 // Local kernel-dispatch tracing path: swaps in pooled completion signals,
 // runs KERNEL_DISPATCH_ENQUEUE tracer hooks, and prepares a completion-signal
-// waiter for the async signal handler pool. Strict 1:1 packet forwarding; does
+// wait for the monitor thread. Strict 1:1 packet forwarding; does
 // not insert PM4 packets. Distinct from Queue::WriteInterceptor (legacy path).
 void
 write_interceptor(Queue*                                queue,
                   const void*                           packets,
                   uint64_t                              pkt_count,
                   hsa_amd_queue_intercept_packet_writer writer,
-                  async_signal_task_vector_t*           deferred_async_tasks,
+                  pending_completion_vector_t*          deferred_completions,
                   uint64_t                              base_pkt_index)
 {
     using callback_record_t = packet_data_t::callback_record_t;
@@ -801,7 +900,7 @@ write_interceptor(Queue*                                queue,
 
     using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
 
-    auto process_packet_batch = [&queue, &corr_id, tracing_data_v, deferred_async_tasks](
+    auto process_packet_batch = [&queue, &corr_id, tracing_data_v, deferred_completions](
                                     const rocprofiler_packet* _packets,
                                     uint64_t                  _num_packets,
                                     uint64_t                  _base_pkt_index,
@@ -1148,25 +1247,19 @@ write_interceptor(Queue*                                queue,
             _shared_info_session = std::make_shared<queue_info_session_t>(std::move(_info_session));
         }
 
-        // Copy packets into the real queue before creating the completion waiter. The caller
-        // defers the actual async enqueue until after it publishes the final doorbell.
+        // Copy packets into the real queue before creating the completion wait. The caller
+        // defers registration until after it publishes the final doorbell.
         _writer(std::move(transformed_packets));
 
         if(_shared_info_session)
         {
-            auto _task = [_signal_v          = last_completion_signal,
-                          _expected_signal_v = current_signal_value,
-                          _session_v         = std::move(_shared_info_session)]() mutable {
-                async_signal_handler(_signal_v, _expected_signal_v, std::move(_session_v));
-            };
+            auto pending = pending_completion{
+                last_completion_signal, current_signal_value, std::move(_shared_info_session)};
 
-            if(deferred_async_tasks)
-                deferred_async_tasks->emplace_back(std::move(_task));
+            if(deferred_completions)
+                deferred_completions->emplace_back(std::move(pending));
             else
-                // Signal path: refuse_during_fini=false. This task owns the
-                // queue_info_session and performs its correlation-id releases, so
-                // refusing during fini would strand those ids -- behaviour unchanged.
-                submit_inline_async(std::move(_task), /*refuse_during_fini=*/false);
+                register_completion(std::move(pending));
         }
     };
 
@@ -1254,7 +1347,7 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     if(!state) return;
 
     auto* state_ptr            = state.get();
-    auto  deferred_async_tasks = async_signal_task_vector_t{};
+    auto  deferred_completions = pending_completion_vector_t{};
 
     // gate_lock serializes doorbell processing; producers never take it, so no deadlock.
     std::unique_lock<std::mutex> lock{state_ptr->gate_lock};
@@ -1351,7 +1444,7 @@ process_doorbell_impl(const queue_state_ptr_t& state,
                           source_snapshot,
                           pkt_count,
                           ring_buffer_writer,
-                          &deferred_async_tasks,
+                          &deferred_completions,
                           start_submit_pos);
     }
     else
@@ -1387,12 +1480,12 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     tls.last_published_submit_pos = 0;
     tls.state                     = nullptr;
 
-    // Arm completion waiters only after the final doorbell is visible
-    // so they can never wait on unpublished packets.
+    // Register completion waits only after the final doorbell is visible
+    // so the monitor can never wait on unpublished packets.
     lock.unlock();
 
-    for(auto& itr : deferred_async_tasks)
-        submit_inline_async(std::move(itr), /*refuse_during_fini=*/false);
+    for(auto& pending : deferred_completions)
+        register_completion(std::move(pending));
 }
 
 std::shared_ptr<QueueState>
@@ -1629,27 +1722,7 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
 void
 interposition_sync()
 {
-    // FIRST, before the gate: an inherited g_handler_gate held by a vanished parent
-    // thread is unacquirable, so a staleness check placed after it never runs. A
-    // fork child owns no inline workers, so there is nothing to join.
-    if(internal_threading::fork_stale()) return;
-
-    // Take the gate EXCLUSIVE to wait out every submitter already inside
-    // submit_inline_async(), then read the constructed flag: it is now either true
-    // with a fully constructed pool or false with provably no submitter in flight,
-    // closing the flag-alone ordering gap. Release BEFORE join(): joining under the
-    // exclusive lock would block every submitter for the join, which runs tasks
-    // that may re-enter. Precondition: callers have already closed their submission
-    // source (fini latch / D5 neutralization) or a later submitter escapes this.
-    bool _constructed = false;
-    {
-        auto _g      = std::unique_lock<std::shared_mutex>{g_handler_gate};
-        _constructed = async_signal_handler_exists();
-    }
-    if(!_constructed) return;
-
-    constexpr auto async_only = true;
-    if(auto* tg = get_async_signal_handler(); tg) tg->join(async_only);
+    drain_completion_monitor();
 }
 
 void
@@ -1694,6 +1767,9 @@ interposition_init(CoreApiTable* core_table, bool enabled)
     core_table->hsa_signal_silent_store_relaxed_fn   = impl::signal_silent_store_relaxed;
     core_table->hsa_signal_silent_store_screlease_fn = impl::signal_silent_store_screlease;
 
+    // launch the completion-monitor thread that waits on in-flight completion signals
+    start_completion_monitor();
+
     // mark that intercept has been activated
     s_intercept_active.store(enabled, std::memory_order_release);
 
@@ -1718,13 +1794,15 @@ interposition_fini()
     // been held by a thread that did not survive the fork, so acquiring them hangs
     // the child, and destroying inherited HSA signals reaches into a runtime the
     // child does not own. The child abandoned all of this state (D6) and is on its
-    // way out, so skip it -- the same treatment interposition_sync() and
-    // submit_inline_async() already give the fork generation. The atomic stores
-    // above are kept: they are safe and make the child's interception inert.
+    // way out, so skip it. The atomic stores above are kept: they are safe and make
+    // the child's interception inert.
     if(internal_threading::fork_stale()) return;
 
-    // wait for any in-flight signal handlers to complete and clean up the signal pool
+    // drain in-flight completions, then stop and join the monitor thread. Stopping
+    // before signal_pool_fini ensures the monitor has released all pooled signals and
+    // is no longer touching the pool.
     interposition_sync();
+    stop_completion_monitor();
 
     // clean up signal pool
     signal_pool_fini();
