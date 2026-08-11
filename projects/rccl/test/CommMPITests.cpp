@@ -575,7 +575,7 @@ protected:
 
     struct ncclComm* ActiveComm()
     {
-        return reinterpret_cast<struct ncclComm*>(getActiveCommunicator());
+        return getActiveCommunicator();
     }
 };
 
@@ -611,7 +611,7 @@ TEST_F(GinRmaContextMPITest, RmaAndGinFinalizeWithSplitComm)
     ASSERT_MPI_EQ(ncclSuccess,
                   ncclCommSplit(getActiveCommunicator(), 0, getTestMpiRank(), &splitComm, nullptr));
 
-    struct ncclComm* child = reinterpret_cast<struct ncclComm*>(splitComm);
+    struct ncclComm* child = splitComm;
     ASSERT_MPI_TRUE(child->sharedRes == parent->sharedRes);
     ASSERT_MPI_TRUE(child->ginContext == parent->ginContext);
     ASSERT_MPI_TRUE(child->rmaGinContext == parent->rmaGinContext);
