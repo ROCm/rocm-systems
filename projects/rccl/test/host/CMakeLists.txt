@@ -345,7 +345,7 @@ target_compile_definitions(rccl-HostUnitTests PRIVATE
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
-target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt)
+target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt -no-pie)
 
 target_link_libraries(rccl-HostUnitTests PRIVATE
   GTest::GTest
