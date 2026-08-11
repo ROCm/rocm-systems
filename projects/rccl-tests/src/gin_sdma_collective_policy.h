@@ -693,8 +693,8 @@ static constexpr size_t kAllReduceSdmaThresholdDefault = 16777216;  // 16 MiB to
 static constexpr size_t kAllReduceOneShotThresholdDefault = 262144;  // 256 KiB total (measured)
 
 // Two-shot (large/in-place) CTA cap. The two-shot path issues a PER-CTA world GIN
-// barrier + AllGather puts; on 8x MI355X with NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS=1 a
-// dense sweep at -V 32 deadlocks (cumulative GIN/SDMA resource pressure from 32
+// barrier + AllGather puts; on 8x MI355X with the single SDMA channel a dense
+// sweep at -V 32 deadlocks (cumulative GIN/SDMA resource pressure from 32
 // concurrent per-CTA barriers/puts), while -V 8 and -V 16 sweep cleanly to 128 MiB.
 // The two-shot grid is therefore capped to this many CTAs (extra CTAs return
 // early); the one-shot / LSA tiers are unaffected and keep the full launch grid.
