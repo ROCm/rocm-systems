@@ -105,9 +105,10 @@ When modifying instruction semantics or adding instruction support:
 
 1. Edit `lib/python/amdisa/codegen/_generator.py` (never the generated
    C++ files)
-2. Regenerate with `--multi` mode (see [docs/codegen.md](docs/codegen.md))
-3. Format the generated files with `clang-format`
-4. Stage ALL generated files before committing
+2. Regenerate with `scripts/generate-amdisa.sh` (see
+   [docs/codegen.md](docs/codegen.md)); the helper formats changed generated
+   files through pre-commit
+3. Stage ALL generated files before committing
 
 ## Testing
 
