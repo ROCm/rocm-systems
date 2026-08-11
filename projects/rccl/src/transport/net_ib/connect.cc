@@ -1216,6 +1216,18 @@ ncclResult_t ncclIbReceiverPrePostReceiveWorkRequests(struct ncclIbRecvComm* rec
 
 NCCL_PARAM(IbGdrFlushDisable, "GDR_FLUSH_DISABLE", 0);
 
+static ncclResult_t ncclIbFreeGpuFlushMem(struct ncclIbGpuFlush* gpuFlush) {
+  if (gpuFlush->gpuFlushGpuMem == nullptr) return ncclSuccess;
+  if (gpuFlush->gpuFlushMemIsHipAlloc) {
+    CUDACHECK(hipFree(gpuFlush->gpuFlushGpuMem));
+  } else {
+    NCCLCHECK(ncclCudaFree(gpuFlush->gpuFlushGpuMem, /*manager=*/nullptr));
+  }
+  gpuFlush->gpuFlushGpuMem = nullptr;
+  gpuFlush->gpuFlushMemIsHipAlloc = false;
+  return ncclSuccess;
+}
+
 ncclResult_t ncclIbAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** /*recvDevComm*/) {
   ncclResult_t ret = ncclSuccess;
   struct ncclIbListenComm* lComm = (struct ncclIbListenComm*)listenComm;
@@ -1471,11 +1483,12 @@ ib_recv:
       rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
       rCommDev->gpuFlush.gpuMr = nullptr;
       rCommDev->gpuFlush.dmabuf_fd = -1;
+      rCommDev->gpuFlush.gpuFlushMemIsHipAlloc = false;
 
       if (rcclParamIbGdrFlushGpuMemNoRelaxedOrdering()) {
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
         if (ncclCuMemEnable()) {
-          NCCLCHECKGOTO(ncclMemAlloc((void**)&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int)), ret, fail);
+          NCCLCHECKGOTO(ncclMemAlloc((void**)&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int)), ret, cumem_flush_hsa);
           CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&rCommDev->gpuFlush.dmabuf_fd,
                                                     (CUdeviceptr)rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int),
                                                     CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0),
@@ -1488,49 +1501,60 @@ ib_recv:
           gpuFlushRegistered = true;
           goto flush_reg_done;
         cumem_flush_hsa:
+          // The HSA fallback below allocates its own non-VMM buffer, so every cuMem failure
+          // here is recoverable and must not leave ret poisoned for the eventual `return ret`.
+          ret = ncclSuccess;
           if (rCommDev->gpuFlush.dmabuf_fd >= 0) {
             close(rCommDev->gpuFlush.dmabuf_fd);
             rCommDev->gpuFlush.dmabuf_fd = -1;
           }
         }
-#else
-#if defined(HIP_UNCACHED_MEMORY)
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), /*manager=*/nullptr,
-                                     ncclMemPersist, hipDeviceMallocUncached),
-                      ret, fail);
-#else
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), /*manager=*/nullptr,
-                                     ncclMemPersist, hipDeviceMallocFinegrained),
-                      ret, fail);
 #endif
-        if (useDmaBuf) {
-          uint64_t export_offset = 0;
-          void* aligned_ptr = NULL;
-          size_t aligned_size = 0;
-          get_aligned_ptr_and_size(rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), &aligned_ptr, &aligned_size);
-          HSACHECKGOTO(hsa_amd_portable_export_dmabuf(aligned_ptr, aligned_size, &rCommDev->gpuFlush.dmabuf_fd,
-                                                      &export_offset),
-                       ret, peermem_flush);
-          if (wrap_ibv_reg_dmabuf_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, export_offset, sizeof(int),
-                                     (uint64_t)rCommDev->gpuFlush.gpuFlushGpuMem, rCommDev->gpuFlush.dmabuf_fd,
-                                     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) !=
-              ncclSuccess)
-            goto peermem_flush;
-          gpuFlushRegistered = true;
-          goto flush_reg_done;
-        peermem_flush:
-          if (rCommDev->gpuFlush.dmabuf_fd >= 0) {
-            close(rCommDev->gpuFlush.dmabuf_fd);
-            rCommDev->gpuFlush.dmabuf_fd = -1;
+#if defined(__HIP_PLATFORM_AMD__)
+        if (!gpuFlushRegistered) {
+          // The cuMem attempt above may have left a buffer behind before failing.
+          (void)ncclIbFreeGpuFlushMem(&rCommDev->gpuFlush);
+#if defined(HIP_UNCACHED_MEMORY)
+          const unsigned int gpuFlushFlags = hipDeviceMallocUncached;
+#else
+          const unsigned int gpuFlushFlags = hipDeviceMallocFinegrained;
+#endif
+          // Allocate directly through HIP rather than ncclCudaCalloc: with cuMem enabled the
+          // latter routes to the VMM allocator, silently dropping these flags and handing the
+          // HSA exporter another mapping from the allocator whose export just failed.
+          CUDACHECKGOTO(hipExtMallocWithFlags((void**)&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), gpuFlushFlags),
+                        ret, fail);
+          rCommDev->gpuFlush.gpuFlushMemIsHipAlloc = true;
+          CUDACHECKGOTO(hipMemset(rCommDev->gpuFlush.gpuFlushGpuMem, 0, sizeof(int)), ret, fail);
+          if (useDmaBuf) {
+            uint64_t export_offset = 0;
+            void* aligned_ptr = NULL;
+            size_t aligned_size = 0;
+            get_aligned_ptr_and_size(rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), &aligned_ptr, &aligned_size);
+            HSACHECKGOTO(hsa_amd_portable_export_dmabuf(aligned_ptr, aligned_size, &rCommDev->gpuFlush.dmabuf_fd,
+                                                        &export_offset),
+                         ret, peermem_flush);
+            if (wrap_ibv_reg_dmabuf_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, export_offset, sizeof(int),
+                                       (uint64_t)rCommDev->gpuFlush.gpuFlushGpuMem, rCommDev->gpuFlush.dmabuf_fd,
+                                       IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) !=
+                ncclSuccess) {
+              goto peermem_flush;
+            }
+            gpuFlushRegistered = true;
+            goto flush_reg_done;
+          peermem_flush:
+            // Flush registration is optional; losing it degrades GDR rather than failing accept.
+            ret = ncclSuccess;
+            if (rCommDev->gpuFlush.dmabuf_fd >= 0) {
+              close(rCommDev->gpuFlush.dmabuf_fd);
+              rCommDev->gpuFlush.dmabuf_fd = -1;
+            }
           }
         }
 #endif
       flush_reg_done:
         if (!gpuFlushRegistered) {
-          if (rCommDev->gpuFlush.gpuFlushGpuMem) {
-            ncclCudaFree(rCommDev->gpuFlush.gpuFlushGpuMem, /*manager=*/nullptr);
-            rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
-          }
+          (void)ncclIbFreeGpuFlushMem(&rCommDev->gpuFlush);
           rCommDev->gpuFlush.gpuMr = nullptr;
         }
       }
@@ -1642,8 +1666,7 @@ ncclResult_t ncclIbCloseRecv(void* recvComm) {
       struct ncclIbRecvCommDev* commDev = comm->devs + i;
       if (comm->flushEnabled) {
         if (commDev->gpuFlush.gpuFlushGpuMem != nullptr) {
-          NCCLCHECK(ncclCudaFree(commDev->gpuFlush.gpuFlushGpuMem, /*manager=*/nullptr));
-          commDev->gpuFlush.gpuFlushGpuMem = nullptr;
+          NCCLCHECK(ncclIbFreeGpuFlushMem(&commDev->gpuFlush));
           if (commDev->gpuFlush.gpuMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.gpuMr));
           commDev->gpuFlush.gpuMr = nullptr;
           if (commDev->gpuFlush.dmabuf_fd > 0) {

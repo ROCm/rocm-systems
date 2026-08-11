@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna3/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -4419,6 +4420,12 @@ DsLoadU8D16Ds::DsLoadU8D16Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void DsLoadU8D16Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void DsLoadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
     throw util::UnimplementedInst(mnemonic());
@@ -4448,6 +4455,12 @@ DsLoadU8D16HiDs::DsLoadU8D16HiDs(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void DsLoadU8D16HiDs::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void DsLoadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
     throw util::UnimplementedInst(mnemonic());
@@ -4475,6 +4488,12 @@ DsLoadI8D16Ds::DsLoadI8D16Ds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void DsLoadI8D16Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsLoadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4507,6 +4526,12 @@ DsLoadI8D16HiDs::DsLoadI8D16HiDs(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void DsLoadI8D16HiDs::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void DsLoadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
     throw util::UnimplementedInst(mnemonic());
@@ -4537,6 +4562,12 @@ DsLoadU16D16Ds::DsLoadU16D16Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void DsLoadU16D16Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void DsLoadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
     throw util::UnimplementedInst(mnemonic());
@@ -4564,6 +4595,12 @@ DsLoadU16D16HiDs::DsLoadU16D16HiDs(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void DsLoadU16D16HiDs::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsLoadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {

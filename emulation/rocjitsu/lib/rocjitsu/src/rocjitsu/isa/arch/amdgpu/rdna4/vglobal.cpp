@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vglobal.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -565,6 +566,12 @@ GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void GlobalLoadD16U8Vglobal::implicit_uses(RegisterSet &uses) const {
+  Vglobal::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void GlobalLoadD16U8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
@@ -596,6 +603,12 @@ GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void GlobalLoadD16I8Vglobal::implicit_uses(RegisterSet &uses) const {
+  Vglobal::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void GlobalLoadD16I8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -632,6 +645,12 @@ GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void GlobalLoadD16B16Vglobal::implicit_uses(RegisterSet &uses) const {
+  Vglobal::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void GlobalLoadD16B16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
@@ -663,6 +682,12 @@ GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void GlobalLoadD16HiU8Vglobal::implicit_uses(RegisterSet &uses) const {
+  Vglobal::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void GlobalLoadD16HiU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -698,6 +723,12 @@ GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void GlobalLoadD16HiI8Vglobal::implicit_uses(RegisterSet &uses) const {
+  Vglobal::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void GlobalLoadD16HiI8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
@@ -730,6 +761,12 @@ GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void GlobalLoadD16HiB16Vglobal::implicit_uses(RegisterSet &uses) const {
+  Vglobal::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void GlobalLoadD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {

@@ -6,7 +6,9 @@
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -344,6 +346,13 @@ TbufferLoadD16FormatXMtbuf::TbufferLoadD16FormatXMtbuf(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
+}
+
+void TbufferLoadD16FormatXMtbuf::implicit_uses(RegisterSet &uses) const {
+  Mtbuf::implicit_uses(uses);
+  if (auto r = vdata.to_register_ref())
+    uses.expand(*r);
 }
 
 void TbufferLoadD16FormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -366,6 +375,7 @@ TbufferLoadD16FormatXyMtbuf::TbufferLoadD16FormatXyMtbuf(const MachineInst *inst
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferLoadD16FormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -388,6 +398,13 @@ TbufferLoadD16FormatXyzMtbuf::TbufferLoadD16FormatXyzMtbuf(const MachineInst *in
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
+}
+
+void TbufferLoadD16FormatXyzMtbuf::implicit_uses(RegisterSet &uses) const {
+  Mtbuf::implicit_uses(uses);
+  if (auto r = vdata.to_register_ref())
+    uses.expand(RegisterRef{r->cls, static_cast<uint16_t>(r->index + 1), 1});
 }
 
 void TbufferLoadD16FormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -410,6 +427,7 @@ TbufferLoadD16FormatXyzwMtbuf::TbufferLoadD16FormatXyzwMtbuf(const MachineInst *
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferLoadD16FormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -432,6 +450,7 @@ TbufferStoreD16FormatXMtbuf::TbufferStoreD16FormatXMtbuf(const MachineInst *inst
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreD16FormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -454,6 +473,7 @@ TbufferStoreD16FormatXyMtbuf::TbufferStoreD16FormatXyMtbuf(const MachineInst *in
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreD16FormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -476,6 +496,7 @@ TbufferStoreD16FormatXyzMtbuf::TbufferStoreD16FormatXyzMtbuf(const MachineInst *
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreD16FormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -498,6 +519,7 @@ TbufferStoreD16FormatXyzwMtbuf::TbufferStoreD16FormatXyzwMtbuf(const MachineInst
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
 void TbufferStoreD16FormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
