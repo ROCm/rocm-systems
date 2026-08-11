@@ -195,6 +195,17 @@ Debugging HIP applications using Windows tools can be more informative than on L
 tools provides more visibility into debug codes, which makes it easier to inspect variables, watch
 multiple details, and examine call stacks.
 
+HIP Record & Replay
+===================
+
+HIP Record & Replay (HRR) captures HIP API traces into a binary archive and replays them on a live
+GPU for bug reproduction and validation.
+
+As described in https://github.com/ROCm/rocm-systems/blob/develop/projects/clr/hipamd/src/hrr/README.md
+HRR allows you to capture and replay runtime operations of a HIP kernel, letting you replay the
+kernel on other GPUs without having the avilable source code. This lets you review performance issues
+or execution problems without the actual application. 
+
 Useful environment variables
 ===================================================
 
