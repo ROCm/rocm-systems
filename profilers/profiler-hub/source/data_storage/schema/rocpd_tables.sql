@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS
         "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
         "nid" INTEGER NOT NULL,
         "pid" INTEGER NOT NULL,
-        "type" TEXT CHECK ("type" IN ('CPU', 'GPU')),
+        "type" TEXT CHECK ("type" IN ('CPU', 'GPU', 'NIC')),
         "absolute_index" INTEGER,
         "logical_index" INTEGER,
         "type_index" INTEGER,

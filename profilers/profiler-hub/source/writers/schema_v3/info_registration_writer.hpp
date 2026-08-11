@@ -112,10 +112,10 @@ public:
         if(agent_info.unique_id.agent_type.has_value())
         {
             const std::string_view agent_type{ *agent_info.unique_id.agent_type };
-            if(agent_type != "CPU" && agent_type != "GPU")
+            if(agent_type != "CPU" && agent_type != "GPU" && agent_type != "NIC")
             {
                 throw std::invalid_argument(
-                    fmt::format("Invalid agent type: {}. Type can be NULL, CPU, or GPU.",
+                    fmt::format("Invalid agent type: {}. Type can be NULL, CPU, GPU, or NIC.",
                                 agent_type));
             }
         }
