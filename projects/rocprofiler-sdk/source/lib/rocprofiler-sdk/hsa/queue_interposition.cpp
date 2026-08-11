@@ -60,7 +60,6 @@
 #include <hsa/hsa_api_trace.h>
 #include <pthread.h>
 
-#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -656,12 +655,18 @@ completion_monitor_loop(completion_monitor& mon)
         // One more drain closes the window between the pre-wait drain and the reset.
         drain_incoming(mon);
 
+        // Break on shutdown regardless of whether `active` is empty: pending
+        // completion signals may never transition during finalization, so this
+        // check must not be gated on an empty active set or the loop could spin
+        // without ever reaching the teardown path that releases them. Finalization
+        // can begin before the monitor is explicitly stopped, so honor it too.
+        if(!mon.running.load(std::memory_order_acquire) || registration::get_fini_status() != 0)
+            break;
+
         if(mon.active.empty())
         {
-            // Nothing to watch. Exit if shutting down; otherwise block on the wake
-            // signal alone until a producer registers work or requests shutdown.
-            if(!mon.running.load(std::memory_order_acquire)) break;
-
+            // Nothing to watch; block on the wake signal alone until a producer
+            // registers work or requests shutdown.
             get_core_table()->hsa_signal_wait_relaxed_fn(mon.wake_signal,
                                                          HSA_SIGNAL_CONDITION_NE,
                                                          0,
