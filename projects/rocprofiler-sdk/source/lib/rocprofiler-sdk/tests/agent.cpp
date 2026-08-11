@@ -209,10 +209,20 @@ TEST(rocprofiler_lib, agent)
     // bare metal both read the same KFD tree, so rocprofiler's list is a superset
     // of HSA's. On WSL rocprofiler drops every GPU the DXG topology thunk cannot
     // fully describe while HSA keeps reporting it, so there the list may
-    // legitimately be a strict subset. Mirrors the precedence in
-    // select_platform().
-    const bool wsl_topology = !::rocprofiler::platform::gnulinux::is_available() &&
-                              ::rocprofiler::platform::wsl::is_available();
+    // legitimately be a strict subset.
+    //
+    // select_platform() in agent.cpp has internal linkage, so its precedence has
+    // to be restated here: an explicit ROCPROFILER_FORCE_PLATFORM decides, a
+    // value it does not recognize is ignored in favour of autodetect, and
+    // autodetect prefers gnulinux over wsl.
+    const bool wsl_topology = []() {
+        const auto forced =
+            ::rocprofiler::common::get_env("ROCPROFILER_FORCE_PLATFORM", std::string{});
+        if(forced == "wsl") return true;
+        if(forced == "gnulinux") return false;
+        return !::rocprofiler::platform::gnulinux::is_available() &&
+               ::rocprofiler::platform::wsl::is_available();
+    }();
 
     if(!wsl_topology)
     {
