@@ -72,9 +72,8 @@ get_trace_specs()
             .value_or("");
     if(!_periods_v.empty())
     {
-        auto _periods = parse_trace_periods(_periods_v, _delay_v, _duration_v);
-        _v.insert(_v.end(), std::make_move_iterator(_periods.begin()),
-                  std::make_move_iterator(_periods.end()));
+        const auto _periods = parse_trace_periods(_periods_v, _delay_v, _duration_v);
+        _v.insert(_v.end(), _periods.begin(), _periods.end());
     }
 
     return _v;

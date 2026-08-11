@@ -48,7 +48,7 @@ parse_trace_periods(std::string_view periods, double default_delay,
 [[nodiscard]] clockid_t
 parse_trace_period_clock_id(std::string_view clock_id_str);
 
-std::vector<spec>
+[[nodiscard]] std::vector<spec>
 get_trace_specs();
 
 [[nodiscard]] clockid_t
