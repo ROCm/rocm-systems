@@ -6,7 +6,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
-#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -201,6 +201,31 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
 [[nodiscard]] bool image_contains_range(size_t image_size, uint64_t file_offset, uint64_t size) {
   const uint64_t limit = static_cast<uint64_t>(image_size);
   return file_offset <= limit && size <= limit - file_offset;
+}
+
+/// @brief Read a kernel descriptor struct out of the in-memory image.
+///
+/// @returns nullopt if the descriptor does not fit within the image. Shared by
+/// DBT's resource translation and DBI's narrower scratch-grow so both agree on
+/// bounds checking and struct-sized copy.
+[[nodiscard]] std::optional<KD> read_kernel_descriptor(std::span<const uint8_t> image,
+                                                       uint64_t file_offset) {
+  if (!image_contains_range(image.size(), file_offset, sizeof(KD)))
+    return std::nullopt;
+  KD desc;
+  std::memcpy(&desc, image.data() + file_offset, sizeof(desc));
+  return desc;
+}
+
+/// @brief Write a kernel descriptor struct back into the in-memory image.
+///
+/// @returns false if the descriptor does not fit within the image.
+[[nodiscard]] bool write_kernel_descriptor(std::span<uint8_t> image, uint64_t file_offset,
+                                           const KD &desc) {
+  if (!image_contains_range(image.size(), file_offset, sizeof(KD)))
+    return false;
+  std::memcpy(image.data() + file_offset, &desc, sizeof(desc));
+  return true;
 }
 
 /// @brief Write the translated resource fields into a descriptor.
@@ -1292,17 +1317,27 @@ bool CodeObjectPatcher::patch_kernel_descriptor(uint64_t file_offset,
   return true;
 }
 
+bool CodeObjectPatcher::set_private_segment_fixed_size(uint64_t descriptor_file_offset,
+                                                       uint32_t bytes) {
+  auto desc = read_kernel_descriptor(image_, descriptor_file_offset);
+  if (!desc)
+    return false;
+
+  desc->private_segment_fixed_size = bytes;
+  return write_kernel_descriptor(image_, descriptor_file_offset, *desc);
+}
+
 bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation &translation,
                                                             rj_code_arch_t target_arch) {
-  if (!image_contains_range(image_.size(), translation.descriptor_file_offset, sizeof(KD)))
+  auto desc = read_kernel_descriptor(image_, translation.descriptor_file_offset);
+  if (!desc)
     return false;
 
-  KD desc;
-  std::memcpy(&desc, image_.data() + translation.descriptor_file_offset, sizeof(desc));
-  if (!apply_kernel_descriptor_resource_translation(desc, translation, target_arch))
+  if (!apply_kernel_descriptor_resource_translation(*desc, translation, target_arch))
     return false;
 
-  std::memcpy(image_.data() + translation.descriptor_file_offset, &desc, sizeof(desc));
+  if (!write_kernel_descriptor(image_, translation.descriptor_file_offset, *desc))
+    return false;
   if (!redirect_kernel_entry(translation.descriptor_file_offset, translation.entry_text_offset,
                              translation.target_entry_text_offset))
     return false;

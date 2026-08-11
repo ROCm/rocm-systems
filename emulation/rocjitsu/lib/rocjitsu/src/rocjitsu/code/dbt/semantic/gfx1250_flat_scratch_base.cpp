@@ -7,15 +7,17 @@
 #include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
 
 #include "rocjitsu/analysis/liveness.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace rocjitsu {
@@ -25,9 +27,14 @@ namespace {
 /// @details Both deliver the whole 64-bit base in a 64-bit source position; the
 /// low selector is the spelling the A0 profile reads. See gfx1250
 /// operand_types.h (OPR_SSRC_SRC_FLAT_SCRATCH_BASE_LO / _HI).
-constexpr int kFlatScratchBaseLo = 230;
-constexpr int kFlatScratchBaseHi = 231;
+constexpr uint32_t kFlatScratchBaseLo = 230;
+constexpr uint32_t kFlatScratchBaseHi = 231;
 constexpr int k64BitOperand = 64;
+
+/// @brief True when an encoding field value names the flat-scratch base.
+[[nodiscard]] bool names_flat_scratch_base(uint32_t value) {
+  return value == kFlatScratchBaseLo || value == kFlatScratchBaseHi;
+}
 
 /// @brief Highest scalar selector usable as an ordinary SGPR source operand.
 /// @details Selectors above this range name architectural values rather than
@@ -98,32 +105,77 @@ void set_word_field(uint32_t &word, uint32_t value, uint32_t shift, uint32_t wid
   word = (word & ~mask) | ((value << shift) & mask);
 }
 
+/// @brief Read one source-operand field out of the instruction words.
+/// @returns The field's value, or nullopt when it lies outside @p words.
+[[nodiscard]] std::optional<uint32_t> read_word_field(std::span<const uint32_t> words,
+                                                      const SourceField &field) {
+  if (field.word >= words.size())
+    return std::nullopt;
+  const uint32_t mask = (uint32_t{1} << field.width) - 1;
+  return (words[field.word] >> field.shift) & mask;
+}
+
+/// @brief Words of the base encoding that a layout's source fields reach into.
+/// @details Derived from the layout rather than tabulated separately so the two
+/// cannot drift apart as encodings are added.
+[[nodiscard]] size_t modelled_word_count(const EncodingSourceFields &layout) {
+  size_t words = 0;
+  for (uint8_t i = 0; i < layout.count; ++i)
+    words = std::max<size_t>(words, static_cast<size_t>(layout.fields[i].word) + 1);
+  return words;
+}
+
 /// @brief True when source operand @p index names the base in a 64-bit position.
 ///
-/// @details The value alone is not decisive. A vector field that indexes the
-/// register file directly can hold the selector's number while meaning an
-/// ordinary register, so the field has to be one that reaches the scalar
-/// encodings before the value is compared.
+/// @details The selector is read from the encoding field, never from the
+/// decoded operand. A literal source reports the literal's *value* through
+/// Operand::encoding_value(), so an ordinary constant of 230 or 231 is
+/// indistinguishable there from the selector; the field itself still reads 255
+/// (literal) or 254 (literal64) and names no register at all. Trusting the
+/// operand rewrites the very field that marks the literal as present, which
+/// leaves its dword behind as a standalone illegal instruction.
+///
+/// The field must also be one that can reach the scalar encodings before its
+/// value means anything. A vector field that indexes the register file directly
+/// can hold the selector's number while naming an ordinary register.
 ///
 /// Operand::is_vgpr() cannot make that distinction: it is a construction-time
 /// capability of the operand *type*, and the ordinary vector source type is
 /// also the one that accepts scalar values, so it reports true for both.
 [[nodiscard]] bool is_flat_scratch_base_64bit_source(const Instruction &inst, int index,
-                                                     const EncodingSourceFields &layout) {
+                                                     const EncodingSourceFields &layout,
+                                                     std::span<const uint32_t> words) {
   const Operand *op = inst.src_operand(index);
   if (op == nullptr || op->size_bits() != k64BitOperand)
     return false;
   const SourceField &field = layout.fields[static_cast<size_t>(index)];
   if (layout.vector && field.width != kSelectorCapableVectorFieldWidth)
     return false;
-  const int value = op->encoding_value();
-  return value == kFlatScratchBaseLo || value == kFlatScratchBaseHi;
+  const std::optional<uint32_t> encoded = read_word_field(words, field);
+  return encoded.has_value() && names_flat_scratch_base(*encoded);
+}
+
+/// @brief True when @p op is a decoded literal rather than a named operand.
+///
+/// @details Used only by the conservative scans below, which have no field
+/// layout to read and so must fall back to the operand. It recognizes the
+/// 64-bit literal form, the only one the shared Operand interface exposes; a
+/// 32-bit literal widened into a 64-bit source position is indistinguishable
+/// from a selector by value alone. That residual gap is why the modelled
+/// encodings above read the encoding field instead of asking here, and it can
+/// only cause a refusal, never a miscompile.
+///
+/// TODO: close the gap with a generic immediate predicate on Operand, set from
+/// the per-arch is_immediate_type() the way is_vgpr_ already is. That is a
+/// change to the amdisa codegen templates and every generated arch.
+[[nodiscard]] bool is_decoded_literal(const Operand &op) {
+  return op.literal64_value().has_value();
 }
 
 /// @brief Copy the instruction's words from the authoritative source image.
 ///
-/// @details raw_encoding() addresses only the base-format subobject, so any
-/// literal or modifier word that follows it must come from the text image.
+/// @details The rewrite operates on the exact source bytes, including any
+/// literal or modifier words, so copy the complete bounded instruction span.
 [[nodiscard]] std::optional<std::vector<uint32_t>>
 instruction_words(const Instruction &inst, uint64_t offset, std::span<const uint8_t> source_text) {
   const size_t size = static_cast<size_t>(inst.size());
@@ -152,8 +204,10 @@ instruction_words(const Instruction &inst, uint64_t offset, std::span<const uint
     const Operand *op = inst.src_operand(i);
     if (op == nullptr || op->is_vgpr() || op->size_bits() != k64BitOperand)
       continue;
+    if (is_decoded_literal(*op))
+      continue;
     const int value = op->encoding_value();
-    if (value == kFlatScratchBaseLo || value == kFlatScratchBaseHi)
+    if (value >= 0 && names_flat_scratch_base(static_cast<uint32_t>(value)))
       return true;
   }
   return false;
@@ -175,8 +229,10 @@ instruction_words(const Instruction &inst, uint64_t offset, std::span<const uint
     const Operand *op = inst.src_operand(i);
     if (op == nullptr || op->is_vgpr() || op->size_bits() != k64BitOperand)
       continue;
+    if (is_decoded_literal(*op))
+      continue;
     const int value = op->encoding_value();
-    if (value == kFlatScratchBaseLo || value == kFlatScratchBaseHi)
+    if (value >= 0 && names_flat_scratch_base(static_cast<uint32_t>(value)))
       return true;
   }
   return false;
@@ -193,9 +249,15 @@ bool gfx1250_reads_flat_scratch_base_64bit(const Instruction &inst) {
   // than let it reach the copy path unexamined.
   if (!layout)
     return instruction_names_selector_in_any_64bit_source(inst);
+  // Only the base encoding is read here. Every modelled source field lies
+  // inside it, so the decoded size bounds the span without depending on
+  // whether raw_encoding() also addresses trailing literal or modifier words.
+  const size_t available =
+      inst.size() > 0 ? static_cast<size_t>(inst.size()) / sizeof(uint32_t) : 0;
+  const std::span<const uint32_t> words(raw, std::min(modelled_word_count(*layout), available));
   const int sources = std::min(inst.num_src_operands(), static_cast<int>(layout->count));
   for (int i = 0; i < sources; ++i) {
-    if (is_flat_scratch_base_64bit_source(inst, i, *layout))
+    if (is_flat_scratch_base_64bit_source(inst, i, *layout, words))
       return true;
   }
   return false;
@@ -229,7 +291,7 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
   std::vector<uint32_t> prologue;
   std::optional<uint16_t> borrowed_pair;
   for (int i = 0; i < rewritable; ++i) {
-    if (!is_flat_scratch_base_64bit_source(inst, i, *layout))
+    if (!is_flat_scratch_base_64bit_source(inst, i, *layout, *words))
       continue;
 
     const SourceField &field = layout->fields[static_cast<size_t>(i)];
