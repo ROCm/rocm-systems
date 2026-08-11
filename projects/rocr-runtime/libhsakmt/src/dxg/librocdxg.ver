@@ -115,6 +115,7 @@ hsaKmtMemHandleFreePreserveMetadata;
 hsaKmtMemoryGetCpuAddr;
 hsaKmtMemoryCpuMap;
 hsaKmtGetAmdGPUDeviceFd;
+hsaKmtTranslateGpuVa;
 rocdxg_smi_get_device_count;
 rocdxg_smi_get_device_info;
 rocdxg_smi_get_vram_usage;
