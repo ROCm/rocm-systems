@@ -2173,11 +2173,10 @@ def test_generated_dpp8_disassembly_uses_encoding_state(
     amdgpu_generated_root: Path,
 ) -> None:
     for arch in ('rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4', 'gfx1250'):
-        encodings_cpp = (amdgpu_generated_root / arch / 'encodings.cpp').read_text()
-        encodings_h = (amdgpu_generated_root / arch / 'encodings.h').read_text()
-        generated_cpp = '\n'.join(
-            path.read_text() for path in (amdgpu_generated_root / arch).glob('*.cpp')
-        )
+        arch_root = amdgpu_generated_root / _generated_dir_name(arch)
+        encodings_cpp = (arch_root / 'encodings.cpp').read_text()
+        encodings_h = (arch_root / 'encodings.h').read_text()
+        generated_cpp = '\n'.join(path.read_text() for path in arch_root.glob('*.cpp'))
 
         vop1_modifiers = encodings_cpp[
             encodings_cpp.index('void Vop1::build_modifiers') :
