@@ -245,6 +245,12 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
     comm->ceColl.ceSyncWin = NULL;
   }
 
+  // Free the UC barrier flag-value device buffer
+  if (comm->ceColl.ceSeqNumDev != NULL) {
+    NCCLCHECKGOTO(ncclCudaFree(comm->ceColl.ceSeqNumDev, comm->memManager), ret, fail);
+    comm->ceColl.ceSeqNumDev = NULL;
+  }
+
   // Clean up CE AllReduce staging buffer
   if (comm->ceColl.ceARTmpBuf != NULL) {
     if (comm->ceColl.ceARTmpWin && comm->ceColl.ceARTmpWin->vidmem) {
