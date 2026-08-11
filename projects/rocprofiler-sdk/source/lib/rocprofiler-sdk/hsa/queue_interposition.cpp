@@ -382,10 +382,7 @@ struct completion_monitor
 completion_monitor&
 get_completion_monitor()
 {
-    // Intentionally leaked, never deleted: the monitor thread and its state must
-    // outlive static destruction so a late completion or teardown cannot touch a
-    // destroyed object during HSA shutdown ordering.
-    static auto* _v = new completion_monitor{};
+    static auto*& _v = common::static_object<completion_monitor>::construct();
     return *_v;
 }
 
