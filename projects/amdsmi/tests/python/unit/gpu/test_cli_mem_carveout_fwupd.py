@@ -59,8 +59,9 @@ _CARVEOUT_OPTIONS = ["512 MB", "4 GB", "8 GB", "16 GB", "32 GB", "64 GB", "96 GB
 _DEFAULT_PAYLOAD = {
     "BiosSettings": [
         {
-            # Decoy: an enumeration setting with a different name.
+            # Decoy: an enumeration setting with an unrelated AppStream id.
             "Name": "Thermal Profile",
+            "BiosSettingId": "com.hp-bioscfg.Thermal_Profile",
             "BiosSettingCurrentValue": "Balanced",
             "BiosSettingType": 1,
             "BiosSettingReadOnly": "False",
@@ -68,6 +69,7 @@ _DEFAULT_PAYLOAD = {
         },
         {
             "Name": "Dedicated Graphics Memory",
+            "BiosSettingId": "com.hp-bioscfg.Dedicated_Graphics_Memory",
             "BiosSettingCurrentValue": "32 GB",
             "BiosSettingType": 1,
             "BiosSettingReadOnly": "False",
@@ -189,7 +191,13 @@ def _fwupd_run(recorder, version="2.1.1", payload=None, set_result=(0, "", "")):
         argv = list(cmd)
         sub = argv[1] if len(argv) > 1 else ""
         if sub == "--version":
-            return subprocess.CompletedProcess(argv, 0, f"client version:\t{version}\n", "")
+            versions = {
+                "Versions": [
+                    {"Type": "compile", "AppstreamId": "org.freedesktop.fwupd", "Version": version},
+                    {"Type": "runtime", "AppstreamId": "org.freedesktop.fwupd", "Version": version},
+                ]
+            }
+            return subprocess.CompletedProcess(argv, 0, json.dumps(versions), "")
         if sub == "get-bios-settings":
             return subprocess.CompletedProcess(argv, 0, payload_json, "")
         if sub == "set-bios-setting":
@@ -258,13 +266,15 @@ class TestFwupdBiosAdapter(_CarveoutFwupdBase):
         self.assertEqual(info["current_value"], "32 GB")
         self.assertEqual(info["current_index"], 4)
 
-    def test_get_rejects_same_name_wrong_type(self):
+    def test_get_rejects_unknown_setting_id(self):
         payload = {
             "BiosSettings": [
                 {
+                    # Carveout-like name, but an id we do not recognise.
                     "Name": "Dedicated Graphics Memory",
+                    "BiosSettingId": "com.example.some_other_knob",
                     "BiosSettingCurrentValue": "x",
-                    "BiosSettingType": 2,
+                    "BiosSettingType": 1,
                     "BiosSettingReadOnly": "False",
                     "BiosSettingPossibleValues": ["x", "y"],
                 }
@@ -273,6 +283,39 @@ class TestFwupdBiosAdapter(_CarveoutFwupdBase):
         _recorder, stack = self._patch_fwupd(payload=payload)
         with stack:
             self.assertIsNone(self.fwupd_bios.get_carveout_setting())
+
+    def test_get_prefers_amd_setting_id_over_hp(self):
+        # When both vendor ids are present, AMD's attribute wins regardless of
+        # array order, and its options/current value are the ones reported.
+        amd_options = ["Minimum (512 MB)", "Medium (8 GB)", "High (16 GB)"]
+        payload = {
+            "BiosSettings": [
+                {
+                    "Name": "Dedicated Graphics Memory",
+                    "BiosSettingId": "com.hp-bioscfg.Dedicated_Graphics_Memory",
+                    "BiosSettingCurrentValue": "32 GB",
+                    "BiosSettingType": 1,
+                    "BiosSettingReadOnly": "False",
+                    "BiosSettingPossibleValues": list(_CARVEOUT_OPTIONS),
+                },
+                {
+                    "Name": "Dedicated Video Memory",
+                    "BiosSettingId": "com.amd-gpu.uma_carveout",
+                    "BiosSettingCurrentValue": "Medium (8 GB)",
+                    "BiosSettingType": 1,
+                    "BiosSettingReadOnly": False,
+                    "BiosSettingPossibleValues": list(amd_options),
+                },
+            ]
+        }
+        _recorder, stack = self._patch_fwupd(payload=payload)
+        with stack:
+            info = self.fwupd_bios.get_carveout_setting()
+        self.assertIsNotNone(info)
+        self.assertEqual(info["name"], "Dedicated Video Memory")
+        self.assertEqual(info["options"], amd_options)
+        self.assertEqual(info["current_value"], "Medium (8 GB)")
+        self.assertEqual(info["current_index"], 1)
 
     def test_set_maps_index_to_value_string(self):
         # (c) index -> possible_values[index] STRING, passed to set-bios-setting.

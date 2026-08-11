@@ -40,10 +40,14 @@ from typing import List, Optional
 _MIN_READ_VERSION = (1, 8, 4)
 _MIN_WRITE_VERSION = (2, 1, 1)
 
-# The knob is matched case-insensitively by name and by enumeration type, rather
-# than a single hard-coded string, so vendor naming variants still resolve.
-_CARVEOUT_NAME_CANDIDATES = ("dedicated graphics memory",)
-_BIOS_SETTING_TYPE_ENUMERATION = 1
+# The knob is matched by its vendor-specific AppStream ``BiosSettingId`` rather
+# than a display name, whose semantics are not guaranteed identical across
+# vendors. AMD's canonical attribute is preferred and HP's UEFI-HII naming is the
+# fallback; order is significant, so the first id present wins.
+_CARVEOUT_SETTING_IDS = ("com.amd-gpu.uma_carveout", "com.hp-bioscfg.Dedicated_Graphics_Memory")
+
+# AppStream component id of the fwupd daemon, reported by ``fwupdmgr --version``.
+_FWUPD_APPSTREAM_ID = "org.freedesktop.fwupd"
 
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
@@ -75,10 +79,28 @@ def _run_fwupdmgr(args: List[str]) -> Optional[subprocess.CompletedProcess]:
 
 
 def _fwupd_version() -> Optional[tuple]:
-    result = _run_fwupdmgr(["--version"])
-    if result is None:
+    result = _run_fwupdmgr(["--version", "--json"])
+    if result is None or result.returncode != 0:
         return None
-    return _parse_version(result.stdout or result.stderr or "")
+    try:
+        payload = json.loads(result.stdout)
+    except (ValueError, TypeError):
+        return None
+    # ``Versions`` reports both the compile-time and runtime fwupd component; the
+    # runtime daemon is what actually applies the change, so prefer it.
+    runtime_version = None
+    compile_version = None
+    for entry in payload.get("Versions", []) or []:
+        if entry.get("AppstreamId") != _FWUPD_APPSTREAM_ID:
+            continue
+        parsed = _parse_version(str(entry.get("Version", "")))
+        if parsed is None:
+            continue
+        if entry.get("Type") == "runtime":
+            runtime_version = parsed
+        elif entry.get("Type") == "compile":
+            compile_version = parsed
+    return runtime_version or compile_version
 
 
 def fwupd_available(require_write: bool = False) -> bool:
@@ -91,13 +113,16 @@ def fwupd_available(require_write: bool = False) -> bool:
 
 
 def _find_carveout(settings) -> Optional[dict]:
+    # Index settings by their AppStream id (case-insensitive) and return the
+    # highest-priority match, so AMD's attribute wins over HP's when both exist.
+    by_id = {}
     for setting in settings:
-        name = str(setting.get("Name", "")).strip().lower()
-        try:
-            setting_type = int(setting.get("BiosSettingType", -1))
-        except (TypeError, ValueError):
-            setting_type = -1
-        if name in _CARVEOUT_NAME_CANDIDATES and setting_type == _BIOS_SETTING_TYPE_ENUMERATION:
+        setting_id = str(setting.get("BiosSettingId", "")).strip().lower()
+        if setting_id and setting_id not in by_id:
+            by_id[setting_id] = setting
+    for candidate in _CARVEOUT_SETTING_IDS:
+        setting = by_id.get(candidate.lower())
+        if setting is not None:
             return setting
     return None
 
