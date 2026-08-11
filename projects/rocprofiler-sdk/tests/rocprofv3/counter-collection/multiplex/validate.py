@@ -46,22 +46,31 @@ def test_agent_info(agent_info_input_data):
             assert int(row["Max_Waves_Per_Simd"]) > 0
 
 
-def expected_group_index(dispatch_id, pmc_group_interval, num_groups):
-    return ((dispatch_id - 1) // pmc_group_interval) % num_groups
+def expected_group_schedule(num_dispatches, pmc_group_interval, num_groups):
+    """The group each dispatch is scheduled under. The tool advances a counter once
+    per profiled dispatch on a device and selects (counter / interval) % num_groups,
+    so the schedule follows each device's own dispatch ordering."""
+    return [(idx // pmc_group_interval) % num_groups for idx in range(num_dispatches)]
 
 
-def _actual_group_index(seen_counters, group_counters):
-    for group_id, counters in enumerate(group_counters):
-        if seen_counters == counters:
-            return group_id
-    return None
+def _matching_group_indices(seen_counters, group_counters):
+    return [
+        group_id
+        for group_id, counters in enumerate(group_counters)
+        if seen_counters == counters
+    ]
 
 
 def test_counter_collection_multiplex(
-    counter_input_data, multiplex_layout, allow_zero_counter_values
+    counter_input_data, multiplex_layout, skip_layout_check, allow_zero_counter_values
 ):
     if multiplex_layout is None:
-        pytest.skip("--multiplex-input not set (no single layout to validate)")
+        # Absent options otherwise turn a mis-plumbed test into a silent pass.
+        assert skip_layout_check, (
+            "--multiplex-input is required to validate the group schedule; pass "
+            "--skip-layout-check to opt out for a run with no single valid layout"
+        )
+        pytest.skip("--skip-layout-check set (no single valid layout for this run)")
 
     pmc_groups, pmc_group_interval = multiplex_layout
     num_groups = len(pmc_groups)
@@ -69,7 +78,7 @@ def test_counter_collection_multiplex(
     group_counters = [set(group) for group in pmc_groups]
     all_counters = set().union(*group_counters)
 
-    # grouped per Agent_Id then Dispatch_Id (the interval rotates per device)
+    # grouped per Agent_Id then Dispatch_Id (the tool rotates groups per device)
     per_agent = defaultdict(lambda: defaultdict(set))
     for row in counter_input_data:
         assert int(row["Queue_Id"]) > 0
@@ -87,53 +96,45 @@ def test_counter_collection_multiplex(
 
     assert per_agent, "no counter collection data was produced"
 
+    # every dispatch in the process is profiled exactly once, across all devices
+    all_dispatch_ids = sorted(
+        dispatch_id for dispatches in per_agent.values() for dispatch_id in dispatches
+    )
+    assert all_dispatch_ids == list(
+        range(1, len(all_dispatch_ids) + 1)
+    ), f"dispatch ids are not contiguous from 1: {all_dispatch_ids}"
+
     observed_group_counters = [set() for _ in pmc_groups]
 
     for agent_id, dispatch_counters in per_agent.items():
         dispatch_ids = sorted(dispatch_counters)
+        expected_groups = expected_group_schedule(
+            len(dispatch_ids), pmc_group_interval, num_groups
+        )
 
-        # Dispatch_Id must be contiguous 1..N (each dispatch profiled exactly once)
-        assert dispatch_ids == list(
-            range(1, len(dispatch_ids) + 1)
-        ), f"agent {agent_id} dispatch ids are not contiguous from 1: {dispatch_ids}"
-
-        group_sequence = []
-        for dispatch_id in dispatch_ids:
+        for position, (dispatch_id, group_id) in enumerate(
+            zip(dispatch_ids, expected_groups)
+        ):
             seen_counters = dispatch_counters[dispatch_id]
-            group_id = expected_group_index(dispatch_id, pmc_group_interval, num_groups)
-            expected_counters = group_counters[group_id]
 
-            # a dispatch collects exactly its group's set (no leakage, no partial)
-            assert seen_counters, f"dispatch {dispatch_id} collected no counters"
-            assert seen_counters == expected_counters, (
-                f"agent {agent_id} dispatch {dispatch_id} maps to group {group_id} "
-                f"({sorted(expected_counters)}) but collected {sorted(seen_counters)}"
+            # the collected set is exactly one group of the layout: no counter from
+            # another group leaked in, and no counter of this group is missing
+            matching = _matching_group_indices(seen_counters, group_counters)
+            assert matching, (
+                f"agent {agent_id} dispatch {dispatch_id} collected "
+                f"{sorted(seen_counters)}, which is not exactly any group of "
+                f"{[sorted(group) for group in group_counters]}"
             )
 
-            group_sequence.append(_actual_group_index(seen_counters, group_counters))
-            observed_group_counters[group_id] |= seen_counters
+            # ... and it is the group this position in the rotation is scheduled for
+            assert group_id in matching, (
+                f"agent {agent_id} dispatch {dispatch_id} (dispatch "
+                f"{position + 1} on this device) is scheduled for group {group_id} "
+                f"({sorted(group_counters[group_id])}) but collected group "
+                f"{matching[0]} ({sorted(seen_counters)})"
+            )
 
-        # consecutive dispatches stay on one group for exactly the interval
-        # (the trailing run may be a partial cycle)
-        run_start = 0
-        for idx in range(1, len(group_sequence) + 1):
-            if (
-                idx == len(group_sequence)
-                or group_sequence[idx] != group_sequence[run_start]
-            ):
-                run_len = idx - run_start
-                if idx == len(group_sequence):
-                    assert run_len <= pmc_group_interval, (
-                        f"agent {agent_id}: trailing run of group "
-                        f"{group_sequence[run_start]} has length {run_len} > "
-                        f"interval {pmc_group_interval}"
-                    )
-                else:
-                    assert run_len == pmc_group_interval, (
-                        f"agent {agent_id}: run of group {group_sequence[run_start]} "
-                        f"has length {run_len} != interval {pmc_group_interval}"
-                    )
-                run_start = idx
+            observed_group_counters[group_id] |= seen_counters
 
     for group_id, expected_counters in enumerate(group_counters):
         assert observed_group_counters[group_id] == expected_counters, (
@@ -142,17 +143,26 @@ def test_counter_collection_multiplex(
         )
 
 
-def test_counter_value_stability(counter_input_data, max_value_ratio):
+def test_counter_value_stability(counter_input_data, stable_counters, max_value_ratio):
     """Values for a counter across identical repeated dispatches must be stable
-    (max <= ratio * min). Skipped unless --max-value-ratio is set."""
-    if max_value_ratio is None:
-        pytest.skip("--max-value-ratio not set (workload not identical-dispatch)")
+    (max <= ratio * min). Restricted to --stable-counters: only counters that measure
+    the kernel itself qualify, since free-running clock counters such as GRBM_COUNT
+    time the whole dispatch window and vary with unrelated load on the device."""
+    if stable_counters is None:
+        pytest.skip("--stable-counters not set (workload not identical-dispatch)")
 
     by_counter = defaultdict(list)
     for row in counter_input_data:
+        if row["Counter_Name"] not in stable_counters:
+            continue
         by_counter[(row["Agent_Id"], row["Counter_Name"])].append(
             float(row["Counter_Value"])
         )
+
+    assert {counter_name for _, counter_name in by_counter} == stable_counters, (
+        f"--stable-counters {sorted(stable_counters)} were not all collected, saw "
+        f"{sorted({counter_name for _, counter_name in by_counter})}"
+    )
 
     checked = 0
     for (agent_id, counter_name), values in by_counter.items():

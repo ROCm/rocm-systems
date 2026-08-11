@@ -63,7 +63,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-multiplex
     TEST_PATHS validate.py
-    COPY conftest.py input.json input.yml input_3group.json input_3group.yml
+    COPY conftest.py input.json
     CONFIG pytest.ini
     ARGS --agent-input
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_json_agent_info.csv
@@ -91,7 +91,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-multiple-yaml
     TEST_PATHS validate.py
-    COPY conftest.py input.json input.yml input_3group.json input_3group.yml
+    COPY conftest.py input.yml
     CONFIG pytest.ini
     ARGS --agent-input
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_yaml_agent_info.csv
@@ -124,7 +124,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-multiplex-3group
     TEST_PATHS validate.py
-    COPY conftest.py input.json input.yml input_3group.json input_3group.yml
+    COPY conftest.py input_3group.json
     CONFIG pytest.ini
     ARGS --agent-input
          ${CMAKE_CURRENT_BINARY_DIR}/multiplex-3group-json-cc/out_3group_json_agent_info.csv
@@ -132,8 +132,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/multiplex-3group-json-cc/out_3group_json_counter_collection.csv
          --multiplex-input
          ${CMAKE_CURRENT_BINARY_DIR}/input_3group.json
-         --max-value-ratio
-         2.0
+         --stable-counters
+         SQ_WAVES
     TIMEOUT 120
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-multiplex-3group)
@@ -155,7 +155,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-multiplex-3group-yaml
     TEST_PATHS validate.py
-    COPY conftest.py input.json input.yml input_3group.json input_3group.yml
+    COPY conftest.py input_3group.yml
     CONFIG pytest.ini
     ARGS --agent-input
          ${CMAKE_CURRENT_BINARY_DIR}/multiplex-3group-yaml-cc/out_3group_yaml_agent_info.csv
@@ -163,8 +163,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/multiplex-3group-yaml-cc/out_3group_yaml_counter_collection.csv
          --multiplex-input
          ${CMAKE_CURRENT_BINARY_DIR}/input_3group.yml
-         --max-value-ratio
-         2.0
+         --stable-counters
+         SQ_WAVES
     TIMEOUT 120
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-multiplex-3group-yaml)
@@ -189,7 +189,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-multiplex-interval4
     TEST_PATHS validate.py
-    COPY conftest.py input_interval4.json input_interval4.yml
+    COPY conftest.py input_interval4.json
     CONFIG pytest.ini
     ARGS --agent-input
          ${CMAKE_CURRENT_BINARY_DIR}/multiplex-interval4-json-cc/out_interval4_json_agent_info.csv
@@ -197,8 +197,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/multiplex-interval4-json-cc/out_interval4_json_counter_collection.csv
          --multiplex-input
          ${CMAKE_CURRENT_BINARY_DIR}/input_interval4.json
-         --max-value-ratio
-         2.0
+         --stable-counters
+         SQ_WAVES
     TIMEOUT 120
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-multiplex-interval4)
@@ -220,7 +220,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-multiplex-interval4-yaml
     TEST_PATHS validate.py
-    COPY conftest.py input_interval4.json input_interval4.yml
+    COPY conftest.py input_interval4.yml
     CONFIG pytest.ini
     ARGS --agent-input
          ${CMAKE_CURRENT_BINARY_DIR}/multiplex-interval4-yaml-cc/out_interval4_yaml_agent_info.csv
@@ -228,8 +228,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/multiplex-interval4-yaml-cc/out_interval4_yaml_counter_collection.csv
          --multiplex-input
          ${CMAKE_CURRENT_BINARY_DIR}/input_interval4.yml
-         --max-value-ratio
-         2.0
+         --stable-counters
+         SQ_WAVES
     TIMEOUT 120
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-multiplex-interval4-yaml)
@@ -259,15 +259,14 @@ rocprofiler_add_integration_validate_test(
 # two 6-counter groups that multiplexing collects across dispatches. The integer-only
 # workload leaves some SQ counters at 0, hence --allow-zero-counter-values.
 #
-# The negative case (all 12 in one group) is not a ctest: rocprofv3 aborts (SIGABRT) on it
-# instead of exiting cleanly, which would hang the test.
-#
-# The per-pass counter limit is architecture-specific (verified on gfx942), so this is
-# gated to the gfx9/CDNA family and disabled elsewhere.
+# This depends on the architecture: the layout needs all 12 counters to resolve, and they
+# have to exceed one pass when merged. That holds on gfx94x (verified on gfx942), whereas
+# gfx900/gfx906/gfx908 define only 7 of the 12, which then fit in a single pass and no
+# longer demonstrate multiplexing beyond one pass. An unknown architecture disables it.
 set(_MULTIPLEX_OVERSUB_DISABLED ON)
 if(rocprofiler-sdk-tests-gfx-info)
     list(GET rocprofiler-sdk-tests-gfx-info 0 _multiplex_gpu0_gfx)
-    if("${_multiplex_gpu0_gfx}" MATCHES "^gfx9")
+    if("${_multiplex_gpu0_gfx}" MATCHES "^gfx94[0-9]$")
         set(_MULTIPLEX_OVERSUB_DISABLED OFF)
     endif()
 endif()
@@ -305,7 +304,8 @@ rocprofiler_add_integration_validate_test(
 
 # Graceful degradation: a layout with an unresolvable (unknown counter) group and an empty
 # group must drop only those groups and still collect the valid one. --present-counters is
-# the exact surviving set. No --multiplex-input, so the layout test skips here.
+# the exact surviving set. The layout has no single valid group, hence --skip-layout-check
+# instead of --multiplex-input.
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-counter-collection-multiplex-degraded
     COMMAND
@@ -330,6 +330,7 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/multiplex-degraded-json-cc/out_degraded_json_counter_collection.csv
          --present-counters
          "SQ_WAVES,GRBM_COUNT"
+         --skip-layout-check
     TIMEOUT 120
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-multiplex-degraded)

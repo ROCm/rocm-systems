@@ -51,17 +51,31 @@ def pytest_addoption(parser):
         help="Path to the JSON/YAML multiplex layout input used for the run.",
     )
     parser.addoption(
+        "--skip-layout-check",
+        action="store_true",
+        default=False,
+        help="Opt out of the group-schedule check for runs that have no single valid "
+        "layout (the graceful-degradation run). Required to omit --multiplex-input, so "
+        "that forgetting it fails instead of silently skipping.",
+    )
+    parser.addoption(
         "--rocprofv3",
         action="store",
         help="Path to the rocprofv3 script (imported for GPU-free parse unit tests).",
     )
     parser.addoption(
+        "--stable-counters",
+        action="store",
+        default=None,
+        help="Comma-separated counters whose values must be stable across identical "
+        "dispatches. Only counters that measure the kernel itself qualify.",
+    )
+    parser.addoption(
         "--max-value-ratio",
         action="store",
         type=float,
-        default=None,
-        help="If set, assert per-counter values are stable across identical "
-        "dispatches (max <= ratio * min).",
+        default=2.0,
+        help="Tolerance for the --stable-counters check (max <= ratio * min).",
     )
     parser.addoption(
         "--allow-zero-counter-values",
@@ -135,6 +149,19 @@ def multiplex_layout(request):
     ), "pmc_group_interval must be a positive integer"
 
     return pmc_groups, pmc_group_interval
+
+
+@pytest.fixture
+def skip_layout_check(request):
+    return request.config.getoption("--skip-layout-check")
+
+
+@pytest.fixture
+def stable_counters(request):
+    value = request.config.getoption("--stable-counters")
+    if not value:
+        return None
+    return {name.strip() for name in value.split(",") if name.strip()}
 
 
 @pytest.fixture
