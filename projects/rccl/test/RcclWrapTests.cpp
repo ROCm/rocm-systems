@@ -9,6 +9,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 
 #include "comm.h"
 #include "common/ErrCode.hpp"
@@ -1691,14 +1692,17 @@ TEST(Rcclwrap, RcclHierarchicalAlgoInfoTests)
                     GTEST_SKIP() << "Direct AllGather is disabled on AINIC";
                 }
 
-                ncclComm_t            parent = nullptr, inter = nullptr, intra = nullptr;
-                struct ncclTopoSystem parentTopo, interTopo, intraTopo;
-                struct ncclTopoNode   parentGpu, interGpu, intraGpu;
+                ncclComm_t          parent = nullptr, inter = nullptr, intra = nullptr;
+                struct ncclTopoNode parentGpu, interGpu, intraGpu;
+
+                auto parentTopo = std::make_unique<ncclTopoSystem>();
+                auto interTopo  = std::make_unique<ncclTopoSystem>();
+                auto intraTopo  = std::make_unique<ncclTopoSystem>();
 
                 // 8 nodes x 8 local ranks.
-                CreateMockComm(parent, parentTopo, parentGpu, "gfx942", 64);
-                CreateMockComm(inter, interTopo, interGpu, "gfx942", 8);
-                CreateMockComm(intra, intraTopo, intraGpu, "gfx942", 8);
+                CreateMockComm(parent, *parentTopo, parentGpu, "gfx942", 64);
+                CreateMockComm(inter, *interTopo, interGpu, "gfx942", 8);
+                CreateMockComm(intra, *intraTopo, intraGpu, "gfx942", 8);
 
                 parent->p2pnChannels          = 32;
                 inter->p2pnChannels           = 12;
