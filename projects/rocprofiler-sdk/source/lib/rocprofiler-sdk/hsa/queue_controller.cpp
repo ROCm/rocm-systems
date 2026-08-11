@@ -896,6 +896,11 @@ queue_controller_fini()
     // synchronize first
     queue_controller_sync();
 
+    // Stop the interposition monitor before any signal-pool teardown: its straggler
+    // sweep releases pooled signals, so it must run while the pool is still alive
+    // (queue_fini below tears the pool down).
+    queue_interposition::stop_completion_monitor();
+
     // finalize queue data (e.g. clean up signal pool)
     if(enable_queue_intercept()) queue_fini();
 

@@ -313,6 +313,17 @@ interposition_fini();
  */
 void
 interposition_sync();
+
+/**
+ * @brief Stop and join the completion-monitor thread, sweeping any stragglers
+ *
+ * Clears the running flag, wakes the monitor, joins it, waits for any producer still
+ * in the doorbell path to finish, and runs completion for any entry they leave behind
+ * so pooled signals / correlation-id refs are released. Must be called before the
+ * signal pool is torn down so the sweep's releases target a live pool.
+ */
+void
+stop_completion_monitor();
 }  // namespace queue_interposition
 }  // namespace hsa
 }  // namespace rocprofiler
