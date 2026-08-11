@@ -38,7 +38,8 @@
 
 #include "StandaloneUtils.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
-#include "rccl_common.h"  // rcclGetCollImplInfo, rcclGetAlgoName, rcclGetProtocolName, rcclAddonAlgos_t
+#include "common/SymmetricBufferHelpers.hpp"  // RCCLTestHelpers::SymBuf (RAII deregister+free)
+#include "rccl_common.h"  // rcclGetCollImplInfo, rcclSymKGetInfo, rcclGetAlgoName, rcclGetProtocolName, rcclAddonAlgos_t
 
 // rccl_common.h drags in RCCL's internal NCCLCHECK (which `return`s). These tests
 // live in void functions, so use a gtest-friendly, non-returning check instead.
@@ -104,15 +105,11 @@ namespace RcclUnitTesting
     {
       SelectedImpl kernel;    // from enqueue.cc tuning line
       SelectedImpl addon;     // from a backend-specific line, if any
-      bool         warpSpeed = false;
 
       std::istringstream iss(log);
       std::string        line;
       while (std::getline(iss, line))
       {
-        // WarpSpeed: RING algorithm reported as "RING*" with scaled channels.
-        if (line.find("WarpSpeed enabled") != std::string::npos) warpSpeed = true;
-
         // Canonical addon-backend selection line (CE / DDA / Direct / Hier /
         // symmetric): "<Func> impl selected: algo <NAME>". This is the only line
         // several addon backends emit (DDA IPC, CE registered, symmetric all run
@@ -178,14 +175,9 @@ namespace RcclUnitTesting
 
       if (addon.found) return addon;
 
-      if (kernel.found && warpSpeed)
-      {
-        // Base tuning line logs "RING"; the backend actually running is WarpSpeed,
-        // which the report names "RING*" and runs on a scaled channel count -- so
-        // proto still matches the tuning line but channels do not.
-        kernel.algoName    = "RING*";
-        kernel.hasChannels = false;
-      }
+      // WarpSpeed self-describes on the tuning line as "RING*" with the physical
+      // block count (enqueue.cc), so no post-processing is needed here -- the parsed
+      // algo/channels already match what rcclGetCollImplInfo reports.
       return kernel;
     }
 
@@ -210,12 +202,44 @@ namespace RcclUnitTesting
       return r;
     }
 
+    // (algo, proto) reported by rcclSymKGetInfo -- the reporter rccl-tests calls in
+    // -R 2 (symmetric-window-registered) mode. Decoded to names like ReportedImpl.
+    struct SymkReport
+    {
+      ncclResult_t res = ncclSuccess;
+      int          algo = -1, proto = -1, channels = -1;
+      std::string  algoName, protoName;
+    };
+
+    SymkReport QuerySymk(ncclComm_t comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dt, ncclRedOp_t op)
+    {
+      SymkReport r;
+      r.res = rcclSymKGetInfo(comm, coll, count, dt, op, &r.algo, &r.proto, &r.channels);
+      const char* an = nullptr;
+      const char* pn = nullptr;
+      if (r.res == ncclSuccess)
+      {
+        if (rcclGetAlgoName(r.algo, &an) == ncclSuccess && an) r.algoName = an;
+        if (rcclGetProtocolName(r.proto, &pn) == ncclSuccess && pn) r.protoName = pn;
+      }
+      return r;
+    }
+
+    // Options controlling one sweep. Plain sweeps (existing tests) use all-false.
+    struct SweepMode
+    {
+      bool registerSym = false;  // allocate cuMem buffers + register NCCL_WIN_COLL_SYMMETRIC
+      bool checkSymk   = false;  // also assert rcclSymKGetInfo agrees with the dispatch log
+      bool expectNoSym = false;  // additionally assert the symk reporter never returns SYM
+      bool cumemOff    = false;  // force NCCL_CUMEM_ENABLE=0 before comm init
+    };
+
     // Runs one collective across all comms, captures its selection log to a fresh
     // per-size file, then asserts rcclGetCollImplInfo reports what was logged.
     void CheckSizeMatchesLog(const char* funcStr, ncclFunc_t coll, int idx, int nRanks,
                              const std::vector<ncclComm_t>& comms, const std::vector<hipStream_t>& streams,
                              const std::vector<void*>& sbuf, const std::vector<void*>& rbuf, size_t count,
-                             ncclDataType_t dt)
+                             ncclDataType_t dt, const SweepMode& mode, bool* sawSym)
     {
       char path[256];
       snprintf(path, sizeof(path), "/tmp/rccl_collimpl_%d_%s_%d.log", (int)getpid(), funcStr, idx);
@@ -256,7 +280,13 @@ namespace RcclUnitTesting
       // enqueue), so the surrounding group closes empty.
       NCCLCHECK(ncclGroupStart());
       ReportedImpl rep = QueryReport(comms[0], coll, count, dt, ncclSum, sbuf[0], rbuf[0]);
+      // rcclSymKGetInfo's non-symk fallback routes through rcclSelect*, which is
+      // group-depth sensitive, so query it at the same depth as dispatch.
+      SymkReport symk;
+      if (mode.checkSymk) symk = QuerySymk(comms[0], coll, count, dt, ncclSum);
       NCCLCHECK(ncclGroupEnd());
+
+      if (sawSym && sel.algoName == "SYM") *sawSym = true;
 
       EXPECT_EQ(rep.algoName, sel.algoName)
         << "reported algo != logged-selected algo\nLOG:\n" << log;
@@ -271,6 +301,36 @@ namespace RcclUnitTesting
         EXPECT_EQ(rep.channels, sel.channels)
           << "reported channels != logged-selected channels\nLOG:\n" << log;
 
+      if (mode.checkSymk)
+      {
+        // rcclSymKGetInfo is the -R 2 reporter. It must never fail (the old code
+        // returned ncclInvalidArgument, which aborted rccl-tests under TESTCHECK).
+        ASSERT_EQ(symk.res, ncclSuccess)
+          << "rcclSymKGetInfo failed: " << ncclGetErrorString(symk.res);
+
+        if (mode.expectNoSym)
+        {
+          // cuMem off => symmetricSupport false => symk falls back to the real
+          // backend. No symmetric window exists anywhere (dispatch buffers are plain
+          // too), so the null-buffer fallback sees the same state as dispatch and must
+          // equal the log -- and must never claim SYM.
+          EXPECT_EQ(symk.algoName, sel.algoName)
+            << "symk-reported algo != logged-selected algo\nLOG:\n" << log;
+          EXPECT_NE(symk.algoName, "SYM")
+            << "symk reported SYM with cuMem disabled\nLOG:\n" << log;
+        }
+        else if (sel.algoName == "SYM")
+        {
+          // Registered sweep, symmetric actually dispatched: the symk reporter must
+          // agree it is SYM. (At non-SYM sizes the dispatch may run a
+          // registration-dependent backend like CE that rcclSymKGetInfo's null-buffer
+          // fallback cannot observe, so only the SYM case is asserted here; rep above
+          // -- queried with the real registered buffers -- covers the rest.)
+          EXPECT_EQ(symk.algoName, "SYM")
+            << "symk did not report SYM though dispatch ran SYM\nLOG:\n" << log;
+        }
+      }
+
       remove(path);
     }
 
@@ -278,7 +338,8 @@ namespace RcclUnitTesting
     // two over [loBytes, hiBytes] (matching rccl-tests -b/-e). The total maps to a
     // per-dtype element count; for AllGather the total is split across ranks
     // (per-rank sendcount = total / nRanks), as rccl-tests reports all_gather size.
-    void RunSweep(const char* funcStr, ncclFunc_t coll, size_t loBytes, size_t hiBytes)
+    void RunSweep(const char* funcStr, ncclFunc_t coll, size_t loBytes, size_t hiBytes,
+                  const SweepMode& mode = SweepMode{})
     {
       int numDevices = 0;
       HIPCALL(hipGetDeviceCount(&numDevices));
@@ -287,6 +348,11 @@ namespace RcclUnitTesting
         GTEST_SKIP() << "This test requires at least 2 GPUs.";
       }
       const int nRanks = std::min(numDevices, 8);
+
+      // Force cuMem off before init so comm->symmetricSupport is false: the -R 2
+      // reporter (rcclSymKGetInfo) must then fall back to the real backend and
+      // never claim SYM. Set in the isolated child only (fresh param cache).
+      if (mode.cumemOff) setenv("NCCL_CUMEM_ENABLE", "0", 1);
 
       // Ground truth = the library's own selection log. COLL covers the addon
       // backend lines; TUNING covers the native-kernel algo/proto/channel line.
@@ -302,17 +368,95 @@ namespace RcclUnitTesting
       // AllReduce: send == recv == total. AllGather: send == total/nRanks, recv == total.
       std::vector<void*>       sbuf(nRanks), rbuf(nRanks);
       std::vector<hipStream_t> streams(nRanks);
+      // For the -R 2 sweep, buffers are cuMem-allocated and registered as symmetric
+      // windows (RAII); kept alive for the whole sweep. Released before comm destroy.
+      std::vector<RCCLTestHelpers::SymBuf> symSend, symRecv;
       const size_t recvBytes = hiBytes;
       const size_t sendBytes =
         (coll == ncclFuncAllGather) ? (hiBytes + nRanks - 1) / nRanks : hiBytes;
+
       for (int i = 0; i < nRanks; i++)
       {
         HIPCALL(hipSetDevice(i));
-        HIPCALL(hipMalloc(&sbuf[i], sendBytes));
-        HIPCALL(hipMalloc(&rbuf[i], recvBytes));
-        HIPCALL(hipMemset(sbuf[i], 0, sendBytes));
-        HIPCALL(hipMemset(rbuf[i], 0, recvBytes));
         HIPCALL(hipStreamCreate(&streams[i]));
+      }
+
+      if (mode.registerSym)
+      {
+        symSend.resize(nRanks);
+        symRecv.resize(nRanks);
+
+        // cuMem-backed allocation is local per rank -- do it before the group.
+        bool allocOk = true;
+        for (int i = 0; i < nRanks && allocOk; i++)
+        {
+          HIPCALL(hipSetDevice(i));
+          symSend[i].comm = comms[i];
+          symRecv[i].comm = comms[i];
+          if (ncclMemAlloc(&symSend[i].ptr, sendBytes) != ncclSuccess ||
+              ncclMemAlloc(&symRecv[i].ptr, recvBytes) != ncclSuccess)
+            allocOk = false;
+        }
+
+        // Symmetric-window registration is a COLLECTIVE op: every rank must register
+        // inside a single group, else the first rank blocks forever waiting on peers
+        // (in-process multi-GPU). Mirrors tryRegisterInputWindows in DeviceApiTests.
+        // In-group calls defer, so the real status is ncclGroupEnd()'s.
+        ncclResult_t regRes = allocOk ? ncclSuccess : ncclInternalError;
+        if (allocOk)
+        {
+          std::vector<ncclResult_t> rr(2 * nRanks, ncclSuccess);
+          NCCLCHECK(ncclGroupStart());
+          for (int i = 0; i < nRanks; i++)
+          {
+            HIPCALL(hipSetDevice(i));
+            rr[2 * i]     = ncclCommWindowRegister(comms[i], symSend[i].ptr, sendBytes,
+                                                   &symSend[i].win, NCCL_WIN_COLL_SYMMETRIC);
+            rr[2 * i + 1] = ncclCommWindowRegister(comms[i], symRecv[i].ptr, recvBytes,
+                                                   &symRecv[i].win, NCCL_WIN_COLL_SYMMETRIC);
+          }
+          ncclResult_t ge = ncclGroupEnd();
+          for (ncclResult_t r : rr)
+            if (r != ncclSuccess) { regRes = r; break; }
+          if (regRes == ncclSuccess) regRes = ge;
+        }
+
+        if (regRes != ncclSuccess)
+        {
+          // Symmetric windows unavailable/unsupported (cuMem/VMM off). Release any
+          // partial allocations while comms are alive (deregister is per-rank local),
+          // then skip.
+          symSend.clear();
+          symRecv.clear();
+          for (int j = 0; j < nRanks; j++)
+          {
+            HIPCALL(hipSetDevice(j));
+            hipStreamDestroy(streams[j]);
+          }
+          for (auto& c : comms) ncclCommDestroy(c);
+          GTEST_SKIP() << "symmetric windows unavailable (cuMem/VMM off or unsupported): "
+                       << ncclGetErrorString(regRes);
+        }
+
+        for (int i = 0; i < nRanks; i++)
+        {
+          HIPCALL(hipSetDevice(i));
+          sbuf[i] = symSend[i].ptr;
+          rbuf[i] = symRecv[i].ptr;
+          HIPCALL(hipMemset(sbuf[i], 0, sendBytes));
+          HIPCALL(hipMemset(rbuf[i], 0, recvBytes));
+        }
+      }
+      else
+      {
+        for (int i = 0; i < nRanks; i++)
+        {
+          HIPCALL(hipSetDevice(i));
+          HIPCALL(hipMalloc(&sbuf[i], sendBytes));
+          HIPCALL(hipMalloc(&rbuf[i], recvBytes));
+          HIPCALL(hipMemset(sbuf[i], 0, sendBytes));
+          HIPCALL(hipMemset(rbuf[i], 0, recvBytes));
+        }
       }
 
       // Warmup: some backends initialize lazily on first use (CE allocates its
@@ -347,7 +491,8 @@ namespace RcclUnitTesting
         HIPCALL(hipStreamSynchronize(streams[i]));
       }
 
-      int idx = 0;
+      int  idx    = 0;
+      bool sawSym = false;
       for (ncclDataType_t dt : dtypes)
       {
         const size_t elemSize = (dt == ncclFloat32 ? 4 : 2);
@@ -357,19 +502,40 @@ namespace RcclUnitTesting
         {
           const size_t count = bytes / denom;
           if (count == 0) continue;  // total too small to split across ranks for this dtype
-          CheckSizeMatchesLog(funcStr, coll, idx++, nRanks, comms, streams, sbuf, rbuf, count, dt);
+          CheckSizeMatchesLog(funcStr, coll, idx++, nRanks, comms, streams, sbuf, rbuf, count, dt,
+                              mode, &sawSym);
         }
       }
+
+      // The -R 2 sweep registered symmetric windows. Whether SYM actually dispatches
+      // is arch/config dependent (AllGather loses to CE by taskAppend ordering; on
+      // some arches/tuner configs AllReduce stays on native RING/TREE), so this is
+      // informational only -- the portable guarantees are the per-size assertions
+      // above: rcclGetCollImplInfo and the symk reporter both match the dispatch log,
+      // and the symk reporter never aborts or falsely claims SYM.
+      if (mode.registerSym && !sawSym)
+        fprintf(stderr,
+                "[ NOTE     ] %s: symmetric windows registered but SYM never dispatched "
+                "on this arch/config (reporter still matched the dispatch log at every size)\n",
+                funcStr);
 
       // Restore default debug target before teardown.
       unsetenv("NCCL_DEBUG_FILE");
       ncclResetDebugInitInternal();
 
+      // Release symmetric windows before destroying comms (deregister needs a live
+      // comm); RAII owns the cuMem buffers, so no hipFree for those.
+      symSend.clear();
+      symRecv.clear();
+
       for (int i = 0; i < nRanks; i++)
       {
         HIPCALL(hipSetDevice(i));
-        HIPCALL(hipFree(sbuf[i]));
-        HIPCALL(hipFree(rbuf[i]));
+        if (!mode.registerSym)
+        {
+          HIPCALL(hipFree(sbuf[i]));
+          HIPCALL(hipFree(rbuf[i]));
+        }
         HIPCALL(hipStreamDestroy(streams[i]));
       }
       for (auto& c : comms) NCCLCHECK(ncclCommDestroy(c));
@@ -391,6 +557,55 @@ namespace RcclUnitTesting
   {
     RUN_ISOLATED_TEST("AllGatherMatchesDispatchLog", []() {
       RunSweep("AllGather", ncclFuncAllGather, kLoBytes, kHiBytes);
+    });
+  }
+
+  // -R 2 path: buffers registered as symmetric windows. Both rcclGetCollImplInfo
+  // and the symk reporter (rcclSymKGetInfo) must match the dispatch log at every
+  // size (whether SYM actually dispatches is arch/config dependent -- see the
+  // informational NOTE in RunSweep). Skips if cuMem/VMM is unavailable.
+  TEST(CollImplInfo, AllReduceSymmetricMatchesDispatchLog)
+  {
+    RUN_ISOLATED_TEST("AllReduceSymmetricMatchesDispatchLog", []() {
+      SweepMode mode;
+      mode.registerSym = true;
+      mode.checkSymk   = true;
+      RunSweep("AllReduce", ncclFuncAllReduce, kLoBytes, kHiBytes, mode);
+    });
+  }
+
+  TEST(CollImplInfo, AllGatherSymmetricMatchesDispatchLog)
+  {
+    RUN_ISOLATED_TEST("AllGatherSymmetricMatchesDispatchLog", []() {
+      SweepMode mode;
+      mode.registerSym = true;
+      mode.checkSymk   = true;
+      RunSweep("AllGather", ncclFuncAllGather, kLoBytes, kHiBytes, mode);
+    });
+  }
+
+  // Regression guard: with cuMem disabled, symmetric memory cannot be used, so the
+  // -R 2 reporter must fall back to the real backend -- succeed (not abort) and
+  // never claim SYM. Buffers stay plain; comm->symmetricSupport is forced false.
+  TEST(CollImplInfo, AllReduceSymkNotReportedWhenCuMemDisabled)
+  {
+    RUN_ISOLATED_TEST("AllReduceSymkNotReportedWhenCuMemDisabled", []() {
+      SweepMode mode;
+      mode.cumemOff    = true;
+      mode.checkSymk   = true;
+      mode.expectNoSym = true;
+      RunSweep("AllReduce", ncclFuncAllReduce, kLoBytes, kHiBytes, mode);
+    });
+  }
+
+  TEST(CollImplInfo, AllGatherSymkNotReportedWhenCuMemDisabled)
+  {
+    RUN_ISOLATED_TEST("AllGatherSymkNotReportedWhenCuMemDisabled", []() {
+      SweepMode mode;
+      mode.cumemOff    = true;
+      mode.checkSymk   = true;
+      mode.expectNoSym = true;
+      RunSweep("AllGather", ncclFuncAllGather, kLoBytes, kHiBytes, mode);
     });
   }
 }  // namespace RcclUnitTesting

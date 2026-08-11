@@ -1108,9 +1108,21 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
     plan->groupApiEventHandle = task->groupApiEventHandle;
 
     if (comm->rank == 0) {
+      int chLo = devWork->channelLo, chHi = devWork->channelHi;
+      const char* algoStr = ncclAlgoToString(task->algorithm);
+#ifdef ENABLE_WARP_SPEED
+      // WarpSpeed packs task->nWarps logical channels per physical block; report it as
+      // "RING*" over the physical block count so this line matches rcclGetCollImplInfo.
+      if (task->useWarpSpeed && task->nWarps > 0) {
+        int phys = task->nMaxChannels / task->nWarps;
+        chLo = 0;
+        chHi = phys > 0 ? phys - 1 : 0;
+        algoStr = "RING*";
+      }
+#endif
       INFO(NCCL_TUNING, "%s: %ld Bytes -> Algo %s proto %s channel{Lo..Hi}={%d..%d}", ncclFuncToString(task->func),
-           task->count * ncclTypeSize(task->datatype), ncclAlgoToString(task->algorithm),
-           ncclProtoToString(task->protocol), devWork->channelLo, devWork->channelHi);
+           task->count * ncclTypeSize(task->datatype), algoStr,
+           ncclProtoToString(task->protocol), chLo, chHi);
 
       if (task->isCollnet) {
         TRACE(NCCL_COLL,

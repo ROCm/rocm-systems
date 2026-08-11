@@ -920,18 +920,10 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // kernel (extracted downstream), so DDA is gated on !symEligible, as before.
   const bool symEligible =
     isSymmetricKernelRequested(comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount, sendbuff, recvbuff);
-  // Reporting only: symk wins when eligible (extracted downstream on the live
-  // path, which falls through to enqueue exactly as before). If the kernel pick
-  // fails, fall through and report the next backend.
-  if (query && symEligible) {
-    int a, p, ch;
-    if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch)) {
-      decision->algo = a;
-      decision->protocol = p;
-      decision->nMaxChannels = ch;
-      return ncclSuccess;
-    }
-  }
+  // symEligible gates DDA below; the symk report itself is deferred until after
+  // the CE-registered check so it loses to CE exactly as dispatch does
+  // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
+  // symk never reclaims it), mirroring rcclSelectAllReduce.
   if (!symEligible && rcclDdaEnabled(comm, totalBytes, 8388608)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       if (rcclParamDdaLL() && msgSize <= (size_t)rcclParamDdaLLThreshold() &&
@@ -1031,6 +1023,19 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
     if (ceAvailable && !hasSysmemSegment) {
       decision->algo = RCCL_CE_REGISTERED;
+      return ncclSuccess;
+    }
+  }
+
+  // (3.5) Symmetric-window kernel. Reported only after CE-registered so it loses
+  // to CE exactly as dispatch does; on the live path taskAppend recomputes and
+  // the symmetric extraction downstream dispatches symk. Mirrors rcclSelectAllReduce.
+  if (query && symEligible) {
+    int a, p, ch;
+    if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch)) {
+      decision->algo = a;
+      decision->protocol = p;
+      decision->nMaxChannels = ch;
       return ncclSuccess;
     }
   }
