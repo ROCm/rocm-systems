@@ -210,7 +210,6 @@ jobs:
             "DaemonTest\.LoggingPlugin"
             "BfeRegressionTest\.ThreadIdxY"
             "LoggingTest\.dispatch_logged"
-            "ProfiledPluginTest\.hook_profile_output"
             "CvtNarrow\.AllTests"
             "RaceTest\..*"
           )
