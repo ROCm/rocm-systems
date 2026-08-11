@@ -32,6 +32,7 @@ class CppFile:
         fwd_decls: Forward declarations within the namespace.
         src_code: Source code objects (strings or cgen objects).
         arch_name: ISA architecture name.
+        generated_dir_name: Filesystem directory for the generated file.
         replace_structs: If True, replace 'struct' with 'class' in output.
         file_name: File name with extension.
     """
@@ -57,6 +58,7 @@ class CppFile:
         src_code: Sequence[object],
         arch_name: str,
         replace_structs: bool = False,
+        generated_dir_name: str | None = None,
     ) -> None:
         self.name = name
         self.out_path = out_path
@@ -65,6 +67,7 @@ class CppFile:
         self.fwd_decls = fwd_decls
         self.src_code = src_code
         self.arch_name = arch_name
+        self.generated_dir_name = generated_dir_name or arch_name
         self.replace_structs = replace_structs
         self.file_name = self.name
 
@@ -112,7 +115,7 @@ class CppFile:
 
     def gen_code(self) -> None:
         """Generate the file (header or source)."""
-        arch_out_path = os.path.join(self.out_path, self.arch_name)
+        arch_out_path = os.path.join(self.out_path, self.generated_dir_name)
         os.makedirs(arch_out_path, exist_ok=True)
         with open(os.path.join(arch_out_path, self.file_name), 'w') as f:
             self.gen_prologue(f)
