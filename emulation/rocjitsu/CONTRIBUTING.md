@@ -19,6 +19,7 @@
 |---|---|
 | GPU hardware component (cache, queue, CU logic) | `lib/rocjitsu/src/rocjitsu/vm/amdgpu/` |
 | ISA instruction semantics | `lib/python/amdisa/codegen/_generator.py` (regenerate) |
+| Generated ISA sources and headers (including `insts.h`) | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<target>/` |
 | Hand-written ISA support (address calc, matrix math) | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/<target>/` |
 | KFD ioctl or interposer hook | `lib/rocjitsu/src/rocjitsu/kmd/linux/` |
 | Binary translation rule or expansion | `lib/rocjitsu/src/rocjitsu/code/dbt/` |
@@ -104,9 +105,10 @@ When modifying instruction semantics or adding instruction support:
 
 1. Edit `lib/python/amdisa/codegen/_generator.py` (never the generated
    C++ files)
-2. Regenerate with `--multi` mode (see [docs/codegen.md](docs/codegen.md))
-3. Format the generated files with `clang-format`
-4. Stage ALL generated files before committing
+2. Regenerate with `scripts/generate-amdisa.sh` (see
+   [docs/codegen.md](docs/codegen.md)); the helper formats changed generated
+   files through pre-commit
+3. Stage ALL generated files before committing
 
 ## Testing
 
