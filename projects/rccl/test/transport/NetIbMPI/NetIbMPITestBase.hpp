@@ -11,6 +11,7 @@
 #include <hip/hip_runtime.h>
 #include "MPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
+#include "NetIbQpSharingInspect.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include "DeviceBufferHelpers.hpp"
@@ -82,6 +83,32 @@ using namespace RCCLTestHelpers;
             GTEST_SKIP() << "Requires RCCL_IB_QP_SCHED_UPDATE_INTERVAL >= "             \
                          << (long long)(min_us) << " us (current: " << _v << ")";        \
         }                                                                                \
+    } while (0)
+
+// Skip a QP-sharing test when RCCL_IB_COMM_NGROUPS is absent/disabled, or when
+// a feature known to be mutually exclusive with sharing (resiliency, CAST
+// scheduler) is enabled alongside it. Must be called from the test body (not
+// a helper), because GTEST_SKIP() only interrupts execution when expanded
+// inline in the test scope. RCCL_IB_COMM_NGROUPS is set by the qpshare_base
+// section in net_ib_transport.json.
+#define QPSHARE_ENV_CHECK_OR_SKIP()                                                       \
+    do {                                                                                   \
+        const char* _ng = getenv("RCCL_IB_COMM_NGROUPS");                                  \
+        if (!_ng || _ng[0] == '\0' || std::atoll(_ng) <= 0) {                              \
+            GTEST_SKIP() << "Requires RCCL_IB_COMM_NGROUPS > 0. "                          \
+                            "Use qpshare_* configs in net_ib_transport.json.";              \
+        }                                                                                   \
+        auto _qpshareIsSetTo1 = [](const char* name) {                                     \
+            const char* v = getenv(name);                                                  \
+            return v && v[0] && strcmp(v, "1") == 0;                                       \
+        };                                                                                  \
+        if (_qpshareIsSetTo1("NCCL_IB_RESILIENCY_PORT_FAILOVER") ||                        \
+            _qpshareIsSetTo1("NCCL_IB_RESILIENCY_PORT_RECOVERY")) {                         \
+            GTEST_SKIP() << "QP sharing tests do not support resiliency combos yet.";      \
+        }                                                                                   \
+        if (_qpshareIsSetTo1("RCCL_IB_QP_SCHED_ENABLE")) {                                 \
+            GTEST_SKIP() << "QP sharing tests do not support CAST scheduler combos yet.";  \
+        }                                                                                   \
     } while (0)
 
 // External NET IB plugin
@@ -594,6 +621,16 @@ protected:
         MPI_Bcast(&nqps, 1, MPI_INT, 1, MPI_COMM_WORLD);
         EXPECT_GT(nqps, 0);
         return nqps;
+    }
+
+    // Read QP-sharing pool state directly from a connected sendComm/recvComm.
+    // Unlike GetActualNqps(), no warmup send/recv is required: PRIMARY/SECONDARY
+    // role, groupIdx, refcount, and QP handles are all fixed at connect()/accept()
+    // time (see connect.cc groupIdx assignment), not populated lazily by traffic.
+    struct ncclIbQpSharingState GetActualQpSharingState(void* comm) {
+        struct ncclIbQpSharingState state = {};
+        EXPECT_EQ(ncclIbCastGetQpSharingState(comm, &state), ncclSuccess);
+        return state;
     }
 
     // Read RCCL_IB_QP_SCHED_SPLIT_DATA_MIN from the environment.

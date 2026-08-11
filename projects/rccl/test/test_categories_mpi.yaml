@@ -161,6 +161,40 @@ test_categories:
       - "NCCL_LAUNCH_MODE=GROUP"
       - "NCCL_DMABUF_ENABLE=1"
       - "RCCL_MPI_LOG_ALL_RANKS=1"
+  quick_env_qpshare_ngroups1_depth8:
+    description: "QP sharing baseline: NGROUPS=1 concentrates 8 connections onto one shared QP. DEPTH_MULTIPLIER=8 sized to that group count — every comm sharing a QP unconditionally preposts a full RQ's worth of receive WQEs, so depth must be >= comms-per-group or accept()/connect() fails with ibv_post_recv ENOMEM (see quick_env_qpshare_depth_default)."
+    test_patterns:
+      - "NetIbMPITest.QpShareNGroupsOne:NetIbMPITest.QpShareDepthMultiplierRaised"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "RCCL_IB_COMM_NGROUPS=1"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=8"
+  quick_env_qpshare_depth_default:
+    description: "QP sharing known limitation: NGROUPS=1 at the default depth multiplier (1). A 2nd comm joining a shared group always overflows the RQ at this depth; asserts the failure surfaces cleanly rather than corrupting state."
+    test_patterns:
+      - "NetIbMPITest.QpShareDepthMultiplierDefault"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "RCCL_IB_COMM_NGROUPS=1"
+  quick_env_qpshare_ngroups2:
+    description: "QP sharing baseline: NGROUPS=2 mixes PRIMARY-only and PRIMARY+SECONDARY groups. DEPTH_MULTIPLIER=2 sized to the largest group (2 comms)."
+    test_patterns:
+      - "NetIbMPITest.QpSharePrimarySecondaryMix:NetIbMPITest.QpShareSendRecvMultipleSizes"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "RCCL_IB_COMM_NGROUPS=2"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=2"
+  quick_env_qpshare_ngroups16:
+    description: "QP sharing baseline: NGROUPS exceeds connection count, so sharing degenerates to one comm per group."
+    test_patterns:
+      - "NetIbMPITest.QpShareNGroupsExceedsConns"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "RCCL_IB_COMM_NGROUPS=16"
   standard:
     description: "MPI regression — all transport / IB / implicit-launch / UBR / graph-capture suites (same patterns as comprehensive; lighter env)."
     test_patterns: &mpi_all_patterns
@@ -347,6 +381,19 @@ test_categories:
       - "RCCL_LL128_FORCE_ENABLE=1"
       - "NCCL_PROTO=LL128"
       - "NCCL_ALGO=Tree"
+  qpshare_stress:
+    description: "QP sharing stress: many-connection load, shared-RQ saturation, connection churn, and batch create/destroy under sharing. ConnectionChurn and BatchCreateDestroy currently FAIL against a real, pre-existing shared-QP pool-exhaustion bug (g_IbCastSharedQpPool in qp_sharing.cc never compacts freed slots past IBCAST_MAX_SHARED_QPS); kept in this gating category deliberately as the acceptance criterion for that fix."
+    test_patterns:
+      - "NetIbMPITest.QpShareManyConnsStress:NetIbMPITest.QpShareSharedRqSaturation:NetIbMPITest.QpShareConnectionChurn:NetIbMPITest.QpShareBatchCreateDestroy"
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "mpi"
+      - "qpshare"
+    env_variables:
+      - "RCCL_IB_COMM_NGROUPS=2"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=64"
+      - "NCCL_IB_QPS_PER_CONNECTION=1"
 
 execution_settings:
   mpi_launch:
@@ -363,6 +410,10 @@ execution_settings:
     quick_env_net_graph_register: 1200
     quick_env_netib_xfer_trace: 1200
     quick_env_netib_xfer_log_ranks: 1200
+    quick_env_qpshare_ngroups1_depth8: 1200
+    quick_env_qpshare_depth_default: 1200
+    quick_env_qpshare_ngroups2: 1200
+    quick_env_qpshare_ngroups16: 1200
     standard: 1200
     comprehensive: 1200
     comprehensive_disable_env: 1200
@@ -374,3 +425,4 @@ execution_settings:
     full_pow2_tree_ll: 1200
     full_pow2_ring_ll128: 1200
     full_pow2_tree_ll128: 1200
+    qpshare_stress: 3600

@@ -109,7 +109,7 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/gensrc # for rccl_bfloat16.h
     ${PROJECT_BINARY_DIR}/hipify/src # for graph/topo.h
     ${PROJECT_BINARY_DIR}/hipify/src/include/plugin # for recorder tests, nccl_tuner.h
-    ${PROJECT_BINARY_DIR}/hipify/src/transport/net_ib_cast # for net_ib_fault_inject.h, net_ib_cast_inspect.h
+    ${PROJECT_BINARY_DIR}/hipify/src/transport/net_ib_cast # for net_ib_fault_inject.h, net_ib_cast_inspect.h, net_ib_qp_sharing_inspect.h
     ${PROJECT_BINARY_DIR}/hipify/src/transport             # for net_ib_limits.h
     ${ROCM_PATH}/include
     ${ROCM_PATH}
@@ -416,6 +416,7 @@ if(BUILD_TESTS)
       transport/NetIbMPI/OpsFaultUnitTests.cpp
       transport/GinMPI/GinMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
+      transport/NetIbMPI/QpSharingTests.cpp
       transport/GinDeviceMPITests.cpp
       WarpSpeedMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp

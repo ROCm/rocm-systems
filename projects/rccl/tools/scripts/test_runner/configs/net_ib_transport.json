@@ -476,6 +476,110 @@
       ]
     },
 
+    "qpshare_ngroups1_depth8": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "1",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "8"
+      },
+      "tests": [
+        {
+          "name": "QpShare_NGroupsOne",
+          "description": "RCCL_IB_COMM_NGROUPS=1: all 8 connections land in group 0 (1 PRIMARY + 7 SECONDARY on one physical QP). DEPTH_MULTIPLIER=8 sized to that group, since every comm sharing a QP unconditionally preposts a full RQ's worth of receive WQEs (see QpShare_DepthMultiplierDefault) — default depth would overflow with 8 comms in one group.",
+          "test_filter": "NetIbMPITest.QpShareNGroupsOne"
+        },
+        {
+          "name": "QpShare_DepthMultiplierRaised",
+          "description": "RCCL_IB_QP_DEPTH_MULTIPLIER=8 (== comms-per-group): concurrent post-all-then-wait-all load from all 8 comms sharing one QP completes cleanly once depth is sized correctly",
+          "test_filter": "NetIbMPITest.QpShareDepthMultiplierRaised"
+        }
+      ]
+    },
+
+    "qpshare_ngroups1_depth_default": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "1"
+      },
+      "tests": [
+        {
+          "name": "QpShare_DepthMultiplierDefault",
+          "description": "RCCL_IB_QP_DEPTH_MULTIPLIER left at default (1): documents a known limitation — a 2nd comm joining a shared group always overflows the RQ (ibv_post_recv ENOMEM) at default depth, since every comm sharing a QP unconditionally reposts a full 256-WQE RQ sized for only one comm. Asserts the failure surfaces cleanly as a non-success accept()/connect() return, not a crash, and that it does not corrupt the first (unshared) connection.",
+          "test_filter": "NetIbMPITest.QpShareDepthMultiplierDefault"
+        }
+      ]
+    },
+
+    "qpshare_ngroups2": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "2",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "2"
+      },
+      "tests": [
+        {
+          "name": "QpShare_PrimarySecondaryMix",
+          "description": "RCCL_IB_COMM_NGROUPS=2 with 3 connections: one group gets a PRIMARY+SECONDARY pair (needs DEPTH_MULTIPLIER>=2 to avoid the default-depth RQ overflow), the other a single PRIMARY",
+          "test_filter": "NetIbMPITest.QpSharePrimarySecondaryMix"
+        },
+        {
+          "name": "QpShare_SendRecvMultipleSizes",
+          "description": "Size sweep through the forced-prepost data path under sharing, pattern-verified at every boundary (single connection, unaffected by the raised depth multiplier)",
+          "test_filter": "NetIbMPITest.QpShareSendRecvMultipleSizes"
+        }
+      ]
+    },
+
+    "qpshare_ngroups16": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "16"
+      },
+      "tests": [
+        {
+          "name": "QpShare_NGroupsExceedsConns",
+          "description": "RCCL_IB_COMM_NGROUPS=16 with only 4 connections: every comm is its own PRIMARY — sharing degenerates to the pre-sharing baseline",
+          "test_filter": "NetIbMPITest.QpShareNGroupsExceedsConns"
+        }
+      ]
+    },
+
+    "qpshare_stress": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "2",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "64",
+        "NCCL_IB_QPS_PER_CONNECTION": "1"
+      },
+      "tests": [
+        {
+          "name": "QpShare_ManyConnsStress",
+          "description": "100 connections under sharing (~50 comms concentrated per group) — DEPTH_MULTIPLIER=64 sized with headroom above the 50 required, sustained batched concurrent traffic on every connection",
+          "test_filter": "NetIbMPITest.QpShareManyConnsStress"
+        },
+        {
+          "name": "QpShare_SharedRqSaturation",
+          "description": "Post-all-then-wait-all across every connection in a shared group, repeated rounds — deliberately tries to starve/overflow the shared RQ",
+          "test_filter": "NetIbMPITest.QpShareSharedRqSaturation"
+        },
+        {
+          "name": "QpShare_ConnectionChurn",
+          "description": "2048 connect/transfer/close cycles, sized to exceed IBCAST_MAX_SHARED_QPS (1024). g_IbCastSharedQpPool (qp_sharing.cc) never compacts freed slots, so churn past 1024 cumulative PRIMARY creations exhausts the pool and this test currently FAILS — a real, pre-existing bug, not a test defect. Kept in the gate deliberately: this is the acceptance criterion for the pool-compaction fix.",
+          "test_filter": "NetIbMPITest.QpShareConnectionChurn"
+        },
+        {
+          "name": "QpShare_BatchCreateDestroy",
+          "description": "110 batches of 10 connections (1100 total), crossing IBCAST_MAX_SHARED_QPS at bursty-batch cadence. Same never-compacted shared-QP pool as QpShare_ConnectionChurn; currently FAILS since the pool is a process-global left exhausted by that test. Kept in the gate deliberately: this is the acceptance criterion for the pool-compaction fix.",
+          "test_filter": "NetIbMPITest.QpShareBatchCreateDestroy"
+        }
+      ]
+    },
+
     "cast_single_qp": {
       "extends": "cast_base",
       "timeout": 60,
@@ -993,6 +1097,36 @@
       "name": "NET IB - CAST WRR only (QPS=2, splitData=0)",
       "description": "White-box WRR scheduler tests without split-data: weights distribution, doWrr toggle, splitData toggle, sched parms reflection",
       "config": "cast_wrr_no_split",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - QP Sharing (NGROUPS=1, depth=8)",
+      "description": "White-box baseline: all 8 connections concentrated onto one shared QP, DEPTH_MULTIPLIER=8 sized to that group; includes the raised-depth concurrent-load probe",
+      "config": "qpshare_ngroups1_depth8",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - QP Sharing (NGROUPS=1, default depth)",
+      "description": "Documents a known limitation: at the default depth multiplier (1), a 2nd comm sharing a group always overflows the RQ — asserts the failure is surfaced cleanly rather than corrupting state",
+      "config": "qpshare_ngroups1_depth_default",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - QP Sharing (NGROUPS=2)",
+      "description": "White-box baseline: PRIMARY/SECONDARY role mix across two groups (DEPTH_MULTIPLIER=2), size sweep under sharing",
+      "config": "qpshare_ngroups2",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - QP Sharing (NGROUPS=16)",
+      "description": "White-box baseline: NGROUPS exceeding connection count degenerates to the pre-sharing baseline",
+      "config": "qpshare_ngroups16",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - QP Sharing Stress",
+      "description": "Many-connection load, shared-RQ saturation, connection churn, and batch create/destroy under sharing. ConnectionChurn and BatchCreateDestroy currently FAIL against a real, pre-existing shared-QP pool-exhaustion bug (qp_sharing.cc never compacts freed slots past IBCAST_MAX_SHARED_QPS) — kept in the gate deliberately as the acceptance criterion for that fix, not disabled.",
+      "config": "qpshare_stress",
       "enabled": true
     },
     {
