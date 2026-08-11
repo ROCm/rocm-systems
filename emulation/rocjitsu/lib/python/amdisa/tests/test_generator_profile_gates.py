@@ -1425,6 +1425,30 @@ def test_matrix_acc_cd_destination_uses_encoding_field_presence(mnemonic):
     assert 'inst_.acc_cd' not in without_acc_cd
 
 
+def test_cdna3_real_spec_mfma_destination_uses_acc_cd(tmp_path):
+    isa_xml = _mrisa_dir() / 'amdgpu_isa_cdna3.xml'
+    if not isa_xml.is_file():
+        pytest.skip('CDNA3 semantics XML not available')
+
+    args = SimpleNamespace(
+        multi=[f'cdna3:{isa_xml}'],
+        gen_isas=True,
+        gen_dbt=False,
+        isa_output=str(tmp_path),
+        dbt_output=None,
+    )
+    _run_multi(args)
+
+    vop3p = (tmp_path / 'cdna3' / 'vop3p.cpp').read_text()
+    body = _generated_method_body(
+        vop3p,
+        'VMfmaF3216x16x8Xf32Vop3pMfma',
+        'VMfmaF3232x32x4Xf32Vop3pMfma',
+    )
+
+    assert 'amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd)' in body
+
+
 def test_gfx1250_wmma_f32_passes_c_modifier_to_accumulator_helper():
     inst = Instruction('V_WMMA_F32_16X16X32_F16', 'ENC_VOP3P', 0, [])
     body = _gen_mfma(inst, 'cdna5')
