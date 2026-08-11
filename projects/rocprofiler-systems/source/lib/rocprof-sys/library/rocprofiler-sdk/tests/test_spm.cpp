@@ -16,8 +16,9 @@
 
 namespace
 {
+using rocprofsys::rocprofiler_sdk::spm::configuration;
+using rocprofsys::rocprofiler_sdk::spm::configure_runtime;
 using rocprofsys::rocprofiler_sdk::spm::is_config_valid;
-using rocprofsys::rocprofiler_sdk::spm::request;
 namespace spm_detail = rocprofsys::rocprofiler_sdk::spm::detail;
 
 void
@@ -43,6 +44,8 @@ protected:
             std::string{ rocprofsys::env_vars::ROCM_SPM_EVENTS });
         previous_sample_interval = rocprofsys::config::get_setting_value<std::uint64_t>(
             std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL });
+        previous_dispatch_events = rocprofsys::config::get_setting_value<std::string>(
+            std::string{ rocprofsys::env_vars::ROCM_EVENTS });
     }
 
     void TearDown() override
@@ -53,16 +56,20 @@ protected:
         rocprofsys::config::set_setting_value(
             std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL },
             previous_sample_interval.value_or(std::uint64_t{ 0 }));
+        rocprofsys::config::set_setting_value(
+            std::string{ rocprofsys::env_vars::ROCM_EVENTS },
+            previous_dispatch_events.value_or(std::string{}));
     }
 
     std::optional<std::string>   previous_events          = std::nullopt;
     std::optional<std::uint64_t> previous_sample_interval = std::nullopt;
+    std::optional<std::string>   previous_dispatch_events = std::nullopt;
 };
 
-request
-make_valid_requested_spm_request()
+configuration
+make_valid_requested_spm_config()
 {
-    return request{ { "SQ_WAVES" }, 4200 };
+    return configuration{ .counter_events = { "SQ_WAVES" }, .sample_interval = 4200 };
 }
 
 void
@@ -92,16 +99,16 @@ TEST_F(spm_settings_test, accessors_reflect_configured_spm_settings)
     EXPECT_EQ(rocprofsys::rocprofiler_sdk::spm::get_sample_interval(), 4200);
 }
 
-TEST(spm_request, requested_reflects_events)
+TEST(spm_configuration, requested_reflects_events)
 {
-    EXPECT_FALSE(request{}.requested());
+    EXPECT_FALSE(configuration{}.requested());
 
-    auto event_request   = request{};
-    event_request.events = { "SQ_WAVES" };
-    EXPECT_TRUE(event_request.requested());
+    auto event_config           = configuration{};
+    event_config.counter_events = { "SQ_WAVES" };
+    EXPECT_TRUE(event_config.requested());
 }
 
-TEST(spm_request_parsing, parse_device_id_accepts_only_complete_unsigned_values)
+TEST(spm_configuration_parsing, parse_device_id_accepts_only_complete_unsigned_values)
 {
     EXPECT_EQ(spm_detail::parse_device_id("0"), std::optional<std::uint64_t>{ 0 });
     EXPECT_EQ(spm_detail::parse_device_id("42"), std::optional<std::uint64_t>{ 42 });
@@ -111,28 +118,31 @@ TEST(spm_request_parsing, parse_device_id_accepts_only_complete_unsigned_values)
     EXPECT_EQ(spm_detail::parse_device_id("-1"), std::nullopt);
 }
 
-TEST(spm_request_parsing, parse_counter_name_trims_and_removes_device_qualifier)
+TEST(spm_configuration_parsing, parse_counter_name_trims_and_removes_device_qualifier)
 {
     EXPECT_EQ(spm_detail::parse_counter_name(" SQ_WAVES "), "SQ_WAVES");
     EXPECT_EQ(spm_detail::parse_counter_name(" SQ_WAVES:device=0 "), "SQ_WAVES");
     EXPECT_EQ(spm_detail::parse_counter_name(":device=0"), "");
 }
 
-TEST(spm_request_parsing, parse_requested_counters_skips_empty_and_invalid_entries)
+TEST(spm_configuration_parsing, parse_requested_counters_skips_empty_and_invalid_entries)
 {
-    const auto parsed = spm_detail::parse_requested_counters(request{
-        { " SQ_WAVES:device=0 ", "", "TD_TD_BUSY", "BAD:device=abc", ":device=1" },
-        4200 });
+    const auto parsed = spm_detail::parse_requested_counters(
+        configuration{ .counter_events  = { " SQ_WAVES:device=0 ", "", "TD_TD_BUSY",
+                                            "BAD:device=abc", ":device=1" },
+                       .sample_interval = 4200 });
 
     ASSERT_EQ(parsed.size(), 2);
     expect_requested_counter(parsed.at(0), "SQ_WAVES", std::uint64_t{ 0 });
     expect_requested_counter(parsed.at(1), "TD_TD_BUSY", std::nullopt);
 }
 
-TEST(spm_request_parsing, requested_counters_for_device_keeps_unqualified_and_matching)
+TEST(spm_configuration_parsing,
+     requested_counters_for_device_keeps_unqualified_and_matching)
 {
-    const auto parsed = spm_detail::parse_requested_counters(
-        request{ { "SQ_WAVES:device=0", "TD_TD_BUSY:device=1", "TCC_HIT" }, 4200 });
+    const auto parsed = spm_detail::parse_requested_counters(configuration{
+        .counter_events  = { "SQ_WAVES:device=0", "TD_TD_BUSY:device=1", "TCC_HIT" },
+        .sample_interval = 4200 });
 
     const auto device_zero = spm_detail::requested_counters_for_device(parsed, 0);
     ASSERT_EQ(device_zero.size(), 2);
@@ -145,10 +155,11 @@ TEST(spm_request_parsing, requested_counters_for_device_keeps_unqualified_and_ma
     expect_requested_counter(device_one.at(1), "TCC_HIT", std::nullopt);
 }
 
-TEST(spm_request_parsing, requested_counter_names_deduplicates_parsed_names)
+TEST(spm_configuration_parsing, requested_counter_names_deduplicates_parsed_names)
 {
-    const auto parsed = spm_detail::parse_requested_counters(
-        request{ { "SQ_WAVES:device=0", "SQ_WAVES:device=1", "TD_TD_BUSY" }, 4200 });
+    const auto parsed = spm_detail::parse_requested_counters(configuration{
+        .counter_events  = { "SQ_WAVES:device=0", "SQ_WAVES:device=1", "TD_TD_BUSY" },
+        .sample_interval = 4200 });
 
     const auto names = spm_detail::requested_counter_names(parsed);
     EXPECT_EQ(names, (std::unordered_set<std::string>{ "SQ_WAVES", "TD_TD_BUSY" }));
@@ -166,44 +177,81 @@ TEST_F(spm_settings_test, events_request_spm_but_default_interval_is_invalid)
 
     EXPECT_EQ(events, std::vector<std::string>{ "SQ_WAVES" });
     EXPECT_EQ(rocprofsys::rocprofiler_sdk::spm::get_sample_interval(), 0);
-    EXPECT_FALSE(is_config_valid(request{ events, 0 }, {}, {}));
+    EXPECT_FALSE(is_config_valid(
+        configuration{ .counter_events = events, .sample_interval = 0 }, {}, {}));
 }
 
 TEST(spm_config_validation, accepts_when_spm_is_not_requested)
 {
-    EXPECT_TRUE(is_config_valid(request{}, {}, {}));
+    EXPECT_TRUE(is_config_valid(configuration{}, {}, {}));
 }
 
 TEST(spm_config_validation, accepts_sample_interval_without_events)
 {
-    EXPECT_TRUE(is_config_valid(request{ {}, 4200 }, {}, {}));
+    EXPECT_TRUE(is_config_valid(
+        configuration{ .counter_events = {}, .sample_interval = 4200 }, {}, {}));
 }
 
 TEST(spm_config_validation, rejects_rocm_dispatch_counter_conflict)
 {
-    const auto request = make_valid_requested_spm_request();
+    const auto requested_config = make_valid_requested_spm_config();
 
-    EXPECT_FALSE(is_config_valid(request, { "SQ_WAVES" }, {}));
+    EXPECT_FALSE(is_config_valid(requested_config, { "SQ_WAVES" }, {}));
 }
 
 TEST(spm_config_validation, rejects_gpu_perf_counter_conflict)
 {
-    const auto request = make_valid_requested_spm_request();
+    const auto requested_config = make_valid_requested_spm_config();
 
-    EXPECT_FALSE(is_config_valid(request, {}, "SQ_WAVES"));
+    EXPECT_FALSE(is_config_valid(requested_config, {}, "SQ_WAVES"));
 }
 
 TEST(spm_config_validation, rejects_zero_sample_interval)
 {
-    auto request            = make_valid_requested_spm_request();
-    request.sample_interval = 0;
+    auto requested_config            = make_valid_requested_spm_config();
+    requested_config.sample_interval = 0;
 
-    EXPECT_FALSE(is_config_valid(request, {}, {}));
+    EXPECT_FALSE(is_config_valid(requested_config, {}, {}));
 }
 
-TEST(spm_config_validation, accepts_valid_requested_spm_request)
+TEST(spm_config_validation, accepts_valid_requested_spm_configuration)
 {
-    const auto request = make_valid_requested_spm_request();
+    const auto requested_config = make_valid_requested_spm_config();
 
-    EXPECT_TRUE(is_config_valid(request, {}, {}));
+    EXPECT_TRUE(is_config_valid(requested_config, {}, {}));
+}
+
+TEST(spm_runtime_configuration, accepts_when_spm_is_not_requested)
+{
+    EXPECT_TRUE(configure_runtime(nullptr, configuration{}));
+}
+
+TEST(spm_runtime_configuration, accepts_sample_interval_without_events)
+{
+    EXPECT_TRUE(configure_runtime(
+        nullptr, configuration{ .counter_events = {}, .sample_interval = 4200 }));
+}
+
+// Invalid user configuration is the only case that fails tool initialization, so it
+// must be rejected before any client data is touched.
+TEST(spm_runtime_configuration, rejects_rocm_dispatch_counter_conflict)
+{
+    EXPECT_FALSE(configure_runtime(nullptr, make_valid_requested_spm_config(),
+                                   { "SQ_WAVES" }, {}, false));
+}
+
+TEST(spm_runtime_configuration, rejects_zero_sample_interval)
+{
+    auto requested_config            = make_valid_requested_spm_config();
+    requested_config.sample_interval = 0;
+
+    EXPECT_FALSE(configure_runtime(nullptr, requested_config, {}, {}, false));
+}
+
+TEST(spm_runtime_configuration, rejects_counter_conflict_with_zero_interval)
+{
+    auto requested_config            = make_valid_requested_spm_config();
+    requested_config.sample_interval = 0;
+
+    EXPECT_FALSE(configure_runtime(nullptr, requested_config, { "SQ_WAVES" }, {}, false));
 }

@@ -1,21 +1,23 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Keep SPM request handling, validation, SDK runtime wiring, callbacks, and
+// Keep SPM configuration handling, validation, SDK runtime wiring, callbacks, and
 // no-SDK runtime fallbacks here.
 
 #include "library/rocprofiler-sdk/spm.hpp"
 
+#include "core/config.hpp"
+#include "core/rocprofiler-sdk.hpp"
 #include "core/utility.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -31,24 +33,14 @@
 //     perfetto_processor.cpp for SPM-dependent data members/output.
 //
 //   ROCPROFSYS_DISABLE_SPM_RUNTIME
-//     Defined only by the unit-test target so the SPM request/validation helpers
+//     Defined only by the unit-test target so the SPM configuration/validation helpers
 //     can be compiled and tested without pulling in SDK SPM runtime dependencies.
-//
-// ROCPROFSYS_COMPILE_SPM_RUNTIME resolves those inputs into the single local
-// condition this file branches on. Keeping this derived gate avoids repeating the
-// compound condition at each #if site.
-#if ROCPROFSYS_USE_SPM && !defined(ROCPROFSYS_DISABLE_SPM_RUNTIME)
-#    define ROCPROFSYS_COMPILE_SPM_RUNTIME 1
-#else
-#    define ROCPROFSYS_COMPILE_SPM_RUNTIME 0
-#endif
 
-#if ROCPROFSYS_COMPILE_SPM_RUNTIME
+#if ROCPROFSYS_USE_SPM && !defined(ROCPROFSYS_DISABLE_SPM_RUNTIME)
 #    include "backends/rocprofiler_sdk/backend.hpp"
 #    include "backends/rocprofiler_sdk/wrapper.hpp"
 #    include "core/trace_cache/cache_manager.hpp"
 #    include "core/trace_cache/sample_type.hpp"
-#    include "core/utility.hpp"
 #    include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #    include "library/rocprofiler-sdk/fwd.hpp"
 
@@ -58,8 +50,8 @@
 
 #    include <array>
 #    include <atomic>
-#    include <functional>
 #    include <numeric>
+#    include <span>
 #    include <unordered_map>
 #endif
 
@@ -70,22 +62,22 @@ namespace rocprofiler_sdk
 namespace spm
 {
 bool
-request::requested() const noexcept
+configuration::requested() const noexcept
 {
-    return !events.empty();
+    return !counter_events.empty();
 }
 
 bool
-is_config_valid(const request&                  req,
+is_config_valid(const configuration&            requested_config,
                 const std::vector<std::string>& dispatch_counter_events,
                 const std::string&              gpu_perf_counter_events)
 {
     // Backstop for direct library load paths. Tool initialization must reject
     // SPM requests when the required interval or mutual-exclusion constraints
     // are not satisfied.
-    if(!req.requested())
+    if(!requested_config.requested())
     {
-        if(req.sample_interval > 0)
+        if(requested_config.sample_interval > 0)
         {
             LOG_WARNING("ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL is set but "
                         "ROCPROFSYS_ROCM_SPM_EVENTS is empty; no SPM counters will be "
@@ -112,7 +104,7 @@ is_config_valid(const request&                  req,
         return false;
     }
 
-    if(req.sample_interval == 0)
+    if(requested_config.sample_interval == 0)
     {
         LOG_ERROR("Invalid SPM configuration: SPM counter collection requires a "
                   "positive sample interval. Set ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL or "
@@ -124,6 +116,32 @@ is_config_valid(const request&                  req,
 
     return true;
 }
+
+namespace
+{
+bool
+prepare_runtime_configuration(const configuration&            requested_config,
+                              const std::vector<std::string>& dispatch_counter_events,
+                              const std::string& gpu_perf_counter_events, bool use_rocpd)
+{
+    if(!is_config_valid(requested_config, dispatch_counter_events,
+                        gpu_perf_counter_events))
+        return false;
+
+    if(requested_config.requested() && use_rocpd)
+    {
+        LOG_WARNING("SPM samples are not written to the RocPD database in this "
+                    "release; use Perfetto output for SPM results");
+    }
+    return true;
+}
+
+void
+log_continue_without_spm()
+{
+    LOG_WARNING("Continuing without SPM counter collection");
+}
+}  // namespace
 
 namespace detail
 {
@@ -154,11 +172,11 @@ parse_counter_name(std::string_view event)
 }
 
 requested_counter_vec_t
-parse_requested_counters(const request& req)
+parse_requested_counters(const configuration& requested_config)
 {
     auto counters = requested_counter_vec_t{};
-    counters.reserve(req.events.size());
-    for(const auto& event : req.events)
+    counters.reserve(requested_config.counter_events.size());
+    for(const auto& event : requested_config.counter_events)
     {
         auto trimmed_event = event;
         utility::trim_str(trimmed_event);
@@ -211,7 +229,7 @@ requested_counter_names(const requested_counter_vec_t& requested)
 }
 }  // namespace detail
 
-#if ROCPROFSYS_COMPILE_SPM_RUNTIME
+#if ROCPROFSYS_USE_SPM && !defined(ROCPROFSYS_DISABLE_SPM_RUNTIME)
 namespace
 {
 constexpr auto invalid_context_handle = 0UL;
@@ -302,7 +320,8 @@ spm_supported_counters_callback(rocprofiler_agent_id_t /*agent_id*/,
 }
 
 bool
-sample_interval_supported(rocprofiler_agent_id_t agent_id, const request& req)
+sample_interval_supported(rocprofiler_agent_id_t agent_id,
+                          const configuration&   requested_config)
 {
     auto configs = spm_available_config_vec_t{};
     auto status  = rocprofiler_spm_query_agent_configurations(
@@ -315,12 +334,13 @@ sample_interval_supported(rocprofiler_agent_id_t agent_id, const request& req)
         return false;
     }
 
-    return std::any_of(configs.begin(), configs.end(), [&req](const auto& config) {
-        return config.type ==
-                   ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES &&
-               config.interval.min_interval <= req.sample_interval &&
-               config.interval.max_interval >= req.sample_interval;
-    });
+    return std::any_of(
+        configs.begin(), configs.end(), [&requested_config](const auto& config) {
+            return config.type ==
+                       ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES &&
+                   config.interval.min_interval <= requested_config.sample_interval &&
+                   config.interval.max_interval >= requested_config.sample_interval;
+        });
 }
 
 counter_config_data
@@ -425,12 +445,13 @@ query_supported_spm_counters(rocprofiler_agent_id_t                 agent_id,
 
 std::optional<rocprofiler_counter_config_id_t>
 create_sdk_spm_counter_config(rocprofiler_agent_id_t agent_id, std::uint64_t device_id,
-                              const request& req, spm_counter_id_vec_t& counters)
+                              const configuration&  requested_config,
+                              spm_counter_id_vec_t& counters)
 {
     auto param = rocprofiler_spm_parameters_t{
         sizeof(rocprofiler_spm_parameters_t),
         ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
-        req.sample_interval,
+        requested_config.sample_interval,
     };
     auto params = std::array<rocprofiler_spm_parameters_t*, 1>{ &param };
     auto config = rocprofiler_counter_config_id_t{};
@@ -455,23 +476,24 @@ create_sdk_spm_counter_config(rocprofiler_agent_id_t agent_id, std::uint64_t dev
 
 agent_config_result
 create_agent_spm_config(rocprofiler_agent_id_t agent_id, std::uint64_t device_id,
-                        const request& req, const requested_counter_vec_t& requested)
+                        const configuration&           requested_config,
+                        const requested_counter_vec_t& requested)
 {
     const auto requested_names = detail::requested_counter_names(requested);
     auto counters = query_supported_spm_counters(agent_id, requested_names, device_id);
     if(counters.status != spm_status::success) return { counters.status, {} };
 
-    if(!sample_interval_supported(agent_id, req))
+    if(!sample_interval_supported(agent_id, requested_config))
     {
         LOG_WARNING("SPM sample interval {} SCLK cycles is not supported for device {} "
                     "(agent {})",
-                    req.sample_interval, device_id, agent_id.handle);
+                    requested_config.sample_interval, device_id, agent_id.handle);
         return { spm_status::failed, {} };
     }
 
     auto config_data = make_counter_config_data(counters.counters);
-    auto config =
-        create_sdk_spm_counter_config(agent_id, device_id, req, config_data.counter_ids);
+    auto config = create_sdk_spm_counter_config(agent_id, device_id, requested_config,
+                                                config_data.counter_ids);
     if(config)
     {
         trace_cache::get_metadata_registry().set_spm_counter_names(
@@ -483,7 +505,7 @@ create_agent_spm_config(rocprofiler_agent_id_t agent_id, std::uint64_t device_id
 }
 
 bool
-configure_agent_spm_configs(client_data& data, const request& req)
+configure_agent_spm_configs(client_data& data, const configuration& requested_config)
 {
     if(data.gpu_agents.empty())
     {
@@ -491,7 +513,7 @@ configure_agent_spm_configs(client_data& data, const request& req)
         return false;
     }
 
-    const auto all_requested = detail::parse_requested_counters(req);
+    const auto all_requested = detail::parse_requested_counters(requested_config);
 
     return data.agent_spm_counter_configs.wlock([&](auto& configs) {
         configs.clear();
@@ -509,8 +531,9 @@ configure_agent_spm_configs(client_data& data, const request& req)
                 continue;
             }
 
-            auto config = create_agent_spm_config(
-                rocprofiler_agent_id_t{ agent.agent->handle }, device_id, req, requested);
+            auto config =
+                create_agent_spm_config(rocprofiler_agent_id_t{ agent.agent->handle },
+                                        device_id, requested_config, requested);
             if(config.status == spm_status::skipped)
             {
                 ++skipped_agents;
@@ -530,7 +553,7 @@ configure_agent_spm_configs(client_data& data, const request& req)
         else if(skipped_agents > 0)
         {
             LOG_WARNING("SPM configured on {} GPU agent(s); skipped {} requested GPU "
-                        "agent(s) without SPM support for this request",
+                        "agent(s) without SPM support for this configuration",
                         configs.size(), skipped_agents);
         }
         else
@@ -662,7 +685,7 @@ spm_record_callback(const rocprofiler_spm_dispatch_counting_service_data_t* disp
 }  // namespace
 
 bool
-configure_runtime(client_data* data, const request& req)
+configure_requested_runtime(client_data* data, const configuration& requested_config)
 {
     if(data == nullptr)
     {
@@ -670,7 +693,7 @@ configure_runtime(client_data* data, const request& req)
         return false;
     }
 
-    if(!configure_agent_spm_configs(*data, req))
+    if(!configure_agent_spm_configs(*data, requested_config))
     {
         return false;
     }
@@ -706,6 +729,20 @@ configure_runtime(client_data* data, const request& req)
     return true;
 }
 
+bool
+configure_runtime(client_data* data, const configuration& requested_config,
+                  const std::vector<std::string>& dispatch_counter_events,
+                  const std::string& gpu_perf_counter_events, bool use_rocpd)
+{
+    if(!prepare_runtime_configuration(requested_config, dispatch_counter_events,
+                                      gpu_perf_counter_events, use_rocpd))
+        return false;
+    if(!requested_config.requested()) return true;
+
+    if(!configure_requested_runtime(data, requested_config)) log_continue_without_spm();
+    return true;
+}
+
 void
 log_data_loss(client_data* data)
 {
@@ -721,19 +758,37 @@ log_data_loss(client_data* data)
 }
 #else
 bool
-configure_runtime(client_data*, const request&)
+configure_runtime(client_data*, const configuration& requested_config,
+                  const std::vector<std::string>& dispatch_counter_events,
+                  const std::string& gpu_perf_counter_events, bool use_rocpd)
 {
+    if(!prepare_runtime_configuration(requested_config, dispatch_counter_events,
+                                      gpu_perf_counter_events, use_rocpd))
+        return false;
+    if(!requested_config.requested()) return true;
+
     LOG_WARNING("SPM runtime collection was requested, but this rocprofiler-sdk "
                 "build does not provide the experimental SPM API. Build with a "
                 "rocprofiler-sdk version that provides "
                 "rocprofiler-sdk/experimental/spm.h.");
-    return false;
+    log_continue_without_spm();
+    return true;
 }
 
 void
 log_data_loss(client_data*)
 {}
 #endif
+
+bool
+configure_runtime(client_data* data, const configuration& requested_config)
+{
+    if(!requested_config.requested())
+        return configure_runtime(data, requested_config, {}, {}, false);
+
+    return configure_runtime(data, requested_config, rocprofiler_sdk::get_rocm_events(),
+                             config::get_gpu_perf_counters(), config::get_use_rocpd());
+}
 }  // namespace spm
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys

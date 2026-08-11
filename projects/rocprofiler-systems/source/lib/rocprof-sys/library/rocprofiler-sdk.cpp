@@ -2475,11 +2475,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     auto _buffered_domain  = rocprofiler_sdk::get_buffered_domains();
     auto _counter_events   = rocprofiler_sdk::get_rocm_events();
     auto _gpu_perf_events  = config::get_gpu_perf_counters();
-    auto _spm_request      = rocprofiler_sdk::spm::request{
-        rocprofiler_sdk::spm::get_events(),
-        rocprofiler_sdk::spm::get_sample_interval(),
+    auto _version          = rocprofiler_sdk::get_version();
+
+    const auto _spm_config = rocprofiler_sdk::spm::configuration{
+        .counter_events  = rocprofiler_sdk::spm::get_events(),
+        .sample_interval = rocprofiler_sdk::spm::get_sample_interval(),
     };
-    auto _version = rocprofiler_sdk::get_version();
+
     if(_version.formatted == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
@@ -2488,22 +2490,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     auto* _data        = as_client_data(user_data);
     _data->client_fini = fini_func;
 
-    // SPM gate, stage 1 of 2: reject invalid user configuration. This is the only
-    // SPM check that is fatal; conflicting counter modes or a missing interval are
-    // explicit user errors.
-    if(!rocprofiler_sdk::spm::is_config_valid(_spm_request, _counter_events,
-                                              _gpu_perf_events))
-    {
-        return -1;
-    }
-    if(_spm_request.requested() && config::get_use_rocpd())
-    {
-        LOG_WARNING("SPM samples are not written to the RocPD database in this "
-                    "release; use Perfetto output for SPM results");
-    }
-
     _data->initialize();
     if(!_counter_events.empty()) _data->initialize_event_info();
+
+    if(!rocprofiler_sdk::spm::configure_runtime(_data, _spm_config)) return -1;
 
     ROCPROFILER_CALL(rocprofiler_create_context(&_data->primary_ctx));
 
@@ -2516,18 +2506,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     // Control context for marker-based region filtering and pause/resume (always-on)
     ROCPROFILER_CALL(rocprofiler_create_context(&_data->control_ctx));
-
-    if(_spm_request.requested())
-    {
-        // SPM gate, stage 2 of 2: attempt SDK/hardware runtime setup. SDK-side
-        // capability and opt-in failures warn and continue without SPM.
-        if(!rocprofiler_sdk::spm::configure_runtime(_data, _spm_request))
-        {
-            // SPM being unavailable on this SDK/hardware/runtime path must not abort tool
-            // initialization. configure_runtime() already logged the specific reason.
-            LOG_WARNING("Continuing without SPM counter collection");
-        }
-    }
 
     auto external_corr_id_request_kinds =
         std::array<rocprofiler_external_correlation_id_request_kind_t, 3>{
