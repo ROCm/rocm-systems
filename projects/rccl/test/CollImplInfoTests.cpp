@@ -249,7 +249,14 @@ namespace RcclUnitTesting
 
       ASSERT_TRUE(sel.found) << "No recognizable selection line in dispatch log:\n" << log;
 
+      // DDA is disabled inside a group (rcclDdaEnabled bails when ncclGroupDepth
+      // != 0), and the dispatch above runs grouped. Query in the same grouped
+      // context so the report reflects the backend that actually ran; querying
+      // ungrouped would spuriously report DDA. The query only reads state (no
+      // enqueue), so the surrounding group closes empty.
+      NCCLCHECK(ncclGroupStart());
       ReportedImpl rep = QueryReport(comms[0], coll, count, dt, ncclSum, sbuf[0], rbuf[0]);
+      NCCLCHECK(ncclGroupEnd());
 
       EXPECT_EQ(rep.algoName, sel.algoName)
         << "reported algo != logged-selected algo\nLOG:\n" << log;
