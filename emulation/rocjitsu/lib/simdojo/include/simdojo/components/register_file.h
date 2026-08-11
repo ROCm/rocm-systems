@@ -8,16 +8,12 @@
 #define SIMDOJO_COMPONENTS_REGISTER_FILE_H_
 
 #include "simdojo/sim/component.h"
-#include "util/reclaimable_buffer.h"
-
 #include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <memory>
-#include <new>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -25,23 +21,15 @@
 
 namespace simdojo {
 
-template <size_t NUM_ELEMS, typename VecElem> class VectorReg;
-
-/// @brief Backing-store policy for a physical register file.
+/// @brief Backing-store layout for a physical register file.
 enum class RegisterFileStorage {
-  EAGER,         ///< Heap storage committed and initialized up front.
-  DEMAND_PAGED,  ///< OS demand paging where supported; software-lazy fallback.
+  CONTIGUOUS,    ///< Contiguous storage used by the small scalar register file.
   SOFTWARE_LAZY, ///< Portable chunk storage allocated on first mutable access.
 };
 
 namespace detail {
 
-template <typename RegType> inline constexpr bool has_zero_bit_pattern_v = false;
-template <> inline constexpr bool has_zero_bit_pattern_v<uint32_t> = true;
-template <size_t NUM_ELEMS>
-inline constexpr bool has_zero_bit_pattern_v<VectorReg<NUM_ELEMS, uint32_t>> = true;
-
-template <typename RegType> class EagerRegisterStorage {
+template <typename RegType> class ContiguousRegisterStorage {
 public:
   void init(uint32_t count) { data_.assign(count, RegType{}); }
 
@@ -56,62 +44,6 @@ public:
 
 private:
   std::vector<RegType> data_;
-};
-
-/// @brief Contiguous register storage with zero-and-reclaim semantics.
-///
-/// The register types used by rocjitsu are implicit-lifetime, trivially
-/// copyable values. ReclaimableBuffer therefore gives them their required
-/// all-zero initial representation without eagerly touching storage on systems
-/// with demand-paged backing. Resetting a reused allocation restores that same
-/// zero-filled state and recycles physical pages when the platform supports it.
-template <typename RegType> class DemandPagedRegisterStorage {
-public:
-  static_assert(std::is_trivially_copyable_v<RegType>);
-  static_assert(std::is_trivially_destructible_v<RegType>);
-  static_assert(has_zero_bit_pattern_v<RegType>,
-                "demand-paged registers must use all-zero bytes for RegType{}");
-
-  DemandPagedRegisterStorage() = default;
-  DemandPagedRegisterStorage(const DemandPagedRegisterStorage &) = delete;
-  DemandPagedRegisterStorage &operator=(const DemandPagedRegisterStorage &) = delete;
-  DemandPagedRegisterStorage(DemandPagedRegisterStorage &&) = delete;
-  DemandPagedRegisterStorage &operator=(DemandPagedRegisterStorage &&) = delete;
-
-  void init(uint32_t count) {
-    assert(data_ == nullptr && "DemandPagedRegisterStorage already initialized");
-    if (count == 0)
-      return;
-    if (count > std::numeric_limits<size_t>::max() / sizeof(RegType))
-      throw std::bad_alloc();
-
-    const size_t bytes = static_cast<size_t>(count) * sizeof(RegType);
-    storage_.allocate(bytes, DATA_ALIGNMENT);
-    data_ = std::launder(reinterpret_cast<RegType *>(storage_.data()));
-  }
-
-  void reset(uint32_t base, uint32_t count) {
-    storage_.zero_and_reclaim(static_cast<size_t>(base) * sizeof(RegType),
-                              static_cast<size_t>(count) * sizeof(RegType));
-  }
-
-  [[nodiscard]] static bool can_reclaim_independently(uint32_t count) noexcept {
-    const size_t bytes = static_cast<size_t>(count) * sizeof(RegType);
-    return bytes % util::ReclaimableBuffer::reclamation_granularity() == 0;
-  }
-
-  RegType &operator[](uint32_t idx) { return data_[idx]; }
-  const RegType &operator[](uint32_t idx) const { return data_[idx]; }
-  RegType *data() { return data_; }
-  const RegType *data() const { return data_; }
-
-private:
-  // Preserve the register type's alignment; ReclaimableBuffer strengthens it
-  // to the platform reclamation granularity when needed.
-  static constexpr size_t DATA_ALIGNMENT = std::max(alignof(RegType), alignof(std::max_align_t));
-
-  util::ReclaimableBuffer storage_;
-  RegType *data_ = nullptr;
 };
 
 /// @brief Portable sparse register storage allocated in fixed-size chunks.
@@ -172,7 +104,9 @@ public:
 
   [[nodiscard]] static constexpr uint32_t registers_per_chunk() noexcept { return REGS_PER_CHUNK; }
 
-  [[nodiscard]] size_t allocated_chunk_count() const noexcept {
+  /// @brief Count chunks with materialized register storage.
+  /// @returns Number of currently materialized chunks.
+  [[nodiscard]] size_t materialized_chunk_count() const noexcept {
     return static_cast<size_t>(std::count_if(chunks_.begin(), chunks_.end(),
                                              [](const auto &chunk) { return chunk != nullptr; }));
   }
@@ -207,26 +141,10 @@ private:
   uint32_t total_regs_ = 0;
 };
 
-template <typename RegType, RegisterFileStorage Storage> struct RegisterStorageFor;
-
-template <typename RegType> struct RegisterStorageFor<RegType, RegisterFileStorage::EAGER> {
-  using type = EagerRegisterStorage<RegType>;
-};
-
-template <typename RegType> struct RegisterStorageFor<RegType, RegisterFileStorage::SOFTWARE_LAZY> {
-  using type = SoftwareLazyRegisterStorage<RegType>;
-};
-
-template <typename RegType> struct RegisterStorageFor<RegType, RegisterFileStorage::DEMAND_PAGED> {
-#if defined(__linux__)
-  using type = DemandPagedRegisterStorage<RegType>;
-#else
-  using type = SoftwareLazyRegisterStorage<RegType>;
-#endif
-};
-
 template <typename RegType, RegisterFileStorage Storage>
-using RegisterStorage = typename RegisterStorageFor<RegType, Storage>::type;
+using RegisterStorage =
+    std::conditional_t<Storage == RegisterFileStorage::CONTIGUOUS,
+                       ContiguousRegisterStorage<RegType>, SoftwareLazyRegisterStorage<RegType>>;
 
 } // namespace detail
 
@@ -238,11 +156,17 @@ using RegisterStorage = typename RegisterStorageFor<RegType, Storage>::type;
 /// free block and returns its base register index. References and pointers are
 /// allocation-scoped: callers must not read or write through them before
 /// allocation or after freeing their block. Freeing a block invalidates every
-/// handle into that block.
+/// handle into that block. With software-lazy storage, const access to an
+/// unmaterialized register is an ephemeral observation of its logical zero
+/// value and may use shared immutable backing. Such a handle is not a persistent
+/// storage identity and need not observe a later write through a mutable handle.
+/// Mutable handles, and const handles into already materialized storage, remain
+/// stable until their allocation is freed.
 ///
 /// @tparam RegType Register element type (default: uint32_t).
-/// @tparam Storage Backing-store policy (default: eager heap storage).
-template <typename RegType = uint32_t, RegisterFileStorage Storage = RegisterFileStorage::EAGER>
+/// @tparam Storage Backing-store layout (default: contiguous storage).
+template <typename RegType = uint32_t,
+          RegisterFileStorage Storage = RegisterFileStorage::CONTIGUOUS>
 class RegisterFile : public Component {
 public:
   explicit RegisterFile(std::string name) : Component(std::move(name)) {}
@@ -294,11 +218,10 @@ public:
       return;
     assert(!free_blocks_[block] && "double-free of register block");
     free_blocks_[block] = true;
-    if constexpr (Storage != RegisterFileStorage::EAGER) {
-      // Immediately restore the retired block's zero state and let the backing
-      // store release physical storage when the platform supports it. Generic
-      // layouts whose blocks share reclamation units receive one final
-      // whole-file reset so their boundary storage can also be released.
+    if constexpr (Storage == RegisterFileStorage::SOFTWARE_LAZY) {
+      // Immediately restore the retired block's zero state and release wholly
+      // covered chunks. Layouts whose blocks share chunks receive one final
+      // whole-file reset so their boundary chunks can also be released.
       const bool independently_reclaimable = data_.can_reclaim_independently(regs_per_block_);
       const bool all_blocks_free =
           !independently_reclaimable && std::all_of(free_blocks_.begin(), free_blocks_.end(),
@@ -370,6 +293,16 @@ public:
       if (b)
         ++count;
     return count;
+  }
+
+  /// @brief Count chunks with materialized backing storage.
+  /// @returns Number of currently materialized chunks.
+  [[nodiscard]] size_t materialized_chunk_count() const
+    requires requires(const detail::RegisterStorage<RegType, Storage> &storage) {
+      storage.materialized_chunk_count();
+    }
+  {
+    return data_.materialized_chunk_count();
   }
 
 private:

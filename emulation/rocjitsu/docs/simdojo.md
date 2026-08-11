@@ -226,19 +226,17 @@ following dimensions:
 | Register width            | 64 lanes × 4 bytes                         |
 | Complete vector backing   | 1,280 MiB                                  |
 
-On Linux, `RegisterFile` keeps this backing contiguous and uses anonymous
-demand paging, so untouched portions do not consume resident memory. Storage
-becomes resident when a wave first accesses it and is zeroed when that wave
-retires. Wholly covered pages are also returned to the operating system when
-reclamation succeeds.
-
-The portable backend divides the same physical-register index space into
-fixed-size chunks. An untouched chunk is represented by a null entry and reads
-as zero; its storage is allocated and zero-initialized on the first mutable
-access. Retiring a wave releases wholly covered chunks and clears any shared
-boundary chunk. Both backends preserve stable addresses for individual
-registers over an allocation's lifetime, but only the Linux backend exposes a
-single pointer spanning the complete file.
+`RegisterFile` divides the physical VGPR index space into fixed 4 KiB chunks.
+An untouched chunk is represented by a null entry and reads as zero; its
+storage is allocated and zero-initialized on the first mutable access. Retiring
+a wave releases wholly covered chunks and clears any shared boundary chunk.
+The implementation uses only portable C++ allocation and does not require
+virtual-memory APIs. Mutable handles and handles into materialized registers
+remain stable until their allocation retires, but the complete register file is
+deliberately not contiguous. Const access to an unmaterialized register observes
+its logical zero value through shared immutable backing without allocating a
+chunk. That read-only handle is an ephemeral value observation, not a persistent
+storage identity, and need not observe a later write through another handle.
 
 This is a functional storage model, not a model of a physical register file.
 In particular, filling all 32 simulator slots with high-pressure waves can
@@ -246,37 +244,59 @@ represent an occupancy that hardware could not admit. That distinction is
 important when interpreting memory measurements or using register pressure to
 approximate hardware throughput.
 
-The following reference measurements were collected on 2026-08-06 with the
-gfx942 CDNA3 KMD configuration unless another target is shown. They compare
-the former eager backing with the current demand-backed representation; all
-workloads produced their expected correctness results.
+#### Representative workloads
 
-| Workload                        | Eager runtime | Demand-backed runtime | Eager peak RSS | Demand-backed peak RSS |
-|---------------------------------|--------------:|----------------------:|---------------:|-----------------------:|
-| Fixed topology, no kernel       |        0.86 s |                0.13 s |  1,511,424 KiB |            198,656 KiB |
-| Corpus matvec set, 6–88 VGPR    |        3.26 s |                1.86 s | ~1,616,700 KiB |            305,864 KiB |
-| HipKittens 256³, 248 VGPR       |        2.03 s |                0.60 s | ~1,626,112 KiB |            314,368 KiB |
-| hip-matmul 128³, VGPR and AGPR  |        6.34 s |                4.91 s | ~1,615,000 KiB |            302,940 KiB |
-| IREE softmax, gfx942            |        2.09 s |                0.70 s |  1,627,477 KiB |            316,328 KiB |
-| IREE softmax, gfx950            |        1.84 s |                0.72 s |  1,387,861 KiB |            338,881 KiB |
+The fixed-topology and IREE measurements were collected on 2026-08-10 from
+rocjitsu revision `49e6ddafeb9fd8cadda1c78b891466fd498ec676`. Fixed topology
+reports the median of six processes; IREE reports the median of five processes,
+all of which matched the checked-in output exactly. The CTS rows report the
+median of three source-identical processes from rocjitsu revision
+`4d5779c15beb0d9495b319dce5d906e966275e23` and test-corpus revision
+`ce5da512188dd40de0bc7da298ec11b587d8fdd3`; all tests passed. Every build was
+Release, pinned to CPU 8, and used an AMD EPYC 9554 host running Linux 6.8.
 
-A qualified gfx942 saturation workload isolates page first-touch and
-reclamation costs. Its single-queue case places eight waves on each of 40 CUs;
-the all-slot case deliberately fills all 32 slots on all 320 CUs and is not a
-hardware-achievable occupancy for a 253-VGPR wave.
+| Workload                             | Eager runtime | Software runtime | Eager peak RSS | Software peak RSS | Effect                              |
+|--------------------------------------|--------------:|-----------------:|---------------:|------------------:|-------------------------------------|
+| Fixed topology, no kernel            |        0.87 s |          0.125 s |  1,511,424 KiB |       201,728 KiB | 85.6% faster, 86.7% less RSS        |
+| IREE softmax, exact output            |        2.50 s |           0.99 s |  1,630,208 KiB |       326,656 KiB | 60.4% faster, 80.0% less RSS        |
+| CTS math                             |       28.37 s |          27.94 s |  2,235,924 KiB |       926,788 KiB | 1.5% faster, 58.5% less RSS         |
+| CTS MFMA                             |      151.40 s |         150.78 s |  2,235,392 KiB |       926,720 KiB | 0.4% faster, 58.5% less RSS         |
 
-| Saturation scenario                 | Eager runtime | Demand-backed runtime | Runtime change | Eager peak RSS | Demand-backed peak RSS | RSS change |
-|-------------------------------------|--------------:|----------------------:|---------------:|---------------:|-----------------------:|-----------:|
-| 253 VGPR, initialization only       |    149.162 ms |            161.507 ms |         +8.28% |              — |                      — |          — |
-| 253 VGPR, eight update passes       |  1,257.192 ms |          1,262.361 ms |         +0.41% |              — |                      — |          — |
-| Complete single-queue sweep         |       23.25 s |               22.10 s |          -4.9% |  1,592,320 KiB |            299,676 KiB |     -81.2% |
-| All slots, 253 VGPR, eight passes   |      47.678 s |              46.955 s |          -1.5% |  1,620,992 KiB |            947,352 KiB |     -41.6% |
+Unlike fixed topology and the shorter IREE workload, the CTS suites are
+dominated by simulated instruction execution and therefore amortize the fixed
+initialization work that lazy storage eliminates. Across three runs, the
+startup proxy (whole-process wall time minus test-body time) fell from about
+1.29 seconds to 0.54 seconds. Test-body time increased by 1.2% for math and was
+unchanged to measurement precision for MFMA (+0.1%). The result is a smaller
+end-to-end runtime improvement even as peak RSS falls by 58.5%.
 
-The short initialization-only case exposes the dispatch-time cost of touching
-new pages. Reusing the same live registers amortizes that cost, while retiring
-the wave makes its backing reclaimable for later dispatches. The qualified
-workload, complete methodology, and reproduction commands live in the
-[rocjitsu test corpus](https://github.com/ROCm/rocjitsu-test-corpus/tree/develop/corpus/kernels/benchmarks/vgpr_saturation).
+#### Worst-case saturation validation
+
+The qualified gfx942 saturation workload was measured on 2026-08-10 from
+rocjitsu revision `49e6ddafeb9fd8cadda1c78b891466fd498ec676`. The
+representative case places eight waves on each of one XCD's 40 CUs and reports
+three-launch medians. The all-slot case deliberately fills all 32 functional
+simulator slots on all 320 CUs with 253-VGPR waves—an occupancy that hardware
+could not admit—and reports one checksum-validated launch.
+
+| Saturation runtime                          |       Eager | Software lazy | Change      |
+|---------------------------------------------|------------:|--------------:|-------------|
+| 253-VGPR initialization-only median launch  |  156.201 ms |    157.479 ms | 0.8% slower |
+| 253-VGPR eight-update median launch         | 1,332.955 ms |  1,335.671 ms | 0.2% slower |
+| All-slot 253-VGPR eight-update timed launch |    48.127 s |      48.780 s | 1.4% slower |
+
+Peak RSS is a process-wide high-water measurement. The representative sweep
+therefore has one result covering all 9--253-VGPR pressure points rather than
+separate values for its individual launch timings.
+
+| Saturation peak RSS                |          Eager | Software lazy | Change         |
+|------------------------------------|---------------:|--------------:|----------------|
+| Complete 9--253-VGPR sweep         | 1,609,728 KiB  |  318,280 KiB  | 80.2% less RSS |
+| All slots, 253 VGPR, eight updates | 1,622,016 KiB  |  967,064 KiB  | 40.4% less RSS |
+
+The qualified workload, complete methodology, and reproduction commands are
+pinned at rocjitsu test corpus revision
+[`b3f5fa8a263ee2cd83666a62bc18731b09b1166a`](https://github.com/ROCm/rocjitsu-test-corpus/tree/b3f5fa8a263ee2cd83666a62bc18731b09b1166a/corpus/kernels/benchmarks/vgpr_saturation).
 
 ---
 

@@ -484,23 +484,29 @@ public:
   /// @returns Pointer to the contiguous SGPR data.
   const uint32_t *sgpr_data(uint32_t base) const { return &sgpr_file_[base]; }
 
-  /// @brief Return a raw pointer to a wavefront's VGPR data in the physical file.
+  /// @brief Return a raw pointer to one VGPR in the physical file.
   /// @details This bypasses plugin read hooks and should not be used directly
   /// by instruction emulators. It is reserved for RegisterAccess, VM storage
   /// code, serialization/checkpointing, diagnostics, and tightly controlled
   /// internals that have a separate observation contract.
-  /// @param base Base register index in the VGPR file.
-  /// @returns Const pointer to the raw VGPR data.
+  /// The returned pointer spans exactly one register's lanes, not a contiguous
+  /// multi-register region. For software-lazy storage, an unmaterialized
+  /// register may return shared immutable zero backing. Treat the result as an
+  /// ephemeral value observation: it is not a persistent storage identity and
+  /// need not observe a later write through another handle.
+  /// @param base Register index in the VGPR file.
+  /// @returns Const pointer to one register's raw lane data.
   virtual const uint8_t *raw_vgpr_data(uint32_t base) const = 0;
 
-  /// @brief Return a mutable raw pointer to a wavefront's VGPR data.
+  /// @brief Return a mutable raw pointer to one VGPR.
   /// @details This bypasses the instruction-facing RegisterAccess boundary.
   /// It is intended for VM storage operations such as memory completion,
   /// checkpoint restore, RegisterAccess view implementation, and other
   /// tightly controlled internals. Instruction emulators should use Operand or
-  /// RegisterAccess write APIs instead.
-  /// @param base Base register index in the VGPR file.
-  /// @returns Mutable pointer to the raw VGPR data.
+  /// RegisterAccess write APIs instead. The returned pointer spans exactly one
+  /// register's lanes and remains stable until the owning wave retires.
+  /// @param base Register index in the VGPR file.
+  /// @returns Mutable pointer to one register's raw lane data.
   virtual uint8_t *raw_vgpr_data(uint32_t base) = 0;
 
   /// @brief Read a VGPR lane directly from physical storage.
@@ -755,13 +761,7 @@ template <simdojo::ExecMode Mode, GpuIsa Isa>
 class IsaExecComputeUnit : public ExecComputeUnit<Mode> {
 public:
   using Vgpr = simdojo::VectorReg<Isa::WF_SIZE, uint32_t>;
-#if defined(RJ_VGPR_STORAGE_BACKEND_EAGER)
-  using VgprFile = simdojo::RegisterFile<Vgpr, simdojo::RegisterFileStorage::EAGER>;
-#elif defined(RJ_VGPR_STORAGE_BACKEND_SOFTWARE_LAZY)
   using VgprFile = simdojo::RegisterFile<Vgpr, simdojo::RegisterFileStorage::SOFTWARE_LAZY>;
-#else
-  using VgprFile = simdojo::RegisterFile<Vgpr, simdojo::RegisterFileStorage::DEMAND_PAGED>;
-#endif
 
   /// @brief Construct an ISA-parameterized compute unit.
   /// @param name Human-readable name (e.g., "cu0").
@@ -815,12 +815,12 @@ public:
     vgpr_file_[reg_idx][lane] = val;
   }
 
-  /// @returns Const pointer to the raw VGPR data.
+  /// @returns Const pointer to one VGPR's raw lane data.
   const uint8_t *raw_vgpr_data(uint32_t base) const override {
     return reinterpret_cast<const uint8_t *>(&vgpr_file_[base]);
   }
 
-  /// @returns Mutable pointer to the raw VGPR data.
+  /// @returns Mutable pointer to one VGPR's raw lane data.
   uint8_t *raw_vgpr_data(uint32_t base) override {
     return reinterpret_cast<uint8_t *>(&vgpr_file_[base]);
   }

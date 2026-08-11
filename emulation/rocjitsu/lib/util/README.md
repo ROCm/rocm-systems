@@ -32,7 +32,6 @@ INTERFACE library that contributes an include path and nothing to link.
 | File | Description |
 |------|-------------|
 | `arena_alloc.h` | Fixed-size block pool allocator with free-list. `ArenaAlloc<BlockSize, NumBlocks, BlockAlign>` provides O(1) alloc/dealloc with global-allocator fallback. |
-| `reclaimable_buffer.h` | Stable aligned byte storage with zero-and-reclaim semantics. Uses sparse anonymous mappings and best-effort page discard on Linux, with an eager portable fallback. |
 | `spinlock.h` | TTAS spinlock optimized for sub-microsecond critical sections. Uses C++20 `atomic::wait()` with ThreadSanitizer annotations. |
 | `intrusive_list.h` | Bidirectional intrusive linked list with optional parent-pointer tracking. `IntrusiveList<T>` and `IListNode<T>` with O(1) insert/erase. |
 | `unique_handle.h` | Move-only RAII ownership for POSIX file descriptors, Win32 handles, and custom handle traits. |
