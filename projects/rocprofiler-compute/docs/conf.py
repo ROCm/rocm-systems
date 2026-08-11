@@ -219,5 +219,5 @@ extlinks = {
     ),
 }
 
-# Uncomment if facing rate limit exceed issue with local build
-external_projects_remote_repository = ""
+# Uncomment if you encounter rate limits when building locally
+# external_projects_remote_repository = ""
