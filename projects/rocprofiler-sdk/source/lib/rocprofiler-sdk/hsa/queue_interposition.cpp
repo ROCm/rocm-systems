@@ -668,13 +668,15 @@ completion_monitor_loop(completion_monitor& mon)
         // One more drain closes the window between the pre-wait drain and the reset.
         drain_incoming(mon);
 
-        // Break on shutdown regardless of whether `active` is empty: pending
-        // completion signals may never transition during finalization, so this
-        // check must not be gated on an empty active set or the loop could spin
-        // without ever reaching the teardown path that releases them. Finalization
-        // can begin before the monitor is explicitly stopped, so honor it too.
-        if(!mon.running.load(std::memory_order_acquire) || registration::get_fini_status() != 0)
-            break;
+        // Break only on the authoritative stop signal. stop_completion_monitor clears
+        // `running` AND bumps `wake_signal`, so the waits below (and the wait_any on the
+        // active set) always return and this check is reached even when in-flight
+        // completion signals never transition during teardown. Deliberately do NOT break
+        // on get_fini_status(): that flag is also set transiently (to -1) around a
+        // per-client finalizer / detach and then restored while the SDK keeps running,
+        // so honoring it would make the monitor exit mid-life in a multi-client session
+        // and never restart.
+        if(!mon.running.load(std::memory_order_acquire)) break;
 
         if(mon.active.empty())
         {
@@ -809,7 +811,13 @@ start_completion_monitor()
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS)
         << "failed to create completion-monitor wake signal";
 
+    // Bracket creation with the internal-thread notifications so tools honoring the
+    // rocprofiler_at_internal_thread_create contract can suppress instrumentation of
+    // the SDK's own monitor thread (as the retired task-group pool did, and as other
+    // raw-thread sites such as kfd do).
+    internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
     mon.thread = std::thread{[&mon]() { completion_monitor_loop(mon); }};
+    internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
 }
 
 // Wait for all in-flight completions to drain without stopping the monitor. Safe to
