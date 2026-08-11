@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_ISA_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_ISA_H_
+#ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_ISA_H_
+#define ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_ISA_H_
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
@@ -19,7 +19,7 @@ namespace rocjitsu::amdgpu {
 class Wavefront;
 } // namespace rocjitsu::amdgpu
 
-namespace rocjitsu::gfx1250 {
+namespace rocjitsu::cdna5 {
 
 /// @brief gfx1250 STATUS register layout.
 ///
@@ -64,10 +64,10 @@ public:
 
 /// @brief gfx1250 ISA traits.
 struct Isa : amdgpu::RdnaIsaBase {
-  using Decoder = rocjitsu::gfx1250::Decoder;
-  using MachineInst = rocjitsu::gfx1250::MachineInst;
-  using OperandType = rocjitsu::gfx1250::OperandType;
-  using StatusReg = rocjitsu::gfx1250::StatusReg;
+  using Decoder = rocjitsu::cdna5::Decoder;
+  using MachineInst = rocjitsu::cdna5::MachineInst;
+  using OperandType = rocjitsu::cdna5::OperandType;
+  using StatusReg = rocjitsu::cdna5::StatusReg;
 
   static constexpr uint32_t WF_SIZE_MAX = 32; ///< gfx1250 is Wave32-only.
   // gfx1250 uses the RDNA base decoder shape, but its MODE[27] enables VGPR
@@ -84,14 +84,14 @@ struct Isa : amdgpu::RdnaIsaBase {
   static uint32_t simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev);
 };
 
-} // namespace rocjitsu::gfx1250
+} // namespace rocjitsu::cdna5
 
 namespace rocjitsu {
 
 template <> struct IsaTrait<ROCJITSU_CODE_ARCH_GFX1250> {
-  using type = gfx1250::Isa;
+  using type = cdna5::Isa;
 };
 
 } // namespace rocjitsu
 
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_ISA_H_
+#endif // ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_ISA_H_

@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_MMA_EXEC_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_MMA_EXEC_H_
+#ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_MMA_EXEC_H_
+#define ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_MMA_EXEC_H_
 
 /// @file WMMA execution helpers for gfx1250.
 
@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <utility>
 
-namespace rocjitsu::gfx1250 {
+namespace rocjitsu::cdna5 {
 
 template <typename F>
 inline uint32_t resolve_acc(uint32_t vb, uint32_t dst, int src2_ev, uint32_t &const_acc,
@@ -20,6 +20,6 @@ inline uint32_t resolve_acc(uint32_t vb, uint32_t dst, int src2_ev, uint32_t &co
                                                        std::forward<F>(get_const));
 }
 
-} // namespace rocjitsu::gfx1250
+} // namespace rocjitsu::cdna5
 
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_MMA_EXEC_H_
+#endif // ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_MMA_EXEC_H_

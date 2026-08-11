@@ -8,7 +8,7 @@
 
 #include <array>
 
-namespace rocjitsu::gfx1250 {
+namespace rocjitsu::cdna5 {
 
 inline constexpr std::array<IsaGpuTargetDescription, 1> kGpuTargets{{
     {ROCJITSU_CODE_TARGET_GFX1250, "gfx1250", EF_AMDGPU_MACH_AMDGCN_GFX1250},
@@ -26,4 +26,4 @@ make_target_descriptor(bool supports_execution,
   };
 }
 
-} // namespace rocjitsu::gfx1250
+} // namespace rocjitsu::cdna5

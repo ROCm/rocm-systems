@@ -17,7 +17,7 @@
 #include <cstdint>
 #include <optional>
 
-namespace rocjitsu::gfx1250 {
+namespace rocjitsu::cdna5 {
 namespace {
 
 uint32_t scaled_vaddr_factor(const amdgpu::VectorMemState &d) {
@@ -282,4 +282,4 @@ void ds_calculate_addresses(const VdsMachineInst &inst, amdgpu::Wavefront &wf,
   }
 }
 
-} // namespace rocjitsu::gfx1250
+} // namespace rocjitsu::cdna5

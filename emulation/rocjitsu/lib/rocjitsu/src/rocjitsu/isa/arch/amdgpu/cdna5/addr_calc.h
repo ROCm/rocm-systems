@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_ADDR_CALC_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_ADDR_CALC_H_
+#ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_ADDR_CALC_H_
+#define ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_ADDR_CALC_H_
 
 /// @file Address calculation helpers for gfx1250 memory instructions.
 
@@ -16,7 +16,7 @@ class Wavefront;
 struct VectorMemState;
 } // namespace rocjitsu::amdgpu
 
-namespace rocjitsu::gfx1250 {
+namespace rocjitsu::cdna5 {
 
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
                                 uint32_t access_size_bytes);
@@ -44,6 +44,6 @@ inline amdgpu::Mtype mtype_from_bits(bool sc0, bool sc1) {
   return amdgpu::Mtype::RW;
 }
 
-} // namespace rocjitsu::gfx1250
+} // namespace rocjitsu::cdna5
 
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_ADDR_CALC_H_
+#endif // ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_ADDR_CALC_H_

@@ -96,7 +96,7 @@ std::optional<EncodingWords> rdna4_encoding(std::string_view mnemonic) {
 }
 
 std::optional<EncodingWords> gfx1250_encoding(std::string_view mnemonic) {
-  return find_test_encoding(gfx1250::test_data::ENCODINGS, mnemonic);
+  return find_test_encoding(cdna5::test_data::ENCODINGS, mnemonic);
 }
 
 class ScalarSccProfile {

@@ -175,7 +175,7 @@ void apply_immediate_mode_vgpr_msb_side_effect(VgprMsbState &state, uint16_t hwr
 
 void transfer_instruction(VgprMsbState &state, const Instruction &inst,
                           std::span<const uint8_t> text) {
-  if (inst.opcode() == gfx1250::kSSetVgprMsbSopp && inst.mnemonic() == "s_set_vgpr_msb") {
+  if (inst.opcode() == cdna5::kSSetVgprMsbSopp && inst.mnemonic() == "s_set_vgpr_msb") {
     const Operand *immediate = inst.src_operand(0);
     if (immediate == nullptr) {
       state.banks.fill(std::nullopt);

@@ -6,8 +6,8 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/target_provider.h"
 
-namespace rocjitsu::gfx1250 {
+namespace rocjitsu::cdna5 {
 
 std::unique_ptr<rocjitsu::Decoder> create_model_target_decoder() { return make_isa_decoder<Isa>(); }
 
-} // namespace rocjitsu::gfx1250
+} // namespace rocjitsu::cdna5

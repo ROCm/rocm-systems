@@ -6,10 +6,10 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/target_provider.h"
 
-namespace rocjitsu::gfx1250 {
+namespace rocjitsu::cdna5 {
 
 std::unique_ptr<rocjitsu::Decoder> create_target_decoder() {
   return make_isa_decoder<Isa>(&execution_backend());
 }
 
-} // namespace rocjitsu::gfx1250
+} // namespace rocjitsu::cdna5

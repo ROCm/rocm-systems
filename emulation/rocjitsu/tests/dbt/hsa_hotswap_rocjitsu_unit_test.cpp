@@ -572,7 +572,7 @@ TEST_F(HsaHotswapHookTest, TranslationFailureDoesNotLoadOrRetain) {
 TEST_F(HsaHotswapHookTest, RendersTranslatorDiagnosticsAndDumpsFailedSource) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   constexpr auto conversion =
-      rocjitsu::gfx1250::build_sop1(rocjitsu::gfx1250::kSBarrierSignalIsfirstSop1, {.ssrc0 = 195});
+      rocjitsu::cdna5::build_sop1(rocjitsu::cdna5::kSBarrierSignalIsfirstSop1, {.ssrc0 = 195});
   constexpr uint32_t kEndpgm = 0xBFB00000u;
   const std::array<uint32_t, 2> text = {conversion[0], kEndpgm};
   const auto source = rocjitsu::test_support::make_gfx1250_code_object(text);
