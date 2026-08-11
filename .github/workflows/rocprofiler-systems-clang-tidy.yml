@@ -26,6 +26,7 @@ jobs:
   clang-tidy:
     name: clang-tidy
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-24.04
 
