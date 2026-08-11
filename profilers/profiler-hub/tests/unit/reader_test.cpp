@@ -3157,4 +3157,93 @@ TEST_F(reader_v3_summary_test, far_future_window_yields_empty)
     expect_far_future_window_empty(*m_reader);
 }
 
+// =============================================================================
+// Missing-metadata naming fallbacks (v3). The fixture has an unnamed stream, one
+// region whose thread row is entirely absent, one region whose thread has a NULL
+// name, and one agent with a NULL type_index -- so synthesize_derived_tracks()
+// must fall back to the synthetic display names and get_all_agents() must drop the
+// corrupt agent. Each test asserts the EXACT fallback string / dropped-agent count.
+// =============================================================================
+class reader_v3_missing_meta_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        m_storage = std::make_unique<profiler_hub::storage_t>(m_database_path, "");
+        m_reader  = std::make_shared<profiler_hub::reader_t>(std::move(m_storage));
+    }
+
+    void TearDown() override
+    {
+        m_reader.reset();
+        m_storage.reset();
+    }
+
+    std::string                              m_database_path{ ROCPD_DB_V3_MISSING_META_PATH };
+    std::unique_ptr<profiler_hub::storage_t> m_storage;
+    std::shared_ptr<profiler_hub::reader_t>  m_reader;
+};
+
+// stream_info present but name empty (NULL in rocpd_info_stream) -> the stream
+// track display name falls back to "Stream <stream_id>".
+TEST_F(reader_v3_missing_meta_test, unnamed_stream_track_falls_back_to_stream_id)
+{
+    auto streams = find_tracks(m_reader->get_tracks(),
+                               profiler_hub::reader_types::track_type_t::stream);
+    ASSERT_EQ(streams.size(), 1U);
+    EXPECT_EQ(streams.front()->name, "Stream 7");
+}
+
+// region whose tid matches no rocpd_info_thread row -> thread_info is entirely
+// absent, so the cpu_thread track display name is the bare "Thread". Both fixture
+// regions are non-sample (main) tracks.
+TEST_F(reader_v3_missing_meta_test, thread_without_thread_info_falls_back_to_thread)
+{
+    auto threads = find_tracks(m_reader->get_tracks(),
+                               profiler_hub::reader_types::track_type_t::cpu_thread);
+    ASSERT_EQ(threads.size(), 2U);
+
+    profiler_hub::reader_types::track_info_ptr_t bare;
+    for(const auto& t : threads)
+    {
+        if(t->name == "Thread") bare = t;
+    }
+    ASSERT_NE(bare, nullptr) << "no cpu_thread track fell back to bare \"Thread\"";
+    EXPECT_EQ(bare->name, "Thread");
+    // Fallback path taken precisely because thread_info could not be resolved.
+    EXPECT_EQ(bare->thread_info, nullptr);
+    EXPECT_EQ(bare->region_kind, profiler_hub::reader_types::region_track_kind_t::main);
+}
+
+// region whose thread row exists but has a NULL name -> thread_info is present,
+// so the display name falls back to "Thread <thread_id>" using the OS tid, NOT
+// the bare "Thread".
+TEST_F(reader_v3_missing_meta_test, unnamed_thread_falls_back_to_thread_tid)
+{
+    auto threads = find_tracks(m_reader->get_tracks(),
+                               profiler_hub::reader_types::track_type_t::cpu_thread);
+    ASSERT_EQ(threads.size(), 2U);
+
+    profiler_hub::reader_types::track_info_ptr_t named;
+    for(const auto& t : threads)
+    {
+        if(t->name == "Thread 99001") named = t;
+    }
+    ASSERT_NE(named, nullptr) << "no cpu_thread track fell back to \"Thread <tid>\"";
+    ASSERT_NE(named->thread_info, nullptr);
+    EXPECT_EQ(named->thread_info->thread_id, 99001U);
+    EXPECT_TRUE(named->thread_info->name.empty());
+}
+
+// get_all_agents() drops any agent whose type_index is NULL ("Corrupted database
+// detected" continue): the fixture has one valid agent and one with a NULL
+// type_index, so exactly one agent survives.
+TEST_F(reader_v3_missing_meta_test, agent_with_null_type_index_is_dropped)
+{
+    auto agents = m_reader->get_all_agents();
+    ASSERT_EQ(agents.size(), 1U);
+    EXPECT_EQ(agents.front()->type_index, 0U);
+    EXPECT_EQ(agents.front()->name, "Synthetic GPU 0");
+}
+
 }  // namespace

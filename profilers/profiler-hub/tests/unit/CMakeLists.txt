@@ -470,6 +470,54 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_SUMMARY_PATH="${ROCPD_DB_V3_SUMMARY_PATH}"
 )
 
+# Synthetic v3 missing-metadata naming-fallback fixture, generated at build time from
+# committed SQL against the in-tree v3 schema (rocpd_metadata DML stripped -- the modern
+# sqlite3 CLI rejects it). An unnamed stream, a region on an absent thread, a region on a
+# NULL-named thread, and an agent with a NULL type_index light the synthetic-name / dropped-
+# agent fallbacks; the absence of rocpd_timestamp selects the v3 backend.
+set(_v3mm_uuid "00000000000000000000000000730048")
+set(_v3mm_schema_src
+    ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
+)
+set(_v3mm_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_missing_meta_data.sql)
+set(_v3mm_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v3_missing_meta_gen.sql)
+file(READ ${_v3mm_schema_src} _v3mm_schema)
+file(READ ${_v3mm_data_src} _v3mm_data)
+string(
+    REGEX REPLACE
+    "INSERT INTO[^;]*rocpd_metadata[^;]*;"
+    ""
+    _v3mm_schema
+    "${_v3mm_schema}"
+)
+string(REPLACE "{{uuid}}" "_${_v3mm_uuid}" _v3mm_schema "${_v3mm_schema}")
+string(REPLACE "{{guid}}" "${_v3mm_uuid}" _v3mm_schema "${_v3mm_schema}")
+string(REPLACE "{{uuid}}" "_${_v3mm_uuid}" _v3mm_data "${_v3mm_data}")
+string(REPLACE "{{guid}}" "${_v3mm_uuid}" _v3mm_data "${_v3mm_data}")
+file(WRITE ${_v3mm_gen_sql} "${_v3mm_schema}\n${_v3mm_data}\n")
+
+set(ROCPD_DB_V3_MISSING_META_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v3_missing_meta.db)
+add_custom_command(
+    OUTPUT ${ROCPD_DB_V3_MISSING_META_PATH}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V3_MISSING_META_PATH}
+    COMMAND
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_MISSING_META_PATH} ".read ${_v3mm_gen_sql}"
+    DEPENDS ${_v3mm_gen_sql} ${_v3mm_schema_src} ${_v3mm_data_src}
+    COMMENT "Generating synthetic v3 missing-metadata test fixture"
+    VERBATIM
+)
+add_custom_target(
+    profiler-hub_v3_missing_meta_fixture
+    DEPENDS ${ROCPD_DB_V3_MISSING_META_PATH}
+)
+add_dependencies(profiler-hub_unit_tests profiler-hub_v3_missing_meta_fixture)
+
+target_compile_definitions(
+    profiler-hub_unit_tests
+    PRIVATE ROCPD_DB_V3_MISSING_META_PATH="${ROCPD_DB_V3_MISSING_META_PATH}"
+)
+
 gtest_discover_tests(
     profiler-hub_unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
