@@ -107,6 +107,7 @@
         {"name": "Standalone.StackSize", "description": "Verify RCCL kernel stack size for each gfx architecture", "test_filter": "Standalone.StackSize"},
         {"name": "Standalone.CommCuDevice_Check", "description": "Verify device associated with communicator in single/multi-device scenarios", "test_filter": "Standalone.CommCuDevice_Check"},
         {"name": "Standalone.SplitComms_RankCheck_Basic_Failure", "description": "Verify ncclCommUserRank fails with invalid communicator handle", "test_filter": "Standalone.SplitComms_RankCheck_Basic_Failure"},
+        {"name": "ProfilerPluginClose.UnusablePluginIsUnloaded", "description": "Verify a profiler plugin exposing no usable interface is unloaded instead of being left mapped", "test_filter": "ProfilerPluginClose.UnusablePluginIsUnloaded"},
         {"name": "AllReduce.BiasInt8_Sum", "description": "AllReduce bias int8 sum", "test_filter": "AllReduce.BiasInt8_Sum"},
         {"name": "AllReduce.BiasInt8_Max", "description": "AllReduce bias int8 max", "test_filter": "AllReduce.BiasInt8_Max"},
         {"name": "AllReduce.BiasInt8_Min", "description": "AllReduce bias int8 min", "test_filter": "AllReduce.BiasInt8_Min"},
