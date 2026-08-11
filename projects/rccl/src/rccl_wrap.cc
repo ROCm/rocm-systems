@@ -364,6 +364,8 @@ void rcclSetPipelining(struct ncclComm* comm, size_t const& nBytes, struct ncclT
 
 extern ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task, int collNetSupport, int nvlsSupport,
                                 int numPipeOps, ncclSimInfo_t* simInfo = NULL);
+extern int rcclKernelPackedChannels(struct ncclComm* comm, ncclFunc_t func, size_t count,
+                                    ncclDataType_t datatype, int protocol, int nMaxChannels);
 
 ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
                              int collNetSupport, int nvlsSupport, int numPipeOps, int* algo, int* protocol,
@@ -872,12 +874,16 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     task.datatype = datatype;
     NCCLCHECK(getAlgoInfo(comm, &task, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*numPipeOps=*/1, /*simInfo=*/nullptr));
     decision->protocol = task.protocol;
+    // Report the traffic-packed channel count the kernel actually runs on, not the
+    // tuning cap (task.nMaxChannels), matching the enqueue.cc channel{Lo..Hi} log.
+    int packed = rcclKernelPackedChannels(comm, ncclFuncAllReduce, count, datatype, task.protocol,
+                                          task.nMaxChannels);
 #ifdef ENABLE_WARP_SPEED
     // WarpSpeed reports as RING* with channels scaled by nWarps, matching rcclGetAlgoInfo.
-    decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : task.nMaxChannels;
+    decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : packed;
     decision->algo = task.useWarpSpeed ? rcclAddonAlgos_t::RCCL_WARP_SPEED : task.algorithm;
 #else
-    decision->nMaxChannels = task.nMaxChannels;
+    decision->nMaxChannels = packed;
     decision->algo = task.algorithm;
 #endif
   }
@@ -1038,12 +1044,16 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     task.datatype = datatype;
     NCCLCHECK(getAlgoInfo(comm, &task, 0, 0, 1));
     decision->protocol = task.protocol;
+    // Report the traffic-packed channel count the kernel actually runs on, not the
+    // tuning cap (task.nMaxChannels), matching the enqueue.cc channel{Lo..Hi} log.
+    int packed = rcclKernelPackedChannels(comm, ncclFuncAllGather, sendcount, datatype, task.protocol,
+                                          task.nMaxChannels);
 #ifdef ENABLE_WARP_SPEED
     // WarpSpeed reports as RING* with channels scaled by nWarps, matching rcclGetAlgoInfo.
-    decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : task.nMaxChannels;
+    decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : packed;
     decision->algo = task.useWarpSpeed ? rcclAddonAlgos_t::RCCL_WARP_SPEED : task.algorithm;
 #else
-    decision->nMaxChannels = task.nMaxChannels;
+    decision->nMaxChannels = packed;
     decision->algo = task.algorithm;
 #endif
   }

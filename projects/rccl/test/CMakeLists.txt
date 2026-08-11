@@ -189,6 +189,7 @@ if(BUILD_TESTS)
     AllToAllTests.cpp
     AllToAllVTests.cpp
     AsymmetricVisibilityTests.cpp
+    CollImplInfoTests.cpp
     BroadcastTests.cpp
     DoneEventOrderingTests.cpp
     GatherTests.cpp

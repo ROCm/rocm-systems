@@ -183,6 +183,27 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
   }
 }
 
+// Reporting helper: the single-collective channel count scheduleCollTasksToPlan()
+// packs traffic into, so rcclGetCollImplInfo reports the channels that actually run
+// rather than the tuning cap. Mirrors the native-kernel packer (channelId=0,
+// currentTraffic=0): for one coll, 1+nMid+(cellsHi!=0) reduces to divUp(cells,cellsPerChannel).
+rccl_static int rcclKernelPackedChannels(struct ncclComm* comm, ncclFunc_t func, size_t count,
+                                         ncclDataType_t datatype, int protocol, int nMaxChannels) {
+  if (nMaxChannels <= 0 || count == 0) return nMaxChannels;
+  constexpr size_t MinTrafficPerChannel = 16 << 10;
+  size_t elementSize = ncclTypeSize(datatype);
+  int trafficPerByte = ncclFuncTrafficPerByte(func, comm->nRanks);
+  if (protocol == NCCL_PROTO_LL) trafficPerByte *= 4;
+  size_t trafficBytes = std::max(MinTrafficPerChannel, count * elementSize * (size_t)trafficPerByte);
+  size_t trafficPerChannel = std::max<size_t>(MinTrafficPerChannel, divUp(trafficBytes / nMaxChannels, 16) * 16);
+  size_t cellSize = divUp(divUp(MinTrafficPerChannel, (size_t)trafficPerByte), 16) * 16;
+  size_t cells = divUp(count * elementSize, cellSize);
+  size_t trafficPerCell = cellSize * (size_t)trafficPerByte;
+  size_t cellsPerChannel = std::min(cells, divUp(trafficPerChannel, trafficPerCell));
+  if (cellsPerChannel == 0) return nMaxChannels;
+  return (int)std::min((size_t)nMaxChannels, divUp(cells, cellsPerChannel));
+}
+
 RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 /*****************************************************************************/
 /*       Launch system : synchronization and CUDA kernel launch              */
