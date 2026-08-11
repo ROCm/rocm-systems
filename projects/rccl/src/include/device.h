@@ -39,6 +39,12 @@ typedef __hip_bfloat16 hip_bfloat16;
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #endif
+#if SQTT_ENABLED
+#include <rocprof_trace_decoder/cxx/markers.hpp>
+#else
+#define sqtt_marker_enter(name) do {} while(0)
+#define sqtt_marker_exit(name) do {} while(0)
+#endif
 
 extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4];
 

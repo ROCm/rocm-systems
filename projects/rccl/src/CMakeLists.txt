@@ -876,6 +876,7 @@ target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/gensrc)
 target_include_directories(rccl PRIVATE ${HSA_INCLUDE_PATH})
 target_include_directories(rccl PRIVATE ${SMI_INCLUDE_DIR})
 target_include_directories(rccl PRIVATE ${ROCMCORE_PATH}/include)
+target_include_directories(rccl PRIVATE /opt/rocm/include/rocprof-trace-decoder)
 if(DEMANGLE_DIR)
   target_include_directories(rccl PRIVATE ${DEMANGLE_DIR})
 endif()
@@ -1077,6 +1078,20 @@ if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-unused-private-field)
   target_compile_options(rccl PRIVATE -Wno-null-conversion)
   target_compile_options(rccl PRIVATE -Wno-missing-braces)
+endif()
+
+## Add SQTT instrumentation support if enabled
+if(SQTT_ENABLED)
+  # Check if SQTT markers are already in source code
+  execute_process(
+    COMMAND grep -q "PRIM_SIMPLE_WAIT_PEER" "${CMAKE_CURRENT_SOURCE_DIR}/device/prims_simple.h"
+    RESULT_VARIABLE MARKERS_PRESENT
+    OUTPUT_QUIET ERROR_QUIET
+  )
+
+  target_compile_options(rccl PRIVATE "-fpass-plugin=/opt/rocm/lib/libsqttinstrumentpass.so")
+  target_compile_definitions(rccl PRIVATE SQTT_ENABLED=1)
+  message(STATUS "SQTT instrumentation pass plugin enabled for RCCL")
 endif()
 
 ## Set RCCL compile and linker options for unit tests and code coverage
