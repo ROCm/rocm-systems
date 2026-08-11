@@ -24,12 +24,14 @@
 
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/vop3.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/vopd.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3_5/vopd.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/operand.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/sop2.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vopd.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -45,6 +47,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <format>
 #include <memory>
 #include <string>
 
@@ -133,6 +136,42 @@ INSTANTIATE_TEST_SUITE_P(
       name += info.param.expected_mnemonic;
       return name;
     });
+
+TEST(RawEncodingTest, PreservesScalarLiteralWordsAcrossAmdgpuIsas) {
+  struct Case {
+    rj_code_arch_t arch;
+    const char *arch_name;
+    uint32_t word;
+  };
+  constexpr uint32_t s_mov_b32_literal = 0xBE8000FFu;
+  constexpr uint32_t rdna1_s_mov_b32_literal = 0xBE8003FFu;
+  constexpr Case cases[] = {
+      {ROCJITSU_CODE_ARCH_CDNA1, "cdna1", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_CDNA2, "cdna2", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_CDNA3, "cdna3", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_CDNA4, "cdna4", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_RDNA1, "rdna1", rdna1_s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_RDNA2, "rdna2", rdna1_s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", s_mov_b32_literal},
+  };
+
+  for (const auto &tc : cases) {
+    SCOPED_TRACE(tc.arch_name);
+    const uint32_t words[] = {tc.word, 0x12345678u};
+    auto decoder = Decoder::create(tc.arch);
+    ASSERT_NE(decoder, nullptr) << tc.arch_name;
+    std::unique_ptr<Instruction> inst;
+    ASSERT_NO_THROW(inst.reset(decoder->decode(words))) << tc.arch_name;
+    ASSERT_NE(inst, nullptr) << tc.arch_name;
+    ASSERT_EQ(inst->size(), sizeof(words)) << tc.arch_name;
+    ASSERT_NE(inst->raw_encoding(), nullptr) << tc.arch_name;
+    EXPECT_EQ(inst->raw_encoding()[0], words[0]) << tc.arch_name;
+    EXPECT_EQ(inst->raw_encoding()[1], words[1]) << tc.arch_name;
+  }
+}
 
 TEST(FieldlessOperandDecodeTest, SaveexecExposesInertExecAndSccOperands) {
   const uint32_t words[] = {
@@ -344,6 +383,20 @@ TEST(LiteralDisassemblyTest, Simm32HexUsesUnsignedEncodingBits) {
 TEST(Rdna3Vop3LiteralDecodeTest, TrigPreopF64ClassifiesMixedWidthLiteralsPerOperand) {
   constexpr uint32_t literal = 0xaf123456u;
 
+  amdgpu::GpuMemory gpu_mem("f64_literal_mem");
+  amdgpu::L2Cache l2("f64_literal_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA3;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("f64_literal", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  amdgpu::RegisterAccess regs(*wf);
+
   rdna3::Vop3InstLiteralMachineInst raw{};
   raw.vdst = 0;
   raw.src0 = 255;
@@ -359,12 +412,85 @@ TEST(Rdna3Vop3LiteralDecodeTest, TrigPreopF64ClassifiesMixedWidthLiteralsPerOper
   ASSERT_NE(src1, nullptr);
 
   EXPECT_EQ(src0->size_bits(), 64);
-  ASSERT_TRUE(src0->literal64_value().has_value());
-  EXPECT_EQ(*src0->literal64_value(), 0xaf12345600000000ULL);
+  EXPECT_EQ(static_cast<uint32_t>(src0->encoding_value()), literal);
+  EXPECT_FALSE(src0->literal64_value().has_value());
+  EXPECT_EQ(regs.read_lane64(*src0, 0), 0xaf12345600000000ULL);
 
   EXPECT_EQ(src1->size_bits(), 32);
   EXPECT_FALSE(src1->literal64_value().has_value());
   EXPECT_EQ(static_cast<uint32_t>(src1->encoding_value()), literal);
+}
+
+TEST(Rdna4LiteralOperandTest, SignedI64SignExtendsWithoutClaimingLiteral64Encoding) {
+  amdgpu::GpuMemory gpu_mem("signed_i64_literal_mem");
+  amdgpu::L2Cache l2("signed_i64_literal_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("signed_i64_literal", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  amdgpu::RegisterAccess regs(*wf);
+
+  struct LiteralCase {
+    uint32_t encoded;
+    uint64_t signed_value;
+  };
+  constexpr std::array cases{
+      LiteralCase{0x7fffffffu, 0x000000007fffffffULL},
+      LiteralCase{0x80000000u, 0xffffffff80000000ULL},
+      LiteralCase{0xffffffffu, 0xffffffffffffffffULL},
+  };
+
+  for (const auto &[literal, signed_value] : cases) {
+    SCOPED_TRACE(::testing::Message() << "literal=" << literal);
+
+    rdna4::Vop3InstLiteralMachineInst raw{};
+    raw.vdst = 0;
+    raw.src0 = 255;
+    raw.src1 = 256;
+    raw.simm32 = literal;
+
+    rdna4::VCmpLtI64Vop3 signed_inst(reinterpret_cast<const rdna4::MachineInst *>(&raw));
+    rdna4::VCmpLtU64Vop3 unsigned_inst(reinterpret_cast<const rdna4::MachineInst *>(&raw));
+
+    const Operand *signed_src0 = signed_inst.src_operand(0);
+    const Operand *unsigned_src0 = unsigned_inst.src_operand(0);
+    ASSERT_NE(signed_src0, nullptr);
+    ASSERT_NE(unsigned_src0, nullptr);
+
+    EXPECT_EQ(signed_src0->name(), std::format("0x{:x}", literal));
+    EXPECT_EQ(static_cast<uint32_t>(signed_src0->encoding_value()), literal);
+    EXPECT_FALSE(signed_src0->literal64_value().has_value());
+    EXPECT_EQ(regs.read_lane64(*signed_src0, 0), signed_value);
+
+    EXPECT_EQ(static_cast<uint32_t>(unsigned_src0->encoding_value()), literal);
+    EXPECT_FALSE(unsigned_src0->literal64_value().has_value());
+    EXPECT_EQ(regs.read_lane64(*unsigned_src0, 0), static_cast<uint64_t>(literal));
+
+    raw.src0 = 256;
+    raw.src1 = 255;
+    rdna4::VCmpLtI64Vop3 signed_src1_inst(reinterpret_cast<const rdna4::MachineInst *>(&raw));
+    const Operand *signed_src1 = signed_src1_inst.src_operand(1);
+    ASSERT_NE(signed_src1, nullptr);
+    EXPECT_FALSE(signed_src1->literal64_value().has_value());
+    EXPECT_EQ(regs.read_lane64(*signed_src1, 0), signed_value);
+
+    rdna4::Sop2InstLiteralMachineInst scalar_raw{};
+    scalar_raw.ssrc0 = 255;
+    scalar_raw.ssrc1 = 128;
+    scalar_raw.simm32 = literal;
+    rdna4::SAshrI64Sop2 scalar_inst(reinterpret_cast<const rdna4::MachineInst *>(&scalar_raw));
+    const Operand *scalar_src0 = scalar_inst.src_operand(0);
+    ASSERT_NE(scalar_src0, nullptr);
+    EXPECT_FALSE(scalar_src0->literal64_value().has_value());
+    EXPECT_EQ(regs.read_scalar64(*scalar_src0), signed_value);
+  }
 }
 
 TEST(Rdna3DecodeTest, GlobalFlatAllOnesSaddrIsNull) {
