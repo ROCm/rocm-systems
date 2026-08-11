@@ -48,9 +48,10 @@ rocm-systems/shared/machine-readable-isa/isa/
 | Cross-ISA legalization tables | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `legalization_codegen.py` |
 | Encoding decode/encode functions | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `encoding_translator_codegen.py` |
 
-CDNA5 output uses the `generated/cdna5/` directory. Its MR ISA name, logical
-architecture key, generated C++ namespace, and runtime identity remain
-`gfx1250`; only its filesystem output directory is named `cdna5`.
+CDNA5's MR ISA name, logical architecture key, runtime target, ELF identity,
+configuration, and public DBT target identity remain `gfx1250`. Its filesystem
+directories, generated and hand-written C++ namespace (`rocjitsu::cdna5`), and
+internal CMake provider targets use `cdna5`.
 
 Hand-written per-ISA files (`isa.h`, `mma_exec.h`, `addr_calc.h/.cpp`) remain
 under `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/<output-directory>/` and are
