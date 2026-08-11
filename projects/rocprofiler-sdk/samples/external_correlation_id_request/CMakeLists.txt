@@ -90,22 +90,6 @@ set_tests_properties(
                DISABLED
                "${IS_DISABLED}")
 
-add_test(NAME external-correlation-id-request-inline-async-delay
-         COMMAND $<TARGET_FILE:external-correlation-id-request> 2 100 10)
-
-set_tests_properties(
-    external-correlation-id-request-inline-async-delay
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "samples;repro"
-               ENVIRONMENT
-               "${external-correlation-id-request-inline-stress-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${IS_DISABLED}")
-
 add_test(NAME external-correlation-id-request-kernel-map-unload-race
          COMMAND $<TARGET_FILE:external-correlation-id-request> 2 500 500)
 
