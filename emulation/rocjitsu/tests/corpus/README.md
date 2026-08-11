@@ -61,38 +61,10 @@ exclusion, which prevents partial runs from becoming a develop baseline.
 With `--warn-perf`, `run-corpus-tests.sh` warns about passing tests whose
 runtime approaches the pytest timeout.
 
-## Temporary near-timeout skips
-
-The release corpus job applies a 15-second timeout to each pytest call. A test
-from any corpus suite may be temporarily added to the corresponding suite in a
-target's skip-list JSON file when its measured call time is approximately
-13–15 seconds. This prevents normal CI load variation from turning a passing
-test into a timeout failure and adding noise to the release gate.
-
-This policy applies to `iree`, `kernels`, `cts`, `llama`, and future corpus
-suites. Only call durations are relevant because the job sets
-`timeout_func_only=true`; setup and teardown durations do not justify a skip.
-Record the source run, target, suite, and selector here for each temporary
-near-timeout skip.
-
-The following cases were identified in CI test:
-`rocjitsu-test-corpus / test (release)`
-
-| Target | Suite | Test selector |
-| --- | --- | --- |
-| gfx942 | llama | `llama.gfx942.backend_ops.FLASH_ATTN_EXT.2dce6045f861` |
-| gfx942 | llama | `llama.gfx942.backend_ops.FLASH_ATTN_EXT.09f30cac3778` |
-| gfx942 | llama | `llama.gfx942.backend_ops.FLASH_ATTN_EXT.b951a29db5dd` |
-| gfx942 | llama | `llama.gfx942.backend_ops.MUL_MAT.3f2054def40b` |
-| gfx942 | llama | `llama.gfx942.backend_ops.MUL_MAT.12d6ef2eb102` |
-| gfx950 | llama | `llama.gfx950.backend_ops.FLASH_ATTN_EXT.09f30cac3778` |
-| gfx950 | llama | `llama.gfx950.backend_ops.MUL_MAT.12d6ef2eb102` |
-| gfx950 | llama | `llama.gfx950.backend_ops.MUL_MAT.3f2054def40b` |
-| gfx950 | llama | `llama.gfx950.backend_ops.MUL_MAT_ID.8e571d7d711d` |
-| gfx950 | llama | `llama.gfx950.backend_ops.FLASH_ATTN_EXT.b951a29db5dd` |
-| gfx950 | llama | `llama.gfx950.backend_ops.FLASH_ATTN_EXT.2dce6045f861` |
-| gfx1100 | llama | `llama.gfx1100.backend_ops.MUL_MAT_ID.bbb77a88fa25` |
-
-Remove a temporary entry after the test has sufficient headroom below the
-timeout or the timeout policy changes. Keep functional failures and permanent
-unsupported cases governed by their own skip rationale.
+## Corpus skip tests
+Some corpus tests fail with the current ROCjitsu implementation. They are
+temporarily disabled in CI through the target-specific
+`gfx*_skip_tests.json` files. The skipped cases and their observed outcomes
+are documented in
+[`gfx-corpus-skip-tests.md`](gfx-corpus-skip-tests.md), grouped by target and
+observed outcome. The JSON files and documentation contain the same cases.

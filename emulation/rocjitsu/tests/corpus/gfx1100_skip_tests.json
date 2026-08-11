@@ -8,17 +8,10 @@
     "cts.gfx1100.fpsan.fpsan_wave_gfx11_w64_test",
     "cts.gfx1100.fpsan.fpsan_atomic_test",
     "cts.gfx1100.fpsan.fpsan_hip_device_test",
-    "cts.gfx1100.fpsan.fpsan_wave_test",
-    "cts.gfx1100.fpsan.fpsan_amdgcn_math_test",
-    "cts.gfx1100.fpsan.fpsan_amdgcn_ldexp_test",
     "cts.gfx1100.fpsan.fpsan_amdgcn_math_extra_test",
-    "cts.gfx1100.fpsan.fpsan_wmma_gfx11_acc16_test",
-    "cts.gfx1100.fpsan.fpsan_wmma_gfx11_tied_test",
-    "cts.gfx1100.fpsan.fpsan_wmma_gfx11_tied_bf16_test",
     "cts.gfx1100.fpsan.fpsan_wmma_gfx11_acc16_w64_test",
     "cts.gfx1100.fpsan.fpsan_wmma_gfx11_tied_w64_test",
-    "cts.gfx1100.fpsan.fpsan_wmma_gfx11_tied_bf16_w64_test",
-    "cts.gfx1100.fpsan.fpsan_xlane_test"
+    "cts.gfx1100.fpsan.fpsan_wmma_gfx11_tied_bf16_w64_test"
   ],
   "kernels": [
     "rocblas_sgemm::large_2048x2048"
@@ -61,8 +54,6 @@
     "llama.gfx1100.backend_ops.LIGHTNING_INDEXER.28d7def07117",
     "llama.gfx1100.backend_ops.MUL_MAT_ID.4c6f0c369254",
     "llama.gfx1100.backend_ops.MUL_MAT_ID.501e10751a9a",
-    "llama.gfx1100.backend_ops.MUL_MAT_ID.8e571d7d711d",
-    "llama.gfx1100.backend_ops.MUL_MAT_ID.bbb77a88fa25",
     "llama.gfx1100.backend_ops.MUL_MAT_ID.dbedbadd142a",
     "llama.gfx1100.backend_ops.MUL_MAT_ID_FUSION.b3d0befaa714",
     "llama.gfx1100.backend_ops.MUL_MAT_ID_FUSION.dfb1ed5ca4e9",
