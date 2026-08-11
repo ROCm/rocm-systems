@@ -36,9 +36,8 @@ __global__ void BusyKernel(int* out, int slot, int busy_iters) {
   for (int i = 0; i < busy_iters; ++i) {
     acc += __sinf(static_cast<float>(i) * 0.001f);
   }
-  if (acc == 123456.789f) {  // never true; defeats dead-code elimination
-    out[slot] += 1;
-  }
+  if (acc == 123456.789f) acc += 1.0f;  // never true; keeps the spin loop
+  out[slot] += 1;                        // unconditional sink defeats dead-code elimination
 }
 
 __global__ void BusyRmwKernel(int* buf, int busy_iters) {
@@ -58,6 +57,8 @@ double TimeEventDependencyPairs(int num_pairs, int busy_iters, int iters) {
     HIP_CHECK(hipEventCreateWithFlags(&ev[p], hipEventDisableTiming));
     HIP_CHECK(hipMalloc(&bp[p], sizeof(int)));
     HIP_CHECK(hipMalloc(&bc[p], sizeof(int)));
+    HIP_CHECK(hipMemset(bp[p], 0, sizeof(int)));
+    HIP_CHECK(hipMemset(bc[p], 0, sizeof(int)));
   }
 
   auto launch_all = [&]() {
@@ -76,6 +77,7 @@ double TimeEventDependencyPairs(int num_pairs, int busy_iters, int iters) {
   HIP_CHECK(hipEventCreate(&beg));
   HIP_CHECK(hipEventCreate(&end));
   HIP_CHECK(hipEventRecord(beg));
+  HIP_CHECK(hipEventSynchronize(beg));  // ensure start timestamp is taken before timed work
   for (int it = 0; it < iters; ++it) launch_all();
   HIP_CHECK(hipEventRecord(end));
   HIP_CHECK(hipEventSynchronize(end));
@@ -115,6 +117,7 @@ double TimeStreamSweep(int num_streams, int busy_iters, int iters) {
   HIP_CHECK(hipEventCreate(&beg));
   HIP_CHECK(hipEventCreate(&end));
   HIP_CHECK(hipEventRecord(beg));
+  HIP_CHECK(hipEventSynchronize(beg));  // ensure start timestamp is taken before timed work
   for (int it = 0; it < iters; ++it) launch_all();
   HIP_CHECK(hipEventRecord(end));
   HIP_CHECK(hipEventSynchronize(end));

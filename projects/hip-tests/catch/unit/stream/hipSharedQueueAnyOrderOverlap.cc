@@ -237,6 +237,7 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_InternalPredecessorOrdering") {
     HIP_CHECK(hipMalloc(&buf[i], n));
     HIP_CHECK(hipMalloc(&seen[i], sizeof(int)));
     HIP_CHECK(hipMalloc(&warm[i], sizeof(int)));
+    HIP_CHECK(hipMemset(warm[i], 0, sizeof(int)));
   }
 
   for (int r = 0; r < kReps; ++r) {
@@ -332,10 +333,10 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_GraphUnaffected") {
 
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  int one = 1;  // outlives graph instantiation/launch; args are captured at node add time
   for (int c = 0; c < kChains; ++c) {
     hipGraphNode_t prev = nullptr;
     for (int d = 0; d < kDepth; ++d) {
-      int one = 1;
       void* args[] = {&buf[c], &one};
       hipKernelNodeParams np{};
       np.func = reinterpret_cast<void*>(AddDeltaKernel);
