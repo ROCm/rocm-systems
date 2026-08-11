@@ -19,6 +19,7 @@
 |---|---|
 | GPU hardware component (cache, queue, CU logic) | `lib/rocjitsu/src/rocjitsu/vm/amdgpu/` |
 | ISA instruction semantics | `lib/python/amdisa/codegen/_generator.py` (regenerate) |
+| Generated ISA sources and headers (including `insts.h`) | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<target>/` |
 | Hand-written ISA support (address calc, matrix math) | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/<target>/` |
 | KFD ioctl or interposer hook | `lib/rocjitsu/src/rocjitsu/kmd/linux/` |
 | Binary translation rule or expansion | `lib/rocjitsu/src/rocjitsu/code/dbt/` |
