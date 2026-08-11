@@ -828,5 +828,5 @@ HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet, size_t size_bytes
     return write_idx;
 }
 
-HsaRsrcFactory*             HsaRsrcFactory::instance_ = nullptr;
-HsaRsrcFactory::mutex_t     HsaRsrcFactory::mutex_;
+HsaRsrcFactory*         HsaRsrcFactory::instance_ = nullptr;
+HsaRsrcFactory::mutex_t HsaRsrcFactory::mutex_;
