@@ -388,12 +388,28 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hip-tests.cmake
 # Without this, catch_discover_tests("[disabled]") on a binary with no
 # [disabled] tests leaves a dangling _include.cmake whose include() fails:
 #   "include could not find requested file: ..._tests.cmake"
+# This is a known Catch2 bug fixed upstream in:
+#   https://github.com/catchorg/Catch2/pull/3075
+# Remove this patch once we update to a Catch2 version that includes that fix.
+set(_catch_old_snippet "  if(num_tests STREQUAL \"0\")\n    return()\n  endif()")
+set(_catch_new_snippet "  if(num_tests STREQUAL \"0\")\n    file(WRITE \"\${_CTEST_FILE}\" \"# no tests discovered for this spec\\n\")\n    return()\n  endif()")
 file(READ "${CATCH_ADD_TESTS_SCRIPT}" _catch_content)
-string(REPLACE
-  "  if(num_tests STREQUAL \"0\")\n    return()\n  endif()"
-  "  if(num_tests STREQUAL \"0\")\n    file(WRITE \"\${_CTEST_FILE}\" \"# no tests discovered for this spec\\n\")\n    return()\n  endif()"
-  _catch_content "${_catch_content}")
-file(WRITE "${CATCH_ADD_TESTS_SCRIPT}" "${_catch_content}")
+string(FIND "${_catch_content}" "${_catch_new_snippet}" _catch_already_patched)
+if(_catch_already_patched EQUAL -1)
+  string(REPLACE "${_catch_old_snippet}" "${_catch_new_snippet}" _catch_patched "${_catch_content}")
+  if("${_catch_patched}" STREQUAL "${_catch_content}")
+    message(FATAL_ERROR
+      "Failed to patch CatchAddTests.cmake: expected snippet not found.\n"
+      "The Catch2 version may have changed. Check upstream fix:\n"
+      "  https://github.com/catchorg/Catch2/pull/3075")
+  endif()
+  file(WRITE "${CATCH_ADD_TESTS_SCRIPT}" "${_catch_patched}")
+endif()
+unset(_catch_old_snippet)
+unset(_catch_new_snippet)
+unset(_catch_content)
+unset(_catch_patched)
+unset(_catch_already_patched)
 
 file(COPY ${CATCH_ADD_TESTS_SCRIPT}
          DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
