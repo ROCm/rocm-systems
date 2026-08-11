@@ -334,6 +334,16 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
   NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, sendcount, datatype, /*query=*/false,
                                 /*graphCapturingHint=*/false, &decision));
 
+  // Canonical selection line for addon backends (CE / DDA / Direct / Hier /
+  // symmetric). Native kernels report via the enqueue.cc channel{Lo..Hi} tuning
+  // line instead; this names the addon RCCL runs so rcclGetCollImplInfo can be
+  // checked against it.
+  if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
+    const char* an = nullptr;
+    rcclGetAlgoName(decision.algo, &an);
+    INFO(NCCL_COLL, "AllGather impl selected: algo %s", an ? an : "?");
+  }
+
   switch (decision.algo) {
   case RCCL_DDA_FABRIC_LL:
     INFO(NCCL_COLL, "AllGather: taking DDA fabric LL path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d totalBytes=%zu",
@@ -589,6 +599,15 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
                                 /*graphCapturingHint=*/false, &decision));
   info.decision = decision;
   info.decisionValid = true;
+
+  // Canonical selection line for addon backends (CE / DDA / symmetric). Native
+  // kernels report via the enqueue.cc channel{Lo..Hi} tuning line instead; this
+  // names the addon RCCL runs so rcclGetCollImplInfo can be checked against it.
+  if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
+    const char* an = nullptr;
+    rcclGetAlgoName(decision.algo, &an);
+    INFO(NCCL_COLL, "AllReduce impl selected: algo %s", an ? an : "?");
+  }
 
   switch (decision.algo) {
   case RCCL_CE_2SHOT:

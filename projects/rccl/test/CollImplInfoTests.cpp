@@ -113,6 +113,18 @@ namespace RcclUnitTesting
         // WarpSpeed: RING algorithm reported as "RING*" with scaled channels.
         if (line.find("WarpSpeed enabled") != std::string::npos) warpSpeed = true;
 
+        // Canonical addon-backend selection line (CE / DDA / Direct / Hier /
+        // symmetric): "<Func> impl selected: algo <NAME>". This is the only line
+        // several addon backends emit (DDA IPC, CE registered, symmetric all run
+        // through paths with no other recognizable log), so it is what makes the
+        // report checkable on cumem systems. Algo only; proto/channels are not
+        // computed on the dispatch path for these backends, so they stay unset
+        // here and a later, more specific line (below) may refine the protocol.
+        if (line.find(func + " impl selected: algo ") != std::string::npos)
+        {
+          addon = {true, TokenAfter(line, "algo "), false, "", false, 0};
+        }
+
         if (func == "AllGather")
         {
           if (line.find("DDA fabric LL128") != std::string::npos)
@@ -294,6 +306,38 @@ namespace RcclUnitTesting
         HIPCALL(hipMemset(sbuf[i], 0, sendBytes));
         HIPCALL(hipMemset(rbuf[i], 0, recvBytes));
         HIPCALL(hipStreamCreate(&streams[i]));
+      }
+
+      // Warmup: some backends initialize lazily on first use (CE allocates its
+      // staging buffer via a group task on the first enqueue-path CE collective;
+      // DDA sets up IPC/fabric handles). Until that runs, the dispatch path can
+      // pick a fallback for one size while the report -- taken after dispatch has
+      // triggered the init -- sees the now-eligible backend, a spurious mismatch.
+      // Run the full sweep once, discarded, so every lazy init completes first.
+      for (ncclDataType_t dt : dtypes)
+      {
+        const size_t elemSize = (dt == ncclFloat32 ? 4 : 2);
+        const size_t denom = elemSize * (coll == ncclFuncAllGather ? (size_t)nRanks : 1);
+        for (size_t bytes = loBytes; bytes <= hiBytes; bytes <<= 1)
+        {
+          const size_t count = bytes / denom;
+          if (count == 0) continue;
+          NCCLCHECK(ncclGroupStart());
+          for (int i = 0; i < nRanks; i++)
+          {
+            HIPCALL(hipSetDevice(i));
+            if (coll == ncclFuncAllReduce)
+              NCCLCHECK(ncclAllReduce(sbuf[i], rbuf[i], count, dt, ncclSum, comms[i], streams[i]));
+            else
+              NCCLCHECK(ncclAllGather(sbuf[i], rbuf[i], count, dt, comms[i], streams[i]));
+          }
+          NCCLCHECK(ncclGroupEnd());
+        }
+      }
+      for (int i = 0; i < nRanks; i++)
+      {
+        HIPCALL(hipSetDevice(i));
+        HIPCALL(hipStreamSynchronize(streams[i]));
       }
 
       int idx = 0;
