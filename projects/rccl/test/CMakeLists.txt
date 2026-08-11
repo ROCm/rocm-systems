@@ -206,6 +206,7 @@ if(BUILD_TESTS)
     DdaIpcTests.cpp
     NetPluginReloadTests.cpp
     plugin/net_reload_plugin.cpp
+    ProfilerPluginCloseTests.cpp
     CpuAffinityTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
@@ -252,6 +253,14 @@ if(BUILD_TESTS)
   # export just the one plugin symbol (narrow, unlike a broad -rdynamic).
   target_link_options(rccl-UnitTests PRIVATE
     "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12")
+
+  # A real shared library, unlike the net plugin above: ProfilerPluginCloseTests checks
+  # that RCCL unloads an external profiler plugin, so it needs a separately loadable
+  # object. Its path reaches the test through the generator expression below.
+  add_library(rccl-test-profiler-stub SHARED plugin/profiler_stub_plugin.cpp)
+  add_dependencies(rccl-UnitTests rccl-test-profiler-stub)
+  target_compile_definitions(rccl-UnitTests PRIVATE
+    RCCL_TEST_PROFILER_STUB_PATH="$<TARGET_FILE:rccl-test-profiler-stub>")
 
   # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
   # (inline, static, constexpr, template functions) and can run in both Release and Debug.
