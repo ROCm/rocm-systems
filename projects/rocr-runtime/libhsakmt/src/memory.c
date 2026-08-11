@@ -1361,6 +1361,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetSigbusDelay(HSAuint32 NodeId, HSAuint32 DelayMs
 
 	return HSAKMT_STATUS_SUCCESS;
 }
+HSAKMT_STATUS HSAKMTAPI hsaKmtDtifMemoryCopy(void *dst, const void *src, HSAuint64 size) {
+	/* On Linux/KFD, GPU VA == CPU VA — no translation needed. */
+	memcpy(dst, src, size);
+	return HSAKMT_STATUS_SUCCESS;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetAmdGPUDeviceFd(HsaAMDGPUDeviceHandle DeviceHandle, int *fd) {
 	CHECK_KFD_OPEN();
 	int renderFd = hsakmt_fn_amdgpu_device_get_fd((amdgpu_device_handle)DeviceHandle);
