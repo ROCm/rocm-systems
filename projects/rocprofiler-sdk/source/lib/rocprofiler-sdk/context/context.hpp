@@ -35,6 +35,8 @@
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/cxx/hash.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <array>
 #include <cstddef>
@@ -88,7 +90,7 @@ struct dispatch_counter_collection_service
     // produces; rocprofiler_dispatch_counting_service_set_agents narrows it. The set is read
     // on the dispatch path and when scoping serialization, so it is fixed at configure time
     // and never mutated once the context is started.
-    std::unordered_set<uint64_t> agents{};
+    std::unordered_set<rocprofiler_agent_id_t> agents{};
     // A flag to state whether or not the counter set is currently enabled. This is primarily
     // to protect against multithreaded calls to enable a context (and enabling already enabled
     // counters).
@@ -98,7 +100,7 @@ struct dispatch_counter_collection_service
     // exactly as it did before per-agent scoping existed.
     bool collects_on(rocprofiler_agent_id_t agent_id) const
     {
-        return agents.empty() || agents.count(agent_id.handle) > 0;
+        return agents.empty() || agents.count(agent_id) > 0;
     }
 
     // Two counter-collection contexts can coexist as long as they do not both want the same

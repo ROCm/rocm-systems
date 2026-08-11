@@ -29,6 +29,7 @@
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <cstdint>
 #include <functional>
@@ -94,7 +95,7 @@ public:
     common::Synchronized<hsa::profiler_serializer>& serializer(const Queue*);
 
     // Agent handles (rocprofiler_agent_id_t::handle). An empty set means every GPU agent.
-    using agent_handle_set_t = std::unordered_set<uint64_t>;
+    using agent_handle_set_t = std::unordered_set<rocprofiler_agent_id_t>;
 
     /**
      * Enable/disable serialization for QueueController, has no effect if counter collection
