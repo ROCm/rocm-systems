@@ -11,9 +11,47 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.
 | `RaceDetectorPlugin` | `race_detector/` | Hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
 | `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MMA instruction usage. |
 | `ThroughputPlugin` | `throughput/` | Reports per-dispatch and aggregate wave-instruction MIPS with an exclusive instruction-family breakdown. |
+| `DataHazardPlugin` | `data_hazard/` | Detects RAW, WAR and WAW hazards caused by missing or insufficient `s_wait_*` instructions, plus LDS and global memory races. See [data-hazard.md](data-hazard.md). |
 
 The race detector plugin contains both the core detection algorithm
 (`race_detector/core/`) and the rocjitsu adapter (`race_detector/plugin.h`).
+The data hazard plugin is organised the same way, with the simulator-neutral
+engine in `data_hazard/hazard_core/` and the adapter in `data_hazard/adapter.h`.
+
+### Data Hazard Plugin
+
+The data hazard plugin tracks in-flight asynchronous operations per wavefront
+and reports the cases where a wait counter does not cover an access:
+
+- **RAW**: a register or memory location is read before the asynchronous
+  operation that writes it has drained.
+- **WAR** and **WAW**: a pending asynchronous read or write is overwritten
+  before it completes.
+- **Cross-wave races**: LDS accesses within a barrier epoch, and global
+  memory accesses across workgroups, where two waves touch the same address
+  and at least one writes.
+
+Each hazard is written to the plugin sink as a single line as soon as it is
+found. A JSON report and the closing summary are written only once the run
+ends, which for a launched application is process exit, so the sink is the
+only output available while a run is still in progress. The report is a JSON
+array with one object per hazard, carrying the consumer and producer
+instruction identity (dispatch, workgroup, wave, PC, raw ISA words) alongside
+the message and suggested fix.
+
+| Config key | Default | Description |
+|---|---|---|
+| `report_path` | `""` | File to write the JSON hazard report to. Empty means output goes only to the sink. |
+| `verbose` | `false` | Report every occurrence instead of folding logically identical hazards into one entry with a `suppressed_occurrences` count. |
+
+The engine is also built as a standalone `libdata_hazard_core.so` with default
+visibility for consumers outside this tree that drive it directly. Disable it
+with `-DRJ_BUILD_DATA_HAZARD_CORE=OFF`. Driving the engine from another
+simulator is covered in
+[hazard_core/README.md](../lib/rocjitsu/src/rocjitsu/vm/plugins/data_hazard/hazard_core/README.md).
+
+Kernels and a mutation-testing harness that removes `s_wait_*` instructions
+one at a time to verify detection live in `tests/data-hazard/`.
 
 ### Throughput Plugin
 
@@ -91,13 +129,15 @@ plugin's configuration:
   "plugins": {
     "race": {},
     "logging": {},
-    "throughput": {}
+    "throughput": {},
+    "data_hazard": {}
   }
 }
 ```
 
 The bundled plugins are `race` (`RaceDetectorPlugin`), `logging`
-(`KernelLoggingPlugin`), and `throughput` (`ThroughputPlugin`).
+(`KernelLoggingPlugin`), `throughput` (`ThroughputPlugin`), and `data_hazard`
+(`DataHazardPlugin`).
 
 ### Enabling plugins from the mirage CLI
 
@@ -178,8 +218,20 @@ sink-related environment variables.
 
 When `file` is in `types`, each plugin writes to
 `<dir>/<plugin_name>.log`. Plugin names are fixed:
-`race` for `RaceDetectorPlugin`, `logging` for `KernelLoggingPlugin`, and
-`throughput` for `ThroughputPlugin`.
+`race` for `RaceDetectorPlugin`, `logging` for `KernelLoggingPlugin`,
+`throughput` for `ThroughputPlugin`, and `data_hazard` for `DataHazardPlugin`.
+
+### Profiled execution
+
+Set the top-level `"profiled": true` key to wrap the plugins in a
+profiled execution group, which emits per-hook timing data
+(`HOOK_PROFILE` lines) to the configured sinks. With the default sink, timing
+data goes to stderr; stdout sends it to stdout, and file sinks write it to
+`<dir>/profile.log`.
+
+Profiled execution requires the simulation engine to use `"num_threads": 1`.
+Multithreaded configurations are rejected because the profiling counters are
+not synchronized.
 
 ### Examples
 

@@ -1,0 +1,211 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+"""
+Pytest: one test per ``.hip`` kernel through the mutation pipeline.
+
+Run from ``tests/data-hazard`` (so ``mutate_and_test`` imports)::
+
+    cd tests/data-hazard && pytest test_mutate_and_test_kernels.py -v
+
+Every kernel runs under rocJitsu with the ``data_hazard`` plugin enabled.
+``ROCJITSU_LAUNCHER``, ``ROCJITSU_CONFIG`` and ``ROCJITSU_BUILD_DIR`` select
+the launcher and simulator config; see :func:`build_rocjitsu_runner` for the
+defaults. The suite skips when the launcher cannot be found.
+
+Each test writes ``mutation_report.json`` / ``mutation_report.csv`` under pytest ``tmp_path``
+(the ``--output-dir`` equivalent).
+
+At session end, aggregated ``mutation_report.json`` and ``mutation_report.md`` are written to
+the pytest rootdir; the ``## Summary`` table is printed (GitHub Actions ``::group::``) for CI
+visibility. CI uploads those two files as job artifacts.
+
+**Detection rules** (each mutant vs the baseline run for that shader):
+
+- **Baseline FP:** unmodified shader must report ``baseline_hazard_count == 0``.
+- **FN:** if a mutant *killed* the program (``m.correct`` is false) and it *ran*, the plugin
+  must report *more* hazards than baseline: ``m.hazard_count > baseline_hazard_count``.
+- **FP:** if a mutant *survived* (``m.correct`` is true) and ran, the plugin must not report
+  *more* hazards than baseline: ``m.hazard_count <= baseline_hazard_count``.
+
+ROCm tool discovery uses ``ROCM_PATH`` / ``ROCM_HOME`` when set; architecture uses
+``TARGET_ARCH`` when set.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Any, Dict
+
+import pytest
+
+_TEST_DIR = Path(__file__).resolve().parent
+_SHADERS_DIR = _TEST_DIR / "shaders"
+if str(_TEST_DIR) not in sys.path:
+    sys.path.insert(0, str(_TEST_DIR))
+
+from mutate_and_test import (  # noqa: E402
+    DEFAULT_ARCH,
+    KernelBuilder,
+    KernelBuilderConfig,
+    MutantResult,
+    RocjitsuRunner,
+    ShaderReport,
+    build_rocjitsu_runner,
+    discover_shaders,
+    find_tool,
+    is_false_negative,
+    process_shader,
+    write_csv_report,
+    write_json_report,
+)
+from mutate_and_test.__main__ import _detect_rocm_path  # noqa: E402
+
+
+def _all_kernel_paths() -> list[Path]:
+    return discover_shaders(_SHADERS_DIR)
+
+
+@pytest.fixture(scope="session")
+def target_arch() -> str:
+    return os.environ.get("TARGET_ARCH", DEFAULT_ARCH)
+
+
+@pytest.fixture(scope="session")
+def rocm_path() -> str:
+    return (
+        os.environ.get("ROCM_PATH")
+        or os.environ.get("ROCM_HOME")
+        or _detect_rocm_path()
+    )
+
+
+@pytest.fixture(scope="session")
+def rocm_tools(rocm_path: str) -> Dict[str, str]:
+    try:
+        return {
+            "hipcc": find_tool("hipcc", rocm_path),
+            "clang": find_tool("clang", rocm_path),
+            "bundler": find_tool("clang-offload-bundler", rocm_path),
+            "llvm_mc": find_tool("llvm-mc", rocm_path),
+            "llvm_nm": find_tool("llvm-nm", rocm_path),
+        }
+    except FileNotFoundError as e:
+        pytest.skip(f"ROCm tools not available: {e}")
+
+
+@pytest.fixture(scope="session")
+def hazard_runner(
+    tmp_path_factory: pytest.TempPathFactory, target_arch: str
+) -> RocjitsuRunner:
+    """Launcher and config used to run every kernel with hazard detection on."""
+    try:
+        return build_rocjitsu_runner(
+            tmp_path_factory.mktemp("rocjitsu"), arch=target_arch
+        )
+    except FileNotFoundError as e:
+        pytest.skip(
+            "rocJitsu is not built; set ROCJITSU_LAUNCHER / ROCJITSU_BUILD_DIR "
+            f"or build the launcher first: {e}"
+        )
+
+
+@pytest.fixture
+def output_workdir(tmp_path: Path) -> Path:
+    return tmp_path
+
+
+@pytest.fixture
+def kernel_builder_for_shader(
+    shader_path: Path,
+    rocm_tools: Dict[str, str],
+    target_arch: str,
+    rocm_path: str,
+    output_workdir: Path,
+) -> KernelBuilder:
+    cfg = KernelBuilderConfig(
+        tools=rocm_tools,
+        shader_cpp=shader_path,
+        asm_file=output_workdir / f"{shader_path.stem}.s",
+        arch=target_arch,
+        workdir=output_workdir,
+        tag=shader_path.name,
+        rocm_path=rocm_path,
+    )
+    return KernelBuilder(cfg)
+
+
+def _write_reports(report: ShaderReport, arch: str, out_dir: Path) -> None:
+    write_json_report([report], out_dir / "mutation_report.json", arch=arch)
+    write_csv_report([report], out_dir / "mutation_report.csv")
+
+
+def _assert_mutation_ground_truth(report: ShaderReport, artifact_dir: Path) -> None:
+    """
+    Ground truth vs plugin using only the written JSON payload (see module docstring).
+
+    Rules are implemented here in the test module — not via ``report_writer`` — so
+    pass/fail matches what you can inspect in ``mutation_report.json`` on disk.
+    """
+    baseline_hazard_count = report.baseline_hazard_count
+    assert baseline_hazard_count == 0, (
+        "baseline false positive: expected 0 hazards on the unmodified shader "
+        f"for {report.shader!r}, got baseline_hazard_count={baseline_hazard_count}. "
+        f"See {artifact_dir / 'mutation_report.json'}"
+    )
+    mismatches: list[str] = []
+    for i, mutant in enumerate(report.mutants):
+        assert mutant.ran, f"mutant {i} ({mutant.wait_instruction!r}) did not run"
+        if is_false_negative(mutant, baseline_hazard_count):
+            mismatches.append(
+                f"  [{i}] {mutant.wait_instruction!r}: "
+                f"hazard_count={mutant.hazard_count}, baseline={baseline_hazard_count}"
+            )
+    assert not mismatches, (
+        "hazard_count must be strictly above baseline for the cases below.\n"
+        + "\n".join(mismatches)
+        + f"\nReport: {artifact_dir / 'mutation_report.json'}"
+    )
+
+
+@pytest.mark.mutation_pipeline
+@pytest.mark.parametrize("shader_path", _all_kernel_paths(), ids=lambda p: p.stem)
+def test_kernel_mutation_pipeline_runs(
+    shader_path: Path,
+    kernel_builder_for_shader: KernelBuilder,
+    output_workdir: Path,
+    hazard_runner: RocjitsuRunner,
+    target_arch: str,
+    mutation_session_reports: list,
+) -> None:
+    from mutate_and_test import DEFAULT_EXCLUDED_WAITS
+
+    report = process_shader(
+        kernel_builder_for_shader,
+        extra_cxxflags=None,
+        verbose=False,
+        runner=hazard_runner,
+        timeout=120,
+        excluded_waits=DEFAULT_EXCLUDED_WAITS,
+        subprocess_output=False,
+    )
+    mutation_session_reports.append(report)
+
+    _write_reports(report, target_arch, output_workdir)
+
+    assert report.shader == shader_path.stem
+    assert report.compile_ok, f"compile_to_assembly failed: {report.error}"
+    assert report.build_ok, f"baseline build failed: {report.error}"
+    assert report.baseline_ok, (
+        f"baseline run failed exit={report.baseline_exit_code!r}; "
+        "GPU/runtime may be required for some shaders."
+    )
+    assert len(report.mutants) == len(report.waits_found)
+    for m in report.mutants:
+        assert m.shader == shader_path.stem
+
+    json_path = output_workdir / "mutation_report.json"
+    _assert_mutation_ground_truth(report, output_workdir)

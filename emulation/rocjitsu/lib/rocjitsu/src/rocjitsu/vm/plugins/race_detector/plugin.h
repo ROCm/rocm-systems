@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/vm/plugins/disasm_cache.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
@@ -50,36 +51,6 @@ MarkedPc findConflict(const RaceViolation &, RaceDetector &);
 std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
                         const std::unordered_map<uint64_t, std::string> &disasm,
                         std::optional<MarkedPc> conflict, MarkedPc read);
-
-/// PC-to-disassembly cache, shared across all wavefronts in a dispatch.
-///
-/// Records disassembly on first encounter of each PC. An alternative would
-/// be lazy decode at race-report time (code bytes are in GPU memory), but
-/// this approach avoids needing access to the CU's decoder from the plugin.
-///
-/// Shared per-dispatch because all wavefronts execute the same kernel code.
-/// Per-wavefront caches caused cache thrashing under round-robin scheduling.
-///
-/// Keyed by absolute PC. This avoids assuming that a dispatch executes a single
-/// compact, monotonic text range; helper/trampoline code can be far away from
-/// the first PC observed for the dispatch.
-struct DisasmCache {
-  void record(uint64_t pc, const Instruction &inst) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (entries_.contains(pc))
-      return;
-    entries_.emplace(pc, inst.disassemble());
-  }
-
-  std::unordered_map<uint64_t, std::string> to_map() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return entries_;
-  }
-
-private:
-  mutable std::mutex mutex_;
-  std::unordered_map<uint64_t, std::string> entries_;
-};
 
 struct RaceWavefrontState : WavefrontState {
   RingBuffer<uint64_t, 256> trace;
