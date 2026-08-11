@@ -52,7 +52,7 @@ target_include_directories(
         ${SQL_SCHEMA_BINARY_DIR}
 )
 
-target_compile_features(profiler-hub_unit_tests PRIVATE cxx_std_17)
+target_compile_features(profiler-hub_unit_tests PRIVATE cxx_std_20)
 
 # Several tests (e.g. sqlite_backend_impl_test.cpp) #include headers with LOG_*
 # calls directly, compiling them fresh into this TU rather than reusing
