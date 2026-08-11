@@ -253,6 +253,33 @@ else()
   message(STATUS "amdsmi fabric API not found (AMDSMI_FABRIC_DIRECT disabled)")
 endif()
 
+# --- Detect HIP fabric API support (mirrors top-level CMakeLists.txt) ---
+# mem_manager.h only defines its own hipMemFabricHandle_st fallback when
+# HIP_FABRIC_API is undefined; on HIP runtimes that already provide the type
+# (e.g. ROCm 7.14+), omitting this define causes a redefinition conflict
+# with hip_runtime_api.h.
+# Compile-only (STATIC_LIBRARY), like the amdsmi probe above: with the default
+# EXECUTABLE target type these checks link, which drags in the HIP runtime at
+# configure time even though the binary itself is linked with -no-hip-rt.
+include(CheckSymbolExists)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+check_symbol_exists("hipMemImportFromShareableHandle" "hip/hip_runtime_api.h" HIP_FABRIC_API_FUNC)
+check_cxx_source_compiles("
+  #include <hip/hip_runtime_api.h>
+  int main() {
+    hipMemFabricHandle_t handle;
+    (void)handle;
+    return 0;
+  }
+" HIP_FABRIC_HANDLE_TYPE)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+if(HIP_FABRIC_API_FUNC AND HIP_FABRIC_HANDLE_TYPE)
+  set(HIP_FABRIC_API ON)
+  message(STATUS "HIP Fabric API enabled (hipMemImportFromShareableHandle and hipMemFabricHandle_t found)")
+else()
+  set(HIP_FABRIC_API OFF)
+endif()
+
 # --- Common include paths for hipified RCCL headers ---
 set(RCCL_INCLUDE_DIRS
   ${RCCL_HIPIFY_DIR}/src/include
@@ -279,6 +306,7 @@ target_compile_definitions(rccl-source-wrappers PRIVATE
   NCCL_OS_LINUX
   ROCM_VERSION=70000
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 target_link_libraries(rccl-source-wrappers PRIVATE
   GTest::GTest
@@ -314,6 +342,7 @@ target_compile_definitions(rccl-HostUnitTests PRIVATE
   RCCL_EXPOSE_STATIC
   ARSMI_TEST_BUILD
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
 target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt)
