@@ -44,7 +44,7 @@ exclude_patterns = ["archive", "*/includes"]
 
 html_static_path = ["sphinx/static/css"]
 html_css_files = ["o_custom.css"]
-# Generate llms.txt
+# Generate llms.txt and llms-full.txt (requires the rocm-docs-core[llms] extra).
 rocm_docs_generate_llms = True
 
 # Load per-arch CDNA metrics YAMLs
