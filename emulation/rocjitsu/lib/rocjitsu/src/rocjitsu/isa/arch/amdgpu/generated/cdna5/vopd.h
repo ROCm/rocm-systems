@@ -7,8 +7,8 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_VOPD_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_VOPD_H_
 
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
 #include <cstdint>
 #include <string>
 

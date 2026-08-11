@@ -7,8 +7,8 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_ENCODINGS_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_ENCODINGS_H_
 
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>

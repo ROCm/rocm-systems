@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/execution_backend.h"
 
 namespace rocjitsu {

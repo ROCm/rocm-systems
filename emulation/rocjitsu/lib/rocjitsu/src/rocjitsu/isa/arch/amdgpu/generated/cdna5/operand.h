@@ -7,8 +7,8 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_OPERAND_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_OPERAND_H_
 
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/operand_types.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/execution_backend.h"
 #include "rocjitsu/isa/operand.h"
 #include <string>

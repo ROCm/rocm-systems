@@ -7,7 +7,7 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_DECODER_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_DECODER_H_
 
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include <array>
 #include <memory>
 
