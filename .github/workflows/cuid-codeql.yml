@@ -1,0 +1,120 @@
+name: "CodeQL Security Scan"
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/cuid/**'
+      - '.github/workflows/cuid-codeql.yml'
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  DEBCONF_NONINTERACTIVE_SEEN: true
+  BUILD_TYPE: Release
+  ROCM_DIR: /opt/rocm
+
+jobs:
+  analyze:
+    name: Analyze C/C++ Code
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    container:
+      image: ${{ vars.Ubuntu22_DOCKER_IMAGE }}
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['cpp']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: manual
+          registries: |
+            - url: https://ghcr.io/v2/
+              packages:
+                - amd-sit-sast-scv/cpp-queries
+              token: ${{ secrets.CODEQL_PACKAGES_TOKEN }}
+          config: |
+            queries:
+              - uses: security-extended
+            packs:
+              - amd-sit-sast-scv/cpp-queries:src/driver/BannedFunctions.ql
+
+      - name: Set Project Directory
+        run: |
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/cuid/CMakeLists.txt" -exec dirname {} \;)
+
+          if [ -z "$TARGET_DIR" ]; then
+            echo "Could not find CMakeLists.txt in projects/cuid. Searching workspace..."
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -name "CMakeLists.txt" | grep "projects/cuid" | head -n 1 | xargs dirname)
+          fi
+
+          if [ -z "$TARGET_DIR" ]; then
+             echo "Could not find CMakeLists.txt for CUID."
+             exit 1
+          fi
+
+          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
+
+      - name: Build and Install OpenSSL 3.0 (if needed)
+        run: |
+          set -e
+          OPENSSL_VER=$(openssl version | awk '{print $2}')
+          echo "Current OpenSSL version: $OPENSSL_VER"
+          if [[ "$OPENSSL_VER" != 3.* ]]; then
+             echo "Installing OpenSSL 3.0..."
+             if command -v apt-get &> /dev/null; then
+                 apt-get update
+                 apt-get install -y wget build-essential zlib1g-dev perl
+             elif command -v dnf &> /dev/null; then
+                 dnf install -y wget make gcc perl zlib-devel perl-core
+             elif command -v zypper &> /dev/null; then
+                 zypper install -y wget make gcc perl zlib-devel perl-core
+             fi
+             cd /tmp
+             wget https://github.com/openssl/openssl/releases/download/openssl-3.0.12/openssl-3.0.12.tar.gz
+             tar -xzvf openssl-3.0.12.tar.gz
+             cd openssl-3.0.12
+             ./config
+             make -j $(nproc)
+             make install
+             ldconfig
+             echo "OPENSSL_ROOT_DIR=/usr/local" >> $GITHUB_ENV
+          else
+             echo "OpenSSL 3.0+ already installed."
+          fi
+
+      - name: Build CUID
+        run: |
+          set -e
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
+          rm -rf $BUILD_FOLDER
+          mkdir -p $BUILD_FOLDER
+          cd $BUILD_FOLDER
+          cmake ${{ env.PROJECT_DIR }} -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_ROOT_DIR }}
+          make -j $(nproc)
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          category: "/language:${{ matrix.language }}"
+          upload: true
