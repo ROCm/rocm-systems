@@ -131,8 +131,8 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   }
 
   const bool isHostMemBacked = (prop->location.type == hipMemLocationTypeHost ||
-                              prop->location.type == hipMemLocationTypeHostNuma ||
-                              prop->location.type == hipMemLocationTypeHostNumaCurrent);
+                                prop->location.type == hipMemLocationTypeHostNuma ||
+                                prop->location.type == hipMemLocationTypeHostNumaCurrent);
   bool useHostDevice = isHostMemBacked;
   // NUMA node selector handed to ROCclr: explicit node for HostNuma; -1 (default/
   // resolve-current) for Host, HostNumaCurrent, and non-NUMA allocations.
