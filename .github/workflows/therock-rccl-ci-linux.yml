@@ -217,7 +217,12 @@ jobs:
     name: "Test MADEngine workloads (scheduled)"
     if: ${{ !cancelled() && inputs.amdgpu_families == 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
     needs: [therock-build-linux]
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
     uses: ./.github/workflows/therock-rccl-test-madengine.yml
+    secrets: inherit
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
