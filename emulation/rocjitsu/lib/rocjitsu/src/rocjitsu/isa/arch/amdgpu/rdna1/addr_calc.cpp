@@ -29,10 +29,7 @@ uint32_t read_smem_offset(uint32_t soffset, amdgpu::Wavefront &wf) {
 } // namespace
 
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t sbase = wf.sgpr_alloc().base + inst.sbase * 2;
-  uint64_t base = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sbase + 1)) << 32) |
-                  amdgpu::RegisterAccess(cu).read_sgpr(sbase);
+  uint64_t base = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register64(inst.sbase * 2);
   int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
   off += read_smem_offset(inst.soffset, wf);
   return (base + off) & ~0x3ULL;

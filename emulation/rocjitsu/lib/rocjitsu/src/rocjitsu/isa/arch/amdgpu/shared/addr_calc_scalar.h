@@ -30,10 +30,7 @@ namespace addr_calc {
 /// Requires: inst.sbase, inst.soffset_en, inst.soffset, inst.imm, inst.offset.
 template <typename SmemInst>
 uint64_t smem_calculate_address(const SmemInst &inst, amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t sbase = wf.sgpr_alloc().base + inst.sbase * 2;
-  uint64_t base = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sbase + 1)) << 32) |
-                  amdgpu::RegisterAccess(cu).read_sgpr(sbase);
+  uint64_t base = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register64(inst.sbase * 2);
   uint64_t off = 0;
   if (inst.soffset_en)
     off += amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(inst.soffset);

@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -227,9 +228,9 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
   auto &d = *inst.data_as<ScalarMemState>();
   if (!d.is_load)
     return MemoryAccessCompletion::Complete;
-  auto &cu = wf.raw_cu();
+  RegisterAccess registers(wf);
   for (uint32_t i = 0; i < d.num_dwords; ++i) {
-    cu.write_sgpr(d.dst_reg_base + i, d.response_data[i]);
+    registers.write_sgpr_or_trap_register(d.dst_selector + i, d.response_data[i]);
   }
   // Trace: log SMEM load values for debugging.
   util::Logger::vm([&](auto &os) {
@@ -237,7 +238,7 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
       static thread_local uint32_t slw_count = 0;
       if (++slw_count <= 100) {
         os << std::format("SMEM complete: addr={:#x} dst_s={} ndw={} data=[{:#x}", d.addr,
-                          d.dst_reg_base, d.num_dwords, d.response_data[0]);
+                          d.dst_selector, d.num_dwords, d.response_data[0]);
         for (uint32_t i = 1; i < d.num_dwords && i < 4; ++i)
           os << std::format(",{:#x}", d.response_data[i]);
         os << std::format("] wg={}", wf.wg_id());

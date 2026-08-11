@@ -31,6 +31,7 @@
 #include "util/simd.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cassert>
 #include <cstddef>
@@ -67,8 +68,8 @@ namespace rocjitsu::amdgpu {
 /// - Use read_operand() for SIMD logical source operand views.
 /// - Use write_operand() for SIMD destination views whose old value is not read.
 /// - Use readwrite_operand() when a SIMD destination is also an input.
-/// - Use read_sgpr_or_trap_register() for decoded fields whose SGPR selectors
-///   may enter the per-wave trap-register window.
+/// - Use the SGPR-or-trap selector accessors for decoded fields whose SGPR
+///   selectors may enter the per-wave trap-register window.
 /// - Use read_vgpr_region() when a helper already has physical VGPR indices.
 /// - Use write_vgpr_region() for physical writes that do not read old values.
 /// - Use readwrite_vgpr_region() for physical read-modify-write operations.
@@ -975,6 +976,29 @@ public:
     uint64_t lo = read_sgpr_or_trap_register(selector);
     uint64_t hi = read_sgpr_or_trap_register(selector + 1);
     return lo | (hi << 32);
+  }
+
+  [[nodiscard]] std::array<uint32_t, 4> read_sgpr_or_trap_register128(uint32_t selector) const {
+    return {
+        read_sgpr_or_trap_register(selector),
+        read_sgpr_or_trap_register(selector + 1),
+        read_sgpr_or_trap_register(selector + 2),
+        read_sgpr_or_trap_register(selector + 3),
+    };
+  }
+
+  void write_sgpr_or_trap_register(uint32_t selector, uint32_t value) const {
+    Wavefront &wf = mutable_wavefront();
+    if (Wavefront::is_trap_register_selector(selector)) {
+      wf.write_trap_register(selector, value);
+      return;
+    }
+    write_sgpr(wf.sgpr_alloc().base + selector, value);
+  }
+
+  void write_sgpr_or_trap_register64(uint32_t selector, uint64_t value) const {
+    write_sgpr_or_trap_register(selector, static_cast<uint32_t>(value));
+    write_sgpr_or_trap_register(selector + 1, static_cast<uint32_t>(value >> 32));
   }
 
   // Physical SGPR access. These APIs are for helpers that already know the

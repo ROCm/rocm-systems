@@ -484,6 +484,17 @@ TEST(RegisterAccessTest, SgprOrTrapSelectorRoutesPerWaveStorage) {
   fx.plugin->sgpr_reads.clear();
   EXPECT_EQ(registers.read_sgpr_or_trap_register64(kTtmp0Selector), 0x0506070801020304ULL);
   EXPECT_TRUE(fx.plugin->sgpr_reads.empty());
+
+  fx.wf->write_trap_register(kTtmp0Selector + 2, 0x11121314u);
+  fx.wf->write_trap_register(kTtmp0Selector + 3, 0x15161718u);
+  EXPECT_EQ(registers.read_sgpr_or_trap_register128(kTtmp0Selector),
+            (std::array<uint32_t, 4>{0x01020304u, 0x05060708u, 0x11121314u, 0x15161718u}));
+
+  registers.write_sgpr_or_trap_register(6, 0xA5A50006u);
+  registers.write_sgpr_or_trap_register64(kTtmp0Selector, 0x2122232425262728ULL);
+  EXPECT_EQ(fx.cu->read_sgpr(fx.sgpr_base() + 6), 0xA5A50006u);
+  EXPECT_EQ(fx.wf->read_trap_register(kTtmp0Selector), 0x25262728u);
+  EXPECT_EQ(fx.wf->read_trap_register(kTtmp0Selector + 1), 0x21222324u);
 }
 
 TEST(RegisterAccessTest, TtmpAccessDoesNotAliasAdjacentWaveSgprs) {

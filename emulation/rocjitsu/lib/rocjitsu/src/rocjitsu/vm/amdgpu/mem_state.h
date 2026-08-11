@@ -71,7 +71,7 @@ enum class AtomicOp : uint8_t {
 struct ScalarMemState : DynamicInstState {
   ScalarMemState() { tag_ = SCALAR_MEM; }
   uint64_t addr = 0;
-  uint32_t dst_reg_base = 0;
+  uint32_t dst_selector = 0;
   uint32_t num_dwords = 0;
   uint32_t elem_size = 4;
   bool sign_extend = false;

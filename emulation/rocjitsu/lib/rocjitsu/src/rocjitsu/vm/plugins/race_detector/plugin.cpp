@@ -323,11 +323,15 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
   if (inst.data()->tag() == amdgpu::SCALAR_MEM) {
     auto &d = *inst.data_as<amdgpu::ScalarMemState>();
     if (d.is_load) {
-      uint32_t logicalBase = d.dst_reg_base - wf.sgpr_alloc().base;
-      std::vector<uint32_t> registers(d.num_dwords);
-      for (uint32_t i = 0; i < d.num_dwords; ++i)
-        registers[i] = logicalBase + i;
-      rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_SGPR, std::move(registers), wf.exec());
+      std::vector<uint32_t> registers;
+      registers.reserve(d.num_dwords);
+      for (uint32_t i = 0; i < d.num_dwords; ++i) {
+        uint32_t selector = d.dst_selector + i;
+        if (!amdgpu::Wavefront::is_trap_register_selector(selector))
+          registers.push_back(selector);
+      }
+      if (!registers.empty())
+        rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_SGPR, std::move(registers), wf.exec());
     }
   }
 }

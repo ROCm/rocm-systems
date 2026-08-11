@@ -56,10 +56,7 @@ void init_vector_mem_state(amdgpu::Wavefront &wf, amdgpu::VectorMemState &d) {
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
   // GFX12 SMEM: sbase is an aligned SGPR pair, ioffset is a 24-bit signed immediate,
   // soffset is an SGPR/M0/null selector from rdna4/operand_types.h.
-  auto &cu = wf.cu();
-  uint32_t sbase = wf.sgpr_alloc().base + inst.sbase * 2;
-  uint64_t base = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sbase + 1)) << 32) |
-                  amdgpu::RegisterAccess(cu).read_sgpr(sbase);
+  uint64_t base = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register64(inst.sbase * 2);
   int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   off += read_smem_offset(inst.soffset, wf);
   return (base + off) & ~0x3ULL;
@@ -158,10 +155,8 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   uint64_t exec = wf.exec();
   d.lane_mask = exec;
   d.exec_mask = exec;
-  uint32_t sb = wf.sgpr_alloc().base + inst.rsrc;
-  uint64_t base_addr =
-      (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sb + 1) & 0xFFFF) << 32) |
-      amdgpu::RegisterAccess(cu).read_sgpr(sb);
+  uint64_t descriptor = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register64(inst.rsrc);
+  uint64_t base_addr = descriptor & 0xFFFFFFFFFFFFULL;
   uint32_t soffset_val = read_optional_sreg_m0(inst.soffset, wf);
   int64_t ioff = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   assert(!inst.idxen && "Vbuffer idxen not yet supported");

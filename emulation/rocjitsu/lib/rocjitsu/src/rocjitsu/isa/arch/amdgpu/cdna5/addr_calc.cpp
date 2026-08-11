@@ -147,11 +147,8 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
 
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
                                 uint32_t access_size_bytes) {
-  auto &cu = wf.cu();
   assert(access_size_bytes != 0);
-  uint32_t sbase = wf.sgpr_alloc().base + inst.sbase * 2;
-  uint64_t base = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sbase + 1)) << 32) |
-                  amdgpu::RegisterAccess(cu).read_sgpr(sbase);
+  uint64_t base = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register64(inst.sbase * 2);
   int64_t off = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   uint32_t scale = inst.scale_offset ? access_size_bytes : 1;
   if (has_smem_offset(inst.soffset))
@@ -223,11 +220,8 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
   uint64_t exec = d.exec_mask;
-  uint32_t sb = wf.sgpr_alloc().base + inst.rsrc;
-  uint32_t srd0 = amdgpu::RegisterAccess(cu).read_sgpr(sb);
-  uint32_t srd1 = amdgpu::RegisterAccess(cu).read_sgpr(sb + 1);
-  uint32_t srd2 = amdgpu::RegisterAccess(cu).read_sgpr(sb + 2);
-  uint32_t srd3 = amdgpu::RegisterAccess(cu).read_sgpr(sb + 3);
+  const auto srd = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register128(inst.rsrc);
+  const auto [srd0, srd1, srd2, srd3] = srd;
   uint64_t base_addr = buffer_base_addr(srd0, srd1);
   uint64_t num_records = buffer_num_records(srd1, srd2, srd3);
   uint32_t stride = buffer_stride(srd3);

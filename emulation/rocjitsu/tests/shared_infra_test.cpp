@@ -31,6 +31,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop1.h"
@@ -229,6 +230,29 @@ public:
   using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna3::Isa>;
 
   Rdna3MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
+                    amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
+      : Base(std::move(name), config, memory, l2) {
+    if (l2)
+      l2->set_backing_memory(memory);
+    set_memory(memory);
+    set_l2(l2);
+  }
+
+  void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
+    execute_instruction(inst, wf);
+    if (inst->is_memory_op())
+      route_memory_inst(inst, wf);
+    else
+      delete inst;
+  }
+};
+
+class Cdna4MemoryTestCu
+    : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna4::Isa> {
+public:
+  using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna4::Isa>;
+
+  Cdna4MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
                     amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
       : Base(std::move(name), config, memory, l2) {
     if (l2)
@@ -4223,7 +4247,104 @@ TEST(CdnaAddrCalcTest, Cdna4SmemOffsetsUsePerWaveTrapStorage) {
   cdna4::SmemMachineInst scratch = ordinary;
   scratch.op = cdna4::kSScratchLoadDwordSmem;
   EXPECT_EQ(cdna4::smem_calculate_address(scratch, *first), kBase + 0x40 * 64);
+
+  constexpr uint64_t kTrapBase = 0x5'0000'2000ULL;
+  first->write_trap_register(kTtmp0Selector, static_cast<uint32_t>(kTrapBase));
+  first->write_trap_register(kTtmp0Selector + 1, static_cast<uint32_t>(kTrapBase >> 32));
+  ordinary.sbase = kTtmp0Selector / 2;
+  ordinary.soffset_en = 0;
+  EXPECT_EQ(cdna4::smem_calculate_address(ordinary, *first), kTrapBase);
+
+  scratch = ordinary;
+  scratch.op = cdna4::kSScratchLoadDwordSmem;
+  EXPECT_EQ(cdna4::smem_calculate_address(scratch, *first), kTrapBase);
   EXPECT_EQ(cu->read_sgpr(former_alias), 0x80u);
+}
+
+TEST(CdnaAddrCalcTest, Cdna4BufferSelectorsUsePerWaveTrapStorage) {
+  amdgpu::GpuMemory mem("cdna4_buffer_ttmp_mem");
+  amdgpu::L2Cache l2("cdna4_buffer_ttmp_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_buffer_ttmp_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *first = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  auto *second = cu->dispatch_wf(1, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  first->set_exec(1);
+
+  constexpr uint32_t kTtmp0Selector = amdgpu::Wavefront::kTrapRegisterSelectorBase;
+  constexpr uint32_t kTtmp4Selector = kTtmp0Selector + 4;
+  const uint32_t former_descriptor_alias = first->sgpr_alloc().base + kTtmp0Selector;
+  const uint32_t former_offset_alias = first->sgpr_alloc().base + kTtmp4Selector;
+  ASSERT_EQ(former_descriptor_alias, second->sgpr_alloc().base + 4);
+  ASSERT_EQ(former_offset_alias, second->sgpr_alloc().base + 8);
+  for (uint32_t i = 0; i < 5; ++i)
+    cu->write_sgpr(former_descriptor_alias + i, 0xDEAD0000u + i);
+
+  constexpr uint64_t kBase = 0x6'0000'3000ULL;
+  first->write_trap_register(kTtmp0Selector, static_cast<uint32_t>(kBase));
+  first->write_trap_register(kTtmp0Selector + 1, static_cast<uint32_t>(kBase >> 32));
+  first->write_trap_register(kTtmp0Selector + 2, 0x1000u);
+  first->write_trap_register(kTtmp0Selector + 3, 1u << 31);
+  first->write_trap_register(kTtmp4Selector, 0x40u);
+
+  cdna4::MubufMachineInst inst{};
+  inst.srsrc = kTtmp0Selector / 4;
+  inst.soffset = kTtmp4Selector;
+  amdgpu::VectorMemState addresses(amdgpu::GLOBAL_MEM);
+  cdna4::mubuf_calculate_addresses(inst, *first, addresses);
+
+  EXPECT_EQ(addresses.lane_mask, 1u);
+  EXPECT_EQ(addresses.per_lane_addr[0], kBase + 0x40);
+  for (uint32_t i = 0; i < 5; ++i)
+    EXPECT_EQ(cu->read_sgpr(former_descriptor_alias + i), 0xDEAD0000u + i);
+}
+
+TEST(CdnaMemoryTest, SmemLoadWritesTtmpDestination) {
+  amdgpu::GpuMemory mem("cdna4_smem_ttmp_destination_mem");
+  amdgpu::L2Cache l2("cdna4_smem_ttmp_destination_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = std::make_unique<Cdna4MemoryTestCu>("cdna4_smem_ttmp_destination_cu", cfg, &mem, &l2);
+
+  auto *first = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  auto *second = cu->dispatch_wf(1, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+
+  constexpr uint64_t kAddress = 0x7000;
+  constexpr uint32_t kValue = 0x12345678u;
+  constexpr uint32_t kTtmp0Selector = amdgpu::Wavefront::kTrapRegisterSelectorBase;
+  cu->write_sgpr(first->sgpr_alloc().base, static_cast<uint32_t>(kAddress));
+  cu->write_sgpr(first->sgpr_alloc().base + 1, static_cast<uint32_t>(kAddress >> 32));
+  mem.write32(kAddress, kValue);
+
+  const uint32_t former_alias = first->sgpr_alloc().base + kTtmp0Selector;
+  ASSERT_EQ(former_alias, second->sgpr_alloc().base + 4);
+  cu->write_sgpr(former_alias, 0xDEADBEEFu);
+
+  const auto words =
+      cdna4::build_smem(cdna4::kSLoadDwordSmem, {.sbase = 0, .sdata = kTtmp0Selector});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "s_load_dword");
+  cu->execute_and_route(inst.release(), *first);
+
+  EXPECT_EQ(first->read_trap_register(kTtmp0Selector), kValue);
+  EXPECT_EQ(cu->read_sgpr(former_alias), 0xDEADBEEFu);
 }
 
 TEST(TrapRegisterPcTest, SetpcPrecheckReadsDecodedTtmpPair) {

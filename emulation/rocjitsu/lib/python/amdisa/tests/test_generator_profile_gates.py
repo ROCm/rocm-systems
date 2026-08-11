@@ -4353,7 +4353,10 @@ def test_generated_trap_register_operands_use_per_wave_storage(
     ) in shared_resolve
 
     operand_paths = [
-        amdgpu_generated_root / arch / 'operand.cpp'
+        _execution_source_path(
+            amdgpu_generated_root / _generated_dir_name(arch) / 'operand.cpp',
+            _profile_for_arch(arch),
+        )
         for arch in (
             'cdna1',
             'cdna2',
@@ -4364,14 +4367,38 @@ def test_generated_trap_register_operands_use_per_wave_storage(
             'rdna3',
             'rdna3_5',
             'rdna4',
+            'gfx1250',
         )
     ]
-    operand_paths.append(amdgpu_generated_root / 'gfx1250' / 'operand_exec.cpp')
 
     for operand_path in operand_paths:
         operand = operand_path.read_text()
         assert 'amdgpu::resolve_src_scalar(' in operand
         assert 'amdgpu::resolve_dst_write(' in operand
+
+    for arch in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+        'gfx1250',
+    ):
+        smem_path = _execution_source_path(
+            amdgpu_generated_root / _generated_dir_name(arch) / 'smem.cpp',
+            _profile_for_arch(arch),
+        )
+        smem = smem_path.read_text()
+        assert 'd->dst_selector = inst_.sdata;' in smem
+        assert 'd->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;' not in smem
+        assert 'uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;' not in smem
+
+    shared_execute = (amdgpu_generated_root / 'shared' / 'execute_shared.h').read_text()
+    assert 'write_sgpr_or_trap_register64(inst.inst_.sdata, counter);' in shared_execute
 
 
 def test_cdna4_mfma_f8f6f4_accepts_standalone_and_prefixed_encodings(
