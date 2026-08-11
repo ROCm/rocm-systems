@@ -241,8 +241,10 @@ def parse_diagnostics(output: str, repo_root: str) -> list[Diagnostic]:
     return diagnostics
 
 
-def print_detected_rules(rule_diagnostics: dict[str, list[Diagnostic]]) -> None:
-    print(_color("Detected clang-tidy rules (in this diff):", "bold"))
+def print_rule_diagnostics(
+    title: str, rule_diagnostics: dict[str, list[Diagnostic]]
+) -> None:
+    print(_color(title, "bold"))
     if not rule_diagnostics:
         print(f"  {_color('No issues found.', 'green')}")
         return
@@ -255,27 +257,6 @@ def print_detected_rules(rule_diagnostics: dict[str, list[Diagnostic]]) -> None:
             color = "red" if diagnostic.severity == "error" else "yellow"
             print(f"        {_color(location, color)}: {diagnostic.message}")
     print()
-
-
-def print_legacy_summary(
-    changed_files: list[ChangedFile],
-    file_totals: dict[str, int],
-    file_in_diff_counts: dict[str, int],
-) -> None:
-    print(_color("Legacy issues (outside this diff):", "bold"))
-    any_legacy = False
-    for changed_file in changed_files:
-        total = file_totals.get(changed_file.path, 0)
-        legacy = total - file_in_diff_counts.get(changed_file.path, 0)
-        if legacy <= 0:
-            continue
-        any_legacy = True
-        print(
-            f"  {_color(f'{legacy:>4}', 'yellow')}  {changed_file.path} "
-            f"({total} total in file)"
-        )
-    if not any_legacy:
-        print(f"  {_color('None.', 'green')}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -334,8 +315,7 @@ def main() -> int:
     print_changed_files(changed_files)
 
     rule_diagnostics: dict[str, list[Diagnostic]] = {}
-    file_totals: dict[str, int] = {}
-    file_in_diff_counts: dict[str, int] = {}
+    legacy_rule_diagnostics: dict[str, list[Diagnostic]] = {}
     any_timed_out = False
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         futures = {
@@ -351,20 +331,17 @@ def main() -> int:
             output, succeeded = future.result()
             any_timed_out = any_timed_out or not succeeded
 
-            diagnostics = parse_diagnostics(output, repo_root)
-            file_totals[changed_file.path] = len(diagnostics)
-
-            in_diff_count = 0
-            for diagnostic in diagnostics:
-                if not in_line_ranges(diagnostic.line, changed_file.line_ranges):
-                    continue
-                in_diff_count += 1
+            for diagnostic in parse_diagnostics(output, repo_root):
+                target = (
+                    rule_diagnostics
+                    if in_line_ranges(diagnostic.line, changed_file.line_ranges)
+                    else legacy_rule_diagnostics
+                )
                 for check_name in diagnostic.checks:
-                    rule_diagnostics.setdefault(check_name, []).append(diagnostic)
-            file_in_diff_counts[changed_file.path] = in_diff_count
+                    target.setdefault(check_name, []).append(diagnostic)
 
-    print_detected_rules(rule_diagnostics)
-    print_legacy_summary(changed_files, file_totals, file_in_diff_counts)
+    print_rule_diagnostics("Detected clang-tidy rules (in this diff):", rule_diagnostics)
+    print_rule_diagnostics("Legacy issues (outside this diff):", legacy_rule_diagnostics)
 
     return 1 if rule_diagnostics or any_timed_out else 0
 
