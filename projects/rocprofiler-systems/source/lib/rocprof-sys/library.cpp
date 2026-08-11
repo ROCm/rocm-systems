@@ -1060,6 +1060,8 @@ rocprofsys_finalize_hidden(void)
 
     LOG_INFO("Finalizing rocprof-sys...");
 
+    stop_time_windows();
+
     sampling::block_samples();
 
     thread_info::set_stop(comp::wall_clock::record());
@@ -1412,7 +1414,6 @@ rocprofsys_finalize_hidden(void)
         _output_registry.print_summary();
     }
 
-    stop_time_windows();
     categories::shutdown();
 
     _finalization.stop();
