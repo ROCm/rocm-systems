@@ -735,7 +735,6 @@ ncclResult_t ncclCeAlltoAllv(struct ncclComm* comm, struct ncclCeCollArgs* args,
   size_t* sendDispls = ncclAlltoAllvSendDispls(args->sizes, comm->rank, comm->nRanks);
   size_t* recvDispls = ncclAlltoAllvRecvDispls(args->sizes, comm->rank, comm->nRanks);
   size_t peerDispls = 0;
-  size_t peerRcvSize = 0;
 
   uint8_t* mySendBuff = (uint8_t*)args->sendBuff;
   uint8_t* myRecvBuff = (uint8_t*)args->recvBuff;
@@ -745,6 +744,8 @@ ncclResult_t ncclCeAlltoAllv(struct ncclComm* comm, struct ncclCeCollArgs* args,
   struct ncclCeBatchOpsParams batchOpsParams = {};
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
 
+  NCCLCHECKGOTO(ncclAlltoAllvValidateSizeMatrix(args->sizes, comm->nRanks), ret, fail);
+
   // Ensure all ranks are ready before starting transfers
   NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
@@ -752,7 +753,9 @@ ncclResult_t ncclCeAlltoAllv(struct ncclComm* comm, struct ncclCeCollArgs* args,
   for (int r = 0; r < comm->nRanks; r++) {
     int dstRank = (comm->rank + r) % comm->nRanks;
     const size_t chunkBytes = sendSizes[dstRank];
-    if (chunkBytes == 0) continue;
+    if (chunkBytes == 0) {
+      continue;
+    }
 
     uint8_t* srcPtr = mySendBuff + sendDispls[dstRank];
     uint8_t* dstPtr = myRecvBuff + recvDispls[comm->rank];
@@ -768,11 +771,8 @@ ncclResult_t ncclCeAlltoAllv(struct ncclComm* comm, struct ncclCeCollArgs* args,
       }
     } else {
       // Remote copy to other ranks: send to rank dstRank's receive buffer at position comm->rank
-      size_t* peerRecvSizes = ncclAlltoAllvRecvSizes(args->sizes, dstRank, comm->nRanks);
       size_t* peerRecvDispls = ncclAlltoAllvRecvDispls(args->sizes, dstRank, comm->nRanks);
       peerDispls = peerRecvDispls[comm->rank];
-      peerRcvSize = peerRecvSizes[comm->rank];
-      NCCLCHECKGOTO(ncclAlltoAllvValidatePeerSendSize(chunkBytes, peerRcvSize, comm->rank, dstRank), ret, fail);
 
       uint8_t* dstPtr = (uint8_t*)myRecvBuff + peerDispls;
       offset = dstPtr - (uint8_t*)args->recvBuff;

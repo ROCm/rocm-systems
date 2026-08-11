@@ -4,7 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#pragma once
+#ifndef RCCL_TEST_COMMON_CE_ALLTOALLV_TEST_HELPERS_HPP
+#define RCCL_TEST_COMMON_CE_ALLTOALLV_TEST_HELPERS_HPP
 
 #include <cstring>
 
@@ -22,7 +23,9 @@ inline bool isCeRuntimeDriverSupported()
 {
     int driverVer = 0;
     if (hipDriverGetVersion(&driverVer) != hipSuccess)
+    {
         return false;
+    }
     return (driverVer >= 71200000) ||
            (driverVer >= 70051831 && driverVer < 70060000);
 }
@@ -48,3 +51,5 @@ struct CeAlltoAllvMockComm
 };
 
 } // namespace RcclUnitTesting
+
+#endif  // RCCL_TEST_COMMON_CE_ALLTOALLV_TEST_HELPERS_HPP

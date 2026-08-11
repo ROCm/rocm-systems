@@ -540,12 +540,6 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
     INFO(
       NCCL_INIT,
       "GDA alltoallv is supported for up to 128MB message size; Use ROCSHMEM_HEAP_SIZE=3GB for GDA support till 512MB");
-    for (int i = 0; i < nRanks; i++) {
-      sizes[i] = sendcounts1[i];
-      sizes[nRanks + i] = sdispls1[i];
-      sizes[2 * nRanks + i] = recvcounts1[i];
-      sizes[3 * nRanks + i] = rdispls1[i];
-    }
     count = count / ncclTypeSize(datatype);
 
     // use CU for copy-in/copy-out for small <= 128KB sizes
@@ -592,6 +586,8 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
   NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
   bool ceCapturing = ncclCudaGraphValid(ceGraph);
 
+  // CE AlltoAllv is single-node only (ncclCeAlltoAllvEligible requires nNodes==1).
+  // Multi-node jobs (e.g. 18x4) use the send/recv fallback below for cross-node traffic.
   if (ncclCeAlltoAllvEligible(comm, datatype, winRegType, hasSysmemSegment, ceCapturing)) {
     const size_t nLocal = 4 * (size_t)nRanks;
     const size_t nGather = nLocal * (size_t)nRanks;

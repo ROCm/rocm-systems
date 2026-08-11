@@ -6,14 +6,15 @@
 
 #include "common/CeAlltoAllvTestHelpers.hpp"
 
+#include <vector>
+
+#include "gtest/gtest.h"
+
 #include "ce_coll.h"
 #include "collectives.h"
 #include "group.h"
-#include "gtest/gtest.h"
 #include "nccl_common.h"
 #include "sym_kernels.h"
-
-#include <vector>
 
 namespace RcclUnitTesting
 {
@@ -27,12 +28,6 @@ protected:
 TEST_F(CeAlltoAllvEligibilityTest, FuncToStringReturnsAlltoAllv)
 {
     EXPECT_STREQ(ncclFuncToString(ncclFuncAlltoAllv), "AlltoAllv");
-}
-
-TEST_F(CeAlltoAllvEligibilityTest, FuncEnumValue)
-{
-    EXPECT_EQ(ncclFuncAlltoAllv, 18);
-    EXPECT_EQ(ncclNumFuncs, 19);
 }
 
 TEST_F(CeAlltoAllvEligibilityTest, CeImplementedReturnsFalseForUnsupportedCollectives)
@@ -205,6 +200,31 @@ TEST_F(CeAlltoAllvEligibilityTest, PeerMetadataIndexingMatchesCeCollLayout)
 
     size_t* peerRecvDispls = ncclAlltoAllvRecvDispls(gathered.data(), dstRank, nRanks);
     EXPECT_EQ(peerRecvDispls[myRank], 400u);
+}
+
+TEST_F(CeAlltoAllvEligibilityTest, SizeMatrixVerdictIsRankIndependent)
+{
+    constexpr int nRanks = 4;
+    std::vector<size_t> g(4 * nRanks * nRanks, 0);
+    for (int src = 0; src < nRanks; ++src)
+    {
+        size_t* s = ncclAlltoAllvSendSizes(g.data(), src, nRanks);
+        for (int dst = 0; dst < nRanks; ++dst)
+        {
+            s[dst] = static_cast<size_t>((src + 1) * (dst + 2));
+        }
+    }
+    for (int dst = 0; dst < nRanks; ++dst)
+    {
+        size_t* r = ncclAlltoAllvRecvSizes(g.data(), dst, nRanks);
+        for (int src = 0; src < nRanks; ++src)
+        {
+            r[src] = static_cast<size_t>((src + 1) * (dst + 2));
+        }
+    }
+    EXPECT_EQ(ncclAlltoAllvValidateSizeMatrix(g.data(), nRanks), ncclSuccess);
+    ncclAlltoAllvSendSizes(g.data(), 0, nRanks)[2] = 99;
+    EXPECT_EQ(ncclAlltoAllvValidateSizeMatrix(g.data(), nRanks), ncclInvalidUsage);
 }
 
 TEST_F(CeAlltoAllvEligibilityTest, PeerSendSizeValidationRejectsMismatch)

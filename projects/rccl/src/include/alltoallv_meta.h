@@ -9,6 +9,8 @@
 
 #include <stddef.h>
 
+#include "nccl.h"
+
 // Gathered AlltoAllv metadata layout (bytes):
 // per-rank block of [sendSizes, sendDispls, recvSizes, recvDispls] x nRanks.
 static inline size_t ncclAlltoAllvMetaBlockOffset(int rank, int nRanks) {
@@ -49,8 +51,24 @@ static inline void ncclAlltoAllvPackLocalSizes(size_t* sizes, int nRanks, const 
 static inline size_t ncclAlltoAllvTrafficBytes(const size_t* gathered, int rank, int nRanks) {
   size_t bytes = 0;
   const size_t* sendSizes = ncclAlltoAllvSendSizes((size_t*)gathered, rank, nRanks);
-  for (int r = 0; r < nRanks; ++r) bytes += sendSizes[r];
+  for (int r = 0; r < nRanks; ++r) {
+    bytes += sendSizes[r];
+  }
   return bytes;
+}
+
+// Verdict is a pure function of the gathered matrix - identical on every rank.
+static inline ncclResult_t ncclAlltoAllvValidateSizeMatrix(const size_t* gathered, int nRanks) {
+  for (int src = 0; src < nRanks; ++src) {
+    const size_t* s = ncclAlltoAllvSendSizes((size_t*)gathered, src, nRanks);
+    for (int dst = 0; dst < nRanks; ++dst) {
+      const size_t* r = ncclAlltoAllvRecvSizes((size_t*)gathered, dst, nRanks);
+      if (s[dst] != r[src]) {
+        return ncclInvalidUsage;
+      }
+    }
+  }
+  return ncclSuccess;
 }
 
 #endif /* NCCL_ALLTOALLV_META_H_ */
