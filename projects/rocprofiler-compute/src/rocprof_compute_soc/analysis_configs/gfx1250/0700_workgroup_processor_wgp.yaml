@@ -503,8 +503,12 @@ Panel Config:
         min: Min
         max: Max
         unit: Unit
-      # Table 56 latency metrics require Accum(LEVEL) counters and are omitted.
       metric:
+        LDS access latency:
+          avg: AVG((SQ_INST_LEVEL_LDS_ACCUM_sum / SQ_INSTS_LDS_sum) if (SQ_INSTS_LDS_sum != 0) else None)
+          min: MIN((SQ_INST_LEVEL_LDS_ACCUM_sum / SQ_INSTS_LDS_sum) if (SQ_INSTS_LDS_sum != 0) else None)
+          max: MAX((SQ_INST_LEVEL_LDS_ACCUM_sum / SQ_INSTS_LDS_sum) if (SQ_INSTS_LDS_sum != 0) else None)
+          unit: Cycles
   - metric_table:
       id: 714
       title: "WGP-TXA Interface"

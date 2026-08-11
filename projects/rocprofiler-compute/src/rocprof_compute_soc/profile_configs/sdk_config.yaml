@@ -12314,7 +12314,21 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       - gfx950
+      - gfx1250
       expression: accumulate(SQ_INST_LEVEL_LDS, HIGH_RES)
+  - name: SQ_INST_LEVEL_LDS_ACCUM_sum
+    description: Accumulate SQ_INST_LEVEL_LDS
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      - gfx90a
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      - gfx1250
+      expression: reduce(SQ_INST_LEVEL_LDS_ACCUM, sum)
   - name: SQ_INST_LEVEL_SMEM_ACCUM
     description: Accumulate SQ_INST_LEVEL_SMEM
     properties: []
