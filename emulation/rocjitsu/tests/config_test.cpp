@@ -1198,7 +1198,7 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
 // would restore without the EXEC restore or the privileged STATUS write that
 // leaving the handler performs. Refusing beats resuming the application with
 // the trap handler's state installed.
-TEST(CheckpointTest, RefusesToSaveAWaveInsideATrapHandler) {
+TEST(CheckpointTest, RefusesToSaveTrappedOrDebuggerStoppedWaves) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"gfx1250"},
     "topology":{
@@ -1253,8 +1253,17 @@ TEST(CheckpointTest, RefusesToSaveAWaveInsideATrapHandler) {
                std::runtime_error);
   wf->set_debug_suspended(false);
 
+  // The runtime's own pause is not a debugger stop. A queue throttled to
+  // queue_percentage 0 carries no trap or debugger state and the CP re-derives
+  // queue suspension on restore, so it must stay checkpointable -- this is the
+  // one assertion that tells debug_stopped() apart from debug_paused().
+  wf->set_runtime_suspended(true);
   EXPECT_NO_THROW(
       config::save_checkpoint(checkpoint.path(), *loaded.soc(), 5, loaded.engine_config));
+  wf->set_runtime_suspended(false);
+
+  EXPECT_NO_THROW(
+      config::save_checkpoint(checkpoint.path(), *loaded.soc(), 6, loaded.engine_config));
 }
 
 TEST(CApiTest, CreateAndDestroyFromString) {
