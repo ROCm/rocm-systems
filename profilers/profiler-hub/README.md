@@ -17,7 +17,7 @@ This library is part of the [rocm-systems](https://github.com/ROCm/rocm-systems)
 ## Requirements
 
 - CMake 3.21+
-- C++17 compatible compiler
+- C++20 compatible compiler
 - SQLite3 (bundled via CMake module)
 - spdlog (for logging)
 - Optional: `rocprofiler-sdk-rocpd` for schema compatibility
