@@ -77,6 +77,12 @@ TEST_F(IommuPassthroughTest, ContentHasOptionNullOrEmptyOption) {
   EXPECT_FALSE(ncclKernelConfigContentHasOption(content, ""));
 }
 
+TEST_F(IommuPassthroughTest, ReadFileNullArgs) {
+  std::string content;
+  EXPECT_FALSE(ncclKernelConfigReadFile(nullptr, &content));
+  EXPECT_FALSE(ncclKernelConfigReadFile(tempPath.c_str(), nullptr));
+}
+
 TEST_F(IommuPassthroughTest, ReadFileMissingOption) {
   writeConfig("CONFIG_64BIT=y\n");
   std::string content;
