@@ -32,7 +32,7 @@ RUN zypper --non-interactive update -y && \
         sqlite3-devel vim wget libucp-devel libuct-devel && \
     zypper --non-interactive clean --all && \
     python3 -m pip install --upgrade pip && \
-    python3 -m pip install 'cmake==3.25' perfetto
+    python3 -m pip install 'cmake==3.25' perfetto 'clang-tidy==18.1.8'
 
 ARG PYTHON_VERSIONS="8 9 10 11 12 13"
 

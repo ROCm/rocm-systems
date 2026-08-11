@@ -43,7 +43,7 @@ RUN OS_VERSION_MAJOR=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr 
     fi && \
     yum clean all && \
     python3 -m pip install --upgrade pip && \
-    python3 -m pip install 'cmake==3.25' perfetto
+    python3 -m pip install 'cmake==3.25' perfetto 'clang-tidy==18.1.8'
 
 ARG PYTHON_VERSIONS="8 9 10 11 12 13"
 

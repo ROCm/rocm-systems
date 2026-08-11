@@ -38,7 +38,8 @@ RUN OS_VERSION_MAJOR=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr 
     yum clean all && \
     python3 -m pip install --upgrade pip && \
     python3 -m pip install 'cmake==3.25' && \
-    python3 -m pip install 'perfetto'
+    python3 -m pip install 'perfetto' && \
+    python3 -m pip install 'clang-tidy==18.1.8'
 
 ARG ROCM_VERSION=0.0
 ARG ROCM_MAJOR=0
