@@ -601,3 +601,15 @@ deviceLib:
   Unit_coop_memcpy_async_Unaligned:
     <<: *level_2
     tags: [cooperative, ops]
+  Unit_coop_memcpy_async_SyncPublishesCopy:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_memcpy_async_SyncPublishesCopy_Tile:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_memcpy_async_CrossWaveVisibility:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_memcpy_async_GlobalToGlobal:
+    <<: *level_2
+    tags: [cooperative, ops]
