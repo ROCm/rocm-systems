@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna3/sopp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -43,6 +44,7 @@ SBranchSopp::SBranchSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= BRANCH;
+  flags_ |= IGNORES_EXEC;
 }
 
 std::optional<int64_t> SBranchSopp::branch_offset_bytes() const {
@@ -74,6 +76,7 @@ SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
   num_dst_ = 0;
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
 }
 
 std::optional<int64_t> SCbranchScc0Sopp::branch_offset_bytes() const {
@@ -99,6 +102,7 @@ SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst)
   num_dst_ = 0;
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
 }
 
 std::optional<int64_t> SCbranchScc1Sopp::branch_offset_bytes() const {
@@ -124,6 +128,7 @@ SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst)
   num_dst_ = 0;
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
 }
 
 std::optional<int64_t> SCbranchVcczSopp::branch_offset_bytes() const {
@@ -151,6 +156,7 @@ SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst)
   num_dst_ = 0;
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
 }
 
 std::optional<int64_t> SCbranchVccnzSopp::branch_offset_bytes() const {
@@ -178,6 +184,7 @@ SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst)
   num_dst_ = 0;
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
 }
 
 std::optional<int64_t> SCbranchExeczSopp::branch_offset_bytes() const {
@@ -203,6 +210,7 @@ SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst)
   num_dst_ = 0;
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
 }
 
 std::optional<int64_t> SCbranchExecnzSopp::branch_offset_bytes() const {

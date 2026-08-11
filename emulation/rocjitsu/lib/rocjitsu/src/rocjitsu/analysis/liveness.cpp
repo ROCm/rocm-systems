@@ -4,6 +4,7 @@
 #include "rocjitsu/analysis/liveness.h"
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/exec_state.h"
 #include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/instruction.h"
@@ -58,21 +59,16 @@ void dfs_reverse_post_order(const BasicBlock &start,
   return false;
 }
 
-[[nodiscard]] RegisterSet kill_defs(const InstDefUse &du) {
+[[nodiscard]] RegisterSet kill_defs(const InstDefUse &du, ExecState exec_before) {
   RegisterSet kills = du.defs;
-  // Predicated defs and EXEC-masked vector defs preserve old values on at least
-  // one path or lane. Until EXEC state is tracked at each program point, those
-  // writes cannot be treated as unconditional liveness kills.
-  //
-  // The VGPR/ACC_VGPR kill suppression below is also load-bearing for the gfx1250
-  // VGPR-MSB def handling: InstDefUse records NOTHING for an unknown-bank VGPR def
-  // (see expand_operand_register in def_use_chain.cpp) on the assumption that such
-  // a def never becomes a liveness kill. Every VGPR def is exec-masked, so this
-  // clear is what upholds that assumption. If this suppression is removed or made
-  // conditional, revisit that def handling so an unknown-bank def does not over-kill.
+  // Predicated defs preserve old values on at least one control-flow path, so
+  // they can never be unconditional kills.
   if (du.has_predicated_def)
     return {};
-  if (du.has_exec_masked_vector_def) {
+  // EXEC-masked vector defs preserve inactive lanes' old values, so they are
+  // kills only where EXEC is provably full (every lane overwritten). Where the
+  // EXEC state is unknown we stay conservative and do not kill.
+  if (du.has_exec_masked_vector_def && exec_before != ExecState::Full) {
     kills.clear_class(RegClass::VGPR);
     kills.clear_class(RegClass::ACC_VGPR);
   }
@@ -154,11 +150,16 @@ std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
   return postorder;
 }
 
-LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, LivenessAnalysisOptions options,
+LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<ExecMaskAnalysis> exec,
+                                   LivenessAnalysisOptions options,
                                    std::span<const ScopedCfgEdge> extra_edges) {
   min_free_vgpr_ = options.min_free_vgpr;
   max_free_vgpr_ =
       static_cast<uint16_t>(std::min<size_t>(options.max_free_vgpr, REGISTER_SET_MAX_VGPRS));
+  // Own the EXEC-state analysis; the backward dataflow is deferred to the first
+  // query (ensure_analyzed), which consults it for kills. May be null: kills then
+  // treat every EXEC-masked vector def as `Unknown` (conservative, never a kill).
+  exec_ = std::move(exec);
   deferred_blocks_.assign(blocks.begin(), blocks.end());
   scoped_blocks_.reserve(blocks.size());
   for (const BasicBlock *block : blocks) {
@@ -223,6 +224,12 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
       block_index_.emplace(blocks[i], i);
   }
 
+  // Without an EXEC-state analysis, treat every program point as `Unknown` so
+  // kill_defs never promotes an EXEC-masked vector def to a kill.
+  const auto exec_before = [this](const Instruction &inst) {
+    return exec_ ? exec_->before(inst) : ExecState::Unknown;
+  };
+
   const bool filter_live_before = restrict_live_before_to_instructions;
   std::unordered_set<const Instruction *> requested_live_before;
   if (filter_live_before) {
@@ -274,7 +281,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
       if (filter_live_before && requested_live_before.contains(&inst))
         ++requested_live_before_by_block[i];
       InstDefUse du(inst, gfx1250_vgpr_msb_.get());
-      RegisterSet kills = kill_defs(du);
+      RegisterSet kills = kill_defs(du, exec_before(inst));
       RegisterSet upward_uses = du.uses;
       upward_uses -= state.kill;
       state.gen |= upward_uses;
@@ -343,7 +350,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
       --it;
       const Instruction *inst = &*it;
       InstDefUse du(*inst, gfx1250_vgpr_msb_.get());
-      RegisterSet kills = kill_defs(du);
+      RegisterSet kills = kill_defs(du, exec_before(*inst));
       live -= kills;
       live |= du.uses;
       if (!filter_live_before || requested_live_before.contains(inst)) {
