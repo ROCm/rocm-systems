@@ -70,7 +70,7 @@ class MetricEvaluator:
                 warnings.simplefilter("always", RuntimeWarning)
                 eval_result = eval(
                     compile(expr, "<string>", "eval"),
-                    {},
+                    {"__builtins__": {}},
                     local_expr_context,
                 )
             # RuntimeWarnings (e.g. divide-by-zero) are surfaced only under --verbose
