@@ -20,7 +20,7 @@ import utils.utils_analysis as utils_analysis
 import utils.utils_common as utils_common
 import utils.utils_profile as utils_profile
 from utils.amdsmi_interface import _per_device_query
-from utils.csv_compression import find_csvs, is_compressed
+from utils.csv_compression import find_csvs, is_compressed, open_csv_write
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import (
     format_duration,
@@ -1082,8 +1082,10 @@ def stub_run_prof_deps(monkeypatch, counter_csv_body, warnings):
     monkeypatch.setattr("utils.utils_profile.parse_pmc_perf", lambda f: ["SQ_WAVES"])
 
     def fake_convert(db_paths, counter_csv, marker_csv):
+        assert counter_csv.endswith(".csv.gz"), counter_csv
         if counter_csv_body is not None:
-            Path(counter_csv).write_text(counter_csv_body)
+            with open_csv_write(counter_csv) as f:
+                f.write(counter_csv_body)
 
     monkeypatch.setattr(
         "utils.utils_profile.rocpd_data.convert_dbs_to_csv", fake_convert

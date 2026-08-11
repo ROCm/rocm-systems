@@ -76,8 +76,9 @@ If there is future strong request to return CSV support, we may implement it und
 Gzip is short-term storage-size reduction for CSV artifacts that still exist
 after CSV profile backend removal.
 
-We introduce gzip streaming for two separate csv artifacts, written through its own compression interface used by both python and backend:
- - the results_*.csv(s), written by compute's Python side (rocpd_data.py) at the end of a pass, when the merged result DB is converted to csv and is the artifact analyze reads today.
+We introduce gzip streaming for three csv artifacts, written through its own compression interface used by both python and backend:
+ - the results_*.csv(s), written by compute's Python side (utils_profile.stream_csv_to_file) at the end of a pass, and the artifact analyze reads today.
+ - the per-pass out/pmc_1/*_counter_collection.csv
  - the native tool counter output (countersData), written by the native tool / backend (rocprofiler-compute-tool.so via the counters writer) during in-process collection. This is an early per-process intermediate.
 
 Compression belongs at CSV read/write, where profile writes compressed CSV
@@ -618,7 +619,8 @@ sequenceDiagram
 ## Success Criteria
 
 - Profile mode cannot produce the legacy CSV profile output format.
-- Remaining CSV artifacts are compressed while they still exist.
+- Counter CSV artifacts are compressed while they still exist, apart from the
+  `pmc_perf.csv` that Phase D removes (see AD-2).
 - SDK kernel data and native counter data can be read independently by analyze.
 - Analyze gets the DataFrame through the profile data interface.
 - `pmc_perf.csv` is not an analyze input.

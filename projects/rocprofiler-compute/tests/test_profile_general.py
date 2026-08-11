@@ -18,7 +18,7 @@ import pytest
 import yaml
 from conftest import require_torch, require_triton
 
-from utils.csv_compression import find_csvs
+from utils.csv_compression import find_csvs, open_csv_read, resolve_csv
 from utils.utils_common import canonical_config_arch
 
 # Runtime config options
@@ -2676,18 +2676,14 @@ def test_torch_trace_profile(
 
     # 3. Marker/counter CSV pairs exist and counts match
     marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
-    counter_collection_files = list(
-        Path(workload_dir).glob("**/*counter_collection.csv")
-    )
-    assert len(marker_api_trace_files) == len(counter_collection_files), (
-        "Mismatch in number of marker_api_trace.csv and counter_collection.csv files"
-    )
+    assert marker_api_trace_files, "No marker_api_trace.csv produced"
     for marker_file in marker_api_trace_files:
-        corresponding_counter_file = marker_file.parent / marker_file.name.replace(
-            "marker_api_trace", "counter_collection"
+        corresponding_counter_file = resolve_csv(
+            marker_file.parent
+            / marker_file.name.replace("marker_api_trace", "counter_collection")
         )
-        assert corresponding_counter_file.exists(), (
-            f"counter_collection.csv not found for {marker_file}"
+        assert corresponding_counter_file.is_file(), (
+            f"counter_collection CSV not found for {marker_file}"
         )
         # 4. marker_api_trace CSVs: required columns and non-empty rows
         expected_marker_columns = {
@@ -2724,7 +2720,7 @@ def test_torch_trace_profile(
             "Start_Timestamp",
             "End_Timestamp",
         }
-        with open(corresponding_counter_file, newline="") as f:
+        with open_csv_read(corresponding_counter_file) as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             assert fieldnames is not None, f"No columns in {corresponding_counter_file}"
@@ -3006,13 +3002,13 @@ def test_triton_trace_profile(
     assert returncode == 0, "Profiling the Triton application failed"
 
     marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
-    counter_collection_files = list(
-        Path(workload_dir).glob("**/*counter_collection.csv")
-    )
     assert marker_api_trace_files, "No marker_api_trace.csv produced"
-    assert len(marker_api_trace_files) == len(counter_collection_files), (
-        "marker_api_trace.csv and counter_collection.csv counts differ"
-    )
+    assert all(
+        resolve_csv(
+            f.parent / f.name.replace("marker_api_trace", "counter_collection")
+        ).is_file()
+        for f in marker_api_trace_files
+    ), "counter_collection CSV missing for a marker_api_trace.csv"
 
     found_triton_marker = False
     for marker_file in marker_api_trace_files:
@@ -3128,13 +3124,13 @@ def test_ml_api_trace_torch_compile_triton(
     assert returncode == 0, "Profiling the torch.compile/Triton workload failed"
 
     marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
-    counter_collection_files = list(
-        Path(workload_dir).glob("**/*counter_collection.csv")
-    )
     assert marker_api_trace_files, "No marker_api_trace.csv produced"
-    assert len(marker_api_trace_files) == len(counter_collection_files), (
-        "marker_api_trace.csv and counter_collection.csv counts differ"
-    )
+    assert all(
+        resolve_csv(
+            f.parent / f.name.replace("marker_api_trace", "counter_collection")
+        ).is_file()
+        for f in marker_api_trace_files
+    ), "counter_collection CSV missing for a marker_api_trace.csv"
 
     # Discard captured profiling output.
     capsys.readouterr()

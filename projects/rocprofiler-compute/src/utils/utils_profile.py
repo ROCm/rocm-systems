@@ -299,7 +299,7 @@ def run_prof(
             )
             console_debug(f"Updated rocpd db {db_name} with native tool counters.")
     # Write results_fbase.csv
-    counter_csv = out_pmc_1 / f"{fbase}_counter_collection.csv"
+    counter_csv = compressed_name(out_pmc_1 / f"{fbase}_counter_collection.csv")
     rocpd_data.convert_dbs_to_csv(
         [str(p) for p in db_paths],
         str(counter_csv),

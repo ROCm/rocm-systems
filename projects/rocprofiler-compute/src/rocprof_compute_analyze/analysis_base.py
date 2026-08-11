@@ -394,12 +394,8 @@ class OmniAnalyze_Base:
                         reader = csv.reader(infile)
                         header = next(reader, None)
                         if header is None:
-                            output_file.unlink(missing_ok=True)
-                            console_error(
-                                f"{file} is empty, so the counters from that pass "
-                                "are missing.\n"
-                                "Re-run 'rocprof-compute profile' to regenerate it."
-                            )
+                            console_warning(f"Skipping empty {file}")
+                            continue
                         if "Counter_Name" not in header:
                             output_file.unlink(missing_ok=True)
                             console_error(
