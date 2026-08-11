@@ -114,7 +114,8 @@ virtualMemoryManagement:
     disabled: [amd_windows, amd_wsl]
   Unit_hipMemCreate_HostNuma_NumaTypedAccess:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    # AIRUNTIME-2632: NUMA typed-access allocation triggers bus error on gfx942
+    disabled: [amd_windows, amd_wsl, gfx942]
   Unit_hipMemCreate_HostNuma_Negative:
     <<: *level_2
     disabled: [amd_windows, amd_wsl]

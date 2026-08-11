@@ -117,7 +117,8 @@ math:
   Unit_Device_fma_Accuracy_Positive:
     <<: *level_2
     # special values test, fix: comment out [-3.0f, -1.5f, HEX_FLT(-, 0, 00000c, -, 126), HEX_FLT(-, 0, 000006, -, 126), +3.0f, 1.5f, HEX_FLT(+, 0, 00000c, -, 126), HEX_FLT(+, 0, 000006, -, 126),]
-    disabled: [nvidia_linux, amd_wsl]
+    # AIRUNTIME-2630: 0 ULP accuracy assertion fails on gfx942
+    disabled: [nvidia_linux, amd_wsl, gfx942]
   Unit_Device_fma_fmaf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
@@ -158,7 +159,8 @@ math:
   Unit_Device_fdim_Accuracy_Positive:
     <<: *level_2
     # special values test, fix: comment out [HEX_DBL(-, 1, fffffffffffff, +, 31), HEX_DBL(-, 1, fffffffffffff, +, 30), HEX_DBL(+, 1, fffffffffffff, +, 31), HEX_DBL(+, 1, fffffffffffff, +, 30)]
-    disabled: [nvidia_linux, amd_wsl]
+    # AIRUNTIME-2630: 0 ULP accuracy assertion fails on gfx942
+    disabled: [nvidia_linux, amd_wsl, gfx942]
   Unit_Device_fdim_fdimf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
