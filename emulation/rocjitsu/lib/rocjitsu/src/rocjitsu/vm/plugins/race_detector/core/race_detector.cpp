@@ -112,7 +112,7 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes) co
     // A later ordinary DS write from the same wave cannot overtake an earlier
     // DS read. The read's destination VGPR remains independently protected by
     // lgkmcnt until it is safe to consume or overwrite. This WAR check does
-    // not cover write/write ordering against GLOBAL_TO_LDS events.
+    // not cover LDS write/write ordering, which is not currently checked.
     if (wave == events_.waveId(eventId)) {
       continue;
     }
