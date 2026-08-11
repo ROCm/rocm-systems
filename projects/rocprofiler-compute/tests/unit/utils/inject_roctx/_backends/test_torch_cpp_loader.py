@@ -8,6 +8,7 @@ no-ninja policy.
 """
 
 import importlib
+import re
 import sys
 
 import common  # noqa: F401
@@ -151,21 +152,48 @@ def roctx_recordfn_module_sources():
     )
 
 
+def cmake_declared_sources():
+    """The C++ files CMakeLists.txt names, from its header list and add_library
+    calls.
+
+    Parsed from the build file rather than globbed, so this is independent of
+    how the loader collects its fingerprint inputs. Globbing here would restate
+    the implementation and pass regardless of what it missed.
+    """
+    text = inject_roctx_loader._SO_BUILDFILE.read_text()
+    names = set()
+
+    # Longest extension first, and a trailing non-word guard, so ".hpp" is not
+    # truncated to ".h" by the alternation.
+    header_block = re.search(r"set\(_rcfn_headers(.*?)\)", text, re.DOTALL)
+    if header_block:
+        names.update(re.findall(r"[\w.-]+\.(?:hpp|hxx|h)(?!\w)", header_block.group(1)))
+
+    for args in re.findall(r"add_library\((.*?)\)", text, re.DOTALL):
+        names.update(re.findall(r"[\w.-]+\.(?:cpp|cxx|cc)(?!\w)", args))
+
+    return names
+
+
 def test_fingerprint_inputs_cover_every_build_input():
     """Every file the build consumes is a fingerprint input."""
     src_dir = inject_roctx_loader._SO_SOURCE_DIR
     if not src_dir.is_dir():
         pytest.skip(f"module sources not present at {src_dir}")
 
-    inputs = set(inject_roctx_loader._FINGERPRINT_INPUTS)
-    expected = (
-        set(src_dir.glob("*.cpp"))
-        | set(src_dir.glob("*.h"))
-        | set(src_dir.glob("cmake/*.py"))
-        | {inject_roctx_loader._SO_BUILDFILE}
+    declared = cmake_declared_sources()
+    assert declared, (
+        f"no sources parsed from {inject_roctx_loader._SO_BUILDFILE}; "
+        "the build file changed shape and this parser needs updating"
     )
-    missing = expected - inputs
+
+    input_names = {p.name for p in inject_roctx_loader._FINGERPRINT_INPUTS}
+    missing = declared - input_names
     assert not missing, f"build inputs absent from the fingerprint: {sorted(missing)}"
+
+    # Neither is a compiled source, so neither is reachable from add_library.
+    for required in ("CMakeLists.txt", "probe_torch.py"):
+        assert required in input_names, f"{required} is not a fingerprint input"
 
 
 def test_roctx_recordfn_source_avoids_torch_umbrella_headers():
