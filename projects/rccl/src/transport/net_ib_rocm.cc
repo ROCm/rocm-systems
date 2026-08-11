@@ -164,10 +164,9 @@ NCCL_PARAM(RocmIbEceEnable,"IB_ECE_ENABLE",1);
 NCCL_PARAM(RocmIbDataDirect,"IB_DATA_DIRECT",1);
 NCCL_PARAM(RocmIbQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
 RCCL_PARAM(RocmIbQpsPerP2p, "IB_QPS_PER_P2P", 0);
-NCCL_PARAM(RocmIbGdrFlushDisable, "GDR_FLUSH_DISABLE", 0);
+NCCL_PARAM(RocmIbGdrFlushDisable, "GDR_FLUSH_DISABLE", 1);
 
 // AMD AINIC
-RCCL_PARAM(CtsInlineData, "CTS_INLINE_DATA", -1);
 RCCL_PARAM(CtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
 
 extern int64_t rcclParamAinicRoce();
@@ -983,17 +982,18 @@ ncclResult_t rocmIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
 
     rcclAinicRoce = ((rcclParamAinicRoce() == 1) ? true : false);
     if (rcclAinicRoce) {
-      // for AINIC, these params are defaulted to enabled unless user forces it to disable(0).
-      rcclCtsInlineData = ((rcclParamCtsInlineData() == 0) ? false : true);
       rcclCtsOffloadEnabled = ((rcclParamCtsOffloadEnabled() == 0) ? false : true);
-      // for AINIC IbUseInline is enabled by default always
-      ncclIbUseInline = true;
       // for AINIC GDR flush is disabled by default
-      ncclIbGdrFlushDisable = 1;
-
+      // ncclIbGdrFlushDisable = 1;
+      if (rcclCtsOffloadEnabled && !ncclIbUseInline) {
+        INFO(NCCL_INIT|NCCL_NET, "NET/IB : IB Use Inline is disabled and CTS Offload is enabled - enabling IB Use Inline Data");
+        ncclIbUseInline = true;
+      }
+      rcclCtsInlineData = ncclIbUseInline;
       INFO(NCCL_INIT|NCCL_NET, "NET/IB : AINIC RoCEv2 optimizations enabled: CTS Inline Data: %s; CTS Offload: %s; "
-           "IB Use Inline: enabled; GDR Flush: disabled", rcclCtsInlineData ? "Enabled": "Disabled",
-           rcclCtsOffloadEnabled ? "Enabled": "Disabled");
+           "GDR Flush: %s", rcclCtsInlineData ? "Enabled": "Disabled",
+           rcclCtsOffloadEnabled ? "Enabled": "Disabled",
+           ncclIbGdrFlushDisable ? "Disabled" : "Enabled");
     }
   }
 exit:
@@ -1166,7 +1166,11 @@ ncclResult_t rocmIbGetPhysProperties(int dev, ncclNetProperties_t* props) {
   props->latency = 0; // Not set
   props->port = ibDev->portNum + ibDev->realPort;
   props->maxComms = ibDev->maxQp;
-  props->maxRecvs = NCCL_NET_IB_MAX_RECVS;
+  if (rcclCtsInlineData) {
+    props->maxRecvs = 1;
+  } else {
+    props->maxRecvs = NCCL_NET_IB_MAX_RECVS;
+  }
   props->netDeviceType    = NCCL_NET_DEVICE_HOST;
   props->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
   props->maxP2pBytes = NCCL_MAX_NET_SIZE_BYTES;
@@ -1394,8 +1398,10 @@ struct alignas(32) ncclIbNetCommBase {
 struct ncclIbSendComm {
   struct ncclIbNetCommBase base;
   // Start with fifo and ibv structs as they have alignment restrictions
-  struct ncclIbSendFifo fifo[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
-  struct ncclIbSendFifoCtsInline fifo_inline[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  union {
+    struct ncclIbSendFifo fifo[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+    struct ncclIbSendFifoCtsInline fifo_inline[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  } u;
   struct ibv_sge sges[NCCL_NET_IB_MAX_RECVS];
   struct ibv_send_wr wrs[NCCL_NET_IB_MAX_RECVS + 1];
   // Each dev correlates to a mergedIbDev
@@ -1409,9 +1415,10 @@ struct ncclIbSendComm {
 // to be a 32-byte multiple, so that an entry does not get split and
 // written out of order when IB Relaxed Ordering is enabled
 static_assert((sizeof(struct ncclIbNetCommBase) % 32) == 0, "ncclIbNetCommBase size must be 32-byte multiple to ensure fifo is at proper offset");
-static_assert((offsetof(struct ncclIbSendComm, fifo) % 32) == 0, "ncclIbSendComm fifo must be 32-byte aligned");
+static_assert((offsetof(struct ncclIbSendComm, u.fifo) % 32) == 0, "ncclIbSendComm fifo must be 32-byte aligned");
 static_assert((sizeof(struct ncclIbSendFifo) % 32) == 0, "ncclIbSendFifo element size must be 32-byte multiples");
-static_assert((sizeof(struct ncclIbSendFifoCtsInline) % 32) == 0, "ncclIbSendFifoCtsInline element size must be 32-byte multiples");
+static_assert((sizeof(struct ncclIbSendFifoCtsInline) % 32) == 0, "ncclIbSendFifoCtsInline element size must be 32-byte aligned");
+static_assert((sizeof(struct ncclIbSendFifoCtsInline) <=32), "struct ncclIbSendFifoCtsInline should fit within 32-bytes");
 static_assert((offsetof(struct ncclIbSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-byte aligned");
 
@@ -1425,8 +1432,10 @@ struct ncclIbGpuFlush {
 };
 
 struct ncclIbRemFifo {
-  struct ncclIbSendFifo elems[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
-  struct ncclIbSendFifoCtsInline elems_cts_inline[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  union {
+    struct ncclIbSendFifo elems[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+    struct ncclIbSendFifoCtsInline elems_cts_inline[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  } u;
   uint64_t fifoTail;
   uint64_t addr;
   uint32_t flags;
@@ -1751,11 +1760,7 @@ ib_recv_dev_list:
     devInfo->lid           = ibDev->portAttr.lid;
     devInfo->ibv_dev_index = commDev->base.ibDevN;
     // Prepare my fifo
-    if (rcclCtsInlineData) {
-      NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->fifoMr, commDev->base.pd, comm->fifo_inline, sizeof(struct ncclIbSendFifoCtsInline)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS, IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
-    } else {
-      NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->fifoMr, commDev->base.pd, comm->fifo, sizeof(struct ncclIbSendFifo)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS, IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
-    }
+    NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->fifoMr, commDev->base.pd, comm->u.fifo, sizeof(struct ncclIbSendFifo)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS, IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
     devInfo->fifoRkey = commDev->fifoMr->rkey;
 
     // Pack local GID info
@@ -1799,9 +1804,9 @@ ib_recv_dev_list:
   }
   config = (ncclNetCommConfig_t*)ctx;
   if (rcclCtsInlineData) {
-    meta.fifoAddr = (uint64_t)comm->fifo_inline;
+    meta.fifoAddr = (uint64_t)comm->u.fifo_inline;
   } else {
-    meta.fifoAddr = (uint64_t)comm->fifo;
+    meta.fifoAddr = (uint64_t)comm->u.fifo;
   }
   meta.sl = (ncclParamRocmIbSl() != -1) ? ncclParamRocmIbSl() : (config && config->trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? config->trafficClass : NCCL_IB_SL_DEFAULT;
   meta.tc = (ncclParamRocmIbTc() != -1) ? ncclParamRocmIbTc() : (config && config->trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? config->trafficClass : NCCL_IB_TC_DEFAULT;
@@ -2125,13 +2130,7 @@ ib_recv:
 
     // Retain remote fifo info and prepare my RDMA ops
     rComm->remFifo.addr = remMeta.fifoAddr;
-    if (rcclCtsInlineData) {
-      NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->fifoMr, rCommDev->base.pd, &rComm->remFifo.elems_cts_inline,
-                                    sizeof(struct ncclIbSendFifoCtsInline)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS,
-                                    IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
-    } else {
-      NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->fifoMr, rCommDev->base.pd, &rComm->remFifo.elems, sizeof(struct ncclIbSendFifo)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS, IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
-    }
+    NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->fifoMr, rCommDev->base.pd, &rComm->remFifo.u.elems, sizeof(struct ncclIbSendFifo)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS, IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
     rCommDev->fifoSge.lkey = rCommDev->fifoMr->lkey;
     if (ncclIbUseInline) rComm->remFifo.flags = IBV_SEND_INLINE;
 
@@ -2395,12 +2394,13 @@ NCCL_PARAM(RocmIbSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
 
 ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot, bool use_write_op) {
   struct ncclIbRequest** reqs = comm->fifoReqs[slot];
-  volatile struct ncclIbSendFifo* slots = comm->fifo[slot];
+  volatile struct ncclIbSendFifo* slots = comm->u.fifo[slot];
+  volatile struct ncclIbSendFifoCtsInline* slots_inline = comm->u.fifo_inline[slot];
   int nreqs;
   if (rcclCtsOffloadEnabled) {
     nreqs = 1;
   } else {
-    nreqs = slots[0].nreqs;
+    nreqs = (rcclCtsInlineData) ? slots_inline[0].nreqs : slots[0].nreqs;
   }
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
 
@@ -2416,7 +2416,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot, bool use_wri
     if (rcclCtsOffloadEnabled) {
       wr->wr.rdma.remote_addr = 0xdeadbeef;
     } else {
-      wr->wr.rdma.remote_addr = slots[r].addr;
+      wr->wr.rdma.remote_addr = (rcclCtsInlineData) ? slots_inline[r].addr : slots[r].addr;
     }
     wr->next = wr + 1;
     wr_id += (reqs[r] - comm->base.reqs) << (r*8);
@@ -2474,7 +2474,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot, bool use_wri
       if (rcclCtsOffloadEnabled) {
         comm->wrs[r].wr.rdma.rkey = 0xbade;
       } else {
-        comm->wrs[r].wr.rdma.rkey = slots[r].rkeys[qp->remDevIdx];
+        comm->wrs[r].wr.rdma.rkey = (rcclCtsInlineData) ? slots_inline[r].rkeys[0] : slots[r].rkeys[qp->remDevIdx];
       }
 
       int chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
@@ -2557,6 +2557,7 @@ ncclResult_t rocmIbIsend(void* sendComm, void* data, size_t size, int tag, void*
   // Wait for the receiver to have posted the corresponding receive
   int nreqs = 0;
   volatile struct ncclIbSendFifo* slots;
+  volatile struct ncclIbSendFifoCtsInline* slots_inline;
 
   if (rcclCtsOffloadEnabled) {
       nreqs = 1;
@@ -2565,26 +2566,38 @@ ncclResult_t rocmIbIsend(void* sendComm, void* data, size_t size, int tag, void*
   int slot = (comm->fifoHead) % MAX_REQUESTS;
   struct ncclIbRequest** reqs = comm->fifoReqs[slot];
   if (!rcclCtsOffloadEnabled) {
-    slots = comm->fifo[slot];
+    slots = comm->u.fifo[slot];
+    slots_inline = comm->u.fifo_inline[slot];
     uint64_t idx = comm->fifoHead+1;
-    if (slots[0].idx != idx) { *request = NULL; return ncclSuccess; }
-    nreqs = slots[0].nreqs;
-    // Wait until all data has arrived
-    for (int r=1; r<nreqs; r++) while(slots[r].idx != idx);
+    if (rcclCtsInlineData) {
+      if (slots_inline[0].idx != (uint32_t)idx) { *request = NULL; return ncclSuccess; }
+      nreqs = slots_inline[0].nreqs;
+      // Wait until all data has arrived
+      for (int r=1; r<nreqs; r++) while(slots_inline[r].idx != (uint32_t)idx);
+    } else {
+      if (slots[0].idx != idx) { *request = NULL; return ncclSuccess; }
+      nreqs = slots[0].nreqs;
+      // Wait until all data has arrived
+      for (int r=1; r<nreqs; r++) while(slots[r].idx != idx);
+    }
     __sync_synchronize(); // order the nreqsPtr load against tag/rkey/addr loads below
   }
   for (int r=0; r<nreqs; r++) {
     if (!rcclCtsOffloadEnabled) {
-      if (reqs[r] != NULL || slots[r].tag != tag) continue;
+      uint64_t slot_addr = (rcclCtsInlineData) ? slots_inline[r].addr : slots[r].addr;
+      uint64_t slot_size = (rcclCtsInlineData) ? slots_inline[r].size : slots[r].size;
+      uint32_t slot_rkey = (rcclCtsInlineData) ? slots_inline[r].rkeys[0] : slots[r].rkeys[0];
+      uint32_t slot_tag = (rcclCtsInlineData) ? slots_inline[r].tag : slots[r].tag;
+      if (reqs[r] != NULL || slot_tag != tag) continue;
 
-      if (size > slots[r].size) size = slots[r].size;
+      if (size > slot_size) size = slot_size;
       // Sanity checks
-      if (slots[r].size < 0 || slots[r].addr == 0 || slots[r].rkeys[0] == 0) {
+      if (slot_size < 0 || slot_addr == 0 || slot_rkey == 0) {
         char line[SOCKET_NAME_MAXLEN + 1];
         union ncclSocketAddress addr;
         ncclSocketGetAddr(&comm->base.sock, &addr);
         WARN("NET/IB : req %d/%d tag %x peer %s posted incorrect receive info: size %ld addr %lx rkeys[0]=%x",
-             r, nreqs, tag, ncclSocketToString(&addr, line), slots[r].size, slots[r].addr, slots[r].rkeys[0]);
+             r, nreqs, tag, ncclSocketToString(&addr, line), slot_size, slot_addr, slot_rkey);
         return ncclInternalError;
       }
     } else{
@@ -2636,7 +2649,11 @@ ncclResult_t rocmIbIsend(void* sendComm, void* data, size_t size, int tag, void*
 
     // Clear slots[0]->nreqs, as well as other fields to help debugging and sanity checks
     if (!rcclCtsOffloadEnabled) {
-      memset((void*)slots, 0, sizeof(struct ncclIbSendFifo));
+      if (rcclCtsInlineData) {
+        memset((void*)slots_inline, 0, sizeof(struct ncclIbSendFifoCtsInline));
+      } else {
+        memset((void*)slots, 0, sizeof(struct ncclIbSendFifo));
+      }
     }
     memset(reqs, 0, NCCL_NET_IB_MAX_RECVS*sizeof(struct ncclIbRequest*));
     comm->fifoHead++;
@@ -2661,9 +2678,9 @@ ncclResult_t rocmIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, siz
   req->recv.sizes = comm->sizesFifo[slot];
   for (int i=0; i<n; i++) req->recv.sizes[i] = 0;
   if (rcclCtsInlineData) {
-    localElemCtsInline = comm->remFifo.elems_cts_inline[slot];
+    localElemCtsInline = comm->remFifo.u.elems_cts_inline[slot];
   } else {
-    localElem = comm->remFifo.elems[slot];
+    localElem = comm->remFifo.u.elems[slot];
   }
 
   if (rcclAinicRoce) {
@@ -2680,11 +2697,8 @@ ncclResult_t rocmIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, siz
     struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*) mhandles[i];
     if (rcclCtsInlineData) {
       localElemCtsInline[i].addr = (uint64_t)data[i];
-
-      // Send all applicable rkeys
-      for (int j = 0; j < comm->base.vProps.ndevs; j++)
-        localElemCtsInline[i].rkeys[j] = mhandleWrapper->mrs[j]->rkey;
-
+      // for Inline only one rkey is valid
+      localElemCtsInline[i].rkeys[0] = mhandleWrapper->mrs[0]->rkey;
       localElemCtsInline[i].nreqs = n;
       localElemCtsInline[i].size = sizes[i]; // Sanity/Debugging
       localElemCtsInline[i].tag = tags[i];
@@ -2705,7 +2719,11 @@ ncclResult_t rocmIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, siz
       localElemRef = (uint64_t)localElem;
     }
   }
-  wr.wr.rdma.remote_addr = comm->remFifo.addr + slot*NCCL_NET_IB_MAX_RECVS*sizeof(struct ncclIbSendFifo);
+  if (rcclCtsInlineData) {
+    wr.wr.rdma.remote_addr = comm->remFifo.addr + slot*NCCL_NET_IB_MAX_RECVS*sizeof(struct ncclIbSendFifoCtsInline);
+  } else {
+    wr.wr.rdma.remote_addr = comm->remFifo.addr + slot*NCCL_NET_IB_MAX_RECVS*sizeof(struct ncclIbSendFifo);
+  }
 
   // Lookup the correct fifoRkey
   wr.wr.rdma.rkey = comm->base.remDevs[ctsQp->remDevIdx].fifoRkey;
