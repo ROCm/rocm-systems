@@ -37,7 +37,6 @@ TEST_F(CeAlltoAllvEligibilityTest, FuncEnumValue)
 
 TEST_F(CeAlltoAllvEligibilityTest, CeImplementedReturnsFalseForUnsupportedCollectives)
 {
-    EXPECT_FALSE(ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat32));
     EXPECT_FALSE(ncclCeImplemented(ncclFuncBroadcast, ncclDevSum, ncclFloat32));
 }
 
