@@ -188,6 +188,75 @@ TEST_F(writer_test, register_agent_info_with_invalid_agent_type_throws_invalid_a
     EXPECT_THROW(writer->register_agent_info(agent_info), std::invalid_argument);
 }
 
+
+TEST_F(writer_test, register_nic_agent_info_is_readable_after_flush)
+{
+    auto writer = make_writer();
+
+    const writer_types::node_info_t node_info{ 1, 42, "machine-1" };
+    writer->register_node_info(node_info);
+
+    writer_types::process_info_t process_info;
+    process_info.pid     = 100;
+    process_info.node_id = node_info.node_id;
+    writer->register_process_info(process_info);
+
+    writer_types::agent_info_t agent_info;
+    agent_info.unique_id.agent_type = "NIC";
+    agent_info.unique_id.type_index = 0;
+    agent_info.absolute_index       = 0;
+    agent_info.logical_index        = 0;
+    agent_info.uuid                 = 456;
+    agent_info.node_id              = node_info.node_id;
+    agent_info.process_id           = process_info.pid;
+    writer->register_agent_info(agent_info);
+
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    auto reader =
+        std::make_unique<reader_t>(std::make_unique<storage_t>(m_db_path, m_uuid));
+    const auto agents = reader->get_all_agents();
+
+    ASSERT_EQ(agents.size(), 1);
+    EXPECT_EQ(agents[0]->agent_type, "NIC");
+    EXPECT_EQ(agents[0]->type_index, 0);
+    ASSERT_NE(agents[0]->node_info, nullptr);
+    EXPECT_EQ(agents[0]->node_info->node_id, node_info.node_id);
+    ASSERT_NE(agents[0]->process_info, nullptr);
+    EXPECT_EQ(agents[0]->process_info->pid, process_info.pid);
+}
+
+TEST_F(writer_test, register_agent_info_with_invalid_type_error_message_lists_nic)
+{
+    auto writer = make_writer();
+
+    const writer_types::node_info_t node_info{ 1, 42, "machine-1" };
+    writer->register_node_info(node_info);
+
+    writer_types::process_info_t process_info;
+    process_info.pid     = 100;
+    process_info.node_id = node_info.node_id;
+    writer->register_process_info(process_info);
+
+    writer_types::agent_info_t agent_info;
+    agent_info.unique_id.agent_type = "TPU";
+    agent_info.unique_id.type_index = 0;
+    agent_info.node_id              = node_info.node_id;
+    agent_info.process_id           = process_info.pid;
+
+    try
+    {
+        writer->register_agent_info(agent_info);
+        FAIL() << "Expected std::invalid_argument";
+    }
+    catch(const std::invalid_argument& e)
+    {
+        EXPECT_NE(std::string{ e.what() }.find("NIC"), std::string::npos)
+            << "Error message should list NIC as a valid type: " << e.what();
+    }
+}
+
 TEST_F(writer_test, insert_region_data_is_readable_after_flush)
 {
     auto writer = make_writer();
