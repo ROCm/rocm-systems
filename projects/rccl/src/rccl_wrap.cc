@@ -498,6 +498,10 @@ static int symkHostRedOpToDev(ncclRedOp_t op) {
 // reporting in rcclSelectAllReduce/rcclSelectAllGather.
 static bool rcclSymkQuery(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
                           ncclRedOp_t op, int* algo, int* protocol, int* maxChannels) {
+  // Symmetric kernels need symmetric-window support (cuMem). Without it the
+  // windows are never registered symmetric and symk cannot run, so do not report
+  // it -- rcclSymKGetInfo's caller then falls back to the actual backend.
+  if (comm == nullptr || !comm->symmetricSupport) return false;
   if (coll != ncclFuncAllReduce && coll != ncclFuncAllGather && coll != ncclFuncReduceScatter) return false;
   int devOp = (coll == ncclFuncAllGather) ? (int)ncclDevSum : symkHostRedOpToDev(op);
   if (devOp < 0) return false;
@@ -520,8 +524,15 @@ ncclResult_t rcclSymKGetInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
                              ncclRedOp_t op, int* algo, int* protocol, int* maxChannels) {
   RCCL_STATIC_EXPOSE_CHECK();
   if (algo == nullptr || protocol == nullptr || maxChannels == nullptr) return ncclInvalidArgument;
-  if (!rcclSymkQuery(comm, coll, count, dataType, op, algo, protocol, maxChannels)) return ncclInvalidArgument;
-  return ncclSuccess;
+  if (rcclSymkQuery(comm, coll, count, dataType, op, algo, protocol, maxChannels)) return ncclSuccess;
+  // Symmetric kernel does not apply here (e.g. cuMem disabled -> no symmetric
+  // windows, so symk never runs). Report the backend that actually runs instead
+  // of failing, so the caller labels its numbers with the real implementation.
+  // Buffer pointers are unknown at this ABI, but the selector's gates are
+  // buffer-independent for the decision (DDA reads comm state; symmetric/CE
+  // window lookups null-safely find nothing), so null operands are safe.
+  return rcclGetCollImplInfo(comm, coll, count, dataType, op, /*sendbuff=*/nullptr, /*recvbuff=*/nullptr,
+                             /*graphCapturing=*/0, algo, protocol, maxChannels);
 }
 
 ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
