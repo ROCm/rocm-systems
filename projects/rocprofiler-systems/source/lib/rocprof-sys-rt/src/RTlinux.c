@@ -48,7 +48,6 @@
 #    include <dlfcn.h>
 #endif
 
-#include <errno.h>
 #include <link.h>
 #include <signal.h>
 #include <string.h>
@@ -337,7 +336,7 @@ dyn_pthread_self(void)
         return (dyntid_t) DYNINST_SINGLETHREADED;
     }
     me = (*DYNINST_pthread_self)();
-    return (dyntid_t) me;
+    return me;
 }
 
 /*

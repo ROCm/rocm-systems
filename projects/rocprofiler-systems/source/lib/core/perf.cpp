@@ -173,7 +173,7 @@ config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
         }
         case PERF_TYPE_HW_CACHE:
         {
-            _pe.config = static_cast<int>(perf::get_hw_cache_config(_event));
+            _pe.config = perf::get_hw_cache_config(_event);
             break;
         }
         case PERF_TYPE_BREAKPOINT:

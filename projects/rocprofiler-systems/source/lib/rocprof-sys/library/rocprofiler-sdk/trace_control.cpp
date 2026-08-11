@@ -51,7 +51,7 @@ trace_control::force_initial_pause()
 void
 trace_control::handle_range_start(std::uint64_t range_id, const char* message)
 {
-    if(message == nullptr || m_trace_regions.count(message) == 0)
+    if(message == nullptr || !m_trace_regions.contains(message))
     {
         return;
     }

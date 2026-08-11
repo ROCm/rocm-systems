@@ -13,13 +13,13 @@
 
 #include <spdlog/fmt/ranges.h>
 
+#include <algorithm>
 #include <timemory/environment.hpp>
 #include <timemory/log/color.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/console.hpp>
 #include <timemory/utility/filepath.hpp>
 
-#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -651,7 +651,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
     else if(_cerr)
         throw std::runtime_error(_cerr.what());
 
-    if(_niterations < 1) _niterations = 1;
+    _niterations   = std::max<int64_t>(_niterations, 1);
     auto _get_size = [](const auto& _v) { return std::max<size_t>(_v.size(), 1); };
 
     auto _causal_envs_tmp = std::vector<std::map<std::string_view, std::string>>{};

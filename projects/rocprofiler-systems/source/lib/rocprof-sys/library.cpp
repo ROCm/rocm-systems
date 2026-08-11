@@ -280,7 +280,7 @@ struct fini_bundle
     std::string as_string(bool _print_prefix = true) const
     {
         std::stringstream _ss;
-        if(_print_prefix && m_label.length() > 0) _ss << m_label << " : ";
+        if(_print_prefix && !m_label.empty()) _ss << m_label << " : ";
         size_t _idx = 0;
         ((_ss << (_idx++ > 0 ? ", " : "") << std::get<Tp>(m_data)), ...);
         return _ss.str();

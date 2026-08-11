@@ -1540,7 +1540,7 @@ perfetto_processor_t::handle(const kfd_sample& sample)
               category::rocm_kfd_event_dropped_events> },
     } };
 
-    const auto entry =
+    const auto* const entry =
         std::find_if(dispatch.begin(), dispatch.end(),
                      [&](const auto& row) { return row.first == sample.category; });
     if(entry == dispatch.end())

@@ -6,6 +6,7 @@
 #include "log.hpp"
 #include "rocprof-sys-instrument.hpp"
 
+#include <algorithm>
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
 
@@ -14,7 +15,6 @@
 
 #include <spdlog/fmt/ranges.h>
 
-#include <algorithm>
 #include <link.h>
 #include <linux/limits.h>
 #include <string>
@@ -301,7 +301,7 @@ get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t*,
             _col2 = std::max(_col2, itr.lineOffset());
         }
 
-        if(_col1 < 0) _col1 = 0;
+        _col1 = std::max(_col1, 0);
 
         if(module->getSourceLines(_last_addr, _lines_end))
         {
@@ -310,8 +310,8 @@ get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t*,
                 _row2 = std::max(_row2, itr.lineNumber());
                 _col2 = std::max(_col2, itr.lineOffset());
             }
-            if(_col2 < 0) _col2 = 0;
-            if(_row2 < _row1) _row1 = _row2;  // Fix for wrong line numbers
+            _col2 = std::max(_col2, 0);
+            _row1 = std::min(_row2, _row1);  // Fix for wrong line numbers
 
             return function_signature(_return_type, _func_name, _file_name, _param_types,
                                       { _row1, _row2 }, { _col1, _col2 }, true, true,
@@ -889,8 +889,6 @@ error_func_fake(error_level_t level, int num, const char* const* params)
 
 #include "internal_libs.hpp"
 
-#include <timemory/components/timing/wall_clock.hpp>
-
 //======================================================================================//
 //
 //  Filters app_objects (internal constraints are applied in module level filtering)
@@ -1257,7 +1255,7 @@ process_modules(const std::vector<module_t*>& _app_modules)
         auto _base_name = rocprofsys::path::filename(itr->fullName());
         auto _real_name = rocprofsys::path::realpath(itr->fullName());
 
-        if(_names.count(_base_name) == 0 && _names.count(_real_name) == 0)
+        if(!_names.contains(_base_name) && !_names.contains(_real_name))
         {
             verbprintf(2, "Processing symbol table for module '%s'...\n",
                        itr->fullName().c_str());

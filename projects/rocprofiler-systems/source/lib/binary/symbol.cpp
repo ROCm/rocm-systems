@@ -21,6 +21,7 @@ typedef Elf32_Word  Elf32_Relr;
 typedef Elf64_Xword Elf64_Relr;
 #endif
 
+#include <algorithm>
 #include <bfd.h>
 #include <coff/external.h>
 #include <coff/internal.h>
@@ -125,8 +126,8 @@ symbol::operator+=(const symbol& _rhs)
         address += _rhs.address;
         utility::combine(inlines, _rhs.inlines);
         utility::combine(dwarf_info, _rhs.dwarf_info);
-        if(_rhs.binding < binding) binding = _rhs.binding;
-        if(_rhs.visibility < visibility) visibility = _rhs.visibility;
+        binding    = std::min(_rhs.binding, binding);
+        visibility = std::min(_rhs.visibility, visibility);
         if(load_address == 0 && _rhs.load_address > load_address)
             load_address = _rhs.load_address;
     }
@@ -221,7 +222,7 @@ symbol::read_bfd_line_info(bfd_file& _bfd)
 
     if(_pc < _vma || _pc >= _vma + _size) return false;
     // add one to vma + size because address range is exclusive of last address
-    if(_pc_end > _vma + _size) _pc_end = (_vma + _size);
+    _pc_end = std::min(_pc_end, _vma + _size);
 
     auto* _inp  = static_cast<bfd*>(_bfd.data);
     auto* _syms = reinterpret_cast<asymbol**>(_bfd.syms);

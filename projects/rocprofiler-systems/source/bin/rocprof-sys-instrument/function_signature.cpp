@@ -82,9 +82,9 @@ function_signature::get(bool _all, bool _save) const
             errprintf(3, "line info for %s is empty! [{%s}] [{%s}]\n", m_name.c_str(),
                       _rc1.c_str(), _rc2.c_str());
     }
-    if((_all || use_file_info) && m_file.length() > 0) ss << " [" << m_file;
+    if((_all || use_file_info) && !m_file.empty()) ss << " [" << m_file;
     if((_all || use_line_info) && m_row.first > 0) ss << ":" << m_row.first;
-    if((_all || use_file_info) && m_file.length() > 0) ss << "]";
+    if((_all || use_file_info) && !m_file.empty()) ss << "]";
 
     if(_save) m_signature = ss.str();
     return ss.str();
@@ -98,7 +98,7 @@ function_signature::get_coverage(bool _basic_block) const
     ss << m_name << m_params;
     if(_basic_block && m_loop && m_info_beg)
     {
-        if(m_file.length() > 0) ss << " [" << m_file << "]";
+        if(!m_file.empty()) ss << " [" << m_file << "]";
         auto _row_col_str = [](unsigned long _row, unsigned long _col) {
             std::stringstream _ss{};
             if(_row == 0 && _col == 0) return std::string{};
@@ -124,9 +124,9 @@ function_signature::get_coverage(bool _basic_block) const
     }
     else
     {
-        if(m_file.length() > 0) ss << " [" << m_file;
+        if(!m_file.empty()) ss << " [" << m_file;
         if(m_row.first > 0) ss << ":" << m_row.first;
-        if(m_file.length() > 0) ss << "]";
+        if(!m_file.empty()) ss << "]";
     }
 
     return ss.str();

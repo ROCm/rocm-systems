@@ -717,7 +717,7 @@ load_offload_buffer(std::int64_t _thread_idx)
         return _data;
     }
 
-    if(offload_seq_data.count(_thread_idx) == 0) return _data;
+    if(!offload_seq_data.contains(_thread_idx)) return _data;
 
     size_t _count = 0;
     for(auto itr : offload_seq_data.at(_thread_idx))

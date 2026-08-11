@@ -60,13 +60,13 @@ struct MockedSHMEMGotcha
     static bool is_permitted(const std::string& func_name)
     {
         auto& reject_fn = get_reject_list();
-        if(reject_fn && reject_fn().count(func_name) > 0) return false;
+        if(reject_fn && reject_fn().contains(func_name)) return false;
 
         auto& permit_fn = get_permit_list();
         if(permit_fn)
         {
             const auto& permit = permit_fn();
-            if(!permit.empty() && permit.count(func_name) == 0) return false;
+            if(!permit.empty() && !permit.contains(func_name)) return false;
         }
         return true;
     }

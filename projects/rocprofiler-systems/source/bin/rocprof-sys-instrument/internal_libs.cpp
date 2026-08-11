@@ -331,7 +331,7 @@ get_internal_basic_libs_impl()
     {
         for(auto itr : gitr)
         {
-            if(!itr.empty() && _exclude.count(itr) == 0) _libs.emplace(itr);
+            if(!itr.empty() && !_exclude.contains(itr)) _libs.emplace(itr);
         }
     }
 

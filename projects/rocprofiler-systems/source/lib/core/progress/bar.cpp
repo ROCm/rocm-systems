@@ -222,9 +222,9 @@ bar::render_locked() noexcept
 
     const double frac =
         (total == 0) ? 0.0 : static_cast<double>(current) / static_cast<double>(total);
-    const auto width   = static_cast<std::size_t>(m_opts.width);
-    const auto bar_str = detail::format_bar(m_opts.style, width, frac);
-    const auto sep     = bar_str.empty() ? "" : " ";
+    const auto        width   = static_cast<std::size_t>(m_opts.width);
+    const auto        bar_str = detail::format_bar(m_opts.style, width, frac);
+    const auto* const sep     = bar_str.empty() ? "" : " ";
 
     std::fputs(ANSI_RESET_LINE, m_opts.stream);
     std::fprintf(m_opts.stream, "%s%s%s %3.0f%%", m_label.c_str(), sep, bar_str.c_str(),

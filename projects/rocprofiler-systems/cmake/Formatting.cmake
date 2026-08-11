@@ -20,7 +20,10 @@ macro(ROCPROFILER_SYSTEMS_ACTIVATE_CLANG_TIDY)
             )
             set(ROCPROFSYS_USE_CLANG_TIDY OFF)
         else()
-            set(CMAKE_CXX_CLANG_TIDY ${CLANG_TIDY_COMMAND})
+            # Treat every clang-tidy diagnostic as an error so the build (and CI)
+            # fails on any finding. Matches the enforcement used by sibling
+            # projects in this monorepo (e.g. hipFile).
+            set(CMAKE_CXX_CLANG_TIDY ${CLANG_TIDY_COMMAND} "-warnings-as-errors=*")
 
             # Create a preprocessor definition that depends on .clang-tidy content so the
             # compile command will change when .clang-tidy changes.  This ensures that a

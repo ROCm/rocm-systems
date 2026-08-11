@@ -378,8 +378,16 @@ extern "C"
     void kokkosp_begin_parallel_for(const char* name, std::uint32_t devid,
                                     std::uint64_t* kernid)
     {
-        if(rocprofsys::kokkosp::is_paused()) return set_invalid_id(kernid);
-        if(violates_name_rules(name)) return set_invalid_id(kernid);
+        if(rocprofsys::kokkosp::is_paused())
+        {
+            set_invalid_id(kernid);
+            return;
+        }
+        if(violates_name_rules(name))
+        {
+            set_invalid_id(kernid);
+            return;
+        }
 
         auto _thread_state_guard =
             rocprofsys::state::thread::scoped(rocprofsys::state::thread::Internal);
@@ -409,8 +417,16 @@ extern "C"
     void kokkosp_begin_parallel_reduce(const char* name, std::uint32_t devid,
                                        std::uint64_t* kernid)
     {
-        if(rocprofsys::kokkosp::is_paused()) return set_invalid_id(kernid);
-        if(violates_name_rules(name)) return set_invalid_id(kernid);
+        if(rocprofsys::kokkosp::is_paused())
+        {
+            set_invalid_id(kernid);
+            return;
+        }
+        if(violates_name_rules(name))
+        {
+            set_invalid_id(kernid);
+            return;
+        }
 
         auto _thread_state_guard =
             rocprofsys::state::thread::scoped(rocprofsys::state::thread::Internal);
@@ -440,8 +456,16 @@ extern "C"
     void kokkosp_begin_parallel_scan(const char* name, std::uint32_t devid,
                                      std::uint64_t* kernid)
     {
-        if(rocprofsys::kokkosp::is_paused()) return set_invalid_id(kernid);
-        if(violates_name_rules(name)) return set_invalid_id(kernid);
+        if(rocprofsys::kokkosp::is_paused())
+        {
+            set_invalid_id(kernid);
+            return;
+        }
+        if(violates_name_rules(name))
+        {
+            set_invalid_id(kernid);
+            return;
+        }
 
         auto _thread_state_guard =
             rocprofsys::state::thread::scoped(rocprofsys::state::thread::Internal);
@@ -470,8 +494,16 @@ extern "C"
 
     void kokkosp_begin_fence(const char* name, std::uint32_t devid, std::uint64_t* kernid)
     {
-        if(rocprofsys::kokkosp::is_paused()) return set_invalid_id(kernid);
-        if(violates_name_rules(name)) return set_invalid_id(kernid);
+        if(rocprofsys::kokkosp::is_paused())
+        {
+            set_invalid_id(kernid);
+            return;
+        }
+        if(violates_name_rules(name))
+        {
+            set_invalid_id(kernid);
+            return;
+        }
 
         auto _thread_state_guard =
             rocprofsys::state::thread::scoped(rocprofsys::state::thread::Internal);

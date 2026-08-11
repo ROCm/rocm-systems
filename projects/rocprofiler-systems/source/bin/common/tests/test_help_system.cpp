@@ -409,8 +409,8 @@ TEST_F(help_system_test, see_also_references_valid_topics_only)
     const auto& domain_map = get_domain_help_map();
 
     auto is_valid_topic = [&](std::string_view name) {
-        return group_map.count(std::string{ name }) > 0 ||
-               domain_map.count(std::string{ name }) > 0;
+        return group_map.contains(std::string{ name }) ||
+               domain_map.contains(std::string{ name });
     };
 
     for(const auto& [topic, related] : relations)

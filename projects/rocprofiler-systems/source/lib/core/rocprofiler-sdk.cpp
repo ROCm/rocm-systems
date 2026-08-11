@@ -250,7 +250,7 @@ config_settings(const std::shared_ptr<settings>& _config)
     auto _add_domain     = [&_domain_choices, &_skip_domains](std::string_view _domain) {
         auto _v = to_lower(_domain);
 
-        if(_skip_domains.count(_v) == 0)
+        if(!_skip_domains.contains(_v))
         {
             auto itr = std::find(_domain_choices.begin(), _domain_choices.end(), _v);
             if(itr == _domain_choices.end()) _domain_choices.emplace_back(_v);
@@ -263,7 +263,7 @@ config_settings(const std::shared_ptr<settings>& _config)
                                        auto& _operation_option_names) {
         auto _v = to_lower(_domain_name);
 
-        if(_skip_domains.count(_v) > 0) return;
+        if(_skip_domains.contains(_v)) return;
 
         auto _op_option_name = fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS", _domain_name);
         auto _eop_option_name =
@@ -491,7 +491,7 @@ get_callback_domains()
             {
                 auto ditr = callback_tracing_info[idx];
                 auto dval = static_cast<rocprofiler_callback_tracing_kind_t>(idx);
-                if(itr == to_lower(ditr.name) && supported.count(dval) > 0)
+                if(itr == to_lower(ditr.name) && supported.contains(dval))
                 {
                     _data.emplace(dval);
                     break;
@@ -634,7 +634,7 @@ get_buffered_domains()
             {
                 auto ditr = buffer_tracing_info[idx];
                 auto dval = static_cast<rocprofiler_buffer_tracing_kind_t>(idx);
-                if(itr == to_lower(ditr.name) && supported.count(dval) > 0)
+                if(itr == to_lower(ditr.name) && supported.contains(dval))
                 {
                     _data.emplace(dval);
                     break;
@@ -679,7 +679,7 @@ get_rocm_events()
 std::vector<std::int32_t>
 get_operations(rocprofiler_callback_tracing_kind_t kindv)
 {
-    if(callback_operation_option_names.count(kindv) == 0)
+    if(!callback_operation_option_names.contains(kindv))
     {
         LOG_CRITICAL("callback_operation_operation_names does not have value for {}",
                      static_cast<int>(kindv));
@@ -699,7 +699,7 @@ get_operations(rocprofiler_callback_tracing_kind_t kindv)
 std::vector<std::int32_t>
 get_operations(rocprofiler_buffer_tracing_kind_t kindv)
 {
-    if(buffered_operation_option_names.count(kindv) == 0)
+    if(!buffered_operation_option_names.contains(kindv))
     {
         LOG_CRITICAL("buffered_operation_option_names does not have value for {}",
                      static_cast<int>(kindv));
@@ -719,7 +719,7 @@ get_operations(rocprofiler_buffer_tracing_kind_t kindv)
 std::unordered_set<std::int32_t>
 get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv)
 {
-    if(callback_operation_option_names.count(kindv) == 0)
+    if(!callback_operation_option_names.contains(kindv))
     {
         LOG_CRITICAL("callback_operation_option_names does not have value for {}",
                      static_cast<int>(kindv));
@@ -739,7 +739,7 @@ get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv)
 std::unordered_set<std::int32_t>
 get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv)
 {
-    if(buffered_operation_option_names.count(kindv) == 0)
+    if(!buffered_operation_option_names.contains(kindv))
     {
         LOG_CRITICAL("buffered_operation_option_names does not have value for {}",
                      static_cast<int>(kindv));

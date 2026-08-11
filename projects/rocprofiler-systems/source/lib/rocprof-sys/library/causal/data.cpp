@@ -122,7 +122,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     auto _filters = std::vector<binary::scope_filter>{};
 
     // exclude internal libraries used by rocprof-sys
-    if(_scopes.count(sf::BINARY_FILTER) > 0)
+    if(_scopes.contains(sf::BINARY_FILTER))
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::BINARY_FILTER,
                                   "lib(rocprof-sys[-\\.]|dyninst|"
                                   "tbbmalloc|gotcha\\.|unwind\\.so\\.99)" });
@@ -131,7 +131,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     // telling the user to "make the main function" faster is literally useless since it
     // contains everything that could be made faster
     if(config::get_causal_mode() == state::process::CausalMode::Function &&
-       _scopes.count(sf::FUNCTION_FILTER) > 0)
+       _scopes.contains(sf::FUNCTION_FILTER))
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER,
                                   "( main\\(|^main$|^main\\.cold$)" });
 
@@ -140,7 +140,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
             std::string{ env_vars::CAUSAL_FUNCTION_EXCLUDE_DEFAULTS })
             .value_or(true);
 
-    if(_use_default_excludes && _scopes.count(sf::FUNCTION_FILTER) > 0)
+    if(_use_default_excludes && _scopes.contains(sf::FUNCTION_FILTER))
     {
         // symbols starting with leading underscore are generally system functions
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER, "^_" });
@@ -156,7 +156,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     // "make main function" faster since it contains everything
     // that could be made faster
     if(config::get_causal_mode() == state::process::CausalMode::Function &&
-       _scopes.count(sf::FUNCTION_FILTER) > 0)
+       _scopes.contains(sf::FUNCTION_FILTER))
     {
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER,
                                   "(^main$|^main.cold$|int main\\()" });
@@ -188,15 +188,15 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
             _former_include = _current_include;
         }
 
-        if(!_binary_include.empty() && _scopes.count(sf::BINARY_FILTER) > 0)
+        if(!_binary_include.empty() && _scopes.contains(sf::BINARY_FILTER))
             _filters.emplace_back(
                 sf{ sf::FILTER_INCLUDE, sf::BINARY_FILTER, _binary_include });
 
-        if(!_source_include.empty() && _scopes.count(sf::SOURCE_FILTER) > 0)
+        if(!_source_include.empty() && _scopes.contains(sf::SOURCE_FILTER))
             _filters.emplace_back(
                 sf{ sf::FILTER_INCLUDE, sf::SOURCE_FILTER, _source_include });
 
-        if(!_function_include.empty() && _scopes.count(sf::FUNCTION_FILTER) > 0)
+        if(!_function_include.empty() && _scopes.contains(sf::FUNCTION_FILTER))
             _filters.emplace_back(
                 sf{ sf::FILTER_INCLUDE, sf::FUNCTION_FILTER, _function_include });
     }
@@ -223,15 +223,15 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
             _former_exclude = _current_exclude;
         }
 
-        if(!_binary_exclude.empty() && _scopes.count(sf::BINARY_FILTER) > 0)
+        if(!_binary_exclude.empty() && _scopes.contains(sf::BINARY_FILTER))
             _filters.emplace_back(
                 sf{ sf::FILTER_EXCLUDE, sf::BINARY_FILTER, _binary_exclude });
 
-        if(!_source_exclude.empty() && _scopes.count(sf::SOURCE_FILTER) > 0)
+        if(!_source_exclude.empty() && _scopes.contains(sf::SOURCE_FILTER))
             _filters.emplace_back(
                 sf{ sf::FILTER_EXCLUDE, sf::SOURCE_FILTER, _source_exclude });
 
-        if(!_function_exclude.empty() && _scopes.count(sf::FUNCTION_FILTER) > 0)
+        if(!_function_exclude.empty() && _scopes.contains(sf::FUNCTION_FILTER))
             _filters.emplace_back(
                 sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER, _function_exclude });
     }
@@ -414,7 +414,7 @@ save_line_info_impl(std::ostream&                           _ofs,
         {
             for(const auto& itr : _data.debug_info)
             {
-                if(_emitted_dwarf_addresses.count(itr.address.low) > 0) continue;
+                if(_emitted_dwarf_addresses.contains(itr.address.low)) continue;
                 _ofs << "    " << itr.address.as_hex() << " :: " << itr.file << ":"
                      << itr.line;
                 _ofs << "\n";

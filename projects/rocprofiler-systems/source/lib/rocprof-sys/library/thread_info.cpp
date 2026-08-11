@@ -219,7 +219,7 @@ thread_info::get()
 const std::optional<thread_info>&
 thread_info::get(native_handle_t& _tid)
 {
-    return get(native_handle_t{ _tid });
+    return get(_tid);
 }
 
 const std::optional<thread_info>&

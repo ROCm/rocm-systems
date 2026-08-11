@@ -806,7 +806,7 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
     bool found = false;
     for(const auto& sec : sections)
     {
-        if(target_headers.count(sec.header) > 0)
+        if(target_headers.contains(sec.header))
         {
             found = true;
             for(size_t line_idx = sec.start; line_idx < sec.end; ++line_idx)

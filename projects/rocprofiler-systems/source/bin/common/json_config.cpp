@@ -51,7 +51,7 @@ collect_enabled_entry_names(const nlohmann::json&             metrics_obj,
     std::vector<std::string> result;
     for(const auto& [name, metric] : metrics_obj.items())
     {
-        if(exclude.count(name) > 0) continue;
+        if(exclude.contains(name)) continue;
         if(metric.is_object() && metric.contains("enabled") &&
            metric["enabled"].get<bool>())
         {
@@ -506,8 +506,8 @@ expand_rocm_domain_shorthand(const std::string& shorthand)
         { "hipfile", "hipfile_api" },
     } };
 
-    auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
-                           [&](const entry& e) { return e.first == shorthand; });
+    const auto* it = std::find_if(shortcuts.begin(), shortcuts.end(),
+                                  [&](const entry& e) { return e.first == shorthand; });
     if(it != shortcuts.end()) return std::string{ it->second };
     return shorthand;
 }
@@ -557,8 +557,8 @@ expand_parallel_runtimes(const std::string& runtimes_str)
 
     for(const auto& token : split_csv_lowercase(runtimes_str))
     {
-        auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
-                               [&](const entry& e) { return e.first == token; });
+        const auto* it = std::find_if(shortcuts.begin(), shortcuts.end(),
+                                      [&](const entry& e) { return e.first == token; });
         if(it != shortcuts.end()) result[std::string{ it->second }] = "true";
     }
     return result;
@@ -580,8 +580,8 @@ expand_gpu_metrics(const std::string& metrics_str)
     std::string result;
     for(const auto& token : split_csv_lowercase(metrics_str))
     {
-        auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
-                               [&](const entry& e) { return e.first == token; });
+        const auto* it = std::find_if(shortcuts.begin(), shortcuts.end(),
+                                      [&](const entry& e) { return e.first == token; });
         if(!result.empty()) result += ',';
         result += (it != shortcuts.end()) ? std::string{ it->second } : token;
     }

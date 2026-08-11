@@ -20,7 +20,7 @@ struct fake_env
 
     static int setenv(const char* name, const char* value, int overwrite)
     {
-        if(!overwrite && store.count(name)) return 0;
+        if(!overwrite && store.contains(name)) return 0;
         store[name] = value;
         return 0;
     }

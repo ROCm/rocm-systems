@@ -10,6 +10,8 @@
 #include <dwarf.h>
 #include <elfutils/libdw.h>
 
+#include <algorithm>
+
 namespace rocprofsys
 {
 namespace binary
@@ -35,7 +37,7 @@ get_dwarf_address_ranges(Dwarf_Die* _die)
     {
         Dwarf_Addr _entry_pc;
         dwarf_entrypc(_die, &_entry_pc);
-        if(_entry_pc < _low_pc) _low_pc = _entry_pc;
+        _low_pc = std::min(_entry_pc, _low_pc);
     }
 
     if(_low_pc < _high_pc) _ranges.emplace_back(_low_pc, _high_pc);

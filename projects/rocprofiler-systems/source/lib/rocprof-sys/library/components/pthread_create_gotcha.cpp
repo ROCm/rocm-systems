@@ -418,7 +418,7 @@ pthread_create_gotcha::shutdown()
         for(auto itr : native_handles)
         {
             // skip sending signals to internal threads
-            if(internal_native_handles.count(itr) != 0) continue;
+            if(internal_native_handles.contains(itr)) continue;
 
             bool                         has_bundle = false;
             std::unique_lock<std::mutex> _bundle_lk{ *bundles_mutex };

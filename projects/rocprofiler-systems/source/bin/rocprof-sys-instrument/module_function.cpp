@@ -596,7 +596,7 @@ module_function::is_routine_constrained() const
     //    return _report("Excluding", "critical-printf", 3);
     //}
 
-    if(whole.count(function_name) > 0)
+    if(whole.contains(function_name))
     {
         return _report("Excluding", "critical-whole-match", 3);
     }

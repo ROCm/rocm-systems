@@ -59,9 +59,7 @@
 #if !(defined(arch_power) && defined(os_linux))
 void
 RTmutatedBinary_init(void)
-{
-    return;
-}
+{}
 #endif
 
 #if defined(__GNUC) || defined(__GNUC__)

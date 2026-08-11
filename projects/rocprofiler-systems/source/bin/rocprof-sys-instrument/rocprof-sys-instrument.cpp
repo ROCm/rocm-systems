@@ -1873,7 +1873,7 @@ main(int argc, char** argv)
         string_t best_init_name = {};
         for(const auto& sitr : init_stub_names)
         {
-            if(sitr.find(_name) != npos_v && used_stub_names.count(sitr) == 0)
+            if(sitr.find(_name) != npos_v && !used_stub_names.contains(sitr))
             {
                 verbprintf(
                     3, "Found possible match for '%s' instrumentation init: '%s'...\n",
@@ -1886,7 +1886,7 @@ main(int argc, char** argv)
         string_t base_fini_name = {};
         for(const auto& sitr : fini_stub_names)
         {
-            if(sitr.find(_name) != npos_v && used_stub_names.count(sitr) == 0)
+            if(sitr.find(_name) != npos_v && !used_stub_names.contains(sitr))
             {
                 verbprintf(
                     3, "Found possible match for '%s' instrumentation fini: '%s'...\n",
@@ -2241,7 +2241,7 @@ main(int argc, char** argv)
                            const std::string& _extra = {}) {
         static std::map<std::string, strset_t> already_reported{};
         auto _key = fmt::format("{}_{}_{}_{}_{}", _type, _action, _reason, _name, _extra);
-        if(already_reported[_key].count(_name) == 0)
+        if(!already_reported[_key].contains(_name))
         {
             verbprintf(_lvl, "[%s][%s] %s :: '%s'", _type.c_str(), _action.c_str(),
                        _reason.c_str(), _name.c_str());
@@ -2560,7 +2560,7 @@ main(int argc, char** argv)
             else if(app_thread->terminationStatus() == ExitedViaSignal)
             {
                 auto sign = app_thread->getExitSignal();
-                fprintf(stderr, "\nApplication exited with signal: %i\n", int(sign));
+                fprintf(stderr, "\nApplication exited with signal: %i\n", sign);
             }
             code = app_thread->getExitCode();
         };

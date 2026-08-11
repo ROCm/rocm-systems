@@ -152,7 +152,7 @@ TEST_F(RemoveEnvTest, RealWorld_LD_PRELOAD)
     remove_env(m_env_vars, "LD_PRELOAD", m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 2);
-    EXPECT_FALSE(find_env_var(m_env_vars, "LD_PRELOAD").length() > 0);
+    EXPECT_FALSE(!find_env_var(m_env_vars, "LD_PRELOAD").empty());
     EXPECT_EQ(find_env_var(m_env_vars, "LD_LIBRARY_PATH"), "LD_LIBRARY_PATH=/usr/lib");
     EXPECT_EQ(find_env_var(m_env_vars, "PATH"), "PATH=/usr/bin");
 }
