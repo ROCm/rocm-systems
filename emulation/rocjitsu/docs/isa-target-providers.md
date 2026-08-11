@@ -70,7 +70,7 @@ list:
 
 ```cmake
 rj_add_isa_target_registry(
-    errata_isa_registry
+    translation_isa_registry
     PROVIDERS rocjitsu_isa_gfx1250_model
 )
 ```
