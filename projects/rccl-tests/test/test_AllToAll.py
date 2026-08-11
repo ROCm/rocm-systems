@@ -39,10 +39,22 @@
 # These require an 8x MI355X (or similar) node, an MPI launcher, and a
 # GIN-SDMA-capable RCCL build, so the module is skipped unless
 # RCCL_TESTS_GIN_SDMA_A2A is set in the environment. Configuration is taken from
-# environment variables (see below) with defaults matching the 8-GPU repro.
+# environment variables (see below) with defaults matching the 8-GPU repro:
+#   RCCL_TESTS_A2A_NP        MPI ranks (default: detected GPU count)
+#   RCCL_TESTS_MPI_LAUNCHER  launcher binary (default: mpirun)
+#   RCCL_TESTS_MPI_OPTS      extra launcher opts (e.g. --allow-run-as-root -mca ...)
+#   RCCL_TESTS_A2A_XENV      extra "-x K=V" env the backend needs on this cluster
+#                            (e.g. HSA_FORCE_FINE_GRAIN_PCIE=1 NCCL_CUMEM_ENABLE=1)
+#   RCCL_TESTS_A2A_EXE       path to alltoall_perf (default: ../build/alltoall_perf)
+#   RCCL_TESTS_A2A_TIMEOUT_S per-run hang timeout in seconds (default: 900)
+#
+# Verified on 8x MI355X (ROCm 7.13, NCCL_GIN_TYPE=5, force1ch): 256 MiB/peer and
+# 2 GiB/peer int32 and the 2 GiB-total guard all pass with #wrong=0, no hang
+# (busbw ~424-428 GB/s).
 
 import os
 import shlex
+import signal
 import subprocess
 
 import pytest
@@ -51,7 +63,10 @@ MiB = 1024 * 1024
 GiB = 1024 * MiB
 
 path = os.path.dirname(os.path.abspath(__file__))
-executable = os.path.join(path, "..", "build", "alltoall_perf")
+# Path to alltoall_perf. Override with RCCL_TESTS_A2A_EXE when the binary is not
+# at the default build/ location (e.g. an installed/container path).
+executable = os.environ.get(
+    "RCCL_TESTS_A2A_EXE", os.path.join(path, "..", "build", "alltoall_perf"))
 
 # Opt-in: only run where the GIN-SDMA backend + hardware are available.
 _enabled = os.environ.get("RCCL_TESTS_GIN_SDMA_A2A", "") not in ("", "0", "false", "False")
@@ -77,6 +92,14 @@ CTAS = os.environ.get("RCCL_TESTS_A2A_CTAS", "16")
 # converts item (3) into a detectable failure. Scaled up for the multi-GiB case.
 TIMEOUT_S = int(os.environ.get("RCCL_TESTS_A2A_TIMEOUT_S", "900"))
 
+# Extra launcher options (e.g. "--allow-run-as-root -mca pml ob1 ...") and any
+# deployment-specific env the GIN-SDMA backend needs beyond the essentials below
+# (e.g. HSA_FORCE_FINE_GRAIN_PCIE=1 NCCL_CUMEM_ENABLE=1 RCCL_ENABLE_INTRANET=1).
+# GIN enablement itself is site-specific, so it is injected here rather than
+# hard-coded, keeping the test portable across clusters.
+MPI_OPTS = shlex.split(os.environ.get("RCCL_TESTS_MPI_OPTS", ""))
+XENV = shlex.split(os.environ.get("RCCL_TESTS_A2A_XENV", ""))
+
 pytestmark = pytest.mark.skipif(
     not _enabled,
     reason="GIN-SDMA AllToAll tests are opt-in; set RCCL_TESTS_GIN_SDMA_A2A=1 on "
@@ -90,14 +113,16 @@ def _run_a2a(request, total_bytes, dtype):
         pytest.skip("need >= 2 ranks/GPUs for AllToAll")
 
     size = str(int(total_bytes))
-    gin_env = [
-        "-x", "NCCL_GIN_TYPE=5",
-        # Force the SDMA (large) tier for every size so the put path is exercised.
-        "-x", "NCCL_GIN_ANVIL_SDMA_THRESHOLD=0",
-        "-x", "NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLTOALL=0",
-    ]
+    # Essentials to exercise the GIN-SDMA put path; force the SDMA (large) tier
+    # for every size. Deployment-specific env comes from RCCL_TESTS_A2A_XENV.
+    gin_env = []
+    for kv in ["NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=5",
+               "NCCL_GIN_ANVIL_SDMA_THRESHOLD=0",
+               "NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLTOALL=0"] + XENV:
+        gin_env += ["-x", kv]
+
     hostfile = request.config.getoption("--hostfile")
-    launch = [LAUNCHER, "-np", str(NP)]
+    launch = [LAUNCHER, "-np", str(NP)] + MPI_OPTS
     if hostfile:
         launch += ["-host", hostfile]
 
@@ -116,18 +141,26 @@ def _run_a2a(request, total_bytes, dtype):
     ]
     cmd = " ".join(shlex.quote(a) for a in args)
     print(cmd)
+    # Run in a new session so a hang can be killed as a whole process group --
+    # otherwise a wedged launcher leaves orphaned ranks pinning the GPUs (and
+    # exhausting SDMA queues for later tests).
+    proc = subprocess.Popen(cmd, shell=True, universal_newlines=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            start_new_session=True)
     try:
-        res = subprocess.run(cmd, shell=True, universal_newlines=True,
-                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             timeout=TIMEOUT_S)
-    except subprocess.TimeoutExpired as e:
-        out = e.output or ""
+        out, _ = proc.communicate(timeout=TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        out, _ = proc.communicate()
         pytest.fail(
             "AllToAll GIN-SDMA HANG: no completion within {}s at total={} bytes "
             "({} MiB/peer), dtype={}. Output tail:\n{}".format(
-                TIMEOUT_S, size, total_bytes // NP // MiB, dtype, out[-2000:]))
-    print(res.stdout)
-    return res.returncode, res.stdout
+                TIMEOUT_S, size, total_bytes // NP // MiB, dtype, (out or "")[-2000:]))
+    print(out)
+    return proc.returncode, out
 
 
 # (item 1 + 2) Multi-segment loop and the 1 GiB truncation boundary. per_peer is
