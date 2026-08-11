@@ -10,13 +10,11 @@
 #include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
-
-#include "util/log.h"
 
 #include <array>
 #include <cstring>
@@ -33,20 +31,10 @@ namespace {
 /// rules. Prefix-classified WMMA/SWMMAC and cluster-load instructions are
 /// handled separately by family-level translation rules.
 ///
-/// NOT-YET-SUPPORTED (classified as needing an expansion but with no semantic
-/// expander, so translating a kernel that uses them fails closed rather than
-/// passing the instruction through unchanged):
-///   * v_cvt_pk_fp8_f32, v_cvt_sr_fp8_f32 (only when CLAMP selects the B0-only
-///     mode; the ordinary form stays on the copy path),
-///   * v_wmma_scale / v_wmma_scale16 forms without an implemented rule,
-///   * integer IU4 and IU8 WMMA/SWMMAC forms without an implemented spacing
-///     rule.
 /// Separately, a 64-bit source reading FLAT_SCRATCH_BASE is classified via
 /// operand inspection (see gfx1250_reads_flat_scratch_base_64bit), and the
-/// barrier-state and sleep/monitor families are DEFERRED with a pass-through
-/// warning rather than fail-closed (see is_deferred_gfx1250_family).
-/// Classifying the fail-closed cases keeps the failure explicit and located; add
-/// the semantic rule (and update this note) once each expansion is implemented.
+/// barrier-state query and s_monitor_sleep are DEFERRED with a pass-through
+/// report rather than fail-closed (see gfx1250_b0_to_a0_is_deferred_family).
 inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemonics = {
     "ds_load_2addr_b32",
     "ds_load_2addr_b64",
@@ -96,8 +84,8 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
   // but not A0, so they require semantic expansion. The common f32 K=128 forms
   // use one neutral regular-Scale mixed-format operation. Source fields with no
   // meaning for these opcodes are discarded while constructing the target.
-  // The standalone 32x16 FP4 form splits into two scaled M=16 halves; the f16
-  // K=128 forms still fail closed in their semantic rule.
+  // The standalone 32x16 FP4 form splits into two scaled M=16 halves. Packed-f16
+  // K=128 forms lower through an f32 accumulator and pack the final result.
   const bool is_k128_fp8_bf8 = (mnemonic.starts_with("v_wmma_f16_16x16x128_") ||
                                 mnemonic.starts_with("v_wmma_f32_16x16x128_")) &&
                                (mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||
@@ -154,20 +142,6 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
   gfx1250::Vop3MachineInst encoding{};
   std::memcpy(&encoding, inst.raw_encoding(), sizeof(encoding));
   return encoding.clamp != 0;
-}
-
-/// @brief True for instruction families whose A0 handling is deferred pending
-/// confirmation of the exact translated set.
-/// @details The barrier-state query and the sleep/monitor families may need
-/// target-specific translation that is not yet implemented. Rather than fail closed
-/// (which would refuse otherwise-translatable kernels that use very common ops
-/// such as s_sleep), these are passed through unchanged for now and a warning is
-/// emitted so the omission is visible. Revisit once the precise set is
-/// confirmed; if translation is required, move the relevant members to
-/// requires_b0_to_a0_expansion() so they fail closed instead.
-[[nodiscard]] bool is_deferred_gfx1250_family(std::string_view mnemonic) {
-  return mnemonic == "s_get_barrier_state" || mnemonic == "s_sleep" || mnemonic == "s_sleep_var" ||
-         mnemonic == "s_monitor_sleep";
 }
 
 [[nodiscard]] bool is_wmma_completion_wait(const Instruction &inst) {
@@ -255,6 +229,16 @@ void gfx1250_b0_to_a0_append_wmma_completion_wait_if_needed(
   words.push_back(gfx1250::build_sopp(gfx1250::kSWaitAluSopp, {.simm16 = kWaitVaVdstZero})[0]);
 }
 
+bool gfx1250_b0_to_a0_is_deferred_family(std::string_view mnemonic) {
+  // s_sleep and s_sleep_var are deliberately absent. They behave identically on
+  // A0 and B0: the only sleep-family A0 erratum is DEGFXMI400-12268, which is
+  // specific to s_monitor_sleep('forever') with MWAIT=0. Copying a plain sleep
+  // through is the correct translation, not an unimplemented one, so reporting
+  // it said nothing and buried the reports that do name a real gap -- one RCCL
+  // all_reduce run emitted 104,831 of them.
+  return mnemonic == "s_get_barrier_state" || mnemonic == "s_monitor_sleep";
+}
+
 const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &inst) {
   // CLAMP=0 is the common E4M3 operation on both steppings. CLAMP=1 selects
   // the B0-only E5M3 behavior and therefore requires a semantic expansion.
@@ -266,13 +250,11 @@ const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &
 
   // Reading FLAT_SCRATCH_BASE through a 64-bit source position is a property of
   // the operand rather than the mnemonic, so it is classified separately.
+  // Deferred families reach here and stay on the copy path. Reporting that
+  // omission is the translation loop's job: see
+  // gfx1250_b0_to_a0_is_deferred_family.
   if (!requires_b0_to_a0_expansion(inst.mnemonic()) &&
       !gfx1250_reads_flat_scratch_base_64bit(inst)) {
-    // Deferred families pass through unchanged but warn, so the not-yet-handled
-    // case is visible rather than silent. See is_deferred_gfx1250_family.
-    if (is_deferred_gfx1250_family(mnemonic))
-      util::Logger::warn("gfx1250 translation passes through '", mnemonic,
-                         "' unchanged; target-specific handling is not yet implemented");
     return nullptr;
   }
 

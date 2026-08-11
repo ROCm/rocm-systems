@@ -20,9 +20,9 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/except.h"
 
-#include "rocjitsu/isa/arch/amdgpu/cdna4/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/test_encodings.h"
 
 #include <gtest/gtest.h>
 

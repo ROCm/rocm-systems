@@ -6,20 +6,20 @@
 #include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/dbt/binary_translator_internal.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/mubuf.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vbuffer.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vbuffer.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/mubuf.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -3018,6 +3018,38 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDestinationBank) {
       << "the low-bank alias must not be treated as the read register";
 }
 
+TEST(LivenessAnalysis, Gfx1250D16LoadImplicitUseResolvesDestinationBank) {
+  // A gfx1250 D16 load's destination preserve-read must resolve through the Dst
+  // VGPR-MSB bank via implicit_use_operands(); implicit_uses() VGPRs are dropped
+  // there. DST bank 2 (0x80), vdst v1 -> physical v513 must be live before it.
+  constexpr auto set_dst_bank_two =
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x80});
+  constexpr auto load = gfx1250::build_vflat(gfx1250::kFlatLoadD16U8Vflat, {.vdst = 1});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({set_dst_bank_two[0], load[0], load[1], load[2], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), nullptr, options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  ASSERT_EQ(std::string_view((*instruction).mnemonic()), "flat_load_d16_u8");
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}))
+      << "D16 load preserve-read must resolve to the DST bank";
+  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}))
+      << "the low-bank alias must not be treated as the read register";
+}
+
 TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDespiteExplicitBank0Alias) {
   // Aliasing case: v_mov_b16 v1, v1 reads v1 as an explicit SRC0 (bank 0) and
   // also preserve-reads its destination v1 in DST bank 2 (physical v513). A
@@ -4683,9 +4715,14 @@ constexpr uint32_t kVop3CmpLtF32Op = 17u << 16; // v_cmp_lt_f32_e64 (SGPR vdst)
 // word1: src0=SRC_DPP, src1=VGPR3.
 constexpr uint32_t kVop3DppWord1 = (3u << 9) | 250u;
 
-std::unique_ptr<Instruction> decode_rdna4(const std::array<uint32_t, 3> &words) {
+// VOP3 DPP16 is 3 dwords and a FLAT (D16) load can decode as a 3-dword
+// instruction, so the buffer is zero-padded to avoid out-of-bounds reads during
+// decode when a caller supplies fewer words than the decoded length.
+std::unique_ptr<Instruction> decode_rdna4(std::initializer_list<uint32_t> words) {
+  std::array<uint32_t, 4> buf{};
+  std::copy(words.begin(), words.end(), buf.begin());
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
-  return std::unique_ptr<Instruction>(decoder ? decoder->decode(words.data()) : nullptr);
+  return std::unique_ptr<Instruction>(decoder ? decoder->decode(buf.data()) : nullptr);
 }
 
 TEST(GeneratedInstDefUse, Vop3DppPartialRowMaskReadsVgprDestination) {
@@ -4790,6 +4827,28 @@ TEST(GeneratedInstDefUse, WritelaneReadsDestinationCdna4) {
   EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
+// --- D16 memory loads: sub-dword loads preserve half of vdst (real decode) ---
+//
+// A D16(_HI) load writes one 16-bit half of the destination VGPR and preserves
+// the other, so it reads the old vdst -- a read-modify-write. The generator
+// emits an implicit_uses override for these (see _d16_load_reads_dst), so the
+// decoded instruction reports vdst in both defs and uses while keeping it out
+// of the printed operand list. A regular (non-D16) load fully overwrites vdst
+// and must not report it as a use.
+//
+// Encodings are the canonical forms from rdna4/test_encodings.h with word1's
+// low byte set to vdst=5 (FLAT VDST is word1[7:0]); vaddr stays v0 (word2=0),
+// so v5 is distinct from the address source.
+TEST(GeneratedInstDefUse, D16HiLoadReadsDestination) {
+  auto inst = decode_rdna4({0xEC084000U, 0x00000005U}); // flat_load_d16_hi_u8, vdst=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "flat_load_d16_hi_u8");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
 TEST(GeneratedInstDefUse, WritelaneReadsDestinationGfx1250) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
@@ -4801,6 +4860,168 @@ TEST(GeneratedInstDefUse, WritelaneReadsDestinationGfx1250) {
   InstDefUse idu(*inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
   EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, D16LoLoadReadsDestination) {
+  auto inst = decode_rdna4({0xEC078000U, 0x00000005U}); // flat_load_d16_u8, vdst=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "flat_load_d16_u8");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, RegularLoadDoesNotReadDestination) {
+  auto inst = decode_rdna4({0xEC050000U, 0x00000005U}); // flat_load_b32, vdst=5 (full write)
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "flat_load_b32");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+// The remaining non-FLAT D16 load classes exercise the other paths of
+// _d16_load_reads_dst. MUBUF (buffer) names the destination 'vdata' at
+// word1[7:0]; DS names it 'vdst' at word1[31:24]. vaddr/addr stay 0 (v0), so v5
+// is distinct from the address source.
+
+TEST(GeneratedInstDefUse, D16BufferLoadReadsDestination) {
+  auto inst = decode_rdna4({0xC4078000U, 0x00000005U}); // buffer_load_d16_u8, vdata=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "buffer_load_d16_u8");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+// Odd-count FORMAT D16 load: xyz packs 3 halfwords into two VGPRs. The first
+// (v5) is fully written (x|y); only the last (v6) holds one 16-bit half (z) and
+// preserves its upper 16 bits, so only v6 is read.
+TEST(GeneratedInstDefUse, D16FormatXyzLoadReadsOnlyLastDestination) {
+  auto inst = decode_rdna4({0xC4028000U, 0x00000005U}); // buffer_load_d16_format_xyz, vdata=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "buffer_load_d16_format_xyz");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 2}));  // writes v5:v6
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 6, 1}));  // last reg partial
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1})); // first reg fully written
+}
+
+// Even-count FORMAT D16 load: xyzw fills two whole VGPRs and preserves nothing.
+TEST(GeneratedInstDefUse, D16FormatXyzwLoadDoesNotReadDestination) {
+  auto inst = decode_rdna4({0xC402C000U, 0x00000005U}); // buffer_load_d16_format_xyzw, vdata=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "buffer_load_d16_format_xyzw");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 2}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 2}));
+  // contains() over a range requires every lane, so assert each register
+  // individually to catch a regression that reads only v5 or only v6.
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 6, 1}));
+}
+
+TEST(GeneratedInstDefUse, D16DsLoadReadsDestination) {
+  auto inst = decode_rdna4({0xDA880000U, 0x05000000U}); // ds_load_u8_d16, vdst=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "ds_load_u8_d16");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+// tbuffer (MTBUF) is a separate encoding only on ISAs before the unified
+// VBUFFER (RDNA4 folds MUBUF/MTBUF into VBUFFER and routes typed-buffer ops
+// through the untyped path, leaving them unclassified). Exercise the
+// 'tbuffer_load' path on CDNA3, where MTBUF is distinct and its 4-bit opcode
+// distinguishes the D16 variant (RDNA2's 3-bit opcode cannot, aliasing D16 back
+// to the non-D16 form). Its dest 'vdata' is at word1[8:15]; vaddr at word1[7:0]
+// stays 0 (v0).
+std::unique_ptr<Instruction> decode_cdna3(std::initializer_list<uint32_t> words) {
+  std::array<uint32_t, 4> buf{};
+  std::copy(words.begin(), words.end(), buf.begin());
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  return std::unique_ptr<Instruction>(decoder ? decoder->decode(buf.data()) : nullptr);
+}
+
+TEST(GeneratedInstDefUse, D16TbufferLoadReadsDestination) {
+  auto inst = decode_cdna3({0xE8040000U, 0x00000500U}); // tbuffer_load_format_d16_x, vdata=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "tbuffer_load_format_d16_x");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+// Negative case: D16 stores share the d16 flags but are not in
+// _D16_LOAD_CLASSES, so no implicit_uses override is emitted. The data operand
+// (FLAT 'vsrc' at word1[23:30], set to v5 = 5 << 23) is a plain source: it must
+// be a use, never a def. vaddr at word2[7:0] stays v0.
+TEST(GeneratedInstDefUse, D16StoreDoesNotDefineData) {
+  auto inst = decode_rdna4({0xEC094000U, 0x02800000U}); // flat_store_d16_hi_b16, vsrc=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "flat_store_d16_hi_b16");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_FALSE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+}
+
+// RDNA4 folds typed buffers into ENC_VBUFFER, routed through the untyped
+// derivation. That path now recognizes TBUFFER_* as well, so a typed D16
+// FORMAT_X load (op 136) reports its preserved destination like its untyped and
+// pre-RDNA4 MTBUF counterparts. Before the fix it decoded as an unclassified nop
+// with no implicit_uses override. VDATA is word1[0:7] (=5).
+TEST(GeneratedInstDefUse, D16TypedFormatLoadUnderVbufferReadsDestination) {
+  auto inst = decode_rdna4({0xC4220000U, 0x00000005U}); // tbuffer_load_d16_format_x, vdata=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "tbuffer_load_d16_format_x");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+// Odd-count typed FORMAT under VBUFFER: xyz packs 3 halfwords into two VGPRs,
+// so only the final register's (v6) upper half is preserved. Mirrors the
+// untyped xyz case but through the typed path. VDATA is word1[0:7] (=5).
+TEST(GeneratedInstDefUse, D16TypedFormatXyzLoadUnderVbufferReadsOnlyLastDestination) {
+  auto inst = decode_rdna4({0xC4228000U, 0x00000005U}); // tbuffer_load_d16_format_xyz, vdata=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "tbuffer_load_d16_format_xyz");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 2}));  // writes v5:v6
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 6, 1}));  // last reg partial
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1})); // first reg fully written
+}
+
+// On older MUBUF encodings the LDS bit (word0 bit 16) redirects the loaded data
+// to LDS, leaving no VGPR destination -- so the preserved-destination read must
+// be suppressed there, or liveness invents a false live range. Same opcode
+// (buffer_load_short_d16, MUBUF op 36 on CDNA3), toggling only LDS. VDATA is
+// word1[8:15] (=5).
+TEST(GeneratedInstDefUse, D16BufferLoadLdsBitSuppressesDestinationRead) {
+  auto normal = decode_cdna3({0xE0900000U, 0x00000500U}); // buffer_load_short_d16, vdata=5, lds=0
+  ASSERT_NE(normal, nullptr);
+  ASSERT_EQ(std::string_view(normal->mnemonic()), "buffer_load_short_d16");
+  InstDefUse normal_idu(*normal);
+  EXPECT_TRUE(normal_idu.uses.contains({RegClass::VGPR, 5, 1}))
+      << "LDS clear: the preserved half of vdata is a read";
+
+  auto lds = decode_cdna3({0xE0910000U, 0x00000500U}); // ...same, lds=1 (bit 16 set)
+  ASSERT_NE(lds, nullptr);
+  ASSERT_EQ(std::string_view(lds->mnemonic()), "buffer_load_short_d16");
+  InstDefUse lds_idu(*lds);
+  EXPECT_FALSE(lds_idu.uses.contains({RegClass::VGPR, 5, 1}))
+      << "LDS set: data goes to LDS, so vdata is not a preserved read";
 }
 
 } // namespace

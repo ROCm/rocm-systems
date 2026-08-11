@@ -3,7 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/code/kernel_symbol.h"
-#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 
@@ -38,20 +38,11 @@ namespace rocjitsu {
 namespace amdgpu {
 
 void CommandProcessor::configure_for_arch(rj_code_arch_t arch) {
-  // Matches llvm/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.cpp
-  // AMDGPUBaseInfo::getVGPREncodingGranule(): gfx1250 has
-  // Feature1024AddressableVGPRs, so Wave32 descriptors encode VGPR counts in
-  // 16-register blocks; other RDNA Wave32 targets use 8. LLVM's
-  // AMDGPULowerVGPREncoding.cpp handles the separate gfx1250 s_set_vgpr_msb
-  // high-bank indexing needed to access VGPRs above v255.
-  vgpr_granularity_ = 4;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
-    vgpr_granularity_ = 16;
-  else if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-           arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-           arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-           arch == ROCJITSU_CODE_ARCH_RDNA4)
-    vgpr_granularity_ = 8;
+  if (const auto granularity =
+          descriptor_vgpr_count_granule_for_wavefront(arch, isa_properties(arch).wave_size))
+    vgpr_granularity_ = *granularity;
+  // Unsupported non-AMDGPU architectures retain the constructor default; this
+  // command processor is not used to execute those ISAs.
 
   // Matches LLVM's FeaturePackedTID: gfx90a and later CDNA targets, plus
   // GFX11 and later RDNA targets, receive work-item IDs packed in v0.

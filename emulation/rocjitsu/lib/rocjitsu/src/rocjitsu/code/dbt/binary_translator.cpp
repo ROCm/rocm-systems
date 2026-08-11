@@ -9,6 +9,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/binary_translator_internal.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_cdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna3.h"
@@ -25,13 +26,12 @@
 #include "rocjitsu/code/dbt/semantic_translator.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/code/relocation_function_table.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -1303,6 +1303,10 @@ void BinaryTranslator::set_trace_callback(TranslationTraceCallback callback) {
 TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   TranslatedCodeObject result;
   result.host_arch = host_arch_;
+
+  // Deferred-family warnings are suppressed per translation, not per translator
+  // instance, so a reused translator still reports each code object's gaps.
+  reported_deferred_families_.clear();
 
   auto leave_unchanged = [&]() {
     const auto *image = reinterpret_cast<const uint8_t *>(obj.image_data());
@@ -2795,6 +2799,22 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         }
 
         const InstructionLegalization *leg = lookup_legalization(inst);
+
+        // A deferred gfx1250 family has no A0 handling yet and stays on the copy
+        // path, so the omission is reported rather than left silent. The report
+        // describes the mnemonic, not the site, so one per mnemonic per
+        // translation says everything a second copy would: an earlier RCCL
+        // all_reduce run emitted 104,831 identical lines, burying the
+        // diagnostics that do name a specific instruction. The record is
+        // per-translation, so each code object still reports its own gaps.
+        if (leg == nullptr && is_gfx1250_b0_to_a0() &&
+            gfx1250_b0_to_a0_is_deferred_family(inst.mnemonic()) &&
+            reported_deferred_families_.emplace(inst.mnemonic()).second) {
+          append_warning(result.diagnostics, DiagnosticKind::Legalization,
+                         "gfx1250 translation passes through '" + std::string(inst.mnemonic()) +
+                             "' unchanged; target-specific handling is not yet implemented",
+                         offset, std::string(inst.mnemonic()));
+        }
 
         const uint16_t dst_opcode = leg ? leg->target_opcode : inst.opcode();
 
