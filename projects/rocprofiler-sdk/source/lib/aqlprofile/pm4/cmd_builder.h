@@ -113,8 +113,15 @@ public:
         static_assert(std::is_trivially_copyable_v<std::remove_reference_t<T>>,
                       "Append serialises the packet with memcpy");
 
+        // A pointer here means an Append(ptr, count) bound to the variadic overload, which
+        // happens when count is not exactly uint32_t, splicing the pointer into the stream.
+        // TODO(mkuriche): SFINAE-constrain the overloads so such a call selects
+        // Append(uint32_t*, uint32_t) rather than failing to compile.
+        static_assert(!std::is_pointer_v<std::remove_reference_t<T>>,
+                      "a pointer is not packet data; use Append(uint32_t*, uint32_t)");
+
         size_t         pos        = data_.size();
-        constexpr auto num_dwords = uint32_t{sizeof(T) / sizeof(uint32_t)};
+        constexpr auto num_dwords = uint32_t{sizeof(packet) / sizeof(uint32_t)};
         CheckPredExec(pos, num_dwords);
         data_.resize(pos + num_dwords);
         memcpy(&data_[pos], &packet, sizeof(T));
