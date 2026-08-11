@@ -55,19 +55,12 @@ rcclTestsGetSymkInfo_t rcclTestsGetSymkInfo = NULL;
 rcclTestsGetCollImplInfo_t rcclTestsGetCollImplInfo = NULL;
 
 static void loadRcclSyms() {
-  static void* handle = NULL;
-  const char* libname = "librccl.so";
-  if (!handle) {
-    handle = dlopen(libname, RTLD_LAZY | RTLD_LOCAL);
-      if (!handle) {
-        fprintf(stderr, "dlopen failed: %s\n", dlerror());
-        return;
-      }
-  }
-  rcclTestsGetAlgoInfo      = (rcclTestsGetAlgoInfo_t)     dlsym(handle, "rcclGetAlgoInfo");
-  rcclTestsGetAlgoName      = (rcclTestsGetAlgoName_t)     dlsym(handle, "rcclGetAlgoName");
-  rcclTestsGetProtocolName  = (rcclTestsGetProtocolName_t) dlsym(handle, "rcclGetProtocolName");
-  rcclTestsGetSymkInfo      = (rcclTestsGetSymkInfo_t)     dlsym(handle, "rcclSymKGetInfo");
+  // Resolve optional RCCL symbols from the already-loaded librccl.so.1 (via DT_NEEDED).
+  // Avoid dlopen("librccl.so") which can double-load in build trees with non-symlinked libs.
+  rcclTestsGetAlgoInfo      = (rcclTestsGetAlgoInfo_t)     dlsym(RTLD_DEFAULT, "rcclGetAlgoInfo");
+  rcclTestsGetAlgoName      = (rcclTestsGetAlgoName_t)     dlsym(RTLD_DEFAULT, "rcclGetAlgoName");
+  rcclTestsGetProtocolName  = (rcclTestsGetProtocolName_t) dlsym(RTLD_DEFAULT, "rcclGetProtocolName");
+  rcclTestsGetSymkInfo      = (rcclTestsGetSymkInfo_t)     dlsym(RTLD_DEFAULT, "rcclSymKGetInfo");
   // Optional (newer librccl). Left NULL on older libs -> reporting falls back.
   rcclTestsGetCollImplInfo  = (rcclTestsGetCollImplInfo_t) dlsym(handle, "rcclGetCollImplInfo");
 }

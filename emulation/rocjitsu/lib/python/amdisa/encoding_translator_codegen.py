@@ -35,6 +35,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from amdisa.codegen.config import CodegenConfig
+
 
 def _clang_format(path: Path) -> None:
     """Run clang-format -i on path. Silent no-op if clang-format isn't on PATH.
@@ -859,7 +861,15 @@ def _extract_enc_field_values(spec, enc_names):
 # ---------------------------------------------------------------------------
 
 
-def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output_dir):
+def generate_encoding_translators(
+    src_spec,
+    dst_spec,
+    src_name,
+    dst_name,
+    output_dir,
+    config: CodegenConfig | None = None,
+):
+    config = config if config is not None else CodegenConfig()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -938,9 +948,9 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
         '#include <cstdint>',
         '#include <cstring>',
         '',
-        f'#include "rocjitsu/isa/arch/amdgpu/{src_name}/machine_insts.h"',
-        f'#include "rocjitsu/isa/arch/amdgpu/{dst_name}/builders.h"',
-        f'#include "rocjitsu/isa/arch/amdgpu/{dst_name}/machine_insts.h"',
+        f'#include "{config.generated_include(src_name, "machine_insts.h")}"',
+        f'#include "{config.generated_include(dst_name, "builders.h")}"',
+        f'#include "{config.generated_include(dst_name, "machine_insts.h")}"',
         '#include "rocjitsu/code/dbt/encoding_translator.h"',
         '#include "encoding_fields.h"',
         '',

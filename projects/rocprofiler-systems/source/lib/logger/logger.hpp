@@ -13,6 +13,7 @@
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <ctime>
 #include <mutex>
 #include <pthread.h>
 #include <string>
@@ -248,6 +249,12 @@ private:
 
     static std::shared_ptr<spdlog::logger> create_logger(std::atomic<bool>& log_lock)
     {
+        // Prime glibc's timezone cache once, up front. The spdlog pattern formats
+        // %H:%M:%S per message via localtime_r; without this the first log call on
+        // an arbitrary thread pays the lazy tzset() cost, and hot paths such as the
+        // process sampler repeatedly reach into the non-thread-safe TZ/environ path.
+        ::tzset();
+
         logger_settings_t logger_settings;
 
         std::vector<spdlog::sink_ptr> sinks;
