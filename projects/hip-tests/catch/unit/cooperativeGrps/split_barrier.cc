@@ -172,6 +172,7 @@ HIP_TEST_CASE(Unit_coop_thread_block_split_barrier_Multiple) {
     INFO("phases: " << phases);
     wg_split_barrier_multi<<<1, size, sizeof(float) * size>>>(d_out, d_in,
                                                               phases);
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size,
                         hipMemcpyDeviceToHost));
     HIP_CHECK(hipFree(d_out));
@@ -231,7 +232,9 @@ HIP_TEST_CASE(Unit_coop_thread_block_split_barrier_EquivalentToSync) {
                         hipMemcpyHostToDevice));
 
     wg_sync_kernel<<<1, size, sizeof(int) * size>>>(d_a, d_in, rounds);
+    HIP_CHECK(hipGetLastError());
     wg_split_kernel<<<1, size, sizeof(int) * size>>>(d_b, d_in, rounds);
+    HIP_CHECK(hipGetLastError());
 
     HIP_CHECK(hipMemcpy(a.data(), d_a, sizeof(int) * size,
                         hipMemcpyDeviceToHost));
@@ -302,6 +305,7 @@ HIP_TEST_CASE(Unit_coop_thread_block_split_barrier_ProducerConsumer) {
 
   wg_split_barrier_producer_consumer<<<1, size, sizeof(int) * size>>>(d_out,
                                                                       d_in);
+  HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(int) * size,
                       hipMemcpyDeviceToHost));
   HIP_CHECK(hipFree(d_out));
@@ -377,10 +381,15 @@ HIP_TEST_CASE(Unit_coop_grids_split_barrier_Multiple) {
 }
 
 // Returns 1 when the hardware s_barrier_signal path is compiled in for this
-// arch, 0 for the s_barrier fallback, -1 on a non-AMD compile.
+// arch, 0 for the s_barrier fallback or when the toolchain has no
+// s_barrier_signal builtin, -1 on a non-AMD compile.
 static __device__ int split_barrier_hw_path() {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__HIP_PLATFORM_AMD__)
+#if __has_builtin(__builtin_amdgcn_s_barrier_signal)
   return __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal) ? 1 : 0;
+#else
+  return 0;
+#endif
 #else
   return -1;
 #endif
