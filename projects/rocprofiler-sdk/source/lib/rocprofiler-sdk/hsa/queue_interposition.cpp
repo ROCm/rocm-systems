@@ -1385,15 +1385,6 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 {
     if(!state) return;
 
-    // Mark this producer as potentially about to register a completion. The monitor
-    // will not exit (abandoning the inbox) while any producer is in this window, so a
-    // register_completion at the tail of this function can never land after the monitor
-    // thread has gone. Decremented on every exit path.
-    auto& mon = get_completion_monitor();
-    mon.registering.fetch_add(1, std::memory_order_acq_rel);
-    auto _registering_dtor = common::scope_destructor{
-        [&mon]() { mon.registering.fetch_sub(1, std::memory_order_acq_rel); }};
-
     auto* state_ptr            = state.get();
     auto  deferred_completions = pending_completion_vector_t{};
 
@@ -1685,6 +1676,15 @@ ROCP_QUEUE_LOAD_WRITE_INDEX(scacquire, std::memory_order_acquire)
 #define ROCP_SIGNAL_STORE(NAME)                                                                    \
     void signal_##NAME(hsa_signal_t sig, hsa_signal_value_t val)                                   \
     {                                                                                              \
+        /* Count this caller in `registering` BEFORE reading the bypass gate, so shutdown */       \
+        /* cannot observe quiescence while an admitted producer is still on its way to */          \
+        /* register_completion. seq_cst store-load handshake vs finalization: the fetch_add */     \
+        /* (a full barrier) is ordered before the gate's fini_status load; stop pairs it with a */ \
+        /* fence + seq_cst load of registering. */                                                 \
+        get_completion_monitor().registering.fetch_add(1, std::memory_order_seq_cst);              \
+        auto _admission = common::scope_destructor{[]() {                                          \
+            get_completion_monitor().registering.fetch_sub(1, std::memory_order_release);          \
+        }};                                                                                        \
         if(should_bypass_inline_intercept())                                                       \
         {                                                                                          \
             get_next_table()->hsa_signal_##NAME##_fn(sig, val);                                    \
@@ -1784,14 +1784,16 @@ stop_completion_monitor()
     get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
     if(mon.thread.joinable()) mon.thread.join();
 
-    // A producer may still be between the bypass gate and its register_completion when
-    // the monitor exits (the gate reads fini_status; registering++ happens a few
-    // instructions later). Producers are gated off from starting new work by
-    // fini_status, and this window is bounded non-blocking CPU work, so wait for the
-    // last of them to finish before sweeping. Then process any entry they stranded so
-    // signals / correlation-id refs are released rather than leaked.
+    // Wait for any producer admitted before finalization to finish. Each admits itself
+    // (registering++) before reading the bypass gate, so once finalization's
+    // set_fini_status is visible, no new producer can be admitted and this count only
+    // falls. The seq_cst fence completes the store-load handshake with the producer's
+    // admission (its registering++ then fini_status load) so we cannot read
+    // registering==0 while an admitted producer still exists. Then process any entry a
+    // straggler stranded so signals / correlation-id refs are released rather than leaked.
+    std::atomic_thread_fence(std::memory_order_seq_cst);
     constexpr auto drain_interval = std::chrono::microseconds{100};
-    while(mon.registering.load(std::memory_order_acquire) > 0)
+    while(mon.registering.load(std::memory_order_seq_cst) > 0)
         std::this_thread::sleep_for(drain_interval);
 
     drain_incoming(mon);
