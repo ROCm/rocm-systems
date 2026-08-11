@@ -74,6 +74,8 @@
 #include <utility>
 #include <vector>
 
+#include <link.h>
+
 namespace fs = std::filesystem;
 
 #define HIP_CHECK(call)                                                       \
@@ -85,6 +87,44 @@ namespace fs = std::filesystem;
       return 1;                                                                \
     }                                                                         \
   } while (0)
+
+// The ROCm libraries whose identity decides whether replay is running against
+// the stack hrr-playback was built for. Printing them is not decoration: they
+// are chosen by the dynamic loader from LD_LIBRARY_PATH, RPATH and whatever
+// ROCm the host happens to have in /opt, and a mismatched one does not
+// announce itself. A ROCm 7.0 libamd_comgr loaded under a 7.13 runtime, for
+// instance, corrupts the runtime while loading code objects: the first symptom
+// is an unrelated HIP call failing with "invalid argument", and the second is a
+// segfault with nothing in the log to connect either to the real cause.
+static const char* const kRocmLibs[] = {
+    "libamdhip64.so", "libhsa-runtime64.so", "libamd_comgr.so"};
+
+static int collect_rocm_lib(struct dl_phdr_info* info, size_t, void* out) {
+  auto* found = static_cast<std::vector<std::string>*>(out);
+  if (!info->dlpi_name || !*info->dlpi_name) return 0;  // the executable itself
+  for (const char* want : kRocmLibs) {
+    if (std::strstr(info->dlpi_name, want)) {
+      found->emplace_back(info->dlpi_name);
+      break;
+    }
+  }
+  return 0;
+}
+
+// Report the ROCm libraries actually mapped, resolved through any symlink so
+// the version-suffixed real file is what gets named.
+static void print_loaded_rocm_libs() {
+  std::vector<std::string> found;
+  dl_iterate_phdr(collect_rocm_lib, &found);
+  std::sort(found.begin(), found.end());
+  const char* label = "Runtime ";
+  for (const auto& lib : found) {
+    std::error_code ec;
+    fs::path real = fs::canonical(lib, ec);
+    printf("[HRR] %s: %s\n", label, (ec ? fs::path(lib) : real).c_str());
+    label = "        ";
+  }
+}
 
 static bool env_flag_enabled(const char* name) {
   const char* v = std::getenv(name);
@@ -1282,6 +1322,7 @@ int main(int argc, char** argv) {
   hipDeviceProp_t props{};
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
   printf("[HRR] Device  : %s (%s)\n", props.name, props.gcnArchName);
+  print_loaded_rocm_libs();
 
   // Partition events by thread_id — O(n), no re-scan needed at replay time
   std::unordered_map<uint64_t, std::vector<const hrr::Event*>> thread_events;
