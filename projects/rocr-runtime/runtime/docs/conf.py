@@ -26,6 +26,13 @@ release = version_number
 external_toc_path = "./sphinx/_toc.yml"
 
 external_projects_current_project = "rocr-runtime"
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-systems",
+    "use_repository_button": True,
+    "use_issues_button": True,
+}
 
 docs_core = ROCmDocs(left_nav_title)
 docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
