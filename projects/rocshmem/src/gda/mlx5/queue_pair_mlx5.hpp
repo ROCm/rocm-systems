@@ -238,7 +238,7 @@ template <QueuePairMLX5::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_amo(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     const ActiveWFInfo& wf_info, PostOpt<Options...>) {
-  static_assert(Fetch != AMOFetchType::NonBlocking);
+  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   using PostOptions = PostOpt<Options...>;
   if (wf_info.is_pe_group_last) {
     // acquire SQ lock and poll until we have enough WQEBB for all lanes using this QP
@@ -289,7 +289,7 @@ __device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_
 template <QueuePairMLX5::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_amo_single(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
-  static_assert(Fetch != AMOFetchType::NonBlocking);
+  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   using PostOptions = PostOpt<Options...>;
   // acquire SQ lock and poll until we have enough space for at least one WQEBB
   lock_pollcq<PostOptions>(1);

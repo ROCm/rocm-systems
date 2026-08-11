@@ -266,7 +266,7 @@ __device__ __noinline__ void QueuePairBNXT::post_wqe_rma_single(
 template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, bool CheckSQ>
 __device__ uint64_t* QueuePairBNXT::write_amo_wqe(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, bool signaled) {
-  static_assert(Fetch != AMOFetchType::NonBlocking);
+  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   static constexpr size_t size = sizeof(uint64_t);
 
   struct bnxt_re_bsqe hdr;
@@ -331,7 +331,7 @@ template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     const ActiveWFInfo& wf_info, PostOpt<Options...>) {
-  static_assert(Fetch != AMOFetchType::NonBlocking);
+  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   using PostOptions = PostOpt<Options...>;
   uint64_t* atomic_laddr = nullptr;
 
@@ -377,7 +377,7 @@ __device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_
 template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo_single(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
-  static_assert(Fetch != AMOFetchType::NonBlocking);
+  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   using PostOptions = PostOpt<Options...>;
   uint64_t* atomic_laddr = nullptr;
 

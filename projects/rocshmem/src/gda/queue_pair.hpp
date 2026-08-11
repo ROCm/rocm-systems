@@ -671,7 +671,7 @@ public:
         dest, dest_rkey, value, 0, post_options);
   }
 
-#if 0
+#if 0 // NON-BLOCKING AMOs NOT YET IMPLEMENTED
   /**
    * @brief Create and enqueue a non-blocking atomic fetch-and-add work queue entry (WQE).
    *
@@ -765,7 +765,7 @@ public:
         dest, dest_rkey, value, cond, post_options);
   }
 
-#if 0
+#if 0 // NON-BLOCKING AMOs NOT YET IMPLEMENTED
   /**
    * @brief Create and enqueue a non-blocking atomic compare-and-swap work queue entry (WQE).
    *
@@ -957,7 +957,7 @@ public:
   __device__ uint64_t atomic_fetch_add_single(void *dest, uint64_t value,
                                               PostOpt<PostOptions...> = {});
 
-#if 0
+#if 0 // NON-BLOCKING AMOs NOT YET IMPLEMENTED
   /**
    * @brief Create and enqueue a non-blocking atomic fetch-and-add work queue entry (WQE).
    *
@@ -1022,7 +1022,7 @@ public:
   __device__ uint64_t atomic_compare_swap_single(void *dest, uint64_t cond, uint64_t value,
                                                  PostOpt<PostOptions...> = {});
 
-#if 0
+#if 0 // NON-BLOCKING AMOs NOT YET IMPLEMENTED
   /**
    * @brief Create and enqueue a non-blocking atomic compare-and-swap work queue entry (WQE).
    *
@@ -1157,7 +1157,7 @@ __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add_single(
   return provider().atomic_fetch_add_single(d_raddr, d_rkey, value, post_options);
 }
 
-#if 0
+#if 0 // NON-BLOCKING AMOs NOT YET IMPLEMENTED
 template <typename Provider>
 template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_fetch_add_nbi(
@@ -1215,7 +1215,7 @@ __device__ uint64_t QueuePairSHMEM<Provider>::atomic_compare_swap_single(
   return provider().atomic_compare_swap_single(d_raddr, d_rkey, cond, value, post_options);
 }
 
-#if 0
+#if 0 // NON-BLOCKING AMOs NOT YET IMPLEMENTED
 template <typename Provider>
 template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nbi(
@@ -1957,7 +1957,7 @@ __host__ __device__ constexpr T QueuePairBase<Provider>::to_provider_endianness(
 template <typename Provider>
 template <AMOFetchType Fetch>
 __device__ constexpr uint64_t* QueuePairBase<Provider>::get_atomic_addr() const {
-  static_assert(Fetch != AMOFetchType::NonBlocking);
+  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   if constexpr (Fetch == AMOFetchType::Blocking) {
     return fetching_atomic;
   } else if constexpr (Fetch == AMOFetchType::NonFetching) {
@@ -1968,7 +1968,7 @@ __device__ constexpr uint64_t* QueuePairBase<Provider>::get_atomic_addr() const 
 template <typename Provider>
 template <AMOFetchType Fetch>
 __device__ constexpr uint32_t QueuePairBase<Provider>::get_atomic_lkey() const {
-  static_assert(Fetch != AMOFetchType::NonBlocking);
+  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   if constexpr (Fetch == AMOFetchType::Blocking) {
     return fetching_atomic_lkey;
   } else if constexpr (Fetch == AMOFetchType::NonFetching) {

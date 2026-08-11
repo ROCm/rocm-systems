@@ -370,7 +370,7 @@ template <QueuePairMux::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __forceinline__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     const ActiveWFInfo& wf_info, PostOpt<Options...> options) {
-  static_assert(Fetch != AMOFetchType::NonBlocking);
+  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
@@ -397,7 +397,7 @@ template <QueuePairMux::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __forceinline__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo_single(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     PostOpt<Options...> options) {
-  static_assert(Fetch != AMOFetchType::NonBlocking);
+  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
