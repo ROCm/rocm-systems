@@ -1,5 +1,29 @@
 # roctx_recordfn: native RecordFunction tier
 
+## Motivation
+
+A PyTorch workload decomposes into thousands of individual operators such as
+`aten::mm`. The GPU kernels rocprofiler-compute captures carry only their own
+names: nothing ties a kernel back to the operator, or to the model source line,
+that launched it. To close that gap the instrumentation pushes a ROCTX range
+around each operator. The ROCm profiler records those ranges alongside the
+kernel dispatches in the same run, so analysis can attribute GPU time to
+operators and build call trees rooted at a source location.
+
+Ranges can be emitted from Python, and a `TorchDispatchMode` tier does so as a
+fallback. That tier is entered per thread and observes only ATen calls, so it
+never names the autograd node behind a backward operator and cannot attribute
+that operator to the forward call that produced it. Full coverage requires
+PyTorch's `RecordFunction` observer, which brackets every operator inside the
+ATen dispatcher on every thread. PyTorch exposes `RecordFunction` to Python only
+for emitting a range; registering a global observer callback
+(`at::addGlobalCallback`) is reachable only from C++, and a per-operator callback
+that crossed into Python would acquire the GIL on every operator.
+
+This module supplies that callback. It registers the observer, keeps a
+per-thread marker stack, correlates forward and backward operators, and carries
+Python-pushed structural scopes across to autograd worker threads.
+
 ## Overview
 
 `roctx_recordfn` is a C++ pybind11 extension. It registers a global PyTorch
@@ -37,8 +61,9 @@ flowchart LR
 - **Leaf** — the frame the callback pushes for the current op. Its context is a
   fixed tag from `leaf_context.h` (aten top-level, aten nested, autograd
   backward, or autograd engine).
-- **Sequence number** (`seqNr`) — PyTorch's per-op id that links a forward op to
-  its backward op.
+- **Sequence number** (`seqNr`) — PyTorch's op counter, kept per thread.
+  Together with the originating thread id it links a forward op to its backward
+  op.
 - **Wire string** — the encoded stack handed to ROCTX: `markers:contexts`, with
   an optional trailing `|backend`.
 
@@ -61,7 +86,7 @@ flowchart TD
 ```
 
 - **Per-thread stack** (`thread_local`) — the active marker frames.
-- **Snapshot store** — sequence number to forward stack, for backward lookup.
+- **Snapshot store** — forward stacks held for backward lookup.
 - **TLS context chain** — publishes a thread's scope to autograd workers.
 - **Wire format** — renders the stack into the pushed marker string.
 - **Counters** — push/pop, snapshot, and error tallies for `dump_stats()`.
@@ -73,34 +98,60 @@ flowchart TD
 | `StackEntry` (`stack_entry.h`) | — | one frame: marker name + context string |
 | `ThreadState` (`marker_stack.h`) | `thread_local g_thread` | frame stack + debug-info guards owned by user scopes |
 | `RoctxObserverContext` (`record_function_bridge.h`) | per op | flags for the range/leaf pushed and snapshot-frame count |
-| `SnapshotStore` (`snapshot_store.h`) | `g_snapshots` | sharded map seqNr → stack; each shard has a map, an LRU list, and a mutex |
+| `SnapshotStore` (`snapshot_store.h`) | `g_snapshots` | sharded map (seqNr, threadId) → stack; each shard has a map, an LRU list, and a mutex |
 | `InstallState` (`install_state.h`) | `g_install` | callback handle, installed flag, mutex |
 | `Stats` (`stats.h`) | `g_stats` | atomic counters |
 | `CaptureBuffer` (`capture_buffer.h`) | `g_capture` | test-only buffer of emitted strings |
 
 ## Threading model
 
+Every thread instruments itself independently: it owns its marker stack and
+emits its own ROCTX ranges, with no locking on that path. Threads meet in only
+two shared places, the snapshot store and the published user-scope chain.
+
 ```mermaid
-flowchart TD
-    cb[global callback<br/>fires on all threads] --> tA[main thread<br/>g_thread stack]
-    cb --> tB[autograd worker<br/>g_thread stack]
-    tA --> ss[(g_snapshots<br/>sharded + locked)]
-    tB --> ss
-    tA -. publishes .-> di[(c10 TLS DebugInfo)]
-    di -. copied to worker .-> tB
+flowchart TB
+    subgraph t1["python thread, id T1"]
+        o1["ops"] --> s1["g_thread stack<br/>thread_local"] --> r1["ROCTX range"]
+    end
+
+    subgraph t2["python thread, id T2"]
+        o2["ops"] --> s2["g_thread stack<br/>thread_local"] --> r2["ROCTX range"]
+    end
+
+    subgraph w["autograd worker"]
+        ow["backward ops<br/>forwardThreadId = T1"] --> sw["g_thread stack<br/>thread_local"] --> rw["ROCTX range"]
+    end
+
+    store[("g_snapshots<br/>key: seqNr + threadId<br/>sharded, per-shard mutex")]
+    tls[("c10 ThreadLocalDebugInfo<br/>published user-scope chain")]
+
+    s1 -->|"save (N, T1)"| store
+    s2 -->|"save (N, T2)"| store
+    store -->|"consume (N, T1)"| sw
+
+    s1 -.->|"push_user_scope publishes"| tls
+    tls -.->|"copied to worker"| sw
 ```
 
 - The callback is **global**: one registration fires on every thread that runs
   ops. There is no per-thread install.
-- The marker stack (`g_thread`) is **`thread_local`** — each thread owns its
-  stack and guard vector, so stack access needs no locking.
-- The **snapshot store** is process-wide and touched by many threads. It is
-  sharded by `seqNr` with a per-shard mutex, so forward saves and backward
-  consumes on different threads rarely contend.
+- The marker stack (`g_thread`) is **`thread_local`**, so each thread owns its
+  stack and guard vector, needs no locking, and never sees another thread's
+  frames.
+- Two threads running forward passes concurrently both produce sequence number
+  `N`, because PyTorch's counter is per-thread. The **snapshot store** is
+  process-wide, so its key carries the thread id as well; the shard is chosen by
+  hashing that key and each shard has its own mutex, so saves and consumes
+  rarely contend.
+- A backward op runs on an autograd worker, not on the thread that built the
+  graph. It consumes the snapshot saved by that thread, which it identifies by
+  the `forwardThreadId` on its own record.
+- User scope crosses threads by the other route: `push_user_scope` publishes the
+  chain into `ThreadLocalDebugInfo`, PyTorch copies it to the worker, and the
+  worker overlays it whenever its stack is empty at op entry (see Cross-thread
+  context).
 - **Counters** are atomic; **install state** is mutex-guarded.
-- Autograd runs backward on worker threads. PyTorch copies the parent's
-  `ThreadLocalDebugInfo` to those workers, carrying the published user-scope
-  chain so a worker can rebuild the parent context (see Cross-thread context).
 
 ## Stack maintenance
 
@@ -206,20 +257,28 @@ backward never ran would be held for the life of the process.
 
 ## Forward-to-backward correlation
 
-A forward op saves its stack keyed by its sequence number. The backward op
-carries the same number and consumes the snapshot, rebuilding the forward path
+A forward op saves its stack keyed by the autograd node it created. The backward
+op looks up the same key and consumes the snapshot, rebuilding the forward path
 before it emits.
 
 ```mermaid
 flowchart LR
-    fwd[forward op seq N] --> store[(snapshot store)]
-    store --> bwd[backward op seq N]
+    fwd[forward op<br/>thread T, seq N] --> store[(snapshot store)]
+    store --> bwd[backward op<br/>forward thread T, seq N]
     bwd --> path[forward path restored]
 ```
 
+The key is the pair (sequence number, thread id). PyTorch's sequence counter is
+per-thread and restarts at zero, so concurrent forward passes produce the same
+numbers and the number alone does not identify a node. The backward record
+carries the id of the thread that built the node (`forwardThreadId`), which is
+the id the forward op saved under. A backward record without that id is left
+uncorrelated.
+
 The store is sharded (fixed shard count, per-shard mutex) so concurrent threads
-rarely contend. Each shard has a soft cap and evicts its oldest entry (LRU),
-which bounds memory when backward never runs (for example detached forward).
+rarely contend; the shard is chosen by hashing the whole key. Each shard has a
+soft cap and evicts its oldest entry (LRU), which bounds memory when backward
+never runs (for example detached forward).
 
 ## Cross-thread context
 

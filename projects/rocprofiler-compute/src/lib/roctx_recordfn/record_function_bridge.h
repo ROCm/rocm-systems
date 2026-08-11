@@ -98,8 +98,12 @@ inline std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& r
 
         if (scope == at::RecordScope::BACKWARD_FUNCTION && seq_nr >= 0)
         {
+            // Autograd stamps the record with the id of the thread that built
+            // the node. Zero means the record carries no forward identity, so
+            // there is nothing to correlate.
+            const std::uint64_t     forward_thread_id = record_fn.forwardThreadId();
             std::vector<StackEntry> snapshot;
-            if (g_snapshots.consume(seq_nr, &snapshot))
+            if (forward_thread_id != 0 && g_snapshots.consume(seq_nr, forward_thread_id, &snapshot))
             {
                 observer_ctx->pushed_snapshot_frames += push_with_prefix_dedup(snapshot);
             }
@@ -116,7 +120,8 @@ inline std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& r
 
         if (scope == at::RecordScope::FUNCTION && seq_nr >= 0)
         {
-            g_snapshots.save(seq_nr, g_thread.stack);
+            // Autograd records this same thread id when it builds the node.
+            g_snapshots.save(seq_nr, at::RecordFunction::currentThreadId(), g_thread.stack);
         }
 
         // Emit the ROCTX range. RecordFunction ops are torch-backed.

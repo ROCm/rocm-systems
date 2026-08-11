@@ -21,17 +21,18 @@ namespace roctx_recordfn::detail
 pybind11::dict dump_stats()
 {
     pybind11::dict stats_dict;
-    stats_dict["installed"]           = g_install.installed.load();
-    stats_dict["pushes"]              = g_stats.pushes.load();
-    stats_dict["pops"]                = g_stats.pops.load();
-    stats_dict["user_scope_pushes"]   = g_stats.user_scope_pushes.load();
-    stats_dict["user_scope_pops"]     = g_stats.user_scope_pops.load();
-    stats_dict["user_scope_inherits"] = g_stats.user_scope_inherits.load();
-    stats_dict["snapshots_saved"]     = g_stats.snapshots_saved.load();
-    stats_dict["snapshots_consumed"]  = g_stats.snapshots_consumed.load();
-    stats_dict["snapshots_dropped"]   = g_stats.snapshots_dropped.load();
-    stats_dict["callback_errors"]     = g_stats.callback_errors.load();
-    stats_dict["snapshots_pending"]   = g_snapshots.pending();
+    stats_dict["installed"]             = g_install.installed.load();
+    stats_dict["pushes"]                = g_stats.pushes.load();
+    stats_dict["pops"]                  = g_stats.pops.load();
+    stats_dict["user_scope_pushes"]     = g_stats.user_scope_pushes.load();
+    stats_dict["user_scope_pops"]       = g_stats.user_scope_pops.load();
+    stats_dict["user_scope_inherits"]   = g_stats.user_scope_inherits.load();
+    stats_dict["snapshots_saved"]       = g_stats.snapshots_saved.load();
+    stats_dict["snapshots_consumed"]    = g_stats.snapshots_consumed.load();
+    stats_dict["snapshots_dropped"]     = g_stats.snapshots_dropped.load();
+    stats_dict["snapshots_overwritten"] = g_stats.snapshots_overwritten.load();
+    stats_dict["callback_errors"]       = g_stats.callback_errors.load();
+    stats_dict["snapshots_pending"]     = g_snapshots.pending();
     return stats_dict;
 }
 

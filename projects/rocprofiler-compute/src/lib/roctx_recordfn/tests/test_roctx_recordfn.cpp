@@ -18,6 +18,8 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -43,6 +45,7 @@ void reset_state()
     g_stats.snapshots_saved.store(0);
     g_stats.snapshots_consumed.store(0);
     g_stats.snapshots_dropped.store(0);
+    g_stats.snapshots_overwritten.store(0);
     g_stats.callback_errors.store(0);
     g_stats.user_scope_pushes.store(0);
     g_stats.user_scope_pops.store(0);
@@ -70,9 +73,30 @@ protected:
     }
 };
 
+// Stand-in thread ids. Real ids come from at::RecordFunction::currentThreadId();
+// zero means no forward identity.
+constexpr std::uint64_t kThreadA = 1;
+constexpr std::uint64_t kThreadB = 2;
+constexpr std::uint64_t kThreadC = 3;
+
 std::size_t pending_snapshots()
 {
     return g_snapshots.pending();
+}
+
+// The first `count` sequence numbers that hash to `shard` for `thread_id`.
+std::vector<std::int64_t> seq_nrs_on_shard(std::size_t shard, std::uint64_t thread_id, std::size_t count)
+{
+    std::vector<std::int64_t> seq_nrs;
+    seq_nrs.reserve(count);
+    for (std::int64_t seq_nr = 0; seq_nrs.size() < count; ++seq_nr)
+    {
+        if (SnapshotStore::shard_index(SnapshotKey{seq_nr, thread_id}) == shard)
+        {
+            seq_nrs.push_back(seq_nr);
+        }
+    }
+    return seq_nrs;
 }
 
 std::size_t count_in_marker_path(const std::string& wire, const std::string& needle)
@@ -199,10 +223,10 @@ TEST(MarkerEncoding, RoundTripsThroughBuildCallTreesDecode)
 TEST_F(RoctxRecordFnTest, SaveThenConsumeReturnsSavedStack)
 {
     const std::vector<StackEntry> stack = {{"A", "a"}, {"B", "b"}};
-    g_snapshots.save(42, stack);
+    g_snapshots.save(42, kThreadA, stack);
 
     std::vector<StackEntry> out;
-    ASSERT_TRUE(g_snapshots.consume(42, &out));
+    ASSERT_TRUE(g_snapshots.consume(42, kThreadA, &out));
     ASSERT_EQ(out.size(), 2u);
     EXPECT_EQ(out[0].marker, "A");
     EXPECT_EQ(out[0].context, "a");
@@ -215,87 +239,125 @@ TEST_F(RoctxRecordFnTest, SaveThenConsumeReturnsSavedStack)
 TEST_F(RoctxRecordFnTest, ConsumeUnknownReturnsFalse)
 {
     std::vector<StackEntry> out;
-    EXPECT_FALSE(g_snapshots.consume(999, &out));
+    EXPECT_FALSE(g_snapshots.consume(999, kThreadA, &out));
     EXPECT_TRUE(out.empty());
     EXPECT_EQ(g_stats.snapshots_consumed.load(), 0u);
 }
 
 TEST_F(RoctxRecordFnTest, ConsumeIsOneShot)
 {
-    g_snapshots.save(7, std::vector<StackEntry>{{"X", "x"}});
+    g_snapshots.save(7, kThreadA, std::vector<StackEntry>{{"X", "x"}});
 
     std::vector<StackEntry> out;
-    ASSERT_TRUE(g_snapshots.consume(7, &out));
-    EXPECT_FALSE(g_snapshots.consume(7, &out));
+    ASSERT_TRUE(g_snapshots.consume(7, kThreadA, &out));
+    EXPECT_FALSE(g_snapshots.consume(7, kThreadA, &out));
     EXPECT_EQ(g_stats.snapshots_consumed.load(), 1u);
 }
 
 TEST_F(RoctxRecordFnTest, SaveTwiceReturnsLatest)
 {
-    g_snapshots.save(1, std::vector<StackEntry>{{"first", "f"}});
-    g_snapshots.save(1, std::vector<StackEntry>{{"second", "s"}});
+    g_snapshots.save(1, kThreadA, std::vector<StackEntry>{{"first", "f"}});
+    g_snapshots.save(1, kThreadA, std::vector<StackEntry>{{"second", "s"}});
 
     std::vector<StackEntry> out;
-    ASSERT_TRUE(g_snapshots.consume(1, &out));
+    ASSERT_TRUE(g_snapshots.consume(1, kThreadA, &out));
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].marker, "second");
     EXPECT_EQ(g_stats.snapshots_saved.load(), 2u);
+    EXPECT_EQ(g_stats.snapshots_overwritten.load(), 1u);
+}
+
+TEST_F(RoctxRecordFnTest, SameSeqNrOnDifferentThreadsDoesNotCollide)
+{
+    // Concurrent forward passes both count from zero, so one thread's snapshot
+    // must not displace another's under the same sequence number.
+    g_snapshots.save(0, kThreadA, std::vector<StackEntry>{{"threadA", "a"}});
+    g_snapshots.save(0, kThreadB, std::vector<StackEntry>{{"threadB", "b"}});
+    EXPECT_EQ(g_stats.snapshots_saved.load(), 2u);
+    EXPECT_EQ(g_stats.snapshots_overwritten.load(), 0u);
+    EXPECT_EQ(pending_snapshots(), 2u);
+
+    std::vector<StackEntry> out_a;
+    ASSERT_TRUE(g_snapshots.consume(0, kThreadA, &out_a));
+    ASSERT_EQ(out_a.size(), 1u);
+    EXPECT_EQ(out_a[0].marker, "threadA");
+
+    std::vector<StackEntry> out_b;
+    ASSERT_TRUE(g_snapshots.consume(0, kThreadB, &out_b));
+    ASSERT_EQ(out_b.size(), 1u);
+    EXPECT_EQ(out_b[0].marker, "threadB");
+
+    std::vector<StackEntry> out_c;
+    EXPECT_FALSE(g_snapshots.consume(0, kThreadC, &out_c));
+    EXPECT_EQ(g_stats.snapshots_consumed.load(), 2u);
+    EXPECT_EQ(pending_snapshots(), 0u);
 }
 
 TEST_F(RoctxRecordFnTest, EvictsOldestPastSoftCap)
 {
-    // Multiples of SnapshotStore::kNumShards keep every seq on shard 0.
-    const std::int64_t step = static_cast<std::int64_t>(SnapshotStore::kNumShards);
+    const auto seq_nrs = seq_nrs_on_shard(0, kThreadA, SnapshotStore::kShardSoftCap + 1);
     for (std::size_t i = 0; i < SnapshotStore::kShardSoftCap; ++i)
     {
-        g_snapshots.save(static_cast<std::int64_t>(i) * step, std::vector<StackEntry>{{"k", "v"}});
+        g_snapshots.save(seq_nrs[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
     }
     ASSERT_EQ(g_stats.snapshots_dropped.load(), 0u);
 
-    g_snapshots.save(static_cast<std::int64_t>(SnapshotStore::kShardSoftCap) * step,
-                     std::vector<StackEntry>{{"k", "v"}});
+    g_snapshots.save(seq_nrs.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
     EXPECT_EQ(g_stats.snapshots_dropped.load(), 1u);
 
     std::vector<StackEntry> out;
-    EXPECT_FALSE(g_snapshots.consume(0, &out));
-    EXPECT_TRUE(g_snapshots.consume(static_cast<std::int64_t>(SnapshotStore::kShardSoftCap) * step, &out));
+    EXPECT_FALSE(g_snapshots.consume(seq_nrs.front(), kThreadA, &out));
+    EXPECT_TRUE(g_snapshots.consume(seq_nrs.back(), kThreadA, &out));
 }
 
 TEST_F(RoctxRecordFnTest, EvictionIsPerShard)
 {
-    const std::int64_t step = static_cast<std::int64_t>(SnapshotStore::kNumShards);
+    const auto seq_nrs     = seq_nrs_on_shard(0, kThreadA, SnapshotStore::kShardSoftCap + 1);
+    const auto other_shard = seq_nrs_on_shard(1, kThreadA, 1);
     for (std::size_t i = 0; i < SnapshotStore::kShardSoftCap; ++i)
     {
-        g_snapshots.save(static_cast<std::int64_t>(i) * step, std::vector<StackEntry>{{"k", "v"}});
+        g_snapshots.save(seq_nrs[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
     }
-    g_snapshots.save(1, std::vector<StackEntry>{{"shard1", "v"}});
+    g_snapshots.save(other_shard.front(), kThreadA, std::vector<StackEntry>{{"shard1", "v"}});
 
-    g_snapshots.save(static_cast<std::int64_t>(SnapshotStore::kShardSoftCap) * step,
-                     std::vector<StackEntry>{{"k", "v"}});
+    g_snapshots.save(seq_nrs.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
 
     std::vector<StackEntry> out;
-    EXPECT_TRUE(g_snapshots.consume(1, &out));
+    EXPECT_TRUE(g_snapshots.consume(other_shard.front(), kThreadA, &out));
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].marker, "shard1");
 }
 
-TEST_F(RoctxRecordFnTest, ConcurrentSaveConsumeNoLoss)
+TEST_F(RoctxRecordFnTest, ConcurrentOverlappingSeqNrsAreIsolated)
 {
+    // Every thread walks the same sequence numbers, mirroring a thread-local
+    // counter. Each must read back its own snapshot.
     constexpr int            n_threads  = 4;
     constexpr int            per_thread = 256;
+    std::atomic<int>         lost{0};
+    std::atomic<int>         mismatched{0};
     std::vector<std::thread> threads;
     threads.reserve(n_threads);
     for (int t = 0; t < n_threads; ++t)
     {
         threads.emplace_back(
-            [t]()
+            [t, &lost, &mismatched]()
             {
+                const std::uint64_t thread_id = static_cast<std::uint64_t>(t) + 1;
+                const std::string   marker    = "t" + std::to_string(t);
                 for (int i = 0; i < per_thread; ++i)
                 {
-                    const std::int64_t seq = static_cast<std::int64_t>(t) * 100000 + i;
-                    g_snapshots.save(seq, std::vector<StackEntry>{{"k", "v"}});
+                    const std::int64_t seq = i;
+                    g_snapshots.save(seq, thread_id, std::vector<StackEntry>{{marker, "v"}});
                     std::vector<StackEntry> out;
-                    g_snapshots.consume(seq, &out);
+                    if (!g_snapshots.consume(seq, thread_id, &out))
+                    {
+                        ++lost;
+                    }
+                    else if (out.size() != 1 || out[0].marker != marker)
+                    {
+                        ++mismatched;
+                    }
                 }
             });
     }
@@ -303,9 +365,12 @@ TEST_F(RoctxRecordFnTest, ConcurrentSaveConsumeNoLoss)
     {
         th.join();
     }
+    EXPECT_EQ(lost.load(), 0);
+    EXPECT_EQ(mismatched.load(), 0);
     const auto expected = static_cast<std::uint64_t>(n_threads) * per_thread;
     EXPECT_EQ(g_stats.snapshots_saved.load(), expected);
     EXPECT_EQ(g_stats.snapshots_consumed.load(), expected);
+    EXPECT_EQ(pending_snapshots(), 0u);
 }
 
 TEST_F(RoctxRecordFnTest, PushPopAreBalanced)
@@ -616,6 +681,20 @@ TEST_F(RoctxRecordFnRealOpsTest, ConcurrentThreadsScopedMarkers)
                 break;
         }
         EXPECT_TRUE(saw) << "worker " << wid;
+    }
+
+    // Each worker's markers must carry only its own scope.
+    for (const auto& m : captured)
+    {
+        std::size_t workers_named = 0;
+        for (int wid = 0; wid < n_workers; ++wid)
+        {
+            if (m.find("test.concurrent.worker" + std::to_string(wid)) != std::string::npos)
+            {
+                ++workers_named;
+            }
+        }
+        EXPECT_LE(workers_named, 1u) << m;
     }
 
     EXPECT_EQ(g_stats.callback_errors.load(), 0u);
