@@ -71,6 +71,12 @@ TEST_F(IommuPassthroughTest, IommuPassthroughOkWithCmdline) {
   EXPECT_TRUE(ncclIommuPassthroughOk("iommu=pt"));
 }
 
+TEST_F(IommuPassthroughTest, ContentHasOptionNullOrEmptyOption) {
+  const std::string content = "CONFIG_IOMMU_DEFAULT_PASSTHROUGH=y\n";
+  EXPECT_FALSE(ncclKernelConfigContentHasOption(content, nullptr));
+  EXPECT_FALSE(ncclKernelConfigContentHasOption(content, ""));
+}
+
 TEST_F(IommuPassthroughTest, ReadFileMissingOption) {
   writeConfig("CONFIG_64BIT=y\n");
   std::string content;
