@@ -1221,6 +1221,13 @@ For attachment profiling of running processes:
         help="Serialize all kernels, not just the traced ones.",
     )
 
+    add_parser_bool_argument(
+        att_options,
+        "--att-no-detail",
+        default=False,
+        help="Collect occupancy data without instruction-level detail.",
+    )
+
     return (parser.parse_args(rocp_args), app_args)
 
 
@@ -2287,6 +2294,12 @@ def run(app_args, args, **kwargs):
             update_env(
                 "ROCPROF_ATT_PARAM_SERIALIZE_ALL",
                 args.att_serialize_all,
+                overwrite=True,
+            )
+        if args.att_no_detail:
+            update_env(
+                "ROCPROF_ATT_PARAM_NO_DETAIL",
+                args.att_no_detail,
                 overwrite=True,
             )
         if args.att_gpu_index:
