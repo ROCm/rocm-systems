@@ -149,25 +149,9 @@ union ncclLLFifoLine {
 #define NCCL_MAX_GROUPS (NCCL_MAX_NTHREADS / WARP_SIZE)
 #endif
 
-// [RCCL] Device-symbol suffixing for the alternate gfx950 512-thread kernel set.
-// When the device sources are compiled with -DRCCL_NTHREADS_512, every device
-// symbol that must be unique across the two coexisting kernel sets is renamed
-// with a "_512" suffix via RCCL_NT_SYM(). This lets both the default 256-thread
-// set and the 512-thread set live in the same device ELF without collisions.
-// When RCCL_NTHREADS_512 is not defined, RCCL_NT_SYM(x) == x (no change).
-#define RCCL_CAT_(a, b) a##b
-#define RCCL_CAT(a, b) RCCL_CAT_(a, b)
-#if defined(RCCL_NTHREADS_512)
-#define RCCL_NT_SUFFIX _512
-// Redirect the shared-memory objects too: their layout depends on NCCL_MAX_GROUPS,
-// so the 512 set needs its own LDS allocation. Renaming the identifier here means
-// every reference in the (unmodified) device sources resolves to the _512 object.
-#define ncclShmem ncclShmem_512
-#define ncclShmemPerWarp ncclShmemPerWarp_512
-#else
-#define RCCL_NT_SUFFIX
-#endif
-#define RCCL_NT_SYM(name) RCCL_CAT(name, RCCL_NT_SUFFIX)
+// [RCCL] RCCL_NT_SYM() device-symbol suffixing for the alternate gfx950
+// 512-thread kernel set (see rccl_nt_sym.h).
+#include "rccl_nt_sym.h"
 
 #ifdef ENABLE_WARP_SPEED
 #define MAXCHANNELS 512

@@ -27,6 +27,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERATE_PY = os.path.join(HERE, "generate.py")
 DEVICE_H = os.path.join(HERE, "..", "include", "device.h")
+NT_SYM_H = os.path.join(HERE, "..", "include", "rccl_nt_sym.h")
 
 # A small, fast slice of collectives. "AllReduce RING SIMPLE Sum f32" expands to
 # both an unguarded primary and an arch-guarded variant, which exercises the
@@ -61,9 +62,6 @@ class DeviceTableGenerationTest(unittest.TestCase):
         # RCCL_DEVICE_LINKER. The generated forward declarations must stay plain:
         # a stray noinline here leaks into the definition (attribute is a union
         # across decl+def) and would force pure-RDC funcs noinline.
-        # Symbols are wrapped in RCCL_NT_SYM() so the alternate gfx950 512-thread
-        # kernel set (-DRCCL_NTHREADS_512) gets a distinct symbol namespace; with
-        # the macro undefined RCCL_NT_SYM(x) == x.
         self.assertIn("__device__ void RCCL_NT_SYM(ncclDevFunc_", self.header)
         self.assertNotIn("noinline", self.header)
         self.assertNotIn("RCCL_DEVFUNC_ATTR", self.header)
@@ -113,12 +111,12 @@ class DeviceTableGenerationTest(unittest.TestCase):
 
 
 def _extract_nt_sym_macros():
-    """Pull the RCCL_NT_SYM() macro machinery verbatim out of device.h.
+    """Pull the RCCL_NT_SYM() macro machinery verbatim out of rccl_nt_sym.h.
 
     Extracting (rather than duplicating) the definitions keeps this behavioral
-    test honest: if the macros in device.h change, the test exercises the change.
+    test honest: if the macros change, the test exercises the change.
     """
-    with open(DEVICE_H) as f:
+    with open(NT_SYM_H) as f:
         text = f.read()
     start = text.index("#define RCCL_CAT_(")
     last = text.index("#define RCCL_NT_SYM(name)")

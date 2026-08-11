@@ -64,14 +64,13 @@ message(STATUS "Device Linker: GPU targets = ${DL_GPU_TARGETS}")
 # into the gfx950 device ELF. The host selects the set at runtime via
 # RCCL_GFX950_NTHREADS (see enqueue.cc / rccl_wrap.cc).
 #
-# Additional gating (both conditions must hold, else the 512 set is NOT built):
-#   1. ROCm version <= 7.0.2. On these releases the gfx950 512-thread kernels need
-#      the LLVM codegen workaround `-mllvm -amdgpu-agpr-bug-fix=1`, which only
-#      exists there.
-#   2. The compiler actually accepts that option (probed below). If unavailable
-#      the 512 device kernels would miscompile, so we decline to build the set.
-# When enabled, the 512 device kernels are COMPILED with `-mllvm -amdgpu-agpr-bug-fix=1`
-# (carried in RCCL_GFX950_512_AGPR_FLAGS).
+# ROCm-version gating (in addition to the opt-in switch and gfx950 being a target):
+#   - ROCm  > 7.0.2: the AGPR codegen bug is fixed, so the 512 set builds with no
+#     workaround (enabled directly; testable on current/future ROCm).
+#   - ROCm <= 7.0.2 (or undetected): the set needs the LLVM codegen workaround
+#     `-mllvm -amdgpu-agpr-bug-fix=1` and is built only if the compiler accepts it
+#     (probed below); when enabled it is COMPILED with that flag
+#     (carried in RCCL_GFX950_512_AGPR_FLAGS).
 # Opt-in build switch (install.sh --build-gfx950-512-threads-kernels). Default OFF:
 # without it the 512-thread set is never built regardless of arch/ROCm/linker.
 option(BUILD_GFX950_512_THREADS_KERNELS
@@ -100,43 +99,49 @@ if(BUILD_GFX950_512_THREADS_KERNELS AND "gfx950" IN_LIST DL_GPU_TARGETS)
     endif()
   endif()
 
-  set(_dl_rocm_ver_ok FALSE)
-  if(_dl_rocm_ver AND (_dl_rocm_ver VERSION_LESS_EQUAL "7.0.2"))
-    set(_dl_rocm_ver_ok TRUE)
+  # ROCm > 7.0.2: the AGPR codegen bug is fixed upstream, so the 512-thread set
+  # builds directly with no workaround. This lets the set be enabled/tested on
+  # current and future ROCm. ROCm <= 7.0.2 (or an undetected version) needs the
+  # `-mllvm -amdgpu-agpr-bug-fix=1` codegen workaround and is gated on the
+  # compiler accepting it.
+  set(_dl_rocm_gt_702 FALSE)
+  if(_dl_rocm_ver AND (_dl_rocm_ver VERSION_GREATER "7.0.2"))
+    set(_dl_rocm_gt_702 TRUE)
   endif()
 
-  # --- Probe: does the compiler accept `-mllvm -amdgpu-agpr-bug-fix=1` for gfx950? ---
-  # This is an AMDGPU codegen option, so we probe it at compile time: compile a
-  # trivial device kernel for gfx950 with the option. A valid option compiles
-  # cleanly (rc=0); an unknown one makes LLVM exit non-zero.
-  set(_dl_agpr_ok FALSE)
-  set(_dl_agpr_probe_src "${PROJECT_BINARY_DIR}/rccl_agpr_probe.hip")
-  file(WRITE "${_dl_agpr_probe_src}" "__global__ void rccl_agpr_probe_kernel() {}\n")
-  execute_process(
-    COMMAND "${DL_CLANG}" -x hip --offload-device-only --offload-arch=gfx950
-            -mllvm -amdgpu-agpr-bug-fix=1 ${DL_HIP_COMPILER_FLAGS}
-            -std=c++17 -S -o /dev/null "${_dl_agpr_probe_src}"
-    RESULT_VARIABLE _dl_agpr_cc_rc OUTPUT_QUIET ERROR_VARIABLE _dl_agpr_cc_err
-  )
-  if(_dl_agpr_cc_rc EQUAL 0)
-    set(_dl_agpr_ok TRUE)
-  endif()
-
-  if(_dl_rocm_ver_ok AND _dl_agpr_ok)
+  if(_dl_rocm_gt_702)
     set(RCCL_BUILD_GFX950_512 TRUE)
-    set(RCCL_GFX950_512_AGPR_FLAGS -mllvm -amdgpu-agpr-bug-fix=1)
+    set(RCCL_GFX950_512_AGPR_FLAGS "")
     message(STATUS "Device Linker: gfx950 512-thread kernel set ENABLED (RCCL_ENABLE_GFX950_512) "
-                   "[ROCm ${_dl_rocm_ver}, -mllvm -amdgpu-agpr-bug-fix available]")
-    # Let the host launch path (enqueue.cc / rccl_wrap.cc) reference the *_512
-    # generic kernels and the runtime selection logic.
+                   "[ROCm ${_dl_rocm_ver} > 7.0.2, no agpr workaround needed]")
     target_compile_definitions(rccl PRIVATE RCCL_ENABLE_GFX950_512)
   else()
-    if(NOT _dl_rocm_ver_ok)
-      message(STATUS "Device Linker: gfx950 512-thread kernel set DISABLED "
-                     "(ROCm version '${_dl_rocm_ver}' is not <= 7.0.2)")
+    # --- Probe: does the compiler accept `-mllvm -amdgpu-agpr-bug-fix=1` for gfx950? ---
+    # AMDGPU codegen option, so probe it at compile time: compile a trivial gfx950
+    # device kernel with the option. Valid -> rc=0; unknown -> LLVM exits non-zero.
+    set(_dl_agpr_ok FALSE)
+    set(_dl_agpr_probe_src "${PROJECT_BINARY_DIR}/rccl_agpr_probe.hip")
+    file(WRITE "${_dl_agpr_probe_src}" "__global__ void rccl_agpr_probe_kernel() {}\n")
+    execute_process(
+      COMMAND "${DL_CLANG}" -x hip --offload-device-only --offload-arch=gfx950
+              -mllvm -amdgpu-agpr-bug-fix=1 ${DL_HIP_COMPILER_FLAGS}
+              -std=c++17 -S -o /dev/null "${_dl_agpr_probe_src}"
+      RESULT_VARIABLE _dl_agpr_cc_rc OUTPUT_QUIET ERROR_VARIABLE _dl_agpr_cc_err
+    )
+    if(_dl_agpr_cc_rc EQUAL 0)
+      set(_dl_agpr_ok TRUE)
+    endif()
+
+    if(_dl_agpr_ok)
+      set(RCCL_BUILD_GFX950_512 TRUE)
+      set(RCCL_GFX950_512_AGPR_FLAGS -mllvm -amdgpu-agpr-bug-fix=1)
+      message(STATUS "Device Linker: gfx950 512-thread kernel set ENABLED (RCCL_ENABLE_GFX950_512) "
+                     "[ROCm ${_dl_rocm_ver} <= 7.0.2, applying -mllvm -amdgpu-agpr-bug-fix]")
+      target_compile_definitions(rccl PRIVATE RCCL_ENABLE_GFX950_512)
     else()
       message(STATUS "Device Linker: gfx950 512-thread kernel set DISABLED "
-                     "(compiler does not accept -mllvm -amdgpu-agpr-bug-fix)")
+                     "(ROCm '${_dl_rocm_ver}' <= 7.0.2 requires -mllvm -amdgpu-agpr-bug-fix, "
+                     "which the compiler does not accept)")
     endif()
   endif()
 endif()

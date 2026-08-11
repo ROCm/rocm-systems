@@ -186,28 +186,43 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
 #endif
 
 #ifdef RCCL_ENABLE_GFX950_512
-  // [RCCL] Configure the alternate gfx950 512-thread generic kernels. On non-gfx950
-  // devices these symbols are not in the loaded image, so cudaFuncGetAttributes
-  // fails and we simply skip them.
-  for (int k = 0; k < (int)(sizeof(ncclKerns512) / sizeof(ncclKerns512[0])); k++) {
-    void* fn = ncclKerns512[k].kernelFn;
-    cudaFuncAttributes attr = {0};
-    if (fn == nullptr) continue;
-    if (!CUDASUCCESS(cudaFuncGetAttributes(&attr, fn))) continue; // not present on this arch
-    if (maxStackSize && attr.localSizeBytes > *maxStackSize) *maxStackSize = attr.localSizeBytes;
-    if (carveout) {
-      CUDACHECKGOTO(cudaFuncSetAttribute(fn, cudaFuncAttributePreferredSharedMemoryCarveout, carveout), result,
-                    ignore512);
-    ignore512:;
-    }
-    if (ncclMaxSharedMem != 0) {
-      int sharedMemSize = ncclMaxSharedMem;
-      if (sharedMemSize <= (maxSharedMem - attr.sharedSizeBytes)) {
+  // [RCCL] Defensive guard: only touch the alternate 512-thread generic kernels
+  // when the device being initialized is gfx950. In a multi-arch build (e.g.
+  // gfx942;gfx950) the *_512 host stubs are registered process-wide but the
+  // matching device symbols exist only in the gfx950 device image, so we must
+  // not query/configure them on any other arch. Detect via the gcnArchName
+  // (matches the IsArchMatch(...,"gfx950") convention used elsewhere).
+  bool isGfx950 = false;
+  {
+    int dev = 0;
+    hipDeviceProp_t prop;
+    if (CUDASUCCESS(hipGetDevice(&dev)) && CUDASUCCESS(hipGetDeviceProperties(&prop, dev)))
+      isGfx950 = IsArchMatch(prop.gcnArchName, "gfx950");
+  }
+  if (isGfx950) {
+    for (int k = 0; k < (int)(sizeof(ncclKerns512) / sizeof(ncclKerns512[0])); k++) {
+      void* fn = ncclKerns512[k].kernelFn;
+      cudaFuncAttributes attr = {0};
+      if (fn == nullptr) continue;
+      if (!CUDASUCCESS(cudaFuncGetAttributes(&attr, fn))) continue; // not present on this arch
+      if (maxStackSize && attr.localSizeBytes > *maxStackSize) *maxStackSize = attr.localSizeBytes;
+      if (carveout) {
+        CUDACHECKGOTO(cudaFuncSetAttribute(fn, cudaFuncAttributePreferredSharedMemoryCarveout, carveout), result,
+                      ignore512);
+      ignore512:;
+      }
+      if (ncclMaxSharedMem != 0) {
+        int sharedMemSize = ncclMaxSharedMem;
+        if (sharedMemSize > (maxSharedMem - attr.sharedSizeBytes)) {
+          WARN("cudaArch %d ncclMaxSharedMem %d exceeds device/fn maxSharedMem %zu", cudaArch, sharedMemSize,
+               maxSharedMem - attr.sharedSizeBytes);
+          return ncclSystemError;
+        }
         CUDACHECKGOTO(cudaFuncSetAttribute(fn, cudaFuncAttributeMaxDynamicSharedMemorySize, sharedMemSize), result,
                       next_kernel512);
       }
+    next_kernel512:;
     }
-  next_kernel512:;
   }
 #endif
 

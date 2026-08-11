@@ -1148,11 +1148,14 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
   // [RCCL] Decide the gfx950 kernel-thread variant before the thread caps below
   // are computed/cached, so rcclGetMaxNthreads sees comm->use512Kernels.
   rcclSetKernelVariant(comm);
-  static int rcclMaxThreads[NCCL_NUM_PROTOCOLS] = {0};
-  if (rcclMaxThreads[NCCL_PROTO_SIMPLE] == 0) rcclGetMaxNthreads(comm, rcclMaxThreads);
-  static int maxNthreads = rcclMaxThreads[NCCL_PROTO_SIMPLE];
-  static int maxLL128Nthreads = rcclMaxThreads[NCCL_PROTO_LL128];
-  static int maxLLThreads = rcclMaxThreads[NCCL_PROTO_LL];
+  // Not cached in statics: rcclGetMaxNthreads is variant- and arch-dependent
+  // (comm->use512Kernels, gfx950), which can differ across comms/devices in one
+  // process, so recompute per comm.
+  int rcclMaxThreads[NCCL_NUM_PROTOCOLS] = {0};
+  rcclGetMaxNthreads(comm, rcclMaxThreads);
+  int maxNthreads = rcclMaxThreads[NCCL_PROTO_SIMPLE];
+  int maxLL128Nthreads = rcclMaxThreads[NCCL_PROTO_LL128];
+  int maxLLThreads = rcclMaxThreads[NCCL_PROTO_LL];
   int simpleDefaultThreads =
     (graphs[NCCL_ALGO_RING]->bwIntra * graphs[NCCL_ALGO_RING]->nChannels <= PCI_BW) ? 256 : maxNthreads;
   comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = getNthreads(

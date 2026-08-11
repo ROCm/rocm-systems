@@ -144,6 +144,7 @@ set(SRC_FILES
   include/debug.h
   include/dev_runtime.h
   include/device.h
+  include/rccl_nt_sym.h
   include/env.h
   include/device_buffer.h
   include/enqueue.h

@@ -54,7 +54,7 @@ function display_help()
     echo " Options:"
     echo "       --address-sanitizer     Build with address sanitizer enabled"
     echo "       --amdgpu_targets        Only compile for specified GPU architecture(s). For multiple targets, separate by ';' (builds for all supported GPU architectures by default)"
-    echo "       --build-gfx950-512-threads-kernels  Build the runtime-selectable gfx950 512-thread kernel set (default off; also requires ROCm <= 7.0.2 and compiler support for -mllvm -amdgpu-agpr-bug-fix)"
+    echo "       --build-gfx950-512-threads-kernels  Build the runtime-selectable gfx950 512-thread kernel set (default off; on ROCm <= 7.0.2 also requires compiler support for -mllvm -amdgpu-agpr-bug-fix)"
     echo "       --cmake-options         Pass additional CMake options (e.g. --cmake-options \"-DFOO=BAR -DBAZ=ON\")"
     echo "       --debug                 Build debug library"
     echo "       --debug-fast            Build debug library with lto optimization disabled (fast build times)"

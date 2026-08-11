@@ -875,7 +875,7 @@ void rcclSetKernelVariant(struct ncclComm* comm) {
   if (rcclParamGfx950Nthreads() == 512 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
     WARN("RCCL_GFX950_NTHREADS=512 requested but the 512-thread kernel set was not built "
          "(not enabled via --build-gfx950-512-threads-kernels, gfx950 not in GPU_TARGETS, "
-         "device linker disabled, or ROCm/compiler lacks -mllvm -amdgpu-agpr-bug-fix); "
+         "device linker disabled, or on ROCm <= 7.0.2 the compiler lacks -mllvm -amdgpu-agpr-bug-fix); "
          "using default 256-thread kernels");
   }
 #endif

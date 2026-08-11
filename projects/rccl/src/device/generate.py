@@ -433,9 +433,6 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
   for fn in primary_funcs:
     sym = "ncclDevFunc_" + fn_sym(fn)
     guard = get_arch_guard(fn)
-    # RCCL_NT_SYM() suffixes the symbol with _512 when this header is compiled for
-    # the alternate gfx950 512-thread kernel set (-DRCCL_NTHREADS_512); otherwise
-    # it is the identity. See src/include/device.h.
     if guard:
       out("#if %s\n__device__ void RCCL_NT_SYM(%s)();\n#endif\n" % (guard, sym))
     else:
@@ -673,9 +670,6 @@ for fn in primary_funcs:
     out('#include "%s.h"\n\n' % lower_coll)
     if guard:
       out("#if %s\n" % guard)
-    # RCCL_NT_SYM() suffixes the kernel wrapper and the called device function with
-    # _512 when compiling the alternate gfx950 512-thread set (-DRCCL_NTHREADS_512),
-    # keeping the two coexisting sets in distinct symbol namespaces. See device.h.
     out(
       "DEFINE_ncclDevFunc({sym}, ncclFunc{coll}, {redop_cxx}, {ty_cxx}, "
       "NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {acc}, {pipeline}, {unroll}, {reg})\n\n"
