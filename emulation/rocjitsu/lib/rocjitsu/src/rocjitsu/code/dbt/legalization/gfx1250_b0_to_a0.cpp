@@ -10,10 +10,10 @@
 #include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <array>

@@ -243,8 +243,8 @@ def test_gfx1250_model_sources_do_not_include_execution_headers(
 ):
     forbidden_includes = (
         '#include "rocjitsu/vm/',
-        '#include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"',
-        '#include "rocjitsu/isa/arch/amdgpu/gfx1250/mma_exec.h"',
+        '#include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"',
+        '#include "rocjitsu/isa/arch/amdgpu/cdna5/mma_exec.h"',
         '#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"',
         '#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"',
         '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"',

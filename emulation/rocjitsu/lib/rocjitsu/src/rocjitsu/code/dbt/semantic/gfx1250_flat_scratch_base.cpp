@@ -8,8 +8,8 @@
 
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/dbt/hazard_tracker.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 

@@ -4,8 +4,8 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_ISA_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_ISA_H_
 
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/decoder.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/decoder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"

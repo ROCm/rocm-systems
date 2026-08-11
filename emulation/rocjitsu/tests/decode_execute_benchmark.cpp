@@ -21,7 +21,7 @@
 #include "util/except.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/test_encodings.h"
 
 #include <gtest/gtest.h>

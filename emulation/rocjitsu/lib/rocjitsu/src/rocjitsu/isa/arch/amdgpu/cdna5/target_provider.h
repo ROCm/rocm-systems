@@ -4,7 +4,7 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_TARGET_PROVIDER_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_TARGET_PROVIDER_H_
 
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/target_descriptor.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna5/target_descriptor.h"
 #include "rocjitsu/isa/target_registry.h"
 
 namespace rocjitsu::gfx1250 {
