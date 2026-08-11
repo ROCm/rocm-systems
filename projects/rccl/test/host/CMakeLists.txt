@@ -184,6 +184,20 @@ if(NOT GTest_FOUND)
   endif()
 endif()
 
+# Both find_package(GTest) code paths above (system and RCCL-vendored) export
+# only the modern GTest::gtest target; GTest::GTest is a legacy alias CMake's
+# own FindGTest module stopped providing. Add it once here instead of after
+# every branch so target_link_libraries(... GTest::GTest) below works
+# regardless of which resolution path was taken.
+if(TARGET GTest::gtest AND NOT TARGET GTest::GTest)
+  # Promote before aliasing: GTest's package config creates GTest::gtest as a
+  # non-GLOBAL imported target, and ALIAS of one of those needs CMake 3.18,
+  # above this project's declared 3.16 minimum. Promotion works from 3.11 and
+  # only from the directory that created the target, which is this file.
+  set_target_properties(GTest::gtest PROPERTIES IMPORTED_GLOBAL TRUE)
+  add_library(GTest::GTest ALIAS GTest::gtest)
+endif()
+
 # --- Resolve fmt: system -> FetchContent fallback ---
 find_package(fmt QUIET)
 if(NOT fmt_FOUND)
